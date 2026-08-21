@@ -91,6 +91,11 @@ body, body[data-ds-dark-theme] {
   letter-spacing: 0.03em;
 }
 [class*="_fishHitbox"], [class*="_previewBadge"] { display: none !important; }
+/* HeroGlow: the blurred backdrop ellipse behind the composer is a hardcoded
+   figma blue (#6187D8 @ .08) on the SVG, not a token. CSS fill beats the
+   presentation attribute. Same for the reference chips' #6187d838 wash. */
+[class*="_heroGlow"] ellipse { fill: rgb(122, 149, 87); }
+[class*="_refChip"] { background: rgba(122, 149, 87, 0.22) !important; }
 `
 
     const FAVICON = 'data:image/svg+xml,' + encodeURIComponent(
