@@ -219,15 +219,15 @@ const portArgs = passthrough.includes('--port') ? [] : ['--port', ARXA_PORT]
 const trustArgs = headless
   ? []
   : [...portArgs, '--trusted-host',
-    `arxa.local:${ARXA_PORT}`, 'arxa.local',
+    `arxa.studio.local:${ARXA_PORT}`, 'arxa.studio.local',
     `arxa.studio:${ARXA_PORT}`, 'arxa.studio']
 if (!headless) {
   const responder = spawn('dns-sd',
-    ['-P', 'arxa', '_http._tcp', 'local', ARXA_PORT, 'arxa.local', '127.0.0.1'],
+    ['-P', 'arxa', '_http._tcp', 'local', ARXA_PORT, 'arxa.studio.local', '127.0.0.1'],
     { stdio: 'ignore' })
   responder.on('error', () => { /* non-mac: no dns-sd, loopback URL still works */ })
   process.on('exit', () => { try { responder.kill() } catch { /* already gone */ } })
-  console.log(`arxa studio: http://arxa.local:${ARXA_PORT}`)
+  console.log(`arxa studio: http://arxa.studio.local:${ARXA_PORT}`)
 }
 const child = spawn(process.execPath, [dshBin, '--profile', 'arxa', ...passthrough, ...trustArgs], {
   stdio: 'inherit',
