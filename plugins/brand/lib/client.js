@@ -46,6 +46,29 @@ body, body[data-ds-dark-theme] {
   --dsw-static-deepseek-600: rgb(88, 110, 62);
   --dsw-static-deepseek-800: rgb(56, 70, 42);
   --dsw-static-deepseek-900: rgb(42, 52, 33);
+  /* The page's ambient cast: every background alias resolves through the
+     neutral-BLUISH ramp (bg-base in dark = bluish-1000 rgb(15,17,21)), which
+     reads as a blue haze behind the hero text. Same values, cast flipped to
+     moss — green is the max channel, luminance kept. */
+  --dsw-static-neutral-bluish-00: rgb(254, 255, 252);
+  --dsw-static-neutral-bluish-50: rgb(249, 251, 247);
+  --dsw-static-neutral-bluish-60: rgb(245, 247, 243);
+  --dsw-static-neutral-bluish-75: rgb(241, 245, 238);
+  --dsw-static-neutral-bluish-100: rgb(236, 242, 232);
+  --dsw-static-neutral-bluish-150: rgb(234, 242, 230);
+  --dsw-static-neutral-bluish-200: rgb(227, 238, 222);
+  --dsw-static-neutral-bluish-300: rgb(208, 214, 203);
+  --dsw-static-neutral-bluish-400: rgb(175, 184, 169);
+  --dsw-static-neutral-bluish-500: rgb(153, 166, 147);
+  --dsw-static-neutral-bluish-600: rgb(131, 140, 125);
+  --dsw-static-neutral-bluish-700: rgb(99, 107, 93);
+  --dsw-static-neutral-bluish-750: rgb(68, 74, 63);
+  --dsw-static-neutral-bluish-800: rgb(53, 56, 50);
+  --dsw-static-neutral-bluish-850: rgb(44, 46, 41);
+  --dsw-static-neutral-bluish-875: rgb(35, 37, 33);
+  --dsw-static-neutral-bluish-900: rgb(27, 29, 25);
+  --dsw-static-neutral-bluish-950: rgb(21, 23, 19);
+  --dsw-static-neutral-bluish-1000: rgb(15, 19, 13);
 }
 [class*="_brand"] > svg { display: none; }
 [class*="_brand"]::before {
