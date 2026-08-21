@@ -32,6 +32,10 @@ or `~/.pi`:
   swaps dsh-web-app for dsh-headless (one-shot, no browser).
 - `profile/cordis.patch.yml` — the arxa profile patch (rewritten into the
   profile on every launch; the materialized copy is a build product).
+- `bin/arxa-explore.mjs` — decision 17's design exploration on Pi's session
+  DAG: one session file, one branch per design option, optional branch
+  summaries (`--summarize`), JSON out with each branch's final answer and a
+  `pi --session <file>` resume line (then `/tree` to keep exploring).
 - `plugins/design-panel/` — H4 viewer: `shell.overlay` dock iframing a live
   `appbox design serve` with the 390×844 / 744×1133 / 1280×832 rung ladder.
 - `plugins/memory/` — H5 dsh adapter: injects `appbox memory recall` output
@@ -44,6 +48,22 @@ or `~/.pi`:
 The guard is engine policy: `hooks/appbox-guard.js`, `harness/verdict.sh`,
 `harness/dsh-external-gate/`, `harness/pi/appbox-gate.ts` (H1). This repo's
 profile references them by absolute path — one policy file, every surface.
+
+## Gating the operator's raw surfaces (decision 12)
+
+arxa gates only its own homes. The operator's daily `~/.dsh` and `~/.pi` are
+theirs; wiring the same gate there is the operator's own copy step:
+
+- **raw dsh**: add the appbox-gate insert row (see `profile/cordis.patch.yml`,
+  `tools: [write, edit, str_replace_editor, bash]` — dsh-native lowercase
+  names) to the profile patch you boot with, e.g.
+  `~/.dsh/profiles/web/cordis.patch.yml`.
+- **raw Pi**: `ln -s <app-box>/harness/pi/appbox-gate.ts
+  ~/.pi/agent/extensions/appbox-gate.ts` — safe as a symlink; the gate
+  resolves its guard through realpath and prints "gate INACTIVE" on stderr if
+  the guard is unreachable.
+
+Either way, prove it with a booted DENY (see below) — an allow proves nothing.
 
 ## Verify without touching any real home
 
