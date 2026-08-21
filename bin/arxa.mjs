@@ -231,6 +231,48 @@ const trustArgs = headless
     `arxa.studio.localhost:${ARXA_PORT}`, 'arxa.studio.localhost',
     `arxa.studio:${ARXA_PORT}`, 'arxa.studio']
 if (!headless) console.log(`arxa studio: http://arxa.studio.localhost:${ARXA_PORT}`)
+
+// The design panel subscribes to `appbox design serve`'s /__events stream for
+// live reload, which is a CROSS-ORIGIN request — the panel is served from
+// arxa.studio.localhost, the design server from 127.0.0.1. That server refuses
+// unlisted origins (app-box appboxd/lib/design_server/browser_trust.dart), so
+// register ours in appbox's machine-wide allowlist instead of making every
+// operator remember --trusted-origin on every serve. Idempotent, provenance in
+// the file, plain text the operator can edit or delete.
+//
+// ONLY the .localhost name, never the bare `arxa.studio:PORT` the trust args
+// also declare: .localhost is reserved to loopback (RFC 6761) so nobody can
+// be served from it, while arxa.studio is a real public domain — trusting it
+// would hand the design server's /__* endpoints to whoever answers that name.
+if (!headless) {
+  const i = passthrough.indexOf('--port')
+  const eq = passthrough.find((a) => a.startsWith('--port='))
+  const webPort = i >= 0 ? (passthrough[i + 1] ?? ARXA_PORT)
+    : eq ? eq.slice(7)
+      : ARXA_PORT
+  const origin = `http://arxa.studio.localhost:${webPort}`
+  const appboxHome = process.env.APPBOX_HOME?.trim()
+    ? resolve(process.env.APPBOX_HOME)
+    : join(homedir(), '.appbox')
+  const file = join(appboxHome, 'trusted-origins')
+  try {
+    mkdirSync(appboxHome, { recursive: true })
+    const existing = existsSync(file) ? readFileSync(file, 'utf8') : ''
+    const already = existing.split('\n')
+      .some((l) => l.split('#')[0].trim() === origin)
+    if (!already) {
+      const header = existing
+        ? ''
+        : '# Origins allowed to call an `appbox design serve` /__* endpoint\n'
+          + '# cross-origin. One per line; # starts a comment.\n'
+      const pad = existing && !existing.endsWith('\n') ? '\n' : ''
+      writeFileSync(file, `${existing}${pad}${header}${origin}  # arxa studio\n`)
+    }
+  } catch {
+    // A studio that cannot write here still runs; the panel loses live reload
+    // and says so. Never block a boot on a convenience.
+  }
+}
 // --import loads bin/loopback-localhost-patch.mjs before dsh: it widens the
 // privileged-plane loopback classifier to *.localhost (RFC 6761) so the
 // settings/models/plugins pages work under arxa.studio.localhost. Fail-loud
