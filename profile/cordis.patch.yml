@@ -97,3 +97,43 @@
 - insert:
   - id: arxa-gen-ui
     name: arxa-gen-ui
+
+# 10. arxa as an MCP Apps host (SEP-1865) — stage 4. DISABLED BY DEFAULT
+#     because it needs a real MCP server to point at; uncomment BOTH rows to
+#     enable one.
+#
+#     TWO rows are required and this is not an oversight. dsh's own
+#     mcp-client is what registers the server's tools with the model; it drops
+#     `_meta` at the boundary, so it can never carry UI. arxa-mcp-apps opens a
+#     second, read-only connection to the SAME server purely to discover
+#     `ui://` templates, and renders them. Tools without UI keep their normal
+#     row. Enable arxa-mcp-apps alone and nothing appears — there would be no
+#     tool call to attach a view to.
+#
+#     `serverName` MUST match between the two rows: the qualified tool name
+#     dsh builds (`mcp__<serverName>__<rawName>`) is the slot key the renderer
+#     claims. A mismatch silently renders nothing.
+#
+#     The bundled plugins/mcp-apps/testserver.mjs is a working MCP App server
+#     (a counter widget that calls back via tools/call) — point both rows at
+#     it to see the whole path end to end.
+#
+# - insert:
+#   - id: mcp-arxatest
+#     name: '@deepseek-ai/dsh-mcp-client'
+#     config:
+#       serverName: arxatest
+#       transport: stdio
+#       command: node
+#       args:
+#         - /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/mcp-apps/testserver.mjs
+#
+# - insert:
+#   - id: arxa-mcp-apps
+#     name: arxa-mcp-apps
+#     config:
+#       serverName: arxatest
+#       transport: stdio
+#       command: node
+#       args:
+#         - /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/mcp-apps/testserver.mjs

@@ -1,0 +1,25 @@
+{
+  "name": "arxa-mcp-apps",
+  "version": "0.1.0",
+  "private": true,
+  "description": "arxa as an MCP Apps host (SEP-1865): discovers ui:// templates on an MCP server's tools and renders them in a sandboxed iframe inline in the conversation, with JSON-RPC over postMessage. Stage 4 of docs/plans/inline-generative-ui-in-dsh.md.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-tool"
+      ],
+      "platform": "web"
+    }
+  },
+  "peerDependencies": {
+    "react": "^18.2.0"
+  }
+}

@@ -48,6 +48,9 @@ const bundles = headless
 const designPanelDir = resolve(here, '..', 'plugins', 'design-panel')
 const brandDir = resolve(here, '..', 'plugins', 'brand')
 const genUiDir = resolve(here, '..', 'plugins', 'gen-ui')
+// Installed always, loaded only when the profile enables it (row 10 ships
+// commented out — it needs a real MCP server to point at).
+const mcpAppsDir = resolve(here, '..', 'plugins', 'mcp-apps')
 mkdirSync(profileDir, { recursive: true })
 writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
   name: 'dsh-profile-arxa',
@@ -56,6 +59,7 @@ writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
     'arxa-design-panel': `file:${designPanelDir}`,
     'arxa-brand': `file:${brandDir}`,
     'arxa-gen-ui': `file:${genUiDir}`,
+    'arxa-mcp-apps': `file:${mcpAppsDir}`,
   },
   dsh: { profile: { bundles } },
 }, null, 2) + '\n')
@@ -195,7 +199,7 @@ if (!dshBin) {
 // The design panel, brand and gen-ui plugins resolve by package name (their
 // browser halves are discovered through package.json dsh.client, which a
 // file-path entry never reaches).
-const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui']
+const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa-mcp-apps']
 if (BY_NAME_PLUGINS.some((p) => !existsSync(join(profileDir, 'node_modules', p)))) {
   const r = spawnSync('pnpm', ['install', '--dir', profileDir], { stdio: 'inherit' })
   if (r.error || r.status !== 0) {
