@@ -1,12 +1,20 @@
 /**
- * The arxa gen-UI component catalogue — the ONE list both halves agree on.
+ * The arxa gen-UI component catalogue — the HOST half's list, and the
+ * authority on what the model is allowed to name.
  *
- * This file is the whole security model. A2UI's guarantee is "agents can only
- * name components the client already trusts"; that guarantee is only worth
- * anything if the host validates against the same list the browser renders
- * from. So: host imports it to reject unknown component names at tool-execute
- * time, browser imports the same names to dispatch. Adding a component means
- * editing this file AND writing its renderer — the two-step is deliberate.
+ * This file is the security model. A2UI's guarantee is "agents can only name
+ * components the client already trusts", and the host enforces it here:
+ * `validateComponents` rejects an unknown name at tool-execute time, so an
+ * out-of-catalogue component never reaches the browser.
+ *
+ * HONEST CAVEAT — this is not literally one shared list. `lib/client.js` is a
+ * hand-written `__ModuleLoader__` factory with no bundler, so it cannot import
+ * this module; it carries its own `RENDERERS` map and its own `DEFAULT_RUNGS`.
+ * Two lists that must be edited together. Divergence is survivable, not
+ * silent: a name here without a renderer there draws a visible
+ * "not in this build's catalogue" placeholder, and a renderer there without a
+ * name here is unreachable because the host rejects the call. Adding a
+ * component means editing BOTH files — that two-step is the actual contract.
  *
  * Kept to five, per plan decision 23: three driven by real arxa need (rung
  * ladder, choice, diff) plus two primitives so a surface can carry prose.

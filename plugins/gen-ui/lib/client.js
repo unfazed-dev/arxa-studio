@@ -313,6 +313,21 @@ window.__ModuleLoader__.load({
           title = typeof meta.title === 'string' ? meta.title : ''
           surfaceId = typeof meta.surfaceId === 'string' ? meta.surfaceId : block.callId
           components = componentsFrom(meta.messages)
+        } else if (block.call) {
+          // No meta. Two ways to get here, both real:
+          //  - a SUB-call — the host only projects presentationMeta when
+          //    `exec.parent === undefined` (dsh-tools/lib/index.js:3417), and
+          //    the sub-call projection never sets meta at all
+          //    (ui-conversation childResult, ~:8381);
+          //  - window truncation that dropped the meta-bearing event.
+          // The call head survives in both cases, so rebuild from the args
+          // rather than rendering a blank card.
+          try {
+            const args = JSON.parse(block.call.argsRaw || '{}')
+            title = typeof args.title === 'string' ? args.title : ''
+            surfaceId = block.callId
+            components = Array.isArray(args.components) ? args.components : []
+          } catch { /* nothing recoverable; the empty card stands */ }
         }
       } else if (block) {
         // Running: args are already complete (argsRaw is assigned whole from
