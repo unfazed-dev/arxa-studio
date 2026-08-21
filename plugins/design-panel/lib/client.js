@@ -74,11 +74,15 @@ window.__ModuleLoader__.load({
         if (!open) return
         let es
         try { es = new EventSource(new URL('/__events', url).href) } catch { setLive('blocked'); return }
-        es.onopen = () => setLive('live')
+        // EventSource fires onerror for a REFUSED subscription and for every
+        // ordinary reconnect alike, and it reconnects after each server hot
+        // reload (retry: 500). Without this flag the dot would go grey on the
+        // first successful reload and stay grey, reading as "misconfigured"
+        // while live reload works perfectly.
+        let opened = false
+        es.onopen = () => { opened = true; setLive('live') }
         es.addEventListener('reload', () => setEpoch((e) => e + 1))
-        // Fires on a refused subscription AND on every ordinary reconnect;
-        // EventSource does not distinguish them, so the label stays soft.
-        es.onerror = () => setLive('blocked')
+        es.onerror = () => setLive(opened ? 'reconnecting' : 'blocked')
         return () => es.close()
       }, [open, url])
 
@@ -117,11 +121,15 @@ window.__ModuleLoader__.load({
           h('span', {
             title: live === 'live'
               ? 'live reload connected (/__events)'
-              : 'no live reload — start the design server with '
-                + '--trusted-origin ' + window.location.origin,
+              : live === 'reconnecting'
+                ? 'live reload reconnecting…'
+                : 'no live reload — start the design server with '
+                  + '--trusted-origin ' + window.location.origin,
             style: {
               marginLeft: 'auto', width: 8, height: 8, borderRadius: 4,
-              background: live === 'live' ? '#7a9557' : '#555',
+              background: live === 'live'
+                ? '#7a9557'
+                : live === 'reconnecting' ? '#8a7a3a' : '#555',
             },
           }),
           h('button', {
