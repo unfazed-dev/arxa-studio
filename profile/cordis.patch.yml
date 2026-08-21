@@ -1,7 +1,7 @@
 # The arxa profile patch — materialized by bin/arxa.mjs into
 # $DSH_HOME/profiles/arxa/cordis.patch.yml, applied after the bundle layers.
 #
-# Three patches, each earning its row (arxa-harness-and-distribution.md):
+# Each patch earns its row (arxa-harness-and-distribution.md):
 #
 # 1. Identity. dsh-base's `system-prompt` entry ships
 #    "You are an AI agent powered by DeepSeek Harness." behind
@@ -28,7 +28,20 @@
     maxBytes: 65536
     instructionFileCandidates: [AGENTS.md]
 
-# 3. The appbox gate on every mutating tool call (harness/README.md template;
+# 3. Silence the DeepSeek-worded web-surface identity. dsh-web-app's
+#    web-runtime row injects "DeepSeek Harness Web GUI" into the system
+#    prompt (plus a harness-source section and the DSH_WEB_URL shell
+#    variable) behind surfaceContext. arxa-brand (row below) re-registers
+#    the orientation arxa-worded; the other two are deliberately dropped.
+#    Config replaces wholesale, so printUrl/trustedHosts are restated.
+#    Headless profiles have no web-runtime row — the loader warns and skips.
+- id: web-runtime
+  config:
+    printUrl: true
+    surfaceContext: false
+    trustedHosts: !!js ctx.webStartup.trustedHosts
+
+# 4. The appbox gate on every mutating tool call (harness/README.md template;
 #    absolute path because arxa declares no npm dependency on the plugin).
 - insert:
   - id: appbox-gate
@@ -40,7 +53,7 @@
       tools: [write, edit, str_replace_editor, bash]
       timeoutMs: 5000
 
-# 4. Project memory injection (H5): shells `appbox memory recall` for the
+# 5. Project memory injection (H5): shells `appbox memory recall` for the
 #    boot cwd and registers it as a system-prompt section. Absolute path —
 #    host-only plugin, no client half to discover.
 - insert:
@@ -49,7 +62,7 @@
     config:
       project: !!js process.cwd()
 
-# 5. Pi as a delegated subagent engine (decision 3ii): one tool, delegate_pi,
+# 6. Pi as a delegated subagent engine (decision 3ii): one tool, delegate_pi,
 #    one-shot `pi -p` in the workspace. The spawned Pi inherits
 #    PI_CODING_AGENT_DIR=~/.arxa/pi from bin/arxa.mjs, so the appbox gate
 #    extension rides along. Absolute path — host-only plugin.
@@ -57,7 +70,7 @@
   - id: arxa-pi-delegate
     name: /Volumes/developer_ssd/Developer/totem_labs/arxa-harness/plugins/pi-delegate/index.mjs
 
-# 6. The design panel (H4, viewer-first): shell.overlay dock iframing a live
+# 7. The design panel (H4, viewer-first): shell.overlay dock iframing a live
 #    `appbox design serve` with the viewport-rung ladder. By PACKAGE NAME —
 #    the browser half is discovered through the package.json dsh.client
 #    declaration, which a file-path entry has no association to; bin/arxa.mjs
@@ -65,3 +78,12 @@
 - insert:
   - id: arxa-design-panel
     name: arxa-design-panel
+
+# 8. arxa branding (web surface): moss-green accent palette, arxa wordmark
+#    over the baked-in brand SVG, tab title/favicon (browser half), and the
+#    arxa-worded web-surface prompt section replacing the one row 3 disabled
+#    (host half). By PACKAGE NAME — the browser half is discovered through
+#    package.json dsh.client, same as the design panel.
+- insert:
+  - id: arxa-brand
+    name: arxa-brand

@@ -1,0 +1,91 @@
+// Browser half of arxa-brand. Hand-written in the __ModuleLoader__ factory
+// shape every dsh client bundle uses (same pattern as arxa-design-panel).
+//
+// Three moves, all CSS/DOM — the frontend dist is a built artifact and is
+// never edited:
+//  1. Accent: the frontend's accent aliases resolve through the static
+//     `--dsw-static-blue-*` and `--dsw-static-deepseek-*` palettes. This
+//     stylesheet redefines both ramps to moss green; it is appended to
+//     <head> after the bundle CSS, so equal-specificity :root wins by
+//     source order.
+//  2. Wordmark: the sidebar brand button renders BrandWordmark — a single
+//     decorative aria-hidden SVG (dsh-client-ui-primitives). Hide the SVG,
+//     paint "arxa" via ::before. Class names are hash-prefixed
+//     ("hHd-Xa_brand"), so attribute-contains selectors target the stable
+//     suffix. Same treatment for the boot screen's "HARNESS" text card.
+//  3. Tab identity: title + favicon. The app captures the base title at
+//     first render, after client plugins load, so writing early sticks.
+window.__ModuleLoader__.load({
+  id: 'arxa-brand',
+  factory: () => {
+    var module = { exports: {} }
+    var exports = module.exports
+    Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' })
+
+    const MOSS = `
+:root {
+  --dsw-static-blue-50: rgb(244, 247, 240);
+  --dsw-static-blue-75: rgb(238, 243, 232);
+  --dsw-static-blue-100: rgb(227, 235, 216);
+  --dsw-static-blue-300: rgb(178, 198, 148);
+  --dsw-static-blue-400: rgb(143, 168, 106);
+  --dsw-static-blue-450: rgb(126, 152, 90);
+  --dsw-static-blue-500: rgb(110, 136, 76);
+  --dsw-static-blue-600: rgb(90, 113, 61);
+  --dsw-static-blue-800: rgb(60, 78, 41);
+  --dsw-static-blue-900: rgb(44, 58, 30);
+  --dsw-static-blue-950: rgb(32, 43, 22);
+  --dsw-static-deepseek-50: rgb(243, 246, 238);
+  --dsw-static-deepseek-100: rgb(229, 237, 217);
+  --dsw-static-deepseek-200: rgb(214, 227, 197);
+  --dsw-static-deepseek-300: rgb(186, 204, 158);
+  --dsw-static-deepseek-400: rgb(139, 165, 101);
+  --dsw-static-deepseek-450: rgb(122, 149, 87);
+  --dsw-static-deepseek-500: rgb(106, 133, 74);
+  --dsw-static-deepseek-600: rgb(88, 110, 62);
+  --dsw-static-deepseek-800: rgb(56, 70, 42);
+  --dsw-static-deepseek-900: rgb(42, 52, 33);
+}
+[class*="_brand"] > svg { display: none; }
+[class*="_brand"]::before {
+  content: "arxa";
+  font: 700 21px/1 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0.03em;
+  color: var(--dsw-alias-label-primary, #e8e8e8);
+}
+[class*="_wordmark"] { font-size: 0 !important; }
+[class*="_wordmark"]::before {
+  content: "arxa";
+  font: 700 26px/1 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0.03em;
+}
+`
+
+    const FAVICON = 'data:image/svg+xml,' + encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+      + '<rect width="24" height="24" rx="6" fill="rgb(106,133,74)"/>'
+      + '<text x="12" y="17.5" font-family="system-ui" font-size="15" font-weight="700" text-anchor="middle" fill="rgb(243,246,238)">a</text>'
+      + '</svg>')
+
+    function apply() {
+      const style = document.createElement('style')
+      style.dataset.arxaBrand = ''
+      style.textContent = MOSS
+      document.head.appendChild(style)
+
+      document.title = 'arxa'
+      let icon = document.querySelector('link[rel="icon"]')
+      if (!icon) {
+        icon = document.createElement('link')
+        icon.rel = 'icon'
+        document.head.appendChild(icon)
+      }
+      icon.type = 'image/svg+xml'
+      icon.href = FAVICON
+    }
+
+    exports.apply = apply
+    exports.inject = []
+    return module.exports
+  },
+})
