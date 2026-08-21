@@ -112,7 +112,10 @@ if (!existsSync(settingsFile)) {
             supportsReasoningEffort: true
             zaiToolStream: true
 agent-default-model:
-  provider: zai-coding-cn
+  # Wallet endpoint: glm-5.3 + effort max verified working 2026-08-21.
+  # zai-coding-cn stays configured — flip here to burn plan quota instead
+  # (weekly cap resets 2026-08-24 10:04).
+  provider: zai
   model: glm-5.3
   reasoningEffort: max
 agent-presets:
@@ -156,8 +159,13 @@ if (!existsSync(piModels)) {
         // Shelled at request time by pi itself; the value never lands in a file.
         apiKey: '!appbox credentials exec ZAI_API_KEY -- printenv ZAI_API_KEY',
         models: [
+          // glm-5.3 + reasoning verified working on the wallet 2026-08-21.
+          {
+            id: 'glm-5.3', name: 'GLM-5.3', contextWindow: 1000000, maxTokens: 131072,
+            reasoning: true,
+            thinkingLevelMap: { minimal: null, low: 'low', medium: 'low', high: 'high', max: 'max' },
+          },
           { id: 'glm-4.6v', name: 'GLM-4.6V', contextWindow: 131072, maxTokens: 8192 },
-          { id: 'glm-5.3', name: 'GLM-5.3', contextWindow: 1000000, maxTokens: 131072 },
         ],
       },
     },

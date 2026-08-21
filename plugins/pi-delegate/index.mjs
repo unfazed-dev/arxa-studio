@@ -36,7 +36,8 @@ export const inject = ['tools']
 
 export function apply (ctx, config = {}) {
   const provider = config.provider ?? 'zai-wallet'
-  const model = config.model ?? 'glm-4.6v'
+  // Wallet glm-5.3 verified working 2026-08-21 (stale 1302 conclusion withdrawn).
+  const model = config.model ?? 'glm-5.3'
   const piBin = config.piBin ?? 'pi'
   const timeoutMs = config.timeoutMs ?? 300_000
   const maxBytes = config.maxBytes ?? 65_536
