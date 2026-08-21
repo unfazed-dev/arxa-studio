@@ -1,4 +1,4 @@
-# arxa-harness
+# arxa-studio
 
 arxa — Totem Labs' agentic studio harness. **A package that depends on dsh
 components, never a fork** (depend-don't-fork amendment): this repo is the

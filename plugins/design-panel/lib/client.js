@@ -39,6 +39,22 @@ window.__ModuleLoader__.load({
       const [draft, setDraft] = React.useState(DEFAULT_URL)
       const [epoch, setEpoch] = React.useState(0)
 
+      // Adopt the configured URL (settings card / arxa-design-panel ns) once,
+      // unless the user already typed their own.
+      React.useEffect(() => {
+        let live = true
+        ;(async () => {
+          try {
+            const { result } = await hostCtx.connection.api.settings.describe({})
+            const row = result.ok && result.value.namespaces.find((n) => n.ns === NS)
+            if (live && row && row.value?.url && url === DEFAULT_URL) {
+              setUrl(row.value.url); setDraft(row.value.url)
+            }
+          } catch { /* composed default stands */ }
+        })()
+        return () => { live = false }
+      }, [])
+
       if (!open) {
         return h('button', {
           onClick: () => setOpen(true),
@@ -111,15 +127,103 @@ window.__ModuleLoader__.load({
             }))))
     }
 
+    // Set by apply; the card reaches the connection API through it (slot
+    // components render without props we control).
+    let hostCtx = null
+    const NS = 'arxa-design-panel'
+
+    // The card in Settings → Plugins → Plugin configuration. The tab renders
+    // one card per SERVED namespace that a client plugin claims by key in
+    // `settings.plugin.item`; the host half serves ours via
+    // installSettingsSection. Read via settings.describe, write via
+    // settings.update {ns, patch, expectedRevision}.
+    function SettingsCard() {
+      const [phase, setPhase] = React.useState('loading')
+      const [note, setNote] = React.useState('')
+      const [revision, setRevision] = React.useState(undefined)
+      const [draft, setDraft] = React.useState('')
+
+      React.useEffect(() => {
+        let live = true
+        ;(async () => {
+          try {
+            const { result } = await hostCtx.connection.api.settings.describe({})
+            if (!result.ok) throw new Error(result.error.message)
+            const row = result.value.namespaces.find((n) => n.ns === NS)
+            if (!row) throw new Error('namespace not served')
+            if (!live) return
+            setDraft(row.value?.url ?? '')
+            setRevision(row.revision)
+            setPhase('ready')
+          } catch (e) {
+            if (!live) return
+            setPhase('error'); setNote(String(e?.message ?? e))
+          }
+        })()
+        return () => { live = false }
+      }, [])
+
+      const save = async () => {
+        setPhase('saving'); setNote('')
+        try {
+          const { result } = await hostCtx.connection.api.settings.update({
+            ns: NS, patch: { url: draft },
+            ...revision === undefined ? {} : { expectedRevision: revision },
+          })
+          if (!result.ok) throw new Error(result.error.message)
+          setRevision(result.value.revision)
+          setPhase('ready'); setNote('saved')
+        } catch (e) {
+          setPhase('ready'); setNote(String(e?.message ?? e))
+        }
+      }
+
+      return h('li', { style: { listStyle: 'none', padding: '12px 0' } },
+        h('div', { style: { fontWeight: 600, marginBottom: 2 } }, 'arxa design panel'),
+        h('div', { style: { fontSize: 12, opacity: 0.7, marginBottom: 8 } },
+          'Live appbox design server the panel iframes.'),
+        phase === 'loading'
+          ? h('div', { style: { fontSize: 12, opacity: 0.7 } }, 'loading…')
+          : phase === 'error'
+            ? h('div', { style: { fontSize: 12, color: '#c66' } }, note)
+            : h('form', {
+              onSubmit: (e) => { e.preventDefault(); save() },
+              style: { display: 'flex', gap: 8, alignItems: 'center' },
+            },
+              h('input', {
+                value: draft,
+                onChange: (e) => setDraft(e.target.value),
+                spellCheck: false,
+                style: {
+                  flex: 1, padding: 6, background: 'transparent',
+                  color: 'inherit', border: '1px solid #555', borderRadius: 4,
+                },
+              }),
+              h('button', {
+                type: 'submit',
+                disabled: phase === 'saving',
+                style: { padding: '6px 14px', cursor: 'pointer', borderRadius: 4 },
+              }, phase === 'saving' ? 'saving…' : 'Save'),
+              note ? h('span', { style: { fontSize: 12, opacity: 0.7 } }, note) : null))
+    }
+
     function apply(ctx) {
+      hostCtx = ctx
       ctx.slots.inject('shell.overlay', () =>
         ctx.slots.register({
           name: 'shell.overlay',
           id: 'arxa-design-panel',
           order: 100,
         }, DesignPanel))
+      ctx.slots.inject('settings.plugin.item', () =>
+        ctx.slots.register({
+          name: 'settings.plugin.item',
+          id: 'arxa-design-panel',
+          key: NS,
+          order: 10,
+        }, SettingsCard))
     }
-    const inject = ['slots']
+    const inject = ['slots', 'connection']
 
     exports.apply = apply
     exports.inject = inject

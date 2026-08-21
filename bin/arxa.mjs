@@ -186,7 +186,7 @@ const candidates = [
 ]
 const dshBin = candidates.find(existsSync)
 if (!dshBin) {
-  console.error('arxa: cannot find @deepseek-ai/dsh — npm install in arxa-harness, or install dsh')
+  console.error('arxa: cannot find @deepseek-ai/dsh — npm install in arxa-studio, or install dsh')
   process.exit(127)
 }
 

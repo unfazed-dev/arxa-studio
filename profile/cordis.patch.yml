@@ -58,7 +58,7 @@
 #    host-only plugin, no client half to discover.
 - insert:
   - id: arxa-memory
-    name: /Volumes/developer_ssd/Developer/totem_labs/arxa-harness/plugins/memory/index.mjs
+    name: /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/memory/index.mjs
     config:
       project: !!js process.cwd()
 
@@ -68,7 +68,7 @@
 #    extension rides along. Absolute path — host-only plugin.
 - insert:
   - id: arxa-pi-delegate
-    name: /Volumes/developer_ssd/Developer/totem_labs/arxa-harness/plugins/pi-delegate/index.mjs
+    name: /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/pi-delegate/index.mjs
 
 # 7. The design panel (H4, viewer-first): shell.overlay dock iframing a live
 #    `appbox design serve` with the viewport-rung ladder. By PACKAGE NAME —
