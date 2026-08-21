@@ -47,6 +47,7 @@ const bundles = headless
 // ---- dsh home ----------------------------------------------------------------
 const designPanelDir = resolve(here, '..', 'plugins', 'design-panel')
 const brandDir = resolve(here, '..', 'plugins', 'brand')
+const genUiDir = resolve(here, '..', 'plugins', 'gen-ui')
 mkdirSync(profileDir, { recursive: true })
 writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
   name: 'dsh-profile-arxa',
@@ -54,6 +55,7 @@ writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
   dependencies: {
     'arxa-design-panel': `file:${designPanelDir}`,
     'arxa-brand': `file:${brandDir}`,
+    'arxa-gen-ui': `file:${genUiDir}`,
   },
   dsh: { profile: { bundles } },
 }, null, 2) + '\n')
@@ -190,11 +192,11 @@ if (!dshBin) {
   process.exit(127)
 }
 
-// The design panel and brand plugins resolve by package name (their browser
-// halves are discovered through package.json dsh.client, which a file-path
-// entry never reaches).
-if (!existsSync(join(profileDir, 'node_modules', 'arxa-design-panel'))
-  || !existsSync(join(profileDir, 'node_modules', 'arxa-brand'))) {
+// The design panel, brand and gen-ui plugins resolve by package name (their
+// browser halves are discovered through package.json dsh.client, which a
+// file-path entry never reaches).
+const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui']
+if (BY_NAME_PLUGINS.some((p) => !existsSync(join(profileDir, 'node_modules', p)))) {
   const r = spawnSync('pnpm', ['install', '--dir', profileDir], { stdio: 'inherit' })
   if (r.error || r.status !== 0) {
     console.error('arxa: could not pnpm-install the profile — the design '

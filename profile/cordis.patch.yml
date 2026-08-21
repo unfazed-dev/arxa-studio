@@ -87,3 +87,13 @@
 - insert:
   - id: arxa-brand
     name: arxa-brand
+
+# 9. arxa generative UI: the `gen_ui` tool (host half) plus the keyed
+#    `tool.call.toolview` renderer for it (browser half), so a tool result
+#    becomes live React inline in the conversation instead of prose.
+#    Stages 1-3 of app-box/docs/plans/inline-generative-ui-in-dsh.md.
+#    By PACKAGE NAME — the browser half is discovered through package.json
+#    dsh.client, same as the design panel and brand rows above.
+- insert:
+  - id: arxa-gen-ui
+    name: arxa-gen-ui
