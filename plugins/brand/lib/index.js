@@ -18,8 +18,9 @@ export function apply(ctx) {
       const port = ctx.get('webServer')?.port
       if (port === undefined) return ''
       return `You are interacting with the user through the arxa studio web GUI `
-        + `at http://arxa.studio:${String(port)} (an /etc/hosts alias of `
-        + `http://127.0.0.1:${String(port)}). When the user refers to "this page", `
+        + `at http://arxa.local:${String(port)} (an mDNS alias of `
+        + `http://127.0.0.1:${String(port)}; arxa.studio also works where that `
+        + `name resolves). When the user refers to "this page", `
         + `"this GUI", or "this app" without naming another target, they mean this `
         + `GUI. The browser provides no implicit DOM, route, or screenshot context. `
         + `Changes to the GUI's own code require rebuilding its artifacts and a page `

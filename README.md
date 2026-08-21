@@ -29,7 +29,14 @@ or `~/.pi`:
   `includeHarnessIdentity: false` + persona, `instructionFileCandidates:
   [AGENTS.md]`, the appbox gate, the plugins below) and execs dsh's own bin
   with `DSH_HOME` + `PI_CODING_AGENT_DIR` pointed at them. `--headless`
-  swaps dsh-web-app for dsh-headless (one-shot, no browser).
+  swaps dsh-web-app for dsh-headless (one-shot, no browser). Web mode
+  serves on port 7891 as **http://arxa.local:7891** — the launcher
+  advertises the name over mDNS (`dns-sd -P`, zero sudo, responder dies
+  with the process) and declares it to the /api browser-trust fence.
+  `arxa.studio` is also trusted and works wherever it resolves to loopback;
+  the product path there is owning the domain and publishing a public
+  `A 127.0.0.1` record (localtest.me-style) — zero-config for every
+  install, no code change.
 - `profile/cordis.patch.yml` — the arxa profile patch (rewritten into the
   profile on every launch; the materialized copy is a build product).
 - `bin/arxa-explore.mjs` — decision 17's design exploration on Pi's session
