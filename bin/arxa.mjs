@@ -203,15 +203,19 @@ if (!existsSync(join(profileDir, 'node_modules', 'arxa-design-panel'))
   }
 }
 
-// Web mode answers as arxa.studio: the browser-trust fence on /api accepts
-// only known authorities, so the alias must be declared (host:port for the
-// default port, bare host for a port-80 forward). DNS is the operator's
-// /etc/hosts line — `127.0.0.1 arxa.studio` — which this launcher never
-// writes. Last on the argv so the variadic flag can't swallow passthrough.
+// Web mode answers as arxa.studio on arxa's own port: the browser-trust
+// fence on /api accepts only known authorities, so the alias must be
+// declared (host:port for the default port, bare host for a port-80
+// forward). DNS is the operator's /etc/hosts line — `127.0.0.1 arxa.studio`
+// — which this launcher never writes. Last on the argv so the variadic flag
+// can't swallow passthrough; an explicit --port in passthrough wins by
+// dropping ours.
+const ARXA_PORT = '7891'
+const portArgs = passthrough.includes('--port') ? [] : ['--port', ARXA_PORT]
 const trustArgs = headless
   ? []
-  : ['--trusted-host', 'arxa.studio:3080', 'arxa.studio']
-if (!headless) console.log('arxa studio: http://arxa.studio:3080 (needs `127.0.0.1 arxa.studio` in /etc/hosts)')
+  : [...portArgs, '--trusted-host', `arxa.studio:${ARXA_PORT}`, 'arxa.studio']
+if (!headless) console.log(`arxa studio: http://arxa.studio:${ARXA_PORT} (needs \`127.0.0.1 arxa.studio\` in /etc/hosts)`)
 const child = spawn(process.execPath, [dshBin, '--profile', 'arxa', ...passthrough, ...trustArgs], {
   stdio: 'inherit',
   env: { ...process.env, DSH_HOME: dshHome, PI_CODING_AGENT_DIR: piHome },
