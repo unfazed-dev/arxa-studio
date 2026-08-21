@@ -30,9 +30,10 @@ or `~/.pi`:
   [AGENTS.md]`, the appbox gate, the plugins below) and execs dsh's own bin
   with `DSH_HOME` + `PI_CODING_AGENT_DIR` pointed at them. `--headless`
   swaps dsh-web-app for dsh-headless (one-shot, no browser). Web mode
-  serves on port 7891 as **http://arxa.studio.local:7891** — the launcher
-  advertises the name over mDNS (`dns-sd -P`, zero sudo, responder dies
-  with the process) and declares it to the /api browser-trust fence.
+  serves on port 7891 as **http://arxa.studio.localhost:7891** — *.localhost
+  resolves to loopback natively (OS and browsers) and is a W3C trustworthy
+  origin, so no "Not Secure" chip, no mDNS responder, no sudo. The name is
+  declared to the /api browser-trust fence.
   `arxa.studio` is also trusted and works wherever it resolves to loopback;
   the product path there is owning the domain and publishing a public
   `A 127.0.0.1` record (localtest.me-style) — zero-config for every

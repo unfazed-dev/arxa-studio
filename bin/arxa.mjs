@@ -203,32 +203,28 @@ if (!existsSync(join(profileDir, 'node_modules', 'arxa-design-panel'))
   }
 }
 
-// Web mode answers by NAME, baked in with zero sudo: the launcher advertises
-// arxa.local → 127.0.0.1 over mDNS (macOS resolves .local userland; the
-// responder lives and dies with this process — verified resolving 2026-08-21).
+// Web mode answers as arxa.studio.localhost — baked in, zero sudo, zero
+// moving parts: the OS resolver and browsers both send *.localhost to
+// loopback natively (verified on macOS 2026-08-21), and the W3C
+// secure-context spec treats http://*.localhost as a trustworthy origin, so
+// no "Not Secure" chip and no loss of secure-context APIs (an earlier
+// .local mDNS name drew the chip — .local is not on that allowlist).
 // arxa.studio additionally works wherever it already resolves to loopback:
-// an operator hosts line today, and the product path is a public A record
-// 127.0.0.1 on the real domain (localtest.me-style), which makes every
-// install zero-config without touching this code. The /api browser-trust
-// fence accepts only declared authorities, so both names are declared
-// (host:port for the real port, bare host for a port-80 forward). Trust args
-// go last on the argv so the variadic flag can't swallow passthrough; an
-// explicit --port in passthrough wins by dropping ours.
+// an operator hosts line today; the product path is a public A 127.0.0.1
+// record on the real domain (localtest.me-style) — zero-config for every
+// install, no code change. The /api browser-trust fence accepts only
+// declared authorities, so both names are declared (host:port for the real
+// port, bare host for a port-80 forward). Trust args go last on the argv so
+// the variadic flag can't swallow passthrough; an explicit --port in
+// passthrough wins by dropping ours.
 const ARXA_PORT = '7891'
 const portArgs = passthrough.includes('--port') ? [] : ['--port', ARXA_PORT]
 const trustArgs = headless
   ? []
   : [...portArgs, '--trusted-host',
-    `arxa.studio.local:${ARXA_PORT}`, 'arxa.studio.local',
+    `arxa.studio.localhost:${ARXA_PORT}`, 'arxa.studio.localhost',
     `arxa.studio:${ARXA_PORT}`, 'arxa.studio']
-if (!headless) {
-  const responder = spawn('dns-sd',
-    ['-P', 'arxa', '_http._tcp', 'local', ARXA_PORT, 'arxa.studio.local', '127.0.0.1'],
-    { stdio: 'ignore' })
-  responder.on('error', () => { /* non-mac: no dns-sd, loopback URL still works */ })
-  process.on('exit', () => { try { responder.kill() } catch { /* already gone */ } })
-  console.log(`arxa studio: http://arxa.studio.local:${ARXA_PORT}`)
-}
+if (!headless) console.log(`arxa studio: http://arxa.studio.localhost:${ARXA_PORT}`)
 const child = spawn(process.execPath, [dshBin, '--profile', 'arxa', ...passthrough, ...trustArgs], {
   stdio: 'inherit',
   env: { ...process.env, DSH_HOME: dshHome, PI_CODING_AGENT_DIR: piHome },
