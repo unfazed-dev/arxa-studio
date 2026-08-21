@@ -4,10 +4,11 @@
 // Three moves, all CSS/DOM — the frontend dist is a built artifact and is
 // never edited:
 //  1. Accent: the frontend's accent aliases resolve through the static
-//     `--dsw-static-blue-*` and `--dsw-static-deepseek-*` palettes. This
-//     stylesheet redefines both ramps to moss green; it is appended to
-//     <head> after the bundle CSS, so equal-specificity :root wins by
-//     source order.
+//     `--dsw-static-blue-*` and `--dsw-static-deepseek-*` palettes, which
+//     the bundle defines on `body` / `body[data-ds-dark-theme]` (NOT :root
+//     — a bare :root override is shadowed by inheritance). This stylesheet
+//     redefines both ramps to moss green on the same selectors; appended to
+//     <head> after the bundle CSS, so it wins by source order.
 //  2. Wordmark: the sidebar brand button renders BrandWordmark — a single
 //     decorative aria-hidden SVG (dsh-client-ui-primitives). Hide the SVG,
 //     paint "arxa" via ::before. Class names are hash-prefixed
@@ -23,7 +24,7 @@ window.__ModuleLoader__.load({
     Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' })
 
     const MOSS = `
-:root {
+body, body[data-ds-dark-theme] {
   --dsw-static-blue-50: rgb(244, 247, 240);
   --dsw-static-blue-75: rgb(238, 243, 232);
   --dsw-static-blue-100: rgb(227, 235, 216);
