@@ -35,7 +35,9 @@
     name: /Volumes/developer_ssd/Developer/totem_labs/app-box/harness/dsh-external-gate/index.mjs
     config:
       command: /Volumes/developer_ssd/Developer/totem_labs/app-box/harness/verdict.sh
-      tools: [Write, Edit, MultiEdit, Bash]
+      # dsh-native tool names (dsh-tool-fs registers write/edit, not Write/Edit).
+      # The 2026-08-21 booted check proved Claude-cased names match nothing here.
+      tools: [write, edit, str_replace_editor, bash]
       timeoutMs: 5000
 
 # 4. Project memory injection (H5): shells `appbox memory recall` for the
