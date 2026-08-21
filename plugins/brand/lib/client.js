@@ -67,6 +67,7 @@ body, body[data-ds-dark-theme] {
   font: 700 26px/1 ui-sans-serif, system-ui, sans-serif;
   letter-spacing: 0.03em;
 }
+[class*="_fishHitbox"], [class*="_previewBadge"] { display: none !important; }
 `
 
     const FAVICON = 'data:image/svg+xml,' + encodeURIComponent(
@@ -90,6 +91,21 @@ body, body[data-ds-dark-theme] {
       }
       icon.type = 'image/svg+xml'
       icon.href = FAVICON
+
+      // Hero headline ("Into the Unknown") comes from a locale dictionary
+      // whose namespace+locale is already registered — register() throws on
+      // duplicates, so there is no override seam. Swap the text in the DOM
+      // instead; the observer re-applies after React re-renders. The
+      // textContent guard keeps the observer from feeding itself.
+      const HEADLINE = 'Flowing High'
+      const swapHeadline = () => {
+        for (const el of document.querySelectorAll('[class*="_headlineText"]')) {
+          if (el.textContent !== HEADLINE) el.textContent = HEADLINE
+        }
+      }
+      swapHeadline()
+      new MutationObserver(swapHeadline)
+        .observe(document.body, { childList: true, subtree: true })
     }
 
     exports.apply = apply
