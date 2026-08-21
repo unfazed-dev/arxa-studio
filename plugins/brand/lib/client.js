@@ -54,9 +54,16 @@ body, body[data-ds-dark-theme] {
   letter-spacing: 0.03em;
   color: var(--dsw-alias-label-primary, #e8e8e8);
 }
+[class*="_brand"]::after {
+  content: "studio";
+  font: 400 21px/1 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0.03em;
+  margin-left: 0.32em;
+  color: var(--dsw-static-deepseek-400, rgb(139, 165, 101));
+}
 [class*="_wordmark"] { font-size: 0 !important; }
 [class*="_wordmark"]::before {
-  content: "arxa";
+  content: "arxa studio";
   font: 700 26px/1 ui-sans-serif, system-ui, sans-serif;
   letter-spacing: 0.03em;
 }
@@ -74,7 +81,7 @@ body, body[data-ds-dark-theme] {
       style.textContent = MOSS
       document.head.appendChild(style)
 
-      document.title = 'arxa'
+      document.title = 'arxa studio'
       let icon = document.querySelector('link[rel="icon"]')
       if (!icon) {
         icon = document.createElement('link')
