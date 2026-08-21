@@ -11,10 +11,12 @@
 //
 // The panel iframes a live `appbox design serve` and renders the viewport
 // ladder (390×844 / 744×1133 / 1280×832) as rung buttons; the iframe keeps
-// the rung's true pixel size and is CSS-scaled to fit the dock. Live reload
-// comes from the design server itself — the panel only remounts the iframe
-// (key bump) on demand. Direct manipulation (drag → engine `design patch`
-// verb) is deferred until that verb exists, per H4.
+// the rung's true pixel size and is CSS-scaled to fit the dock. The panel
+// remounts the iframe when the design server pushes a `reload` frame on its
+// /__events SSE stream (cross-origin — see the effect below for the
+// --trusted-origin it requires), and on demand via ⟳. Direct manipulation
+// (drag → engine `design patch` verb) is deferred until that verb exists,
+// per H4.
 window.__ModuleLoader__.load({
   id: 'arxa-design-panel',
   factory: (require) => {
@@ -38,6 +40,7 @@ window.__ModuleLoader__.load({
       const [url, setUrl] = React.useState(DEFAULT_URL)
       const [draft, setDraft] = React.useState(DEFAULT_URL)
       const [epoch, setEpoch] = React.useState(0)
+      const [live, setLive] = React.useState('off')
 
       // Adopt the configured URL (settings card / arxa-design-panel ns) once,
       // unless the user already typed their own.
@@ -54,6 +57,30 @@ window.__ModuleLoader__.load({
         })()
         return () => { live = false }
       }, [])
+
+      // Live reload. The design server pushes an SSE frame on /__events once a
+      // hot reload has settled AND its route table has re-registered, so
+      // remounting on it can never land in the 404 window a naive timer would.
+      // EventSource reconnects on its own (the server sends `retry: 500`), so
+      // there is no retry loop here on purpose.
+      //
+      // This is a CROSS-ORIGIN subscription — the panel is served from
+      // arxa.studio.localhost, the design server from 127.0.0.1 — so that
+      // server must be started with:
+      //   appbox design serve … --trusted-origin http://arxa.studio.localhost:7891
+      // Without it the request is refused 403 and this drops to 'blocked';
+      // the ⟳ button still works.
+      React.useEffect(() => {
+        if (!open) return
+        let es
+        try { es = new EventSource(new URL('/__events', url).href) } catch { setLive('blocked'); return }
+        es.onopen = () => setLive('live')
+        es.addEventListener('reload', () => setEpoch((e) => e + 1))
+        // Fires on a refused subscription AND on every ordinary reconnect;
+        // EventSource does not distinguish them, so the label stays soft.
+        es.onerror = () => setLive('blocked')
+        return () => es.close()
+      }, [open, url])
 
       if (!open) {
         return h('button', {
@@ -87,10 +114,20 @@ window.__ModuleLoader__.load({
               background: i === rung ? '#3b5bdb' : '#222', color: '#eee',
             },
           }, x.label + ' ' + x.w + '×' + x.h)),
+          h('span', {
+            title: live === 'live'
+              ? 'live reload connected (/__events)'
+              : 'no live reload — start the design server with '
+                + '--trusted-origin ' + window.location.origin,
+            style: {
+              marginLeft: 'auto', width: 8, height: 8, borderRadius: 4,
+              background: live === 'live' ? '#7a9557' : '#555',
+            },
+          }),
           h('button', {
             onClick: () => setEpoch((e) => e + 1),
             title: 'remount the iframe',
-            style: { marginLeft: 'auto', padding: '4px 8px', cursor: 'pointer' },
+            style: { padding: '4px 8px', cursor: 'pointer' },
           }, '⟳'),
           h('button', {
             onClick: () => setOpen(false),
@@ -181,7 +218,8 @@ window.__ModuleLoader__.load({
       return h('li', { style: { listStyle: 'none', padding: '12px 0' } },
         h('div', { style: { fontWeight: 600, marginBottom: 2 } }, 'arxa design panel'),
         h('div', { style: { fontSize: 12, opacity: 0.7, marginBottom: 8 } },
-          'Live appbox design server the panel iframes.'),
+          'Live appbox design server the panel iframes. For live reload, start '
+          + 'it with --trusted-origin ' + window.location.origin),
         phase === 'loading'
           ? h('div', { style: { fontSize: 12, opacity: 0.7 } }, 'loading…')
           : phase === 'error'
