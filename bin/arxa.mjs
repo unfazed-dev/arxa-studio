@@ -21,7 +21,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { spawn, spawnSync } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { homedir } from 'node:os'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -225,7 +225,12 @@ const trustArgs = headless
     `arxa.studio.localhost:${ARXA_PORT}`, 'arxa.studio.localhost',
     `arxa.studio:${ARXA_PORT}`, 'arxa.studio']
 if (!headless) console.log(`arxa studio: http://arxa.studio.localhost:${ARXA_PORT}`)
-const child = spawn(process.execPath, [dshBin, '--profile', 'arxa', ...passthrough, ...trustArgs], {
+// --import loads bin/loopback-localhost-patch.mjs before dsh: it widens the
+// privileged-plane loopback classifier to *.localhost (RFC 6761) so the
+// settings/models/plugins pages work under arxa.studio.localhost. Fail-loud
+// on dep bumps — see that file.
+const loaderArgs = ['--import', pathToFileURL(join(here, 'loopback-localhost-patch.mjs')).href]
+const child = spawn(process.execPath, [...loaderArgs, dshBin, '--profile', 'arxa', ...passthrough, ...trustArgs], {
   stdio: 'inherit',
   env: { ...process.env, DSH_HOME: dshHome, PI_CODING_AGENT_DIR: piHome },
 })
