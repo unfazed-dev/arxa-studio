@@ -40,6 +40,10 @@ or `~/.pi`:
   `appbox design serve` with the 390×844 / 744×1133 / 1280×832 rung ladder.
 - `plugins/memory/` — H5 dsh adapter: injects `appbox memory recall` output
   as a system-prompt section at mount.
+- `plugins/pi-delegate/` — decision 3ii: registers the `delegate_pi` tool
+  (one-shot `pi -p` in the workspace, default `zai-wallet`/glm-4.6v). The
+  spawned Pi inherits `PI_CODING_AGENT_DIR=~/.arxa/pi`, so the appbox gate
+  extension rides along on every delegated run.
 - `pi/arxa-memory.ts` — H5 Pi adapter: injects recall output once per
   session on `before_agent_start`. Symlink into `~/.pi/agent/extensions/`.
 
