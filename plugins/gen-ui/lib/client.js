@@ -140,10 +140,31 @@ window.__ModuleLoader__.load({
       const rung = rungs[Math.min(active, rungs.length - 1)] ?? DEFAULT_RUNGS[0]
       const w = Number(rung.w) || 390
       const hgt = Number(rung.h) || 844
-      // Cap the on-screen height so a desktop rung cannot push the rest of the
-      // conversation off-screen; the iframe keeps its true pixel size and is
-      // CSS-scaled, same technique as the design panel.
-      const scale = Math.min(1, 320 / w, 420 / hgt)
+
+      // Fill the width the thread actually gives us. This was a hardcoded
+      // `Math.min(1, 320 / w, 420 / hgt)`, which pinned the desktop rung to
+      // 320x208 inside a ~700px card — a quarter scale for the rung that most
+      // needs the room. The cap has to be MEASURED, not guessed: the usable
+      // width changes when the sidebar collapses or the details panel opens,
+      // so a one-shot read would be wrong for the rest of the session.
+      const boxRef = React.useRef(null)
+      const [avail, setAvail] = React.useState(0)
+      React.useLayoutEffect(() => {
+        const el = boxRef.current
+        if (!el || typeof ResizeObserver !== 'function') return
+        const ro = new ResizeObserver((entries) => {
+          const px = entries[0]?.contentRect?.width ?? 0
+          // Ignore a transient 0 (collapsed/hidden ancestor) rather than
+          // collapsing the frame to nothing and flashing on the way back.
+          if (px > 0) setAvail(px)
+        })
+        ro.observe(el)
+        return () => ro.disconnect()
+      }, [])
+      // Never scale ABOVE 1:1 — upscaling a 390px mobile rung to fill 700px
+      // renders a blurry lie about how the design looks at that viewport.
+      // Height follows the same factor, so the frame stays proportional.
+      const scale = avail > 0 ? Math.min(1, avail / w) : Math.min(1, 320 / w)
       if (!url) return h('div', { style: muted }, 'RungLadder: no url')
       return h('div', { style: { margin: '6px 0' } },
         h('div', { style: { display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' } },
@@ -162,12 +183,16 @@ window.__ModuleLoader__.load({
             title: 'reload this preview',
             style: { marginLeft: 'auto', padding: '3px 8px', cursor: 'pointer', fontSize: 12 },
           }, '⟳')),
-        h('div', {
-          style: {
-            width: w * scale, height: hgt * scale, overflow: 'hidden',
-            border: '1px solid var(--dsw-alias-border-l2, #333)', borderRadius: 6,
+        // The measured element is a full-width block; the framed box inside it
+        // takes the scaled size. Measuring the scaled box itself would feed its
+        // own width back into the scale and oscillate.
+        h('div', { ref: boxRef, style: { width: '100%' } },
+          h('div', {
+            style: {
+              width: w * scale, height: hgt * scale, overflow: 'hidden',
+              border: '1px solid var(--dsw-alias-border-l2, #333)', borderRadius: 6,
+            },
           },
-        },
           h('iframe', {
             key: epoch + ':' + url + ':' + (rung.label ?? active),
             src: url,
@@ -189,7 +214,7 @@ window.__ModuleLoader__.load({
               border: 0, transform: `scale(${scale})`, transformOrigin: 'top left',
               background: '#fff',
             },
-          })))
+          }))))
     }
 
     function Choice (props, ctxProps) {
