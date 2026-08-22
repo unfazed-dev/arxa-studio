@@ -77,6 +77,20 @@ window.__ModuleLoader__.load({
       return SAME_ORIGIN_SANDBOX
     }
 
+    // The scale factor for one rung: fit the measured width, never upscale
+    // past 1:1 (a blurry 390px mobile stretched to 700 is a lie about the
+    // design), and never let the frame run taller than HEIGHT_CAP of the
+    // window — a tablet rung is 1133px and would shove the whole thread.
+    // Capping the FACTOR keeps it proportional; clipping would not.
+    // Module scope and pure so selftest.mjs runs this exact code.
+    const HEIGHT_CAP = 0.7
+    function rungScale (w, hgt, avail, vh) {
+      return Math.min(
+        1,
+        vh > 0 ? (HEIGHT_CAP * vh) / hgt : 1,
+        avail > 0 ? avail / w : 320 / w)
+    }
+
     // ---- the catalogue renderers -----------------------------------------
     // One function per catalogue entry in lib/catalog.js. Every prop is
     // treated as untrusted and defaulted: the payload is model-authored, so a
@@ -161,10 +175,23 @@ window.__ModuleLoader__.load({
         ro.observe(el)
         return () => ro.disconnect()
       }, [])
+      // The height ceiling. A tablet rung is 1133px tall and at width-fit
+      // scale runs to ~1069px — taller than the window, so the card shoves the
+      // whole thread around. Cap the FACTOR, not the box: clipping or
+      // letterboxing would lie about the design, shrinking does not. Tracked
+      // live because the window can be resized.
+      const [vh, setVh] = React.useState(
+        typeof window === 'undefined' ? 0 : window.innerHeight)
+      React.useEffect(() => {
+        if (typeof window === 'undefined') return
+        const onResize = () => setVh(window.innerHeight)
+        window.addEventListener('resize', onResize)
+        return () => window.removeEventListener('resize', onResize)
+      }, [])
       // Never scale ABOVE 1:1 — upscaling a 390px mobile rung to fill 700px
       // renders a blurry lie about how the design looks at that viewport.
       // Height follows the same factor, so the frame stays proportional.
-      const scale = avail > 0 ? Math.min(1, avail / w) : Math.min(1, 320 / w)
+      const scale = rungScale(w, hgt, avail, vh)
       if (!url) return h('div', { style: muted }, 'RungLadder: no url')
       return h('div', { style: { margin: '6px 0' } },
         h('div', { style: { display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' } },

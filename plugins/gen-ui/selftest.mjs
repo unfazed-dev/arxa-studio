@@ -183,4 +183,26 @@ check("client.js's copy of the sandbox rule has not drifted", () => {
   }
 })
 
+check('rungScale fits the width, never upscales, and honours the height cap', () => {
+  const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
+  const start = src.indexOf('const HEIGHT_CAP')
+  assert.ok(start > 0, 'client.js no longer defines HEIGHT_CAP/rungScale')
+  const end = src.indexOf('\n    }', start)
+  // eslint-disable-next-line no-new-func
+  const scale = new Function(`${src.slice(start, end + 6)}; return rungScale`)()
+  const near = (got, want, why) =>
+    assert.ok(Math.abs(got - want) < 1e-6, `${why}: got ${got}, want ${want}`)
+
+  // A 900px window caps a frame at 630px tall.
+  near(scale(1280, 832, 700, 900), 700 / 1280, 'desktop is width-bound')
+  near(scale(744, 1133, 700, 900), 630 / 1133, 'tablet is height-bound')
+  near(scale(390, 844, 700, 900), 630 / 844, 'mobile is height-bound, not 1:1')
+  // The cap can only ever shrink.
+  near(scale(390, 844, 700, 10000), 1, 'a tall window never upscales')
+  near(scale(100, 100, 700, 900), 1, 'a small rung is never blown up')
+  // Degrade sanely before either measurement lands.
+  near(scale(390, 844, 700, 0), 1, 'no viewport yet -> width only')
+  near(scale(390, 844, 0, 0), 320 / 390, 'nothing measured -> the old default')
+})
+
 console.log(process.exitCode ? 'FAILED' : `all ${passed} checks passed`)
