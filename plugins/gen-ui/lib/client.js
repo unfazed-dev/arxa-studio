@@ -411,6 +411,84 @@ window.__ModuleLoader__.load({
       return !ready && late
     }
 
+    // ---- the staggered reveal ---------------------------------------------
+    //
+    // The materials all arrive at once (measured: tool arguments come in ONE
+    // chunk on this provider, and that is provider-dependent, so nothing is
+    // built on it). This is therefore an ENTRANCE ANIMATION, not streaming —
+    // worth saying plainly, because calling it streaming would be a lie about
+    // where the data came from.
+    //
+    // What it buys: a surface that assembles instead of blinking into place,
+    // and a pending outline that is actually on screen long enough to read.
+    // What it costs: content that is ready is deliberately shown late — so it
+    // is fast, bounded, and never runs on replay (see shouldReveal).
+    const STAGGER_MS = 90
+    const STAGGER_MAX_MS = 720
+
+    /**
+     * How many of `count` children are on screen at `elapsed` ms.
+     * The step shrinks as the surface grows: a 20-component card must not
+     * take two seconds to assemble, so the WHOLE reveal is capped.
+     * @returns {number} revealed count; the first child is always immediate.
+     */
+    function revealedCount (count, elapsed) {
+      if (!(count > 0)) return 0
+      if (!(elapsed >= 0)) return 1
+      const step = Math.min(STAGGER_MS, STAGGER_MAX_MS / count)
+      return Math.min(count, Math.floor(elapsed / step) + 1)
+    }
+
+    // Stand-in heights per component, so an unrevealed child reserves roughly
+    // the room it will take. Image and RungLadder carry their own size; the
+    // rest are single-line widgets and get a line.
+    const SLOT_H = {
+      Heading: 26, Text: 20, Icon: 20, Button: 30,
+      Diff: 80, Choice: 80, Card: 60, Image: 120, RungLadder: 200,
+    }
+    function slotHeightFor (entry) {
+      if (entry?.component === 'Image') return Number(entry.height) || SLOT_H.Image
+      return SLOT_H[entry?.component] ?? 24
+    }
+
+    // Animate a surface ONCE, and only when it happened while this page was
+    // open. Scrollback and reload must paint instantly: the toolview is a pure
+    // function of persisted meta and "identical render forever" is the whole
+    // point of stage 2. A surface whose call predates this page load is
+    // history, not news.
+    const LIVE_SINCE = Date.now()
+    const revealed = new Set()
+    // Claims the id as it answers. Deciding and remembering must be ONE
+    // operation: split across predicate-and-caller, a second call site would
+    // quietly re-animate a surface that had already assembled.
+    function claimReveal (callId, callTime) {
+      if (typeof callId !== 'string' || callId === '') return false
+      if (revealed.has(callId)) return false
+      if (typeof callTime !== 'number' || callTime < LIVE_SINCE) return false
+      revealed.add(callId)
+      return true
+    }
+
+    /**
+     * Drive the reveal clock. Returns how many children may be drawn.
+     * `enabled` false means "all of them, now" — the replay path.
+     */
+    function useReveal (count, enabled) {
+      const [elapsed, setElapsed] = React.useState(enabled ? 0 : Infinity)
+      React.useEffect(() => {
+        if (!enabled) return
+        const t0 = Date.now()
+        const step = Math.min(STAGGER_MS, STAGGER_MAX_MS / Math.max(1, count))
+        const timer = setInterval(() => {
+          const dt = Date.now() - t0
+          setElapsed(dt)
+          if (revealedCount(count, dt) >= count) clearInterval(timer)
+        }, Math.max(16, step / 2))
+        return () => clearInterval(timer)
+      }, [count, enabled])
+      return enabled ? revealedCount(count, elapsed) : count
+    }
+
     /** A reserved slot: real height, so nothing jumps when content lands. */
     function Slot ({ height, label, pending }) {
       return h('div', {
@@ -485,6 +563,7 @@ window.__ModuleLoader__.load({
 
     function Card (props, ctx) {
       const kids = Array.isArray(props.children) ? props.children : []
+      const shown = useReveal(kids.length, ctx.reveal === true)
       return h('div', {
         style: {
           border: '1px solid var(--dsw-alias-border-l2, #333)',
@@ -493,7 +572,13 @@ window.__ModuleLoader__.load({
         },
       },
         props.title ? h('div', { style: { fontWeight: 600 } }, String(props.title)) : null,
-        ...kids.map((id) => ctx.renderChild(String(id))))
+        ...kids.map((id, i) => (i < shown
+          ? ctx.renderChild(String(id))
+          : h(Slot, {
+            key: 'slot:' + id,
+            height: ctx.slotHeightOf(String(id)),
+            pending: true,
+          }))))
     }
 
     const RENDERERS = { Heading, Text, Choice, Diff, RungLadder, Card, Button, Icon, Image }
@@ -520,7 +605,7 @@ window.__ModuleLoader__.load({
     // Renderers needing surface identity get it as a second argument rather
     // than as props, so a model-authored prop can never shadow surfaceId or
     // componentId — the two keys the durable selection record is stored under.
-    function renderEntry (surfaceId, entry, i, index) {
+    function renderEntry (surfaceId, entry, i, index, reveal) {
       const id = String(entry?.id ?? i)
       const Renderer = RENDERERS[entry?.component]
       if (!Renderer) {
@@ -532,11 +617,11 @@ window.__ModuleLoader__.load({
       }
       const { id: _id, component: _c, ...props } = entry
       return h(RendererHost, {
-        key: id, Renderer, props, surfaceId, componentId: id, index,
+        key: id, Renderer, props, surfaceId, componentId: id, index, reveal,
       })
     }
 
-    function RendererHost ({ Renderer, props, surfaceId, componentId, index }) {
+    function RendererHost ({ Renderer, props, surfaceId, componentId, index, reveal }) {
       // A Card names its children by id; resolution happens here so a renderer
       // never sees the whole surface — it can draw its own children and
       // nothing else. A missing id says so rather than rendering blank.
@@ -548,9 +633,13 @@ window.__ModuleLoader__.load({
             style: { ...muted, fontSize: 12, fontStyle: 'italic' },
           }, `[${id} — no such component in this surface]`)
         }
-        return renderEntry(surfaceId, child, id, index)
+        return renderEntry(surfaceId, child, id, index, reveal)
       }
-      return Renderer(props, { surfaceId, componentId, renderChild })
+      const slotHeightOf = (id) =>
+        slotHeightFor(index instanceof Map ? index.get(id) : undefined)
+      return Renderer(props, {
+        surfaceId, componentId, renderChild, slotHeightOf, reveal,
+      })
     }
 
     /**
@@ -575,18 +664,30 @@ window.__ModuleLoader__.load({
      * from builds whose validation differed, so a dangling id must draw a note
      * rather than throw the whole card away.
      */
-    function renderSurface (surfaceId, components) {
+    function renderSurface (surfaceId, components, reveal) {
       if (!Array.isArray(components)) return []
       const index = new Map(components.map((e, i) => [String(e?.id ?? i), e]))
       const claimed = claimedChildren(components)
       return components
         .filter((e, i) => !claimed.has(String(e?.id ?? i)))
-        .map((e, i) => renderEntry(surfaceId, e, i, index))
+        .map((e, i) => renderEntry(surfaceId, e, i, index, reveal))
     }
 
     // ---- the toolview ------------------------------------------------------
 
     function GenUiToolView ({ block, toolName }) {
+      // Decided once per mount and remembered per callId: a surface assembles
+      // the first time it appears and never again. Scrollback, reload and
+      // replay paint instantly — "identical render forever" is stage 2's whole
+      // promise, and an animation that re-ran on every scroll would break it.
+      // `callTime` is `previous?.time ?? null` host-side: a call whose head
+      // was dropped (window truncation, or a sub-call whose dispatch-start did
+      // not survive) carries null and would silently never animate. The node's
+      // own `time` is always set, so fall back to it rather than fail closed
+      // into a feature that looks implemented and never runs.
+      const [reveal] = React.useState(() => claimReveal(
+        block?.callId,
+        typeof block?.callTime === 'number' ? block.callTime : block?.time))
       // Settled nodes carry `kind: 'tool-result'`; running ones have no `kind`
       // at all (the discriminant is asymmetric — conversation.d.ts:161-276).
       const settled = block && block.kind === 'tool-result'
@@ -652,7 +753,7 @@ window.__ModuleLoader__.load({
         },
           h('span', { style: { fontWeight: 600 } }, title || toolName || 'gen_ui'),
           settled ? null : h('span', { style: { ...muted, fontSize: 12 } }, '…')),
-        h('div', null, ...renderSurface(surfaceId, components)))
+        h('div', null, ...renderSurface(surfaceId, components, reveal)))
     }
 
     function apply (ctx) {

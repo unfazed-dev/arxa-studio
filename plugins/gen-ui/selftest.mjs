@@ -418,4 +418,60 @@ check('a dangling child id draws a note, never a blank card', () => {
   assert.match(out.text, /no such component/, 'a missing child must say so')
 })
 
+check('the reveal is staggered but never outruns its cap', () => {
+  const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
+  const start = src.indexOf('const STAGGER_MS')
+  assert.ok(start > 0, 'client.js no longer defines the stagger')
+  const end = src.indexOf('\n    }', src.indexOf('function revealedCount', start))
+  // eslint-disable-next-line no-new-func
+  const m = new Function(
+    `${src.slice(start, end + 6)}; return { revealedCount, STAGGER_MS, STAGGER_MAX_MS }`)()
+  const { revealedCount: rc, STAGGER_MS, STAGGER_MAX_MS } = m
+
+  assert.equal(rc(0, 0), 0, 'nothing to reveal')
+  assert.equal(rc(4, 0), 1, 'the first child is immediate — never an empty card')
+  assert.equal(rc(4, STAGGER_MS), 2, 'one step, one more child')
+  assert.equal(rc(4, 10_000), 4, 'never more than there are')
+  assert.equal(rc(4, -5), 1, 'a nonsense clock still shows something')
+
+  // THE property: a big surface must not crawl. The step shrinks with count,
+  // so the whole assembly is bounded no matter how many components arrive.
+  for (const count of [1, 2, 5, 20, 200]) {
+    const step = Math.min(STAGGER_MS, STAGGER_MAX_MS / count)
+    const total = (count - 1) * step
+    assert.ok(total <= STAGGER_MAX_MS,
+      `${count} components would take ${total}ms, over the ${STAGGER_MAX_MS}ms cap`)
+    assert.equal(rc(count, total), count,
+      `${count} components must all be shown by ${total}ms`)
+  }
+})
+
+check('replay never animates — only a surface born on this page does', () => {
+  const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
+  const start = src.indexOf('const LIVE_SINCE')
+  assert.ok(start > 0, 'client.js no longer defines LIVE_SINCE/claimReveal')
+  const end = src.indexOf('\n    }', src.indexOf('function claimReveal', start))
+  // eslint-disable-next-line no-new-func
+  const shouldReveal = new Function(
+    `${src.slice(start, end + 6)}; return claimReveal`)()
+
+  const now = Date.now()
+  // Scrollback and reload: the call happened before this page existed. An
+  // animation here would re-run on every scroll and break stage 2's promise
+  // that a settled surface renders identically forever.
+  assert.equal(shouldReveal('old', now - 60_000), false, 'history must paint instantly')
+  assert.equal(shouldReveal('nostamp', undefined), false, 'no timestamp -> do not animate')
+  assert.equal(shouldReveal('nulltime', null), false, 'a null callTime -> do not animate')
+  assert.equal(shouldReveal('', now + 1000), false, 'no call id -> do not animate')
+  // A live turn animates exactly once.
+  assert.equal(shouldReveal('live', now + 1000), true, 'a new surface assembles')
+  assert.equal(shouldReveal('live', now + 1000), false, 'and never assembles twice')
+
+  // The host sets callTime to `previous?.time ?? null`. If the toolview read
+  // callTime alone, every surface whose call head was dropped would silently
+  // skip the animation — implemented, shipped, never running.
+  assert.match(src.slice(src.indexOf('const [reveal]'), src.indexOf('const [reveal]') + 300),
+    /block\?\.time/, 'the reveal must fall back to the node time when callTime is null')
+})
+
 console.log(process.exitCode ? 'FAILED' : `all ${passed} checks passed`)
