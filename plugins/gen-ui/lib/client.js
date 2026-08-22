@@ -114,6 +114,57 @@ window.__ModuleLoader__.load({
       return true
     }
 
+    // ---- the entrance animation -------------------------------------------
+    //
+    // One 250ms fade+rise per newly revealed component, driven entirely by
+    // CSS so the stagger clock below never has to touch style. The values are
+    // researched, not guessed (app-box docs/plans/entrance-animation-research.md):
+    //
+    //  - EASING: Material 3 "emphasized decelerate", cubic-bezier(0.05, 0.7,
+    //    0.1, 1) — the curve M3 assigns to elements ENTERING the screen
+    //    (MotionTokens.EasingEmphasizedDecelerateCubicBezier, AOSP source).
+    //  - DURATION: 250ms is M3 DurationMedium1, the short end of the medium
+    //    band M3 gives small components; entrances over ~500ms read as slow,
+    //    under ~100ms as a glitch.
+    //  - PROPERTIES: transform + opacity only — they run on the compositor
+    //    and cannot trigger layout. The slot has already reserved the height,
+    //    so nothing needs to move but the pixels.
+    //  - DISTANCE: 8px. FlutterFlow's Slide spans whole screens, but for
+    //    item-level entrances the consensus is a small rise (4-16px); larger
+    //    reads as a notification arriving, not a surface assembling.
+    //
+    // `both` holds the first frame until the animation starts and the last
+    // after it ends. The media query removes the motion; the JS side of the
+    // same promise is prefersReducedMotion() in useReveal.
+    const ENTER_CLASS = 'arxa-genui-enter'
+    const ENTER_MS = 250
+    const ENTER_TAG = 'arxa-gen-ui/enter'
+    const ENTER_CSS = `
+@keyframes arxa-genui-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+.${ENTER_CLASS} { animation: arxa-genui-enter ${ENTER_MS}ms cubic-bezier(0.05, 0.7, 0.1, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .${ENTER_CLASS} { animation: none; }
+}`
+
+    /**
+     * Append the entrance stylesheet once. Mirrors installGlow deliberately:
+     * the selftest pins that shape, and two small copies beat one shared
+     * helper the source-slice tests cannot see whole.
+     */
+    function installEnter () {
+      if (typeof document === 'undefined') return false
+      const sel = 'style[data-plugin-css=' + JSON.stringify(ENTER_TAG) + ']'
+      if (document.querySelector(sel) !== null) return false
+      const tag = document.createElement('style')
+      tag.setAttribute('data-plugin-css', ENTER_TAG)
+      tag.textContent = ENTER_CSS
+      document.head.appendChild(tag)
+      return true
+    }
+
     // Mirrors `sandboxFor` in lib/catalog.js — this factory cannot import it
     // (the ModuleLoader gives us `require('react')` and nothing else), the same
     // reason DEFAULT_RUNGS is duplicated above. selftest.mjs runs ONE table
@@ -462,7 +513,14 @@ window.__ModuleLoader__.load({
     // What it buys: a surface that assembles instead of blinking into place,
     // and a pending outline that is actually on screen long enough to read.
     // What it costs: content that is ready is deliberately shown late — so it
-    // is fast, bounded, and never runs on replay (see shouldReveal).
+    // is fast, bounded, and never runs on replay (see claimReveal).
+    //
+    // The numbers are researched, not tuned by feel (app-box
+    // docs/plans/entrance-animation-research.md): 90ms sits inside the 50-100ms
+    // stagger consensus (FlutterFlow exposes the same knob as a per-widget
+    // Delay; Material choreographs menus the same way), and the cap keeps a
+    // 20-component surface near 0.7s because excessive motion measurably
+    // RAISES perceived delay (streaming-generative-ui-research.md §6).
     const STAGGER_MS = 90
     const STAGGER_MAX_MS = 720
 
@@ -509,24 +567,46 @@ window.__ModuleLoader__.load({
       return true
     }
 
+    // One OS-level question, answered once per page. The media query in
+    // ENTER_CSS can only stop the CSS half of the motion — the stagger clock
+    // is JS-side motion (timed swaps), so it must stand down here or
+    // reduced-motion users still watch a surface assemble in slices. Cached:
+    // matchMedia allocates a listener list on some engines, and this runs per
+    // card per render.
+    let reducedMotionCache = null
+    function prefersReducedMotion () {
+      if (reducedMotionCache === null) {
+        reducedMotionCache = typeof matchMedia === 'function' &&
+          matchMedia('(prefers-reduced-motion: reduce)').matches
+      }
+      return reducedMotionCache
+    }
+
     /**
      * Drive the reveal clock. Returns how many children may be drawn.
-     * `enabled` false means "all of them, now" — the replay path.
+     * `enabled` false means "all of them, now" — the replay path. Reduced
+     * motion gets the same instant paint: an assembly you cannot opt out of
+     * is not an enhancement.
      */
     function useReveal (count, enabled) {
       const [elapsed, setElapsed] = React.useState(enabled ? 0 : Infinity)
       React.useEffect(() => {
-        if (!enabled) return
+        if (!enabled || prefersReducedMotion()) return
         const t0 = Date.now()
         const step = Math.min(STAGGER_MS, STAGGER_MAX_MS / Math.max(1, count))
         const timer = setInterval(() => {
           const dt = Date.now() - t0
-          setElapsed(dt)
+          // Re-render only when the count actually advances: a fixed-cadence
+          // setState would re-run the whole card ~45x during an 8-child
+          // reveal where exactly 8 of those ticks change anything.
+          setElapsed((prev) =>
+            revealedCount(count, prev) === revealedCount(count, dt) ? prev : dt)
           if (revealedCount(count, dt) >= count) clearInterval(timer)
         }, Math.max(16, step / 2))
         return () => clearInterval(timer)
       }, [count, enabled])
-      return enabled ? revealedCount(count, elapsed) : count
+      if (!enabled || prefersReducedMotion()) return count
+      return revealedCount(count, elapsed)
     }
 
     /** A reserved slot: real height, so nothing jumps when content lands. */
@@ -656,9 +736,14 @@ window.__ModuleLoader__.load({
           `[${String(entry?.component)} — not in this build's catalogue]`)
       }
       const { id: _id, component: _c, ...props } = entry
-      return h(RendererHost, {
-        key: id, Renderer, props, surfaceId, componentId: id, index, reveal,
-      })
+      const hostProps = { Renderer, props, surfaceId, componentId: id, index, reveal }
+      // Only a LIVE surface earns motion: replay and scrollback must paint
+      // identically forever, which is why claimReveal decided once. The class
+      // is inert without ENTER_CSS, and ENTER_CSS is inert under reduced
+      // motion — each layer fails safe on its own.
+      return reveal === true
+        ? h('div', { key: id, className: ENTER_CLASS }, h(RendererHost, hostProps))
+        : h(RendererHost, { key: id, ...hostProps })
     }
 
     function RendererHost ({ Renderer, props, surfaceId, componentId, index, reveal }) {
@@ -799,6 +884,7 @@ window.__ModuleLoader__.load({
     function apply (ctx) {
       hostCtx = ctx
       installGlow()
+      installEnter()
       ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
         name: 'tool.call.toolview',
         key: 'gen_ui',

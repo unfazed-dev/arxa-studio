@@ -359,12 +359,14 @@ function renderSurfaceForTest (components, blockTime) {
   // Walk, invoking every function component, and collect what was drawn.
   const seenTypes = []
   const strings = []
+  const classes = []
   const walk = (node, depth) => {
     if (depth > 60) throw new Error('render did not terminate — a cycle reached the renderer')
     if (node === null || node === undefined || node === false) return
     if (Array.isArray(node)) { for (const n of node) walk(n, depth + 1); return }
     if (typeof node === 'string' || typeof node === 'number') { strings.push(String(node)); return }
     if (typeof node !== 'object') return
+    if (typeof node.props?.className === 'string') classes.push(node.props.className)
     if (typeof node.type === 'function') {
       seenTypes.push(node.type.name)
       walk(node.type(node.props, node.props), depth + 1)
@@ -374,7 +376,7 @@ function renderSurfaceForTest (components, blockTime) {
     walk(node.props?.children, depth + 1)
   }
   walk(tree, 0)
-  return { text: strings.join('\u0000'), types: seenTypes }
+  return { text: strings.join('\u0000'), types: seenTypes, classes }
 }
 
 check('the browser half renders a Card with its children nested exactly once', () => {
@@ -445,6 +447,90 @@ check('the reveal is staggered but never outruns its cap', () => {
     assert.equal(rc(count, total), count,
       `${count} components must all be shown by ${total}ms`)
   }
+})
+
+check('only a live surface enters with motion — replay paints bare', () => {
+  const components = [
+    { id: 'card', component: 'Card', children: ['t', 'b'] },
+    { id: 't', component: 'Text', text: 'UNIQUE_LIVE_MARKER' },
+    { id: 'b', component: 'Button', label: 'UNIQUE_BTN_MARKER', tone: 'primary' },
+  ]
+  // A time comfortably after the factory's LIVE_SINCE snapshot: the harness
+  // re-evaluates client.js per call, so "now" captured here would PREDATE it.
+  const live = renderSurfaceForTest(components, Date.now() + 60_000)
+  assert.ok(live.classes.includes('arxa-genui-enter'),
+    'a surface born on this page must enter with the animation class')
+  assert.ok(live.text.includes('UNIQUE_LIVE_MARKER'),
+    'the first child still renders immediately — never an empty card')
+
+  const replay = renderSurfaceForTest(components)
+  assert.ok(!replay.classes.includes('arxa-genui-enter'),
+    'replay and scrollback must paint with no motion at all')
+  assert.ok(replay.text.includes('UNIQUE_LIVE_MARKER') && replay.text.includes('UNIQUE_BTN_MARKER'),
+    'replay draws every child at once, no slots')
+})
+
+check('reduced motion stands the clock down — a live surface paints at once', () => {
+  // The Node harness has no matchMedia, which is also the honest default
+  // (no preference expressed -> full motion). Install one that says REDUCE:
+  // a live surface must then paint every child immediately, class-guarded
+  // CSS being only half the promise — the JS clock is the other half.
+  global.matchMedia = () => ({ matches: true })
+  try {
+    const out = renderSurfaceForTest([
+      { id: 'card', component: 'Card', children: ['t', 'b'] },
+      { id: 't', component: 'Text', text: 'UNIQUE_RM_TEXT' },
+      { id: 'b', component: 'Button', label: 'UNIQUE_RM_BTN' },
+    ], Date.now() + 60_000)
+    assert.ok(out.text.includes('UNIQUE_RM_TEXT') && out.text.includes('UNIQUE_RM_BTN'),
+      'every child must paint immediately when the user asked for no motion')
+    assert.ok(!out.types.includes('Slot'), 'no child may be held back as a slot')
+  } finally {
+    delete global.matchMedia
+  }
+})
+
+check('the entrance stylesheet is the researched curve, installed once', () => {
+  const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
+  const start = src.indexOf('const ENTER_CLASS')
+  assert.ok(start > 0, 'client.js no longer defines ENTER_CLASS/installEnter')
+  const end = src.indexOf('\n    }', src.indexOf('function installEnter', start))
+  assert.ok(end > start, 'could not find the end of installEnter')
+
+  // The same deliberately-thin DOM stub the glow check uses.
+  const head = []
+  const document = {
+    querySelector: (sel) => {
+      const m = /data-plugin-css=(".*")\]$/.exec(sel)
+      const want = m ? JSON.parse(m[1]) : null
+      return head.find((t) => t.attrs['data-plugin-css'] === want) ?? null
+    },
+    createElement: () => ({
+      attrs: {}, textContent: '', setAttribute (k, v) { this.attrs[k] = v },
+    }),
+    head: { appendChild: (t) => head.push(t) },
+  }
+  // eslint-disable-next-line no-new-func
+  const mod = new Function('document',
+    `${src.slice(start, end + 6)}; return { installEnter, ENTER_CSS, ENTER_MS }`)(document)
+
+  assert.equal(mod.installEnter(), true, 'first call must install')
+  assert.equal(mod.installEnter(), false, 'HMR re-apply must be a no-op')
+  assert.equal(head.length, 1, 'exactly one <style> may reach <head>')
+
+  const css = head[0].textContent
+  // Material 3 emphasized DECELERATE — the curve M3 assigns to elements
+  // entering the screen (MotionTokens.kt, AOSP). Curve drift would be a
+  // silent visual regression, so the value is pinned, not approximated.
+  assert.ok(css.includes('cubic-bezier(0.05, 0.7, 0.1, 1)'),
+    'the entering curve must be M3 emphasized-decelerate')
+  assert.ok(css.includes(mod.ENTER_MS + 'ms'), 'the researched duration must be the one applied')
+  assert.match(css, /prefers-reduced-motion/, 'the motion must be escapable')
+  assert.match(css, /transform: translateY\(8px\)/, 'the rise must be small — 8px, not a screen')
+  assert.match(css, /opacity: 0/, 'the fade must be present')
+  // transform+opacity only: layout properties would re-layout every frame.
+  assert.ok(!/animation:[^;]*(height|width|margin|padding)/.test(css),
+    'only compositor properties may animate')
 })
 
 check('replay never animates — only a surface born on this page does', () => {
