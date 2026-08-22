@@ -183,16 +183,29 @@ if (!existsSync(piModels)) {
 }
 
 // ---- exec dsh ----------------------------------------------------------------
-// dsh's bin, resolved from arxa's own node_modules when installed, else the
-// operator install this machine already carries (read-only reuse — arxa never
-// writes there).
-const candidates = [
-  join(here, '..', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
-  join(homedir(), '.dsh', 'profiles', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
-]
-const dshBin = candidates.find(existsSync)
-if (!dshBin) {
-  console.error('arxa: cannot find @deepseek-ai/dsh — npm install in arxa-studio, or install dsh')
+// dsh's bin, resolved ONLY from arxa's own node_modules.
+//
+// There used to be a second candidate here, ~/.dsh/profiles/node_modules,
+// justified as "read-only reuse — arxa never writes there". That justification
+// was about writing; the leak was reading. Executing the operator's binary means
+// running the operator's VERSION. arxa-studio/node_modules was never installed,
+// so that fallback always won: arxa pinned dsh 0.1.0-rc.7 and actually ran
+// whatever `npx @deepseek-ai/dsh` last wrote into the shared npm cache slot
+// (measured 2026-08-22: pinned rc.7, running 0.1.1-rc.2). One `npx` invocation
+// changed the version under arxa and the operator at the same instant, because
+// all 1039 package symlinks in both profile trees point into that one slot.
+//
+// Resolving an executable from a path the operator controls is an isolation
+// break even when nothing is written there. Failing to boot is strictly better
+// than silently booting someone else's version, so there is no fallback.
+// See app-box/docs/plans/dsh-isolation-from-operator-install.md.
+const dshBin = join(here, '..', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
+if (!existsSync(dshBin)) {
+  console.error('arxa: @deepseek-ai/dsh is not installed in arxa-studio.')
+  console.error('  fix:  npm install --prefix ' + resolve(here, '..'))
+  console.error('  arxa deliberately will NOT fall back to the operator install at')
+  console.error('  ~/.dsh — that would run an unpinned version. See')
+  console.error('  app-box/docs/plans/dsh-isolation-from-operator-install.md')
   process.exit(127)
 }
 
