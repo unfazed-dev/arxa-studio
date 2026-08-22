@@ -190,6 +190,9 @@ window.__ModuleLoader__.load({
           h('div', {
             style: {
               width: w * scale, height: hgt * scale, overflow: 'hidden',
+              // A rung narrower than the card is centred, not left-hugged.
+              // No-op once the rung fills the card (desktop at scale 1).
+              margin: '0 auto',
               border: '1px solid var(--dsw-alias-border-l2, #333)', borderRadius: 6,
             },
           },
