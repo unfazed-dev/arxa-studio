@@ -123,8 +123,8 @@ window.__ModuleLoader__.load({
               ? 'live reload connected (/__events)'
               : live === 'reconnecting'
                 ? 'live reload reconnecting…'
-                : 'no live reload — start the design server with '
-                  + '--trusted-origin ' + window.location.origin,
+                : 'no live reload — add ' + window.location.origin
+                  + ' to ~/.appbox/trusted-origins and restart the design server',
             style: {
               marginLeft: 'auto', width: 8, height: 8, borderRadius: 4,
               background: live === 'live'
@@ -226,8 +226,9 @@ window.__ModuleLoader__.load({
       return h('li', { style: { listStyle: 'none', padding: '12px 0' } },
         h('div', { style: { fontWeight: 600, marginBottom: 2 } }, 'arxa design panel'),
         h('div', { style: { fontSize: 12, opacity: 0.7, marginBottom: 8 } },
-          'Live appbox design server the panel iframes. For live reload, start '
-          + 'it with --trusted-origin ' + window.location.origin),
+          'Live appbox design server the panel iframes. arxa registers '
+          + window.location.origin + ' in ~/.appbox/trusted-origins at boot, '
+          + 'which is what lets this panel frame it and subscribe to reloads.'),
         phase === 'loading'
           ? h('div', { style: { fontSize: 12, opacity: 0.7 } }, 'loading…')
           : phase === 'error'
