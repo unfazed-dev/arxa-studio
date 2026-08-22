@@ -393,7 +393,110 @@ window.__ModuleLoader__.load({
                 : 'Recorded. Tell the agent to continue.'))
     }
 
-    const RENDERERS = { Heading, Text, Choice, Diff, RungLadder }
+    /**
+     * Whether to DRESS something as pending. Not the same question as "is it
+     * pending": a skeleton shown for a load that resolves in 200ms flashes and
+     * reads as a glitch, which is the documented reason our first glow was
+     * never visible. So the treatment is withheld until the wait has actually
+     * earned it. Under the threshold the component simply appears.
+     */
+    const PENDING_AFTER_MS = 400
+    function usePending (ready) {
+      const [late, setLate] = React.useState(false)
+      React.useEffect(() => {
+        if (ready) { setLate(false); return }
+        const t = setTimeout(() => setLate(true), PENDING_AFTER_MS)
+        return () => clearTimeout(t)
+      }, [ready])
+      return !ready && late
+    }
+
+    /** A reserved slot: real height, so nothing jumps when content lands. */
+    function Slot ({ height, label, pending }) {
+      return h('div', {
+        className: pending ? GLOW_CLASS : undefined,
+        style: {
+          height: height || 120, borderRadius: 6,
+          border: '1px dashed var(--dsw-alias-border-l2, #444)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          ...muted, fontSize: 12,
+        },
+      }, label || '')
+    }
+
+    const GLYPHS = {
+      check: '✓', warn: '⚠', info: 'ℹ', error: '✕', star: '★',
+      arrow: '→', external: '↗', file: '▤', folder: '▸', play: '▶',
+    }
+    function Icon (props) {
+      const size = Number(props.size) || 16
+      // An unknown name is a neutral dot, never a broken glyph box: the name
+      // is model-authored and the catalogue only constrains the COMPONENT.
+      return h('span', {
+        style: { fontSize: size, lineHeight: 1, display: 'inline-block' },
+        title: String(props.name ?? ''),
+      }, GLYPHS[String(props.name)] ?? '•')
+    }
+
+    function Button (props) {
+      const primary = props.tone === 'primary'
+      // Inert by design: a button that silently did nothing would be worse
+      // than one that says so. Choice is the component that records an answer.
+      return h('button', {
+        type: 'button',
+        disabled: true,
+        title: 'display only — use Choice for an answer the agent can read',
+        style: {
+          padding: '5px 12px', borderRadius: 6, cursor: 'default',
+          border: '1px solid ' + (primary ? accent : 'var(--dsw-alias-border-l2, #444)'),
+          background: primary ? accent : 'transparent',
+          color: primary ? '#0d0d10' : 'inherit',
+          fontWeight: primary ? 600 : 400, font: 'inherit',
+        },
+      }, String(props.label ?? 'Button'))
+    }
+
+    function Image (props) {
+      const src = typeof props.src === 'string' ? props.src : ''
+      const height = Number(props.height) || 0
+      const [state, setState] = React.useState('loading')
+      const pending = usePending(state !== 'loading')
+      if (!src) return h(Slot, { height, label: 'Image: no src' })
+      return h('div', { style: { position: 'relative' } },
+        state !== 'ready'
+          ? h(Slot, {
+            height,
+            pending,
+            label: state === 'error' ? 'image did not load' : '',
+          })
+          : null,
+        h('img', {
+          src,
+          alt: String(props.alt ?? ''),
+          onLoad: () => setState('ready'),
+          onError: () => setState('error'),
+          style: {
+            display: state === 'ready' ? 'block' : 'none',
+            maxWidth: '100%', borderRadius: 6,
+            ...height ? { height } : {},
+          },
+        }))
+    }
+
+    function Card (props, ctx) {
+      const kids = Array.isArray(props.children) ? props.children : []
+      return h('div', {
+        style: {
+          border: '1px solid var(--dsw-alias-border-l2, #333)',
+          borderRadius: 8, padding: 12, margin: '6px 0',
+          display: 'flex', flexDirection: 'column', gap: 8,
+        },
+      },
+        props.title ? h('div', { style: { fontWeight: 600 } }, String(props.title)) : null,
+        ...kids.map((id) => ctx.renderChild(String(id))))
+    }
+
+    const RENDERERS = { Heading, Text, Choice, Diff, RungLadder, Card, Button, Icon, Image }
 
     // ---- surface rendering -------------------------------------------------
 
@@ -417,7 +520,7 @@ window.__ModuleLoader__.load({
     // Renderers needing surface identity get it as a second argument rather
     // than as props, so a model-authored prop can never shadow surfaceId or
     // componentId — the two keys the durable selection record is stored under.
-    function renderEntry (surfaceId, entry, i) {
+    function renderEntry (surfaceId, entry, i, index) {
       const id = String(entry?.id ?? i)
       const Renderer = RENDERERS[entry?.component]
       if (!Renderer) {
@@ -428,11 +531,57 @@ window.__ModuleLoader__.load({
           `[${String(entry?.component)} — not in this build's catalogue]`)
       }
       const { id: _id, component: _c, ...props } = entry
-      return h(RendererHost, { key: id, Renderer, props, surfaceId, componentId: id })
+      return h(RendererHost, {
+        key: id, Renderer, props, surfaceId, componentId: id, index,
+      })
     }
 
-    function RendererHost ({ Renderer, props, surfaceId, componentId }) {
-      return Renderer(props, { surfaceId, componentId })
+    function RendererHost ({ Renderer, props, surfaceId, componentId, index }) {
+      // A Card names its children by id; resolution happens here so a renderer
+      // never sees the whole surface — it can draw its own children and
+      // nothing else. A missing id says so rather than rendering blank.
+      const renderChild = (id) => {
+        const child = index instanceof Map ? index.get(id) : undefined
+        if (child === undefined) {
+          return h('div', {
+            key: id,
+            style: { ...muted, fontSize: 12, fontStyle: 'italic' },
+          }, `[${id} — no such component in this surface]`)
+        }
+        return renderEntry(surfaceId, child, id, index)
+      }
+      return Renderer(props, { surfaceId, componentId, renderChild })
+    }
+
+    /**
+     * Mirrors `claimedChildren` in lib/catalog.js — this factory cannot import
+     * it, the same two-list contract as DEFAULT_RUNGS and sandboxFor.
+     * selftest.mjs runs ONE table against both so they cannot drift.
+     */
+    function claimedChildren (components) {
+      const claimed = new Set()
+      if (!Array.isArray(components)) return claimed
+      for (const entry of components) {
+        if (entry?.component !== 'Card' || !Array.isArray(entry.children)) continue
+        for (const kid of entry.children) if (typeof kid === 'string') claimed.add(kid)
+      }
+      return claimed
+    }
+
+    /**
+     * Draw one surface. Top level holds every component EXCEPT those a Card
+     * claims — those are drawn inside their card instead, never twice.
+     * Tolerant like componentsFrom: this also runs on replay against payloads
+     * from builds whose validation differed, so a dangling id must draw a note
+     * rather than throw the whole card away.
+     */
+    function renderSurface (surfaceId, components) {
+      if (!Array.isArray(components)) return []
+      const index = new Map(components.map((e, i) => [String(e?.id ?? i), e]))
+      const claimed = claimedChildren(components)
+      return components
+        .filter((e, i) => !claimed.has(String(e?.id ?? i)))
+        .map((e, i) => renderEntry(surfaceId, e, i, index))
     }
 
     // ---- the toolview ------------------------------------------------------
@@ -503,7 +652,7 @@ window.__ModuleLoader__.load({
         },
           h('span', { style: { fontWeight: 600 } }, title || toolName || 'gen_ui'),
           settled ? null : h('span', { style: { ...muted, fontSize: 12 } }, '…')),
-        h('div', null, ...components.map((entry, i) => renderEntry(surfaceId, entry, i))))
+        h('div', null, ...renderSurface(surfaceId, components)))
     }
 
     function apply (ctx) {

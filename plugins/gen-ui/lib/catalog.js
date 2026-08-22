@@ -49,6 +49,29 @@ export const CATALOG = {
     summary: 'A before/after comparison of one file or value, rendered as a '
       + 'line-by-line diff.',
   },
+  Card: {
+    props: '{ children: string[], title?: string }',
+    summary: 'A container. `children` lists the ids of OTHER components in '
+      + 'this same array, rendered inside the card in the order given. A child '
+      + 'is drawn inside its card and not again at top level. Cards may not '
+      + 'contain themselves, directly or through another card.',
+  },
+  Button: {
+    props: '{ label: string, tone?: "primary" | "normal" }',
+    summary: 'A button. Inert on purpose — it records nothing and sends '
+      + 'nothing. Use Choice when you need the answer back.',
+  },
+  Icon: {
+    props: '{ name: string, size?: number }',
+    summary: 'A small glyph. Names: check, warn, info, error, star, arrow, '
+      + 'external, file, folder, play. An unknown name draws a neutral dot.',
+  },
+  Image: {
+    props: '{ src: string, alt?: string, height?: number }',
+    summary: 'An image by URL. Give `height` when you know it: the slot is '
+      + 'reserved at that height before the bytes arrive, so the surface does '
+      + 'not jump when it loads.',
+  },
   RungLadder: {
     props: '{ url: string, rungs?: Array<{ label: string, w: number, h: number }> }',
     summary: 'Live viewport ladder — iframes `url` at each rung size, scaled to '
@@ -104,7 +127,69 @@ export function validateComponents (components) {
         + ` Known components: ${COMPONENT_NAMES.join(', ')}.`)
     }
   })
+  if (problems.length > 0) return problems
+
+  // The child graph. Only reached once every entry is individually sound, so
+  // ids are known-good strings here.
+  const byId = new Map(components.map((e) => [e.id, e]))
+  const claimed = new Map()
+  for (const entry of components) {
+    if (entry.component !== 'Card') continue
+    const kids = entry.children
+    if (kids === undefined) continue
+    if (!Array.isArray(kids)) {
+      problems.push(`Card "${entry.id}".children must be an array of component ids.`)
+      continue
+    }
+    for (const kid of kids) {
+      if (typeof kid !== 'string' || !byId.has(kid)) {
+        problems.push(`Card "${entry.id}" names child ${JSON.stringify(kid)}, which is not an id in this surface.`)
+      } else if (kid === entry.id) {
+        problems.push(`Card "${entry.id}" cannot contain itself.`)
+      } else if (claimed.has(kid)) {
+        // Two parents would render the same component twice and give one
+        // componentId two selection records.
+        problems.push(`"${kid}" is claimed by both Card "${claimed.get(kid)}" and Card "${entry.id}"; a component has one parent.`)
+      } else {
+        claimed.set(kid, entry.id)
+      }
+    }
+  }
+  if (problems.length > 0) return problems
+
+  // A cycle would recurse forever in the renderer, and it survives every
+  // per-entry check above because each individual reference is valid.
+  const visited = new Set()
+  const walk = (id, path) => {
+    if (path.includes(id)) {
+      problems.push(`Cards form a cycle: ${[...path, id].join(' -> ')}.`)
+      return
+    }
+    if (visited.has(id)) return
+    visited.add(id)
+    const entry = byId.get(id)
+    if (entry?.component !== 'Card' || !Array.isArray(entry.children)) return
+    for (const kid of entry.children) walk(kid, [...path, id])
+  }
+  for (const entry of components) if (entry.component === 'Card') walk(entry.id, [])
+
   return problems
+}
+
+/**
+ * Ids that are drawn inside a Card, and so must NOT also be drawn at top
+ * level. Shared shape with the browser half, which folds the same set.
+ * @param {unknown[]} components - validated component objects.
+ * @returns {Set<string>} claimed child ids.
+ */
+export function claimedChildren (components) {
+  const claimed = new Set()
+  if (!Array.isArray(components)) return claimed
+  for (const entry of components) {
+    if (entry?.component !== 'Card' || !Array.isArray(entry.children)) continue
+    for (const kid of entry.children) if (typeof kid === 'string') claimed.add(kid)
+  }
+  return claimed
 }
 
 /**
