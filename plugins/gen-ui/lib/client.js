@@ -71,6 +71,8 @@ window.__ModuleLoader__.load({
     //  - The window that IS real is the iframe boot: a RungLadder frames a
     //    live `appbox design serve`, and that app takes seconds to come up.
     //    That is the wait the user actually watches, so that is what glows.
+    //    For stepwise surfaces the wait lives BETWEEN calls instead — the
+    //    warmth clock below (surfaceWarm) covers that one.
     //
     // Technique: a masked conic-gradient on ::after paints ONLY the 1px ring
     // (mask-composite cuts the interior out), and the sweep is an animated
@@ -112,6 +114,25 @@ window.__ModuleLoader__.load({
       tag.textContent = GLOW_CSS
       document.head.appendChild(tag)
       return true
+    }
+
+    // ---- surface warmth ----------------------------------------------------
+    //
+    // The pending glow was built when the only real wait was an iframe boot.
+    // Stepwise assembly moved the wait: glm-5.3 delivers each call whole (no
+    // argument streaming — the §7 measurement) and execute settles in
+    // milliseconds, so tool PENDING lasts a frame or two and a glow bound to
+    // it never shows. The wait the user actually watches is BETWEEN calls
+    // (~700ms measured cadence, session e0b1b8ce), when every block in the
+    // chain is already settled. So the host card glows while its surface is
+    // WARM — changed within the last SURFACE_WARM_MS. 1500ms is ~2x the
+    // observed cadence: long enough to bridge the gap between steps, short
+    // enough that a finished surface stops shimmering promptly. Replay is
+    // cold for free — folded timestamps are old — so scrollback paints
+    // instantly, the same promise claimReveal makes for the entrance.
+    const SURFACE_WARM_MS = 1500
+    function surfaceWarm (lastChangeAt, now) {
+      return typeof lastChangeAt === 'number' && now - lastChangeAt < SURFACE_WARM_MS
     }
 
     // ---- the entrance animation -------------------------------------------
@@ -858,6 +879,7 @@ window.__ModuleLoader__.load({
             renderId: surface.renderId,
             ordinal: surface.ordinals.get(callId), title: surface.title,
             components: surface.components, changed: false,
+            lastChangeAt: surface.lastChangeAt,
           }
         }
       }
@@ -885,13 +907,14 @@ window.__ModuleLoader__.load({
         const key = usableId !== null ? 'id:' + usableId : 'auto:' + callId
         surface = {
           key, title, hostCallId: callId, renderId: usableId ?? callId,
-          components, lastTime: time,
+          components, lastTime: time, lastChangeAt: time,
           callIds: new Set(), ordinals: new Map(),
         }
         surfaces.set(key, surface)
       } else if (!(surface.lastTime > time)) {
         surface.components = components
         surface.lastTime = time
+        surface.lastChangeAt = time
       }
       surface.callIds.add(callId)
       const ordinal = surface.callIds.size
@@ -900,6 +923,7 @@ window.__ModuleLoader__.load({
         key: surface.key, hostCallId: surface.hostCallId,
         renderId: surface.renderId, ordinal,
         title: surface.title, components: surface.components, changed: true,
+        lastChangeAt: surface.lastChangeAt,
       }
     }
 
@@ -991,13 +1015,24 @@ window.__ModuleLoader__.load({
         ? {
           key: 'own:' + block.callId, hostCallId: block.callId,
           renderId: block.callId, ordinal: 1, title,
-          components: [], changed: false,
+          components: [], changed: false, lastChangeAt: 0,
         }
         : foldCall(SURFACES, { callId: block.callId, surfaceId, title, components, time: callTime })
       if (fold.changed) notifySurface(fold.key)
       React.useEffect(
         () => subscribeToSurface(fold.key, () => setFoldVersion((v) => v + 1)),
         [fold.key])
+      // Warmth is time-based, so the card must re-render once when the window
+      // lapses — growth already re-renders via the subscription above. One
+      // timeout per change, never an interval.
+      const [warmNow, setWarmNow] = React.useState(() => Date.now())
+      React.useEffect(() => {
+        const remain = fold.lastChangeAt + SURFACE_WARM_MS - Date.now()
+        if (!(remain > 0)) return
+        const t = setTimeout(() => setWarmNow(Date.now()), remain + 30)
+        return () => clearTimeout(t)
+      }, [fold.lastChangeAt])
+      const warm = surfaceWarm(fold.lastChangeAt, warmNow)
 
       if (failed) {
         const text = (block.content ?? [])
@@ -1020,7 +1055,7 @@ window.__ModuleLoader__.load({
       // The host renders the LEDGER's current snapshot, not this block's own:
       // later folded calls grow this card in place, each new child arriving
       // with the enter animation.
-      return h('div', { className: settled ? undefined : GLOW_CLASS, style: card },
+      return h('div', { className: !settled || warm ? GLOW_CLASS : undefined, style: card },
         h('div', {
           style: {
             display: 'flex', alignItems: 'center', gap: 8,

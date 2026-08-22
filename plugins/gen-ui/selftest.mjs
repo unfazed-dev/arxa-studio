@@ -610,11 +610,14 @@ check('stepwise calls fold into one growing surface; a rebuild starts a new one'
   assert.equal(c.ordinal, 3, 'the stub needs its step number')
   assert.equal(c.components.length, 3, 'the surface holds the latest snapshot')
   assert.ok(b.changed && c.changed, 'growth is a change')
+  assert.equal(a.lastChangeAt, 100, 'a surface is born warm at its own time')
+  assert.equal(c.lastChangeAt, 300, 'growth advances the warmth clock')
 
   // Same title but starting from scratch — a rebuild is NOT an extension.
   const d = foldCall(S, { callId: 'd', title: T, surfaceId: null, components: mk(['card']), time: 400 })
   assert.notEqual(d.key, a.key, 'a rebuild must not fold into the finished surface')
   assert.equal(d.hostCallId, 'd')
+  assert.equal(d.lastChangeAt, 400, 'a rebuild starts its own clock')
 
   // Explicit surfaceId folds on identity, no prefix rule — a shrink replaces.
   const e = foldCall(S, { callId: 'e', title: 'X', surfaceId: 'surf-1', components: mk(['card', 't1']), time: 500 })
@@ -633,6 +636,7 @@ check('stepwise calls fold into one growing surface; a rebuild starts a new one'
   assert.equal(a2.changed, false, 'a known callId is a no-op')
   assert.equal(a2.ordinal, 1)
   assert.equal(a2.components.length, 4, 'and it sees the grown state')
+  assert.equal(a2.lastChangeAt, 700, 'a no-op read carries the current warmth clock')
 
   // The title gate: same shape, different surface purpose — no fold.
   const h = foldCall(S, { callId: 'h', title: 'Other card', surfaceId: null, components: mk(['card', 't1', 't2', 't3', 't4']), time: 800 })
@@ -665,6 +669,45 @@ check('folded calls render ONE growing card plus one-line stubs', () => {
   assert.ok(!views[1].text.includes('FOLD_TWO'), 'the stub shows no surface content')
   assert.ok(views[2].text.includes('FOLD_ONE') && views[2].text.includes('FOLD_TWO'),
     'the host re-render draws the grown surface — one card, assembling')
+})
+
+check('surfaceWarm is the glow clock — fresh warm, lapsed cold, replay cold', () => {
+  const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
+  const start = src.indexOf('const SURFACE_WARM_MS')
+  assert.ok(start > 0, 'client.js no longer defines the warmth clock')
+  const end = src.indexOf('\n    }', src.indexOf('function surfaceWarm', start))
+  assert.ok(end > start, 'could not find the end of surfaceWarm')
+  // eslint-disable-next-line no-new-func
+  const { surfaceWarm, SURFACE_WARM_MS } = new Function(
+    `${src.slice(start, end + 6)}; return { surfaceWarm, SURFACE_WARM_MS }`)()
+  const now = Date.now()
+  assert.equal(surfaceWarm(now, now), true, 'a change right now is warm')
+  assert.equal(surfaceWarm(now - (SURFACE_WARM_MS - 1), now), true, 'still warm just inside the window')
+  assert.equal(surfaceWarm(now - SURFACE_WARM_MS, now), false, 'the window lapses exactly at the boundary')
+  assert.equal(surfaceWarm(now - 60_000, now), false, 'replay/scrollback is cold — no shimmer on history')
+  assert.equal(surfaceWarm(undefined, now), false, 'no timestamp -> cold, never crash')
+})
+
+check('a warm settled card glows; a cold one does not', () => {
+  // glm-5.3 settles each call in milliseconds, so the glow cannot hang off
+  // tool pending — it hangs off surface warmth. These blocks are SETTLED:
+  // any glow on them comes from the warmth clock and nothing else.
+  const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
+  assert.ok(src.includes('!settled || warm'),
+    'the host card must glow while pending OR warm — pending alone is a frame')
+  const comps = [
+    { id: 'card', component: 'Card', children: ['t'] },
+    { id: 't', component: 'Text', text: 'WARM_MARKER' },
+  ]
+  const fresh = renderSurfaceForTest(comps, Date.now())
+  assert.ok(fresh.classes.includes('arxa-genui-pending'),
+    'a surface changed this instant must glow even though the call settled')
+  const stale = renderSurfaceForTest(comps, Date.now() - 60_000)
+  assert.ok(!stale.classes.includes('arxa-genui-pending'),
+    'a surface assembled a minute ago must stand still')
+  const timeless = renderSurfaceForTest(comps)
+  assert.ok(!timeless.classes.includes('arxa-genui-pending'),
+    'no timestamp -> cold (fail closed, same as the entrance)')
 })
 
 check('a surface that finished assembling draws fold growth at once', () => {
