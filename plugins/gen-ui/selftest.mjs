@@ -107,6 +107,31 @@ await checkAsync('duplicate component ids are rejected', async () => {
   )
 })
 
+await checkAsync('a model-supplied surfaceId wins, so updates share one surface', async () => {
+  const value = await toolDef.execute({ ...goodArgs, surfaceId: 'card-7' }, exec)
+  assert.equal(value.surfaceId, 'card-7', 'a supplied surfaceId must beat the callId')
+  assert.equal(value.messages[0].createSurface.surfaceId, 'card-7')
+  assert.equal(value.messages[1].updateComponents.surfaceId, 'card-7')
+})
+
+await checkAsync('a malformed surfaceId is rejected like any bad component', async () => {
+  await assert.rejects(
+    () => toolDef.execute({ ...goodArgs, surfaceId: 'has spaces in it' }, exec), /surfaceId/)
+  await assert.rejects(
+    () => toolDef.execute({ ...goodArgs, surfaceId: 42 }, exec), /surfaceId/)
+})
+
+check('the tool teaches the fold in its own schema', () => {
+  // defineTool compiles the shorthand map into a JSON Schema: properties.*.
+  const params = toolDef.parameters.properties ?? {}
+  assert.ok(params.surfaceId,
+    'no surfaceId parameter — the model cannot name an update target')
+  assert.match(params.surfaceId.description, /same surfaceId/i,
+    'the parameter must tell the model to reuse the id for updates')
+  assert.match(toolDef.description, /full list, never a delta/i,
+    'replace semantics must be spelled out or the model will send deltas')
+})
+
 await checkAsync('presenters are pure and produce generic cards', async () => {
   const call = toolDef.presentCall(goodArgs)
   assert.equal(call.card, 'generic')
@@ -301,7 +326,11 @@ check('claimedChildren agrees in catalog.js and client.js', () => {
 // Answers the standing caveat in plan decision 32c ("no component in
 // client.js has executed"). Not a browser — no layout, no CSS — but the
 // component FUNCTIONS run, which is where the surface graph is resolved.
-function renderSurfaceForTest (components, blockTime) {
+// Evaluate the factory once and return the registered toolview. The factory
+// closes over module-level state — the surface ledger among it — so checks
+// that need several blocks to SHARE one ledger must load once and render
+// each block through the same ToolView: renderBlocksForTest below.
+function loadToolView () {
   const h = (type, props, ...kids) => ({
     type, props: { ...(props || {}), children: kids.flat(Infinity) },
   })
@@ -320,7 +349,6 @@ function renderSurfaceForTest (components, blockTime) {
   }
   delete global.document
   const clientPath = new URL('./lib/client.js', import.meta.url)
-  // Fresh evaluation each call: the factory closes over module-level state.
   const src = readFileSync(clientPath, 'utf8')
   // eslint-disable-next-line no-new-func
   new Function('window', src)(global.window)
@@ -339,24 +367,12 @@ function renderSurfaceForTest (components, blockTime) {
     connection: {},
   })
   assert.ok(ToolView, 'no toolview was registered')
+  return ToolView
+}
 
-  // Drive it as a SETTLED node, the durable path.
-  const tree = ToolView({
-    toolName: 'gen_ui',
-    block: {
-      kind: 'tool-result',
-      callId: 'call_' + Math.random().toString(36).slice(2),
-      ...blockTime === undefined ? {} : { time: blockTime },
-      isError: false,
-      meta: {
-        surfaceId: 's1',
-        title: 'Test surface',
-        messages: [{ version: 'v0.9', updateComponents: { surfaceId: 's1', components } }],
-      },
-    },
-  })
-
-  // Walk, invoking every function component, and collect what was drawn.
+// Walk one rendered tree, invoking every function component, and collect
+// what was drawn.
+function walkTree (tree) {
   const seenTypes = []
   const strings = []
   const classes = []
@@ -377,6 +393,43 @@ function renderSurfaceForTest (components, blockTime) {
   }
   walk(tree, 0)
   return { text: strings.join('\u0000'), types: seenTypes, classes }
+}
+
+// A settled tool-result block — the durable path. meta.surfaceId mirrors
+// the host's stamping (the callId) unless one is supplied.
+function settledBlock ({ callId, time, title, components, surfaceId }) {
+  const sid = surfaceId ?? callId
+  return {
+    toolName: 'gen_ui',
+    block: {
+      kind: 'tool-result',
+      callId,
+      ...time === undefined ? {} : { time },
+      isError: false,
+      meta: {
+        surfaceId: sid,
+        title: title ?? 'Test surface',
+        messages: [{ version: 'v0.9', updateComponents: { surfaceId: sid, components } }],
+      },
+    },
+  }
+}
+
+function renderSurfaceForTest (components, blockTime) {
+  const ToolView = loadToolView()
+  return walkTree(ToolView(settledBlock({
+    callId: 'call_' + Math.random().toString(36).slice(2),
+    time: blockTime,
+    components,
+  })))
+}
+
+// N block descriptors through ONE ToolView, sharing the module-level
+// surface ledger — the only way the fold can be observed end to end.
+// Repeat a descriptor to re-render that block after later ones registered.
+function renderBlocksForTest (blocks) {
+  const ToolView = loadToolView()
+  return blocks.map((b) => walkTree(ToolView(settledBlock(b))))
 }
 
 check('the browser half renders a Card with its children nested exactly once', () => {
@@ -533,6 +586,98 @@ check('the entrance stylesheet is the researched curve, installed once', () => {
     'only compositor properties may animate')
 })
 
+check('stepwise calls fold into one growing surface; a rebuild starts a new one', () => {
+  const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
+  const start = src.indexOf('function isPrefixChain')
+  assert.ok(start > 0, 'client.js no longer defines the surface fold')
+  const end = src.indexOf('\n    }', src.indexOf('function foldCall', start))
+  assert.ok(end > start, 'could not find the end of foldCall')
+  // eslint-disable-next-line no-new-func
+  const { foldCall } = new Function(
+    `${src.slice(start, end + 6)}; return { foldCall }`)()
+
+  const mk = (ids) => ids.map((id) => ({ id, component: id === 'card' ? 'Card' : 'Text' }))
+  const T = 'Studio pricing card'
+  const S = new Map()
+  // The observed glm-5.3 pattern (session e0b1b8ce, 2026-08-23): N calls,
+  // each a prefix of the next, surfaceId never set.
+  const a = foldCall(S, { callId: 'a', title: T, surfaceId: null, components: mk(['card']), time: 100 })
+  const b = foldCall(S, { callId: 'b', title: T, surfaceId: null, components: mk(['card', 't1']), time: 200 })
+  const c = foldCall(S, { callId: 'c', title: T, surfaceId: null, components: mk(['card', 't1', 't2']), time: 300 })
+  assert.equal(b.key, a.key, 'a prefix extension must fold into the same surface')
+  assert.equal(c.key, a.key, 'and the third step too')
+  assert.equal(c.hostCallId, 'a', 'the FIRST call owns the card')
+  assert.equal(c.ordinal, 3, 'the stub needs its step number')
+  assert.equal(c.components.length, 3, 'the surface holds the latest snapshot')
+  assert.ok(b.changed && c.changed, 'growth is a change')
+
+  // Same title but starting from scratch — a rebuild is NOT an extension.
+  const d = foldCall(S, { callId: 'd', title: T, surfaceId: null, components: mk(['card']), time: 400 })
+  assert.notEqual(d.key, a.key, 'a rebuild must not fold into the finished surface')
+  assert.equal(d.hostCallId, 'd')
+
+  // Explicit surfaceId folds on identity, no prefix rule — a shrink replaces.
+  const e = foldCall(S, { callId: 'e', title: 'X', surfaceId: 'surf-1', components: mk(['card', 't1']), time: 500 })
+  const f2 = foldCall(S, { callId: 'f', title: 'X', surfaceId: 'surf-1', components: mk(['card']), time: 600 })
+  assert.equal(f2.key, e.key)
+  assert.equal(f2.components.length, 1, 'an explicit update replaces, even shrinking')
+
+  // The model echoes the receipt's surfaceId — the first call's callId —
+  // which must find the auto surface, not open a parallel one.
+  const g = foldCall(S, { callId: 'g', title: T, surfaceId: 'a', components: mk(['card', 't1', 't2', 't3']), time: 700 })
+  assert.equal(g.key, a.key, 'echoing the host callId as surfaceId must fold home')
+  assert.equal(g.components.length, 4)
+
+  // Re-registration is idempotent (StrictMode double-invokes initializers).
+  const a2 = foldCall(S, { callId: 'a', title: T, surfaceId: null, components: mk(['card']), time: 100 })
+  assert.equal(a2.changed, false, 'a known callId is a no-op')
+  assert.equal(a2.ordinal, 1)
+  assert.equal(a2.components.length, 4, 'and it sees the grown state')
+
+  // The title gate: same shape, different surface purpose — no fold.
+  const h = foldCall(S, { callId: 'h', title: 'Other card', surfaceId: null, components: mk(['card', 't1', 't2', 't3', 't4']), time: 800 })
+  assert.notEqual(h.key, a.key, 'a different title must not fold')
+
+  // Empty args (an unparseable call) never heuristic-fold.
+  const e1 = foldCall(S, { callId: 'e1', title: '', surfaceId: null, components: [], time: 900 })
+  const e2 = foldCall(S, { callId: 'e2', title: '', surfaceId: null, components: [], time: 1000 })
+  assert.notEqual(e2.key, e1.key, 'empty snapshots each stand alone')
+})
+
+check('folded calls render ONE growing card plus one-line stubs', () => {
+  const T = 'Studio pricing card'
+  const mk = (ids) => ids.map((id) => ({
+    id,
+    component: id === 'card' ? 'Card' : id === 'cta' ? 'Button' : 'Text',
+    ...(id === 'card' ? { children: ids.filter((x) => x !== 'card') } : {}),
+    ...(id === 't1' ? { text: 'FOLD_ONE' } : {}),
+    ...(id === 'cta' ? { label: 'FOLD_TWO' } : {}),
+  }))
+  const t0 = Date.now() + 60_000
+  const first = { callId: 'fa', time: t0, title: T, components: mk(['card', 't1']) }
+  const grown = { callId: 'fb', time: t0 + 1, title: T, components: mk(['card', 't1', 'cta']) }
+  // host paints, step 2 arrives, host paints again — the live sequence.
+  const views = renderBlocksForTest([first, grown, first])
+
+  assert.ok(views[0].text.includes('FOLD_ONE'), 'the host renders the first snapshot')
+  assert.ok(!views[0].text.includes('FOLD_TWO'), 'growth has not landed at first paint')
+  assert.match(views[1].text, /assembled into/, 'a folded-away call renders the stub')
+  assert.ok(!views[1].text.includes('FOLD_TWO'), 'the stub shows no surface content')
+  assert.ok(views[2].text.includes('FOLD_ONE') && views[2].text.includes('FOLD_TWO'),
+    'the host re-render draws the grown surface — one card, assembling')
+})
+
+check('a surface that finished assembling draws fold growth at once', () => {
+  const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
+  const start = src.indexOf('function revealTarget')
+  assert.ok(start > 0, 'client.js no longer defines revealTarget')
+  const end = src.indexOf('\n    }', start)
+  // eslint-disable-next-line no-new-func
+  const revealTarget = new Function(`${src.slice(start, end + 6)}; return revealTarget`)()
+  assert.equal(revealTarget(8, 3, false), 3, 'the clock rules while assembling')
+  assert.equal(revealTarget(8, 3, true), 8, 'post-assembly growth draws immediately')
+})
+
 check('replay never animates — only a surface born on this page does', () => {
   const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
   const start = src.indexOf('const LIVE_SINCE')
@@ -556,9 +701,12 @@ check('replay never animates — only a surface born on this page does', () => {
 
   // The host sets callTime to `previous?.time ?? null`. If the toolview read
   // callTime alone, every surface whose call head was dropped would silently
-  // skip the animation — implemented, shipped, never running.
-  assert.match(src.slice(src.indexOf('const [reveal]'), src.indexOf('const [reveal]') + 300),
-    /block\?\.time/, 'the reveal must fall back to the node time when callTime is null')
+  // skip the animation — implemented, shipped, never running. The toolview
+  // computes the fallback ONCE and both the reveal and the fold read it.
+  assert.match(src.slice(src.indexOf('const callTime'), src.indexOf('const callTime') + 300),
+    /block\?\.callTime.*block\?\.time/, 'callTime must fall back to the node time when callTime is null')
+  assert.match(src.slice(src.indexOf('const [reveal]'), src.indexOf('const [reveal]') + 200),
+    /callTime/, 'the reveal must consume the same fallback the fold uses')
 })
 
 check('REPRO: a LIVE surface holds its children back; history does not', () => {

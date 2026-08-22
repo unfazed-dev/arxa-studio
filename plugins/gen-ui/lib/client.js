@@ -583,30 +583,47 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Drive the reveal clock. Returns how many children may be drawn.
-     * `enabled` false means "all of them, now" — the replay path. Reduced
-     * motion gets the same instant paint: an assembly you cannot opt out of
-     * is not an enhancement.
+     * How many children may be drawn. While a surface assembles the clock
+     * rules; once it has fully assembled, fold growth draws AT ONCE — the
+     * model's own call cadence already paced the arrival, and restarting
+     * the clock would re-slot children that are on screen.
+     */
+    function revealTarget (count, clockShown, assembled) {
+      return assembled ? count : clockShown
+    }
+
+    /**
+     * Drive the reveal clock. `enabled` false means "all of them, now" —
+     * the replay path. Reduced motion gets the same instant paint: an
+     * assembly you cannot opt out of is not an enhancement.
+     *
+     * `count` moves through refs, not effect deps: a fold GROWING the
+     * surface mid-march must not restart the interval (a restart would
+     * un-draw children). `assembledRef` latches when the march completes.
      */
     function useReveal (count, enabled) {
+      const countRef = React.useRef(count)
+      countRef.current = count
+      const assembledRef = React.useRef(false)
       const [elapsed, setElapsed] = React.useState(enabled ? 0 : Infinity)
       React.useEffect(() => {
-        if (!enabled || prefersReducedMotion()) return
+        if (!enabled || prefersReducedMotion() || assembledRef.current) return
         const t0 = Date.now()
-        const step = Math.min(STAGGER_MS, STAGGER_MAX_MS / Math.max(1, count))
         const timer = setInterval(() => {
           const dt = Date.now() - t0
+          const total = countRef.current
+          const n = revealedCount(total, dt)
           // Re-render only when the count actually advances: a fixed-cadence
           // setState would re-run the whole card ~45x during an 8-child
           // reveal where exactly 8 of those ticks change anything.
           setElapsed((prev) =>
-            revealedCount(count, prev) === revealedCount(count, dt) ? prev : dt)
-          if (revealedCount(count, dt) >= count) clearInterval(timer)
-        }, Math.max(16, step / 2))
+            revealedCount(total, prev) === n ? prev : dt)
+          if (n >= total) { assembledRef.current = true; clearInterval(timer) }
+        }, Math.max(16, Math.min(STAGGER_MS, STAGGER_MAX_MS / Math.max(1, countRef.current)) / 2))
         return () => clearInterval(timer)
-      }, [count, enabled])
+      }, [enabled])
       if (!enabled || prefersReducedMotion()) return count
-      return revealedCount(count, elapsed)
+      return revealTarget(count, revealedCount(count, elapsed), assembledRef.current)
     }
 
     /** A reserved slot: real height, so nothing jumps when content lands. */
@@ -798,6 +815,113 @@ window.__ModuleLoader__.load({
         .map((e, i) => renderEntry(surfaceId, e, i, index, reveal))
     }
 
+    // ---- the surface fold --------------------------------------------------
+    //
+    // glm-5.3 (measured 2026-08-23, session e0b1b8ce) answers "assemble the
+    // card stepwise" with N rapid gen_ui calls, each a PREFIX SNAPSHOT of the
+    // next — and zai does not stream tool arguments (0 tool-call-chunks rows,
+    // the §7 measurement), so per-call granularity is the only kind there is.
+    // Without a fold that renders as N disjoint cards; with it, as ONE card
+    // assembling in place — streaming-generative-ui-research.md §8.2.
+    //
+    // Two fold paths:
+    //  - EXPLICIT: the model passed a surfaceId (the schema offers one and the
+    //    result receipt echoes it). Identity match, replace semantics — any
+    //    shape, even a shrink. A surfaceId equal to this call's OWN callId is
+    //    the host's default stamping, not a choice, and is treated as absent;
+    //    one naming an existing surface's HOST callId folds home, because
+    //    that is exactly the id the receipt taught the model.
+    //  - HEURISTIC (no usable surfaceId): same title + the surface's current
+    //    snapshot is an (id, component) prefix of the new call's — the
+    //    observed stepwise pattern. The newest candidate wins. An equal
+    //    snapshot folds (a resend); an empty one never does.
+    //
+    // Determinism: everything keys off persisted callIds and times, so a
+    // reload re-folds identically. Registration is idempotent per callId
+    // because StrictMode double-invokes initializers.
+    function isPrefixChain (prev, next) {
+      if (!Array.isArray(prev) || !Array.isArray(next)) return false
+      if (next.length < prev.length) return false
+      for (let i = 0; i < prev.length; i++) {
+        if (String(prev[i]?.id) !== String(next[i]?.id)) return false
+        if (prev[i]?.component !== next[i]?.component) return false
+      }
+      return true
+    }
+
+    function foldCall (surfaces, call) {
+      const { callId, surfaceId, title, components, time } = call
+      for (const surface of surfaces.values()) {
+        if (surface.callIds.has(callId)) {
+          return {
+            key: surface.key, hostCallId: surface.hostCallId,
+            renderId: surface.renderId,
+            ordinal: surface.ordinals.get(callId), title: surface.title,
+            components: surface.components, changed: false,
+          }
+        }
+      }
+      const usableId = typeof surfaceId === 'string' && surfaceId !== '' &&
+        surfaceId !== callId ? surfaceId : null
+      let surface = null
+      if (usableId !== null) {
+        surface = surfaces.get('id:' + usableId) ?? null
+        if (surface === null) {
+          for (const s of surfaces.values()) {
+            if (s.hostCallId === usableId) { surface = s; break }
+          }
+        }
+      } else if (components.length > 0) {
+        let best = null
+        for (const s of surfaces.values()) {
+          if (s.title !== title) continue
+          if (!(s.lastTime <= time)) continue
+          if (!isPrefixChain(s.components, components)) continue
+          if (best === null || s.lastTime > best.lastTime) best = s
+        }
+        surface = best
+      }
+      if (surface === null) {
+        const key = usableId !== null ? 'id:' + usableId : 'auto:' + callId
+        surface = {
+          key, title, hostCallId: callId, renderId: usableId ?? callId,
+          components, lastTime: time,
+          callIds: new Set(), ordinals: new Map(),
+        }
+        surfaces.set(key, surface)
+      } else if (!(surface.lastTime > time)) {
+        surface.components = components
+        surface.lastTime = time
+      }
+      surface.callIds.add(callId)
+      const ordinal = surface.callIds.size
+      surface.ordinals.set(callId, ordinal)
+      return {
+        key: surface.key, hostCallId: surface.hostCallId,
+        renderId: surface.renderId, ordinal,
+        title: surface.title, components: surface.components, changed: true,
+      }
+    }
+
+    // The ledger is module state: every gen_ui toolview on the page folds
+    // into it, which is what lets a LATER call grow an EARLIER block's card.
+    // Notification is deferred a tick — foldCall runs during a render, and a
+    // listener setState landing mid-render is React's classic warning.
+    const SURFACES = new Map()
+    const SURFACE_LISTENERS = new Map() // surface key -> Set<listener>
+    function subscribeToSurface (key, fn) {
+      let set = SURFACE_LISTENERS.get(key)
+      if (set === undefined) { set = new Set(); SURFACE_LISTENERS.set(key, set) }
+      set.add(fn)
+      return () => set.delete(fn)
+    }
+    function notifySurface (key) {
+      setTimeout(() => {
+        const set = SURFACE_LISTENERS.get(key)
+        if (set !== undefined) for (const fn of [...set]) fn()
+      }, 0)
+    }
+
     // ---- the toolview ------------------------------------------------------
 
     function GenUiToolView ({ block, toolName }) {
@@ -809,28 +933,22 @@ window.__ModuleLoader__.load({
       // was dropped (window truncation, or a sub-call whose dispatch-start did
       // not survive) carries null and would silently never animate. The node's
       // own `time` is always set, so fall back to it rather than fail closed
-      // into a feature that looks implemented and never runs.
-      const [reveal] = React.useState(() => claimReveal(
-        block?.callId,
-        typeof block?.callTime === 'number' ? block.callTime : block?.time))
+      // into a feature that looks implemented and never runs. The fold reads
+      // the same fallback, so both decide on one clock.
+      const callTime = typeof block?.callTime === 'number' ? block.callTime : block?.time
+      const [reveal] = React.useState(() => claimReveal(block?.callId, callTime))
+      const [, setFoldVersion] = React.useState(0)
       // Settled nodes carry `kind: 'tool-result'`; running ones have no `kind`
       // at all (the discriminant is asymmetric — conversation.d.ts:161-276).
       const settled = block && block.kind === 'tool-result'
 
-      if (settled && block.isError) {
-        const text = (block.content ?? [])
-          .map((c) => (c && c.type === 'text' ? c.text : '')).join('\n').trim()
-        return h('div', { style: { ...card, borderColor: 'rgba(190,80,80,0.5)' } },
-          h('div', { style: { fontWeight: 600, marginBottom: 4 } }, 'gen_ui failed'),
-          h('pre', { style: { margin: 0, whiteSpace: 'pre-wrap', ...muted, font: '12px/1.5 ui-monospace, monospace' } },
-            text || 'no detail'))
-      }
+      const failed = settled && block.isError
 
       let title = ''
       let surfaceId = ''
       let components = []
 
-      if (settled) {
+      if (!failed && settled) {
         // The durable path: everything comes from persisted presentation meta.
         const meta = block.meta
         if (meta && typeof meta === 'object') {
@@ -849,11 +967,11 @@ window.__ModuleLoader__.load({
           try {
             const args = JSON.parse(block.call.argsRaw || '{}')
             title = typeof args.title === 'string' ? args.title : ''
-            surfaceId = block.callId
+            surfaceId = typeof args.surfaceId === 'string' ? args.surfaceId : block.callId
             components = Array.isArray(args.components) ? args.components : []
           } catch { /* nothing recoverable; the empty card stands */ }
         }
-      } else if (block) {
+      } else if (!failed && block) {
         // Running: args are already complete (argsRaw is assigned whole from
         // the tool/call event), so the surface can be drawn before `execute`
         // settles rather than showing a spinner. Host-side validation has not
@@ -861,24 +979,57 @@ window.__ModuleLoader__.load({
         try {
           const args = JSON.parse(block.argsRaw || '{}')
           title = typeof args.title === 'string' ? args.title : ''
-          surfaceId = block.callId
+          surfaceId = typeof args.surfaceId === 'string' ? args.surfaceId : block.callId
           components = Array.isArray(args.components) ? args.components : []
         } catch { /* args not parseable yet; fall through to the empty card */ }
       }
 
-      // Running: the surface is drawn from args but execute has not returned.
-      // Brief for gen_ui (validation only) — it earns its keep for any surface
-      // whose host half does real work before settling.
+      // Fold this call into the surface ledger. An ERROR call never folds —
+      // its (invalid) args would anchor a junk surface — it gets a
+      // pass-through identity and renders its own card below.
+      const fold = failed
+        ? {
+          key: 'own:' + block.callId, hostCallId: block.callId,
+          renderId: block.callId, ordinal: 1, title,
+          components: [], changed: false,
+        }
+        : foldCall(SURFACES, { callId: block.callId, surfaceId, title, components, time: callTime })
+      if (fold.changed) notifySurface(fold.key)
+      React.useEffect(
+        () => subscribeToSurface(fold.key, () => setFoldVersion((v) => v + 1)),
+        [fold.key])
+
+      if (failed) {
+        const text = (block.content ?? [])
+          .map((c) => (c && c.type === 'text' ? c.text : '')).join('\n').trim()
+        return h('div', { style: { ...card, borderColor: 'rgba(190,80,80,0.5)' } },
+          h('div', { style: { fontWeight: 600, marginBottom: 4 } }, 'gen_ui failed'),
+          h('pre', { style: { margin: 0, whiteSpace: 'pre-wrap', ...muted, font: '12px/1.5 ui-monospace, monospace' } },
+            text || 'no detail'))
+      }
+
+      if (fold.hostCallId !== block.callId) {
+        // A folded-away step. The surface lives in its first call's card,
+        // which is already drawing this call's components — one muted line,
+        // not a second card. (The disjointed-pieces bug was N of these each
+        // rendering the full prefix it carried.)
+        return h('div', { style: { ...muted, fontSize: 12, padding: '2px 0' } },
+          `↑ assembled into "${fold.title}" — step ${fold.ordinal}`)
+      }
+
+      // The host renders the LEDGER's current snapshot, not this block's own:
+      // later folded calls grow this card in place, each new child arriving
+      // with the enter animation.
       return h('div', { className: settled ? undefined : GLOW_CLASS, style: card },
         h('div', {
           style: {
             display: 'flex', alignItems: 'center', gap: 8,
-            marginBottom: components.length > 0 ? 8 : 0,
+            marginBottom: fold.components.length > 0 ? 8 : 0,
           },
         },
-          h('span', { style: { fontWeight: 600 } }, title || toolName || 'gen_ui'),
+          h('span', { style: { fontWeight: 600 } }, fold.title || toolName || 'gen_ui'),
           settled ? null : h('span', { style: { ...muted, fontSize: 12 } }, '…')),
-        h('div', null, ...renderSurface(surfaceId, components, reveal)))
+        h('div', null, ...renderSurface(fold.renderId, fold.components, reveal)))
     }
 
     function apply (ctx) {

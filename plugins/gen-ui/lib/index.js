@@ -108,7 +108,10 @@ export function apply (ctx, config = {}) {
       + `Catalogue:\n${CATALOG_DOC}\n\n`
       + 'Each entry in `components` is `{ "id": "<unique>", "component": "<name>", ...props }`. '
       + 'Components render in array order. Prefer one surface with a few components over '
-      + 'several calls.',
+      + 'several calls. To assemble or update a surface step by step, call again with the '
+      + 'SAME `surfaceId` (the result receipt names it) and the client folds the calls into '
+      + 'ONE card that grows in place — each call REPLACES the component list (A2UI '
+      + 'updateComponents semantics), so always send the full list, never a delta.',
     parameters: {
       title: {
         type: 'string',
@@ -127,6 +130,12 @@ export function apply (ctx, config = {}) {
       dataModel: {
         type: 'json',
         description: 'Optional initial data model for the surface (A2UI updateDataModel).',
+      },
+      surfaceId: {
+        type: 'string',
+        description: 'Optional. Omit to start a NEW surface. To update or extend a surface '
+          + 'you already emitted in this conversation, pass the SAME surfaceId again — the '
+          + 'calls fold into one card that updates in place.',
       },
     },
     output: {
@@ -151,7 +160,8 @@ export function apply (ctx, config = {}) {
         type: 'text',
         text: `Rendered surface ${value.surfaceId} — "${value.title}". `
           + 'It is now visible to the user in the conversation. Do not repeat its '
-          + 'contents in prose.',
+          + 'contents in prose. To update or extend this surface, call gen_ui again '
+          + `with surfaceId "${value.surfaceId}" and the full new component list.`,
       }],
       // THE seam that makes stage 2 durable. `presentationMeta` is the
       // "pure replayable presentation metadata" that lands on the settled node
@@ -184,6 +194,12 @@ export function apply (ctx, config = {}) {
       if (args.components?.length > maxComponents) {
         problems.push(`components has ${args.components.length} entries; the cap is ${maxComponents}.`)
       }
+      // Omitted/empty means "new surface". When given it must be URL- and
+      // log-safe: it keys the durable selection record and the fold ledger.
+      if (args.surfaceId !== undefined && args.surfaceId !== null && args.surfaceId !== ''
+        && (typeof args.surfaceId !== 'string' || !/^[A-Za-z0-9._~-]{1,120}$/.test(args.surfaceId))) {
+        problems.push('`surfaceId` must be 1-120 chars of [A-Za-z0-9._~-] when given.')
+      }
       if (problems.length > 0) {
         // Throwing gives the model an isError result it can repair from —
         // A2UI's own repair-loop posture (kit/genui_bridge emits errors rather
@@ -192,8 +208,12 @@ export function apply (ctx, config = {}) {
       }
       // callId is unique per tool call and is what the browser half keys its
       // durable selection state on, so the surface and its interactions share
-      // one identity across reloads.
-      const surfaceId = exec.callId ?? `surface-${Date.now()}`
+      // one identity across reloads. A model-supplied surfaceId wins: that is
+      // how a surface is UPDATED across calls (the client folds on it).
+      const surfaceId = typeof args.surfaceId === 'string' &&
+        /^[A-Za-z0-9._~-]{1,120}$/.test(args.surfaceId)
+        ? args.surfaceId
+        : (exec.callId ?? `surface-${Date.now()}`)
       return {
         surfaceId,
         title: args.title,
