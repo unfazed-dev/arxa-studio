@@ -2,20 +2,20 @@
   "name": "arxa",
   "version": "0.1.0",
   "private": true,
-  "description": "arxa — Totem Labs' agentic studio harness. A package that DEPENDS on dsh components (depend-don't-fork, arxa-harness-and-distribution.md amendment); never a fork, never a rebase.",
+  "description": "arxa \u2014 Totem Labs' agentic studio harness. A package that DEPENDS on dsh components (depend-don't-fork, arxa-harness-and-distribution.md amendment); never a fork, never a rebase.",
   "type": "module",
   "bin": {
     "arxa": "bin/arxa.mjs"
   },
   "dependencies": {
-    "@deepseek-ai/dsh": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-base": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-headless": "0.1.0-rc.7",
-    "@deepseek-ai/dsh-web-app": "0.1.0-rc.7"
+    "@deepseek-ai/dsh": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-base": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-headless": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-web-app": "0.1.1-rc.2"
   },
   "//": [
-    "Versions are EXACT — a caret on a prerelease moves under you (H1 finding 2).",
-    "private:true until the outward name check (trademark/domain/npm) — decision 10.",
+    "Versions are EXACT \u2014 a caret on a prerelease moves under you (H1 finding 2).",
+    "private:true until the outward name check (trademark/domain/npm) \u2014 decision 10.",
     "arxa update = bump these pins, run the suite. That is the whole upstream story."
   ]
 }
