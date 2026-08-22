@@ -59,6 +59,61 @@ window.__ModuleLoader__.load({
     const muted = { color: 'var(--dsw-alias-label-tertiary, #888)' }
     const accent = 'var(--dsw-static-deepseek-450, rgb(122,149,87))'
 
+    // ---- the pending glow --------------------------------------------------
+    //
+    // An accent outline that travels around a surface while it is still
+    // filling in. Two honest caveats about WHEN it can show:
+    //
+    //  - NOT during reasoning. A toolview does not exist until the tool/call
+    //    node does; measured in session e0b1b8ce the card mounts 37ms after
+    //    the call and 26s after the user hit enter. Those 26s are the model
+    //    thinking, and no card exists to glow.
+    //  - The window that IS real is the iframe boot: a RungLadder frames a
+    //    live `appbox design serve`, and that app takes seconds to come up.
+    //    That is the wait the user actually watches, so that is what glows.
+    //
+    // Technique: a masked conic-gradient on ::after paints ONLY the 1px ring
+    // (mask-composite cuts the interior out), and the sweep is an animated
+    // @property angle — a plain custom property is a string to the animation
+    // engine and would jump, not travel. Falls back to a static accent ring
+    // where @property is unsupported, and honours prefers-reduced-motion.
+    const GLOW_CLASS = 'arxa-genui-pending'
+    const GLOW_TAG = 'arxa-gen-ui/glow'
+    const GLOW_CSS = `
+@property --arxa-glow-angle { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+.${GLOW_CLASS} { position: relative; box-shadow: 0 0 16px -7px ${accent}; }
+.${GLOW_CLASS}::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit;
+  padding: 1px; pointer-events: none;
+  background: conic-gradient(from var(--arxa-glow-angle),
+    transparent 0 55%, ${accent} 78%, transparent 92% 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask-composite: exclude;
+  animation: arxa-glow-sweep 2.4s linear infinite;
+}
+@keyframes arxa-glow-sweep { to { --arxa-glow-angle: 360deg; } }
+@media (prefers-reduced-motion: reduce) {
+  .${GLOW_CLASS}::after { animation: none; background: ${accent}; opacity: 0.45; }
+}`
+
+    /**
+     * Append the glow stylesheet once. Returns true only when it actually
+     * inserted — HMR re-runs apply(), and N copies of an animated rule is a
+     * real cost, so the guard is the same one arxa-brand uses.
+     */
+    function installGlow () {
+      if (typeof document === 'undefined') return false
+      const sel = 'style[data-plugin-css=' + JSON.stringify(GLOW_TAG) + ']'
+      if (document.querySelector(sel) !== null) return false
+      const tag = document.createElement('style')
+      tag.setAttribute('data-plugin-css', GLOW_TAG)
+      tag.textContent = GLOW_CSS
+      document.head.appendChild(tag)
+      return true
+    }
+
     // Mirrors `sandboxFor` in lib/catalog.js — this factory cannot import it
     // (the ModuleLoader gives us `require('react')` and nothing else), the same
     // reason DEFAULT_RUNGS is duplicated above. selftest.mjs runs ONE table
@@ -192,6 +247,19 @@ window.__ModuleLoader__.load({
       // renders a blurry lie about how the design looks at that viewport.
       // Height follows the same factor, so the frame stays proportional.
       const scale = rungScale(w, hgt, avail, vh)
+      // Keyed by the frame's identity, not a boolean: switching rung or
+      // hitting ⟳ remounts the iframe but NOT this component, so a boolean
+      // would stay true and the new frame would never glow.
+      const frameKey = epoch + ':' + url + ':' + (rung.label ?? active)
+      const [loadedKey, setLoadedKey] = React.useState('')
+      // ponytail: a frame that never fires load (server down mid-boot) would
+      // glow forever and read as broken. 20s ceiling, then give up quietly.
+      React.useEffect(() => {
+        if (loadedKey === frameKey) return
+        const t = setTimeout(() => setLoadedKey(frameKey), 20000)
+        return () => clearTimeout(t)
+      }, [frameKey, loadedKey])
+      const framePending = loadedKey !== frameKey
       if (!url) return h('div', { style: muted }, 'RungLadder: no url')
       return h('div', { style: { margin: '6px 0' } },
         h('div', { style: { display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' } },
@@ -215,6 +283,7 @@ window.__ModuleLoader__.load({
         // own width back into the scale and oscillate.
         h('div', { ref: boxRef, style: { width: '100%' } },
           h('div', {
+            className: framePending ? GLOW_CLASS : undefined,
             style: {
               width: w * scale, height: hgt * scale, overflow: 'hidden',
               // A rung narrower than the card is centred, not left-hugged.
@@ -224,8 +293,9 @@ window.__ModuleLoader__.load({
             },
           },
           h('iframe', {
-            key: epoch + ':' + url + ':' + (rung.label ?? active),
+            key: frameKey,
             src: url,
+            onLoad: () => setLoadedKey(frameKey),
             width: w,
             height: hgt,
             // `url` arrives in model-supplied tool args, so it is sandboxed —
@@ -421,7 +491,10 @@ window.__ModuleLoader__.load({
         } catch { /* args not parseable yet; fall through to the empty card */ }
       }
 
-      return h('div', { style: card },
+      // Running: the surface is drawn from args but execute has not returned.
+      // Brief for gen_ui (validation only) — it earns its keep for any surface
+      // whose host half does real work before settling.
+      return h('div', { className: settled ? undefined : GLOW_CLASS, style: card },
         h('div', {
           style: {
             display: 'flex', alignItems: 'center', gap: 8,
@@ -435,6 +508,7 @@ window.__ModuleLoader__.load({
 
     function apply (ctx) {
       hostCtx = ctx
+      installGlow()
       ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
         name: 'tool.call.toolview',
         key: 'gen_ui',

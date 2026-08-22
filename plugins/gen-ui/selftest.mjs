@@ -205,4 +205,44 @@ check('rungScale fits the width, never upscales, and honours the height cap', ()
   near(scale(390, 844, 0, 0), 320 / 390, 'nothing measured -> the old default')
 })
 
+check('the glow stylesheet installs exactly once and can actually animate', () => {
+  const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
+  const start = src.indexOf('const GLOW_CLASS')
+  assert.ok(start > 0, 'client.js no longer defines GLOW_CLASS/installGlow')
+  const end = src.indexOf('\n    }', src.indexOf('function installGlow', start))
+  assert.ok(end > start, 'could not find the end of installGlow')
+
+  // A DOM stub thin enough to be obviously honest: it observes the guard and
+  // nothing else. HMR re-runs apply(), and N copies of an infinite animation
+  // is a real cost, so "installs once" is the property worth pinning.
+  const head = []
+  const document = {
+    querySelector: (sel) => {
+      const m = /data-plugin-css=(".*")\]$/.exec(sel)
+      const want = m ? JSON.parse(m[1]) : null
+      return head.find((t) => t.attrs['data-plugin-css'] === want) ?? null
+    },
+    createElement: () => ({
+      attrs: {}, textContent: '', setAttribute (k, v) { this.attrs[k] = v },
+    }),
+    head: { appendChild: (t) => head.push(t) },
+  }
+  // eslint-disable-next-line no-new-func
+  const mod = new Function('document', 'accent',
+    `${src.slice(start, end + 6)}; return { installGlow, GLOW_CSS }`)(document, 'ACCENT_TOKEN')
+
+  assert.equal(mod.installGlow(), true, 'first call must install')
+  assert.equal(mod.installGlow(), false, 'second call must be a no-op')
+  assert.equal(head.length, 1, 'exactly one <style> may reach <head>')
+
+  const css = head[0].textContent
+  // A plain custom property is a STRING to the animation engine: it would jump
+  // 0->360 instead of sweeping. The @property registration is what makes it an
+  // angle, so its absence is a silent visual failure, not an error.
+  assert.match(css, /@property --arxa-glow-angle/, 'the angle must be a registered property')
+  assert.match(css, /mask-composite: exclude/, 'without the mask the gradient fills the box, not the ring')
+  assert.match(css, /prefers-reduced-motion/, 'the motion must be escapable')
+  assert.ok(css.includes('ACCENT_TOKEN'), 'the ring must use the accent token, never a hardcoded colour')
+})
+
 console.log(process.exitCode ? 'FAILED' : `all ${passed} checks passed`)
