@@ -7,10 +7,11 @@
 // last wrote into the shared npm cache slot. Run this after touching
 // bin/arxa.mjs or the dsh pins.
 //   node bin/isolation-check.mjs
-import { readFileSync, existsSync, readlinkSync, lstatSync, readdirSync } from 'node:fs'
+import { readFileSync, existsSync, readlinkSync, lstatSync, readdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { homedir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
+import { spawnSync } from 'node:child_process'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const fail = []
@@ -61,6 +62,36 @@ for (const [label, dir] of [
   const hits = npxLinks(dir)
   check(`no npx-cache links in ${label}`, hits.length === 0,
     hits.length ? `${hits.length} link(s) into ~/.npm/_npx, e.g. ${hits[0]}` : 'clean')
+}
+
+// 5. a contaminated launch env must be REFUSED before the first write.
+// A shell inside a dsh session exports DSH_HOME=~/.dsh (managed DSH_*
+// vars); 2026-08-22 the studio booted that way and listed the operator's
+// sessions. os.homedir() honours $HOME on POSIX, so a tmpdir stands in
+// for the operator's machine: the launcher must exit 127 with the refusal
+// and leave the 'operator home' byte-for-byte untouched.
+for (const [label, env] of [
+  ['DSH_HOME points at the operator home', { DSH_HOME: 'OPERATOR_DSH' }],
+  ['ARXA_HOME points at the operator home', { ARXA_HOME: 'OPERATOR_DSH' }],
+]) {
+  const fakeHome = mkdtempSync(join(tmpdir(), 'arxa-isolation-'))
+  const childEnv = {
+    HOME: fakeHome,
+    PATH: process.env.PATH,
+    DSH_SESSION_ID: 'parent-session', // the realistic shape of the leak
+  }
+  for (const [k, v] of Object.entries(env)) {
+    childEnv[k] = v === 'OPERATOR_DSH' ? join(fakeHome, '.dsh') : v
+  }
+  const r = spawnSync(process.execPath, [join(root, 'bin', 'arxa.mjs'), '--headless'],
+    { env: childEnv, encoding: 'utf8', timeout: 15000 })
+  const wrote = readdirSync(fakeHome)
+  check(`contaminated ${label} is refused before any write`,
+    r.status === 127 && (r.stderr || '').includes('refusing to boot') && wrote.length === 0,
+    r.status !== 127 ? `exit ${r.status}, wanted 127`
+      : wrote.length ? `wrote into the operator home before refusing: ${wrote[0]}`
+        : (r.stderr || '').slice(0, 120))
+  rmSync(fakeHome, { recursive: true, force: true })
 }
 
 for (const l of ok) console.log('  ok    ' + l)

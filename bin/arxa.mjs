@@ -20,7 +20,7 @@
 //   DSH_HOME=<dir> arxa   → override just the dsh home (legacy sandbox path)
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { spawn, spawnSync } from 'node:child_process'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { homedir } from 'node:os'
 
@@ -39,6 +39,27 @@ const dshHome = process.env.DSH_HOME?.trim()
   : join(arxaHome, 'dsh')
 const piHome = join(arxaHome, 'pi')
 const profileDir = join(dshHome, 'profiles', 'arxa')
+
+// ISOLATION HARD STOP (2026-08-22): a shell inside any dsh session exports
+// managed DSH_* vars — DSH_HOME=~/.dsh among them — and DSH_HOME above is
+// the legacy sandbox override. So arxa launched from inside a dsh session
+// (agent OR operator terminal) boots against the OPERATOR'S home: their
+// sessions and workspaces listed in arxa's UI, arxa's writes landing in
+// their store. Measured live: studio pid 25528 ran with
+// DSH_HOME=/Users/unfazed-mac/.dsh exactly this way. The operator's ~/.dsh
+// is never a legitimate arxa home — refuse BEFORE the first write, with no
+// fallback and no partial boot.
+const operatorDsh = resolve(homedir(), '.dsh')
+const inOperatorDsh = (p) => p === operatorDsh || p.startsWith(operatorDsh + sep)
+if (inOperatorDsh(arxaHome) || inOperatorDsh(dshHome)) {
+  console.error('arxa: refusing to boot — the effective home lands in the operator\'s ~/.dsh:')
+  console.error('  ARXA_HOME=' + arxaHome)
+  console.error('  DSH_HOME=' + dshHome)
+  console.error('  A parent dsh session exports DSH_HOME into its shells; arxa')
+  console.error('  must never share that home. Relaunch with a clean environment:')
+  console.error('    env -u DSH_HOME arxa')
+  process.exit(127)
+}
 
 const bundles = headless
   ? ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-headless']
@@ -291,8 +312,14 @@ if (!headless) {
 // settings/models/plugins pages work under arxa.studio.localhost. Fail-loud
 // on dep bumps — see that file.
 const loaderArgs = ['--import', pathToFileURL(join(here, 'loopback-localhost-patch.mjs')).href]
+// Inherited DSH_* vars are the PARENT session's identity (DSH_SESSION_ID,
+// DSH_SESSION_JSONL, DSH_SHELL, DSH_WEB_URL — managed vars a harness shell
+// exports), never arxa's. Strip every one of them; DSH_HOME is then set
+// explicitly to arxa's own home and dsh derives the rest fresh.
+const childEnv = Object.fromEntries(
+  Object.entries(process.env).filter(([k]) => !k.startsWith('DSH_')))
 const child = spawn(process.execPath, [...loaderArgs, dshBin, '--profile', 'arxa', ...passthrough, ...trustArgs], {
   stdio: 'inherit',
-  env: { ...process.env, DSH_HOME: dshHome, PI_CODING_AGENT_DIR: piHome },
+  env: { ...childEnv, DSH_HOME: dshHome, PI_CODING_AGENT_DIR: piHome },
 })
 child.on('exit', (code, signal) => process.exit(signal ? 1 : code ?? 1))
