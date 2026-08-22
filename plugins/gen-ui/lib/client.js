@@ -206,9 +206,6 @@ window.__ModuleLoader__.load({
       const [active, setActive] = React.useState(0)
       const [epoch, setEpoch] = React.useState(0)
       const url = typeof props.url === 'string' ? props.url : ''
-      const rung = rungs[Math.min(active, rungs.length - 1)] ?? DEFAULT_RUNGS[0]
-      const w = Number(rung.w) || 390
-      const hgt = Number(rung.h) || 844
 
       // Fill the width the thread actually gives us. This was a hardcoded
       // `Math.min(1, 320 / w, 420 / hgt)`, which pinned the desktop rung to
@@ -243,85 +240,121 @@ window.__ModuleLoader__.load({
         window.addEventListener('resize', onResize)
         return () => window.removeEventListener('resize', onResize)
       }, [])
-      // Never scale ABOVE 1:1 — upscaling a 390px mobile rung to fill 700px
-      // renders a blurry lie about how the design looks at that viewport.
-      // Height follows the same factor, so the frame stays proportional.
-      const scale = rungScale(w, hgt, avail, vh)
-      // Keyed by the frame's identity, not a boolean: hitting ⟳ remounts the
-      // iframe but NOT this component, so a boolean would stay true and the
-      // new frame would never glow.
+      // ONE LIVE DOCUMENT PER RUNG, booted at its own size and never
+      // navigated again. This is the only shape that can keep a rung's scroll
+      // position: an iframe has exactly one scroll offset, so a shared frame
+      // can hold at most one rung's place, and switching necessarily loses the
+      // other two. Verified in a real browser (Chrome, CDP): a rung scrolled
+      // to 600px, hidden behind another rung and shown again, came back at
+      // 600px — display:none preserves both the scroll offset and the live
+      // document. Narrow claim on purpose: that was measured against a design
+      // with a fixed shell and an inner scroller. A design driven by an
+      // IntersectionObserver or ResizeObserver sees display:none as zero-size
+      // and may not come back identical.
       //
-      // The RUNG IS DELIBERATELY NOT IN THIS KEY. It used to be, and that made
-      // every rung switch a fresh page load: the framed app rebooted and threw
-      // away the scroll position just to show the same document at a different
-      // width. width/height are plain attributes and the scale is a transform —
-      // changing them resizes the frame in place, with no navigation — so ONE
-      // mounted document serves every rung.
-      const frameKey = epoch + ':' + url
-      const [loadedKey, setLoadedKey] = React.useState('')
+      // Mounted LAZILY and then kept alive. Booting every rung up front is a
+      // live app instance for each viewport nobody has looked at — precisely
+      // the cost that made a single shared frame attractive in the first
+      // place. Lazy mounting is what makes one-frame-per-rung affordable.
+      const [mounted, setMounted] = React.useState(() => ({ [active]: true }))
+      const [epochs, setEpochs] = React.useState({})
+      const [stale, setStale] = React.useState({})
+      const [loaded, setLoaded] = React.useState({})
+      const keyOf = (i) => (epochs[i] ?? 0) + ':' + url + ':' + i
+
+      const show = (i) => {
+        setActive(i)
+        setMounted((m) => (m[i] ? m : { ...m, [i]: true }))
+        // A rung that was hidden while the design reloaded is showing
+        // pre-reload content — a preview that lies. Reloading it on the way IN
+        // is what keeps a refresh scoped to one rung without leaving the
+        // others quietly wrong. Do not "simplify" this into reloading them all
+        // at reload time: that throws away the scroll position of two rungs
+        // the operator is not even looking at, which is the whole feature.
+        if (stale[i]) {
+          setEpochs((e) => ({ ...e, [i]: (e[i] ?? 0) + 1 }))
+          setStale((sx) => { const n = { ...sx }; delete n[i]; return n })
+        }
+      }
+
       // ponytail: a frame that never fires load (server down mid-boot) would
       // glow forever and read as broken. 20s ceiling, then give up quietly.
+      // Only the rung on screen is worth waiting on.
+      const activeKey = keyOf(active)
+      const activeLoaded = !!loaded[activeKey]
       React.useEffect(() => {
-        if (loadedKey === frameKey) return
-        const t = setTimeout(() => setLoadedKey(frameKey), 20000)
+        if (activeLoaded) return
+        const t = setTimeout(
+          () => setLoaded((l) => ({ ...l, [activeKey]: true })), 20000)
         return () => clearTimeout(t)
-      }, [frameKey, loadedKey])
-      const framePending = loadedKey !== frameKey
+      }, [activeKey, activeLoaded])
+
       if (!url) return h('div', { style: muted }, 'RungLadder: no url')
       return h('div', { style: { margin: '6px 0' } },
         h('div', { style: { display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' } },
           ...rungs.map((r, i) => h('button', {
             key: (r.label ?? i) + ':' + i,
-            onClick: () => setActive(i),
+            onClick: () => show(i),
             style: {
               padding: '3px 8px', borderRadius: 4, cursor: 'pointer', fontSize: 12,
               border: '1px solid ' + (i === active ? accent : 'var(--dsw-alias-border-l2, #444)'),
               background: i === active ? accent : 'transparent',
               color: i === active ? '#fff' : 'inherit',
             },
-          }, `${r.label ?? i} ${r.w}×${r.h}`)),
+          }, `${r.label ?? i} ${r.w}\u00d7${r.h}`)),
           h('button', {
-            onClick: () => setEpoch((e) => e + 1),
-            title: 'reload this preview',
+            // Reloads THIS rung only. The others keep their documents and
+            // their scroll positions.
+            onClick: () => setEpochs((e) => ({ ...e, [active]: (e[active] ?? 0) + 1 })),
+            title: 'reload this rung only',
             style: { marginLeft: 'auto', padding: '3px 8px', cursor: 'pointer', fontSize: 12 },
-          }, '⟳')),
-        // The measured element is a full-width block; the framed box inside it
-        // takes the scaled size. Measuring the scaled box itself would feed its
-        // own width back into the scale and oscillate.
+          }, '\u27f3')),
+        // The measured element is a full-width block and stays mounted whatever
+        // the rungs do, so a hidden rung can never feed a 0 width back into the
+        // scale. Measuring a rung box itself would feed its own width into its
+        // own scale and oscillate.
         h('div', { ref: boxRef, style: { width: '100%' } },
-          h('div', {
-            className: framePending ? GLOW_CLASS : undefined,
-            style: {
-              width: w * scale, height: hgt * scale, overflow: 'hidden',
-              // A rung narrower than the card is centred, not left-hugged.
-              // No-op once the rung fills the card (desktop at scale 1).
-              margin: '0 auto',
-              border: '1px solid var(--dsw-alias-border-l2, #333)', borderRadius: 6,
+          ...rungs.map((r, i) => {
+            if (!mounted[i]) return null
+            const rw = Number(r.w) || 390
+            const rh = Number(r.h) || 844
+            const rs = rungScale(rw, rh, avail, vh)
+            const k = keyOf(i)
+            return h('div', {
+              key: 'rung:' + i,
+              className: loaded[k] ? undefined : GLOW_CLASS,
+              style: {
+                display: i === active ? 'block' : 'none',
+                width: rw * rs, height: rh * rs, overflow: 'hidden',
+                // A rung narrower than the card is centred, not left-hugged.
+                margin: '0 auto',
+                border: '1px solid var(--dsw-alias-border-l2, #333)', borderRadius: 6,
+              },
             },
-          },
-          h('iframe', {
-            key: frameKey,
-            src: url,
-            onLoad: () => setLoadedKey(frameKey),
-            width: w,
-            height: hgt,
-            // `url` arrives in model-supplied tool args, so it is sandboxed —
-            // unlike the design panel's iframe, whose URL the operator typed.
-            //
-            // Decision 19 said allow-same-origin "would silently mean no
-            // sandbox at all". That is true ONLY when the frame is same-origin
-            // with us (MDN: the escape is conditional), and withholding it
-            // unconditionally gave the frame an OPAQUE origin — which is why
-            // every ladder rendered black while the panel rendered fine: a
-            // server-rendered artifact cannot boot without its own origin.
-            // sandboxFor grants it only for a genuinely foreign http(s) host
-            // and fails closed on everything else.
-            sandbox: sandboxFor(url, window.location.href),
-            style: {
-              border: 0, transform: `scale(${scale})`, transformOrigin: 'top left',
-              background: '#fff',
-            },
-          }))))
+            h('iframe', {
+              key: k,
+              src: url,
+              onLoad: () => setLoaded((l) => ({ ...l, [k]: true })),
+              width: rw,
+              height: rh,
+              // `url` arrives in model-supplied tool args, so it is sandboxed —
+              // unlike the design panel's iframe, whose URL the operator typed.
+              //
+              // Decision 19 said allow-same-origin "would silently mean no
+              // sandbox at all". That is true ONLY when the frame is same-origin
+              // with us (MDN: the escape is conditional), and withholding it
+              // unconditionally gave the frame an OPAQUE origin — which is why
+              // every ladder rendered black while the panel rendered fine: a
+              // server-rendered artifact cannot boot without its own origin.
+              // sandboxFor grants it only for a genuinely foreign http(s) host
+              // and fails closed on everything else.
+              sandbox: sandboxFor(url, window.location.href),
+              style: {
+                border: 0, transform: `scale(${rs})`, transformOrigin: 'top left',
+                background: '#fff',
+              },
+            }))
+          })))
     }
 
     function Choice (props, ctxProps) {

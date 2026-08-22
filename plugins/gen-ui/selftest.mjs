@@ -499,29 +499,80 @@ check('REPRO: a LIVE surface holds its children back; history does not', () => {
     `expected 3 reserved slots, got ${live.types.filter((t) => t === 'Slot').length}`)
 })
 
-check('switching rung must not remount the frame — scroll survives', () => {
-  // The iframe key IS the reload trigger: change it and React unmounts the
-  // old element and mounts a new one, which is a fresh page load. The rung
-  // used to be in that key, so every mobile/tablet/desktop click rebooted
-  // the framed app and threw away the scroll position — to show the SAME
-  // document at a different width. width/height are plain attributes and
-  // the scale is a CSS transform, so a resize needs no navigation at all.
+check('each rung is its own document, and a reload stays inside one rung', () => {
+  // The frame key IS the reload trigger: change it and React unmounts the old
+  // element and mounts a new one, which reloads that design. So the key
+  // decides the blast radius of a refresh.
+  //
+  // It used to be `epoch:url:rungLabel` off ONE shared epoch, which made every
+  // rung click a page load. Then it was `epoch:url`, one shared document —
+  // which cannot keep per-rung scroll, because an iframe has exactly one
+  // scroll offset. Now it is per-rung epoch + rung index: one live document
+  // each, and bumping one rung's epoch cannot touch another's key.
   const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
-  const at = src.indexOf('const frameKey')
-  assert.ok(at > 0, 'frameKey must still exist')
-  const key = src.slice(at, src.indexOf('\n', at))
-  assert.doesNotMatch(key, /rung|active/,
-    'the rung must not be in the frame key, or every switch reloads the app')
-  assert.match(key, /epoch/,
-    'epoch must stay in the key — the reload button and SSE reload need it')
-
-  // Same invariant, same reason, in the design panel dock.
   const panel = readFileSync(
     new URL('../design-panel/lib/client.js', import.meta.url), 'utf8')
-  const pat = panel.indexOf('key: epoch')
-  assert.ok(pat > 0, 'the design panel iframe must still be keyed on epoch')
-  assert.doesNotMatch(panel.slice(pat, panel.indexOf('\n', pat)), /label/,
-    'the design panel iframe key must not carry the rung either')
+
+  for (const [name, text] of [['gen-ui', src], ['design-panel', panel]]) {
+    assert.match(text, /epochs\[/,
+      `${name}: the epoch must be PER RUNG, or a refresh reloads every rung`)
+    assert.doesNotMatch(text, /setEpoch\(/,
+      `${name}: a single shared epoch is back — one bump reloads all rungs`)
+    // Hidden, not unmounted. Unmounting is what loses the scroll position.
+    assert.match(text, /display: i === (active|rung) \? 'block' : 'none'/,
+      `${name}: inactive rungs must be HIDDEN, not unmounted`)
+  }
+
+  // The reload button must bump exactly the rung on screen.
+  const btn = src.slice(src.indexOf('reload this rung only') - 260,
+    src.indexOf('reload this rung only'))
+  assert.match(btn, /\[active\]/,
+    'the gen-ui reload button must bump only the active rung')
+
+  // An SSE reload must reload the visible rung and FLAG the rest, never bump
+  // them: bumping a hidden rung throws away a scroll position nobody asked to
+  // lose. This is the piece most likely to be "simplified" back.
+  const sse = panel.slice(panel.indexOf("addEventListener('reload'"),
+    panel.indexOf("addEventListener('reload'") + 420)
+  assert.match(sse, /setStale/,
+    'an SSE reload must mark hidden rungs stale rather than reloading them')
+  assert.match(sse, /rungRef\.current/,
+    'the SSE handler is created once and would otherwise close over a stale rung')
+
+  // Lazy: a rung nobody opened is never booted.
+  for (const [name, text] of [['gen-ui', src], ['design-panel', panel]]) {
+    assert.match(text, /if \(!mounted\[i\]\) return null/,
+      `${name}: rungs must mount lazily — three live app instances up front is `
+      + 'the cost that made a shared frame look attractive')
+  }
+})
+
+check('a RungLadder boots ONE rung, not all three', () => {
+  // Executes RungLadder for real against the React stub. Source greps cannot
+  // catch a crash in it, and a crash here takes the whole card down — the
+  // ladder is the one renderer that touches window, ResizeObserver and a
+  // sandbox attribute.
+  //
+  // The count is the point: three mounted iframes is three live app instances
+  // for viewports nobody has opened. Lazy mounting is the concession that
+  // makes one-document-per-rung affordable, so it is pinned here rather than
+  // left to a comment.
+  const out = renderSurfaceForTest([{
+    id: 'ladder',
+    component: 'RungLadder',
+    url: 'http://127.0.0.1:4319/',
+    rungs: [
+      { label: 'mobile', w: 390, h: 844 },
+      { label: 'tablet', w: 744, h: 1133 },
+      { label: 'desktop', w: 1280, h: 832 },
+    ],
+  }])
+  const frames = out.types.filter((t) => t === 'iframe').length
+  assert.equal(frames, 1,
+    `only the active rung may be mounted on first paint, got ${frames} iframes`)
+  // All three buttons are there — the rungs exist, they are just not booted.
+  assert.ok(out.text.includes('mobile') && out.text.includes('desktop'),
+    'the rung buttons must render even though their frames are not booted')
 })
 
 console.log(process.exitCode ? 'FAILED' : `all ${passed} checks passed`)

@@ -37,9 +37,35 @@ window.__ModuleLoader__.load({
     function DesignPanel() {
       const [open, setOpen] = React.useState(false)
       const [rung, setRung] = React.useState(0)
+      // One live document per rung, mounted lazily and then kept alive. An
+      // iframe has exactly one scroll offset, so a shared frame can hold at
+      // most one rung's place — per-rung scroll is unimplementable without
+      // per-rung frames. Verified in Chrome over CDP: a rung scrolled to
+      // 600px, hidden behind another and shown again, came back at 600px.
+      const [mounted, setMounted] = React.useState({ 0: true })
+      const [epochs, setEpochs] = React.useState({})
+      const [stale, setStale] = React.useState({})
+      // The SSE effect below is created once per (open, url) and would close
+      // over a stale `rung`. The ref is what lets a reload frame know which
+      // rung is actually on screen when it lands.
+      const rungRef = React.useRef(0)
+      React.useEffect(() => { rungRef.current = rung }, [rung])
+
+      const show = (i) => {
+        setRung(i)
+        setMounted((m) => (m[i] ? m : { ...m, [i]: true }))
+        // A rung hidden through a reload is showing pre-reload content — a
+        // preview that lies. Reload it on the way IN. Do not "simplify" this
+        // into reloading every rung when the reload lands: that discards the
+        // scroll position of rungs the operator is not looking at, which is
+        // the whole point of keeping them alive.
+        if (stale[i]) {
+          setEpochs((e) => ({ ...e, [i]: (e[i] ?? 0) + 1 }))
+          setStale((sx) => { const n = { ...sx }; delete n[i]; return n })
+        }
+      }
       const [url, setUrl] = React.useState(DEFAULT_URL)
       const [draft, setDraft] = React.useState(DEFAULT_URL)
-      const [epoch, setEpoch] = React.useState(0)
       const [live, setLive] = React.useState('off')
 
       // Adopt the configured URL (settings card / arxa-design-panel ns) once,
@@ -81,7 +107,15 @@ window.__ModuleLoader__.load({
         // while live reload works perfectly.
         let opened = false
         es.onopen = () => { opened = true; setLive('live') }
-        es.addEventListener('reload', () => setEpoch((e) => e + 1))
+        es.addEventListener('reload', () => {
+          const cur = rungRef.current
+          setEpochs((e) => ({ ...e, [cur]: (e[cur] ?? 0) + 1 }))
+          setStale((sx) => {
+            const n = { ...sx }
+            RUNGS.forEach((_, i) => { if (i !== cur) n[i] = true })
+            return n
+          })
+        })
         es.onerror = () => setLive(opened ? 'reconnecting' : 'blocked')
         return () => es.close()
       }, [open, url])
@@ -98,8 +132,6 @@ window.__ModuleLoader__.load({
         }, 'design')
       }
 
-      const r = RUNGS[rung]
-      const scale = Math.min(1, (DOCK_WIDTH - 24) / r.w)
       return h('div', {
         style: {
           position: 'fixed', right: 0, top: 0, bottom: 0, width: DOCK_WIDTH,
@@ -111,7 +143,7 @@ window.__ModuleLoader__.load({
         h('div', { style: { display: 'flex', gap: 6, padding: 8, alignItems: 'center' } },
           ...RUNGS.map((x, i) => h('button', {
             key: x.label,
-            onClick: () => setRung(i),
+            onClick: () => show(i),
             style: {
               padding: '4px 8px', cursor: 'pointer', borderRadius: 4,
               border: '1px solid #555',
@@ -133,8 +165,8 @@ window.__ModuleLoader__.load({
             },
           }),
           h('button', {
-            onClick: () => setEpoch((e) => e + 1),
-            title: 'remount the iframe',
+            onClick: () => setEpochs((e) => ({ ...e, [rung]: (e[rung] ?? 0) + 1 })),
+            title: 'reload this rung only',
             style: { padding: '4px 8px', cursor: 'pointer' },
           }, '⟳'),
           h('button', {
@@ -164,29 +196,32 @@ window.__ModuleLoader__.load({
             scrollbarWidth: 'none',
           },
         },
-          h('div', {
-            style: {
-              width: r.w * scale, height: r.h * scale,
-              margin: '0 auto',
-              overflow: 'hidden', border: '1px solid #333',
-            },
-          },
-            // The RUNG IS DELIBERATELY NOT IN THIS KEY. It used to be, and that
-            // made every rung switch a fresh page load: the app rebooted and
-            // threw away the scroll position just to show the same document at
-            // a different width. width/height are plain attributes and the
-            // scale is a transform — changing them resizes the frame in place,
-            // with no navigation — so ONE mounted document serves every rung.
-            // Only epoch (⟳ / SSE reload) and url may remount it.
-            h('iframe', {
-              key: epoch + ':' + url,
-              src: url,
-              width: r.w, height: r.h,
+          ...RUNGS.map((x, i) => {
+            if (!mounted[i]) return null
+            const sc = Math.min(1, (DOCK_WIDTH - 24) / x.w)
+            return h('div', {
+              key: 'rung:' + i,
               style: {
-                border: 0, transform: 'scale(' + scale + ')',
-                transformOrigin: 'top left',
+                display: i === rung ? 'block' : 'none',
+                width: x.w * sc, height: x.h * sc,
+                margin: '0 auto',
+                overflow: 'hidden', border: '1px solid #333',
               },
-            }))))
+            },
+              // Keyed per rung and per rung-epoch: bumping one rung's epoch
+              // remounts THAT frame and leaves the others untouched. The rung
+              // index is in the key on purpose here — each rung is a separate
+              // document, not the same document resized.
+              h('iframe', {
+                key: (epochs[i] ?? 0) + ':' + url + ':' + i,
+                src: url,
+                width: x.w, height: x.h,
+                style: {
+                  border: 0, transform: 'scale(' + sc + ')',
+                  transformOrigin: 'top left',
+                },
+              }))
+          })))
     }
 
     // Set by apply; the card reaches the connection API through it (slot
