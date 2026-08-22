@@ -301,7 +301,7 @@ check('claimedChildren agrees in catalog.js and client.js', () => {
 // Answers the standing caveat in plan decision 32c ("no component in
 // client.js has executed"). Not a browser — no layout, no CSS — but the
 // component FUNCTIONS run, which is where the surface graph is resolved.
-function renderSurfaceForTest (components) {
+function renderSurfaceForTest (components, blockTime) {
   const h = (type, props, ...kids) => ({
     type, props: { ...(props || {}), children: kids.flat(Infinity) },
   })
@@ -345,7 +345,8 @@ function renderSurfaceForTest (components) {
     toolName: 'gen_ui',
     block: {
       kind: 'tool-result',
-      callId: 'call_test',
+      callId: 'call_' + Math.random().toString(36).slice(2),
+      ...blockTime === undefined ? {} : { time: blockTime },
       isError: false,
       meta: {
         surfaceId: 's1',
@@ -472,6 +473,30 @@ check('replay never animates — only a surface born on this page does', () => {
   // skip the animation — implemented, shipped, never running.
   assert.match(src.slice(src.indexOf('const [reveal]'), src.indexOf('const [reveal]') + 300),
     /block\?\.time/, 'the reveal must fall back to the node time when callTime is null')
+})
+
+check('REPRO: a LIVE surface holds its children back; history does not', () => {
+  const comps = [
+    { id: 'card', component: 'Card', title: 'T', children: ['a', 'b', 'c', 'd'] },
+    { id: 'a', component: 'Text', text: 'MARK_A' },
+    { id: 'b', component: 'Text', text: 'MARK_B' },
+    { id: 'c', component: 'Text', text: 'MARK_C' },
+    { id: 'd', component: 'Text', text: 'MARK_D' },
+  ]
+  const marks = (out) => ['MARK_A', 'MARK_B', 'MARK_C', 'MARK_D']
+    .filter((m) => out.text.includes(m))
+
+  // History: no timestamp -> paints whole, instantly.
+  assert.deepEqual(marks(renderSurfaceForTest(comps)),
+    ['MARK_A', 'MARK_B', 'MARK_C', 'MARK_D'], 'history must paint whole')
+
+  // Live: born now. Under the stub the reveal clock never advances, so this
+  // is the very first frame — exactly one child, the rest reserved slots.
+  const live = renderSurfaceForTest(comps, Date.now() + 5000)
+  assert.deepEqual(marks(live), ['MARK_A'],
+    'a live surface must reveal only its first child on frame one')
+  assert.ok(live.types.filter((t) => t === 'Slot').length === 3,
+    `expected 3 reserved slots, got ${live.types.filter((t) => t === 'Slot').length}`)
 })
 
 console.log(process.exitCode ? 'FAILED' : `all ${passed} checks passed`)
