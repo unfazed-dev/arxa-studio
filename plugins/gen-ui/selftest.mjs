@@ -499,4 +499,29 @@ check('REPRO: a LIVE surface holds its children back; history does not', () => {
     `expected 3 reserved slots, got ${live.types.filter((t) => t === 'Slot').length}`)
 })
 
+check('switching rung must not remount the frame — scroll survives', () => {
+  // The iframe key IS the reload trigger: change it and React unmounts the
+  // old element and mounts a new one, which is a fresh page load. The rung
+  // used to be in that key, so every mobile/tablet/desktop click rebooted
+  // the framed app and threw away the scroll position — to show the SAME
+  // document at a different width. width/height are plain attributes and
+  // the scale is a CSS transform, so a resize needs no navigation at all.
+  const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
+  const at = src.indexOf('const frameKey')
+  assert.ok(at > 0, 'frameKey must still exist')
+  const key = src.slice(at, src.indexOf('\n', at))
+  assert.doesNotMatch(key, /rung|active/,
+    'the rung must not be in the frame key, or every switch reloads the app')
+  assert.match(key, /epoch/,
+    'epoch must stay in the key — the reload button and SSE reload need it')
+
+  // Same invariant, same reason, in the design panel dock.
+  const panel = readFileSync(
+    new URL('../design-panel/lib/client.js', import.meta.url), 'utf8')
+  const pat = panel.indexOf('key: epoch')
+  assert.ok(pat > 0, 'the design panel iframe must still be keyed on epoch')
+  assert.doesNotMatch(panel.slice(pat, panel.indexOf('\n', pat)), /label/,
+    'the design panel iframe key must not carry the rung either')
+})
+
 console.log(process.exitCode ? 'FAILED' : `all ${passed} checks passed`)

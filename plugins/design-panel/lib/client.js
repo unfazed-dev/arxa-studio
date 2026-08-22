@@ -171,8 +171,15 @@ window.__ModuleLoader__.load({
               overflow: 'hidden', border: '1px solid #333',
             },
           },
+            // The RUNG IS DELIBERATELY NOT IN THIS KEY. It used to be, and that
+            // made every rung switch a fresh page load: the app rebooted and
+            // threw away the scroll position just to show the same document at
+            // a different width. width/height are plain attributes and the
+            // scale is a transform — changing them resizes the frame in place,
+            // with no navigation — so ONE mounted document serves every rung.
+            // Only epoch (⟳ / SSE reload) and url may remount it.
             h('iframe', {
-              key: epoch + ':' + url + ':' + r.label,
+              key: epoch + ':' + url,
               src: url,
               width: r.w, height: r.h,
               style: {

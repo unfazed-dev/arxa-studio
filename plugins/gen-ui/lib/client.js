@@ -247,10 +247,17 @@ window.__ModuleLoader__.load({
       // renders a blurry lie about how the design looks at that viewport.
       // Height follows the same factor, so the frame stays proportional.
       const scale = rungScale(w, hgt, avail, vh)
-      // Keyed by the frame's identity, not a boolean: switching rung or
-      // hitting ⟳ remounts the iframe but NOT this component, so a boolean
-      // would stay true and the new frame would never glow.
-      const frameKey = epoch + ':' + url + ':' + (rung.label ?? active)
+      // Keyed by the frame's identity, not a boolean: hitting ⟳ remounts the
+      // iframe but NOT this component, so a boolean would stay true and the
+      // new frame would never glow.
+      //
+      // The RUNG IS DELIBERATELY NOT IN THIS KEY. It used to be, and that made
+      // every rung switch a fresh page load: the framed app rebooted and threw
+      // away the scroll position just to show the same document at a different
+      // width. width/height are plain attributes and the scale is a transform —
+      // changing them resizes the frame in place, with no navigation — so ONE
+      // mounted document serves every rung.
+      const frameKey = epoch + ':' + url
       const [loadedKey, setLoadedKey] = React.useState('')
       // ponytail: a frame that never fires load (server down mid-boot) would
       // glow forever and read as broken. 20s ceiling, then give up quietly.
