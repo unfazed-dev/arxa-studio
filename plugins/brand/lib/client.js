@@ -70,25 +70,34 @@ body, body[data-ds-dark-theme] {
   --dsw-static-neutral-bluish-950: rgb(21, 23, 19);
   --dsw-static-neutral-bluish-1000: rgb(15, 19, 13);
 }
-[class*="_brand"] > svg { display: none; }
-[class*="_brand"]::before {
+/* dsh 0.1.1-rc.2 restructured the sidebar brand button from ONE element
+   holding a single SVG into FOUR nested ones:
+       button._brand > span._brandIdentity > (span._brandMark + span._brandName)
+   The old class-contains selector on the bare _brand token is a SUBSTRING
+   match, so it hit all four and painted "arxa"+"studio" once per element,
+   stacking into the mangled "arxaarxa arxa...tstlid" header. The _brand token
+   is a PREFIX of its own children tokens — never target a class token that
+   prefixes a sibling token. The child-SVG rule also stopped matching: the mark
+   is DIV-wrapped now, not a direct child SVG. So: target the leaf that carries
+   the wordmark text, and hide the mark beside it. */
+[class*="_brandMark"] { display: none !important; }
+[class*="_brandName"] > * { display: none !important; }
+[class*="_brandName"]::before {
   content: "arxa";
   font: 700 21px/1 ui-sans-serif, system-ui, sans-serif;
   letter-spacing: 0.03em;
   color: var(--dsw-alias-label-primary, #e8e8e8);
 }
-[class*="_brand"]::after {
+[class*="_brandName"]::after {
   content: "studio";
   font: 400 21px/1 ui-sans-serif, system-ui, sans-serif;
   letter-spacing: 0.03em;
-  margin-left: 0.32em;
+  /* No margin here. _brandName is display:flex with gap:6px, so ::before and
+     ::after are flex ITEMS and the gap already separates them; the old
+     margin-left stacked on top of it (6px gap + 6.72px margin = ~13px) and
+     read as a broken word space. rc.7 painted these into an inline box where
+     no gap applied, which is why the margin was needed then and is wrong now. */
   color: var(--dsw-static-deepseek-400, rgb(139, 165, 101));
-}
-[class*="_wordmark"] { font-size: 0 !important; }
-[class*="_wordmark"]::before {
-  content: "arxa studio";
-  font: 700 26px/1 ui-sans-serif, system-ui, sans-serif;
-  letter-spacing: 0.03em;
 }
 [class*="_fishHitbox"], [class*="_previewBadge"] { display: none !important; }
 /* HeroGlow: the blurred backdrop ellipse behind the composer is a hardcoded
@@ -110,7 +119,15 @@ body, body[data-ds-dark-theme] {
       style.textContent = MOSS
       document.head.appendChild(style)
 
-      document.title = 'arxa studio'
+      // rc.2 writes the base title AFTER client plugins load, so the one-shot
+      // assignment this used to be was silently overwritten back to "DeepSeek
+      // Harness". Re-assert it the same way the headline is re-asserted; the
+      // inequality guard keeps the observer from feeding itself.
+      const TITLE = 'arxa studio'
+      const swapTitle = () => { if (document.title !== TITLE) document.title = TITLE }
+      swapTitle()
+      new MutationObserver(swapTitle).observe(document.head,
+        { childList: true, subtree: true, characterData: true })
       let icon = document.querySelector('link[rel="icon"]')
       if (!icon) {
         icon = document.createElement('link')
