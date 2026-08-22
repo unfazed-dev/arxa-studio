@@ -154,7 +154,16 @@ window.__ModuleLoader__.load({
               background: '#0d0d10', color: '#ddd', border: '1px solid #444',
             },
           })),
-        h('div', { style: { flex: 1, overflow: 'auto', padding: '0 12px 12px' } },
+        // Still scrolls; just no bar. The design server hides the scrollbars
+        // INSIDE the frame (it injects CSS for a framed navigation, which we
+        // cannot do from here — the frame is cross-origin); this is the dock's
+        // own scroller, which is ours to style.
+        h('div', {
+          style: {
+            flex: 1, overflow: 'auto', padding: '0 12px 12px',
+            scrollbarWidth: 'none',
+          },
+        },
           h('div', {
             style: {
               width: r.w * scale, height: r.h * scale,
