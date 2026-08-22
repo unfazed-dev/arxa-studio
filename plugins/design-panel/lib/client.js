@@ -167,6 +167,7 @@ window.__ModuleLoader__.load({
           h('div', {
             style: {
               width: r.w * scale, height: r.h * scale,
+              margin: '0 auto',
               overflow: 'hidden', border: '1px solid #333',
             },
           },
