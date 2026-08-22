@@ -12,7 +12,9 @@
 import assert from 'node:assert/strict'
 
 import { apply } from './lib/index.js'
-import { A2UI_VERSION, CATALOG_ID } from './lib/catalog.js'
+import { A2UI_VERSION, CATALOG_ID, sandboxFor, STRICT_SANDBOX, SAME_ORIGIN_SANDBOX }
+  from './lib/catalog.js'
+import { readFileSync } from 'node:fs'
 
 let passed = 0
 const check = (label, fn) => {
@@ -122,6 +124,63 @@ await checkAsync('rpc select then state round-trips', async () => {
 await checkAsync('rpc rejects unknown endpoints and bad args', async () => {
   assert.equal((await rpcHandler('drop_table', {})).ok, false)
   assert.equal((await rpcHandler('state', {})).ok, false)
+})
+
+// The RungLadder's sandbox is the one security decision the browser half makes
+// on model-supplied input, so it is tested on BOTH copies of the rule: the
+// importable one in catalog.js and the real one inside client.js, which cannot
+// be imported (it lives in a __ModuleLoader__ factory). Drift fails here
+// instead of in a browser nobody is watching.
+const SELF = 'http://arxa.studio.localhost:7891/session'
+const SANDBOX_TABLE = [
+  // The case this whole fix exists for: a foreign http host may keep its own
+  // origin, so a server-rendered design can actually boot.
+  ['http://127.0.0.1:4319/', SAME_ORIGIN_SANDBOX],
+  ['https://example.test/x', SAME_ORIGIN_SANDBOX],
+  // Same host as us — the MDN escape applies, so it stays opaque.
+  ['http://arxa.studio.localhost:7891/', STRICT_SANDBOX],
+  // Same host, different port: an origin difference, but cookies ignore the
+  // port, so this must NOT be treated as foreign.
+  ['http://arxa.studio.localhost:9999/x', STRICT_SANDBOX],
+  // Relative — resolves against US. Parsed without a base it would throw or
+  // read as foreign; both are wrong.
+  ['/admin', STRICT_SANDBOX],
+  ['../x', STRICT_SANDBOX],
+  // origin "null" is !== ours, so a naive difference check would GRANT these.
+  ['data:text/html,<script>1</script>', STRICT_SANDBOX],
+  ['javascript:alert(1)', STRICT_SANDBOX],
+  ['file:///etc/passwd', STRICT_SANDBOX],
+  // Unparseable or absent: fail closed, never open.
+  ['', STRICT_SANDBOX],
+  ['   ', STRICT_SANDBOX],
+  [null, STRICT_SANDBOX],
+  [undefined, STRICT_SANDBOX],
+  [42, STRICT_SANDBOX],
+  ['http://', STRICT_SANDBOX],
+]
+
+check('sandboxFor grants same-origin only to a foreign http host', () => {
+  for (const [url, want] of SANDBOX_TABLE) {
+    assert.equal(sandboxFor(url, SELF), want, `catalog.js: ${String(url)}`)
+  }
+})
+
+check("client.js's copy of the sandbox rule has not drifted", () => {
+  const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
+  const start = src.indexOf('function sandboxFor')
+  assert.ok(start > 0, 'client.js no longer defines sandboxFor')
+  // Take the function plus the two constants it closes over, and run the very
+  // same table against the code the browser will actually execute.
+  const end = src.indexOf('\n    }', start)
+  const body = src.slice(start, end + 6)
+  // eslint-disable-next-line no-new-func
+  const fn = new Function(
+    `const STRICT_SANDBOX = ${JSON.stringify(STRICT_SANDBOX)};` +
+    `const SAME_ORIGIN_SANDBOX = ${JSON.stringify(SAME_ORIGIN_SANDBOX)};` +
+    `${body}; return sandboxFor`)()
+  for (const [url, want] of SANDBOX_TABLE) {
+    assert.equal(fn(url, SELF), want, `client.js: ${String(url)}`)
+  }
 })
 
 console.log(process.exitCode ? 'FAILED' : `all ${passed} checks passed`)

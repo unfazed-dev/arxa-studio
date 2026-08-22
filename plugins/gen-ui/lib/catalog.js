@@ -128,3 +128,51 @@ export function toA2uiMessages (surfaceId, components, dataModel) {
   }
   return messages
 }
+
+/** The strict sandbox: an opaque origin, no cookies, no storage, no DOM reach. */
+export const STRICT_SANDBOX = 'allow-scripts allow-forms'
+
+/** The strict sandbox plus the frame's own origin — still cross-origin to us. */
+export const SAME_ORIGIN_SANDBOX = 'allow-scripts allow-forms allow-same-origin'
+
+/**
+ * Which `sandbox` a RungLadder iframe gets for `url`.
+ *
+ * Without `allow-same-origin` a framed page runs on an OPAQUE origin: its own
+ * fetches, cookies and storage all fail the same-origin policy, so a
+ * server-rendered app (every `appbox design serve` artifact) boots into a blank
+ * frame and logs "Unsafe attempt to load URL ... Domains, protocols and ports
+ * must match". That is why the ladder rendered black while the design panel —
+ * whose iframe carries NO sandbox because its URL is operator-typed — was fine.
+ * The difference is provenance: this URL arrives in model-supplied tool args.
+ *
+ * Granting `allow-same-origin` unconditionally would be the hole the strict
+ * sandbox was there to close. MDN's escape is CONDITIONAL: `allow-scripts`
+ * plus `allow-same-origin` lets a document drop its own sandbox only "when the
+ * embedded document has the same origin as the embedding page". So the grant is
+ * safe exactly when the target is somewhere else, and that is what this decides.
+ *
+ * Three ways this goes wrong, all closed here:
+ *  - a RELATIVE url (`/admin`) resolves against our own page, so it must parse
+ *    with a base or it silently looks foreign;
+ *  - `data:`/`javascript:` URLs have origin `"null"`, which is `!==` ours — a
+ *    naive difference check would GRANT them;
+ *  - hostname, not origin, is the comparison: cookies ignore the port, so
+ *    `arxa.studio.localhost:9999` could read the studio's cookies.
+ * Anything unparseable fails closed.
+ *
+ * @param {unknown} url - the model-supplied `url` prop.
+ * @param {string} selfHref - the embedding page's href (`window.location.href`).
+ * @returns {string} the `sandbox` attribute value.
+ */
+export function sandboxFor (url, selfHref) {
+  if (typeof url !== 'string' || url.trim() === '') return STRICT_SANDBOX
+  let target, self
+  try {
+    target = new URL(url, selfHref)
+    self = new URL(selfHref)
+  } catch { return STRICT_SANDBOX }
+  if (target.protocol !== 'http:' && target.protocol !== 'https:') return STRICT_SANDBOX
+  if (target.hostname === '' || target.hostname === self.hostname) return STRICT_SANDBOX
+  return SAME_ORIGIN_SANDBOX
+}

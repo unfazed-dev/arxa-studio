@@ -59,6 +59,24 @@ window.__ModuleLoader__.load({
     const muted = { color: 'var(--dsw-alias-label-tertiary, #888)' }
     const accent = 'var(--dsw-static-deepseek-450, rgb(122,149,87))'
 
+    // Mirrors `sandboxFor` in lib/catalog.js — this factory cannot import it
+    // (the ModuleLoader gives us `require('react')` and nothing else), the same
+    // reason DEFAULT_RUNGS is duplicated above. selftest.mjs runs ONE table
+    // against both copies, so drift fails the suite rather than the browser.
+    const STRICT_SANDBOX = 'allow-scripts allow-forms'
+    const SAME_ORIGIN_SANDBOX = 'allow-scripts allow-forms allow-same-origin'
+    function sandboxFor (url, selfHref) {
+      if (typeof url !== 'string' || url.trim() === '') return STRICT_SANDBOX
+      let target, self
+      try {
+        target = new URL(url, selfHref)
+        self = new URL(selfHref)
+      } catch { return STRICT_SANDBOX }
+      if (target.protocol !== 'http:' && target.protocol !== 'https:') return STRICT_SANDBOX
+      if (target.hostname === '' || target.hostname === self.hostname) return STRICT_SANDBOX
+      return SAME_ORIGIN_SANDBOX
+    }
+
     // ---- the catalogue renderers -----------------------------------------
     // One function per catalogue entry in lib/catalog.js. Every prop is
     // treated as untrusted and defaulted: the payload is model-authored, so a
@@ -155,12 +173,18 @@ window.__ModuleLoader__.load({
             src: url,
             width: w,
             height: hgt,
-            // The design server is first-party and same-machine, but this is
-            // still model-supplied markup rendering in our origin: keep it
-            // scripted-but-not-same-origin so it cannot reach our DOM or
-            // storage. See plan decision 19 — allow-same-origin here would
-            // silently mean no sandbox at all.
-            sandbox: 'allow-scripts allow-forms',
+            // `url` arrives in model-supplied tool args, so it is sandboxed —
+            // unlike the design panel's iframe, whose URL the operator typed.
+            //
+            // Decision 19 said allow-same-origin "would silently mean no
+            // sandbox at all". That is true ONLY when the frame is same-origin
+            // with us (MDN: the escape is conditional), and withholding it
+            // unconditionally gave the frame an OPAQUE origin — which is why
+            // every ladder rendered black while the panel rendered fine: a
+            // server-rendered artifact cannot boot without its own origin.
+            // sandboxFor grants it only for a genuinely foreign http(s) host
+            // and fails closed on everything else.
+            sandbox: sandboxFor(url, window.location.href),
             style: {
               border: 0, transform: `scale(${scale})`, transformOrigin: 'top left',
               background: '#fff',
