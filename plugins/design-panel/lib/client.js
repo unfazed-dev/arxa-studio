@@ -15,8 +15,10 @@
 // remounts the iframe when the design server pushes a `reload` frame on its
 // /__events SSE stream (cross-origin — see the effect below for the
 // --trusted-origin it requires), and on demand via ⟳. Direct manipulation
-// (drag → engine `design patch` verb) is deferred until that verb exists,
-// per H4.
+// lives in the served page's Design Dial island (Design Mode); this panel
+// additionally subscribes to /__dial/events and surfaces 'commit' frames —
+// the Author's request for the agent to patch artifact source (locked
+// amendment 2026-08-23, decision 2).
 window.__ModuleLoader__.load({
   id: 'arxa-design-panel',
   factory: (require) => {
@@ -120,6 +122,26 @@ window.__ModuleLoader__.load({
         return () => es.close()
       }, [open, url])
 
+      // Design Mode's commit socket (locked amendment 2026-08-23, decision
+      // 2): the Author clicks 'Request commit' in the dial island, the
+      // design server broadcasts the draft as structured patch ops on
+      // /__dial/events, and this banner hands them to the agent — it runs
+      // `appbox design patch` per op (tokens go to the token sheet) and
+      // clears the draft on success. Same cross-origin rule as /__events:
+      // one trusted-origin entry covers both streams.
+      const [commitReq, setCommitReq] = React.useState(null)
+      React.useEffect(() => {
+        if (!open) return
+        let es
+        try { es = new EventSource(new URL('/__dial/events', url).href) } catch { return }
+        es.addEventListener('dial', (ev) => {
+          let msg
+          try { msg = JSON.parse(ev.data) } catch { return }
+          if (msg && msg.kind === 'commit' && msg.data) setCommitReq(msg.data)
+        })
+        return () => es.close()
+      }, [open, url])
+
       if (!open) {
         return h('button', {
           onClick: () => setOpen(true),
@@ -186,6 +208,35 @@ window.__ModuleLoader__.load({
               background: '#0d0d10', color: '#ddd', border: '1px solid #444',
             },
           })),
+        commitReq && h('div', {
+          style: {
+            margin: '0 8px 8px', padding: 8, border: '1px solid #8a6d3b',
+            borderRadius: 6, background: '#1f1a12', color: '#e8d9b8',
+          },
+        },
+          h('div', { style: { fontWeight: 600, marginBottom: 4 } },
+            'commit requested — ' + (commitReq.ops || []).length + ' ops · '
+              + Object.keys(commitReq.tokens || {}).length + ' tokens'),
+          h('div', { style: { color: '#a89f8a', fontSize: 11, marginBottom: 6 } },
+            (commitReq.artifact || 'artifact')
+              + ' — copy the ops for the agent; it runs design patch, re-runs gates, clears the draft'),
+          h('div', { style: { display: 'flex', gap: 6 } },
+            h('button', {
+              onClick: () => {
+                try { navigator.clipboard.writeText(JSON.stringify(commitReq, null, 2)) } catch (_) {}
+              },
+              style: {
+                padding: '3px 8px', cursor: 'pointer', borderRadius: 4,
+                border: '1px solid #666', background: '#222', color: '#eee',
+              },
+            }, 'copy ops'),
+            h('button', {
+              onClick: () => setCommitReq(null),
+              style: {
+                marginLeft: 'auto', padding: '3px 8px', cursor: 'pointer',
+                background: 'none', border: 'none', color: '#a89f8a',
+              },
+            }, 'dismiss'))),
         // Still scrolls; just no bar. The design server hides the scrollbars
         // INSIDE the frame (it injects CSS for a framed navigation, which we
         // cannot do from here — the frame is cross-origin); this is the dock's
