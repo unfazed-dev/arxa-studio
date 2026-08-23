@@ -731,57 +731,72 @@ check('folded calls render ONE growing card plus one-line stubs', () => {
     'the host re-render draws the grown surface — one card, assembling')
 })
 
-check('surfaceWarm is the glow clock — fresh warm, lapsed cold, replay cold', () => {
+check('the arrival window owns the accent — and the warm clock is GONE', () => {
+  // The 1500ms warmth window only ever fired as a tail pulse right after the
+  // last node's entrance (cadence 705ms < arrival window closes every gap),
+  // reading as a phantom second ring on the last node (operator report, run
+  // call_c944d223). It was removed, not retuned — pin its absence so the
+  // tail pulse cannot sneak back in under a new name.
   const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
-  const start = src.indexOf('const SURFACE_WARM_MS')
-  assert.ok(start > 0, 'client.js no longer defines the warmth clock')
-  const end = src.indexOf('\n    }', src.indexOf('function surfaceArriving', src.indexOf('function surfaceWarm', start)))
+  assert.ok(!src.includes('SURFACE_WARM_MS'), 'the warm window constant must stay deleted')
+  assert.ok(!src.includes('surfaceWarm'), 'the warm clock function must stay deleted')
+  const start = src.indexOf('const ARRIVAL_MS')
+  assert.ok(start > 0, 'client.js no longer defines the arrival window')
+  const end = src.indexOf('\n    }', src.indexOf('function surfaceArriving', start))
   assert.ok(end > start, 'could not find the end of surfaceArriving')
   // eslint-disable-next-line no-new-func
-  const { surfaceWarm, SURFACE_WARM_MS, surfaceArriving, ARRIVAL_MS } = new Function(
-    `${src.slice(start, end + 6)}; return { surfaceWarm, SURFACE_WARM_MS, surfaceArriving, ARRIVAL_MS }`)()
+  const { surfaceArriving, ARRIVAL_MS } = new Function(
+    `${src.slice(start, end + 6)}; return { surfaceArriving, ARRIVAL_MS }`)()
   const now = Date.now()
-  assert.equal(surfaceWarm(now, now), true, 'a change right now is warm')
-  assert.equal(surfaceWarm(now - (SURFACE_WARM_MS - 1), now), true, 'still warm just inside the window')
-  assert.equal(surfaceWarm(now - SURFACE_WARM_MS, now), false, 'the window lapses exactly at the boundary')
-  assert.equal(surfaceWarm(now - 60_000, now), false, 'replay/scrollback is cold — no shimmer on history')
-  assert.equal(surfaceWarm(undefined, now), false, 'no timestamp -> cold, never crash')
-
-  // The arrival window: while a node's entrance plays, IT owns the accent.
   assert.equal(ARRIVAL_MS, 850, 'ring 600 + rise 250 — the window a fresh arrival owns')
   assert.equal(surfaceArriving(now, now), true, 'a change right now is arriving')
   assert.equal(surfaceArriving(now - (ARRIVAL_MS - 1), now), true, 'the entrance still plays')
-  assert.equal(surfaceArriving(now - ARRIVAL_MS, now), false, 'the card ring may fill the gap after it')
+  assert.equal(surfaceArriving(now - ARRIVAL_MS, now), false, 'the arrival window ends exactly at the boundary')
+  assert.equal(surfaceArriving(now - 60_000, now), false, 'replay/scrollback is never arriving')
   assert.equal(surfaceArriving(undefined, now), false, 'no timestamp -> not arriving, never crash')
 })
 
-check('the card ring yields to an arrival and fills only the gap', () => {
-  // glm-5.3 settles each call in milliseconds, so the glow cannot hang off
-  // tool pending — it hangs off surface warmth. These blocks are SETTLED:
-  // any glow on them comes from the warmth clock and nothing else. And the
-  // ring must never compete with an in-flight entrance (operator report:
-  // two rings of different sizes at the button).
+check('the card ring means EXECUTING — it yields to arrivals and never tails', () => {
+  // Contract after run call_c944d223: the card-level ring shows only while
+  // THIS block is still executing AND no entrance is playing. Settled
+  // surfaces never glow — the warm tail pulse read as the last node getting
+  // a second ring (operator report). The RungLadder boot glow is per-rung,
+  // unaffected.
   const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
-  assert.ok(src.includes('!settled || (warm && !arriving)'),
-    'the card ring must glow while pending, or warm AND NOT arriving')
-  assert.ok(src.includes('setTimeout(() => setWarmNow(Date.now()), arriveEnds + 30)'),
-    'the lapse effect must TICK at the arrival boundary or the ring never turns back on in the gap')
+  assert.ok(src.includes('!settled && !arriving ? GLOW_CLASS : undefined'),
+    'the card ring must require EXECUTING and NOT arriving — nothing else')
+  assert.ok(src.includes('setTimeout(() => setClockNow(Date.now()), arriveEnds + 30)'),
+    'the effect must TICK at the arrival boundary or a running block never starts its ring')
   const comps = [
     { id: 'card', component: 'Card', children: ['t'] },
     { id: 't', component: 'Text', text: 'WARM_MARKER' },
   ]
+  // Settled blocks: cold in every temporal state — no tail pulse, ever.
   const fresh = renderSurfaceForTest(comps, Date.now())
   assert.ok(!fresh.classes.includes('arxa-genui-pending'),
-    'a change this instant is ARRIVING — the node ring owns the accent, not the card')
+    'settled + arriving: the node ring owns the accent')
   const gap = renderSurfaceForTest(comps, Date.now() - 1000)
-  assert.ok(gap.classes.includes('arxa-genui-pending'),
-    'past the arrival window but still warm: the card ring fills the gap')
+  assert.ok(!gap.classes.includes('arxa-genui-pending'),
+    'settled + just past the arrival window: NO tail pulse (the run-12 bug)')
   const stale = renderSurfaceForTest(comps, Date.now() - 60_000)
   assert.ok(!stale.classes.includes('arxa-genui-pending'),
     'a surface assembled a minute ago must stand still')
   const timeless = renderSurfaceForTest(comps)
   assert.ok(!timeless.classes.includes('arxa-genui-pending'),
     'no timestamp -> cold (fail closed, same as the entrance)')
+  // A RUNNING block: the ring yields while an entrance plays and shows only
+  // once the arrival is over — the executing signal the glow exists for.
+  const ToolView = loadToolView()
+  const runningBlock = (callId, time, title) => ({
+    toolName: 'gen_ui',
+    block: { callId, time, argsRaw: JSON.stringify({ title, components: comps }) },
+  })
+  const runFresh = walkTree(ToolView(runningBlock('run_f', Date.now(), 'Exec fresh')))
+  assert.ok(!runFresh.classes.includes('arxa-genui-pending'),
+    'executing but ARRIVING: the entrance owns the accent')
+  const runGap = walkTree(ToolView(runningBlock('run_g', Date.now() - 1000, 'Exec gap')))
+  assert.ok(runGap.classes.includes('arxa-genui-pending'),
+    'executing past the arrival window: the card ring says still working')
 })
 
 check('every component in a live surface enters individually — nested children cascade', () => {
@@ -804,9 +819,13 @@ check('every component in a live surface enters individually — nested children
   for (const id of kids) assert.ok(out.text.includes('CASC_' + id.toUpperCase()),
     id + ' must be drawn inside its card')
   const enters = out.classes.filter((c) => c === 'arxa-genui-enter')
-  assert.equal(enters.length, 10, 'card + 9 children each carry the entrance class')
-  assert.equal(out.pairs.length, 10, 'every ring host is present')
+  assert.equal(enters.length, 9, 'the 9 children carry ring hosts — the Card rises ringless')
+  assert.equal(out.pairs.length, 9, 'every ring host is present')
   assert.ok(out.pairs.every(Boolean), 'every ring host wraps exactly one rise box')
+  assert.ok(src.includes("if (entry?.component === 'Card')"),
+    'the Card ringless branch must exist — a growing container has no honest ring size')
+  assert.ok(src.includes("style: { animationDelay: delay + 'ms' }"),
+    'the ringless Card must NOT wait out the 600ms ring offset — no ring leads it')
   assert.deepEqual(out.delays,
     ['90ms', '180ms', '270ms', '360ms', '450ms', '540ms', '630ms', '720ms', '720ms'],
     'children cascade 90ms apart in reading order, capped at the researched max')
@@ -815,20 +834,23 @@ check('every component in a live surface enters individually — nested children
 check('the ring hugs each node UI — leaves shrink-wrap, structure keeps the row', () => {
   // Operator clip 10.22.28: every ring was an identical full-row strip. The
   // ring is the wrapper's ::after, so the wrapper must BE the node's size:
-  // fit-content for ink-sized leaves, never for structural/measuring boxes.
+  // fit-content for ink-sized leaves AND the Button pill (inline-block in
+  // the real renderer — the row-wide bar was a fixture fiction), never for
+  // structural/measuring boxes.
   const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
-  assert.ok(src.includes("const FIT_RING = new Set(['Text', 'Heading', 'Icon'])"),
-    'exactly Text/Heading/Icon shrink-wrap — the set is the contract')
+  assert.ok(src.includes("const FIT_RING = new Set(['Text', 'Heading', 'Icon', 'Button'])"),
+    'exactly Text/Heading/Icon/Button shrink-wrap — the set is the contract')
   const comps = [
-    { id: 'card', component: 'Card', children: ['hd', 't', 'ico'] },
+    { id: 'card', component: 'Card', children: ['hd', 't', 'ico', 'btn'] },
     { id: 'hd', component: 'Heading', text: 'HUG_HEAD' },
     { id: 't', component: 'Text', text: 'HUG_TEXT' },
     { id: 'ico', component: 'Icon', name: 'check' },
+    { id: 'btn', component: 'Button', label: 'HUG_BTN', tone: 'primary' },
   ]
   const live = renderSurfaceForTest(comps, Date.now() + 60_000)
   const enters = live.classes.filter((c) => c === 'arxa-genui-enter')
-  assert.equal(enters.length, 4, 'card + 3 children each wrapped')
-  assert.equal(live.fits.length, 3, 'heading, text and icon hug their ink — the card does not')
+  assert.equal(enters.length, 4, '4 children wrapped — the Card rises ringless')
+  assert.equal(live.fits.length, 4, 'heading, text, icon and the button pill hug their ink')
   const replay = renderSurfaceForTest(comps)
   assert.equal(replay.fits.length, 0, 'replay has no wrappers at all')
 })

@@ -68,11 +68,11 @@ window.__ModuleLoader__.load({
     //    node does; measured in session e0b1b8ce the card mounts 37ms after
     //    the call and 26s after the user hit enter. Those 26s are the model
     //    thinking, and no card exists to glow.
-    //  - The window that IS real is the iframe boot: a RungLadder frames a
-    //    live `appbox design serve`, and that app takes seconds to come up.
-    //    That is the wait the user actually watches, so that is what glows.
-    //    For stepwise surfaces the wait lives BETWEEN calls instead — the
-    //    warmth clock below (surfaceWarm) covers that one.
+    //  - The window that IS real is a genuinely slow execution: the block is
+    //    still running and nothing is arriving. That is the only time this
+    //    ring shows (!settled && !arriving at the toolview below). The
+    //    RungLadder iframe boot glows per-rung on its own state, and the
+    //    stepwise-assembly gap is covered by the entrance rings themselves.
     //
     // Technique: a masked conic-gradient on ::after paints ONLY the 1px ring
     // (mask-composite cuts the interior out), and the sweep is an animated
@@ -116,31 +116,24 @@ window.__ModuleLoader__.load({
       return true
     }
 
-    // ---- surface warmth ----------------------------------------------------
+    // ---- the arrival window ------------------------------------------------
     //
-    // The pending glow was built when the only real wait was an iframe boot.
-    // Stepwise assembly moved the wait: glm-5.3 delivers each call whole (no
-    // argument streaming — the §7 measurement) and execute settles in
-    // milliseconds, so tool PENDING lasts a frame or two and a glow bound to
-    // it never shows. The wait the user actually watches is BETWEEN calls
-    // (~700ms measured cadence, session e0b1b8ce), when every block in the
-    // chain is already settled. So the host card glows while its surface is
-    // WARM — changed within the last SURFACE_WARM_MS. 1500ms is ~2x the
-    // observed cadence: long enough to bridge the gap between steps, short
-    // enough that a finished surface stops shimmering promptly. Replay is
-    // cold for free — folded timestamps are old — so scrollback paints
-    // instantly, the same promise claimReveal makes for the entrance.
-    const SURFACE_WARM_MS = 1500
-    function surfaceWarm (lastChangeAt, now) {
-      return typeof lastChangeAt === 'number' && now - lastChangeAt < SURFACE_WARM_MS
-    }
-
     // A fresh arrival OWNS the accent: its ring sweeps (600ms) and its content
-    // rises (250ms). If the warm card ring kept sweeping during that window the
-    // screen shows TWO rings of different sizes at once — conspicuous exactly
-    // at full-width nodes like the CTA (operator report, sim recording). So
-    // the card ring yields while an arrival plays and only fills the genuine
-    // gap AFTER it — the "more may be coming" wait it was built for.
+    // rises (250ms). While that plays, the card-level ring stands down — two
+    // rings of different sizes at once is the double-ring the operator kept
+    // reporting (clip 10.22.28; runs call_6015227 and call_c944d223).
+    //
+    // There is deliberately NO warm/tail clock. The warmth window this
+    // replaced (1500ms after the last change) only ever manifested as a TAIL
+    // PULSE: the measured cadence (705ms, session e0b1b8ce) is shorter than
+    // the arrival window, so the card ring never bridged a real gap — it
+    // fired exactly once per surface, right after the LAST node finished, and
+    // read as that node getting a second ring (operator report, run
+    // call_c944d223). What remains is the honest signal: the card ring means
+    // THIS BLOCK IS STILL EXECUTING (a genuinely slow gen_ui call — the
+    // RungLadder iframe boot glows per-rung on its own), always yielding to
+    // an arrival. Sub-second executions never show it, which is correct: the
+    // entrance rings ARE the loading choreography.
     const ARRIVAL_MS = 850
     function surfaceArriving (lastChangeAt, now) {
       return typeof lastChangeAt === 'number' && now - lastChangeAt < ARRIVAL_MS
@@ -753,16 +746,17 @@ window.__ModuleLoader__.load({
 
     // Components whose visible ink is smaller than their block box: Text and
     // Heading render full-width blocks for one left-aligned line, Icon a
-    // 16px glyph. A block wrapper would sweep the ring around the whole ROW
-    // regardless of content — identical strips for every node, the "uniform"
-    // half of the operator's ring report (clip 10.22.28). fit-content shrinks
-    // the wrapper to the ink so the ring is the size of the NODE.
-    // Deliberately NOT: Card (its border box IS its size), Choice/Diff
-    // (full-width widgets by design), RungLadder (measures its container —
-    // shrink-wrap breaks the scale math), Image (pre-load there is no
-    // intrinsic size — the wrapper would collapse), Button (the established
-    // CTA design is a full-width bar; shrink-wrap could collapse it).
-    const FIT_RING = new Set(['Text', 'Heading', 'Icon'])
+    // 16px glyph, Button an inline-block PILL (no width in its style — the
+    // "full-width CTA bar" assumption came from the sim fixture's block div,
+    // not the real renderer; measured against client.js Button 2026-08-23).
+    // A block wrapper would sweep the ring around the whole ROW regardless
+    // of content — the ring must be the size of the NODE (operator
+    // directive), so fit-content shrinks the wrapper to the ink.
+    // Deliberately NOT: Card (a growing container — it rises ringless, see
+    // renderEntry), Choice/Diff (full-width widgets by design), RungLadder
+    // (measures its container — shrink-wrap breaks the scale math), Image
+    // (pre-load there is no intrinsic size — the wrapper would collapse).
+    const FIT_RING = new Set(['Text', 'Heading', 'Icon', 'Button'])
 
     // Renderers needing surface identity get it as a second argument rather
     // than as props, so a model-authored prop can never shadow surfaceId or
@@ -801,6 +795,20 @@ window.__ModuleLoader__.load({
         const n = batchCounts.get(seenAt) ?? 0
         batchCounts.set(seenAt, n + 1)
         delay = cascadeDelay(n)
+      }
+      // A Card rises RINGLESS. Its box at mount is not the node it produces:
+      // in a stepwise assembly the first call lands an EMPTY card (children:[]
+      // — measured, run call_c944d223) whose 26px sliver gets a ring, and the
+      // card the user ends up with never does. The ring must be the size of
+      // the node it announces (operator directive), a growing container has
+      // no honest size at mount, and its children each ring on their own
+      // arrival — so the container simply rises, at its batch delay with NO
+      // 600ms ring offset (there is no ring to wait for).
+      if (entry?.component === 'Card') {
+        return h('div', {
+          key: id, className: RISE_CLASS,
+          style: { animationDelay: delay + 'ms' },
+        }, h(RendererHost, hostProps))
       }
       // Ring host outside, rise box inside — the host must NEVER fade or it
       // takes its ::after ring down with it (pseudo-elements share host
@@ -1070,22 +1078,18 @@ window.__ModuleLoader__.load({
       React.useEffect(
         () => subscribeToSurface(fold.key, () => setFoldVersion((v) => v + 1)),
         [fold.key])
-      // Warmth is time-based, so the card must re-render at each window
-      // BOUNDARY: when the arrival window ends (the card ring's turn to fill
-      // the gap) and when warmth lapses. Growth already re-renders via the
-      // subscription above. Two timeouts per change, never an interval.
-      const [warmNow, setWarmNow] = React.useState(() => Date.now())
+      // The arrival window is time-based, so the card must re-render when it
+      // ENDS: while this block is still executing, that is the moment the
+      // card ring may switch on. Growth already re-renders via the
+      // subscription above. One timeout per change, never an interval.
+      const [clockNow, setClockNow] = React.useState(() => Date.now())
       React.useEffect(() => {
-        const now = Date.now()
-        const arriveEnds = fold.lastChangeAt + ARRIVAL_MS - now
-        const warmEnds = fold.lastChangeAt + SURFACE_WARM_MS - now
-        const timers = []
-        if (arriveEnds > 0) timers.push(setTimeout(() => setWarmNow(Date.now()), arriveEnds + 30))
-        if (warmEnds > 0) timers.push(setTimeout(() => setWarmNow(Date.now()), warmEnds + 30))
-        return () => timers.forEach(clearTimeout)
+        const arriveEnds = fold.lastChangeAt + ARRIVAL_MS - Date.now()
+        if (arriveEnds <= 0) return undefined
+        const t = setTimeout(() => setClockNow(Date.now()), arriveEnds + 30)
+        return () => clearTimeout(t)
       }, [fold.lastChangeAt])
-      const warm = surfaceWarm(fold.lastChangeAt, warmNow)
-      const arriving = surfaceArriving(fold.lastChangeAt, warmNow)
+      const arriving = surfaceArriving(fold.lastChangeAt, clockNow)
 
       if (failed) {
         const text = (block.content ?? [])
@@ -1108,9 +1112,12 @@ window.__ModuleLoader__.load({
       // The host renders the LEDGER's current snapshot, not this block's own:
       // later folded calls grow this card in place, each new child arriving
       // with the enter animation.
-      // The card ring yields to an arrival: exactly one accent ring plays at
-      // a time — the node's own while it enters, the card's only in the gap.
-      return h('div', { className: !settled || (warm && !arriving) ? GLOW_CLASS : undefined, style: card },
+      // The card ring means EXECUTING, and even then it yields to an
+      // arrival: exactly one accent ring plays at a time — the node's own
+      // while it enters, the card's only while the tool runs and nothing is
+      // entering. No tail pulse: once the block settles, the surface is
+      // done and says so by standing still (run call_c944d223).
+      return h('div', { className: !settled && !arriving ? GLOW_CLASS : undefined, style: card },
         h('div', {
           style: {
             display: 'flex', alignItems: 'center', gap: 8,

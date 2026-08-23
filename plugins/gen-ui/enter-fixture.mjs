@@ -117,12 +117,19 @@ writeFileSync(liveOut, live)
 console.log('wrote', liveOut)
 
 // ---- the studio sim (faithful reproduction) -------------------------------
-// The tenth run's actual payload and cadence (session e0b1b8ce, 2026-08-23:
-// 8 fold steps ~705ms apart, one component per call, pcta last at 4936ms) on
-// the REAL stylesheets: a toolview div carrying the warm ring, the card
-// component, children inserted at their measured arrival times, stubs below.
-// ?warm=always reproduces the pre-fix double ring at the button;
-// ?warm=fixed plays the arrival-suppressed state machine.
+// The twelfth run's actual payload and cadence (session e0b1b8ce, run
+// call_c944d223, 2026-08-23: 8 fold steps ~705ms apart, one component per
+// call, pcta last at 4935ms, root settles ~10ms later) on the REAL
+// stylesheets. Post-fix contract being demonstrated:
+//  - every CONTENT node gets exactly one ring, sized to its box (the button
+//    is an inline-block PILL in the real renderer — the old full-width .cta
+//    bar was a fixture fiction that hid the row-sized ring);
+//  - the Card rises RINGLESS (its mount box is an empty sliver, not the
+//    node it produces);
+//  - the card-level ring means EXECUTING and yields to every arrival. With
+//    the measured 705ms cadence it therefore never shows (each gap is
+//    shorter than the 850ms arrival window) and there is NO tail pulse.
+//    ?gap=2500 widens the last gap so the executing ring honestly appears.
 const SIM_CSS = [
   '.tv { position: relative; max-width: 560px; margin: 24px auto; border-radius: 10px;',
   '  border: 1px solid #2a2a2e; padding: 12px 14px; background: #1b1b1f; }',
@@ -130,20 +137,44 @@ const SIM_CSS = [
   '.stub { color: #777; font-size: 12px; padding: 2px 0; }',
 ].join('\n')
 
-// The card container is one entering node; its children arrive one per fold
-// step. Each is rendered as the real two boxes (ring host > rise box).
+// The card container rises ringless; its children arrive one per fold step,
+// each as the real two boxes (ring host > rise box).
 const CARD_HTML = '<div id="pcard" style="border: 1px solid #333; border-radius: 8px;' +
   ' padding: 12px; display: flex; flex-direction: column; gap: 8px"></div>'
+const PILL = '<button type="button" disabled style="padding: 5px 12px; border-radius: 6px;' +
+  ' border: 1px solid ' + ACCENT + ';' +
+  ' background: ' + ACCENT + '; color: #0d0d10; font-weight: 600; font: inherit">Start free</button>'
 const SIM_STEPS = [
-  { t: 0, html: CARD_HTML, fit: false, host: true },
-  { t: 705, html: '<div class="hd">Studio</div>', fit: true },
-  { t: 1410, html: '<p>$29 / month</p>', fit: true },
-  { t: 2115, html: '<p>\u2713 Fast setup</p>', fit: true },
-  { t: 2820, html: '<p>\u2713 Unlimited projects</p>', fit: true },
-  { t: 3525, html: '<p>\u2713 Team roles</p>', fit: true },
-  { t: 4230, html: '<p>\u2713 Priority support</p>', fit: true },
-  { t: 4935, html: '<div class="cta">Start free</div>', fit: false },
+  { t: 0, html: CARD_HTML, host: true, nid: 'pcard' },
+  { t: 705, html: '<div class="hd">Studio</div>', fit: true, nid: 'phdr' },
+  { t: 1410, html: '<p>$29 / month</p>', fit: true, nid: 'pprice' },
+  { t: 2115, html: '<p>\u2713 Fast setup</p>', fit: true, nid: 'pf1' },
+  { t: 2820, html: '<p>\u2713 Unlimited projects</p>', fit: true, nid: 'pf2' },
+  { t: 3525, html: '<p>\u2713 Team roles</p>', fit: true, nid: 'pf3' },
+  { t: 4230, html: '<p>\u2713 Priority support</p>', fit: true, nid: 'pf4' },
+  { t: 4935, html: PILL, fit: true, nid: 'pcta' },
 ]
+
+// Evidence ledger (fixture-only): every arxa animation event with the
+// target's live box. Pseudo-element animations target their originating
+// element in Chromium (pseudoElement carries '::after'), so the ring is a
+// first-class row here. Read it back with:
+//   appbox lens eval file://<sim> 'JSON.stringify(window.__LEDGER__)' --settle=9000
+const LEDGER_JS = [
+  'window.__LEDGER__ = [];',
+  'function __rec(e) {',
+  '  if (!e.animationName || e.animationName.indexOf("arxa") < 0) return;',
+  '  const r = e.target.getBoundingClientRect();',
+  '  window.__LEDGER__.push({ ev: e.type, anim: e.animationName,',
+  '    pe: e.pseudoElement || "",',
+  '    node: (e.target.dataset && e.target.dataset.node) || e.target.id || e.target.className,',
+  '    t: Math.round(e.timeStamp), w: Math.round(r.width), h: Math.round(r.height),',
+  '    x: Math.round(r.x), y: Math.round(r.y) });',
+  '}',
+  'document.addEventListener("animationstart", __rec, true);',
+  'document.addEventListener("animationend", __rec, true);',
+  'document.addEventListener("animationiteration", __rec, true);',
+].join(' ')
 
 const simHtml = [
   '<!doctype html><meta charset="utf-8"><title>studio sim</title>',
@@ -152,24 +183,32 @@ const simHtml = [
   '<style>' + SCAFFOLD + SIM_CSS + '</style>',
   '<div class="tv" id="tv"><div class="tv-h">Studio pricing card</div><div id="surf"></div></div>',
   '<div id="stubs" style="max-width:560px;margin:0 auto"></div>',
-  '<script>const NODES = ' + JSON.stringify(SIM_STEPS) + ';',
-  'const FIX = location.search.includes("warm=fixed");',
+  '<script>' + LEDGER_JS,
+  'const NODES = ' + JSON.stringify(SIM_STEPS) + ';',
+  'const GAP = parseInt((location.search.match(/gap=(\\d+)/) || [0, "0"])[1], 10);',
+  'if (GAP > 0) NODES[NODES.length - 1].t += GAP;',
+  'const EXEC_UNTIL = NODES[NODES.length - 1].t + 10; // root settles with the last sub-call (7ms measured)',
   'const FITCSS = ' + JSON.stringify(FIT) + ';',
   'const tv = document.getElementById("tv"), surf = document.getElementById("surf"), stubs = document.getElementById("stubs");',
-  'function enterBox(n) { const h = document.createElement("div"); h.className = "arxa-genui-enter";',
+  'function enterBox(n) { const h = document.createElement("div"); h.className = "arxa-genui-enter"; h.dataset.node = n.nid;',
   '  if (n.fit) h.style.cssText = FITCSS; const r = document.createElement("div");',
   '  r.className = "arxa-genui-enter-rise"; r.innerHTML = n.html; h.appendChild(r); return h }',
-  'function setWarm(on) { tv.classList.toggle("arxa-genui-pending", on) }',
-  'setWarm(!FIX) // fixed mode: the arrival window owns the accent',
+  // The Card rises RINGLESS (renderEntry): a bare rise box, no ring host,
+  // no 600ms offset — there is no ring to wait for.
+  'function riseOnly(n) { const r = document.createElement("div"); r.className = "arxa-genui-enter-rise";',
+  '  r.dataset.node = n.nid; r.style.animationDelay = "0ms"; r.innerHTML = n.html; return r }',
+  // The card ring means EXECUTING and yields to every arrival: off at each
+  // arrival, on only in a gap that outlasts the 850ms arrival window while
+  // the root still runs. 705ms cadence -> never on; ?gap=2500 shows it.
+  'function glow(on) { tv.classList.toggle("arxa-genui-pending", on) }',
   'NODES.forEach((n, k) => setTimeout(() => {',
-  '  if (n.host) surf.appendChild(enterBox(n)); else document.getElementById("pcard").appendChild(enterBox(n))',
+  '  if (n.host) surf.appendChild(riseOnly(n)); else document.getElementById("pcard").appendChild(enterBox(n))',
+  '  glow(false)',
   '  if (k > 0) { const d = document.createElement("div"); d.className = "stub"; d.textContent = "\u2191 assembled into Studio pricing card \u2014 step " + (k + 1); stubs.appendChild(d) }',
   '}, n.t))',
-  '// warm state machine: always = pre-fix (on until 1500ms after the last',
-  '// arrival); fixed = suppressed while any arrival plays (600 ring + 250',
-  '// rise), then a 650ms tail pulse inside the warm window, then done.',
-  'setTimeout(() => { if (FIX) setWarm(true) }, 4935 + 850)',
-  'setTimeout(() => setWarm(false), 4935 + 1500)',
+  'NODES.forEach((n, k) => { const next = NODES[k + 1] ? NODES[k + 1].t : Infinity;',
+  '  const on = n.t + 850, off = Math.min(next, EXEC_UNTIL);',
+  '  if (off > on) { setTimeout(() => glow(true), on); setTimeout(() => glow(false), off) } })',
   '</scr' + 'ipt>',
 ].join('\n')
 const simOut = out.replace(/\.html$/, '') + '-sim.html'
