@@ -164,9 +164,14 @@ window.__ModuleLoader__.load({
     // around ITSELF once (600ms, fading out), not just the card container —
     // a ring that only circles the outer card while children pop inside reads
     // as "the card glows, nothing inside does" (operator report 2026-08-23).
-    // Rise and ring share --arxa-enter-delay so the sweep starts exactly when
-    // the node moves; the delay is a custom property because animation-delay
-    // on the wrapper cannot reach the ::after. The ring reuses the registered
+    // The ring LEADS, strictly (operator directive, same day: the clip showed
+    // ring and content playing TOGETHER — "the ring must always be before the
+    // node ui"): the sweep runs [delay, delay+600ms], the rise only starts
+    // when the sweep completes. The ring therefore orbits the node's final
+    // box while the content is still invisible (fill both holds frame one) —
+    // the classic shimmer-then-content order, per node.
+    // --arxa-enter-delay is a custom property because animation-delay on the
+    // wrapper cannot reach the ::after. The ring reuses the registered
     // --arxa-glow-angle from GLOW_CSS (apply() installs both), one-shot —
     // infinite belongs to the warm glow alone. Reduced motion hides the ring
     // outright: a static substitute for a one-shot accent is just noise.
@@ -181,7 +186,7 @@ window.__ModuleLoader__.load({
 .${ENTER_CLASS} {
   position: relative;
   animation: arxa-genui-enter ${ENTER_MS}ms cubic-bezier(0.05, 0.7, 0.1, 1) both;
-  animation-delay: var(--arxa-enter-delay, 0ms);
+  animation-delay: calc(var(--arxa-enter-delay, 0ms) + 600ms);
 }
 .${ENTER_CLASS}::after {
   content: ''; position: absolute; inset: 0; border-radius: inherit;
@@ -720,6 +725,19 @@ window.__ModuleLoader__.load({
       return components
     }
 
+    // Components whose visible ink is smaller than their block box: Text and
+    // Heading render full-width blocks for one left-aligned line, Icon a
+    // 16px glyph. A block wrapper would sweep the ring around the whole ROW
+    // regardless of content — identical strips for every node, the "uniform"
+    // half of the operator's ring report (clip 10.22.28). fit-content shrinks
+    // the wrapper to the ink so the ring is the size of the NODE.
+    // Deliberately NOT: Card (its border box IS its size), Choice/Diff
+    // (full-width widgets by design), RungLadder (measures its container —
+    // shrink-wrap breaks the scale math), Image (pre-load there is no
+    // intrinsic size — the wrapper would collapse), Button (the established
+    // CTA design is a full-width bar; shrink-wrap could collapse it).
+    const FIT_RING = new Set(['Text', 'Heading', 'Icon'])
+
     // Renderers needing surface identity get it as a second argument rather
     // than as props, so a model-authored prop can never shadow surfaceId or
     // componentId — the two keys the durable selection record is stored under.
@@ -760,11 +778,16 @@ window.__ModuleLoader__.load({
       }
       return h('div', {
         key: id, className: ENTER_CLASS,
-        // A custom property, not animationDelay: the rise AND the ring on
-        // ::after must start together, and a shorthand delay on the wrapper
-        // cannot reach the pseudo-element. React passes custom properties
-        // through style untouched.
-        style: delay > 0 ? { '--arxa-enter-delay': delay + 'ms' } : undefined,
+        // The delay is a custom property, not animationDelay: the ring on
+        // ::after must read it too, and a shorthand delay on the wrapper
+        // cannot reach a pseudo-element. React passes custom properties
+        // through style untouched. fit-content is the ring's size contract
+        // (FIT_RING above) — harmless to the rise, which only translates.
+        style: {
+          ...(delay > 0 ? { '--arxa-enter-delay': delay + 'ms' } : null),
+          ...(FIT_RING.has(entry?.component)
+            ? { width: 'fit-content', maxWidth: '100%' } : null),
+        },
       }, h(RendererHost, hostProps))
     }
 

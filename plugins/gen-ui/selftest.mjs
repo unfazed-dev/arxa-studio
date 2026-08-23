@@ -377,6 +377,7 @@ function walkTree (tree) {
   const strings = []
   const classes = []
   const delays = []
+  const fits = []
   const walk = (node, depth) => {
     if (depth > 60) throw new Error('render did not terminate — a cycle reached the renderer')
     if (node === null || node === undefined || node === false) return
@@ -386,6 +387,7 @@ function walkTree (tree) {
     if (typeof node.props?.className === 'string') classes.push(node.props.className)
     const delay = node.props?.style?.['--arxa-enter-delay']
     if (typeof delay === 'string') delays.push(delay)
+    if (node.props?.className === 'arxa-genui-enter' && node.props?.style?.width === 'fit-content') fits.push(true)
     if (typeof node.type === 'function') {
       seenTypes.push(node.type.name)
       walk(node.type(node.props, node.props), depth + 1)
@@ -395,7 +397,7 @@ function walkTree (tree) {
     walk(node.props?.children, depth + 1)
   }
   walk(tree, 0)
-  return { text: strings.join('\u0000'), types: seenTypes, classes, delays }
+  return { text: strings.join('\u0000'), types: seenTypes, classes, delays, fits }
 }
 
 // A settled tool-result block — the durable path. meta.surfaceId mirrors
@@ -558,9 +560,14 @@ check('arriving components sweep the accent ring once, aligned with their rise',
   assert.match(ENTER_CSS, /opacity: 0/, 'the ring must fade out, not linger')
   assert.ok(!/arxa-enter-ring[^;]*infinite/.test(ENTER_CSS),
     'the entrance ring is one-shot — infinite belongs to the warm glow alone')
-  // Rise and ring must share the cascade delay or they drift apart.
-  const shares = ENTER_CSS.match(/animation-delay: var\(--arxa-enter-delay, 0ms\)/g) ?? []
-  assert.equal(shares.length, 2, 'rise and ring must both read --arxa-enter-delay')
+  // The ring LEADS, strictly (operator directive): it starts at the batch
+  // delay; the rise starts only after the 600ms sweep completes.
+  const ringFirst = ENTER_CSS.match(/animation-delay: var\(--arxa-enter-delay, 0ms\);/g) ?? []
+  assert.equal(ringFirst.length, 1, 'exactly one animation starts at the batch delay — the ring')
+  assert.ok(ENTER_CSS.includes('animation-delay: calc(var(--arxa-enter-delay, 0ms) + 600ms);'),
+    'the rise must wait for the full sweep — ring before node ui, always')
+  assert.ok(ENTER_CSS.includes('arxa-enter-ring 600ms linear both'),
+    'the sweep duration the rise waits on must be the pinned 600ms')
   // The wrapper must anchor the pseudo-element.
   assert.match(ENTER_CSS, /\.arxa-genui-enter \{\s*position: relative/,
     'without position:relative the ring would anchor to the wrong box')
@@ -769,6 +776,27 @@ check('every component in a live surface enters individually — nested children
     'children cascade 90ms apart in reading order, capped at the researched max')
 })
 
+check('the ring hugs each node UI — leaves shrink-wrap, structure keeps the row', () => {
+  // Operator clip 10.22.28: every ring was an identical full-row strip. The
+  // ring is the wrapper's ::after, so the wrapper must BE the node's size:
+  // fit-content for ink-sized leaves, never for structural/measuring boxes.
+  const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
+  assert.ok(src.includes("const FIT_RING = new Set(['Text', 'Heading', 'Icon'])"),
+    'exactly Text/Heading/Icon shrink-wrap — the set is the contract')
+  const comps = [
+    { id: 'card', component: 'Card', children: ['hd', 't', 'ico'] },
+    { id: 'hd', component: 'Heading', text: 'HUG_HEAD' },
+    { id: 't', component: 'Text', text: 'HUG_TEXT' },
+    { id: 'ico', component: 'Icon', name: 'check' },
+  ]
+  const live = renderSurfaceForTest(comps, Date.now() + 60_000)
+  const enters = live.classes.filter((c) => c === 'arxa-genui-enter')
+  assert.equal(enters.length, 4, 'card + 3 children each wrapped')
+  assert.equal(live.fits.length, 3, 'heading, text and icon hug their ink — the card does not')
+  const replay = renderSurfaceForTest(comps)
+  assert.equal(replay.fits.length, 0, 'replay has no wrappers at all')
+})
+
 check('fold growth joins its own entrance batch — the ledger drives the cascade', () => {
   // The latch that used to draw growth "at once" is gone; the batch ledger
   // does better: each fold STEP's additions cascade from their own mount,
@@ -792,8 +820,8 @@ check('fold growth joins its own entrance batch — the ledger drives the cascad
     'the counter must advance per rendered node')
   assert.ok(src.includes('delay = cascadeDelay(n)'),
     'the batch position passes through the capped cascade step')
-  assert.ok(src.includes("style: delay > 0 ? { '--arxa-enter-delay': delay + 'ms' } : undefined"),
-    'a batch-leading node carries no delay style — it enters at its mount')
+  assert.ok(src.includes("...(delay > 0 ? { '--arxa-enter-delay': delay + 'ms' } : null),"),
+    'a batch-leading node carries no delay property — it enters at its mount')
 })
 
 check('replay never animates — only a surface born on this page does', () => {
