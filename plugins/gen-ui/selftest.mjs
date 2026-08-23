@@ -378,6 +378,7 @@ function walkTree (tree) {
   const classes = []
   const delays = []
   const fits = []
+  const bareFits = []
   const pairs = []
   const walk = (node, depth) => {
     if (depth > 60) throw new Error('render did not terminate — a cycle reached the renderer')
@@ -389,6 +390,7 @@ function walkTree (tree) {
     const delay = node.props?.style?.['--arxa-enter-delay']
     if (typeof delay === 'string') delays.push(delay)
     if (node.props?.className === 'arxa-genui-enter' && node.props?.style?.width === 'fit-content') fits.push(true)
+    if (node.props?.style?.width === 'fit-content') bareFits.push(true)
     if (node.props?.className === 'arxa-genui-enter') {
       pairs.push(node.props.children?.[0]?.props?.className === 'arxa-genui-enter-rise')
     }
@@ -401,7 +403,7 @@ function walkTree (tree) {
     walk(node.props?.children, depth + 1)
   }
   walk(tree, 0)
-  return { text: strings.join('\u0000'), types: seenTypes, classes, delays, fits, pairs }
+  return { text: strings.join('\u0000'), types: seenTypes, classes, delays, fits, bareFits, pairs }
 }
 
 // A settled tool-result block — the durable path. meta.surfaceId mirrors
@@ -852,7 +854,15 @@ check('the ring hugs each node UI — leaves shrink-wrap, structure keeps the ro
   assert.equal(enters.length, 4, '4 children wrapped — the Card rises ringless')
   assert.equal(live.fits.length, 4, 'heading, text, icon and the button pill hug their ink')
   const replay = renderSurfaceForTest(comps)
-  assert.equal(replay.fits.length, 0, 'replay has no wrappers at all')
+  assert.equal(replay.fits.length, 0, 'replay has no ANIMATION wrappers — bare means no motion, not no sizing')
+  // Operator report 2026-08-23: switch away from a finished session and back
+  // and the CTA is suddenly as wide as the card. The replay path dropped the
+  // wrapper ENTIRELY, and with it the fit-content box — the <button> has no
+  // width of its own, so the Card's flex column (align-items: stretch)
+  // stretches it to the row (measured live: 665px replay vs 83px live).
+  // Sizing is a layout contract, not an animation concern: replay keeps it.
+  assert.equal(replay.bareFits.length, 4,
+    'replay keeps the ink-sized boxes — the button pill must not stretch to the card row')
 })
 
 check('fold growth joins its own entrance batch — the ledger drives the cascade', () => {

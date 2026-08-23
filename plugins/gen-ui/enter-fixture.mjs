@@ -99,8 +99,8 @@ const LIVE_ROWS = [
   row('txt', '--arxa-enter-delay: 800ms; ' + FIT, '<div class="hd">Studio</div>'),
   '  <div class="cap">D — full-width Button bar, batch delay 1200ms</div>',
   row('bar', '--arxa-enter-delay: 1200ms', '<div class="cta">Start free</div>'),
-  '  <div class="cap">E — replay reference: no wrapper, never animates</div>',
-  '  <p>Priority support</p>',
+  '  <div class="cap">E — replay reference: sizing wrapper only, never animates</div>',
+  '  <div style="' + FIT + '"><p>Priority support</p></div>',
 ].join('\n')
 
 const live = [

@@ -788,7 +788,24 @@ window.__ModuleLoader__.load({
       // membership and pre-order position are stable under growth), so a
       // finished animation never restarts; a fold step's additions form
       // their own batch and cascade from their own mount.
-      if (reveal !== true) return h(RendererHost, { key: id, ...hostProps })
+      if (reveal !== true) {
+        // Replay/scrollback paints BARE — but bare means no MOTION, not no
+        // sizing. fit-content is a layout contract, not an animation one:
+        // the Button renderer's <button> has no width of its own, so as a
+        // direct child of the Card's flex column (align-items: stretch) it
+        // stretched to the full row the moment the live wrapper was gone —
+        // operator report: the CTA was pill-sized live and card-wide after
+        // switching sessions and back (measured 665px replay vs 83px live).
+        // The replay wrapper carries the size and nothing else: no classes,
+        // no delays, nothing to animate.
+        if (FIT_RING.has(entry?.component)) {
+          return h('div', {
+            key: id,
+            style: { width: 'fit-content', maxWidth: '100%' },
+          }, h(RendererHost, hostProps))
+        }
+        return h(RendererHost, { key: id, ...hostProps })
+      }
       const seenAt = firstSeen instanceof Map ? firstSeen.get(id) : undefined
       let delay = 0
       if (typeof seenAt === 'number') {
