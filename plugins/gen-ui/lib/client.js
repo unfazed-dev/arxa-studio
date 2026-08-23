@@ -135,6 +135,17 @@ window.__ModuleLoader__.load({
       return typeof lastChangeAt === 'number' && now - lastChangeAt < SURFACE_WARM_MS
     }
 
+    // A fresh arrival OWNS the accent: its ring sweeps (600ms) and its content
+    // rises (250ms). If the warm card ring kept sweeping during that window the
+    // screen shows TWO rings of different sizes at once — conspicuous exactly
+    // at full-width nodes like the CTA (operator report, sim recording). So
+    // the card ring yields while an arrival plays and only fills the genuine
+    // gap AFTER it — the "more may be coming" wait it was built for.
+    const ARRIVAL_MS = 850
+    function surfaceArriving (lastChangeAt, now) {
+      return typeof lastChangeAt === 'number' && now - lastChangeAt < ARRIVAL_MS
+    }
+
     // ---- the entrance animation -------------------------------------------
     //
     // One 250ms fade+rise per newly arriving component plus one ring sweep,
@@ -1059,17 +1070,22 @@ window.__ModuleLoader__.load({
       React.useEffect(
         () => subscribeToSurface(fold.key, () => setFoldVersion((v) => v + 1)),
         [fold.key])
-      // Warmth is time-based, so the card must re-render once when the window
-      // lapses — growth already re-renders via the subscription above. One
-      // timeout per change, never an interval.
+      // Warmth is time-based, so the card must re-render at each window
+      // BOUNDARY: when the arrival window ends (the card ring's turn to fill
+      // the gap) and when warmth lapses. Growth already re-renders via the
+      // subscription above. Two timeouts per change, never an interval.
       const [warmNow, setWarmNow] = React.useState(() => Date.now())
       React.useEffect(() => {
-        const remain = fold.lastChangeAt + SURFACE_WARM_MS - Date.now()
-        if (!(remain > 0)) return
-        const t = setTimeout(() => setWarmNow(Date.now()), remain + 30)
-        return () => clearTimeout(t)
+        const now = Date.now()
+        const arriveEnds = fold.lastChangeAt + ARRIVAL_MS - now
+        const warmEnds = fold.lastChangeAt + SURFACE_WARM_MS - now
+        const timers = []
+        if (arriveEnds > 0) timers.push(setTimeout(() => setWarmNow(Date.now()), arriveEnds + 30))
+        if (warmEnds > 0) timers.push(setTimeout(() => setWarmNow(Date.now()), warmEnds + 30))
+        return () => timers.forEach(clearTimeout)
       }, [fold.lastChangeAt])
       const warm = surfaceWarm(fold.lastChangeAt, warmNow)
+      const arriving = surfaceArriving(fold.lastChangeAt, warmNow)
 
       if (failed) {
         const text = (block.content ?? [])
@@ -1092,7 +1108,9 @@ window.__ModuleLoader__.load({
       // The host renders the LEDGER's current snapshot, not this block's own:
       // later folded calls grow this card in place, each new child arriving
       // with the enter animation.
-      return h('div', { className: !settled || warm ? GLOW_CLASS : undefined, style: card },
+      // The card ring yields to an arrival: exactly one accent ring plays at
+      // a time — the node's own while it enters, the card's only in the gap.
+      return h('div', { className: !settled || (warm && !arriving) ? GLOW_CLASS : undefined, style: card },
         h('div', {
           style: {
             display: 'flex', alignItems: 'center', gap: 8,

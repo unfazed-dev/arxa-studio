@@ -735,33 +735,47 @@ check('surfaceWarm is the glow clock — fresh warm, lapsed cold, replay cold', 
   const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
   const start = src.indexOf('const SURFACE_WARM_MS')
   assert.ok(start > 0, 'client.js no longer defines the warmth clock')
-  const end = src.indexOf('\n    }', src.indexOf('function surfaceWarm', start))
-  assert.ok(end > start, 'could not find the end of surfaceWarm')
+  const end = src.indexOf('\n    }', src.indexOf('function surfaceArriving', src.indexOf('function surfaceWarm', start)))
+  assert.ok(end > start, 'could not find the end of surfaceArriving')
   // eslint-disable-next-line no-new-func
-  const { surfaceWarm, SURFACE_WARM_MS } = new Function(
-    `${src.slice(start, end + 6)}; return { surfaceWarm, SURFACE_WARM_MS }`)()
+  const { surfaceWarm, SURFACE_WARM_MS, surfaceArriving, ARRIVAL_MS } = new Function(
+    `${src.slice(start, end + 6)}; return { surfaceWarm, SURFACE_WARM_MS, surfaceArriving, ARRIVAL_MS }`)()
   const now = Date.now()
   assert.equal(surfaceWarm(now, now), true, 'a change right now is warm')
   assert.equal(surfaceWarm(now - (SURFACE_WARM_MS - 1), now), true, 'still warm just inside the window')
   assert.equal(surfaceWarm(now - SURFACE_WARM_MS, now), false, 'the window lapses exactly at the boundary')
   assert.equal(surfaceWarm(now - 60_000, now), false, 'replay/scrollback is cold — no shimmer on history')
   assert.equal(surfaceWarm(undefined, now), false, 'no timestamp -> cold, never crash')
+
+  // The arrival window: while a node's entrance plays, IT owns the accent.
+  assert.equal(ARRIVAL_MS, 850, 'ring 600 + rise 250 — the window a fresh arrival owns')
+  assert.equal(surfaceArriving(now, now), true, 'a change right now is arriving')
+  assert.equal(surfaceArriving(now - (ARRIVAL_MS - 1), now), true, 'the entrance still plays')
+  assert.equal(surfaceArriving(now - ARRIVAL_MS, now), false, 'the card ring may fill the gap after it')
+  assert.equal(surfaceArriving(undefined, now), false, 'no timestamp -> not arriving, never crash')
 })
 
-check('a warm settled card glows; a cold one does not', () => {
+check('the card ring yields to an arrival and fills only the gap', () => {
   // glm-5.3 settles each call in milliseconds, so the glow cannot hang off
   // tool pending — it hangs off surface warmth. These blocks are SETTLED:
-  // any glow on them comes from the warmth clock and nothing else.
+  // any glow on them comes from the warmth clock and nothing else. And the
+  // ring must never compete with an in-flight entrance (operator report:
+  // two rings of different sizes at the button).
   const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
-  assert.ok(src.includes('!settled || warm'),
-    'the host card must glow while pending OR warm — pending alone is a frame')
+  assert.ok(src.includes('!settled || (warm && !arriving)'),
+    'the card ring must glow while pending, or warm AND NOT arriving')
+  assert.ok(src.includes('setTimeout(() => setWarmNow(Date.now()), arriveEnds + 30)'),
+    'the lapse effect must TICK at the arrival boundary or the ring never turns back on in the gap')
   const comps = [
     { id: 'card', component: 'Card', children: ['t'] },
     { id: 't', component: 'Text', text: 'WARM_MARKER' },
   ]
   const fresh = renderSurfaceForTest(comps, Date.now())
-  assert.ok(fresh.classes.includes('arxa-genui-pending'),
-    'a surface changed this instant must glow even though the call settled')
+  assert.ok(!fresh.classes.includes('arxa-genui-pending'),
+    'a change this instant is ARRIVING — the node ring owns the accent, not the card')
+  const gap = renderSurfaceForTest(comps, Date.now() - 1000)
+  assert.ok(gap.classes.includes('arxa-genui-pending'),
+    'past the arrival window but still warm: the card ring fills the gap')
   const stale = renderSurfaceForTest(comps, Date.now() - 60_000)
   assert.ok(!stale.classes.includes('arxa-genui-pending'),
     'a surface assembled a minute ago must stand still')

@@ -115,3 +115,63 @@ const live = [
 const liveOut = out.replace(/\.html$/, '') + '-live.html'
 writeFileSync(liveOut, live)
 console.log('wrote', liveOut)
+
+// ---- the studio sim (faithful reproduction) -------------------------------
+// The tenth run's actual payload and cadence (session e0b1b8ce, 2026-08-23:
+// 8 fold steps ~705ms apart, one component per call, pcta last at 4936ms) on
+// the REAL stylesheets: a toolview div carrying the warm ring, the card
+// component, children inserted at their measured arrival times, stubs below.
+// ?warm=always reproduces the pre-fix double ring at the button;
+// ?warm=fixed plays the arrival-suppressed state machine.
+const SIM_CSS = [
+  '.tv { position: relative; max-width: 560px; margin: 24px auto; border-radius: 10px;',
+  '  border: 1px solid #2a2a2e; padding: 12px 14px; background: #1b1b1f; }',
+  '.tv-h { font-weight: 600; margin-bottom: 8px; }',
+  '.stub { color: #777; font-size: 12px; padding: 2px 0; }',
+].join('\n')
+
+// The card container is one entering node; its children arrive one per fold
+// step. Each is rendered as the real two boxes (ring host > rise box).
+const CARD_HTML = '<div id="pcard" style="border: 1px solid #333; border-radius: 8px;' +
+  ' padding: 12px; display: flex; flex-direction: column; gap: 8px"></div>'
+const SIM_STEPS = [
+  { t: 0, html: CARD_HTML, fit: false, host: true },
+  { t: 705, html: '<div class="hd">Studio</div>', fit: true },
+  { t: 1410, html: '<p>$29 / month</p>', fit: true },
+  { t: 2115, html: '<p>\u2713 Fast setup</p>', fit: true },
+  { t: 2820, html: '<p>\u2713 Unlimited projects</p>', fit: true },
+  { t: 3525, html: '<p>\u2713 Team roles</p>', fit: true },
+  { t: 4230, html: '<p>\u2713 Priority support</p>', fit: true },
+  { t: 4935, html: '<div class="cta">Start free</div>', fit: false },
+]
+
+const simHtml = [
+  '<!doctype html><meta charset="utf-8"><title>studio sim</title>',
+  '<style>' + GLOW_CSS + '</style>',
+  '<style>' + ENTER_CSS + '</style>',
+  '<style>' + SCAFFOLD + SIM_CSS + '</style>',
+  '<div class="tv" id="tv"><div class="tv-h">Studio pricing card</div><div id="surf"></div></div>',
+  '<div id="stubs" style="max-width:560px;margin:0 auto"></div>',
+  '<script>const NODES = ' + JSON.stringify(SIM_STEPS) + ';',
+  'const FIX = location.search.includes("warm=fixed");',
+  'const FITCSS = ' + JSON.stringify(FIT) + ';',
+  'const tv = document.getElementById("tv"), surf = document.getElementById("surf"), stubs = document.getElementById("stubs");',
+  'function enterBox(n) { const h = document.createElement("div"); h.className = "arxa-genui-enter";',
+  '  if (n.fit) h.style.cssText = FITCSS; const r = document.createElement("div");',
+  '  r.className = "arxa-genui-enter-rise"; r.innerHTML = n.html; h.appendChild(r); return h }',
+  'function setWarm(on) { tv.classList.toggle("arxa-genui-pending", on) }',
+  'setWarm(!FIX) // fixed mode: the arrival window owns the accent',
+  'NODES.forEach((n, k) => setTimeout(() => {',
+  '  if (n.host) surf.appendChild(enterBox(n)); else document.getElementById("pcard").appendChild(enterBox(n))',
+  '  if (k > 0) { const d = document.createElement("div"); d.className = "stub"; d.textContent = "\u2191 assembled into Studio pricing card \u2014 step " + (k + 1); stubs.appendChild(d) }',
+  '}, n.t))',
+  '// warm state machine: always = pre-fix (on until 1500ms after the last',
+  '// arrival); fixed = suppressed while any arrival plays (600 ring + 250',
+  '// rise), then a 650ms tail pulse inside the warm window, then done.',
+  'setTimeout(() => { if (FIX) setWarm(true) }, 4935 + 850)',
+  'setTimeout(() => setWarm(false), 4935 + 1500)',
+  '</scr' + 'ipt>',
+].join('\n')
+const simOut = out.replace(/\.html$/, '') + '-sim.html'
+writeFileSync(simOut, simHtml)
+console.log('wrote', simOut)
