@@ -376,6 +376,7 @@ function walkTree (tree) {
   const seenTypes = []
   const strings = []
   const classes = []
+  const delays = []
   const walk = (node, depth) => {
     if (depth > 60) throw new Error('render did not terminate — a cycle reached the renderer')
     if (node === null || node === undefined || node === false) return
@@ -383,6 +384,7 @@ function walkTree (tree) {
     if (typeof node === 'string' || typeof node === 'number') { strings.push(String(node)); return }
     if (typeof node !== 'object') return
     if (typeof node.props?.className === 'string') classes.push(node.props.className)
+    if (typeof node.props?.style?.animationDelay === 'string') delays.push(node.props.style.animationDelay)
     if (typeof node.type === 'function') {
       seenTypes.push(node.type.name)
       walk(node.type(node.props, node.props), depth + 1)
@@ -392,7 +394,7 @@ function walkTree (tree) {
     walk(node.props?.children, depth + 1)
   }
   walk(tree, 0)
-  return { text: strings.join('\u0000'), types: seenTypes, classes }
+  return { text: strings.join('\u0000'), types: seenTypes, classes, delays }
 }
 
 // A settled tool-result block — the durable path. meta.surfaceId mirrors
@@ -474,32 +476,23 @@ check('a dangling child id draws a note, never a blank card', () => {
   assert.match(out.text, /no such component/, 'a missing child must say so')
 })
 
-check('the reveal is staggered but never outruns its cap', () => {
+check('the entrance cascade steps 90ms and never outruns its cap', () => {
   const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
   const start = src.indexOf('const STAGGER_MS')
   assert.ok(start > 0, 'client.js no longer defines the stagger')
-  const end = src.indexOf('\n    }', src.indexOf('function revealedCount', start))
+  const end = src.indexOf('\n    }', src.indexOf('function cascadeDelay', start))
+  assert.ok(end > start, 'could not find the end of cascadeDelay')
   // eslint-disable-next-line no-new-func
-  const m = new Function(
-    `${src.slice(start, end + 6)}; return { revealedCount, STAGGER_MS, STAGGER_MAX_MS }`)()
-  const { revealedCount: rc, STAGGER_MS, STAGGER_MAX_MS } = m
+  const { cascadeDelay, STAGGER_MS, STAGGER_MAX_MS } = new Function(
+    `${src.slice(start, end + 6)}; return { cascadeDelay, STAGGER_MS, STAGGER_MAX_MS }`)()
 
-  assert.equal(rc(0, 0), 0, 'nothing to reveal')
-  assert.equal(rc(4, 0), 1, 'the first child is immediate — never an empty card')
-  assert.equal(rc(4, STAGGER_MS), 2, 'one step, one more child')
-  assert.equal(rc(4, 10_000), 4, 'never more than there are')
-  assert.equal(rc(4, -5), 1, 'a nonsense clock still shows something')
-
-  // THE property: a big surface must not crawl. The step shrinks with count,
-  // so the whole assembly is bounded no matter how many components arrive.
-  for (const count of [1, 2, 5, 20, 200]) {
-    const step = Math.min(STAGGER_MS, STAGGER_MAX_MS / count)
-    const total = (count - 1) * step
-    assert.ok(total <= STAGGER_MAX_MS,
-      `${count} components would take ${total}ms, over the ${STAGGER_MAX_MS}ms cap`)
-    assert.equal(rc(count, total), count,
-      `${count} components must all be shown by ${total}ms`)
-  }
+  assert.equal(cascadeDelay(0), 0, 'the first node of a batch enters at mount — no dead time')
+  assert.equal(cascadeDelay(1), STAGGER_MS, 'one batch step is the researched interval')
+  assert.equal(cascadeDelay(2), 2 * STAGGER_MS, 'steps are linear inside the cap')
+  // THE property: a big batch must not crawl. The delay clamps, so the whole
+  // cascade is bounded no matter how many components arrive together.
+  assert.equal(cascadeDelay(8), STAGGER_MAX_MS, 'the cap is exactly the researched max')
+  assert.equal(cascadeDelay(200), STAGGER_MAX_MS, 'a huge batch never outruns the cap')
 })
 
 check('only a live surface enters with motion — replay paints bare', () => {
@@ -513,8 +506,10 @@ check('only a live surface enters with motion — replay paints bare', () => {
   const live = renderSurfaceForTest(components, Date.now() + 60_000)
   assert.ok(live.classes.includes('arxa-genui-enter'),
     'a surface born on this page must enter with the animation class')
-  assert.ok(live.text.includes('UNIQUE_LIVE_MARKER'),
-    'the first child still renders immediately — never an empty card')
+  assert.ok(live.text.includes('UNIQUE_LIVE_MARKER') && live.text.includes('UNIQUE_BTN_MARKER'),
+    'every child draws on the first frame — motion is CSS delay, never a draw gate')
+  assert.deepEqual(live.delays, ['90ms', '180ms'],
+    'the batch cascades in reading order; the root enters at mount (no style)')
 
   const replay = renderSurfaceForTest(components)
   assert.ok(!replay.classes.includes('arxa-genui-enter'),
@@ -523,24 +518,25 @@ check('only a live surface enters with motion — replay paints bare', () => {
     'replay draws every child at once, no slots')
 })
 
-check('reduced motion stands the clock down — a live surface paints at once', () => {
-  // The Node harness has no matchMedia, which is also the honest default
-  // (no preference expressed -> full motion). Install one that says REDUCE:
-  // a live surface must then paint every child immediately, class-guarded
-  // CSS being only half the promise — the JS clock is the other half.
-  global.matchMedia = () => ({ matches: true })
-  try {
-    const out = renderSurfaceForTest([
-      { id: 'card', component: 'Card', children: ['t', 'b'] },
-      { id: 't', component: 'Text', text: 'UNIQUE_RM_TEXT' },
-      { id: 'b', component: 'Button', label: 'UNIQUE_RM_BTN' },
-    ], Date.now() + 60_000)
-    assert.ok(out.text.includes('UNIQUE_RM_TEXT') && out.text.includes('UNIQUE_RM_BTN'),
-      'every child must paint immediately when the user asked for no motion')
-    assert.ok(!out.types.includes('Slot'), 'no child may be held back as a slot')
-  } finally {
-    delete global.matchMedia
-  }
+check('reduced motion: no JS clock remains — the CSS guard is the whole promise', () => {
+  // The stand-down used to be two halves: a media query for CSS and a
+  // matchMedia gate for the JS reveal clock. The clock is DELETED — motion
+  // is animation-delay on mounted nodes, and with animation:none the delays
+  // are inert. What remains to pin: the clock must stay dead, the media
+  // query must stay present, and paint must never be gated either way.
+  const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
+  assert.ok(!src.includes('useReveal'), 'the JS reveal clock must stay deleted')
+  assert.ok(!src.includes('prefersReducedMotion'), 'no JS-side motion gate may return')
+  assert.match(src, /@media \(prefers-reduced-motion: reduce\)/,
+    'the CSS stand-down must remain')
+  const out = renderSurfaceForTest([
+    { id: 'card', component: 'Card', children: ['t', 'b'] },
+    { id: 't', component: 'Text', text: 'UNIQUE_RM_TEXT' },
+    { id: 'b', component: 'Button', label: 'UNIQUE_RM_BTN' },
+  ], Date.now() + 60_000)
+  assert.ok(out.text.includes('UNIQUE_RM_TEXT') && out.text.includes('UNIQUE_RM_BTN'),
+    'every child paints on frame one — nothing is held back behind a clock')
+  assert.ok(!out.types.includes('Slot'), 'no child may be held back as a slot')
 })
 
 check('the entrance stylesheet is the researched curve, installed once', () => {
@@ -638,6 +634,13 @@ check('stepwise calls fold into one growing surface; a rebuild starts a new one'
   assert.equal(a2.components.length, 4, 'and it sees the grown state')
   assert.equal(a2.lastChangeAt, 700, 'a no-op read carries the current warmth clock')
 
+  // The entrance batch ledger: each id stamps with the ordinal that joined it.
+  assert.equal(a2.firstSeen.get('card'), 1, 'the shell joined with call one')
+  assert.equal(a2.firstSeen.get('t1'), 2, 'growth stamps the growing call')
+  assert.equal(a2.firstSeen.get('t2'), 3)
+  assert.equal(a2.firstSeen.get('t3'), 4, 'the receipt-echo fold stamps its additions too')
+  assert.equal(d.firstSeen.get('card'), 1, 'a rebuild starts a fresh ledger')
+
   // The title gate: same shape, different surface purpose — no fold.
   const h = foldCall(S, { callId: 'h', title: 'Other card', surfaceId: null, components: mk(['card', 't1', 't2', 't3', 't4']), time: 800 })
   assert.notEqual(h.key, a.key, 'a different title must not fold')
@@ -710,15 +713,57 @@ check('a warm settled card glows; a cold one does not', () => {
     'no timestamp -> cold (fail closed, same as the entrance)')
 })
 
-check('a surface that finished assembling draws fold growth at once', () => {
+check('every component in a live surface enters individually — nested children cascade', () => {
+  // The enter wrapper reaches every depth; what makes it read as INDIVIDUAL
+  // entrances is the cascade — per-node delays from the batch ledger
+  // (firstSeen), 90ms steps in depth-first reading order, 720ms cap. The
+  // batch's first node (here the card shell) carries no delay: it enters at
+  // mount and its children follow one by one.
   const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
-  const start = src.indexOf('function revealTarget')
-  assert.ok(start > 0, 'client.js no longer defines revealTarget')
-  const end = src.indexOf('\n    }', start)
-  // eslint-disable-next-line no-new-func
-  const revealTarget = new Function(`${src.slice(start, end + 6)}; return revealTarget`)()
-  assert.equal(revealTarget(8, 3, false), 3, 'the clock rules while assembling')
-  assert.equal(revealTarget(8, 3, true), 8, 'post-assembly growth draws immediately')
+  assert.ok(src.includes('const batchCounts = new Map()'),
+    'the cascade must count per render — stale counts would mistime re-renders')
+  assert.ok(src.includes('if (!surface.firstSeen.has(cid)) surface.firstSeen.set(cid, ordinal)'),
+    'the fold must stamp each id with the ordinal of the call that joined it')
+  const kids = ['k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'k7', 'k8', 'k9']
+  const comps = [
+    { id: 'card', component: 'Card', title: 'Cascade', children: kids },
+    ...kids.map((id) => ({ id, component: 'Text', text: 'CASC_' + id.toUpperCase() })),
+  ]
+  const out = renderSurfaceForTest(comps, Date.now() + 60_000)
+  for (const id of kids) assert.ok(out.text.includes('CASC_' + id.toUpperCase()),
+    id + ' must be drawn inside its card')
+  const enters = out.classes.filter((c) => c === 'arxa-genui-enter')
+  assert.equal(enters.length, 10, 'card + 9 children each carry the entrance class')
+  assert.deepEqual(out.delays,
+    ['90ms', '180ms', '270ms', '360ms', '450ms', '540ms', '630ms', '720ms', '720ms'],
+    'children cascade 90ms apart in reading order, capped at the researched max')
+})
+
+check('fold growth joins its own entrance batch — the ledger drives the cascade', () => {
+  // The latch that used to draw growth "at once" is gone; the batch ledger
+  // does better: each fold STEP's additions cascade from their own mount,
+  // while everything already on screen keeps its original delay VALUES, so
+  // a growth re-render never restarts a finished animation.
+  //
+  // Harness boundary, honestly: the live host holds its reveal in MOUNT
+  // state (useState initializer), which this stateless stub cannot hold
+  // across ToolView calls — a re-rendered host is indistinguishable from
+  // scrollback here and correctly paints bare. So the composition is pinned
+  // at its two ends instead: the ledger stamps per joining call (the fold
+  // sequence check above), and renderEntry counts within batches per render
+  // (pins below) — with the single-batch cascade proven end to end by the
+  // render check above.
+  const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
+  assert.ok(src.includes('const seenAt = firstSeen instanceof Map ? firstSeen.get(id) : undefined'),
+    'the delay must come from the batch ledger, not traversal position alone')
+  assert.ok(src.includes('const n = batchCounts.get(seenAt) ?? 0'),
+    'batch position must count within the node OWN batch — a fold step starts at 0')
+  assert.ok(src.includes('batchCounts.set(seenAt, n + 1)'),
+    'the counter must advance per rendered node')
+  assert.ok(src.includes('delay = cascadeDelay(n)'),
+    'the batch position passes through the capped cascade step')
+  assert.ok(src.includes("style: delay > 0 ? { animationDelay: delay + 'ms' } : undefined"),
+    'a batch-leading node carries no delay style — it enters at its mount')
 })
 
 check('replay never animates — only a surface born on this page does', () => {
@@ -752,7 +797,7 @@ check('replay never animates — only a surface born on this page does', () => {
     /callTime/, 'the reveal must consume the same fallback the fold uses')
 })
 
-check('REPRO: a LIVE surface holds its children back; history does not', () => {
+check('REPRO: a LIVE surface cascades every child; history paints bare', () => {
   const comps = [
     { id: 'card', component: 'Card', title: 'T', children: ['a', 'b', 'c', 'd'] },
     { id: 'a', component: 'Text', text: 'MARK_A' },
@@ -767,13 +812,15 @@ check('REPRO: a LIVE surface holds its children back; history does not', () => {
   assert.deepEqual(marks(renderSurfaceForTest(comps)),
     ['MARK_A', 'MARK_B', 'MARK_C', 'MARK_D'], 'history must paint whole')
 
-  // Live: born now. Under the stub the reveal clock never advances, so this
-  // is the very first frame — exactly one child, the rest reserved slots.
+  // Live: born now. There is no draw gate anymore — every child is in the
+  // tree on frame one and the CSS cascade moves them one by one. Heights are
+  // real from the first commit, so no stand-in slots exist to jump later.
   const live = renderSurfaceForTest(comps, Date.now() + 5000)
-  assert.deepEqual(marks(live), ['MARK_A'],
-    'a live surface must reveal only its first child on frame one')
-  assert.ok(live.types.filter((t) => t === 'Slot').length === 3,
-    `expected 3 reserved slots, got ${live.types.filter((t) => t === 'Slot').length}`)
+  assert.deepEqual(marks(live), ['MARK_A', 'MARK_B', 'MARK_C', 'MARK_D'],
+    'a live surface must draw every child on frame one — motion is CSS-side')
+  assert.ok(!live.types.includes('Slot'), 'no reserved slots remain in a card')
+  assert.deepEqual(live.delays, ['90ms', '180ms', '270ms', '360ms'],
+    'the children cascade in reading order behind the shell')
 })
 
 check('each rung is its own document, and a reload stays inside one rung', () => {

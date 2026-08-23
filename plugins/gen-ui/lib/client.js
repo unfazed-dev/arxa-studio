@@ -155,8 +155,10 @@ window.__ModuleLoader__.load({
     //    reads as a notification arriving, not a surface assembling.
     //
     // `both` holds the first frame until the animation starts and the last
-    // after it ends. The media query removes the motion; the JS side of the
-    // same promise is prefersReducedMotion() in useReveal.
+    // after it ends — the element occupies its final box the whole time, so
+    // nothing else moves. The media query is the WHOLE reduced-motion
+    // stand-down: with animation removed the cascade delays are inert, and
+    // there is no JS clock left that could keep slicing the paint.
     const ENTER_CLASS = 'arxa-genui-enter'
     const ENTER_MS = 250
     const ENTER_TAG = 'arxa-gen-ui/enter'
@@ -523,7 +525,7 @@ window.__ModuleLoader__.load({
       return !ready && late
     }
 
-    // ---- the staggered reveal ---------------------------------------------
+    // ---- the staggered entrance --------------------------------------------
     //
     // The materials all arrive at once (measured: tool arguments come in ONE
     // chunk on this provider, and that is provider-dependent, so nothing is
@@ -531,10 +533,19 @@ window.__ModuleLoader__.load({
     // worth saying plainly, because calling it streaming would be a lie about
     // where the data came from.
     //
-    // What it buys: a surface that assembles instead of blinking into place,
-    // and a pending outline that is actually on screen long enough to read.
-    // What it costs: content that is ready is deliberately shown late — so it
-    // is fast, bounded, and never runs on replay (see claimReveal).
+    // Every node of a LIVE surface enters INDIVIDUALLY: the fold ledger
+    // records when each component id first joined the surface (firstSeen:
+    // id -> call ordinal), and a render cascades each batch — the initial
+    // snapshot is one batch, each fold step's additions another — with
+    // per-node animation-delay steps in depth-first reading order. Nodes
+    // from older batches keep their original delay VALUES, so a growth
+    // re-render never restarts a finished animation; replay gets
+    // reveal=false and paints bare (claimReveal). Heights are real from the
+    // first commit — the element itself occupies its final box while
+    // fill:both holds frame one — so nothing jumps and no stand-in slots or
+    // JS clocks are needed anywhere in the tree. The CSS media query is the
+    // whole reduced-motion stand-down: with animation:none the delays are
+    // inert.
     //
     // The numbers are researched, not tuned by feel (app-box
     // docs/plans/entrance-animation-research.md): 90ms sits inside the 50-100ms
@@ -546,28 +557,11 @@ window.__ModuleLoader__.load({
     const STAGGER_MAX_MS = 720
 
     /**
-     * How many of `count` children are on screen at `elapsed` ms.
-     * The step shrinks as the surface grows: a 20-component card must not
-     * take two seconds to assemble, so the WHOLE reveal is capped.
-     * @returns {number} revealed count; the first child is always immediate.
+     * Delay for the batchIndex-th node of a mounting batch. The cap keeps a
+     * large batch near 0.7s total rather than stretching with the surface.
      */
-    function revealedCount (count, elapsed) {
-      if (!(count > 0)) return 0
-      if (!(elapsed >= 0)) return 1
-      const step = Math.min(STAGGER_MS, STAGGER_MAX_MS / count)
-      return Math.min(count, Math.floor(elapsed / step) + 1)
-    }
-
-    // Stand-in heights per component, so an unrevealed child reserves roughly
-    // the room it will take. Image and RungLadder carry their own size; the
-    // rest are single-line widgets and get a line.
-    const SLOT_H = {
-      Heading: 26, Text: 20, Icon: 20, Button: 30,
-      Diff: 80, Choice: 80, Card: 60, Image: 120, RungLadder: 200,
-    }
-    function slotHeightFor (entry) {
-      if (entry?.component === 'Image') return Number(entry.height) || SLOT_H.Image
-      return SLOT_H[entry?.component] ?? 24
+    function cascadeDelay (batchIndex) {
+      return Math.min(batchIndex * STAGGER_MS, STAGGER_MAX_MS)
     }
 
     // Animate a surface ONCE, and only when it happened while this page was
@@ -586,65 +580,6 @@ window.__ModuleLoader__.load({
       if (typeof callTime !== 'number' || callTime < LIVE_SINCE) return false
       revealed.add(callId)
       return true
-    }
-
-    // One OS-level question, answered once per page. The media query in
-    // ENTER_CSS can only stop the CSS half of the motion — the stagger clock
-    // is JS-side motion (timed swaps), so it must stand down here or
-    // reduced-motion users still watch a surface assemble in slices. Cached:
-    // matchMedia allocates a listener list on some engines, and this runs per
-    // card per render.
-    let reducedMotionCache = null
-    function prefersReducedMotion () {
-      if (reducedMotionCache === null) {
-        reducedMotionCache = typeof matchMedia === 'function' &&
-          matchMedia('(prefers-reduced-motion: reduce)').matches
-      }
-      return reducedMotionCache
-    }
-
-    /**
-     * How many children may be drawn. While a surface assembles the clock
-     * rules; once it has fully assembled, fold growth draws AT ONCE — the
-     * model's own call cadence already paced the arrival, and restarting
-     * the clock would re-slot children that are on screen.
-     */
-    function revealTarget (count, clockShown, assembled) {
-      return assembled ? count : clockShown
-    }
-
-    /**
-     * Drive the reveal clock. `enabled` false means "all of them, now" —
-     * the replay path. Reduced motion gets the same instant paint: an
-     * assembly you cannot opt out of is not an enhancement.
-     *
-     * `count` moves through refs, not effect deps: a fold GROWING the
-     * surface mid-march must not restart the interval (a restart would
-     * un-draw children). `assembledRef` latches when the march completes.
-     */
-    function useReveal (count, enabled) {
-      const countRef = React.useRef(count)
-      countRef.current = count
-      const assembledRef = React.useRef(false)
-      const [elapsed, setElapsed] = React.useState(enabled ? 0 : Infinity)
-      React.useEffect(() => {
-        if (!enabled || prefersReducedMotion() || assembledRef.current) return
-        const t0 = Date.now()
-        const timer = setInterval(() => {
-          const dt = Date.now() - t0
-          const total = countRef.current
-          const n = revealedCount(total, dt)
-          // Re-render only when the count actually advances: a fixed-cadence
-          // setState would re-run the whole card ~45x during an 8-child
-          // reveal where exactly 8 of those ticks change anything.
-          setElapsed((prev) =>
-            revealedCount(total, prev) === n ? prev : dt)
-          if (n >= total) { assembledRef.current = true; clearInterval(timer) }
-        }, Math.max(16, Math.min(STAGGER_MS, STAGGER_MAX_MS / Math.max(1, countRef.current)) / 2))
-        return () => clearInterval(timer)
-      }, [enabled])
-      if (!enabled || prefersReducedMotion()) return count
-      return revealTarget(count, revealedCount(count, elapsed), assembledRef.current)
     }
 
     /** A reserved slot: real height, so nothing jumps when content lands. */
@@ -721,7 +656,6 @@ window.__ModuleLoader__.load({
 
     function Card (props, ctx) {
       const kids = Array.isArray(props.children) ? props.children : []
-      const shown = useReveal(kids.length, ctx.reveal === true)
       return h('div', {
         style: {
           border: '1px solid var(--dsw-alias-border-l2, #333)',
@@ -730,13 +664,7 @@ window.__ModuleLoader__.load({
         },
       },
         props.title ? h('div', { style: { fontWeight: 600 } }, String(props.title)) : null,
-        ...kids.map((id, i) => (i < shown
-          ? ctx.renderChild(String(id))
-          : h(Slot, {
-            key: 'slot:' + id,
-            height: ctx.slotHeightOf(String(id)),
-            pending: true,
-          }))))
+        ...kids.map((id) => ctx.renderChild(String(id))))
     }
 
     const RENDERERS = { Heading, Text, Choice, Diff, RungLadder, Card, Button, Icon, Image }
@@ -763,7 +691,7 @@ window.__ModuleLoader__.load({
     // Renderers needing surface identity get it as a second argument rather
     // than as props, so a model-authored prop can never shadow surfaceId or
     // componentId — the two keys the durable selection record is stored under.
-    function renderEntry (surfaceId, entry, i, index, reveal) {
+    function renderEntry (surfaceId, entry, i, index, reveal, firstSeen, batchCounts) {
       const id = String(entry?.id ?? i)
       const Renderer = RENDERERS[entry?.component]
       if (!Renderer) {
@@ -774,17 +702,37 @@ window.__ModuleLoader__.load({
           `[${String(entry?.component)} — not in this build's catalogue]`)
       }
       const { id: _id, component: _c, ...props } = entry
-      const hostProps = { Renderer, props, surfaceId, componentId: id, index, reveal }
+      const hostProps = { Renderer, props, surfaceId, componentId: id, index, reveal, firstSeen, batchCounts }
       // Only a LIVE surface earns motion: replay and scrollback must paint
       // identically forever, which is why claimReveal decided once. The class
       // is inert without ENTER_CSS, and ENTER_CSS is inert under reduced
       // motion — each layer fails safe on its own.
-      return reveal === true
-        ? h('div', { key: id, className: ENTER_CLASS }, h(RendererHost, hostProps))
-        : h(RendererHost, { key: id, ...hostProps })
+      //
+      // Every node enters INDIVIDUALLY: the delay is its position within its
+      // BATCH (the ordinal of the call that first added this id to the
+      // surface), counted depth-first in reading order across the whole
+      // surface render. Synchronized per-node animations are
+      // indistinguishable from one block animation — the operator's report —
+      // so the batch steps at the researched STAGGER_MS instead. Nodes from
+      // older batches keep the same delay VALUES on every re-render (batch
+      // membership and pre-order position are stable under growth), so a
+      // finished animation never restarts; a fold step's additions form
+      // their own batch and cascade from their own mount.
+      if (reveal !== true) return h(RendererHost, { key: id, ...hostProps })
+      const seenAt = firstSeen instanceof Map ? firstSeen.get(id) : undefined
+      let delay = 0
+      if (typeof seenAt === 'number') {
+        const n = batchCounts.get(seenAt) ?? 0
+        batchCounts.set(seenAt, n + 1)
+        delay = cascadeDelay(n)
+      }
+      return h('div', {
+        key: id, className: ENTER_CLASS,
+        style: delay > 0 ? { animationDelay: delay + 'ms' } : undefined,
+      }, h(RendererHost, hostProps))
     }
 
-    function RendererHost ({ Renderer, props, surfaceId, componentId, index, reveal }) {
+    function RendererHost ({ Renderer, props, surfaceId, componentId, index, reveal, firstSeen, batchCounts }) {
       // A Card names its children by id; resolution happens here so a renderer
       // never sees the whole surface — it can draw its own children and
       // nothing else. A missing id says so rather than rendering blank.
@@ -796,13 +744,9 @@ window.__ModuleLoader__.load({
             style: { ...muted, fontSize: 12, fontStyle: 'italic' },
           }, `[${id} — no such component in this surface]`)
         }
-        return renderEntry(surfaceId, child, id, index, reveal)
+        return renderEntry(surfaceId, child, id, index, reveal, firstSeen, batchCounts)
       }
-      const slotHeightOf = (id) =>
-        slotHeightFor(index instanceof Map ? index.get(id) : undefined)
-      return Renderer(props, {
-        surfaceId, componentId, renderChild, slotHeightOf, reveal,
-      })
+      return Renderer(props, { surfaceId, componentId, renderChild, reveal })
     }
 
     /**
@@ -827,13 +771,18 @@ window.__ModuleLoader__.load({
      * from builds whose validation differed, so a dangling id must draw a note
      * rather than throw the whole card away.
      */
-    function renderSurface (surfaceId, components, reveal) {
+    function renderSurface (surfaceId, components, reveal, firstSeen) {
       if (!Array.isArray(components)) return []
       const index = new Map(components.map((e, i) => [String(e?.id ?? i), e]))
       const claimed = claimedChildren(components)
+      // One batch-count map per RENDER: the cascade counts within each batch
+      // across the whole surface in pre-order, and a re-render with
+      // unchanged content recomputes identical delays — StrictMode's double
+      // render and the warmth lapse tick both stay harmless.
+      const batchCounts = new Map()
       return components
         .filter((e, i) => !claimed.has(String(e?.id ?? i)))
-        .map((e, i) => renderEntry(surfaceId, e, i, index, reveal))
+        .map((e, i) => renderEntry(surfaceId, e, i, index, reveal, firstSeen, batchCounts))
     }
 
     // ---- the surface fold --------------------------------------------------
@@ -879,7 +828,7 @@ window.__ModuleLoader__.load({
             renderId: surface.renderId,
             ordinal: surface.ordinals.get(callId), title: surface.title,
             components: surface.components, changed: false,
-            lastChangeAt: surface.lastChangeAt,
+            lastChangeAt: surface.lastChangeAt, firstSeen: surface.firstSeen,
           }
         }
       }
@@ -908,7 +857,7 @@ window.__ModuleLoader__.load({
         surface = {
           key, title, hostCallId: callId, renderId: usableId ?? callId,
           components, lastTime: time, lastChangeAt: time,
-          callIds: new Set(), ordinals: new Map(),
+          callIds: new Set(), ordinals: new Map(), firstSeen: new Map(),
         }
         surfaces.set(key, surface)
       } else if (!(surface.lastTime > time)) {
@@ -919,11 +868,20 @@ window.__ModuleLoader__.load({
       surface.callIds.add(callId)
       const ordinal = surface.callIds.size
       surface.ordinals.set(callId, ordinal)
+      // Stamp ids that joined with THIS call — the batch the entrance
+      // cascade groups them into. Ids that were already here keep their
+      // original stamp, which is what stops growth re-renders from
+      // restarting finished animations. Idempotent like the rest of the
+      // fold: a re-registered callId returns above before reaching this.
+      for (let ci = 0; ci < surface.components.length; ci++) {
+        const cid = String(surface.components[ci]?.id ?? ci)
+        if (!surface.firstSeen.has(cid)) surface.firstSeen.set(cid, ordinal)
+      }
       return {
         key: surface.key, hostCallId: surface.hostCallId,
         renderId: surface.renderId, ordinal,
         title: surface.title, components: surface.components, changed: true,
-        lastChangeAt: surface.lastChangeAt,
+        lastChangeAt: surface.lastChangeAt, firstSeen: surface.firstSeen,
       }
     }
 
@@ -1016,6 +974,7 @@ window.__ModuleLoader__.load({
           key: 'own:' + block.callId, hostCallId: block.callId,
           renderId: block.callId, ordinal: 1, title,
           components: [], changed: false, lastChangeAt: 0,
+          firstSeen: new Map(),
         }
         : foldCall(SURFACES, { callId: block.callId, surfaceId, title, components, time: callTime })
       if (fold.changed) notifySurface(fold.key)
@@ -1064,7 +1023,7 @@ window.__ModuleLoader__.load({
         },
           h('span', { style: { fontWeight: 600 } }, fold.title || toolName || 'gen_ui'),
           settled ? null : h('span', { style: { ...muted, fontSize: 12 } }, '…')),
-        h('div', null, ...renderSurface(fold.renderId, fold.components, reveal)))
+        h('div', null, ...renderSurface(fold.renderId, fold.components, reveal, fold.firstSeen)))
     }
 
     function apply (ctx) {
