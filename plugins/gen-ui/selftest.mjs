@@ -384,7 +384,8 @@ function walkTree (tree) {
     if (typeof node === 'string' || typeof node === 'number') { strings.push(String(node)); return }
     if (typeof node !== 'object') return
     if (typeof node.props?.className === 'string') classes.push(node.props.className)
-    if (typeof node.props?.style?.animationDelay === 'string') delays.push(node.props.style.animationDelay)
+    const delay = node.props?.style?.['--arxa-enter-delay']
+    if (typeof delay === 'string') delays.push(delay)
     if (typeof node.type === 'function') {
       seenTypes.push(node.type.name)
       walk(node.type(node.props, node.props), depth + 1)
@@ -539,6 +540,35 @@ check('reduced motion: no JS clock remains — the CSS guard is the whole promis
   assert.ok(!out.types.includes('Slot'), 'no child may be held back as a slot')
 })
 
+check('arriving components sweep the accent ring once, aligned with their rise', () => {
+  // Operator report 2026-08-23: only the card glowed while children popped
+  // with motion alone. The ring must JOIN the entrance: one sweep per
+  // arriving node, starting exactly when that node moves.
+  const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
+  const start = src.indexOf('const ENTER_CLASS')
+  assert.ok(start > 0, 'client.js no longer defines ENTER_CLASS/ENTER_CSS')
+  const end = src.indexOf('\n    }', src.indexOf('function installEnter', start))
+  // eslint-disable-next-line no-new-func
+  const { ENTER_CSS } = new Function('accent',
+    `${src.slice(start, end + 6)}; return { ENTER_CSS }`)('ACCENT_TOKEN')
+
+  assert.match(ENTER_CSS, /@keyframes arxa-enter-ring/, 'the one-shot ring keyframes must exist')
+  assert.match(ENTER_CSS, /\.arxa-genui-enter::after/, 'the ring paints on the enter wrapper itself')
+  assert.match(ENTER_CSS, /mask-composite/, 'the ring must be a ring — the interior is cut out')
+  assert.match(ENTER_CSS, /opacity: 0/, 'the ring must fade out, not linger')
+  assert.ok(!/arxa-enter-ring[^;]*infinite/.test(ENTER_CSS),
+    'the entrance ring is one-shot — infinite belongs to the warm glow alone')
+  // Rise and ring must share the cascade delay or they drift apart.
+  const shares = ENTER_CSS.match(/animation-delay: var\(--arxa-enter-delay, 0ms\)/g) ?? []
+  assert.equal(shares.length, 2, 'rise and ring must both read --arxa-enter-delay')
+  // The wrapper must anchor the pseudo-element.
+  assert.match(ENTER_CSS, /\.arxa-genui-enter \{\s*position: relative/,
+    'without position:relative the ring would anchor to the wrong box')
+  // Reduced motion: no ring at all — a static substitute is noise.
+  const rm = ENTER_CSS.slice(ENTER_CSS.indexOf('prefers-reduced-motion'))
+  assert.match(rm, /::after \{ content: none; \}/, 'reduced motion must remove the ring entirely')
+})
+
 check('the entrance stylesheet is the researched curve, installed once', () => {
   const src = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
   const start = src.indexOf('const ENTER_CLASS')
@@ -560,8 +590,8 @@ check('the entrance stylesheet is the researched curve, installed once', () => {
     head: { appendChild: (t) => head.push(t) },
   }
   // eslint-disable-next-line no-new-func
-  const mod = new Function('document',
-    `${src.slice(start, end + 6)}; return { installEnter, ENTER_CSS, ENTER_MS }`)(document)
+  const mod = new Function('document', 'accent',
+    `${src.slice(start, end + 6)}; return { installEnter, ENTER_CSS, ENTER_MS }`)(document, 'ACCENT_TOKEN')
 
   assert.equal(mod.installEnter(), true, 'first call must install')
   assert.equal(mod.installEnter(), false, 'HMR re-apply must be a no-op')
@@ -762,7 +792,7 @@ check('fold growth joins its own entrance batch — the ledger drives the cascad
     'the counter must advance per rendered node')
   assert.ok(src.includes('delay = cascadeDelay(n)'),
     'the batch position passes through the capped cascade step')
-  assert.ok(src.includes("style: delay > 0 ? { animationDelay: delay + 'ms' } : undefined"),
+  assert.ok(src.includes("style: delay > 0 ? { '--arxa-enter-delay': delay + 'ms' } : undefined"),
     'a batch-leading node carries no delay style — it enters at its mount')
 })
 

@@ -137,9 +137,9 @@ window.__ModuleLoader__.load({
 
     // ---- the entrance animation -------------------------------------------
     //
-    // One 250ms fade+rise per newly revealed component, driven entirely by
-    // CSS so the stagger clock below never has to touch style. The values are
-    // researched, not guessed (app-box docs/plans/entrance-animation-research.md):
+    // One 250ms fade+rise per newly arriving component plus one ring sweep,
+    // driven entirely by CSS — there is no JS clock anywhere in the tree. The
+    // values are researched, not guessed (app-box docs/plans/entrance-animation-research.md):
     //
     //  - EASING: Material 3 "emphasized decelerate", cubic-bezier(0.05, 0.7,
     //    0.1, 1) — the curve M3 assigns to elements ENTERING the screen
@@ -148,8 +148,8 @@ window.__ModuleLoader__.load({
     //    band M3 gives small components; entrances over ~500ms read as slow,
     //    under ~100ms as a glitch.
     //  - PROPERTIES: transform + opacity only — they run on the compositor
-    //    and cannot trigger layout. The slot has already reserved the height,
-    //    so nothing needs to move but the pixels.
+    //    and cannot trigger layout. The element itself has occupied its final
+    //    box since frame one (fill both), so nothing needs to move but pixels.
     //  - DISTANCE: 8px. FlutterFlow's Slide spans whole screens, but for
     //    item-level entrances the consensus is a small rise (4-16px); larger
     //    reads as a notification arriving, not a surface assembling.
@@ -159,6 +159,17 @@ window.__ModuleLoader__.load({
     // nothing else moves. The media query is the WHOLE reduced-motion
     // stand-down: with animation removed the cascade delays are inert, and
     // there is no JS clock left that could keep slicing the paint.
+    //
+    // The accent GLOW joins the arrival: each entering node sweeps the ring
+    // around ITSELF once (600ms, fading out), not just the card container —
+    // a ring that only circles the outer card while children pop inside reads
+    // as "the card glows, nothing inside does" (operator report 2026-08-23).
+    // Rise and ring share --arxa-enter-delay so the sweep starts exactly when
+    // the node moves; the delay is a custom property because animation-delay
+    // on the wrapper cannot reach the ::after. The ring reuses the registered
+    // --arxa-glow-angle from GLOW_CSS (apply() installs both), one-shot —
+    // infinite belongs to the warm glow alone. Reduced motion hides the ring
+    // outright: a static substitute for a one-shot accent is just noise.
     const ENTER_CLASS = 'arxa-genui-enter'
     const ENTER_MS = 250
     const ENTER_TAG = 'arxa-gen-ui/enter'
@@ -167,9 +178,30 @@ window.__ModuleLoader__.load({
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }
 }
-.${ENTER_CLASS} { animation: arxa-genui-enter ${ENTER_MS}ms cubic-bezier(0.05, 0.7, 0.1, 1) both; }
+.${ENTER_CLASS} {
+  position: relative;
+  animation: arxa-genui-enter ${ENTER_MS}ms cubic-bezier(0.05, 0.7, 0.1, 1) both;
+  animation-delay: var(--arxa-enter-delay, 0ms);
+}
+.${ENTER_CLASS}::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit;
+  padding: 1px; pointer-events: none;
+  background: conic-gradient(from var(--arxa-glow-angle),
+    transparent 0 55%, ${accent} 78%, transparent 92% 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask-composite: exclude;
+  animation: arxa-enter-ring 600ms linear both;
+  animation-delay: var(--arxa-enter-delay, 0ms);
+}
+@keyframes arxa-enter-ring {
+  from { --arxa-glow-angle: 0deg; opacity: 1; }
+  to { --arxa-glow-angle: 360deg; opacity: 0; }
+}
 @media (prefers-reduced-motion: reduce) {
   .${ENTER_CLASS} { animation: none; }
+  .${ENTER_CLASS}::after { content: none; }
 }`
 
     /**
@@ -728,7 +760,11 @@ window.__ModuleLoader__.load({
       }
       return h('div', {
         key: id, className: ENTER_CLASS,
-        style: delay > 0 ? { animationDelay: delay + 'ms' } : undefined,
+        // A custom property, not animationDelay: the rise AND the ring on
+        // ::after must start together, and a shorthand delay on the wrapper
+        // cannot reach the pseudo-element. React passes custom properties
+        // through style untouched.
+        style: delay > 0 ? { '--arxa-enter-delay': delay + 'ms' } : undefined,
       }, h(RendererHost, hostProps))
     }
 
