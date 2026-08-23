@@ -170,12 +170,19 @@ window.__ModuleLoader__.load({
     // when the sweep completes. The ring therefore orbits the node's final
     // box while the content is still invisible (fill both holds frame one) —
     // the classic shimmer-then-content order, per node.
-    // --arxa-enter-delay is a custom property because animation-delay on the
-    // wrapper cannot reach the ::after. The ring reuses the registered
-    // --arxa-glow-angle from GLOW_CSS (apply() installs both), one-shot —
-    // infinite belongs to the warm glow alone. Reduced motion hides the ring
-    // outright: a static substitute for a one-shot accent is just noise.
+    //
+    // TWO BOXES, because of a compositing fact: a pseudo-element shares its
+    // host's OPACITY. The first version of this put the rise on the ring's
+    // own wrapper — fill:both then held the whole box at opacity 0 until the
+    // rise started, and the "leading" ring swept inside an invisible element:
+    // the ring simply vanished (operator report, third clip). So the ring
+    // host NEVER carries an animation, and the fade+rise lives on an inner
+    // box. The delay var inherits (custom properties inherit by default), so
+    // the inner calc reads the outer's --arxa-enter-delay untouched.
+    // Reduced motion hides the ring outright and stops the rise: a static
+    // substitute for a one-shot accent is just noise.
     const ENTER_CLASS = 'arxa-genui-enter'
+    const RISE_CLASS = 'arxa-genui-enter-rise'
     const ENTER_MS = 250
     const ENTER_TAG = 'arxa-gen-ui/enter'
     const ENTER_CSS = `
@@ -183,29 +190,37 @@ window.__ModuleLoader__.load({
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }
 }
-.${ENTER_CLASS} {
-  position: relative;
+.${ENTER_CLASS} { position: relative; }
+.${RISE_CLASS} {
   animation: arxa-genui-enter ${ENTER_MS}ms cubic-bezier(0.05, 0.7, 0.1, 1) both;
   animation-delay: calc(var(--arxa-enter-delay, 0ms) + 600ms);
 }
 .${ENTER_CLASS}::after {
   content: ''; position: absolute; inset: 0; border-radius: inherit;
   padding: 1px; pointer-events: none;
+  /* base opacity 0 is the ghost guard: the ::after paints whenever content
+     is set, so without it every pending slot would show a static arc
+     fragment for its whole pre-sweep window (seen in the lens recording).
+     The keyframes fade the ring IN — nothing exists before its sweep — and
+     fill forwards holds the faded-out end. */
+  opacity: 0;
   background: conic-gradient(from var(--arxa-glow-angle),
     transparent 0 55%, ${accent} 78%, transparent 92% 100%);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
           mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
           mask-composite: exclude;
-  animation: arxa-enter-ring 600ms linear both;
+  animation: arxa-enter-ring 600ms linear forwards;
   animation-delay: var(--arxa-enter-delay, 0ms);
 }
 @keyframes arxa-enter-ring {
-  from { --arxa-glow-angle: 0deg; opacity: 1; }
-  to { --arxa-glow-angle: 360deg; opacity: 0; }
+  0% { --arxa-glow-angle: 0deg; opacity: 0; }
+  12% { opacity: 1; }
+  82% { opacity: 1; }
+  100% { --arxa-glow-angle: 360deg; opacity: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .${ENTER_CLASS} { animation: none; }
+  .${RISE_CLASS} { animation: none; }
   .${ENTER_CLASS}::after { content: none; }
 }`
 
@@ -776,19 +791,23 @@ window.__ModuleLoader__.load({
         batchCounts.set(seenAt, n + 1)
         delay = cascadeDelay(n)
       }
+      // Ring host outside, rise box inside — the host must NEVER fade or it
+      // takes its ::after ring down with it (pseudo-elements share host
+      // opacity; the ring would sweep inside an invisible box, which is
+      // exactly the regression this split fixes).
       return h('div', {
         key: id, className: ENTER_CLASS,
         // The delay is a custom property, not animationDelay: the ring on
         // ::after must read it too, and a shorthand delay on the wrapper
         // cannot reach a pseudo-element. React passes custom properties
-        // through style untouched. fit-content is the ring's size contract
-        // (FIT_RING above) — harmless to the rise, which only translates.
+        // through style untouched, and the rise box INHERITS the var.
+        // fit-content is the ring's size contract (FIT_RING above).
         style: {
           ...(delay > 0 ? { '--arxa-enter-delay': delay + 'ms' } : null),
           ...(FIT_RING.has(entry?.component)
             ? { width: 'fit-content', maxWidth: '100%' } : null),
         },
-      }, h(RendererHost, hostProps))
+      }, h('div', { className: RISE_CLASS }, h(RendererHost, hostProps)))
     }
 
     function RendererHost ({ Renderer, props, surfaceId, componentId, index, reveal, firstSeen, batchCounts }) {

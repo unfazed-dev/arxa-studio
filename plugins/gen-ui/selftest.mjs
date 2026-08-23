@@ -378,6 +378,7 @@ function walkTree (tree) {
   const classes = []
   const delays = []
   const fits = []
+  const pairs = []
   const walk = (node, depth) => {
     if (depth > 60) throw new Error('render did not terminate — a cycle reached the renderer')
     if (node === null || node === undefined || node === false) return
@@ -388,6 +389,9 @@ function walkTree (tree) {
     const delay = node.props?.style?.['--arxa-enter-delay']
     if (typeof delay === 'string') delays.push(delay)
     if (node.props?.className === 'arxa-genui-enter' && node.props?.style?.width === 'fit-content') fits.push(true)
+    if (node.props?.className === 'arxa-genui-enter') {
+      pairs.push(node.props.children?.[0]?.props?.className === 'arxa-genui-enter-rise')
+    }
     if (typeof node.type === 'function') {
       seenTypes.push(node.type.name)
       walk(node.type(node.props, node.props), depth + 1)
@@ -397,7 +401,7 @@ function walkTree (tree) {
     walk(node.props?.children, depth + 1)
   }
   walk(tree, 0)
-  return { text: strings.join('\u0000'), types: seenTypes, classes, delays, fits }
+  return { text: strings.join('\u0000'), types: seenTypes, classes, delays, fits, pairs }
 }
 
 // A settled tool-result block — the durable path. meta.surfaceId mirrors
@@ -566,11 +570,27 @@ check('arriving components sweep the accent ring once, aligned with their rise',
   assert.equal(ringFirst.length, 1, 'exactly one animation starts at the batch delay — the ring')
   assert.ok(ENTER_CSS.includes('animation-delay: calc(var(--arxa-enter-delay, 0ms) + 600ms);'),
     'the rise must wait for the full sweep — ring before node ui, always')
-  assert.ok(ENTER_CSS.includes('arxa-enter-ring 600ms linear both'),
-    'the sweep duration the rise waits on must be the pinned 600ms')
-  // The wrapper must anchor the pseudo-element.
-  assert.match(ENTER_CSS, /\.arxa-genui-enter \{\s*position: relative/,
-    'without position:relative the ring would anchor to the wrong box')
+  assert.ok(ENTER_CSS.includes('arxa-enter-ring 600ms linear forwards'),
+    'the pinned 600ms sweep, fill FORWARDS — holds the faded-out end state')
+  // The ghost guard: the ::after must be invisible at BASE (before the
+  // sweep starts, the animation has no say) and must fade IN — otherwise
+  // every pending slot shows a static arc fragment (lens recording).
+  assert.match(ENTER_CSS, /\.arxa-genui-enter::after \{[^}]*opacity: 0;/,
+    'the ring must not exist before its sweep — base opacity 0')
+  assert.ok(ENTER_CSS.includes('12% { opacity: 1; }'),
+    'the ring fades IN at the start of its sweep')
+  assert.ok(!ENTER_CSS.includes('//'),
+    'no JS-style comments inside the stylesheet — // is a CSS parse error')
+  // The wrapper must anchor the pseudo-element — and that is ALL it may do.
+  // The exact-rule pin is the regression invariant: a pseudo shares its
+  // host's opacity, so if the ring host ever carries the fade again, the
+  // ring sweeps inside an invisible box (the third-clip bug).
+  assert.match(ENTER_CSS, /\.arxa-genui-enter \{\s*position: relative;\s*\}/,
+    'the ring host must carry position:relative and NOTHING else — never the fade')
+  assert.match(ENTER_CSS, /\.arxa-genui-enter-rise \{\s*animation: arxa-genui-enter/,
+    'the fade+rise must live on the inner rise box')
+  assert.match(ENTER_CSS, /\.arxa-genui-enter-rise \{ animation: none; \}/,
+    'reduced motion must stop the rise too')
   // Reduced motion: no ring at all — a static substitute is noise.
   const rm = ENTER_CSS.slice(ENTER_CSS.indexOf('prefers-reduced-motion'))
   assert.match(rm, /::after \{ content: none; \}/, 'reduced motion must remove the ring entirely')
@@ -771,6 +791,8 @@ check('every component in a live surface enters individually — nested children
     id + ' must be drawn inside its card')
   const enters = out.classes.filter((c) => c === 'arxa-genui-enter')
   assert.equal(enters.length, 10, 'card + 9 children each carry the entrance class')
+  assert.equal(out.pairs.length, 10, 'every ring host is present')
+  assert.ok(out.pairs.every(Boolean), 'every ring host wraps exactly one rise box')
   assert.deepEqual(out.delays,
     ['90ms', '180ms', '270ms', '360ms', '450ms', '540ms', '630ms', '720ms', '720ms'],
     'children cascade 90ms apart in reading order, capped at the researched max')
