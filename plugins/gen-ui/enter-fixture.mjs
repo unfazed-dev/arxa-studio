@@ -34,8 +34,7 @@ const SCAFFOLD = [
   '.cap { color: #777; font-size: 11px; margin: 10px 0 0; }',
   'p { margin: 4px 0; }',
   '.hd { font-size: 15px; font-weight: 600; margin: 8px 0 4px; }',
-  '.cta { padding: 5px 12px; border-radius: 6px; font-weight: 600; text-align: center;',
-  '  background: ' + ACCENT + '; color: #0d0d10; }',
+  '.opt { border: 1px solid #333; border-radius: 6px; padding: 8px 10px; }',
   // Static freeze states. The paused-negative-delay trick does not survive
   // fill-mode forwards in headless Chromium (a never-played paused animation
   // resolves to base values), so the frozen states are painted STATICALLY —
@@ -57,6 +56,13 @@ const row = (extra, style, inner, riseStyle) =>
   `<div class="arxa-genui-enter-rise" style="${riseStyle ?? ''}">${inner}</div></div>`
 
 const FIT = 'width: fit-content; max-width: 100%'
+
+// The real Button renderer's markup, mirrored: an inline-block pill with no
+// width of its own. The old fixture drew a full-width .cta bar — a fiction
+// that hid the row-sized ring and, on the replay path, a real stretch bug.
+const PILL = '<button type="button" disabled style="padding: 5px 12px; border-radius: 6px;' +
+  ' border: 1px solid ' + ACCENT + ';' +
+  ' background: ' + ACCENT + '; color: #0d0d10; font-weight: 600; font: inherit">Start free</button>'
 const html = [
   '<!doctype html><meta charset="utf-8"><title>gen-ui entrance fixture</title>',
   '<style>' + GLOW_CSS + '</style>',
@@ -72,10 +78,12 @@ const html = [
   row('st-gone txt', FIT, '<p>Unlimited projects</p>', 'opacity: 0.45; transform: translateY(4px)'),
   '  <div class="cap">C — settled (nothing lingers)</div>',
   row('settled txt', FIT, '<p>Team roles</p>'),
-  '  <div class="cap">D — full-width node: the ring spans the whole bar</div>',
-  row('st-ring bar', '--arxa-glow-angle: 220deg', '<div class="cta">Start free</div>', 'opacity: 0'),
+  '  <div class="cap">D — full-width node (a Choice row): the ring spans the row</div>',
+  row('st-ring bar', '--arxa-glow-angle: 220deg', '<div class="opt">Fast setup</div>', 'opacity: 0'),
   '  <div class="cap">E — heading ink, hugged</div>',
   row('st-ring txt', FIT + '; --arxa-glow-angle: 300deg', '<div class="hd">Studio</div>', 'opacity: 0'),
+  '  <div class="cap">F — Button pill: the ring hugs the ink, not the row</div>',
+  row('st-ring txt', FIT + '; --arxa-glow-angle: 340deg', PILL, 'opacity: 0'),
   '</div>',
 ].join('\n')
 
@@ -97,8 +105,8 @@ const LIVE_ROWS = [
   row('txt', '--arxa-enter-delay: 400ms; ' + FIT, '<p>Unlimited projects</p>'),
   '  <div class="cap">C — Heading, batch delay 800ms</div>',
   row('txt', '--arxa-enter-delay: 800ms; ' + FIT, '<div class="hd">Studio</div>'),
-  '  <div class="cap">D — full-width Button bar, batch delay 1200ms</div>',
-  row('bar', '--arxa-enter-delay: 1200ms', '<div class="cta">Start free</div>'),
+  '  <div class="cap">D — Button pill, batch delay 1200ms (the ring hugs the ink)</div>',
+  row('txt', '--arxa-enter-delay: 1200ms; ' + FIT, PILL),
   '  <div class="cap">E — replay reference: sizing wrapper only, never animates</div>',
   '  <div style="' + FIT + '"><p>Priority support</p></div>',
 ].join('\n')
@@ -141,9 +149,6 @@ const SIM_CSS = [
 // each as the real two boxes (ring host > rise box).
 const CARD_HTML = '<div id="pcard" style="border: 1px solid #333; border-radius: 8px;' +
   ' padding: 12px; display: flex; flex-direction: column; gap: 8px"></div>'
-const PILL = '<button type="button" disabled style="padding: 5px 12px; border-radius: 6px;' +
-  ' border: 1px solid ' + ACCENT + ';' +
-  ' background: ' + ACCENT + '; color: #0d0d10; font-weight: 600; font: inherit">Start free</button>'
 const SIM_STEPS = [
   { t: 0, html: CARD_HTML, host: true, nid: 'pcard' },
   { t: 705, html: '<div class="hd">Studio</div>', fit: true, nid: 'phdr' },
