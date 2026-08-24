@@ -122,6 +122,43 @@ window.__ModuleLoader__.load({
         return () => es.close()
       }, [open, url])
 
+      // Selection handoff helpers (rework slice 7, 2026-08-24). The pointer
+      // line is the ONE line the draft carries; the organized context
+      // (styles, law, screenshot) stays server-side behind its fetch URL.
+      // No public composer-prefill API exists in the DSH packages (verified
+      // against dsh-client-ui-conversation/attachment contracts), so the
+      // write uses the native value setter + a bubbling input event — the
+      // documented technique for React-controlled textareas — and
+      // degrades to the clipboard when no composer is mounted.
+      const pointerLine = (sel, origin) =>
+        'design selection #' + (sel.id || '') + ' · ' + (sel.label || 'element') +
+        ' · ' + (sel.route || '/') +
+        ' · fetch ' + (origin || '') + (sel.fetch || '/__dial/selection/' + (sel.id || '')) +
+        ' — edit ONLY this element via the design patch contract; structure is locked.'
+      const insertIntoComposer = (sel, origin) => {
+        const line = pointerLine(sel, origin)
+        const ta = document.querySelector('textarea')
+        if (ta) {
+          try {
+            const setter = Object.getOwnPropertyDescriptor(
+              window.HTMLTextAreaElement.prototype, 'value').set
+            setter.call(ta, (ta.value ? ta.value.replace(/\s*$/, '\n') : '') + line)
+            ta.dispatchEvent(new Event('input', { bubbles: true }))
+            ta.focus()
+            return
+          } catch (_) { /* fall through to clipboard */ }
+        }
+        try { navigator.clipboard.writeText(line) } catch (_) {}
+      }
+      const chipStyle = {
+        fontSize: 10, fontWeight: 600, padding: '2px 6px', borderRadius: 6,
+        background: '#22301a', color: '#c8d8b0',
+      }
+      const btnStyle = {
+        padding: '3px 8px', cursor: 'pointer', borderRadius: 4,
+        border: '1px solid #6e884c', background: '#1c2415', color: '#dce8cc',
+      }
+
       // Design Mode's commit socket (locked amendment 2026-08-23, decision
       // 2): the Author clicks 'Request commit' in the dial island, the
       // design server broadcasts the draft as structured patch ops on
@@ -130,6 +167,7 @@ window.__ModuleLoader__.load({
       // clears the draft on success. Same cross-origin rule as /__events:
       // one trusted-origin entry covers both streams.
       const [commitReq, setCommitReq] = React.useState(null)
+      const [selReq, setSelReq] = React.useState(null)
       React.useEffect(() => {
         if (!open) return
         let es
@@ -138,6 +176,11 @@ window.__ModuleLoader__.load({
           let msg
           try { msg = JSON.parse(ev.data) } catch { return }
           if (msg && msg.kind === 'commit' && msg.data) setCommitReq(msg.data)
+          // Selection handoff (2026-08-24, rework slice 7): the dial card's
+          // "Ask arxa" registered an organized selection context server-side
+          // and broadcast its pointer — the rail-twin card below carries it
+          // to the composer.
+          if (msg && msg.kind === 'selection' && msg.data) setSelReq(msg.data)
         })
         return () => es.close()
       }, [open, url])
@@ -237,6 +280,39 @@ window.__ModuleLoader__.load({
                 background: 'none', border: 'none', color: '#a89f8a',
               },
             }, 'dismiss'))),
+        selReq && h('div', {
+          style: {
+            margin: '0 8px 8px', padding: 8, border: '1px solid #6e884c',
+            borderRadius: 6, background: '#141a10', color: '#dce8cc',
+          },
+        },
+          h('div', { style: { fontWeight: 600, marginBottom: 4 } },
+            '✨ design selection ' + (selReq.id || '')),
+          h('div', { style: { display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 } },
+            h('span', chipStyle, selReq.label || 'element'),
+            h('span', chipStyle, (selReq.kind || '') + ' · ' + (selReq.group || '')),
+            h('span', chipStyle, selReq.route || '/')),
+          (selReq.text || '').length > 0 && h('div', {
+            style: { fontSize: 11, color: '#a8b894', marginBottom: 6,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+          }, '"' + selReq.text.slice(0, 90) + '"'),
+          h('div', { style: { fontSize: 10.5, color: '#8a9a76', marginBottom: 8 } },
+            'the agent fetches the organized context (styles · law · screenshot) from the design server and edits ONLY this element'),
+          h('div', { style: { display: 'flex', gap: 6 } },
+            h('button', {
+              onClick: () => insertIntoComposer(selReq, url),
+              style: btnStyle,
+            }, '→ composer'),
+            h('button', {
+              onClick: () => {
+                try { navigator.clipboard.writeText(pointerLine(selReq, url)) } catch (_) {}
+              },
+              style: { ...btnStyle, marginLeft: 'auto' },
+            }, 'copy line'),
+            h('button', {
+              onClick: () => setSelReq(null),
+              style: { background: 'none', border: 'none', color: '#8a9a76', cursor: 'pointer' },
+            }, '×'))),
         // Still scrolls; just no bar. The design server hides the scrollbars
         // INSIDE the frame (it injects CSS for a framed navigation, which we
         // cannot do from here — the frame is cross-origin); this is the dock's
