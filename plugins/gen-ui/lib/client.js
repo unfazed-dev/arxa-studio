@@ -419,6 +419,55 @@ window.__ModuleLoader__.load({
         return () => clearTimeout(t)
       }, [activeKey, activeLoaded])
 
+      // LIVE CONVERGENCE FOR FRAMED APPBOX DESIGN SERVERS. A rung whose
+      // sandbox gave it an opaque origin can never run the dial (guarded
+      // /__dial/* is refused there), so its only truth is what the server
+      // overlaid at load — left alone it mirrors the design as of mount
+      // time forever. The studio page IS a trusted origin, so subscribe
+      // from here: any dial push (draft/pins/commit) or file-watch reload
+      // converges the rungs — the ACTIVE one remounts at once, the others
+      // are marked stale and remount on entry (show()'s existing path),
+      // which preserves scroll position everywhere else. Trailing-debounced
+      // so an editing burst remounts once, not per keystroke. A non-appbox
+      // url has no such endpoints: an error before the first open closes
+      // the stream instead of retrying against it forever. Uncredentialed
+      // cross-origin SSE rides the SAME socket-pool group as the design
+      // panel's two subscriptions — 4 of 6, and the pins-read storm that
+      // once made this tight is gone (app-box b3ba1683).
+      const activeRef = React.useRef(active)
+      React.useEffect(() => { activeRef.current = active }, [active])
+      React.useEffect(() => {
+        if (!/^https?:\/\//.test(url)) return undefined
+        let origin
+        try { origin = new URL(url).origin } catch { return undefined }
+        const streams = []
+        let opened = false
+        let timer = null
+        const converge = () => {
+          clearTimeout(timer)
+          timer = setTimeout(() => {
+            const cur = activeRef.current
+            setEpochs((e) => ({ ...e, [cur]: (e[cur] ?? 0) + 1 }))
+            setStale((sx) => {
+              const n = { ...sx }
+              rungs.forEach((_, i) => { if (i !== cur) n[i] = true })
+              return n
+            })
+          }, 800)
+        }
+        const sub = (path, eventName) => {
+          let es
+          try { es = new EventSource(origin + path) } catch { return }
+          streams.push(es)
+          es.addEventListener('open', () => { opened = true })
+          es.addEventListener(eventName, converge)
+          es.onerror = () => { if (!opened) es.close() }
+        }
+        sub('/__dial/events', 'dial')
+        sub('/__events', 'reload')
+        return () => { clearTimeout(timer); streams.forEach((es) => es.close()) }
+      }, [url])
+
       if (!url) return h('div', { style: muted }, 'RungLadder: no url')
       return h('div', { style: { margin: '6px 0' } },
         h('div', { style: { display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' } },
