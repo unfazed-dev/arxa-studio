@@ -142,6 +142,22 @@ window.__ModuleLoader__.load({
       // before wiring (lens_dial_snapshot_probe: blob thumbnail appeared);
       // a clipboard with no text/plain inserts ONLY the image, so the two
       // writes never collide.
+      // The COMPOSER, not "a textarea" (2026-08-26 live failure): the
+      // studio page carries other textareas — the commit banner's ops
+      // box in this very dock, gen-ui cards above the composer — and
+      // querySelector('textarea') handed them the compose insert: the
+      // card said ✓ while the composer stayed empty. The DSH
+      // SessionInput is the one textarea with the semantic data-phase
+      // attribute (dsh-client-ui-conversation InputBar sets it on every
+      // phase); fall back to the last VISIBLE textarea, else null (the
+      // honest inserted:false path).
+      const composerTextarea = () => {
+        const visible = (t) => !!(t.offsetWidth || t.offsetHeight ||
+          t.getClientRects().length)
+        const tas = [...document.querySelectorAll('textarea')]
+        return tas.filter((t) => t.hasAttribute('data-phase') && visible(t)).pop() ||
+          tas.filter(visible).pop() || null
+      }
       const pointerLine = (sel, origin) =>
         'design selection #' + (sel.id || '') + ' · ' + (sel.label || 'element') +
         ' · ' + (sel.route || '/') +
@@ -154,7 +170,7 @@ window.__ModuleLoader__.load({
             { type: 'image/png' })
           const dt = new DataTransfer()
           dt.items.add(file)
-          const ta = document.querySelector('textarea')
+          const ta = composerTextarea()
           if (!ta) return false
           ta.focus()
           ta.dispatchEvent(new ClipboardEvent('paste',
@@ -169,7 +185,7 @@ window.__ModuleLoader__.load({
       // operator hunting for a line that is not there.
       const insertIntoComposer = async (sel, origin) => {
         const line = pointerLine(sel, origin)
-        const ta = document.querySelector('textarea')
+        const ta = composerTextarea()
         let textOk = false
         if (ta) {
           try {
@@ -207,7 +223,7 @@ window.__ModuleLoader__.load({
       // moss chip at the bottom of the studio page + a brief highlight on
       // the composer textarea — where the operator's eyes go next.
       const confirmInsert = (res) => {
-        const ta = document.querySelector('textarea')
+        const ta = composerTextarea()
         if (ta && res.text) {
           const prev = ta.style.outline
           ta.style.outline = '2px solid #8ea36a'
