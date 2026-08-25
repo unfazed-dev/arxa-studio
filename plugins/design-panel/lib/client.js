@@ -176,32 +176,12 @@ window.__ModuleLoader__.load({
         } else {
           try { navigator.clipboard.writeText(line) } catch (_) {}
         }
-        // The context fetch may still be in flight — the card paints from
-        // the thin pointer frame, and a fast click would otherwise read a
-        // png-less state and silently skip the snapshot (the race caught by
-        // lens_dial_snapshot_race). Await the in-flight promise, bounded;
-        // on expiry or failure proceed text-only.
-        let ctx = sel
-        const rec = selCtxRef.current
-        if (rec && rec.id === sel.id && sel.loading !== false) {
-          try {
-            ctx = await Promise.race([
-              rec.promise,
-              new Promise((_, rej) => setTimeout(rej, 2500)),
-            ])
-          } catch (_) { /* slow or expired — text-only */ }
+        // The caller passes the fetched context (the compose handler
+        // awaits it before calling); a png-less or expired context
+        // simply means pointer-line-only.
+        if (sel.png && String(sel.png).startsWith('data:image/')) {
+          await pasteSnapshot(sel.png, sel.id)
         }
-        if (ctx.png && String(ctx.png).startsWith('data:image/')) {
-          await pasteSnapshot(ctx.png, ctx.id || sel.id)
-        }
-      }
-      const chipStyle = {
-        fontSize: 10, fontWeight: 600, padding: '2px 6px', borderRadius: 6,
-        background: '#22301a', color: '#c8d8b0',
-      }
-      const btnStyle = {
-        padding: '3px 8px', cursor: 'pointer', borderRadius: 4,
-        border: '1px solid #6e884c', background: '#1c2415', color: '#dce8cc',
       }
 
       // Design Mode's commit socket (locked amendment 2026-08-23, decision
@@ -212,42 +192,77 @@ window.__ModuleLoader__.load({
       // clears the draft on success. Same cross-origin rule as /__events:
       // one trusted-origin entry covers both streams.
       const [commitReq, setCommitReq] = React.useState(null)
-      const [selReq, setSelReq] = React.useState(null)
-      // The in-flight selection-context fetch ({id, promise}), so a click on
-      // "→ composer" can AWAIT it — the card paints from the thin pointer
-      // frame before the context (label · png · styles) resolves, and a
-      // click in that window must not silently drop the snapshot.
-      const selCtxRef = React.useRef(null)
+
+      // Destination-side confirmation (operator, 2026-08-26): a transient
+      // moss chip at the bottom of the studio page + a brief highlight on
+      // the composer textarea — where the operator's eyes go next.
+      const confirmInsert = (withSnapshot) => {
+        const ta = document.querySelector('textarea')
+        if (ta) {
+          const prev = ta.style.outline
+          ta.style.outline = '2px solid #8ea36a'
+          ta.style.outlineOffset = '2px'
+          setTimeout(() => { ta.style.outline = prev; ta.style.outlineOffset = '' }, 1400)
+        }
+        let chip = document.getElementById('arxa-compose-chip')
+        if (chip) chip.remove()
+        chip = document.createElement('div')
+        chip.id = 'arxa-compose-chip'
+        chip.textContent = withSnapshot
+          ? '✓ pointer line + snapshot inserted into the composer'
+          : '✓ pointer line inserted into the composer'
+        chip.style.cssText = 'position:fixed;bottom:64px;left:50%;transform:translateX(-50%);' +
+          'background:#1c2415;border:1px solid #6e884c;color:#dce8cc;' +
+          'font-size:12px;font-weight:600;padding:6px 12px;border-radius:8px;' +
+          'z-index:2147483000;pointer-events:none;transition:opacity .4s'
+        document.body.appendChild(chip)
+        setTimeout(() => { chip.style.opacity = '0' }, 2800)
+        setTimeout(() => { chip.remove() }, 3400)
+      }
+
+      // The dial event stream is ALWAYS-ON now (operator, 2026-08-26):
+      // the floating card's Arxa tab drives the composer from the design
+      // iframe, and the insert must land whether or not this panel dock
+      // is expanded. The green selection card retired — its markup moved
+      // INTO the floating card (tabs: Customise / Arxa) and this side
+      // keeps only the machinery: compose → insert → ack.
       React.useEffect(() => {
-        if (!open) return
         let es
         try { es = new EventSource(new URL('/__dial/events', url).href) } catch { return }
         es.addEventListener('dial', (ev) => {
           let msg
           try { msg = JSON.parse(ev.data) } catch { return }
           if (msg && msg.kind === 'commit' && msg.data) setCommitReq(msg.data)
-          // Selection handoff (2026-08-24, rework slice 7): the dial card's
-          // "Ask arxa" registered an organized selection context server-side
-          // and broadcast its POINTER. The frame is deliberately thin
-          // ({id, fetch}) — the PNG, label, styles and law stay server-side
-          // behind the fetch URL, so no 400 KB image ever rides the dial
-          // event log (operator decision 2026-08-25: fetch-on-arrival). The
-          // context fetch is cross-origin; the same trusted-origins entry
-          // that admits this EventSource covers it (CORS headers verified
-          // on GET /__dial/selection/*).
-          if (msg && msg.kind === 'selection' && msg.data) {
+          // Compose request (2026-08-26): the floating card's "→ composer"
+          // button POSTed /compose and the server broadcast the THIN
+          // pointer ({id, fetch, label, route}). Fetch the full context
+          // (the PNG rides it, never the event log — operator
+          // 2026-08-25), insert line + snapshot, ACK back so the card
+          // shows a VERIFIED ✓, and confirm at the destination.
+          if (msg && msg.kind === 'compose' && msg.data && msg.data.id) {
             const ptr = msg.data
-            setSelReq({ ...ptr, loading: true })
-            const ctxPromise = fetch(new URL(ptr.fetch, url).href)
-              .then((r) => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
-            selCtxRef.current = { id: ptr.id, promise: ctxPromise }
-            ctxPromise
-              .then((ctx) => setSelReq((s) => (s && s.id === ptr.id ? { ...s, ...ctx, loading: false } : s)))
-              .catch(() => setSelReq((s) => (s && s.id === ptr.id ? { ...s, loading: false, expired: true } : s)))
+            ;(async () => {
+              let ctx = ptr
+              try {
+                const r = await fetch(new URL(ptr.fetch, url).href)
+                if (r.ok) ctx = await r.json()
+              } catch { /* expired or refused — pointer-line only */ }
+              await insertIntoComposer({ ...ptr, ...ctx,
+                route: ctx.route || ptr.route, label: ctx.label || ptr.label }, url)
+              const withSnap = !!(ctx.png && String(ctx.png).startsWith('data:image/'))
+              confirmInsert(withSnap)
+              try {
+                await fetch(new URL('/__dial/compose-ack', url).href, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ id: ptr.id }),
+                })
+              } catch { /* the insert landed; the ack is best-effort */ }
+            })()
           }
         })
         return () => es.close()
-      }, [open, url])
+      }, [url])
 
       if (!open) {
         return h('button', {
@@ -344,48 +359,6 @@ window.__ModuleLoader__.load({
                 background: 'none', border: 'none', color: '#a89f8a',
               },
             }, 'dismiss'))),
-        selReq && h('div', {
-          style: {
-            margin: '0 8px 8px', padding: 8, border: '1px solid #6e884c',
-            borderRadius: 6, background: '#141a10', color: '#dce8cc',
-          },
-        },
-          h('div', { style: { fontWeight: 600, marginBottom: 4 } },
-            '✨ design selection ' + (selReq.id || '')),
-          h('div', { style: { display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 } },
-            h('span', chipStyle, selReq.label || 'element'),
-            h('span', chipStyle, (selReq.kind || '') + ' · ' + (selReq.group || '')),
-            h('span', chipStyle, selReq.route || '/')),
-          selReq.loading === true && h('div', {
-            style: { fontSize: 10.5, color: '#8a9a76', marginBottom: 6 },
-          }, 'fetching selection context (label · styles · snapshot)…'),
-          selReq.png && h('div', {
-            style: { fontSize: 10.5, color: '#a8b894', marginBottom: 6 },
-          }, '📸 snapshot captured — “→ composer” attaches it to the draft'),
-          selReq.expired && h('div', {
-            style: { fontSize: 10.5, color: '#a88a6d', marginBottom: 6 },
-          }, 'context expired (20 min) — pointer line only'),
-          (selReq.text || '').length > 0 && h('div', {
-            style: { fontSize: 11, color: '#a8b894', marginBottom: 6,
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-          }, '"' + selReq.text.slice(0, 90) + '"'),
-          h('div', { style: { fontSize: 10.5, color: '#8a9a76', marginBottom: 8 } },
-            'the agent fetches the organized context (styles · law · screenshot) from the design server and edits ONLY this element'),
-          h('div', { style: { display: 'flex', gap: 6 } },
-            h('button', {
-              onClick: () => insertIntoComposer(selReq, url),
-              style: btnStyle,
-            }, '→ composer'),
-            h('button', {
-              onClick: () => {
-                try { navigator.clipboard.writeText(pointerLine(selReq, url)) } catch (_) {}
-              },
-              style: { ...btnStyle, marginLeft: 'auto' },
-            }, 'copy line'),
-            h('button', {
-              onClick: () => setSelReq(null),
-              style: { background: 'none', border: 'none', color: '#8a9a76', cursor: 'pointer' },
-            }, '×'))),
         // Still scrolls; just no bar. The design server hides the scrollbars
         // INSIDE the frame (it injects CSS for a framed navigation, which we
         // cannot do from here — the frame is cross-origin); this is the dock's
