@@ -176,8 +176,23 @@ window.__ModuleLoader__.load({
         } else {
           try { navigator.clipboard.writeText(line) } catch (_) {}
         }
-        if (sel.png && String(sel.png).startsWith('data:image/')) {
-          await pasteSnapshot(sel.png, sel.id)
+        // The context fetch may still be in flight — the card paints from
+        // the thin pointer frame, and a fast click would otherwise read a
+        // png-less state and silently skip the snapshot (the race caught by
+        // lens_dial_snapshot_race). Await the in-flight promise, bounded;
+        // on expiry or failure proceed text-only.
+        let ctx = sel
+        const rec = selCtxRef.current
+        if (rec && rec.id === sel.id && sel.loading !== false) {
+          try {
+            ctx = await Promise.race([
+              rec.promise,
+              new Promise((_, rej) => setTimeout(rej, 2500)),
+            ])
+          } catch (_) { /* slow or expired — text-only */ }
+        }
+        if (ctx.png && String(ctx.png).startsWith('data:image/')) {
+          await pasteSnapshot(ctx.png, ctx.id || sel.id)
         }
       }
       const chipStyle = {
@@ -198,6 +213,11 @@ window.__ModuleLoader__.load({
       // one trusted-origin entry covers both streams.
       const [commitReq, setCommitReq] = React.useState(null)
       const [selReq, setSelReq] = React.useState(null)
+      // The in-flight selection-context fetch ({id, promise}), so a click on
+      // "→ composer" can AWAIT it — the card paints from the thin pointer
+      // frame before the context (label · png · styles) resolves, and a
+      // click in that window must not silently drop the snapshot.
+      const selCtxRef = React.useRef(null)
       React.useEffect(() => {
         if (!open) return
         let es
@@ -218,8 +238,10 @@ window.__ModuleLoader__.load({
           if (msg && msg.kind === 'selection' && msg.data) {
             const ptr = msg.data
             setSelReq({ ...ptr, loading: true })
-            fetch(new URL(ptr.fetch, url).href)
+            const ctxPromise = fetch(new URL(ptr.fetch, url).href)
               .then((r) => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
+            selCtxRef.current = { id: ptr.id, promise: ctxPromise }
+            ctxPromise
               .then((ctx) => setSelReq((s) => (s && s.id === ptr.id ? { ...s, ...ctx, loading: false } : s)))
               .catch(() => setSelReq((s) => (s && s.id === ptr.id ? { ...s, loading: false, expired: true } : s)))
           }
