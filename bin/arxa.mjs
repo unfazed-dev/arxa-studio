@@ -234,8 +234,16 @@ if (!existsSync(dshBin)) {
 // browser halves are discovered through package.json dsh.client, which a
 // file-path entry never reaches).
 const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa-mcp-apps']
-if (BY_NAME_PLUGINS.some((p) => !existsSync(join(profileDir, 'node_modules', p)))) {
-  const r = spawnSync('pnpm', ['install', '--dir', profileDir], { stdio: 'inherit' })
+// ALWAYS install, never skip on presence: these are file: dependencies, and
+// pnpm copies them into .pnpm at add-time. A plain `pnpm install` sees the
+// lockfile entry unchanged and keeps the OLD copy — measured 2026-08-25: the
+// studio served an Aug-21 design panel (no selection handoff) three days
+// after slice 7 landed in plugins/, and the two-tab compose proof could not
+// pass until `pnpm install --force` refreshed the bytes. --force re-copies
+// every file: plugin on boot (~160ms measured) — the only policy under which
+// editing a plugin's source and relaunching arxa does what it visibly says.
+{
+  const r = spawnSync('pnpm', ['install', '--force', '--dir', profileDir], { stdio: 'inherit' })
   if (r.error || r.status !== 0) {
     console.error('arxa: could not pnpm-install the profile — the design '
       + 'panel will not mount. Run: dsh plugin --profile arxa add '
