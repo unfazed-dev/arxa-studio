@@ -122,20 +122,47 @@ window.__ModuleLoader__.load({
         return () => es.close()
       }, [open, url])
 
-      // Selection handoff helpers (rework slice 7, 2026-08-24). The pointer
-      // line is the ONE line the draft carries; the organized context
-      // (styles, law, screenshot) stays server-side behind its fetch URL.
-      // No public composer-prefill API exists in the DSH packages (verified
-      // against dsh-client-ui-conversation/attachment contracts), so the
+      // Selection handoff helpers (rework slice 7, 2026-08-24; snapshot
+      // attach 2026-08-25). The pointer line is the text the draft carries;
+      // the organized context (styles, law, screenshot) is fetched into the
+      // card on frame arrival (see the dial listener above).
+      // TEXT: no public composer-prefill API exists in the DSH packages
+      // (verified against dsh-client-ui-conversation/attachment contracts —
+      // the SessionInput facade that owns the draft is package-private, and
+      // the attachment plugin only RENDERS the rail it is handed), so the
       // write uses the native value setter + a bubbling input event — the
-      // documented technique for React-controlled textareas — and
-      // degrades to the clipboard when no composer is mounted.
+      // documented technique for React-controlled textareas — and degrades
+      // to the clipboard when no composer is mounted.
+      //
+      // IMAGE: the same conversation bundle's composer onPaste routes
+      // clipboard FILES through its validation path (intakeImages →
+      // addImages → the draft image rail), so a constructed DataTransfer
+      // carrying the selection PNG, dispatched as a paste on the textarea,
+      // lands the snapshot in the rail. Lens-verified live in this studio
+      // before wiring (lens_dial_snapshot_probe: blob thumbnail appeared);
+      // a clipboard with no text/plain inserts ONLY the image, so the two
+      // writes never collide.
       const pointerLine = (sel, origin) =>
         'design selection #' + (sel.id || '') + ' · ' + (sel.label || 'element') +
         ' · ' + (sel.route || '/') +
         ' · fetch ' + (origin || '') + (sel.fetch || '/__dial/selection/' + (sel.id || '')) +
         ' — edit ONLY this element via the design patch contract; structure is locked.'
-      const insertIntoComposer = (sel, origin) => {
+      const pasteSnapshot = async (png, id) => {
+        try {
+          const blob = await (await fetch(png)).blob()
+          const file = new File([blob], 'selection-' + (id || 'snapshot') + '.png',
+            { type: 'image/png' })
+          const dt = new DataTransfer()
+          dt.items.add(file)
+          const ta = document.querySelector('textarea')
+          if (!ta) return false
+          ta.focus()
+          ta.dispatchEvent(new ClipboardEvent('paste',
+            { clipboardData: dt, bubbles: true, cancelable: true }))
+          return true
+        } catch (_) { return false }
+      }
+      const insertIntoComposer = async (sel, origin) => {
         const line = pointerLine(sel, origin)
         const ta = document.querySelector('textarea')
         if (ta) {
@@ -145,10 +172,13 @@ window.__ModuleLoader__.load({
             setter.call(ta, (ta.value ? ta.value.replace(/\s*$/, '\n') : '') + line)
             ta.dispatchEvent(new Event('input', { bubbles: true }))
             ta.focus()
-            return
           } catch (_) { /* fall through to clipboard */ }
+        } else {
+          try { navigator.clipboard.writeText(line) } catch (_) {}
         }
-        try { navigator.clipboard.writeText(line) } catch (_) {}
+        if (sel.png && String(sel.png).startsWith('data:image/')) {
+          await pasteSnapshot(sel.png, sel.id)
+        }
       }
       const chipStyle = {
         fontSize: 10, fontWeight: 600, padding: '2px 6px', borderRadius: 6,
@@ -178,9 +208,21 @@ window.__ModuleLoader__.load({
           if (msg && msg.kind === 'commit' && msg.data) setCommitReq(msg.data)
           // Selection handoff (2026-08-24, rework slice 7): the dial card's
           // "Ask arxa" registered an organized selection context server-side
-          // and broadcast its pointer — the rail-twin card below carries it
-          // to the composer.
-          if (msg && msg.kind === 'selection' && msg.data) setSelReq(msg.data)
+          // and broadcast its POINTER. The frame is deliberately thin
+          // ({id, fetch}) — the PNG, label, styles and law stay server-side
+          // behind the fetch URL, so no 400 KB image ever rides the dial
+          // event log (operator decision 2026-08-25: fetch-on-arrival). The
+          // context fetch is cross-origin; the same trusted-origins entry
+          // that admits this EventSource covers it (CORS headers verified
+          // on GET /__dial/selection/*).
+          if (msg && msg.kind === 'selection' && msg.data) {
+            const ptr = msg.data
+            setSelReq({ ...ptr, loading: true })
+            fetch(new URL(ptr.fetch, url).href)
+              .then((r) => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
+              .then((ctx) => setSelReq((s) => (s && s.id === ptr.id ? { ...s, ...ctx, loading: false } : s)))
+              .catch(() => setSelReq((s) => (s && s.id === ptr.id ? { ...s, loading: false, expired: true } : s)))
+          }
         })
         return () => es.close()
       }, [open, url])
@@ -292,6 +334,15 @@ window.__ModuleLoader__.load({
             h('span', chipStyle, selReq.label || 'element'),
             h('span', chipStyle, (selReq.kind || '') + ' · ' + (selReq.group || '')),
             h('span', chipStyle, selReq.route || '/')),
+          selReq.loading === true && h('div', {
+            style: { fontSize: 10.5, color: '#8a9a76', marginBottom: 6 },
+          }, 'fetching selection context (label · styles · snapshot)…'),
+          selReq.png && h('div', {
+            style: { fontSize: 10.5, color: '#a8b894', marginBottom: 6 },
+          }, '📸 snapshot captured — “→ composer” attaches it to the draft'),
+          selReq.expired && h('div', {
+            style: { fontSize: 10.5, color: '#a88a6d', marginBottom: 6 },
+          }, 'context expired (20 min) — pointer line only'),
           (selReq.text || '').length > 0 && h('div', {
             style: { fontSize: 11, color: '#a8b894', marginBottom: 6,
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
