@@ -162,9 +162,15 @@ window.__ModuleLoader__.load({
           return true
         } catch (_) { return false }
       }
+      // Returns what LANDED ({text, image}) — the ack and the
+      // destination chip both speak from this, never from hope
+      // (honest-failure law, 2026-08-26): a studio page with no open
+      // composer cannot take the insert, and saying otherwise sends the
+      // operator hunting for a line that is not there.
       const insertIntoComposer = async (sel, origin) => {
         const line = pointerLine(sel, origin)
         const ta = document.querySelector('textarea')
+        let textOk = false
         if (ta) {
           try {
             const setter = Object.getOwnPropertyDescriptor(
@@ -172,16 +178,20 @@ window.__ModuleLoader__.load({
             setter.call(ta, (ta.value ? ta.value.replace(/\s*$/, '\n') : '') + line)
             ta.dispatchEvent(new Event('input', { bubbles: true }))
             ta.focus()
+            textOk = true
           } catch (_) { /* fall through to clipboard */ }
-        } else {
-          try { navigator.clipboard.writeText(line) } catch (_) {}
+        }
+        if (!textOk) {
+          try { await navigator.clipboard.writeText(line) } catch (_) {}
         }
         // The caller passes the fetched context (the compose handler
         // awaits it before calling); a png-less or expired context
         // simply means pointer-line-only.
+        let imgOk = false
         if (sel.png && String(sel.png).startsWith('data:image/')) {
-          await pasteSnapshot(sel.png, sel.id)
+          imgOk = await pasteSnapshot(sel.png, sel.id)
         }
+        return { text: textOk, image: imgOk }
       }
 
       // Design Mode's commit socket (locked amendment 2026-08-23, decision
@@ -196,9 +206,9 @@ window.__ModuleLoader__.load({
       // Destination-side confirmation (operator, 2026-08-26): a transient
       // moss chip at the bottom of the studio page + a brief highlight on
       // the composer textarea — where the operator's eyes go next.
-      const confirmInsert = (withSnapshot) => {
+      const confirmInsert = (res) => {
         const ta = document.querySelector('textarea')
-        if (ta) {
+        if (ta && res.text) {
           const prev = ta.style.outline
           ta.style.outline = '2px solid #8ea36a'
           ta.style.outlineOffset = '2px'
@@ -208,11 +218,14 @@ window.__ModuleLoader__.load({
         if (chip) chip.remove()
         chip = document.createElement('div')
         chip.id = 'arxa-compose-chip'
-        chip.textContent = withSnapshot
-          ? '✓ pointer line + snapshot inserted into the composer'
-          : '✓ pointer line inserted into the composer'
+        chip.textContent = !res.text
+          ? '⚠ no studio composer is open — click into a session, then send again'
+          : res.image
+            ? '✓ pointer line + snapshot inserted into the composer'
+            : '✓ pointer line inserted into the composer'
         chip.style.cssText = 'position:fixed;bottom:64px;left:50%;transform:translateX(-50%);' +
-          'background:#1c2415;border:1px solid #6e884c;color:#dce8cc;' +
+          'background:#1c2415;color:#dce8cc;' +
+          'border:1px solid ' + (res.text ? '#6e884c' : '#a68a3a') + ';' +
           'font-size:12px;font-weight:600;padding:6px 12px;border-radius:8px;' +
           'z-index:2147483000;pointer-events:none;transition:opacity .4s'
         document.body.appendChild(chip)
@@ -237,28 +250,39 @@ window.__ModuleLoader__.load({
           // button POSTed /compose and the server broadcast the THIN
           // pointer ({id, fetch, label, route}). Fetch the full context
           // (the PNG rides it, never the event log — operator
-          // 2026-08-25), insert line + snapshot, ACK back so the card
-          // shows a VERIFIED ✓, and confirm at the destination.
+          // 2026-08-25), insert line + snapshot, ACK back with what
+          // LANDED so the card shows a VERIFIED ✓ or the truth, and
+          // confirm at the destination.
+          const deliver = async (ptr) => {
+            let ctx = ptr
+            try {
+              const r = await fetch(new URL(ptr.fetch, url).href)
+              if (r.ok) ctx = await r.json()
+            } catch { /* expired or refused — pointer-line only */ }
+            const res = await insertIntoComposer({ ...ptr, ...ctx,
+              route: ctx.route || ptr.route, label: ctx.label || ptr.label }, url)
+            confirmInsert(res)
+            try {
+              await fetch(new URL('/__dial/compose-ack', url).href, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: ptr.id, inserted: res.text }),
+              })
+            } catch { /* the insert landed; the ack is best-effort */ }
+          }
           if (msg && msg.kind === 'compose' && msg.data && msg.data.id) {
-            const ptr = msg.data
-            ;(async () => {
-              let ctx = ptr
-              try {
-                const r = await fetch(new URL(ptr.fetch, url).href)
-                if (r.ok) ctx = await r.json()
-              } catch { /* expired or refused — pointer-line only */ }
-              await insertIntoComposer({ ...ptr, ...ctx,
-                route: ctx.route || ptr.route, label: ctx.label || ptr.label }, url)
-              const withSnap = !!(ctx.png && String(ctx.png).startsWith('data:image/'))
-              confirmInsert(withSnap)
-              try {
-                await fetch(new URL('/__dial/compose-ack', url).href, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ id: ptr.id }),
-                })
-              } catch { /* the insert landed; the ack is best-effort */ }
-            })()
+            deliver(msg.data)
+          }
+          // Legacy bridge (version-skew law, 2026-08-26): a design tab
+          // loaded before the tabbed card still runs the OLD island,
+          // whose ask POSTs /selection with NO v marker — and that ask
+          // WAS the whole flow. The green card that used to confirm it
+          // is retired, so deliver straight to the composer. A v2 Send
+          // (store-only; → composer decides, no auto-send law) carries
+          // the marker and is NOT delivered here.
+          if (msg && msg.kind === 'selection' && msg.data && msg.data.id &&
+              msg.data.v !== 2) {
+            deliver(msg.data)
           }
         })
         return () => es.close()
