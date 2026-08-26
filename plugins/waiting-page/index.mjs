@@ -1,32 +1,35 @@
 /**
- * arxa-waiting-page — dsh cordis plugin: inject browser-tab lifecycle scripts
- * into the served web UI.
+ * arxa-waiting-page — dsh cordis plugin: browser-tab lifecycle for the studio.
  *
  * Two page-side behaviors, BROWSER TABS ONLY (the Tauri desktop shell webview
  * identifies itself with an `ArxaShell` user agent and is skipped — it has its
- * own native Rust watchdog + bundled waiting page, and showing "waiting for
- * main app" inside the main app itself would be nonsense):
+ * own native Rust watchdog + bundled waiting page):
  *
- * 1. Connection heartbeat — when the studio server disappears (desktop app
- *    quit tree-kills its child), every open browser tab overlays the branded
- *    "Waiting for main app to start…" page and auto-recovers when the server
+ * 1. Single live tab, enforced SERVER-SIDE — the server holds the one active
+ *    presence claim, so the rule spans browsers (Web Locks could not: they are
+ *    per-browser-profile). A tab that loads while another holds the claim is
+ *    denied: it first tries window.close() (works for script-opened tabs),
+ *    otherwise parks on a branded "already open" notice — no button. Parked
+ *    tabs re-claim every 2s and auto-promote (reload into the studio) the
+ *    moment the active tab closes or dies; the active tab releases its claim
+ *    eagerly with a pagehide beacon so handoff is instant, and a stale
+ *    heartbeat (7s) covers crashed tabs.
+ *
+ * 2. Connection heartbeat — the active tab's presence beat doubles as the
+ *    server liveness probe. When the studio server disappears (desktop app
+ *    quit tree-kills its child), the active tab overlays the branded
+ *    "Waiting for main app to start…" page and reloads when the server
  *    returns.
  *
- * 2. Tab singleton — at most one live studio tab per browser. Enforced with
- *    the Web Locks API (held for the tab's lifetime) + a BroadcastChannel.
- *    A duplicate tab makes the existing tab reload (fresh state) and itself
- *    shows a branded "already open" notice with a "Use this tab instead"
- *    takeover button. Scope is per-browser-profile — two different browsers
- *    cannot see each other's locks; the server stays multi-client.
- *
  * Server death cannot be rendered BY the server — the overlay must already
- * live inside the page, so it rides in as a structured index injection row
- * (webserver/index-inject). Rows are pure data; the page-side function is
- * serialized via toString and the logo svg is read from this plugin's dir.
+ * live inside the page, so the page-side function rides in as a structured
+ * index injection row (webserver/index-inject) serialized via toString.
+ * Presence arbitration lives on exact HTTP routes (exact beats the SPA
+ * prefix/fallback): /__arxa/presence/{claim,beat,release}?id=<tabId>.
  *
- * Config: { intervalMs?: number (poll cadence, default 2000),
- *           failThreshold?: number (consecutive failures before the
- *           overlay shows, default 2) }
+ * Config: { intervalMs?: number (beat/poll cadence, default 2000),
+ *           failThreshold?: number (consecutive failures before the overlay
+ *           shows, default 2), staleMs?: number (claim expiry, default 7000) }
  */
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -40,11 +43,80 @@ const here = dirname(fileURLToPath(import.meta.url))
 export function apply(ctx, config = {}) {
   const intervalMs = config.intervalMs ?? 2000
   const failThreshold = config.failThreshold ?? 2
+  const staleMs = config.staleMs ?? 7000
+
+  // ---- server-side presence arbitration -----------------------------------
+  // One claim, in memory. Lost on server restart by design: the surviving
+  // active tab's next beat auto-adopts the claim (first beat wins).
+  let active = null // { id, lastSeen, ua }
+  const alive = () => active && Date.now() - active.lastSeen < staleMs
+  const json = (res, body) => {
+    res.writeHead(200, {
+      'content-type': 'application/json',
+      'cache-control': 'no-store',
+    })
+    res.end(JSON.stringify(body))
+  }
+  const tabId = (req) =>
+    new URL(req.url, 'http://x').searchParams.get('id') || ''
+
+  ctx.webServer.register({
+    name: 'arxa-presence-claim',
+    path: '/__arxa/presence/claim',
+    kind: 'exact',
+    handler: (req, res) => {
+      const id = tabId(req)
+      if (!id) return json(res, { granted: false })
+      if (!alive() || active.id === id) {
+        active = { id, lastSeen: Date.now(), ua: req.headers['user-agent'] || '' }
+        return json(res, { granted: true })
+      }
+      json(res, { granted: false })
+    },
+  })
+  ctx.webServer.register({
+    name: 'arxa-presence-beat',
+    path: '/__arxa/presence/beat',
+    kind: 'exact',
+    handler: (req, res) => {
+      const id = tabId(req)
+      if (!id) return json(res, { ok: false })
+      if (!alive() || active.id === id) {
+        // adopt after restart/expiry
+        active = { id, lastSeen: Date.now(), ua: req.headers['user-agent'] || '' }
+        return json(res, { ok: true })
+      }
+      json(res, { ok: false })
+    },
+  })
+  ctx.webServer.register({
+    name: 'arxa-presence-status',
+    path: '/__arxa/presence/status',
+    kind: 'exact',
+    handler: (req, res) => {
+      json(res, {
+        active: alive()
+          ? { id: active.id, ageMs: Date.now() - active.lastSeen, ua: active.ua }
+          : null,
+      })
+    },
+  })
+  ctx.webServer.register({
+    name: 'arxa-presence-release',
+    path: '/__arxa/presence/release',
+    kind: 'exact',
+    handler: (req, res) => {
+      if (active && active.id === tabId(req)) active = null
+      json(res, { ok: true })
+    },
+  })
+
+  // ---- page-side injection -------------------------------------------------
   let logo = ''
   try {
     logo = readFileSync(join(here, 'arxa-brand-logo.svg'), 'utf8')
   } catch {
-    // Logo is cosmetic — both behaviors still work without it.
+    // Logo is cosmetic — behaviors still work without it.
   }
   const text = `(${pageSide.toString()})(${JSON.stringify(logo)}, ${intervalMs}, ${failThreshold})`
   ctx.on('webserver/index-inject', (table) => {
@@ -53,22 +125,30 @@ export function apply(ctx, config = {}) {
 }
 
 /**
- * Runs in the browser. Skips entirely inside the desktop shell webview
- * (ArxaShell UA / __TAURI__ global). Otherwise:
- * - heartbeat: polls the page's own origin; after `failThreshold` consecutive
- *   failures it overlays the waiting page, and on the first successful poll
- *   afterwards it reloads to re-enter the studio cleanly.
- * - singleton: holds the `__arxa-studio-tab` web lock for the tab's lifetime;
- *   a newcomer that cannot get the lock tells the holder to reload and parks
- *   itself on an "already open" notice with a takeover button.
+ * Runs in the browser; exits immediately inside the desktop shell webview.
+ * State machine: claim → PRIMARY (beat loop; server-down ⇒ waiting overlay,
+ * recovery ⇒ reload) | DENIED (try close, else parked notice; re-claim loop,
+ * grant ⇒ reload).
  */
 function pageSide(logo, intervalMs, failThreshold) {
-  // ---- shell opt-out -------------------------------------------------------
   if (/ArxaShell/.test(navigator.userAgent) || window.__TAURI__ || window.__TAURI_INTERNALS__) {
     return
   }
 
-  function card(title, sub, extraHtml) {
+  var id = sessionStorage.getItem('__arxaTab')
+  if (!id) {
+    id = (window.crypto && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : String(Date.now()) + '-' + Math.random().toString(36).slice(2)
+    sessionStorage.setItem('__arxaTab', id)
+  }
+  var base = location.origin + '/__arxa/presence/'
+  function call(ep) {
+    return fetch(base + ep + '?id=' + encodeURIComponent(id), { cache: 'no-store' })
+      .then(function (r) { return r.json() })
+  }
+
+  function card(title, sub) {
     var el = document.createElement('div')
     el.setAttribute('style',
       'position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;' +
@@ -78,8 +158,7 @@ function pageSide(logo, intervalMs, failThreshold) {
       '<div><div style="width:72px;height:72px;margin:0 auto 1.25rem;' +
       'animation:__arxaPulse 1.6s ease-in-out infinite;">' + logo + '</div>' +
       '<h1 style="font-size:1.4rem;font-weight:600;margin:0 0 .5rem;">' + title + '</h1>' +
-      '<p style="color:#9ca3af;font-size:.95rem;margin:0;">' + sub + '</p>' +
-      (extraHtml || '') + '</div>'
+      '<p style="color:#9ca3af;font-size:.95rem;margin:0;">' + sub + '</p></div>'
     var st = document.createElement('style')
     st.textContent =
       '@keyframes __arxaPulse{0%,100%{transform:scale(1);opacity:1}' +
@@ -89,79 +168,69 @@ function pageSide(logo, intervalMs, failThreshold) {
     return el
   }
 
-  // ---- 2. tab singleton ----------------------------------------------------
-  var isPrimary = false
-  if (navigator.locks && 'BroadcastChannel' in window) {
-    var bc = new BroadcastChannel('__arxa-studio-tab')
-    navigator.locks.request('__arxa-studio-tab', { ifAvailable: true }, function (lock) {
-      if (lock) {
-        isPrimary = true
-        bc.onmessage = function (e) {
-          if (e.data === 'claim') {
-            // A duplicate tab appeared: refresh this (surviving) tab.
-            location.reload()
-          } else if (e.data === 'takeover') {
-            // Yield: park this tab on the notice; the lock frees on unload
-            // of our held promise scope via page reload into parked state.
-            document.documentElement.innerHTML = ''
-            document.documentElement.appendChild(
-              card('Arxa Studio', 'This tab was taken over by another Arxa Studio tab.'))
-            window.__arxaRelease && window.__arxaRelease()
-          }
-        }
-        // Hold the lock until released or the tab closes.
-        return new Promise(function (resolve) { window.__arxaRelease = resolve })
-      }
-      // Lock busy: another tab is live. Ask it to reload, park this one.
-      bc.postMessage('claim')
-      var el = card('Arxa Studio',
-        'Already open in another tab.',
-        '<button id="__arxa-takeover" style="margin-top:1.25rem;padding:.55rem 1.1rem;' +
-        'border:1px solid #374151;border-radius:8px;background:#1f2937;color:#e5e7eb;' +
-        'font-size:.9rem;cursor:pointer;">Use this tab instead</button>')
-      function park() {
-        if (!document.documentElement) return
-        document.documentElement.innerHTML = ''
-        document.documentElement.appendChild(el)
-        var btn = document.getElementById('__arxa-takeover')
-        if (btn) btn.onclick = function () {
-          bc.postMessage('takeover')
-          setTimeout(function () { location.reload() }, 250)
-        }
-      }
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', park)
-      } else {
-        park()
-      }
-      return
-    })
-  } else {
-    isPrimary = true // no Web Locks: degrade to old multi-tab behavior
+  var overlay = null
+  function showOverlay(title, sub) {
+    if (overlay || !document.documentElement) return
+    overlay = card(title, sub)
+    document.documentElement.appendChild(overlay)
   }
 
-  // ---- 1. connection heartbeat --------------------------------------------
-  var fails = 0
-  var shown = false
-  function show() {
-    if (shown || !document.documentElement) return
-    shown = true
-    var el = card('Arxa Studio', 'Waiting for main app to start…')
-    el.id = '__arxa-waiting'
-    document.documentElement.appendChild(el)
-  }
-  function tick() {
-    if (!isPrimary && navigator.locks) return // parked tabs don't poll
-    fetch(location.origin + '/', { method: 'GET', cache: 'no-store' })
-      .then(function (r) {
-        if (!r.ok) throw new Error('status ' + r.status)
+  function primary() {
+    var fails = 0
+    var down = false
+    window.addEventListener('pagehide', function () {
+      // Eager handoff so a next tab can claim instantly.
+      navigator.sendBeacon && navigator.sendBeacon(base + 'release?id=' + encodeURIComponent(id))
+    })
+    setInterval(function () {
+      call('beat').then(function (j) {
+        if (!j.ok) { location.reload(); return } // claim lost → re-arbitrate
         fails = 0
-        if (shown) location.reload()
-      })
-      .catch(function () {
+        if (down) location.reload() // server came back → clean re-entry
+      }).catch(function () {
         fails += 1
-        if (fails >= failThreshold) show()
+        if (fails >= failThreshold) {
+          down = true
+          showOverlay('Arxa Studio', 'Waiting for main app to start…')
+        }
       })
+    }, intervalMs)
   }
-  setInterval(tick, intervalMs)
+
+  function denied() {
+    // Requested behavior: do not open a second surface at all.
+    // close() only works for script-opened tabs; fall through to a parked
+    // notice otherwise. No button — parked tabs auto-promote when the live
+    // tab goes away.
+    window.close()
+    function park() {
+      if (!document.documentElement) return
+      document.documentElement.innerHTML = ''
+      document.documentElement.appendChild(
+        card('Arxa Studio', 'Already open in another tab or browser.'))
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', park)
+    } else {
+      park()
+    }
+    var t = setInterval(function () {
+      call('claim').then(function (j) {
+        if (j.granted) { clearInterval(t); location.reload() }
+      }).catch(function () { /* server down: keep parked, keep retrying */ })
+    }, intervalMs)
+  }
+
+  call('claim').then(function (j) {
+    if (j.granted) primary()
+    else denied()
+  }).catch(function () {
+    // Server unreachable at load (e.g. app just quit): overlay + retry.
+    showOverlay('Arxa Studio', 'Waiting for main app to start…')
+    var t = setInterval(function () {
+      call('claim').then(function (j) {
+        if (j.granted) { clearInterval(t); location.reload() }
+      }).catch(function () {})
+    }, intervalMs)
+  })
 }
