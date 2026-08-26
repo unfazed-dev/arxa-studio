@@ -138,13 +138,17 @@
 #       args:
 #         - /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/mcp-apps/testserver.mjs
 
-# 11. Waiting-page heartbeat (desktop lifecycle, 2026-08-26): the desktop
-#     app OWNS the studio server (launchd autostart retired) — when it quits
-#     the server tree dies with it. The server cannot render its own death,
-#     so every served page carries a heartbeat that overlays the branded
-#     "Waiting for main app to start…" page on connection loss and reloads
-#     on recovery. Browser tabs get parity with the desktop webview's native
-#     Rust watchdog.
+# 11. Waiting-page / browser-surface lifecycle (desktop-first, 2026-08-27):
+#     the desktop app OWNS the studio server — when it quits the server tree
+#     dies, so every served page carries a heartbeat that overlays the
+#     branded "Waiting for main app to start…" page on loss and reloads on
+#     recovery. The same plugin holds the server-side presence referee:
+#     while the shell beats, browser tabs park ("running as the desktop
+#     app"); with the app closed, at most ONE tab across all browsers. The
+#     only override is the Settings > General "Open in browser" CTA (single
+#     -use token via /__arxa/presence/open-browser). By PACKAGE NAME — the
+#     browser half (the settings row) is discovered through package.json
+#     dsh.client, same as the design panel.
 - insert:
   - id: arxa-waiting-page
-    name: /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/waiting-page/index.mjs
+    name: arxa-waiting-page

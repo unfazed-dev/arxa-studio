@@ -1,0 +1,26 @@
+{
+  "name": "arxa-waiting-page",
+  "version": "0.1.0",
+  "private": true,
+  "description": "arxa desktop lifecycle for browser surfaces: server-held single-tab presence (desktop-first: browser tabs park while the shell runs), the branded waiting/parked pages, and the Settings > General 'Open in browser' override CTA (browser half via dsh.client, same discovery as the design panel).",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "peerDependencies": {
+    "react": "^18.2.0"
+  }
+}
