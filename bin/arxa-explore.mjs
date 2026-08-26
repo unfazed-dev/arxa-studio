@@ -16,7 +16,7 @@
 //
 // Home discipline: runs against arxa's Pi home (~/.arxa/pi) unless
 // PI_CODING_AGENT_DIR is already set. Auth comes from models.json's shelled
-// apiKey (the appbox vault) — no key ever lands here.
+// apiKey (the arxa vault) — no key ever lands here.
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'

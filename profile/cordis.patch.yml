@@ -1,4 +1,4 @@
-# The arxa profile patch — materialized by bin/arxa.mjs into
+# The arxa profile patch — materialized by bin/arxa-studio.mjs into
 # $DSH_HOME/profiles/arxa/cordis.patch.yml, applied after the bundle layers.
 #
 # Each patch earns its row (arxa-harness-and-distribution.md):
@@ -16,7 +16,7 @@
     includeHarnessIdentity: false
     persona: >-
       You are arxa, the agentic app studio harness by Totem Labs. You drive
-      the appbox engine through its pipeline stages and its gates decide what
+      the arxa engine through its pipeline stages and its gates decide what
       ships.
 
 # 2. Repo law only. dsh reads BOTH AGENTS.md and CLAUDE.md by default
@@ -41,19 +41,19 @@
     surfaceContext: false
     trustedHosts: !!js ctx.webStartup.trustedHosts
 
-# 4. The appbox gate on every mutating tool call (harness/README.md template;
+# 4. The arxa gate on every mutating tool call (harness/README.md template;
 #    absolute path because arxa declares no npm dependency on the plugin).
 - insert:
-  - id: appbox-gate
-    name: /Volumes/developer_ssd/Developer/totem_labs/app-box/harness/dsh-external-gate/index.mjs
+  - id: arxa-gate
+    name: /Volumes/developer_ssd/Developer/totem_labs/arxa/harness/dsh-external-gate/index.mjs
     config:
-      command: /Volumes/developer_ssd/Developer/totem_labs/app-box/harness/verdict.sh
+      command: /Volumes/developer_ssd/Developer/totem_labs/arxa/harness/verdict.sh
       # dsh-native tool names (dsh-tool-fs registers write/edit, not Write/Edit).
       # The 2026-08-21 booted check proved Claude-cased names match nothing here.
       tools: [write, edit, str_replace_editor, bash]
       timeoutMs: 5000
 
-# 5. Project memory injection (H5): shells `appbox memory recall` for the
+# 5. Project memory injection (H5): shells `arxa memory recall` for the
 #    boot cwd and registers it as a system-prompt section. Absolute path —
 #    host-only plugin, no client half to discover.
 - insert:
@@ -64,16 +64,16 @@
 
 # 6. Pi as a delegated subagent engine (decision 3ii): one tool, delegate_pi,
 #    one-shot `pi -p` in the workspace. The spawned Pi inherits
-#    PI_CODING_AGENT_DIR=~/.arxa/pi from bin/arxa.mjs, so the appbox gate
+#    PI_CODING_AGENT_DIR=~/.arxa/pi from bin/arxa-studio.mjs, so the arxa gate
 #    extension rides along. Absolute path — host-only plugin.
 - insert:
   - id: arxa-pi-delegate
     name: /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/pi-delegate/index.mjs
 
 # 7. The design panel (H4, viewer-first): shell.overlay dock iframing a live
-#    `appbox design serve` with the viewport-rung ladder. By PACKAGE NAME —
+#    `arxa design serve` with the viewport-rung ladder. By PACKAGE NAME —
 #    the browser half is discovered through the package.json dsh.client
-#    declaration, which a file-path entry has no association to; bin/arxa.mjs
+#    declaration, which a file-path entry has no association to; bin/arxa-studio.mjs
 #    materializes the file: dependency into the profile package.json.
 - insert:
   - id: arxa-design-panel
@@ -91,7 +91,7 @@
 # 9. arxa generative UI: the `gen_ui` tool (host half) plus the keyed
 #    `tool.call.toolview` renderer for it (browser half), so a tool result
 #    becomes live React inline in the conversation instead of prose.
-#    Stages 1-3 of app-box/docs/plans/inline-generative-ui-in-dsh.md.
+#    Stages 1-3 of arxa/docs/plans/inline-generative-ui-in-dsh.md.
 #    By PACKAGE NAME — the browser half is discovered through package.json
 #    dsh.client, same as the design panel and brand rows above.
 - insert:

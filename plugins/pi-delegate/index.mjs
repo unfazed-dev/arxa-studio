@@ -7,7 +7,7 @@
  * (foreground/background, continuable children, followup/interrupt) is the
  * dsh-child machinery; decision 3ii only needs "hand Pi a bounded task where
  * its strengths earn it". The spawned Pi inherits PI_CODING_AGENT_DIR from
- * bin/arxa.mjs, so it runs from ~/.arxa/pi with the appbox gate extension
+ * bin/arxa-studio.mjs, so it runs from ~/.arxa/pi with the arxa gate extension
  * loaded — delegated work is gated exactly like a raw Pi session.
  *
  * Config: { provider?: string ('zai-wallet'), model?: string ('glm-4.6v'),
@@ -20,7 +20,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-// Resolve defineTool the way bin/arxa.mjs resolves the dsh bin: arxa's own
+// Resolve defineTool the way bin/arxa-studio.mjs resolves the dsh bin: arxa's own
 // install first, else the operator install this machine already carries
 // (read-only reuse). Top-level await so `apply` stays sync for cordis.
 const defineTool = await (async () => {

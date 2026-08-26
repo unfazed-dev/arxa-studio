@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // arxa — boots dsh with the arxa profile (identity, repo-law-only
-// instructions, appbox gate). A composition, never a fork: the profile is
+// instructions, arxa gate). A composition, never a fork: the profile is
 // materialized from profile/cordis.patch.yml into arxa's OWN home and dsh's
 // own bin is exec'd against it.
 //
@@ -91,7 +91,7 @@ writeFileSync(join(profileDir, 'cordis.patch.yml'), readFileSync(template))
 // default; `zai` is the same key against the general pay-per-token endpoint
 // (pi-ai's catalog zai route secretly points at the coding endpoint, so the
 // baseURL is explicit). Model auth resolution: inherited env WINS over the
-// store (dsh-credentials-local), so `appbox credentials exec ZAI_API_KEY --
+// store (dsh-credentials-local), so `arxa credentials exec ZAI_API_KEY --
 // arxa` works against an empty store.
 const settingsFile = join(dshHome, 'settings.yaml')
 if (!existsSync(settingsFile)) {
@@ -170,9 +170,9 @@ if (!existsSync(credFile) && existsSync(operatorCreds)) {
 // gate resolves its guard through realpath, so symlinking is safe.
 const piExtensions = join(piHome, 'extensions')
 mkdirSync(piExtensions, { recursive: true })
-const appBoxDir = resolve(here, '..', '..', 'app-box')
+const arxaDir = resolve(here, '..', '..', 'arxa')
 for (const [link, target] of [
-  [join(piExtensions, 'appbox-gate.ts'), join(appBoxDir, 'harness', 'pi', 'appbox-gate.ts')],
+  [join(piExtensions, 'arxa-gate.ts'), join(arxaDir, 'harness', 'pi', 'arxa-gate.ts')],
   [join(piExtensions, 'arxa-memory.ts'), join(here, '..', 'pi', 'arxa-memory.ts')],
 ]) {
   try { rmSync(link, { force: true }) } catch { /* first run */ }
@@ -188,7 +188,7 @@ if (!existsSync(piModels)) {
         baseUrl: 'https://api.z.ai/api/paas/v4',
         api: 'openai-completions',
         // Shelled at request time by pi itself; the value never lands in a file.
-        apiKey: '!appbox credentials exec ZAI_API_KEY -- printenv ZAI_API_KEY',
+        apiKey: '!arxa credentials exec ZAI_API_KEY -- printenv ZAI_API_KEY',
         models: [
           // glm-5.3 + reasoning verified working on the wallet 2026-08-21.
           {
@@ -219,14 +219,14 @@ if (!existsSync(piModels)) {
 // Resolving an executable from a path the operator controls is an isolation
 // break even when nothing is written there. Failing to boot is strictly better
 // than silently booting someone else's version, so there is no fallback.
-// See app-box/docs/plans/dsh-isolation-from-operator-install.md.
+// See arxa/docs/plans/dsh-isolation-from-operator-install.md.
 const dshBin = join(here, '..', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
 if (!existsSync(dshBin)) {
   console.error('arxa: @deepseek-ai/dsh is not installed in arxa-studio.')
   console.error('  fix:  npm install --prefix ' + resolve(here, '..'))
   console.error('  arxa deliberately will NOT fall back to the operator install at')
   console.error('  ~/.dsh — that would run an unpinned version. See')
-  console.error('  app-box/docs/plans/dsh-isolation-from-operator-install.md')
+  console.error('  arxa/docs/plans/dsh-isolation-from-operator-install.md')
   process.exit(127)
 }
 
@@ -274,11 +274,11 @@ const trustArgs = headless
     `arxa.studio:${ARXA_PORT}`, 'arxa.studio']
 if (!headless) console.log(`arxa studio: http://arxa.studio.localhost:${ARXA_PORT}`)
 
-// The design panel subscribes to `appbox design serve`'s /__events stream for
+// The design panel subscribes to `arxa design serve`'s /__events stream for
 // live reload, which is a CROSS-ORIGIN request — the panel is served from
 // arxa.studio.localhost, the design server from 127.0.0.1. That server refuses
-// unlisted origins (app-box appboxd/lib/design_server/browser_trust.dart), so
-// register ours in appbox's machine-wide allowlist instead of making every
+// unlisted origins (arxa arxa/lib/design_server/browser_trust.dart), so
+// register ours in arxa's machine-wide allowlist instead of making every
 // operator remember --trusted-origin on every serve. Idempotent, provenance in
 // the file, plain text the operator can edit or delete.
 //
@@ -293,19 +293,19 @@ if (!headless) {
     : eq ? eq.slice(7)
       : ARXA_PORT
   const origin = `http://arxa.studio.localhost:${webPort}`
-  const appboxHome = process.env.APPBOX_HOME?.trim()
-    ? resolve(process.env.APPBOX_HOME)
-    : join(homedir(), '.appbox')
-  const file = join(appboxHome, 'trusted-origins')
+  const arxaHome = process.env.ARXA_HOME?.trim()
+    ? resolve(process.env.ARXA_HOME)
+    : join(homedir(), '.arxa')
+  const file = join(arxaHome, 'trusted-origins')
   try {
-    mkdirSync(appboxHome, { recursive: true })
+    mkdirSync(arxaHome, { recursive: true })
     const existing = existsSync(file) ? readFileSync(file, 'utf8') : ''
     const already = existing.split('\n')
       .some((l) => l.split('#')[0].trim() === origin)
     if (!already) {
       const header = existing
         ? ''
-        : '# Origins allowed to call an `appbox design serve` /__* endpoint\n'
+        : '# Origins allowed to call an `arxa design serve` /__* endpoint\n'
           + '# cross-origin. One per line; # starts a comment.\n'
       const pad = existing && !existing.endsWith('\n') ? '\n' : ''
       writeFileSync(file, `${existing}${pad}${header}${origin}  # arxa studio\n`)

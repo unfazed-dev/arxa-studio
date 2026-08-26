@@ -5,7 +5,7 @@
 // fallback. arxa-studio/node_modules was never installed, so that fallback
 // ALWAYS won: arxa pinned 0.1.0-rc.7 and ran whatever `npx @deepseek-ai/dsh`
 // last wrote into the shared npm cache slot. Run this after touching
-// bin/arxa.mjs or the dsh pins.
+// bin/arxa-studio.mjs or the dsh pins.
 //   node bin/isolation-check.mjs
 import { readFileSync, existsSync, readlinkSync, lstatSync, readdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
@@ -20,10 +20,10 @@ const skip = []
 const check = (name, cond, detail) => (cond ? ok : fail).push(detail ? `${name} — ${detail}` : name)
 
 // 1. the launcher must not resolve an executable out of the operator's home
-const launcher = readFileSync(join(root, 'bin', 'arxa.mjs'), 'utf8')
+const launcher = readFileSync(join(root, 'bin', 'arxa-studio.mjs'), 'utf8')
 const resolvesOperatorDsh = /['"]\.dsh['"]\s*,\s*['"]profiles['"]\s*,\s*['"]node_modules['"]/.test(launcher)
 check('launcher does not resolve dsh from ~/.dsh', !resolvesOperatorDsh,
-  resolvesOperatorDsh ? 'the operator-install fallback is BACK in bin/arxa.mjs' : '')
+  resolvesOperatorDsh ? 'the operator-install fallback is BACK in bin/arxa-studio.mjs' : '')
 
 // 2. arxa must have its own dsh, at exactly the pinned version
 const pin = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).dependencies['@deepseek-ai/dsh']
@@ -83,7 +83,7 @@ for (const [label, env] of [
   for (const [k, v] of Object.entries(env)) {
     childEnv[k] = v === 'OPERATOR_DSH' ? join(fakeHome, '.dsh') : v
   }
-  const r = spawnSync(process.execPath, [join(root, 'bin', 'arxa.mjs'), '--headless'],
+  const r = spawnSync(process.execPath, [join(root, 'bin', 'arxa-studio.mjs'), '--headless'],
     { env: childEnv, encoding: 'utf8', timeout: 15000 })
   const wrote = readdirSync(fakeHome)
   check(`contaminated ${label} is refused before any write`,

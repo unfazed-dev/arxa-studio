@@ -79,7 +79,7 @@ await checkAsync('execute returns canonical A2UI v0.9 envelopes', async () => {
   assert.equal(create.createSurface.catalogId, CATALOG_ID)
   assert.equal(update.version, A2UI_VERSION)
   assert.equal(update.updateComponents.components.length, 2)
-  // Exactly one verb key per envelope — the invariant AppBoxKitA2uiMessage
+  // Exactly one verb key per envelope — the invariant ArxaKitA2uiMessage
   // .fromJson enforces on the Dart side.
   for (const m of value.messages) {
     const verbs = Object.keys(m).filter((k) => k !== 'version')

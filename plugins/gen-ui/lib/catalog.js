@@ -75,11 +75,11 @@ export const CATALOG = {
   RungLadder: {
     props: '{ url: string, rungs?: Array<{ label: string, w: number, h: number }> }',
     summary: 'Live viewport ladder — iframes `url` at each rung size, scaled to '
-      + 'fit. Defaults to the appbox rungs (mobile/tablet/desktop).',
+      + 'fit. Defaults to the arxa rungs (mobile/tablet/desktop).',
   },
 }
 
-/** The appbox viewport ladder, mirrored from the design panel. */
+/** The arxa viewport ladder, mirrored from the design panel. */
 export const DEFAULT_RUNGS = [
   { label: 'mobile', w: 390, h: 844 },
   { label: 'tablet', w: 744, h: 1133 },
@@ -87,7 +87,7 @@ export const DEFAULT_RUNGS = [
 ]
 
 /** A2UI protocol version. Pinned to what `kit/genui_bridge` accepts on the
- * wire (`appBoxKitA2uiVersion` in appbox_kit_a2ui_message.dart) so one
+ * wire (`arxaKitA2uiVersion` in arxa_kit_a2ui_message.dart) so one
  * vocabulary spans the thread UI and generated Flutter apps. */
 export const A2UI_VERSION = 'v0.9'
 
@@ -196,7 +196,7 @@ export function claimedChildren (components) {
  * Canonical A2UI v0.9 envelopes for one surface.
  *
  * Wire form is exactly `{version, <verb>: {...}}` with one verb per envelope,
- * matching AppBoxKitA2uiMessage.toJson(). Emitted as an array because a
+ * matching ArxaKitA2uiMessage.toJson(). Emitted as an array because a
  * surface is at minimum createSurface + updateComponents.
  * @param {string} surfaceId - unique id for this surface.
  * @param {unknown[]} components - validated component objects.
@@ -225,7 +225,7 @@ export const SAME_ORIGIN_SANDBOX = 'allow-scripts allow-forms allow-same-origin'
  *
  * Without `allow-same-origin` a framed page runs on an OPAQUE origin: its own
  * fetches, cookies and storage all fail the same-origin policy, so a
- * server-rendered app (every `appbox design serve` artifact) boots into a blank
+ * server-rendered app (every `arxa design serve` artifact) boots into a blank
  * frame and logs "Unsafe attempt to load URL ... Domains, protocols and ports
  * must match". That is why the ladder rendered black while the design panel —
  * whose iframe carries NO sandbox because its URL is operator-typed — was fine.

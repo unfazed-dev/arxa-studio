@@ -5,7 +5,7 @@
   "description": "arxa \u2014 Totem Labs' agentic studio harness. A package that DEPENDS on dsh components (depend-don't-fork, arxa-harness-and-distribution.md amendment); never a fork, never a rebase.",
   "type": "module",
   "bin": {
-    "arxa": "bin/arxa.mjs"
+    "arxa-studio": "bin/arxa-studio.mjs"
   },
   "dependencies": {
     "@deepseek-ai/dsh": "0.1.1-rc.2",

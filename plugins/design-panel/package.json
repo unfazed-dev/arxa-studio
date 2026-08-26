@@ -2,7 +2,7 @@
   "name": "arxa-design-panel",
   "version": "0.1.0",
   "private": true,
-  "description": "arxa design panel (H4, viewer-first): a shell.overlay dock iframing the live `appbox design serve` with the viewport-rung ladder. Drag/design-patch overlay deliberately deferred until the engine `design patch` verb exists.",
+  "description": "arxa design panel (H4, viewer-first): a shell.overlay dock iframing the live `arxa design serve` with the viewport-rung ladder. Drag/design-patch overlay deliberately deferred until the engine `design patch` verb exists.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

@@ -1,5 +1,5 @@
 // Generate a frozen-frame fixture for the gen-ui entrance choreography, for
-// appbox-lens evidence. Both stylesheets are slice-evaluated from the REAL
+// arxa-lens evidence. Both stylesheets are slice-evaluated from the REAL
 // lib/client.js (same technique as selftest.mjs), so the fixture can never
 // drift from the plugin. The freeze scaffolding is fixture-only: pausing an
 // animation with a negative delay pins it at an absolute millisecond offset,
@@ -7,7 +7,7 @@
 //
 //   node plugins/gen-ui/enter-fixture.mjs [out.html]
 //
-// Then: appbox lens check file://<out> <evidence.png> 900 640 1800 --expect ...
+// Then: arxa lens check file://<out> <evidence.png> 900 640 1800 --expect ...
 
 import { readFileSync, writeFileSync } from 'node:fs'
 
@@ -164,7 +164,7 @@ const SIM_STEPS = [
 // target's live box. Pseudo-element animations target their originating
 // element in Chromium (pseudoElement carries '::after'), so the ring is a
 // first-class row here. Read it back with:
-//   appbox lens eval file://<sim> 'JSON.stringify(window.__LEDGER__)' --settle=9000
+//   arxa lens eval file://<sim> 'JSON.stringify(window.__LEDGER__)' --settle=9000
 const LEDGER_JS = [
   'window.__LEDGER__ = [];',
   'function __rec(e) {',

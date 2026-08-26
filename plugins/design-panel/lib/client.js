@@ -9,7 +9,7 @@
 // `details` slot is deliberately NOT used: it is occupied by the
 // conversation DetailsPanel and registering there replaces it.
 //
-// The panel iframes a live `appbox design serve` and renders the viewport
+// The panel iframes a live `arxa design serve` and renders the viewport
 // ladder (390×844 / 744×1133 / 1280×832) as rung buttons; the iframe keeps
 // the rung's true pixel size and is CSS-scaled to fit the dock. The panel
 // remounts the iframe when the design server pushes a `reload` frame on its
@@ -95,7 +95,7 @@ window.__ModuleLoader__.load({
       // This is a CROSS-ORIGIN subscription — the panel is served from
       // arxa.studio.localhost, the design server from 127.0.0.1 — so that
       // server must be started with:
-      //   appbox design serve … --trusted-origin http://arxa.studio.localhost:7891
+      //   arxa design serve … --trusted-origin http://arxa.studio.localhost:7891
       // Without it the request is refused 403 and this drops to 'blocked';
       // the ⟳ button still works.
       React.useEffect(() => {
@@ -214,7 +214,7 @@ window.__ModuleLoader__.load({
       // 2): the Author clicks 'Request commit' in the dial island, the
       // design server broadcasts the draft as structured patch ops on
       // /__dial/events, and this banner hands them to the agent — it runs
-      // `appbox design patch` per op (tokens go to the token sheet) and
+      // `arxa design patch` per op (tokens go to the token sheet) and
       // clears the draft on success. Same cross-origin rule as /__events:
       // one trusted-origin entry covers both streams.
       const [commitReq, setCommitReq] = React.useState(null)
@@ -340,7 +340,7 @@ window.__ModuleLoader__.load({
               : live === 'reconnecting'
                 ? 'live reload reconnecting…'
                 : 'no live reload — add ' + window.location.origin
-                  + ' to ~/.appbox/trusted-origins and restart the design server',
+                  + ' to ~/.arxa/trusted-origins and restart the design server',
             style: {
               marginLeft: 'auto', width: 8, height: 8, borderRadius: 4,
               background: live === 'live'
@@ -491,8 +491,8 @@ window.__ModuleLoader__.load({
       return h('li', { style: { listStyle: 'none', padding: '12px 0' } },
         h('div', { style: { fontWeight: 600, marginBottom: 2 } }, 'arxa design panel'),
         h('div', { style: { fontSize: 12, opacity: 0.7, marginBottom: 8 } },
-          'Live appbox design server the panel iframes. arxa registers '
-          + window.location.origin + ' in ~/.appbox/trusted-origins at boot, '
+          'Live arxa design server the panel iframes. arxa registers '
+          + window.location.origin + ' in ~/.arxa/trusted-origins at boot, '
           + 'which is what lets this panel frame it and subscribe to reloads.'),
         phase === 'loading'
           ? h('div', { style: { fontSize: 12, opacity: 0.7 } }, 'loading…')

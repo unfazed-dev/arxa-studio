@@ -1,6 +1,6 @@
 /**
  * arxa-gen-ui, browser half — stage 2 (+ stage 3's client end) of
- * docs/plans/inline-generative-ui-in-dsh.md (app-box).
+ * docs/plans/inline-generative-ui-in-dsh.md (arxa).
  *
  * Registers ONE keyed toolview: `tool.call.toolview` with `key: 'gen_ui'`.
  * That slot is dispatched by wire tool name inside the turn, so our tool's
@@ -143,7 +143,7 @@ window.__ModuleLoader__.load({
     //
     // One 250ms fade+rise per newly arriving component plus one ring sweep,
     // driven entirely by CSS — there is no JS clock anywhere in the tree. The
-    // values are researched, not guessed (app-box docs/plans/entrance-animation-research.md):
+    // values are researched, not guessed (arxa docs/plans/entrance-animation-research.md):
     //
     //  - EASING: Material 3 "emphasized decelerate", cubic-bezier(0.05, 0.7,
     //    0.1, 1) — the curve M3 assigns to elements ENTERING the screen
@@ -419,7 +419,7 @@ window.__ModuleLoader__.load({
         return () => clearTimeout(t)
       }, [activeKey, activeLoaded])
 
-      // LIVE CONVERGENCE FOR FRAMED APPBOX DESIGN SERVERS. A rung whose
+      // LIVE CONVERGENCE FOR FRAMED ARXA DESIGN SERVERS. A rung whose
       // sandbox gave it an opaque origin can never run the dial (guarded
       // /__dial/* is refused there), so its only truth is what the server
       // overlaid at load — left alone it mirrors the design as of mount
@@ -428,12 +428,12 @@ window.__ModuleLoader__.load({
       // converges the rungs — the ACTIVE one remounts at once, the others
       // are marked stale and remount on entry (show()'s existing path),
       // which preserves scroll position everywhere else. Trailing-debounced
-      // so an editing burst remounts once, not per keystroke. A non-appbox
+      // so an editing burst remounts once, not per keystroke. A non-arxa
       // url has no such endpoints: an error before the first open closes
       // the stream instead of retrying against it forever. Uncredentialed
       // cross-origin SSE rides the SAME socket-pool group as the design
       // panel's two subscriptions — 4 of 6, and the pins-read storm that
-      // once made this tight is gone (app-box b3ba1683).
+      // once made this tight is gone (arxa b3ba1683).
       const activeRef = React.useRef(active)
       React.useEffect(() => { activeRef.current = active }, [active])
       React.useEffect(() => {
@@ -652,7 +652,7 @@ window.__ModuleLoader__.load({
     // whole reduced-motion stand-down: with animation:none the delays are
     // inert.
     //
-    // The numbers are researched, not tuned by feel (app-box
+    // The numbers are researched, not tuned by feel (arxa
     // docs/plans/entrance-animation-research.md): 90ms sits inside the 50-100ms
     // stagger consensus (FlutterFlow exposes the same knob as a per-widget
     // Delay; Material choreographs menus the same way), and the cap keeps a

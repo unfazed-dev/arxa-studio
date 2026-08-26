@@ -1,6 +1,6 @@
 /**
  * arxa-gen-ui, host half — stages 1 and 3 of
- * docs/plans/inline-generative-ui-in-dsh.md (app-box).
+ * docs/plans/inline-generative-ui-in-dsh.md (arxa).
  *
  * Stage 1: one model-callable tool, `gen_ui`, whose validated output is a set
  * of canonical A2UI v0.9 envelopes. `presentCall`/`presentResult` give it a

@@ -28,7 +28,7 @@ export const name = 'arxa-design-panel'
 const NS = settingsNamespace('arxa-design-panel')
 const SCHEMA = z.object({
   url: z.string().default('http://127.0.0.1:4319/').description(
-    'Live appbox design server the panel iframes'),
+    'Live arxa design server the panel iframes'),
 })
 
 export function apply(ctx, config) {

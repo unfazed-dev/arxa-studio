@@ -1,6 +1,6 @@
 /**
  * arxa-mcp-apps, host half — stage 4 of
- * app-box/docs/plans/inline-generative-ui-in-dsh.md.
+ * arxa/docs/plans/inline-generative-ui-in-dsh.md.
  *
  * Makes arxa an MCP Apps host (SEP-1865, Final 2026-01-26): an MCP server can
  * ship interactive UI with its tools, and arxa renders it inline in the

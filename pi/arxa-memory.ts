@@ -2,7 +2,7 @@
  * arxa-memory.ts — Pi extension: inject project memory once per session.
  *
  * The engine owns memory; this is its Pi hand (G.17): shells
- * `appbox memory recall --project <cwd>` and injects the result as a
+ * `arxa memory recall --project <cwd>` and injects the result as a
  * persistent message on the FIRST before_agent_start of the session
  * (the event fires on every prompt — the flag keeps one injection).
  *
@@ -10,7 +10,7 @@
  * returning { message: { customType, content, display } } injects a
  * persistent message stored in the session and sent to the LLM.
  *
- * Install: copy or symlink next to appbox-gate.ts in
+ * Install: copy or symlink next to arxa-gate.ts in
  * ~/.pi/agent/extensions/ or <project>/.pi/extensions/.
  */
 import { spawnSync } from "node:child_process";
@@ -24,9 +24,9 @@ export default function (pi: any) {
     if (injected) return undefined;
     injected = true;
 
-    const appbox = process.env.APPBOX_BIN
-      ?? join(homedir(), ".local", "bin", "appbox");
-    const r = spawnSync(appbox, ["memory", "recall", "--project", process.cwd()], {
+    const arxa = process.env.ARXA_BIN
+      ?? join(homedir(), ".local", "bin", "arxa");
+    const r = spawnSync(arxa, ["memory", "recall", "--project", process.cwd()], {
       encoding: "utf8", timeout: 10_000,
     });
     // Missing binary / error / empty store: inject nothing. Memory is an
@@ -40,7 +40,7 @@ export default function (pi: any) {
     return {
       message: {
         customType: "arxa-memory",
-        content: "Project memory (appbox memory recall — `appbox memory why "
+        content: "Project memory (arxa memory recall — `arxa memory why "
           + "<topic> <i>` for provenance):\n" + out.slice(0, 4096),
         display: false,
       },
