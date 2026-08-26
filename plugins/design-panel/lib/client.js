@@ -15,7 +15,7 @@
 // remounts the iframe when the design server pushes a `reload` frame on its
 // /__events SSE stream (cross-origin — see the effect below for the
 // --trusted-origin it requires), and on demand via ⟳. Direct manipulation
-// lives in the served page's Design Dial island (Design Mode); this panel
+// lives in the served page's Arxa Dial island (Design Mode); this panel
 // additionally subscribes to /__dial/events and surfaces 'commit' frames —
 // the Author's request for the agent to patch artifact source (locked
 // amendment 2026-08-23, decision 2).
