@@ -137,3 +137,14 @@
 #       command: node
 #       args:
 #         - /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/mcp-apps/testserver.mjs
+
+# 11. Waiting-page heartbeat (desktop lifecycle, 2026-08-26): the desktop
+#     app OWNS the studio server (launchd autostart retired) — when it quits
+#     the server tree dies with it. The server cannot render its own death,
+#     so every served page carries a heartbeat that overlays the branded
+#     "Waiting for main app to start…" page on connection loss and reloads
+#     on recovery. Browser tabs get parity with the desktop webview's native
+#     Rust watchdog.
+- insert:
+  - id: arxa-waiting-page
+    name: /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/waiting-page/index.mjs
