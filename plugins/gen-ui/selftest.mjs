@@ -35,6 +35,9 @@ let toolDef = null
 let rpcHandler = null
 let rpcOptions = null
 const ctx = {
+  // Cordis child-fiber stub: here `connection` is present, so the child fiber
+  // runs immediately — invoke the callback with this same ctx.
+  inject: (_deps, cb) => cb(ctx),
   tools: { register: (def) => { toolDef = def } },
   connection: {
     rpc: {

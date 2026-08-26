@@ -47,7 +47,16 @@ const defineTool = await (async () => {
 })()
 
 export const name = 'arxa-gen-ui'
-export const inject = ['tools', 'connection']
+// `connection` is deliberately NOT declared here: headless boots (dsh-base +
+// dsh-headless) carry no browser plane, so the service never appears, and any
+// service named in `inject` blocks activation — this cordis has no optional
+// form (Inject.resolve, cordis lib/index.js:1490-1498, maps every key to a
+// blocking entry; `{ required, optional }` is read as two service NAMES).
+// Requiring it killed the whole boot (dsh-app-boot lib/index.js:1126,1134).
+// Stage 3's channel instead mounts via a nested ctx.inject child fiber below,
+// which may validly stay pending forever under headless
+// (dsh-cordis-host-runner lib/index.js:911).
+export const inject = ['tools']
 
 // A channel is a single URL path segment: dsh enforces
 // /^\/[A-Za-z0-9._~-]+$/ and reserves "/api" (dsh-client-connection
@@ -68,7 +77,9 @@ export function apply (ctx, config = {}) {
   /** @type {Map<string, Record<string, unknown>>} */
   const selections = new Map()
 
-  ctx.connection.rpc.handle(RPC_CHANNEL, async (endpoint, payload) => {
+  // Child fiber: runs the moment `connection` is provided (web boot), stays
+  // pending harmlessly when it never is (headless boot).
+  ctx.inject(['connection'], (ctx) => ctx.connection.rpc.handle(RPC_CHANNEL, async (endpoint, payload) => {
     // Every verb is an explicit allowlist entry. A generic "call anything"
     // bridge is the failure mode called out in plan decision 20 — a bridge is
     // invisible to CSP, so its narrowness IS the control.
@@ -93,7 +104,7 @@ export function apply (ctx, config = {}) {
       default:
         return { ok: false, error: { message: `arxa-gen-ui: unknown endpoint ${JSON.stringify(endpoint)}` } }
     }
-  }, { authority: 'loopback' })
+  }, { authority: 'loopback' }))
 
   // ---- Stage 1: the tool -------------------------------------------------
   ctx.tools.register(defineTool({
