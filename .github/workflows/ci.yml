@@ -1,0 +1,49 @@
+# arxa-studio engine CI — runs on the self-hosted mac runner (same fleet as
+# arxa's desktop release CI). This is the repo-level proof that the shared
+# CI process works for arxa-studio, per the standing instruction that the
+# self-hosted CI process is ensured for arxa, arxa-studio, and arxa-built apps.
+#
+# The engine has no test suite yet; this gates on:
+#   1. syntax integrity of every .js/.mjs in bin/, scripts/, plugins/
+#   2. a smoke run of the studio CLI entrypoint (--help must exit 0)
+# Add real test scripts to package.json and wire them in here as they appear.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: [self-hosted, macOS, ARM64, arxa]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Syntax check engine sources
+        run: |
+          fails=0; total=0
+          while IFS= read -r f; do
+            total=$((total+1))
+            node --check "$f" || { fails=$((fails+1)); echo "::error file=$f::syntax check failed"; }
+          done < <(find bin scripts plugins \( -name '*.mjs' -o -name '*.js' \) -not -path '*/node_modules/*')
+          echo "checked $total files, $fails failures"
+          [ "$fails" -eq 0 ]
+
+      - name: Smoke-run studio CLI (--help)
+        run: |
+          # macOS has no `timeout`; guard against a hung CLI with a background killer.
+          node bin/arxa-studio.mjs --help &
+          PID=$!
+          ( sleep 60; kill "$PID" 2>/dev/null ) &
+          KILLER=$!
+          if wait "$PID"; then
+            kill "$KILLER" 2>/dev/null || true
+            echo "smoke ok"
+          else
+            echo "::error::studio CLI smoke run failed or hung"
+            exit 1
+          fi
