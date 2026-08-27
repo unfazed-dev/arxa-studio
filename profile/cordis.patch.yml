@@ -158,3 +158,13 @@
 - insert:
   - id: arxa-waiting-page
     name: arxa-waiting-page
+
+# 12. Theme accent (2026-08-27): Settings > General "Accent" row — three
+#     fixed swatches (#0EBAE4 / #0EE4E0 / #12D49A). The client half rewrites
+#     the dsh accent scale (--dsw-static-deepseek-*) as color-mix tints of
+#     the choice, inline on <body> so it outranks both theme token blocks;
+#     localStorage + storage events keep every window in sync. By PACKAGE
+#     NAME — browser half discovered through package.json dsh.client.
+- insert:
+  - id: arxa-theme-accent
+    name: arxa-theme-accent

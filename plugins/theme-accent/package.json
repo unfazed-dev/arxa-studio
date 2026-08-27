@@ -1,0 +1,26 @@
+{
+  "name": "arxa-theme-accent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Settings > General accent swatches (3 fixed choices). Overrides the dsh --dsw-static-deepseek-* accent scale with color-mix tints of the chosen hex, inline on <body> so it wins over both the :root and dark-theme token blocks. Persisted in localStorage, synced across tabs/windows via the storage event.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "peerDependencies": {
+    "react": "^18.2.0"
+  }
+}
