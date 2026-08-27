@@ -168,3 +168,14 @@
 - insert:
   - id: arxa-theme-accent
     name: arxa-theme-accent
+
+# 13. Pairing (2026-08-27): Settings > General "Pair a device" row — desktop
+#     shell only (ArxaShell UA + window.__TAURI__ present; renders nothing in
+#     a browser tab). The button invokes the Tauri `open_pairing_window`
+#     command (remote-studio capability grants the studio origin core IPC in
+#     the main window), which opens the shell's QR pairing window: iroh host
+#     mints a single-use ticket the mobile app scans. By PACKAGE NAME —
+#     browser half discovered through package.json dsh.client.
+- insert:
+  - id: arxa-pairing
+    name: arxa-pairing

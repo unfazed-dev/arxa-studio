@@ -1,0 +1,26 @@
+{
+  "name": "arxa-pairing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Settings > General 'Pair a device' row (desktop shell only): invokes the Tauri open_pairing_window command over the remote-studio capability so the desktop shell opens its QR pairing window. Renders nothing in plain browser tabs — pairing is hosted by the desktop app.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "peerDependencies": {
+    "react": "^18.2.0"
+  }
+}
