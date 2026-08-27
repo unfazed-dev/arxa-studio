@@ -104,7 +104,7 @@ body, body[data-ds-dark-theme] {
    figma blue (#6187D8 @ .08) on the SVG, not a token. CSS fill beats the
    presentation attribute. Same for the reference chips' #6187d838 wash. */
 [class*="_heroGlow"] ellipse { fill: rgb(122, 149, 87); }
-[class*="_refChip"] { background: rgba(122, 149, 87, 0.22) !important; }
+[class*="_refChip"] { background: color-mix(in srgb, var(--dsw-static-deepseek-450, rgb(122, 149, 87)) 22%, transparent) !important; }
 `
 
     const FAVICON = 'data:image/svg+xml,' + encodeURIComponent(

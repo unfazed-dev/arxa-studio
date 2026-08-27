@@ -24,11 +24,16 @@ window.__ModuleLoader__.load({
     const SWATCHES = ['#0EBAE4', '#0EE4E0', '#12D49A']
     const DEFAULT = SWATCHES[0]
 
-    // Tint ladder mirroring the stock deepseek scale's lightness curve
-    // (#edf3fe … #4176e6 … #283142). oklab keeps hue steady across mixes.
-    // ponytail: eyeballed percentages, tune per-stop if design asks.
-    const STOPS = {
-      50: 'color-mix(in oklab, ACC 10%, white)',
+    // Tint ladders mirroring the stock lightness curves. oklab keeps hue
+    // steady across mixes. ponytail: eyeballed percentages, tune per-stop if
+    // design asks. BOTH accent ramps are owned here: the frontend's accent
+    // aliases resolve through --dsw-static-blue-* AND --dsw-static-deepseek-*
+    // (arxa-brand repaints both to moss by source order; inline-on-<body>
+    // outranks any stylesheet, so this wins over brand AND the theme bundle).
+    const TINTS = {
+      50: 'color-mix(in oklab, ACC 8%, white)',
+      '50p': 'color-mix(in oklab, ACC 9%, white)',
+      75: 'color-mix(in oklab, ACC 12%, white)',
       100: 'color-mix(in oklab, ACC 15%, white)',
       200: 'color-mix(in oklab, ACC 24%, white)',
       300: 'color-mix(in oklab, ACC 40%, white)',
@@ -38,6 +43,12 @@ window.__ModuleLoader__.load({
       600: 'color-mix(in oklab, ACC 72%, black)',
       800: 'color-mix(in oklab, ACC 42%, black)',
       900: 'color-mix(in oklab, ACC 30%, black)',
+      950: 'color-mix(in oklab, ACC 24%, black)',
+    }
+    // Exact stop sets defined by @deepseek-ai/dsh-client-ui-theme:
+    const RAMPS = {
+      deepseek: [50, 100, 200, 300, 400, 450, 500, 600, 800, 900],
+      blue: [50, '50p', 75, 100, 300, 400, 450, 500, 600, 800, 900, 950],
     }
 
     const stored = () => {
@@ -49,11 +60,19 @@ window.__ModuleLoader__.load({
 
     function applyAccent(hex) {
       const body = document.body
-      if (!body) return
-      for (const stop of Object.keys(STOPS)) {
-        body.style.setProperty(
-          '--dsw-static-deepseek-' + stop,
-          STOPS[stop].replace('ACC', hex))
+      if (!body) {
+        // `immediately: true` bundles can run before <body> parses — retry
+        // once the document is ready or the initial accent silently no-ops.
+        document.addEventListener('DOMContentLoaded',
+          () => applyAccent(hex), { once: true })
+        return
+      }
+      for (const ramp of Object.keys(RAMPS)) {
+        for (const stop of RAMPS[ramp]) {
+          body.style.setProperty(
+            '--dsw-static-' + ramp + '-' + stop,
+            TINTS[stop].replace('ACC', hex))
+        }
       }
     }
 
