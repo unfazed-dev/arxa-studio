@@ -49,9 +49,21 @@ placeholder icon). No full bundle attempted.
 
 ## Remaining
 
-- **Engine sidecar in release CI** — build step exists
-  (`node scripts/pack-sidecar.mjs`, needs both repos + npm install); CI just
-  needs to invoke it per target and re-sign/notarize
+- ~~**Engine sidecar in release CI**~~ — RESOLVED (2026-08-27, arxa commit
+  `cdc43c21`): `.github/workflows/desktop-release.yml` (tag `studio-v*`,
+  macos-14) checks out arxa + arxa-studio, builds the dart CLI sidecar
+  (`binaries/arxa-aarch64-apple-darwin`) and packs the engine via
+  `pack-sidecar.mjs --out` (bun for `bun build --compile`), then
+  `tauri build` with updater artifacts using Tauri's native env-driven
+  sign/notarize (ad-hoc when cert secrets absent, notarization skipped with
+  a warning when notary secrets absent — updater tar.gz+sig produced from
+  the final stapled app). Publishes bundles via `gh release create` on the
+  new public repo `https://github.com/unfazed-dev/arxa-releases` and pushes
+  `latest.json` (generated + `--check`ed) to its main. Windows/x64 left as
+  a matrix slot. Verified: actionlint + `node --check` pass; manifest
+  generator ran end-to-end against a dummy bundle. USER STEP: set arxa repo
+  secrets — required: `TAURI_SIGNING_PRIVATE_KEY`, `GH_RELEASES_TOKEN`;
+  optional: signing/notary Apple secrets (table in `desktop/README.md`).
 - ~~**Auto-spawn**~~ — RESOLVED (2026-08-27): launchd
   (`solutions.arxadigital.arxa.studio.plist`) stays the sole launcher; the
   .app does NOT spawn the sidecar. Desktop-app presence is instead signalled
@@ -87,9 +99,12 @@ placeholder icon). No full bundle attempted.
     rejected for studio (Flutter-only); it remains relevant for
     arxa-produced Flutter client apps.
   - Base URL can move to `updates.arxa.dev` later without changing the
-    static-JSON contract. Release-CI wiring (upload on tag, replace the
-    `https://updates.arxa.invalid` placeholder) is the remaining
-    implementation debt (see `desktop/README.md`).
+    static-JSON contract. Release-CI wiring RESOLVED (2026-08-27, arxa
+    commit `cdc43c21`): the `updates.arxa.invalid` placeholder in
+    `tauri.conf.json` + `make-update-manifest.mjs` is now
+    `https://raw.githubusercontent.com/unfazed-dev/arxa-releases/main`
+    (env-overridable via `ARXA_UPDATE_BASE_URL`), and the manifest
+    generator gained `--url` so bundle URLs point at Release assets.
 - **Code signing / notarization** — SIGNING RESOLVED (2026-08-27):
   `desktop/scripts/sign-and-notarize.sh` + `desktop/entitlements.plist`
   (allow-jit + allow-unsigned-executable-memory for node/bun sidecars, per
