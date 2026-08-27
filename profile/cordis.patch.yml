@@ -33,10 +33,16 @@
 #    prompt (plus a harness-source section and the DSH_WEB_URL shell
 #    variable) behind surfaceContext. arxa-brand (row below) re-registers
 #    the orientation arxa-worded; the other two are deliberately dropped.
-#    Config replaces wholesale, so printUrl/trustedHosts are restated.
+#    Config replaces wholesale, so printUrl/trustedHosts are restated —
+#    and so is openBrowser: dropping it silently falls back to the schema
+#    default (true), which made every server boot open a browser tab that
+#    presence then denied and closed. Restating the webStartup wiring keeps
+#    `--no-open` (launchd wrapper + desktop sidecar spawn) honored while
+#    standalone `arxa-studio` browser mode still auto-opens.
 #    Headless profiles have no web-runtime row — the loader warns and skips.
 - id: web-runtime
   config:
+    openBrowser: !!js ctx.webStartup.openBrowser
     printUrl: true
     surfaceContext: false
     trustedHosts: !!js ctx.webStartup.trustedHosts
