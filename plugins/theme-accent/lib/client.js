@@ -51,6 +51,21 @@ window.__ModuleLoader__.load({
       blue: [50, '50p', 75, 100, 300, 400, 450, 500, 600, 800, 900, 950],
     }
 
+    // Surface hue: arxa-brand repaints the ENTIRE neutral-bluish ramp (every
+    // background surface in the app) with green-tinted neutrals, so the
+    // studio's overall hue stayed moss no matter which accent was picked —
+    // only accent-alias consumers (buttons, links, sidebar) reacted.
+    // Re-derive the same lightness ladder from the chosen accent instead:
+    // a light accent wash folded into a pure gray of matching value.
+    // ponytail: gray values eyeballed from the moss ladder's luminance;
+    // tune NEUTRAL_MIX per-stop if design asks.
+    const NEUTRAL_L = {
+      '00': 254, 50: 250, 60: 245, 75: 241, 100: 238, 150: 236, 200: 230,
+      300: 209, 400: 177, 500: 156, 600: 132, 700: 100, 750: 68, 800: 53,
+      850: 44, 875: 35, 900: 27, 950: 21, 1000: 16,
+    }
+    const NEUTRAL_MIX = 10 // % of accent folded into each gray stop
+
     const stored = () => {
       try {
         const v = localStorage.getItem(STORE_KEY)
@@ -73,6 +88,13 @@ window.__ModuleLoader__.load({
             '--dsw-static-' + ramp + '-' + stop,
             TINTS[stop].replace('ACC', hex))
         }
+      }
+      for (const stop of Object.keys(NEUTRAL_L)) {
+        const g = NEUTRAL_L[stop]
+        body.style.setProperty(
+          '--dsw-static-neutral-bluish-' + stop,
+          'color-mix(in oklab, ' + hex + ' ' + NEUTRAL_MIX + '%, rgb(' +
+            g + ', ' + g + ', ' + g + '))')
       }
     }
 

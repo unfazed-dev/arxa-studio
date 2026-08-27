@@ -97,7 +97,47 @@ window.__ModuleLoader__.load({
         }, phase === 'opening' ? 'Opening…' : 'Pair a device'))
     }
 
+    //#region theme relay (shell windows can't read this origin's theme)
+    // The pairing window renders on the shell's bundled origin — different
+    // origin, no shared localStorage, no shared stylesheet. Report the live
+    // theme (accent hex from arxa-theme-accent's store + the dark flag on
+    // <body data-ds-dark-theme>) to the shell via `report_theme`; it caches
+    // and rebroadcasts to its own windows. Same ArxaShell/IPC gate as the row.
+    function installThemeRelay() {
+      if (!/ArxaShell/.test(navigator.userAgent)) return
+      const tauri = window.__TAURI__
+      if (!tauri || !tauri.core || typeof tauri.core.invoke !== 'function') return
+      let last = ''
+      const report = () => {
+        let accent = null
+        try { accent = localStorage.getItem('arxa.themeAccent') } catch { /* private mode */ }
+        const dark = !!(document.body && document.body.hasAttribute('data-ds-dark-theme'))
+        const key = (accent || '') + '|' + dark
+        if (key === last) return // observers fire in bursts; only send changes
+        last = key
+        tauri.core.invoke('report_theme', { accent, dark }).catch(() => {})
+      }
+      const start = () => {
+        report()
+        // Same-window changes: accent lands as an inline style on <body>,
+        // dark mode as the data attribute — one observer covers both.
+        new MutationObserver(report).observe(document.body, {
+          attributes: true,
+          attributeFilter: ['style', 'data-ds-dark-theme'],
+        })
+        // Other-window changes arrive as storage events (theme-accent's own
+        // cross-window sync channel).
+        window.addEventListener('storage', (e) => {
+          if (e.key === 'arxa.themeAccent') report()
+        })
+      }
+      if (document.body) start()
+      else document.addEventListener('DOMContentLoaded', start, { once: true })
+    }
+    //#endregion
+
     function apply(ctx) {
+      installThemeRelay()
       ctx.slots.inject('settings.general.item', () =>
         ctx.slots.register({
           name: 'settings.general.item',

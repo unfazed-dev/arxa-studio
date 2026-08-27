@@ -1,3 +1,9 @@
+# Ownership & database boundary — READ FIRST
+
+- The Supabase database connected to this environment belongs to **Arxa Digital Solutions** — the parent company of arxa, arxa studio, and everything arxa-related. It is Arxa Digital Solutions' own instance, used because they built arxa studio and happen to run it against Supabase.
+- **arxa studio is distributed software.** Its users (including free users) do NOT get access to this database, and arxa studio does not provide database/cloud hosting to its clients (yet).
+- Therefore: **never design an arxa studio feature that requires the Arxa Digital Solutions database to function.** Supabase is a first-class citizen of arxa and may be used by users who bring their *own* database — so every feature that can use a database must have a **local-only fallback with equivalent capability and security** for users without one. Decouple properly: pluggable storage backends (local vs user-provided DB), identical UX either way.
+
 # context-mode — MANDATORY routing rules
 
 You have context-mode MCP tools available. These rules are NOT optional — they protect your context window from flooding. A single unrouted command can dump 56 KB into context and waste the entire session.
