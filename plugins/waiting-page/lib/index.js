@@ -169,7 +169,10 @@ export function apply(ctx, config = {}) {
       if (req.method !== 'POST') return json(res, { ok: false, reason: 'post-only' })
       const token = globalThis.crypto.randomUUID()
       overrideTokens.set(token, Date.now() + OVERRIDE_TTL_MS)
-      const url = `http://127.0.0.1:${ctx.webServer.port}/?arxa-browser=${token}`
+      // Canonical origin (README/grill-decisions): a 127.0.0.1 URL would open
+      // the browser session on a DIFFERENT origin than the served one,
+      // splitting sessionStorage/presence state.
+      const url = `http://arxa.studio.localhost:${ctx.webServer.port}/?arxa-browser=${token}`
       if (process.platform === 'darwin') {
         spawn('open', [url], { stdio: 'ignore', detached: true }).unref()
         return json(res, { ok: true, url })
