@@ -60,6 +60,7 @@ window.__ModuleLoader__.load({
 
     function PairDeviceRow() {
       const [phase, setPhase] = React.useState('idle') // idle|opening|error
+      const [detail, setDetail] = React.useState('')
       // Meaningful only from the desktop shell — the pairing window (QR
       // ticket mint + iroh host) lives in the Tauri app, not the browser.
       if (!/ArxaShell/.test(navigator.userAgent)) return null
@@ -69,7 +70,14 @@ window.__ModuleLoader__.load({
         setPhase('opening')
         tauri.core.invoke('open_pairing_window')
           .then(() => { setPhase('idle') })
-          .catch(() => { setPhase('error') })
+          .catch((e) => {
+            // Surface the real reason (ACL denial, window error, …) — an
+            // opaque catch here once made a stale-build failure undiagnosable.
+            const msg = typeof e === 'string' ? e : (e && e.message) || ''
+            console.error('[arxa-pairing] open_pairing_window failed:', e)
+            setDetail(msg)
+            setPhase('error')
+          })
       }
       return h('div', { className: css.row },
         h('div', { className: css.rowText },
@@ -77,7 +85,10 @@ window.__ModuleLoader__.load({
           h('div', { className: css.desc },
             'Connect the Arxa Studio mobile app by scanning a QR code. '
             + 'Pairing is direct and end-to-end encrypted; no account needed.')),
-        phase === 'error' ? h('span', { className: css.note }, 'Could not open pairing') : null,
+        phase === 'error'
+          ? h('span', { className: css.note },
+              'Could not open pairing' + (detail ? ': ' + detail : ''))
+          : null,
         h('button', {
           type: 'button',
           className: css.button,
