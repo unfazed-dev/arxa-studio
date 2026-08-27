@@ -18,7 +18,7 @@
 //   arxa --headless "..." → one-shot no-browser run (dsh-base + dsh-headless)
 //   ARXA_HOME=<dir> arxa  → relocate the whole home (sandbox verification)
 //   DSH_HOME=<dir> arxa   → override just the dsh home (legacy sandbox path)
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { spawn, spawnSync } from 'node:child_process'
 import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -246,7 +246,28 @@ const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa
 // pass until `pnpm install --force` refreshed the bytes. --force re-copies
 // every file: plugin on boot (~160ms measured) — the only policy under which
 // editing a plugin's source and relaunching arxa does what it visibly says.
-{
+// PACKED MODE (desktop sidecar): bin/packed.json is written only by
+// scripts/pack-sidecar.mjs into the self-extracting sidecar payload — it never
+// exists in a git checkout. End-user machines have no pnpm, and a payload's
+// plugin dirs are immutable per release, so the pnpm --force freshness dance
+// is pointless there: plain directory copies into the profile's node_modules
+// give dsh the identical by-name resolution (all six plugins have zero
+// runtime dependencies of their own — react is a peer the web app provides).
+const packed = existsSync(join(here, 'packed.json'))
+if (packed) {
+  const nm = join(profileDir, 'node_modules')
+  for (const [name, dir] of [
+    ['arxa-design-panel', designPanelDir],
+    ['arxa-brand', brandDir],
+    ['arxa-gen-ui', genUiDir],
+    ['arxa-mcp-apps', mcpAppsDir],
+    ['arxa-waiting-page', waitingPageDir],
+    ['arxa-theme-accent', themeAccentDir],
+  ]) {
+    rmSync(join(nm, name), { recursive: true, force: true })
+    cpSync(dir, join(nm, name), { recursive: true })
+  }
+} else {
   const r = spawnSync('pnpm', ['install', '--force', '--dir', profileDir], { stdio: 'inherit' })
   if (r.error || r.status !== 0) {
     console.error('arxa: could not pnpm-install the profile — the design '
