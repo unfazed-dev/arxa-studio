@@ -50,6 +50,20 @@ client of the Mac-hosted engine. Companion to
   (`cairn:docs/plans/cairn-integration-tauri-flutter-push.md`) lands and
   is integrated.
 
+## Build status
+
+- **Scaffold — DONE (2026-08-27, arxa commit `ca2eff33`):** `mobile/` in the
+  arxa repo alongside `desktop/`. Tauri v2 shell (crate `arxa-mobile`,
+  identifier `solutions.arxadigital.arxa.mobile`, product "Arxa Studio"),
+  static frontend with not-paired / connecting states mirroring desktop,
+  icons + brand logo reused. `cargo check` clean; `tauri android init`
+  succeeded (NDK 29.0.14206865) and iOS project generated (xcodegen →
+  `arxa-mobile.xcodeproj` + Podfile, Xcode 26.6). Seams documented in
+  `mobile/README.md` + `connection.rs` (`connection_status` /
+  `begin_pairing` command contract): iroh (M1), QR pairing (M2),
+  engine-served surface via `studio_url` (M4), cairn-pushd tokens (M7),
+  OTA plugin — none wired yet, by design.
+
 ## Open
 
 - (none — mobile grill closed through M8.)
