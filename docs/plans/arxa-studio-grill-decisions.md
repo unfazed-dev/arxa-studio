@@ -341,8 +341,27 @@ open questions tracked at the bottom.
   - Settles "polling default" from
     agency-backend-provider-abstraction.md — parked queue now empty.
 
+- **D36 — Organisations tree location: user-chosen root.**
+  - The runtime `organisations/` tree lives in a workspace root the user
+    picks (e.g. `~/Arxa`, chosen at first run) — never inside the
+    arxa-studio checkout, never buried in an OS app-data dir.
+  - The empty `organisations/` skeleton currently sitting in the
+    arxa-studio repo (organisation-a/b: projects/, notes/,
+    meetings/{scheduler,notes}, account/{receipts,invoices,
+    subscriptions,profile}, communications/{emails,messages,comments})
+    is a template/spec only: the studio scaffolds a fresh org from it
+    into the user-chosen root. User data never lives in the app repo.
+  - Consistent with D13 (local-first) and the ownership boundary in
+    CLAUDE.md (no feature may depend on the hosted DB).
+
 ## Open
 
-- (none — grill closed through D35; all five parked questions from
-  agency-backend-provider-abstraction.md settled (D32–D35 + hosted
-  note); installation process being nailed down live)
+- File-organisation grill (resumed from D36) — paused mid-session,
+  next question queued:
+  - **Q2 — Git repo boundaries in the tree** (D17 says git under the
+    hood): org repo + nested per-project repos vs one repo per org vs
+    project-repos-only; where `account/` (billing mirrors, D28
+    secrets) sits relative to version control.
+  - Then: naming/slugs, fixed vs extensible org-level categories,
+    context file placement (D1 thin root), account/ population from
+    billing (D12/D15), FS↔BYO-backend mapping (D32).
