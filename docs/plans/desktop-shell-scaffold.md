@@ -71,10 +71,25 @@ placeholder icon). No full bundle attempted.
   `~/.arxa/updater/arxa-updater.key` (600), pubkey committed in
   `tauri.conf.json > plugins.updater`. Static-JSON contract + generator:
   `desktop/scripts/make-update-manifest.mjs` (self-validating; layout
-  `{BASE}/desktop/{channel}/{target}/{arch}/latest.json`). STILL OPEN
-  (debt): endpoint hosting — base URL is the deliberate placeholder
-  `https://updates.arxa.invalid`; picking real hosting is a release-CI
-  decision (see `desktop/README.md`).
+  `{BASE}/desktop/{channel}/{target}/{arch}/latest.json`). HOSTING
+  RESOLVED (2026-08-26): **GitHub Releases on a public releases repo**
+  hosts both the desktop shell bundles + `latest.json` AND mobile OTA
+  asset bundles. Full update architecture:
+  - Desktop web UI: continuously "patched" via the engine (shell loads
+    `localhost:7891`; assets are engine-served, never baked in) — no
+    updater involved.
+  - Desktop shell + sidecars (native): full-bundle via
+    `tauri-plugin-updater`, low-frequency.
+  - Mobile web assets: OTA via `tauri-plugin-ota-self-update`
+    (self-hosted, signed bundles, channels, GitHub Releases publish
+    target; Apple-compliant — JS/assets only). Native shell changes go
+    through TestFlight/APK per M5. Shorebird was researched and
+    rejected for studio (Flutter-only); it remains relevant for
+    arxa-produced Flutter client apps.
+  - Base URL can move to `updates.arxa.dev` later without changing the
+    static-JSON contract. Release-CI wiring (upload on tag, replace the
+    `https://updates.arxa.invalid` placeholder) is the remaining
+    implementation debt (see `desktop/README.md`).
 - **Code signing / notarization** — SIGNING RESOLVED (2026-08-27):
   `desktop/scripts/sign-and-notarize.sh` + `desktop/entitlements.plist`
   (allow-jit + allow-unsigned-executable-memory for node/bun sidecars, per
