@@ -33,6 +33,11 @@ jobs:
           echo "checked $total files, $fails failures"
           [ "$fails" -eq 0 ]
 
+      - name: Install dependencies
+        # The studio CLI refuses to fall back to the operator's ~/.dsh install
+        # (unpinned); it requires deps installed in the workspace itself.
+        run: npm ci
+
       - name: Smoke-run studio CLI (--help)
         run: |
           # macOS has no `timeout`; guard against a hung CLI with a background killer.
