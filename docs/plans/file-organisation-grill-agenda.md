@@ -1,5 +1,9 @@
 # File-organisation grill — resumption agenda
 
+> **Handoff:** grill paused after D36 (user-chosen root). Awaiting the
+> user's answer to Q2 below; nothing built, no decisions pre-taken.
+> Resume by asking Q2, one question at a time.
+
 Prepared while the grill is paused (after D36, before Q2). Nothing here is
 decided; each question carries my recommendation so the resumed session can
 move one answer at a time. Settled context: D1/D2 (folder context lock +
