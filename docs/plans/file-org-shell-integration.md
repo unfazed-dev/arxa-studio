@@ -44,12 +44,26 @@ phase) that owns the org lifecycle and composes the six libraries:
   survives kill -9 mid-open (lock + rewind already proven in libs);
   integration selftest `plugins/file-org-shell/selftest.mjs` green.
 
-## Phase B — Sidebar redesign: per-org surface + CTAs
+## Phase B — Own sidebar plugin: per-org surface + CTAs
 
 **New scope** — no prior plan covers the sidebar (verified: zero
-matches across `docs/plans/`). Registered into the `sidebar` slot
-declared by `@deepseek-ai/dsh-client-ui-layout` (owner share is only
-`collapsed`/`width`; our data comes from our own inject faces).
+matches across `docs/plans/`).
+
+**Own-plugin decision (user, this session)**: do NOT redesign the
+existing dsh sidebar plugin in place. Build a new self-contained
+`plugins/arxa-sidebar/` — copy whatever the existing sidebar plugin
+does well (registrant wiring, collapse/width handling, list
+virtualisation), adapt freely, and leave the original untouched as
+**reference only**. Same pattern as every other plugin in this repo
+(own manifest, own selftest, zero-dep). Registered into the `sidebar`
+slot declared by `@deepseek-ai/dsh-client-ui-layout` (owner share is
+only `collapsed`/`width`; our data comes from our own inject faces).
+
+- **Swap mechanism**: the original sidebar plugin is deregistered from
+  `bin/arxa-studio.mjs` when `arxa-sidebar` registers — exactly one
+  sidebar active; re-enabling the original is a one-line revert.
+  Copied files carry a header comment naming their source file +
+  dsh version (`0.1.1-rc.2`) so drift stays auditable.
 
 - **Org header**: current org identity (name, brand accent via
   existing `theme-accent`/`brand` seams), org switcher.
@@ -71,7 +85,9 @@ declared by `@deepseek-ai/dsh-client-ui-layout` (owner share is only
   read-only, arxa ships its own composition.
 - Exit check: sidebar renders per-org state from a fixture org; every
   CTA drives the Phase A lifecycle API; no `localStorage` writes
-  (layout store is transient by dsh contract).
+  (layout store is transient by dsh contract); original sidebar
+  plugin byte-identical to its shipped state (reference only);
+  `plugins/arxa-sidebar/selftest.mjs` green.
 
 ## Phase C — Permanent CI: rebuild gate + suite
 
