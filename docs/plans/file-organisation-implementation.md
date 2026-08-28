@@ -145,8 +145,13 @@ rebuild gate test still green with cairn active.
 
 **Discharges**: D45, D47, D46 (rail half), D32 contract.
 
-**Open input**: cairn maturity (spec vs working code) decides whether
-this is integration or greenfield — resolve before estimating.
+**Open input — RESOLVED 2026-08-29** (`cairn-maturity-audit.md`):
+cairn is WORKING (alpha) Rust, not spec-only. Rail = adapter work
+(~S/M days): adopt cairn's wire/replication contract for D32 BYO,
+reuse `cairn-core` apply engine + LWW/CRDT merge. Edit log +
+materializer stay greenfield (arxa-studio concepts). Pin a cairn
+commit — pre-v0.1 API churn is the live risk; keep the seam thin.
+Local-only fallback needs no cairn at all (optional rail).
 
 ---
 
