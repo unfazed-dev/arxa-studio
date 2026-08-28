@@ -1,0 +1,18 @@
+{
+  "name": "@arxa/workspace-index",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase 2 — workspace index as a pure derived cache over the file tree (D46). Storage-backend seam for D32 BYO databases; local node:sqlite implementation, no native deps, no network.",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./backend": "./lib/backend.js",
+    "./scan": "./lib/scan.js",
+    "./facts": "./lib/facts.js",
+    "./rebuild": "./lib/rebuild.js"
+  },
+  "scripts": {
+    "selftest": "node selftest.mjs"
+  }
+}
