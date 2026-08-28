@@ -1,0 +1,12 @@
+{
+  "name": "arxa-account-mirror",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Phase 6 track (b) of docs/plans/file-organisation-implementation.md — the read-only account/ mirror (D45): fetch billing/entitlement artifacts through a pluggable provider seam and write them as plain read-only files (0444) under <org>/account/. Ships a local/offline default provider that renders an empty-but-valid account/ with no arxa account and no network (CLAUDE.md ownership boundary: no feature may require the Arxa Digital Solutions database), plus a typed stub of the future remote provider — interface and typed errors only, no HTTP. Mirror content is derivable and never committed: excluded from org git history via the committed D37 ignore rules and the .git info/exclude choke point. Refresh is explicit, idempotent, atomic per file (temp + rename), and prunes stale artifacts a provider no longer returns.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  }
+}
