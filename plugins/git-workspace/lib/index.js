@@ -11,9 +11,9 @@
 //   commits.js  — D18 two-tier commits: WIP auto-commits + clean
 //                 stage-boundary squash
 //   versions.js — D20 version chain + version-chip data (no SHAs, D44)
-//
-// Session lifecycle (branch-per-session worktrees, D38–D40) is phase 4
-// and deliberately absent here.
+//   sessions.js — D38–D40 session lifecycle: branch-per-session
+//                 worktrees, stage-boundary gate + merge, parked
+//                 branches, archive/revive (phase 4)
 
 export const name = 'arxa-git-workspace'
 
@@ -38,6 +38,23 @@ export {
   mintVersion,
   versionChip,
 } from './versions.js'
+export {
+  SESSION_BRANCH_PREFIX,
+  SESSION_BASE_PREFIX,
+  SESSIONS_DIR,
+  SESSIONS_FILE,
+  GATE_CHECK_SCRIPT,
+  SESSION_STATES,
+  SessionMergeError,
+  listSessions,
+  archivedSessionIds,
+  openSession,
+  runGate,
+  sessionStageBoundary,
+  holdSession,
+  archiveSession,
+  reviveSession,
+} from './sessions.js'
 
 import { stageBoundarySquash } from './commits.js'
 import { mintVersion, versionChip } from './versions.js'

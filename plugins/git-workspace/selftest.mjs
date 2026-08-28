@@ -1,11 +1,16 @@
 #!/usr/bin/env node
-// Selftest for arxa-git-workspace (phase 3). Covers:
+// Selftest for arxa-git-workspace (phases 3 + 4). Covers:
 //  1. probe: git present + git absent (disabled state, GitUnavailableError)
 //  2. D37 nesting isolation: org repo commits never capture nested
 //     project repo contents; account/ never enters git history
 //  3. D18 commit wall + squash round-trip: WIP auto-commits accumulate,
 //     stage-boundary squash produces ONE clean commit, second round trip
 //  4. D20/D44 version chip: mint at stage boundary, chip has no SHAs
+//  5. D38–D40 sessions: open → edit → stage boundary → green merges to
+//     main; forced red gate parks the branch; archive prunes the
+//     worktree but the branch survives; revive continues from parked
+//     state; concurrent sessions — the merge loser fails loudly with
+//     all commits intact; main never has a direct commit
 // Runs against a throwaway workspace under a temp dir; nothing
 // machine-global is touched (isolated HOME-free git via run.js).
 
@@ -19,6 +24,9 @@ import {
   isRepo, initOrgRepo, initProjectRepo,
   isDirty, wipCommit, wipRun, stageBoundarySquash, stageLog,
   mintAtStageBoundary, versionChip, readVersions,
+  SessionMergeError, GATE_CHECK_SCRIPT,
+  openSession, sessionStageBoundary, archiveSession, reviveSession,
+  listSessions, archivedSessionIds,
 } from './lib/index.js'
 
 let passed = 0
@@ -160,6 +168,91 @@ ok('org repo log shows nothing from inside the project', () => {
   const orgFiles = runGit(['log', '--name-only', '--format='], { cwd: orgPath })
   assert.ok(!orgFiles.includes('projects/'), 'org history touched projects/')
   assert.ok(!orgFiles.includes('account/'), 'org history touched account/')
+})
+
+// ---- 5. D38–D40 sessions: branch-per-session worktrees ---------------------
+
+ok('sessions degrade: absent git → GitUnavailableError, not a crash', () => {
+  resetProbe()
+  const absentEnv = { ...process.env, ARXA_GIT_BIN: path.join(tmp, 'no-such-git') }
+  assert.throws(() => openSession(projectPath, { env: absentEnv }), GitUnavailableError)
+  resetProbe() // restore cached probe for the checks below
+})
+
+ok('session open → edit → boundary: green merges to main; main never edited directly (D38)', () => {
+  const mainBefore = runGit(['rev-parse', 'main'], { cwd: projectPath })
+  const s = openSession(projectPath, { id: 'chat1', name: 'Chat 1' })
+  assert.equal(s.state, 'open')
+  assert.ok(fs.existsSync(path.join(s.worktree, 'draft.md')), 'worktree missing project files')
+  fs.writeFileSync(path.join(s.worktree, 'draft.md'), 'session edit\n')
+  wipCommit(s.worktree, { message: 'session edit' })
+  // Edits live only on the session branch until the boundary (D38).
+  assert.equal(runGit(['rev-parse', 'main'], { cwd: projectPath }), mainBefore)
+  assert.notEqual(fs.readFileSync(path.join(projectPath, 'draft.md'), 'utf8'), 'session edit\n')
+  const res = sessionStageBoundary(projectPath, 'chat1')
+  assert.equal(res.merged, true)
+  assert.equal(res.gate.kind, 'light') // no check.sh → content repo, config state not error
+  assert.equal(res.gate.configured, false)
+  assert.equal(fs.readFileSync(path.join(projectPath, 'draft.md'), 'utf8'), 'session edit\n')
+  // The other session's squash base is untouched: main-side stage tooling still works.
+  assert.equal(wipRun(projectPath).length, 0)
+})
+
+ok('red gate parks the branch — never deleted (D40)', () => {
+  const s = openSession(projectPath, { id: 'red1', name: 'Red session' })
+  fs.writeFileSync(path.join(s.worktree, GATE_CHECK_SCRIPT), 'exit 1\n')
+  fs.writeFileSync(path.join(s.worktree, 'risky.md'), 'unreviewed\n')
+  const mainBefore = runGit(['rev-parse', 'main'], { cwd: projectPath })
+  const res = sessionStageBoundary(projectPath, 'red1')
+  assert.equal(res.gate.green, false)
+  assert.equal(res.gate.kind, 'check.sh')
+  assert.equal(res.merged, false)
+  assert.equal(res.session.state, 'parked')
+  assert.equal(res.session.parkedReason, 'gate-red')
+  assert.equal(runGit(['rev-parse', 'main'], { cwd: projectPath }), mainBefore, 'red work reached main')
+  assert.ok(runGit(['branch', '--list', 'arxa/session/red1'], { cwd: projectPath }) !== '')
+})
+
+ok('archive prunes worktree, keeps branch; revive continues from parked state (D39/D40)', () => {
+  const parked = archiveSession(projectPath, 'red1')
+  assert.equal(parked.state, 'archived')
+  assert.ok(!fs.existsSync(path.join(projectPath, '.arxa', 'worktrees', 'red1')))
+  assert.ok(runGit(['branch', '--list', 'arxa/session/red1'], { cwd: projectPath }) !== '',
+    'archive deleted the parked branch (D40 violation)')
+  assert.deepEqual(archivedSessionIds(projectPath), ['red1']) // dsh contract
+  const s = reviveSession(projectPath, 'red1')
+  assert.equal(s.state, 'open')
+  assert.equal(fs.readFileSync(path.join(s.worktree, 'risky.md'), 'utf8'), 'unreviewed\n')
+  // Fix the gate, finish the work: revived session merges like any other.
+  fs.writeFileSync(path.join(s.worktree, GATE_CHECK_SCRIPT), 'exit 0\n')
+  fs.writeFileSync(path.join(s.worktree, 'risky.md'), 'reviewed\n')
+  const res = sessionStageBoundary(projectPath, 'red1')
+  assert.equal(res.merged, true)
+  assert.equal(fs.readFileSync(path.join(projectPath, 'risky.md'), 'utf8'), 'reviewed\n')
+})
+
+ok('concurrent sessions: merge loser fails loudly, zero commits lost', () => {
+  const a = openSession(projectPath, { id: 'race-a' })
+  const b = openSession(projectPath, { id: 'race-b' })
+  fs.writeFileSync(path.join(a.worktree, 'shared.md'), 'from a\n')
+  fs.writeFileSync(path.join(b.worktree, 'shared.md'), 'from b\n')
+  assert.equal(sessionStageBoundary(projectPath, 'race-a').merged, true)
+  assert.throws(() => sessionStageBoundary(projectPath, 'race-b'), SessionMergeError)
+  const loser = listSessions(projectPath).find((s) => s.id === 'race-b')
+  assert.equal(loser.state, 'parked')
+  assert.equal(loser.parkedReason, 'merge-conflict')
+  // Loser's commits are all still on its branch, recoverable.
+  const tip = runGit(['rev-parse', 'arxa/session/race-b'], { cwd: projectPath })
+  assert.ok(tip)
+  assert.equal(runGit(['show', `${tip}:shared.md`], { cwd: projectPath }), 'from b')
+  assert.equal(fs.readFileSync(path.join(projectPath, 'shared.md'), 'utf8'), 'from a\n')
+})
+
+ok('main history: every commit is a stage commit — no WIP identity, no direct edits', () => {
+  const emails = runGit(['log', '--format=%ce', 'main'], { cwd: projectPath }).split('\n')
+  assert.ok(!emails.includes(WIP_IDENTITY.email), 'WIP commit reached main')
+  const subjects = runGit(['log', '--format=%s', 'main'], { cwd: projectPath }).split('\n')
+  assert.ok(subjects.every((s) => s.startsWith('stage:')), `non-stage commit on main: ${subjects}`)
 })
 
 console.log(`\nselftest: ${passed}/${passed} passed`)

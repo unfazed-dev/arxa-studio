@@ -36,9 +36,14 @@ function currentBranchRef(repoPath, env) {
   return ref
 }
 
-/** The recorded last stage boundary (falls back to HEAD's root commit). */
-export function stageBase(repoPath, env = process.env) {
-  const recorded = runGit(['rev-parse', '-q', '--verify', STAGE_BASE_REF], {
+/**
+ * The recorded last stage boundary (falls back to HEAD's root commit).
+ * `baseRef` (phase 4 extension): sessions track their own boundary in a
+ * per-session ref — refs are shared across worktrees, so concurrent
+ * sessions cannot all use the one STAGE_BASE_REF.
+ */
+export function stageBase(repoPath, env = process.env, baseRef = STAGE_BASE_REF) {
+  const recorded = runGit(['rev-parse', '-q', '--verify', baseRef], {
     cwd: repoPath, env, allowFail: true,
   })
   if (recorded) return recorded
@@ -66,8 +71,8 @@ export function wipCommit(repoPath, { message, env = process.env } = {}) {
 }
 
 /** Commits since the last stage boundary (newest first), WIP tier flagged by committer identity. */
-export function wipRun(repoPath, env = process.env) {
-  const base = stageBase(repoPath, env)
+export function wipRun(repoPath, env = process.env, baseRef = STAGE_BASE_REF) {
+  const base = stageBase(repoPath, env, baseRef)
   const out = runGit(
     ['log', `--format=%H${'%x1f'}%ce${'%x1f'}%s`, `${base}..HEAD`],
     { cwd: repoPath, env },
@@ -87,16 +92,17 @@ export function wipRun(repoPath, env = process.env) {
  * reaches history, sharing, or CI.
  *
  * @param {string} repoPath
- * @param {{ message: string, env?: object }} opts
+ * @param {{ message: string, env?: object, baseRef?: string }} opts
+ *        `baseRef` (phase 4): per-session boundary ref — see stageBase.
  * @returns {{ squashed: boolean, sha: string|null }}
  */
-export function stageBoundarySquash(repoPath, { message, env = process.env }) {
+export function stageBoundarySquash(repoPath, { message, env = process.env, baseRef = STAGE_BASE_REF }) {
   if (!message) throw new TypeError('stageBoundarySquash requires a message')
   // Final WIP auto-commit so the squash is built from committed state.
   // If this throws (index.lock, etc.) the squash aborts with it.
   wipCommit(repoPath, { message: 'pre-squash snapshot', env })
 
-  const base = stageBase(repoPath, env)
+  const base = stageBase(repoPath, env, baseRef)
   const tip = head(repoPath, env)
   if (base === tip) return { squashed: false, sha: null } // nothing since last boundary
 
@@ -109,7 +115,7 @@ export function stageBoundarySquash(repoPath, { message, env = process.env }) {
   )
   // Atomic move of the branch: fails if someone advanced it under us.
   runGit(['update-ref', branchRef, stageSha, tip], { cwd: repoPath, env })
-  runGit(['update-ref', STAGE_BASE_REF, stageSha], { cwd: repoPath, env })
+  runGit(['update-ref', baseRef, stageSha], { cwd: repoPath, env })
   return { squashed: true, sha: stageSha }
 }
 
