@@ -1,0 +1,12 @@
+{
+  "name": "arxa-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Phase 1 of docs/plans/file-organisation-implementation.md — the raw on-disk tree format: workspace-root persistence (D36), org/project scaffolding with the five fixed categories (D42), kebab-case slugs with numeric-suffix collision handling (D41), org.json/project.json manifests where rename touches the manifest and never the slug (D41), thin AGENTS.md context-file placement (D43), and resolve-by-stable-id over the tree. No DB, no git, no sync.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  }
+}
