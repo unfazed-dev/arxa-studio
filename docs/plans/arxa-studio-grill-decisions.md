@@ -354,14 +354,56 @@ open questions tracked at the bottom.
   - Consistent with D13 (local-first) and the ownership boundary in
     CLAUDE.md (no feature may depend on the hosted DB).
 
+- **D37 — Repo boundaries: org repo + nested per-project repos.**
+  - Org root is one git repo (notes, meetings, communications, org
+    context); each `projects/<name>` is its own repo, ignored by the
+    org repo. `account/` excluded from version control entirely
+    (billing mirrors + D28 secrets never enter git history).
+  - Projects clone/share cleanly per D17; org history stays private;
+    D18/D19 machinery covers org-level content.
+
+- **D38 — Session = branch + worktree; main only advances by gated
+  merge.**
+  - Every work context (chat/agent thread and interactive editing
+    surface) gets its own git branch + worktree; main is never edited
+    directly.
+  - Default merge hook: the D18 stage-boundary squash — the clean
+    commit is gate-checked by arxa-cicd (project `check.sh` for code;
+    light content checks — clean merge, valid files, no
+    `account/`/secret paths — for org repos); green merges to main,
+    red parks on the branch with the failure surfaced.
+  - Worktrees live hidden at
+    `<workspace-root>/.arxa/worktrees/<repo>/<session-id>/` — never
+    inside a repo's tree, skipped by D23 export.
+  - A **git-session plugin** (arxa-studio/plugins pattern, like
+    pairing/theme-accent) adds composer buttons: branch/merge/park/
+    discard — manual overrides of the defaults, not replacements.
+
+- **D39 — Archived-session access: plugin now, upstream later.**
+  - dsh fact base: `dsh-workspace` has durable `archivedSessionIds` +
+    `archiveSession()`, transcripts persist as JSONL forever, but no
+    `unarchiveSession` ships (0.1.1-rc.2) and the UI excludes archived
+    sessions everywhere. Data model anticipates unarchive
+    ("unarchiving must restore the position").
+  - A session-archive plugin browses archived sessions (registry +
+    JSONL, read-only) and offers Unarchive by writing the registry set
+    directly; propose `unarchiveSession` upstream to dsh in parallel.
+    Honors depend-don't-fork.
+
+- **D40 — Archive git lifecycle: merge-try, park branch, prune
+  worktree.**
+  - Archive = final squash → gate → merge attempt; worktree deleted
+    either way; unmerged branch parked, never auto-deleted.
+  - Revival = `git worktree add` from the parked branch + rebase onto
+    current main; conflicts surface in the git-session plugin.
+    Nothing lost; disk stays clean.
+
 ## Open
 
-- File-organisation grill (resumed from D36) — paused mid-session,
-  next question queued:
-  - **Q2 — Git repo boundaries in the tree** (D17 says git under the
-    hood): org repo + nested per-project repos vs one repo per org vs
-    project-repos-only; where `account/` (billing mirrors, D28
-    secrets) sits relative to version control.
-  - Then: naming/slugs, fixed vs extensible org-level categories,
-    context file placement (D1 thin root), account/ population from
-    billing (D12/D15), FS↔BYO-backend mapping (D32).
+- File-organisation grill — in progress, next question queued:
+  - **Q3 — Naming**: kebab slugs on disk vs display names; manifest
+    ids.
+  - Then: fixed vs extensible org-level categories, context file
+    placement (D1 thin root), account/ population from billing
+    (D12/D15), FS↔BYO-backend mapping (D32), template mechanics,
+    deletion/trash.
