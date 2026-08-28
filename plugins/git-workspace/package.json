@@ -1,0 +1,12 @@
+{
+  "name": "arxa-git-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Phase 3 of docs/plans/file-organisation-implementation.md — the git rail: org repo init at scaffold with nested project repos ignored by the org repo (D37), per-project repos, two-tier commits (continuous local-only WIP auto-commits squashed into clean stage-boundary commits, D18), and the version-chip data source (D20 semantic version + state, no SHAs in UX per D44). Engine: shell out to system git with a startup probe and a clear disabled state when git is absent. No sessions/worktrees (phase 4), no network, no DB.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  }
+}
