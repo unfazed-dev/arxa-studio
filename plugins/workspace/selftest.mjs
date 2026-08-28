@@ -21,6 +21,8 @@ import { scanWorkspace, resolveOrgById, resolveProjectById } from './lib/resolve
 import { TEMPLATE_VERSION, getTemplate, stampFor, parseStamp, StampParseError } from './lib/template.js'
 import { StampRefusalError, readOrgStampVersion, checkOrgStamp, writeOrgStampVersion } from './lib/stamp.js'
 import { MigrationError, MIGRATIONS, migrationChain, migrateOrg, openOrg } from './lib/migrate.js'
+import { OrgLockedError, acquireOrgLock } from './lib/lock.js'
+import { spawnSync } from 'node:child_process'
 import { initOrgRepo, runGit, resetProbe, GitUnavailableError, STAGE_PREFIX } from '../git-workspace/lib/index.js'
 
 let failures = 0
@@ -283,6 +285,43 @@ try {
       GitUnavailableError
     )
     resetProbe()
+  })
+
+  // --- org open lock (concurrent-process safety) ---
+  const lockFile = path.join(migOrg.path, '.git', 'arxa-open.lock')
+
+  check('org held by a live foreign process: openOrg refuses with OrgLockedError', () => {
+    // pid 1 (launchd/init) is always alive and never ours.
+    fs.writeFileSync(lockFile, JSON.stringify({ pid: 1, startedAt: new Date().toISOString() }))
+    try {
+      assert.throws(
+        () => openOrg(migOrg.path, { appVersion: 2, migrations: testMigrations }),
+        OrgLockedError
+      )
+    } finally {
+      fs.rmSync(lockFile, { force: true })
+    }
+  })
+
+  check('stale lock from a dead pid is taken over, then released', () => {
+    const dead = spawnSync('/bin/echo', ['x']).pid // exited child: guaranteed-dead pid
+    fs.writeFileSync(lockFile, JSON.stringify({ pid: dead, startedAt: new Date().toISOString() }))
+    const opened = openOrg(migOrg.path, { appVersion: 2, migrations: testMigrations })
+    assert.equal(opened.orgVersion, 2)
+    assert.equal(fs.existsSync(lockFile), false) // takeover must not leak the lock
+  })
+
+  check('lock is reentrant in-process and always released on the happy path', () => {
+    const release = acquireOrgLock(migOrg.path)
+    try {
+      // openOrg nests inside our own lock instead of deadlocking (openOrg →
+      // migrateOrg → recovery all reenter via the same pid).
+      openOrg(migOrg.path, { appVersion: 2, migrations: testMigrations })
+      assert.equal(fs.existsSync(lockFile), true) // inner frames must not steal our unlink
+    } finally {
+      release()
+    }
+    assert.equal(fs.existsSync(lockFile), false)
   })
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true })

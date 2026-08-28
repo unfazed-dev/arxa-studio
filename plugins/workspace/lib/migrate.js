@@ -23,6 +23,7 @@ import path from 'node:path'
 import { TEMPLATE_VERSION, getTemplate } from './template.js'
 import { readManifest, orgManifestPath } from './manifest.js'
 import { checkOrgStamp, readOrgStampVersion, writeOrgStampVersion } from './stamp.js'
+import { withOrgLock } from './lock.js'
 
 /** Typed failure for anything the runner refuses or cannot finish. */
 export class MigrationError extends Error {
@@ -100,6 +101,12 @@ export function recoverDanglingMigration(orgPath, env = process.env) {
     return false
   }
   if (!isRepo(orgPath, env)) return false
+  // Serialize with other processes: a concurrent rewind under someone
+  // else's live migration is the loss scenario (throws OrgLockedError).
+  return withOrgLock(orgPath, env, () => recoverDanglingInner(orgPath, env))
+}
+
+function recoverDanglingInner(orgPath, env) {
   const head = runGit(['log', '-1', '--format=%s'], { cwd: orgPath, env, allowFail: true })
   if (!head || !PRE_MARKER.test(head)) return false
   if (!isDirty(orgPath, env)) return false // crashed right after the pre commit; nothing to rewind
@@ -133,6 +140,12 @@ export function recoverDanglingMigration(orgPath, env = process.env) {
  * @returns {{ orgVersion: number, toVersion: number, migrated: Array<{ from: number, to: number, preSha: string, postSha: string }> }}
  */
 export function migrateOrg(orgPath, { toVersion = TEMPLATE_VERSION, migrations = MIGRATIONS, env = process.env } = {}) {
+  // Hold the org lock across recovery + the whole chain: another process
+  // must see all-or-nothing, never a half-walked chain it could "recover".
+  return withOrgLock(orgPath, env, () => migrateOrgInner(orgPath, { toVersion, migrations, env }))
+}
+
+function migrateOrgInner(orgPath, { toVersion, migrations, env }) {
   recoverDanglingMigration(orgPath, env) // a dead run's uncommitted stamp bump must not be trusted
   const orgVersion = readOrgStampVersion(orgPath)
   if (orgVersion === toVersion) return { orgVersion, toVersion, migrated: [] }
@@ -193,6 +206,13 @@ export function migrateOrg(orgPath, { toVersion = TEMPLATE_VERSION, migrations =
  * @returns {{ path: string, manifest: object, orgVersion: number, migrated: Array }}
  */
 export function openOrg(orgPath, { appVersion = TEMPLATE_VERSION, migrations = MIGRATIONS, env = process.env } = {}) {
+  // One critical section for recover → stamp check → migrate: without it a
+  // second process could slip in between recovery and migration and rewind
+  // under our feet (throws OrgLockedError if the org is held elsewhere).
+  return withOrgLock(orgPath, env, () => openOrgInner(orgPath, { appVersion, migrations, env }))
+}
+
+function openOrgInner(orgPath, { appVersion, migrations, env }) {
   // Heal a crash-interrupted migration BEFORE reading the stamp: the dead
   // run may have bumped the stamp without publishing its post commit, and
   // that uncommitted bump must not make the org look up to date.

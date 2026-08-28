@@ -38,3 +38,4 @@ export {
   checkOrgStamp,
 } from './stamp.js'
 export { MigrationError, MIGRATIONS, migrationChain, migrateOrg, openOrg } from './migrate.js'
+export { OrgLockedError, acquireOrgLock, withOrgLock } from './lock.js'
