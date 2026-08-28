@@ -398,12 +398,57 @@ open questions tracked at the bottom.
     current main; conflicts surface in the git-session plugin.
     Nothing lost; disk stays clean.
 
+- **D41 — Naming: kebab slugs on disk + manifest identity.**
+  - Kebab-case slug is the folder name on disk and in git remotes;
+    stable across renames; collisions get numeric suffixes.
+  - Display name + stable id live in a folder-local manifest
+    (`org.json` / `project.json`); renames touch the manifest, never
+    the path, so git history and context references survive.
+
+- **D42 — Org categories: fixed five, studio-owned.**
+  - `projects/ notes/ meetings/ account/ communications/` is a fixed
+    vocabulary features hang off (scheduler, billing mirrors, comms
+    ingestion). No user-added top-level categories — extensibility
+    there breaks D2 ancestor-chain semantics.
+  - Free-form folders live inside `projects/<name>` and `notes/`.
+
+- **D43 — Context files: `AGENTS.md`, native discovery.**
+  - The folder context file is `AGENTS.md` (not a custom name): both
+    harnesses (dsh, PI) discover it natively via the ancestor chain —
+    no adapter layer. Org root's copy is the thin layer, D1-capped.
+  - Threads/conversations live beside content under dot-dirs so they
+    travel with the folder in git (D17) without cluttering the tree.
+
+- **D44 — Template mechanics: versioned in-app manifest + stamped
+  scaffold.** *(Copier-validated: versioned template + stamp in the
+  generated tree + explicit migrations is the proven shape.)*
+  - The org template ships inside the app as versioned data (folders,
+    initial files, repo boundaries). Scaffolding executes it and
+    writes the template version into the org's D21 format stamp — one
+    stamp, two consumers. The repo's empty `organisations/` skeleton
+    is documentation only (git cannot track empty dirs at all).
+  - Evolution = new template version + explicit forward-only
+    migration. Each migration runs as its own commit pair in the org
+    repo, so a crash rolls back via git (no half-migrated trees).
+  - Requirements: migration chains tested from every historical
+    version (CI fixture trees per version); migrations declare
+    owned paths (manifests, stamps, category folders) vs never-touch
+    (user content) up front.
+  - A clonable template repo is not precluded — layer it on only if
+    user-authored templates become a product goal.
+  - **Version chip**: pill chip rendered by the arxa git plugin,
+    powered by the D20 semantic layer — project header shows current
+    named version + state (e.g. `v4 · Approved`), variant views show
+    the variant name; clickable → opens the D20 version timeline.
+    Never shows git SHAs or the D21/D44 format stamp (that stays in
+    About/diagnostics/export). Two version axes, never merged:
+    D20 = user-facing deliverable versions; D21/D44 = internal org
+    format schema.
+
 ## Open
 
 - File-organisation grill — in progress, next question queued:
-  - **Q3 — Naming**: kebab slugs on disk vs display names; manifest
-    ids.
-  - Then: fixed vs extensible org-level categories, context file
-    placement (D1 thin root), account/ population from billing
-    (D12/D15), FS↔BYO-backend mapping (D32), template mechanics,
-    deletion/trash.
+  - **Q6 — `account/` population** (billing write-through mirror).
+  - Then: **Q7** FS↔BYO-backend mapping / SSOT (D32), **Q9**
+    deletion/trash/rename safety.
+- Glossary of settled terms now lives in `CONTEXT.md` (repo root).
