@@ -39,3 +39,19 @@ export {
 } from './stamp.js'
 export { MigrationError, MIGRATIONS, migrationChain, migrateOrg, openOrg } from './migrate.js'
 export { OrgLockedError, acquireOrgLock, withOrgLock } from './lock.js'
+export {
+  TRASH_DIR,
+  ORIGIN_MANIFEST,
+  TrashError,
+  RestoreConflictError,
+  HistoryBoundaryError,
+  ConfirmRequiredError,
+  hardDeleteToken,
+  trashRoot,
+  softDelete,
+  listTrash,
+  restoreFromTrash,
+  hardDelete,
+  sweepTrash,
+} from './trash.js'
+>>>>>>> worktree-agent-aee38d21f7b982257

@@ -22,8 +22,28 @@ import { TEMPLATE_VERSION, getTemplate, stampFor, parseStamp, StampParseError } 
 import { StampRefusalError, readOrgStampVersion, checkOrgStamp, writeOrgStampVersion } from './lib/stamp.js'
 import { MigrationError, MIGRATIONS, migrationChain, migrateOrg, openOrg } from './lib/migrate.js'
 import { OrgLockedError, acquireOrgLock } from './lib/lock.js'
+import {
+  TrashError,
+  RestoreConflictError,
+  HistoryBoundaryError,
+  ConfirmRequiredError,
+  hardDeleteToken,
+  trashRoot,
+  softDelete,
+  listTrash,
+  restoreFromTrash,
+  hardDelete,
+  sweepTrash,
+} from './lib/trash.js'
 import { spawnSync } from 'node:child_process'
-import { initOrgRepo, runGit, resetProbe, GitUnavailableError, STAGE_PREFIX } from '../git-workspace/lib/index.js'
+import {
+  initOrgRepo,
+  initProjectRepo,
+  runGit,
+  resetProbe,
+  GitUnavailableError,
+  STAGE_PREFIX,
+} from '../git-workspace/lib/index.js'
 
 let failures = 0
 function check(label, fn) {
@@ -322,6 +342,130 @@ try {
       release()
     }
     assert.equal(fs.existsSync(lockFile), false)
+  })
+  // --- Phase 6: trash (D47) ---
+  const trashOrg = scaffoldOrg(workspaceRoot, 'Trash Org')
+  initOrgRepo(trashOrg.path)
+  const doomed = scaffoldProject(trashOrg.path, 'Doomed Project')
+  initProjectRepo(doomed.path)
+  fs.writeFileSync(path.join(doomed.path, 'work.md'), 'irreplaceable work\n')
+  runGit(['add', '-A'], { cwd: doomed.path })
+  runGit(['commit', '-m', 'stage: work'], { cwd: doomed.path })
+
+  check('soft-delete a nested project repo, restore, git history identical', () => {
+    const logBefore = runGit(['log', '--format=%H %s'], { cwd: doomed.path })
+    const { entryId, entryPath, origin } = softDelete(workspaceRoot, doomed.path)
+    assert.equal(fs.existsSync(doomed.path), false)
+    assert.equal(fs.existsSync(path.join(entryPath, doomed.slug, 'work.md')), true)
+    assert.equal(origin.originalPath, path.relative(workspaceRoot, doomed.path))
+    assert.equal(origin.projectId, doomed.manifest.id)
+    const { restoredPath } = restoreFromTrash(workspaceRoot, entryId)
+    assert.equal(restoredPath, doomed.path)
+    assert.equal(fs.existsSync(path.join(trashRoot(workspaceRoot), entryId)), false) // entry consumed
+    const logAfter = runGit(['log', '--format=%H %s'], { cwd: doomed.path })
+    assert.equal(logAfter, logBefore) // full history intact, byte for byte
+  })
+
+  check('delete inside an org repo is D18-recorded as a wip commit', () => {
+    // projects/ is gitignored by the org repo (D37), so use a tracked path.
+    const trackedDir = path.join(trashOrg.path, 'notes', 'tracked-notes')
+    fs.mkdirSync(trackedDir, { recursive: true })
+    fs.writeFileSync(path.join(trackedDir, 'a.md'), 'tracked\n')
+    runGit(['add', '-A'], { cwd: trashOrg.path })
+    runGit(['commit', '-m', 'stage: add tracked notes'], { cwd: trashOrg.path })
+    const { entryId, origin } = softDelete(workspaceRoot, trackedDir)
+    assert.equal(origin.git.committed, true)
+    const subject = runGit(['log', '-1', '--format=%s'], { cwd: trashOrg.path })
+    assert.equal(subject.startsWith('wip:'), true)
+    hardDelete(workspaceRoot, entryId, { confirm: hardDeleteToken(entryId) })
+  })
+
+  check('hard delete refused without the confirm token', () => {
+    const junk = path.join(trashOrg.path, 'notes', 'junk')
+    fs.mkdirSync(junk, { recursive: true })
+    const { entryId, entryPath } = softDelete(workspaceRoot, junk)
+    assert.throws(() => hardDelete(workspaceRoot, entryId), ConfirmRequiredError)
+    assert.throws(() => hardDelete(workspaceRoot, entryId, { confirm: 'yes' }), ConfirmRequiredError)
+    assert.equal(fs.existsSync(entryPath), true) // still there after refusals
+    hardDelete(workspaceRoot, entryId, { confirm: hardDeleteToken(entryId) })
+    assert.equal(fs.existsSync(entryPath), false)
+  })
+
+  check('restore into an occupied path is refused, typed', () => {
+    const spot = path.join(trashOrg.path, 'notes', 'spot')
+    fs.mkdirSync(spot, { recursive: true })
+    const { entryId } = softDelete(workspaceRoot, spot)
+    fs.mkdirSync(spot, { recursive: true }) // squatter takes the origin
+    assert.throws(() => restoreFromTrash(workspaceRoot, entryId), RestoreConflictError)
+    fs.rmSync(spot, { recursive: true, force: true })
+    restoreFromTrash(workspaceRoot, entryId) // origin free again → succeeds
+    assert.equal(fs.existsSync(spot), true)
+  })
+
+  check('cross-repo restore refuses with history-boundary error (D41) unless accepted', () => {
+    const otherOrg = scaffoldOrg(workspaceRoot, 'Other Trash Org')
+    initOrgRepo(otherOrg.path)
+    const drifting = path.join(trashOrg.path, 'notes', 'drifting')
+    fs.mkdirSync(drifting, { recursive: true })
+    const { entryId } = softDelete(workspaceRoot, drifting)
+    const foreignDest = path.join(otherOrg.path, 'notes', 'drifting')
+    assert.throws(
+      () => restoreFromTrash(workspaceRoot, entryId, { intoPath: foreignDest }),
+      HistoryBoundaryError
+    )
+    const { restoredPath } = restoreFromTrash(workspaceRoot, entryId, {
+      intoPath: foreignDest,
+      acceptHistoryLoss: true,
+    })
+    assert.equal(restoredPath, foreignDest)
+  })
+
+  check('trash is invisible to scanWorkspace and resolve-by-id', () => {
+    const ghostOrg = scaffoldOrg(workspaceRoot, 'Ghost Org')
+    const { entryId } = softDelete(workspaceRoot, ghostOrg.path)
+    const scan = scanWorkspace(workspaceRoot)
+    assert.equal(scan.orgs.has(ghostOrg.manifest.id), false)
+    for (const org of scan.orgs.values()) assert.equal(org.path.includes('.arxa'), false)
+    assert.equal(resolveOrgById(workspaceRoot, ghostOrg.manifest.id), null)
+    assert.equal(listTrash(workspaceRoot).some((e) => e.entryId === entryId), true) // but trash sees it
+    hardDelete(workspaceRoot, entryId, { confirm: hardDeleteToken(entryId) })
+  })
+
+  check('sweep requires explicit max-age and only removes older entries', () => {
+    assert.throws(() => sweepTrash(workspaceRoot), TrashError)
+    assert.throws(() => sweepTrash(workspaceRoot, { maxAgeMs: 0 }), TrashError)
+    assert.throws(() => sweepTrash(workspaceRoot, { maxAgeMs: Infinity }), TrashError)
+    const day = 24 * 60 * 60 * 1000
+    const oldDir = path.join(trashOrg.path, 'notes', 'old-thing')
+    const newDir = path.join(trashOrg.path, 'notes', 'new-thing')
+    fs.mkdirSync(oldDir, { recursive: true })
+    fs.mkdirSync(newDir, { recursive: true })
+    const oldEntry = softDelete(workspaceRoot, oldDir, { now: new Date(Date.now() - 10 * day) })
+    const newEntry = softDelete(workspaceRoot, newDir)
+    const { removed } = sweepTrash(workspaceRoot, { maxAgeMs: 5 * day })
+    assert.deepEqual(removed, [oldEntry.entryId])
+    assert.equal(fs.existsSync(newEntry.entryPath), true)
+    hardDelete(workspaceRoot, newEntry.entryId, { confirm: hardDeleteToken(newEntry.entryId) })
+  })
+
+  check('git absent: soft delete still moves, records the skip reason', () => {
+    const absentEnv = { ...process.env, ARXA_GIT_BIN: path.join(tmp, 'no-such-git') }
+    resetProbe()
+    const offline = path.join(trashOrg.path, 'notes', 'offline-thing')
+    fs.mkdirSync(offline, { recursive: true })
+    const { entryId, entryPath, origin } = softDelete(workspaceRoot, offline, { env: absentEnv })
+    assert.equal(fs.existsSync(offline), false) // fs move happened anyway
+    assert.equal(fs.existsSync(entryPath), true)
+    assert.equal(origin.git.committed, false)
+    assert.match(origin.git.skippedReason, /git unavailable/)
+    resetProbe()
+    hardDelete(workspaceRoot, entryId, { confirm: hardDeleteToken(entryId) })
+  })
+
+  check('trash refuses targets outside the workspace and .arxa itself', () => {
+    assert.throws(() => softDelete(workspaceRoot, tmp), TrashError)
+    assert.throws(() => softDelete(workspaceRoot, path.join(workspaceRoot, '.arxa')), TrashError)
+    assert.throws(() => softDelete(workspaceRoot, trashRoot(workspaceRoot)), TrashError)
   })
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true })
