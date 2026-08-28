@@ -57,7 +57,11 @@ populated workspace loses nothing.
 
 **Build**
 - Org repo init at scaffold; nested project repos ignored by the org
-  repo (D37). Uses the existing arxa git plugin.
+  repo (D37). Built as a NEW `plugins/git-workspace/` plugin —
+  the audit (`git-capability-audit.md`) found no existing git code
+  anywhere in the stack; phase 3a (greenfield) is the real path.
+  Engine: shell out to system `git`, startup probe + clear degrade
+  path (end-user machines are minimal); no isomorphic-git emulation.
 - Two-tier commits: continuous WIP auto-commits; squash at stage
   boundary (D18); history/sharing/CI see stage commits only.
 - Version chip data source (D20 semantic version + state), no SHAs
@@ -69,8 +73,9 @@ nothing from inside the project.
 
 **Discharges**: D37 (repo half), D18 wiring, D17 transport unchanged.
 
-**Risk to verify first**: plugin support for nested-repo operations.
-If heavy rework is needed, that rework becomes phase 3a.
+**Risk — RESOLVED 2026-08-29**: audit confirmed no plugin exists;
+greenfield build, ~2–3× `plugins/memory`-class effort across
+phases 3–4. Worktrees desktop-only in v1 (mobile online-only, M8).
 
 ## Phase 4 — Sessions: branch-per-session worktrees
 
