@@ -1,0 +1,119 @@
+#!/usr/bin/env node
+// arxa-sidebar selftest — Phase B exit gate (docs/plans/file-org-shell-integration.md):
+//   1. manifest shape (repo plugin convention: dsh.client.inject + lib/client.js
+//      UI half, lib/index.js server half, zero runtime dependencies)
+//   2. CTA state machine covering all six states
+//   3. copied-file headers present (source file + dsh version 0.1.1-rc.2)
+//   4. original dsh sidebar package byte-identical (content hash)
+//   5. registration wired (bin/arxa-studio.mjs + profile/cordis.patch.yml,
+//      stock ui-sidebar disabled — exactly one sidebar active)
+//   6. Phase A seam declared (stub until plugins/file-org-shell merges)
+import { createHash } from 'node:crypto'
+import { readFileSync, readdirSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { dirname, join, relative, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const here = dirname(fileURLToPath(import.meta.url))
+const repo = resolve(here, '..', '..')
+let failures = 0
+const check = (label, ok, detail = '') => {
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !detail ? '' : ` — ${detail}`}`)
+  if (!ok) failures++
+}
+
+// ---- 1. manifest shape -------------------------------------------------------
+const pkg = JSON.parse(readFileSync(join(here, 'package.json'), 'utf8'))
+check('manifest: name', pkg.name === 'arxa-sidebar')
+check('manifest: server half', pkg.main === 'lib/index.js')
+check('manifest: client half exported', pkg.exports?.['./client'] === './lib/client.js')
+check('manifest: dsh.client.inject declared', Array.isArray(pkg.dsh?.client?.inject)
+  && pkg.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-layout'))
+check('manifest: platform web', pkg.dsh?.client?.platform === 'web')
+check('manifest: zero runtime dependencies', !pkg.dependencies)
+
+// ---- 2. CTA state machine — all six states ----------------------------------
+const { computeCtas, CTA_STATES } = await import('./lib/cta-state.mjs')
+check('cta: six states declared', CTA_STATES.length === 6)
+
+const ids = (snap) => computeCtas(snap).map((c) => c.id)
+// 1. no-org
+let got = ids({ org: null })
+check('cta: no-org → open/new org', got.includes('org-open') && got.includes('org-new'))
+// 2. empty-org
+got = ids({ org: { id: 'o', name: 'o' }, projects: [] })
+check('cta: empty-org → new project', got.includes('project-new'))
+// 3. project-selected
+got = ids({ org: { id: 'o' }, projects: [{ id: 'p' }], selectedProject: 'p', parkedSessions: [] })
+check('cta: project-selected → new session', got.includes('session-new'))
+// 4. session-parked
+got = ids({ org: { id: 'o' }, projects: [{ id: 'p' }], selectedProject: 'p', parkedSessions: [{ id: 's', project: 'p' }] })
+check('cta: parked → resume+merge, no new-session',
+  got.includes('session-resume') && got.includes('session-merge') && !got.includes('session-new'))
+// 5. trash-non-empty (additive)
+got = ids({ org: { id: 'o' }, projects: [], trashCount: 2 })
+check('cta: trash non-empty → restore', got.includes('trash-restore'))
+// 6. ci-reserved — always present, always disabled
+const everyState = [
+  { org: null },
+  { org: { id: 'o' }, projects: [] },
+  { org: { id: 'o' }, projects: [{ id: 'p' }], selectedProject: 'p' },
+]
+check('cta: reserved D3 slot in every state', everyState.every((s) => {
+  const c = computeCtas(s).find((x) => x.id === 'ci-run')
+  return c && c.disabled === true && c.reserved === true
+}))
+
+// ---- 3. copied-file headers --------------------------------------------------
+const client = readFileSync(join(here, 'lib', 'client.js'), 'utf8')
+check('headers: client.js names its source',
+  client.includes('COPIED/ADAPTED FROM: @deepseek-ai/dsh-client-ui-sidebar lib/client.js'))
+check('headers: client.js names dsh version', client.includes('0.1.1-rc.2'))
+
+// ---- 4. original dsh sidebar package byte-identical --------------------------
+const EXPECTED_PKG_HASH = '04d3a1afb6793bd9de0a26eb82b1266ecdf78da03899c5c32ac4258bf242c4e7'
+// Parent-walk resolution: works from the main checkout AND from a git
+// worktree nested under it (no node_modules of its own).
+const pkgDir = dirname(createRequire(import.meta.url)
+  .resolve('@deepseek-ai/dsh-client-ui-sidebar/package.json'))
+const files = []
+const walk = (d) => {
+  for (const e of readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    const f = join(d, e.name)
+    e.isDirectory() ? walk(f) : files.push(f)
+  }
+}
+walk(pkgDir)
+const hash = createHash('sha256')
+for (const f of files) {
+  hash.update(relative(pkgDir, f))
+  hash.update('\0')
+  hash.update(readFileSync(f))
+  hash.update('\0')
+}
+check('reference: dsh sidebar package byte-identical', hash.digest('hex') === EXPECTED_PKG_HASH,
+  `expected ${EXPECTED_PKG_HASH}`)
+
+// ---- 5. registration wired ---------------------------------------------------
+const bin = readFileSync(join(repo, 'bin', 'arxa-studio.mjs'), 'utf8')
+check('registration: profile dependency', bin.includes("'arxa-sidebar': `file:${sidebarDir}`"))
+check('registration: BY_NAME_PLUGINS', /BY_NAME_PLUGINS = \[[^\]]*'arxa-sidebar'/.test(bin))
+check('registration: packed-mode copy list', bin.includes("['arxa-sidebar', sidebarDir]"))
+const patch = readFileSync(join(repo, 'profile', 'cordis.patch.yml'), 'utf8')
+check('registration: arxa-sidebar inserted', /id: arxa-sidebar\s*\n\s*name: arxa-sidebar/.test(patch))
+check('registration: stock ui-sidebar disabled (one sidebar active)',
+  /- id: ui-sidebar\s*\n\s*disabled: true/.test(patch))
+
+// ---- 6. Phase A seam ---------------------------------------------------------
+const host = await import('./lib/index.js')
+if (host.SEAM_LIFECYCLE_STUBBED) {
+  check('seam: lifecycle stub declared (flip when file-org-shell merges)', true)
+} else {
+  // Integrator flipped the seam: the real Phase A plugin must resolve.
+  let real = false
+  try { real = typeof (await import('arxa-file-org-shell')).createOrgLifecycle === 'function' } catch {}
+  check('seam: flipped — arxa-file-org-shell resolves with createOrgLifecycle', real)
+}
+
+console.log(failures === 0 ? '\narxa-sidebar selftest: ALL GREEN' : `\narxa-sidebar selftest: ${failures} FAILURE(S)`)
+process.exit(failures === 0 ? 0 : 1)
