@@ -179,3 +179,16 @@
 - insert:
   - id: arxa-pairing
     name: arxa-pairing
+
+# 11. The arxa sidebar (file-org shell integration, Phase B): org header +
+#     switcher, per-org project tree, state-dependent CTAs. By PACKAGE NAME —
+#     the browser half is discovered through package.json dsh.client, same as
+#     the design panel. The stock dsh sidebar entry is DISABLED in the same
+#     row group so exactly one sidebar registers the "sidebar" slot; delete
+#     the disable row to revert to the dsh sidebar (its package is untouched,
+#     byte-identical — plugins/arxa-sidebar/selftest.mjs hashes it).
+- id: ui-sidebar
+  disabled: true
+- insert:
+  - id: arxa-sidebar
+    name: arxa-sidebar

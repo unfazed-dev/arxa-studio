@@ -75,6 +75,7 @@ const mcpAppsDir = resolve(here, '..', 'plugins', 'mcp-apps')
 const waitingPageDir = resolve(here, '..', 'plugins', 'waiting-page')
 const themeAccentDir = resolve(here, '..', 'plugins', 'theme-accent')
 const pairingDir = resolve(here, '..', 'plugins', 'pairing')
+const sidebarDir = resolve(here, '..', 'plugins', 'arxa-sidebar')
 mkdirSync(profileDir, { recursive: true })
 writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
   name: 'dsh-profile-arxa',
@@ -87,6 +88,7 @@ writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
     'arxa-waiting-page': `file:${waitingPageDir}`,
     'arxa-theme-accent': `file:${themeAccentDir}`,
     'arxa-pairing': `file:${pairingDir}`,
+    'arxa-sidebar': `file:${sidebarDir}`,
   },
   dsh: { profile: { bundles } },
 }, null, 2) + '\n')
@@ -239,7 +241,7 @@ if (!existsSync(dshBin)) {
 // The design panel, brand and gen-ui plugins resolve by package name (their
 // browser halves are discovered through package.json dsh.client, which a
 // file-path entry never reaches).
-const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa-mcp-apps', 'arxa-waiting-page', 'arxa-theme-accent', 'arxa-pairing']
+const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa-mcp-apps', 'arxa-waiting-page', 'arxa-theme-accent', 'arxa-pairing', 'arxa-sidebar']
 // ALWAYS install, never skip on presence: these are file: dependencies, and
 // pnpm copies them into .pnpm at add-time. A plain `pnpm install` sees the
 // lockfile entry unchanged and keeps the OLD copy — measured 2026-08-25: the
@@ -266,6 +268,7 @@ if (packed) {
     ['arxa-waiting-page', waitingPageDir],
     ['arxa-theme-accent', themeAccentDir],
     ['arxa-pairing', pairingDir],
+    ['arxa-sidebar', sidebarDir],
   ]) {
     rmSync(join(nm, name), { recursive: true, force: true })
     cpSync(dir, join(nm, name), { recursive: true })
