@@ -445,10 +445,56 @@ open questions tracked at the bottom.
     D20 = user-facing deliverable versions; D21/D44 = internal org
     format schema.
 
+- **D45 — `account/` population: write-through local mirror.**
+  - Studio fetches billing artifacts (D12 MoR + D15) and writes them
+    as plain files (PDF/JSON): offline-usable, D23-exportable, never
+    authoritative, always re-fetchable. Read-only — no local edits
+    flow back (users don't edit their own invoices).
+  - Excluded from git per D37; empty-but-valid folder for users with
+    no arxa account (CLAUDE.md ownership boundary).
+
+- **D46 — SSOT: tree authoritative; DB rebuildable index; git and
+  cairn as disjoint sync rails.**
+  - File tree is SSOT for all content, including D20 facts stored as
+    append-only files under dot-dirs. DB (SQLite default or BYO via
+    D32) is a search/metadata index, always rebuildable by full scan;
+    external edits to files are legal by definition; DB loss =
+    re-index, not data loss.
+  - **Cairn placement**: git = file-content rail (desktop↔desktop,
+    D17/D18); cairn = DB rail — index/session state, mobile's
+    projection of the tree (M7/M8), and the concrete implementation
+    of the D32 BYO wire contract (local SQLite ↔ user's Postgres).
+  - **Disjointness rule** (split-brain guard): cairn never syncs
+    anything derivable from the tree — that's rebuilt locally. Inbound
+    edits (mobile) travel as an append-only edit log with stable edit
+    IDs; exactly one desktop materializes an edit into the tree and
+    records the edit ID in tree-side facts so other replicas suppress
+    re-materialization. Same edit must never arrive twice via two
+    rails with different merge semantics (git textual vs cairn LWW).
+  - v1 keeps it boring: mobile online-only (M8) → writes are an
+    outbox → materialize → done; cairn CRDT merge stays out of the
+    authoritative path until offline-first ships. Materializer
+    failure must be loud, not a silent queue.
+  - No-BYO users: local inbox file, identical code path — equivalent
+    local fallback per the ownership boundary.
+
+- **D47 — Deletion: workspace trash + git, two tiers.**
+  - Soft-delete = move to `<workspace-root>/.arxa/trash/<timestamp>-<slug>/`
+    with a manifest (origin path, deleted-when, kind). Restore = move
+    back. Plain move ⇒ nested project repos and `account/` survive
+    intact — the cases git-in-the-parent cannot cover.
+  - In-repo deletions additionally get the D18 commit treatment
+    (restore = revert) — two independent tiers.
+  - Hard delete only *from* trash, with D23-grade loud confirm.
+    Trash excluded from indexing (D46) and export (D23); auto-expiry
+    optional, off by default.
+  - Renames stay safe via D41 (slug stability). Cross-repo *moves*
+    get a "history won't follow" confirm dialog, no extra machinery.
+
+## File-organisation grill — COMPLETE (Q1–Q9 → D39–D47)
+
 ## Open
 
-- File-organisation grill — in progress, next question queued:
-  - **Q6 — `account/` population** (billing write-through mirror).
-  - Then: **Q7** FS↔BYO-backend mapping / SSOT (D32), **Q9**
-    deletion/trash/rename safety.
+- Write `docs/plans/file-organisation-implementation.md` from
+  D39–D47, then build.
 - Glossary of settled terms now lives in `CONTEXT.md` (repo root).

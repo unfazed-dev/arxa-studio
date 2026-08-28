@@ -61,3 +61,19 @@ vocabulary only.
 - **Two-tier commits** — continuous local-only WIP auto-commits
   underneath; clean squashed stage commits on top; only stage commits
   are ever seen by history, sharing, or CI. (D18)
+- **Write-through mirror** — the `account/` population model: billing
+  artifacts fetched from arxa and written as plain read-only files;
+  offline-usable and exportable, never authoritative, always
+  re-fetchable. (D45)
+- **Sync rail** — one of the two disjoint replication channels: git
+  carries file content between desktops; cairn carries the DB index,
+  session state, and mobile's projection. A datum travels on exactly
+  one rail. (D46)
+- **Materialize** — turning a mobile edit-log entry into a real file
+  change in the tree, performed by exactly one desktop; the edit ID is
+  recorded in tree-side facts so other replicas suppress a second
+  materialization. (D46)
+- **Trash** — `<workspace-root>/.arxa/trash/`, the soft-delete tier;
+  items move there with an origin manifest and move back on restore.
+  Excluded from indexing and export. Hard delete happens only from
+  trash. (D47)
