@@ -1,0 +1,12 @@
+{
+  "name": "arxa-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Phase 1 of docs/plans/file-organisation-implementation.md — the raw on-disk tree format: workspace-root persistence (D36), org/project scaffolding with the five fixed categories (D42), kebab-case slugs with numeric-suffix collision handling (D41), org.json/project.json manifests where rename touches the manifest and never the slug (D41), thin AGENTS.md context-file placement (D43), and resolve-by-stable-id over the tree. Phase 5 adds the versioned in-app template that drives scaffolding, the org format stamp with clean older-app refusal (D21), and the forward-only migration runner writing one commit pair per migration via arxa-git-workspace (D21/D44). No DB, no sync; git only inside the migration runner.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  }
+}
