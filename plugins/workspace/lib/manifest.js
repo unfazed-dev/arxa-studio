@@ -6,15 +6,20 @@
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import { TEMPLATE_VERSION, stampFor } from './template.js'
 
 export const ORG_MANIFEST = 'org.json'
 export const PROJECT_MANIFEST = 'project.json'
 
-/** Tree-format version stamped into every manifest this code writes. */
-export const FORMAT_STAMP = 'arxa-tree/1'
+/**
+ * Tree-format stamp written into every manifest this code creates —
+ * derived from the shipped template version (D44), so bumping
+ * TEMPLATE_VERSION bumps the stamp in one place.
+ */
+export const FORMAT_STAMP = stampFor(TEMPLATE_VERSION)
 
 /** Build a fresh manifest object for a new org or project. */
-export function createManifest(displayName) {
+export function createManifest(displayName, formatStamp = FORMAT_STAMP) {
   if (typeof displayName !== 'string' || displayName.trim() === '') {
     throw new TypeError('displayName must be a non-empty string')
   }
@@ -22,7 +27,7 @@ export function createManifest(displayName) {
     id: randomUUID(),
     name: displayName,
     createdAt: new Date().toISOString(),
-    formatStamp: FORMAT_STAMP,
+    formatStamp,
   }
 }
 
