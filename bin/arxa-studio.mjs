@@ -76,6 +76,11 @@ const waitingPageDir = resolve(here, '..', 'plugins', 'waiting-page')
 const themeAccentDir = resolve(here, '..', 'plugins', 'theme-accent')
 const pairingDir = resolve(here, '..', 'plugins', 'pairing')
 const sidebarDir = resolve(here, '..', 'plugins', 'arxa-sidebar')
+// Phase A lifecycle service (library, not a dsh client plugin — stays out of
+// BY_NAME_PLUGINS). arxa-sidebar's host half import-probes it by this name;
+// its own imports reach its five composed libraries by RELATIVE path, which
+// resolves through the pnpm file: symlink back into plugins/.
+const fileOrgShellDir = resolve(here, '..', 'plugins', 'file-org-shell')
 mkdirSync(profileDir, { recursive: true })
 writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
   name: 'dsh-profile-arxa',
@@ -89,6 +94,7 @@ writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
     'arxa-theme-accent': `file:${themeAccentDir}`,
     'arxa-pairing': `file:${pairingDir}`,
     'arxa-sidebar': `file:${sidebarDir}`,
+    'arxa-file-org-shell': `file:${fileOrgShellDir}`,
   },
   dsh: { profile: { bundles } },
 }, null, 2) + '\n')
@@ -255,8 +261,11 @@ const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa
 // exists in a git checkout. End-user machines have no pnpm, and a payload's
 // plugin dirs are immutable per release, so the pnpm --force freshness dance
 // is pointless there: plain directory copies into the profile's node_modules
-// give dsh the identical by-name resolution (all seven plugins have zero
-// runtime dependencies of their own — react is a peer the web app provides).
+// give dsh the identical by-name resolution (the dsh plugins have zero npm
+// runtime dependencies of their own — react is a peer the web app provides;
+// arxa-file-org-shell reaches its five composed libraries by RELATIVE path,
+// so those are copied below under their plugins/ directory names to keep
+// `../../<lib>/lib/index.js` resolving inside node_modules).
 const packed = existsSync(join(here, 'packed.json'))
 if (packed) {
   const nm = join(profileDir, 'node_modules')
@@ -269,6 +278,14 @@ if (packed) {
     ['arxa-theme-accent', themeAccentDir],
     ['arxa-pairing', pairingDir],
     ['arxa-sidebar', sidebarDir],
+    ['arxa-file-org-shell', fileOrgShellDir],
+    // Relative-import targets of arxa-file-org-shell (directory names, not
+    // package names — see the header note above).
+    ['workspace', resolve(here, '..', 'plugins', 'workspace')],
+    ['workspace-index', resolve(here, '..', 'plugins', 'workspace-index')],
+    ['git-workspace', resolve(here, '..', 'plugins', 'git-workspace')],
+    ['account-mirror', resolve(here, '..', 'plugins', 'account-mirror')],
+    ['cairn-rail', resolve(here, '..', 'plugins', 'cairn-rail')],
   ]) {
     rmSync(join(nm, name), { recursive: true, force: true })
     cpSync(dir, join(nm, name), { recursive: true })

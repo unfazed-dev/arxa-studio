@@ -109,10 +109,17 @@ const host = await import('./lib/index.js')
 if (host.SEAM_LIFECYCLE_STUBBED) {
   check('seam: lifecycle stub declared (flip when file-org-shell merges)', true)
 } else {
-  // Integrator flipped the seam: the real Phase A plugin must resolve.
-  let real = false
-  try { real = typeof (await import('arxa-file-org-shell')).createOrgLifecycle === 'function' } catch {}
-  check('seam: flipped — arxa-file-org-shell resolves with createOrgLifecycle', real)
+  // Integrator flipped the seam: the real Phase A plugin must resolve in at
+  // least one deployment shape — bare specifier (packed node_modules) or
+  // relative sibling (repo checkout / pnpm file: symlink) — mirroring the
+  // two-shape probe in lib/index.js.
+  let mod = null
+  try { mod = await import('arxa-file-org-shell') } catch {}
+  if (!mod) {
+    try { mod = await import(new URL('../file-org-shell/lib/index.js', import.meta.url).href) } catch {}
+  }
+  check('seam: flipped — arxa-file-org-shell resolves with createOrgLifecycle', typeof mod?.createOrgLifecycle === 'function')
+  check('seam: flipped — workspace-root discovery exported (loadWorkspaceRoot)', typeof mod?.loadWorkspaceRoot === 'function')
 }
 
 console.log(failures === 0 ? '\narxa-sidebar selftest: ALL GREEN' : `\narxa-sidebar selftest: ${failures} FAILURE(S)`)

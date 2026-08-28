@@ -34,8 +34,11 @@ import path from 'node:path'
 import {
   scanWorkspace,
   scaffoldOrg,
+  scaffoldProject,
   openOrg as workspaceOpenOrg,
   validateWorkspaceRoot,
+  listTrash,
+  restoreFromTrash,
 } from '../../workspace/lib/index.js'
 import {
   openBackend,
@@ -49,6 +52,9 @@ import {
   initOrgRepo,
   listSessions,
   archivedSessionIds,
+  openSession,
+  reviveSession,
+  sessionStageBoundary,
 } from '../../git-workspace/lib/index.js'
 import { runGit } from '../../git-workspace/lib/index.js'
 import { refreshAccountMirror, ensureAccountExcluded } from '../../account-mirror/lib/index.js'
@@ -194,6 +200,45 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
         archivedSessionIds: archived,
         index: { backend, rebuilt: counts !== null, counts },
         rails: { account: mirror, cairn },
+        // ---- contract faces (Phase B, docs/plans/file-org-shell-integration.md):
+        // the sidebar consumes projects / parked sessions / trash and the
+        // project/session/trash verbs THROUGH the open org handle, so
+        // teardown on switch/close stays this lifecycle's job. Each face
+        // reads fresh state; the static `sessions` snapshot above is the
+        // open-time record and stays for diagnostics.
+        projects() {
+          return [...scanWorkspace(root).projects.values()]
+            .filter((p) => p.orgId === opened.manifest.id)
+            .map(({ id, name, slug: projectSlug, path: projectPath }) => (
+              { id, name, slug: projectSlug, path: projectPath }
+            ))
+        },
+        parkedSessions() {
+          // Sessions are org-level (git-workspace registry carries no project
+          // field); `project` stays null unless a future migration adds one.
+          return listSessions(resolved, env)
+            .filter((s) => s.state !== 'open')
+            .map((s) => ({ id: s.id, name: s.name, state: s.state, parkedReason: s.parkedReason, project: s.project ?? null }))
+        },
+        trashCount() {
+          return listTrash(root).length
+        },
+        newProject(displayName) {
+          return scaffoldProject(resolved, displayName)
+        },
+        newSession(name) {
+          return openSession(resolved, { name, env })
+        },
+        resumeSession(id) {
+          return reviveSession(resolved, id, env)
+        },
+        mergeSession(id, message) {
+          reviveSession(resolved, id, env) // boundary requires an open session
+          return sessionStageBoundary(resolved, id, { message, env })
+        },
+        restoreTrash(entryId, opts = {}) {
+          return restoreFromTrash(root, entryId, { env, ...opts })
+        },
         _undo: undo,
       }
       return current

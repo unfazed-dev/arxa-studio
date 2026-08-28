@@ -48,7 +48,10 @@ export function computeCtas(snap) {
   } else if (projects.length === 0) {
     ctas.push({ id: 'project-new', label: 'New project', action: 'project.new', state: 'empty-org' })
   } else if (s.selectedProject) {
-    const parkedHere = parked.filter((p) => p.project === s.selectedProject)
+    // Sessions are org-level in the git-workspace registry (no project
+    // field yet), so a null `project` counts for any selected project;
+    // sessions that DO carry an association must match it.
+    const parkedHere = parked.filter((p) => p.project == null || p.project === s.selectedProject)
     if (parkedHere.length > 0) {
       ctas.push(
         { id: 'session-resume', label: 'Resume session', action: 'session.resume', state: 'session-parked' },

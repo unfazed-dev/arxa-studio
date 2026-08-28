@@ -9,16 +9,20 @@
  *   POST /__arxa/sidebar/action  body { id, action, arg? }
  *        → dispatches to the Phase A lifecycle API.
  *
- * PHASE A SEAM (integrator flips): Phase A's lifecycle plugin
- * (plugins/file-org-shell/, built in parallel by builder-file-org-shell) is
- * consumed strictly by the plan contract — createOrgLifecycle() with a single
- * org-open entry point and reverse teardown on switch/close, plus
- * discoverOrgs(). Its code is not merged into this branch yet, so
- * resolveLifecycle() import-probes it and falls back to an inert stub that
- * reports seam:true. To flip: ensure `arxa-file-org-shell` resolves (add it
- * to the profile package.json deps in bin/arxa-studio.mjs the same way this
- * plugin is added) and set SEAM_LIFECYCLE_STUBBED to false; selftest.mjs
- * step "seam" then verifies the real import instead of the stub.
+ * PHASE A SEAM — FLIPPED. The real plugin (plugins/file-org-shell/) is on
+ * this branch and this host half consumes its actual surface:
+ *   createOrgLifecycle({ workspaceRoot }) → { listOrgs, createOrg, openOrg,
+ *   closeOrg, switchOrg, current (getter) }, with the contract faces
+ *   (projects / parkedSessions / trashCount and the project/session/trash
+ *   verbs) exposed ON the open-org handle so switch/close teardown stays
+ *   the lifecycle's job. Workspace root comes from the persisted
+ *   loadWorkspaceRoot() (ARXA_HOME-scoped workspace.json); no root chosen
+ *   yet renders the no-org state, not an error.
+ *
+ * Import resolution is probed in two shapes so every deployment works
+ * without a declared dependency (this package stays zero-dep by convention):
+ *   1. bare `arxa-file-org-shell`  — packed mode (flat node_modules copies)
+ *   2. relative ../../file-org-shell — repo checkout + pnpm file: symlink
  *
  * Nothing here touches the Arxa Digital Solutions database — all data comes
  * from the local lifecycle API (filesystem + git). No localStorage on the
@@ -26,26 +30,41 @@
  */
 import { computeCtas } from './cta-state.mjs'
 
-/** Flipped to false by the integrator once plugins/file-org-shell is merged. */
-export const SEAM_LIFECYCLE_STUBBED = true
+/** Flipped by the integrator: plugins/file-org-shell is merged on this branch. */
+export const SEAM_LIFECYCLE_STUBBED = false
 
 export const name = 'arxa-sidebar'
 export const inject = ['webServer']
 
-/** Import-probe the Phase A plugin; null while the seam is stubbed. */
-async function resolveLifecycle() {
+/** Import-probe the Phase A plugin in both deployment shapes. */
+async function importShell() {
   try {
-    const mod = await import('arxa-file-org-shell')
-    if (typeof mod.createOrgLifecycle === 'function') return mod.createOrgLifecycle()
-    return null
+    return await import('arxa-file-org-shell')
   } catch {
-    return null
+    return import(new URL('../../file-org-shell/lib/index.js', import.meta.url).href)
   }
 }
 
 export function apply(ctx) {
+  /** Singleton — holds the single open-org handle across requests. */
   let lifecycle = null
-  const lifecycleReady = resolveLifecycle().then((l) => { lifecycle = l })
+  let shell = null
+
+  /**
+   * Lazily create the lifecycle. Retried per-request while null because the
+   * workspace root may be chosen (saveWorkspaceRoot) after boot.
+   */
+  const getLifecycle = async () => {
+    if (lifecycle) return lifecycle
+    shell ??= await importShell().catch(() => null)
+    if (typeof shell?.createOrgLifecycle !== 'function') return null
+    const root = (() => {
+      try { return shell.loadWorkspaceRoot?.() } catch { return null }
+    })()
+    if (!root) return null // no workspace chosen yet → no-org state
+    lifecycle = shell.createOrgLifecycle({ workspaceRoot: root })
+    return lifecycle
+  }
 
   const json = (res, body) => {
     res.writeHead(200, {
@@ -56,32 +75,33 @@ export function apply(ctx) {
   }
   const params = (req) => new URL(req.url, 'http://x').searchParams
 
-  /** Snapshot of the open org through the plan contract, stub-safe. */
+  const emptySnap = (seam) => ({
+    seam,
+    org: null,
+    orgs: [],
+    projects: [],
+    parkedSessions: [],
+    trashCount: 0,
+    selectedProject: null,
+  })
+
+  /** Snapshot of the open org through the plan contract faces. */
   const snapshot = async (selectedProject) => {
-    await lifecycleReady
-    if (!lifecycle) {
-      return {
-        seam: true,
-        org: null,
-        orgs: [],
-        projects: [],
-        parkedSessions: [],
-        trashCount: 0,
-        selectedProject: null,
-      }
-    }
-    const current = (await lifecycle.current?.()) ?? null
-    const orgs = (await lifecycle.discoverOrgs?.()) ?? []
+    const l = await getLifecycle()
+    if (!l) return emptySnap(SEAM_LIFECYCLE_STUBBED)
+    const orgs = l.listOrgs().map(({ id, name: orgName, slug, path }) => ({ id, name: orgName, slug, path }))
+    const cur = l.current
+    if (!cur) return { ...emptySnap(false), orgs }
     return {
       seam: false,
-      org: current ? { id: current.id, name: current.name } : null,
+      org: { id: cur.manifest.id, name: cur.manifest.name },
       orgs,
-      // Contract faces: org manifest (workspace plugin), version chips (git
-      // rail), session badges (worktree lifecycle) — all through the open
-      // org handle so teardown on switch/close stays the lifecycle's job.
-      projects: (await current?.projects?.()) ?? [],
-      parkedSessions: (await current?.parkedSessions?.()) ?? [],
-      trashCount: (await current?.trashCount?.()) ?? 0,
+      // Contract faces: org manifest (workspace plugin), session registry
+      // (worktree lifecycle), trash — all through the open org handle so
+      // teardown on switch/close stays the lifecycle's job.
+      projects: cur.projects(),
+      parkedSessions: cur.parkedSessions(),
+      trashCount: cur.trashCount(),
       selectedProject: selectedProject ?? null,
     }
   }
@@ -95,7 +115,7 @@ export function apply(ctx) {
         const snap = await snapshot(params(req).get('project'))
         json(res, { ...snap, cta: computeCtas(snap) })
       } catch (e) {
-        json(res, { seam: SEAM_LIFECYCLE_STUBBED, error: String(e?.message ?? e) })
+        json(res, { ...emptySnap(SEAM_LIFECYCLE_STUBBED), error: String(e?.message ?? e) })
       }
     },
   })
@@ -110,20 +130,51 @@ export function apply(ctx) {
       req.on('end', async () => {
         try {
           const { action, arg } = JSON.parse(raw || '{}')
-          await lifecycleReady
-          if (!lifecycle) return json(res, { ok: false, seam: true, action })
+          const l = await getLifecycle()
+          if (!l) return json(res, { ok: false, seam: SEAM_LIFECYCLE_STUBBED, error: 'no-workspace', action })
+
+          /** Client rows send org ids; openOrg wants a path. Accept both. */
+          const orgPath = (idOrPath) => {
+            const hit = l.listOrgs().find((o) => o.id === idOrPath || o.path === idOrPath)
+            if (hit) return hit.path
+            if (typeof idOrPath === 'string' && idOrPath !== '') return idOrPath
+            throw new Error('org-not-found')
+          }
+          /** Open-org handle or loud failure — no silent ok on a closed org. */
+          const handle = () => {
+            if (!l.current) throw new Error('no-org-open')
+            return l.current
+          }
+          /**
+           * CTA clicks pass the selected PROJECT id as arg; sessions are
+           * org-level. Match a session id first, then a project association,
+           * then fall back to the only parked session. Ambiguity is an error,
+           * never a guess.
+           */
+          const parkedId = (a) => {
+            const parked = handle().parkedSessions()
+            const byId = parked.find((s) => s.id === a)
+            if (byId) return byId.id
+            const byProject = parked.filter((s) => s.project != null && s.project === a)
+            if (byProject.length === 1) return byProject[0].id
+            const pool = byProject.length ? byProject : parked
+            if (pool.length === 1) return pool[0].id
+            throw new Error(pool.length === 0 ? 'no-parked-session' : 'ambiguous-parked-session')
+          }
+
           // Plan contract: ONE org-open entry point; switch/close tear down
-          // in reverse before opening the next org.
+          // in reverse before opening the next org. Untitled defaults keep
+          // the New-* CTAs one-click (slugs are uniquified downstream).
           const table = {
-            'org.open': () => lifecycle.open(arg),
-            'org.new': () => lifecycle.create?.(arg),
-            'org.switch': () => lifecycle.switch(arg),
-            'org.close': () => lifecycle.close(),
-            'project.new': () => lifecycle.currentSync?.()?.newProject?.(arg),
-            'session.new': () => lifecycle.currentSync?.()?.newSession?.(arg),
-            'session.resume': () => lifecycle.currentSync?.()?.resumeSession?.(arg),
-            'session.merge': () => lifecycle.currentSync?.()?.mergeSession?.(arg),
-            'trash.restore': () => lifecycle.currentSync?.()?.restoreTrash?.(arg),
+            'org.open': () => l.openOrg(orgPath(arg)),
+            'org.new': () => l.createOrg(arg || 'Untitled Organisation'),
+            'org.switch': () => l.switchOrg(orgPath(arg)),
+            'org.close': () => l.closeOrg(),
+            'project.new': () => handle().newProject(arg || 'Untitled Project'),
+            'session.new': () => handle().newSession(typeof arg === 'string' ? arg : undefined),
+            'session.resume': () => handle().resumeSession(parkedId(arg)),
+            'session.merge': () => handle().mergeSession(parkedId(arg)),
+            'trash.restore': () => handle().restoreTrash(arg),
             // 'ci.run' reserved for Phase D3 — deliberately absent.
           }
           const fn = table[action]
