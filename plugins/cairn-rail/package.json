@@ -1,0 +1,12 @@
+{
+  "name": "arxa-cairn-rail",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Phase 6 track (c) of docs/plans/file-organisation-implementation.md — the optional cairn DB rail (D46) and D32 BYO wire contract. Rail scope is index/session state + mobile projection ONLY; the disjointness rule (nothing derivable from the file tree ever syncs over the rail) is enforced by a hard allow-list. Ships the arxa-studio greenfield pieces: append-only mobile edit log with stable edit IDs, single-desktop materializer with exactly-once via tree-side facts and loud typed failure, and a v1 online-only outbox with no CRDT merge in the authoritative path. The cairn seam is one thin adapter module pinned to cairn commit 224ccefbb49d50d8318499cec2e6aeb5e67b4d65. Per CLAUDE.md the rail is OPTIONAL: everything here works local-only with no database and no cairn at all.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  }
+}
