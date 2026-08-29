@@ -208,6 +208,8 @@ try {
   await new Promise((r) => setTimeout(r, 300))
   ok(svcD.deviceCode() !== null && svcD.deviceCode().userCode === 'ABCD-1234', 'deviceCode() surfaces the live one-time code to the UI face')
   ok(openedUrl === 'https://github.com/login/device', 'device flow auto-opens the verification page once the code is issued')
+  const linkSrc = fs.readFileSync(new URL('./lib/index.js', import.meta.url), 'utf8')
+  ok(linkSrc.includes("typeof open === 'function' ? open : defaultOpen"), 'device flow falls back to the system opener when none is injected (packed-app fix)')
   const dState = await pending
   ok(dState.login === 'octocat', 'default flow is the device flow — no useDeviceFlow flag needed (OAuth app: secret-less path)')
   ok(svcD.deviceCode() === null, 'deviceCode() clears after a successful link')

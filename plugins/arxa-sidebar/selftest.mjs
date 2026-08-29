@@ -58,6 +58,7 @@ check('rows: add flow opens the create-organisation modal (Q3, webview-safe)',
 check('create-modal: sign-in CTA carries the GitHub brand mark', client.includes('viewBox: "0 0 16 16"') && client.includes('d: GH_MARK'))
 check('create-modal: sign-in step right-aligns the CTA and shows NO premature disabled submit in the footer', client.includes('justifyContent: "flex-end"') && client.includes('!showSignin && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {'))
 check('create-modal: device-flow code surfaces in the sign-in step (github.device poll + big code)', client.includes('"github.device"') && client.includes('github.signin.codeHint') && client.includes('devCode.userCode'))
+check('create-modal: device code row has a copy button and a clickable open-link via the allowlisted host route', client.includes('"github.signin.copy"') && client.includes('"github.signin.openLink"') && client.includes('open-external') && client.includes('navigator.clipboard'))
 check('rows: window.prompt is gone (Tauri WKWebView never implements it)', !client.includes('window.prompt('))
 check('rows: location field opens the OS folder locator (Tauri dialog when injected, host osascript locator otherwise)',
   client.includes('window.__TAURI__.dialog') && client.includes('directory: true') && client.includes('pick-folder'))

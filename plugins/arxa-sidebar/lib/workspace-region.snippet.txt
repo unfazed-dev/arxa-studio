@@ -291,6 +291,7 @@
 			const [error, setError] = (0, react.useState)(null);
 			const [ghLinked, setGhLinked] = (0, react.useState)(null);
 			const [devCode, setDevCode] = (0, react.useState)(null);
+			const [copied, setCopied] = (0, react.useState)(false);
 			const nameRef = (0, react.useRef)(null);
 			const checkGh = () => {
 				ORG_POST("github.status").then((r) => setGhLinked(!!(r.result && r.result.linked)), () => setGhLinked(null));
@@ -419,7 +420,37 @@
 						}) }),
 						busy && devCode && (0, react_jsx_runtime.jsxs)("div", { style: { marginTop: 12, fontSize: 12 }, children: [
 							(0, react_jsx_runtime.jsx)("div", { style: { opacity: 0.75 }, children: t("github.signin.codeHint") }),
-							(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 22, fontWeight: 700, letterSpacing: 2, marginTop: 4 }, children: devCode.userCode })
+							(0, react_jsx_runtime.jsxs)("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 4 }, children: [
+								(0, react_jsx_runtime.jsx)("span", { style: { fontSize: 22, fontWeight: 700, letterSpacing: 2 }, children: devCode.userCode }),
+								(0, react_jsx_runtime.jsx)("button", {
+									title: t("github.signin.copy"),
+									onClick: () => {
+										const done = () => { setCopied(true); setTimeout(() => setCopied(false), 1500); };
+										if (navigator.clipboard && navigator.clipboard.writeText) {
+											navigator.clipboard.writeText(devCode.userCode).then(done, () => {});
+										} else {
+											const ta = document.createElement("textarea");
+											ta.value = devCode.userCode;
+											document.body.appendChild(ta);
+											ta.select();
+											document.execCommand("copy");
+											document.body.removeChild(ta);
+											done();
+										}
+									},
+									style: { border: "1px solid var(--dsw-alias-border-l2)", background: "transparent", color: "inherit", borderRadius: 6, padding: "4px 8px", fontSize: 11, cursor: "pointer" },
+									children: copied ? t("github.signin.copied") : t("github.signin.copy")
+								})
+							] }),
+							(0, react_jsx_runtime.jsx)("div", { style: { marginTop: 6 }, children: (0, react_jsx_runtime.jsx)("a", {
+								href: devCode.verificationUri,
+								onClick: (e) => {
+									e.preventDefault();
+									fetch("/__arxa/sidebar/open-external", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: devCode.verificationUri }) });
+								},
+								style: { color: "var(--dsw-alias-text-link, #6ea8fe)", cursor: "pointer" },
+								children: t("github.signin.openLink")
+							}) })
 						] })
 					] }),
 					!showSignin && (0, react_jsx_runtime.jsx)("div", { style: label, children: t("field.workspaceName") }),
@@ -544,6 +575,9 @@
 			"github.signin.desc": "arxa studio manages everything through git. Link your GitHub account to create an organisation — your projects publish as private repos under it.",
 			"github.signin.button": "Sign in with GitHub",
 			"github.signin.codeHint": "Enter this one-time code at github.com/login/device — your browser should have opened there",
+			"github.signin.copy": "Copy",
+			"github.signin.copied": "Copied ✓",
+			"github.signin.openLink": "Open github.com/login/device",
 			"github.signin.busy": "Waiting for GitHub…",
 			"github.signin.failed": "GitHub sign-in did not complete — try again.",
 			"github.signin.required": "Link your GitHub account first.",

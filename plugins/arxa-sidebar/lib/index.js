@@ -331,6 +331,39 @@ export function apply(ctx, opts = {}) {
     },
   })
 
+  /** Open an https URL in the user's default browser (device-flow hand-off:
+    * github.com/login/device). https + github.com allowlisted — this route
+    * must never become a generic command surface. Non-darwin: xdg-open. */
+  ctx.webServer.register({
+    name: 'arxa-sidebar-open-external',
+    path: '/__arxa/sidebar/open-external',
+    kind: 'exact',
+    handler: async (req, res) => {
+      let raw = ''
+      req.on('data', (c) => { raw += c })
+      req.on('end', async () => {
+        let settled = false
+        const finish = (v) => { if (!settled) { settled = true; json(res, v) } }
+        try {
+          const { url } = JSON.parse(raw || '{}')
+          let parsed = null
+          try { parsed = new URL(String(url)) } catch {}
+          if (!parsed || parsed.protocol !== 'https:' || parsed.hostname !== 'github.com') {
+            return finish({ ok: false, error: 'only https://github.com URLs may be opened' })
+          }
+          const { spawn } = await import('node:child_process')
+          const bin = process.platform === 'darwin' ? '/usr/bin/open' : 'xdg-open'
+          const child = spawn(bin, [parsed.toString()], { stdio: 'ignore', detached: true })
+          child.on('error', (e) => finish({ ok: false, error: String(e?.message ?? e) }))
+          child.unref()
+          finish({ ok: true, opened: parsed.toString() })
+        } catch (e) {
+          finish({ ok: false, error: String(e?.message ?? e) })
+        }
+      })
+    },
+  })
+
   ctx.webServer.register({
     name: 'arxa-sidebar-action',
     path: '/__arxa/sidebar/action',

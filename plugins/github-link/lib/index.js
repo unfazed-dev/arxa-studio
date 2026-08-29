@@ -9,7 +9,7 @@
  * keyring; no cloud database anywhere (CLAUDE.md boundary, D16).
  */
 
-import { getClientId, defaultApiBase, defaultTokenBase, linkViaBrowser, linkViaDevice, createPrivateRepoApi, SCOPES, SHIPPED_CLIENT_ID } from './auth.js'
+import { getClientId, defaultApiBase, defaultTokenBase, linkViaBrowser, linkViaDevice, createPrivateRepoApi, SCOPES, SHIPPED_CLIENT_ID, defaultOpen } from './auth.js'
 import { createKeyring } from './keyring.js'
 import { readState, writeState, clearState } from './state.js'
 
@@ -85,11 +85,13 @@ export function createGithubLink({
           tokenBase,
           onCode: ({ userCode, verificationUri }) => {
             lastDeviceCode = { userCode, verificationUri }
-            if (typeof open === 'function') {
-              Promise.resolve()
-                .then(() => open(verificationUri))
-                .catch(() => {})
-            }
+            // The injected open is test-only; production falls back to the
+            // system opener (mac open / linux xdg-open). Without this default
+            // the packed app silently opened nothing — found in the field.
+            const opener = typeof open === 'function' ? open : defaultOpen
+            Promise.resolve()
+              .then(() => opener(verificationUri))
+              .catch(() => {})
           },
         })
       : await linkViaBrowser({ clientId, fetch, open, tokenBase })
