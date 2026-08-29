@@ -10,7 +10,7 @@
  * bin/arxa-studio.mjs, so it runs from ~/.arxa/pi with the arxa gate extension
  * loaded — delegated work is gated exactly like a raw Pi session.
  *
- * Config: { provider?: string ('zai-wallet'), model?: string ('glm-4.6v'),
+ * Config: { provider?: string ('zai-wallet'), model?: string ('glm-5.3-flash'),
  *           piBin?: string ('pi' from PATH), timeoutMs?: number (300000),
  *           maxBytes?: number (65536, output cap) }
  */
@@ -36,8 +36,8 @@ export const inject = ['tools']
 
 export function apply (ctx, config = {}) {
   const provider = config.provider ?? 'zai-wallet'
-  // Wallet glm-5.3 verified working 2026-08-21 (stale 1302 conclusion withdrawn).
-  const model = config.model ?? 'glm-5.3'
+  // Flash is the studio default (grill decision 4); per-call args override.
+  const model = config.model ?? 'glm-5.3-flash'
   const piBin = config.piBin ?? 'pi'
   const timeoutMs = config.timeoutMs ?? 300_000
   const maxBytes = config.maxBytes ?? 65_536
