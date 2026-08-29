@@ -1,0 +1,108 @@
+{
+  "url": "http://arxa.studio.localhost:7894",
+  "nodes": [
+    {
+      "role": "RootWebArea",
+      "name": "",
+      "ignored": false,
+      "children": [
+        "4"
+      ]
+    },
+    {
+      "role": "none",
+      "name": null,
+      "ignored": true,
+      "children": [
+        "6",
+        "7"
+      ]
+    },
+    {
+      "role": "none",
+      "name": null,
+      "ignored": true,
+      "children": []
+    },
+    {
+      "role": "generic",
+      "name": "",
+      "ignored": false,
+      "children": [
+        "8"
+      ]
+    },
+    {
+      "role": "none",
+      "name": null,
+      "ignored": true,
+      "children": [
+        "9",
+        "17",
+        "18"
+      ]
+    },
+    {
+      "role": "generic",
+      "name": "",
+      "ignored": false,
+      "children": [
+        "10"
+      ]
+    },
+    {
+      "role": "heading",
+      "name": "Arxa Studio",
+      "ignored": false,
+      "children": [
+        "20"
+      ]
+    },
+    {
+      "role": "paragraph",
+      "name": "",
+      "ignored": false,
+      "children": [
+        "21"
+      ]
+    },
+    {
+      "role": "image",
+      "name": "",
+      "ignored": false,
+      "children": []
+    },
+    {
+      "role": "StaticText",
+      "name": "Arxa Studio",
+      "ignored": false,
+      "children": [
+        "-1000000002"
+      ]
+    },
+    {
+      "role": "StaticText",
+      "name": "Already open in another tab or browser.",
+      "ignored": false,
+      "children": [
+        "-1000000003"
+      ]
+    },
+    {
+      "role": "InlineTextBox",
+      "name": "Arxa Studio",
+      "ignored": false,
+      "children": []
+    },
+    {
+      "role": "InlineTextBox",
+      "name": "Already open in another tab or browser.",
+      "ignored": false,
+      "children": []
+    }
+  ],
+  "consoleErrors": [
+    "Error: web app: missing #root\n    at http://arxa.studio.localhost:7894/assets/index-ClqxG24t.js:95:69"
+  ],
+  "certified": false
+}
