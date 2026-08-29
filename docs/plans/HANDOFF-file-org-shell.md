@@ -10,7 +10,7 @@ in the sibling `arxa` repo, noted in §5).
 |---|---|---|
 | A | `plugins/file-org-shell/` — org lifecycle service | **DONE**, merged, selftest 40/40 |
 | B | `plugins/arxa-sidebar/` — own sidebar plugin | **DONE**, merged, selftest ALL GREEN, lens-verified |
-| C | `scripts/ci.mjs` — permanent CI incl. rebuild gate | **NOT STARTED** |
+| C | `scripts/ci.mjs` — permanent CI incl. rebuild gate | **DONE**, `npm test` = 10 suites ALL GREEN |
 
 Phases 1–6 of the earlier `file-organisation-implementation.md` (the six
 libraries) were already done before this session; A/B wire them into the
@@ -18,6 +18,16 @@ running shell.
 
 ## 2. Commits this session (arxa-studio, newest first)
 
+- `d80ff9f` ci: permanent suite — scripts/ci.mjs, npm test, workflow step
+  (Phase C; rebuild gate is a hard failure by inclusion; 10 suites green)
+- `652c07f` evidence: lens shots for the open-org flow past the CTA click
+  (§8's visual gap discharged; the project tag is proven through the real UI)
+- `d6e5807` fix: env-overridable ARXA_PORT + copy the five relative-import
+  libraries in checkout mode too (fresh checkout boots silently served a
+  stubbed sidebar — see §8, engine finding)
+- `c5c2720` feat: project-scoped sessions with scope-resolution ladder in the
+  sidebar CTA contract (registry `project` field, Q4 semantics, Org grouping,
+  +14 smoke checks; CONTEXT.md gains org-level/project session)
 - `4504e85` fix: rebuild arxa-sidebar from the stock dsh shell (see §4 — this
   fixes a real regression I shipped earlier in the session)
 - `3c40f41` feat: flip arxa-sidebar seam to real file-org-shell lifecycle with
@@ -88,6 +98,18 @@ deltas). Re-deriving from the original beats hand-editing.
 The stock package in `node_modules` is untouched and hash-pinned by the
 selftest (`EXPECTED_PKG_HASH`), so drift is detectable.
 
+**Second opinion (this session):** both advisor APIs were unavailable
+(consult-z 401 invalid key; consult-kimi 403 weekly quota), so a fresh-context
+review subagent did a full diff. Verdict: **KEEP copy-whole** (0.82) — a
+wrapper is structurally impossible because stock regionArea renders only
+`renderSlot("sidebar.workspaces")` with no extension point above it. The diff
+confirmed the four deltas plus two harmless extras worth recording: the
+header comment block, and a dropped `sourceMappingURL` trailer. Top risks
+(open follow-ups, not done): commit the regenerate transform
+(`/tmp/gen-sidebar.mjs` is still uncommitted), add a CI regenerate→byte-diff
+gate (the selftest pins the ORIGINAL, not the copy), treat dsh rc bumps as
+explicit re-transform + lens visual gate.
+
 ## 5. Sibling repo change (`/Volumes/developer_ssd/Developer/totem_labs/arxa`)
 
 - `4c0652c4` feat: `ARXA_LENS_UA` env override in `arxa/lib/cdp.dart`.
@@ -131,35 +153,55 @@ Evidence PNGs: `designs/file-org-shell/evidence/smoke/` — notably
 `sidebar-restored-1280.png` (correct anatomy) vs `expanded_1280.png`
 (the broken version, kept as the before-shot).
 
-## 7. Next: Phase C (not started)
+## 7. Phase C — DONE (d80ff9f)
 
-Per the plan:
-- `scripts/ci.mjs` — single entry running all seven plugin selftests **plus
-  the rebuild gate** (delete index DB → full rescan → query-equivalent index)
-  as a hard failure. That gate was called "permanent CI, not a one-off" in
-  the Phase 2 commitment but currently only runs by hand.
-- Alias it as `npm test`. Same entry the future D3 "Run CI" CTA invokes —
-  the sidebar button already exists, disabled, id `ci-run`.
-- Exit check: one command, non-zero on any failure, clean on master.
+`scripts/ci.mjs` discovers `plugins/*/selftest.mjs` dynamically (plus the
+arxa-sidebar smoke), runs all, reports each, exits non-zero on any red — ten
+suites green on master. `npm test` aliases it, and the GitHub workflow runs
+that same entry as a step after `npm ci` (its own header asked for exactly
+this). The rebuild gate is a hard failure by inclusion. D3's `ci-run` button
+and the absent `ci.run` action stay untouched, as reserved.
+
+## 7b. Engine findings this session (both fixed in d6e5807)
+
+- `ARXA_PORT` is now env-overridable. `--headless` boots cannot take web
+  flags at all (the dsh-headless CLI has no `--port`), so a second instance
+  boots the web bundle with `ARXA_PORT=<port> ... --no-open`.
+- The five relative-import libraries (workspace, workspace-index,
+  git-workspace, account-mirror, cairn-rail) now copy flat into the profile's
+  node_modules in CHECKOUT mode too — pnpm's virtual store isolates file:
+  deps, so before this fix every fresh checkout boot silently served the
+  sidebar stub (seam false, all actions no-workspace) while rendering a
+  normal-looking no-org UI. Long-lived profiles kept working, which is why it
+  survived. If a boot still stubs, check for the five dirs flat in
+  `$DSH_HOME/profiles/arxa/node_modules`.
 
 ## 8. Known gaps / caveats
 
-- **Sessions are org-level, not project-level.** The git-workspace registry
-  has no `project` field, so `parkedSessions()` returns `project: null` and
-  the CTA machine treats a null-project session as belonging to any selected
-  project. `session.resume`/`merge` resolve ambiguity by: exact session id →
-  sole project match → sole parked session → else throw
-  `ambiguous-parked-session`. If per-project sessions are wanted, that field
-  has to be added in git-workspace first.
-- **The full open-org flow past the CTA click is unverified visually.**
-  Directory picking needs interactive flow tests; the still capture returns
-  to base state after the transient overlay.
-- **Advisor was unavailable for the last stretch** — consult-mode returned
-  `over_budget` (session fuse 21/20). Phase B's build and this rebuild
-  proceeded on primary sources (dsh package source + local plan docs). A
-  fresh session resets the fuse; worth a second opinion on the sidebar
-  composition.
-- `plugins/file-org-shell` reaches its five composed libraries by **relative
-  path**, so packed mode copies those five directories into the profile's
-  `node_modules` under their `plugins/` directory names. See the comment
-  block in `bin/arxa-studio.mjs`.
+**Discharged this session:**
+- Sessions are now **project-annotated** (registry `project` slug or null;
+  see CONTEXT.md: org-level session vs project session). Scope ladder:
+  exact id → sole in-scope (selected project + org-level) → sole parked
+  anywhere → `ambiguous-parked-session`. Proven through the real UI
+  (`652c07f`): a session created by clicking carries `project: "rocket"`.
+- The open-org flow past the CTA click is lens-verified — including one real
+  UI click (the old client sent the selected project id as `arg` to every
+  CTA, which made Open throw `org-not-found`; fixed).
+- Sidebar composition second opinion delivered (see §4), with caveats.
+
+**Discharged in the follow-up sweep (all green under `npm test`):**
+- `trash.restore` with no entry id now restores the whole trash, per-entry
+  failures collected — the CTA works. (lifecycle +4 selftest checks, smoke +3)
+- Reviewer follow-ups closed: the regenerate transform is committed
+  (`scripts/gen-sidebar.mjs` + two snippet files), the sidebar selftest has
+  a byte drift gate (regenerate → compare; hand-edits go RED), and the
+  rc-bump policy is the transform script's header.
+- The physical per-project design is written down for its own future grill
+  round: `docs/plans/project-sessions-physical.md` (deferred by decision
+  Q3 — annotation shipped, physical reattachment scoped with open questions).
+
+**Still open:**
+- Per-project session WORK (physical branch/worktree on the project repo) —
+  deferred by decision; design ready in the doc above.
+- Evidence shots show dsh's stock first-run notice modal — cosmetic, fresh
+  sandbox home, not a regression (stock dsh chrome; not actionable here).
