@@ -3077,7 +3077,12 @@ window.__ModuleLoader__.load({
 				const orgName = name.trim();
 				setBusy(true);
 				setError(null);
-				const ready = ORG_POST("org.create-at", { name: orgName, path: location.trim(), includeExisting: snapChoice });
+				// Through the store, not ORG_POST: mutate refreshes server truth
+				// before onClose, so the welcome gate (orgs.length === 0) lifts
+				// the moment the create lands. A bare POST left the stale empty
+				// list up for the 5s poll — the gate lingered, and any tap on
+				// the welcome card re-opened this modal (create-again loop).
+				const ready = orgStore.mutate("org.create-at", { name: orgName, path: location.trim(), includeExisting: snapChoice });
 				ready.then(() => {
 					onClose();
 				}, (e) => {
