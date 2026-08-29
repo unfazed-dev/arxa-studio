@@ -55,6 +55,8 @@ check('rows: locale relabels aboard', client.includes('"section.workspaces": "Or
 check('rows: stock Workspaces label superseded in overrides only', !client.includes('"section.workspaces": "Workspaces",\n\t\t\t\t"section.sessions"'))
 check('rows: add flow opens the create-organisation modal (Q3, webview-safe)',
   client.includes('new Event("arxa-create-org")') && client.includes('function OrgCreateModal(') && client.includes('window.addEventListener("arxa-create-org", open)'))
+check('create-modal: sign-in CTA carries the GitHub brand mark', client.includes('viewBox: "0 0 16 16"') && client.includes('d: GH_MARK'))
+check('create-modal: sign-in step right-aligns the CTA and shows NO premature disabled submit in the footer', client.includes('justifyContent: "flex-end"') && client.includes('!showSignin && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {'))
 check('rows: window.prompt is gone (Tauri WKWebView never implements it)', !client.includes('window.prompt('))
 check('rows: location field opens the OS folder locator (Tauri dialog when injected, host osascript locator otherwise)',
   client.includes('window.__TAURI__.dialog') && client.includes('directory: true') && client.includes('pick-folder'))
