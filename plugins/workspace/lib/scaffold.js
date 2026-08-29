@@ -10,8 +10,9 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { uniqueSlug } from './slug.js'
+import { slugify, uniqueSlug } from './slug.js'
 import { getTemplate, stampFor, TEMPLATE_VERSION } from './template.js'
+import { validateWorkspaceRoot } from './root.js'
 import {
   createManifest,
   writeManifest,
@@ -42,20 +43,44 @@ function executeTemplateTree(spec, targetPath, ctx) {
 }
 
 /**
- * Create `<workspaceRoot>/<slug>/` for a new organisation by executing
- * the current template's org tree: the five fixed categories, org.json
- * (carrying the template-version stamp, D44), and a thin AGENTS.md.
+ * Scaffold a new organisation INTO the picked folder DIRECTLY (D69): the
+ * folder chosen by the user IS the org root — org.json (carrying the
+ * template-version stamp, D44), the five fixed categories, and a thin
+ * AGENTS.md are created inside it. No wrapper directory. D36 placement
+ * rules apply to the org folder itself; scaffolding into a folder that is
+ * already an organisation fails loud. The slug is the folder's own
+ * kebab-cased basename (D41) — the user picked the name by picking the
+ * folder.
  *
  * @returns {{ path: string, slug: string, manifest: object }}
  */
-export function scaffoldOrg(workspaceRoot, displayName) {
+export function scaffoldOrg(orgFolder, displayName) {
   const template = getTemplate()
-  const slug = uniqueSlug(displayName, existingSlugs(workspaceRoot))
-  const orgPath = path.join(workspaceRoot, slug)
+  const orgPath = validateWorkspaceRoot(orgFolder)
+  if (fs.existsSync(orgManifestPath(orgPath))) {
+    throw new Error(`already-an-organisation: ${orgPath} already carries org.json (D69)`)
+  }
+  const slug = slugify(path.basename(orgPath))
+  if (slug === '') {
+    throw new Error(`org folder name ${path.basename(orgPath)} has no slug form — rename the folder`)
+  }
   executeTemplateTree(template.org, orgPath, { displayName })
   const manifest = createManifest(displayName, stampFor(template.version))
   writeManifest(orgManifestPath(orgPath), manifest)
   return { path: orgPath, slug, manifest }
+}
+
+/**
+ * Legacy-shape helper (pre-D69 callers that still hold a parent root):
+ * create `<root>/<slug>/` (slug collision-suffixed) and scaffold the org
+ * IN PLACE inside it. New code should call scaffoldOrg on the picked
+ * folder directly.
+ */
+export function scaffoldOrgInRoot(root, displayName) {
+  const slug = uniqueSlug(displayName, existingSlugs(root))
+  const orgPath = path.join(root, slug)
+  fs.mkdirSync(orgPath, { recursive: true })
+  return scaffoldOrg(orgPath, displayName)
 }
 
 /**

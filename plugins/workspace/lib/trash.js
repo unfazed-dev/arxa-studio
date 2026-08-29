@@ -139,12 +139,11 @@ export function softDelete(workspaceRoot, targetPath, { env = process.env, now =
   if (!fs.existsSync(target)) {
     throw new TrashError(`nothing to trash at ${target}`)
   }
-  if (enclosingRepo(workspaceRoot, workspaceRoot) !== null) {
-    // Structural invariant behind "trash never enters org history": the
-    // workspace root itself must not be a repo, or .arxa/trash would sit
-    // in its worktree.
-    throw new TrashError(`workspace root ${workspaceRoot} is itself a git repository — trash would enter its history`)
-  }
+  // Since D69 the trash scope IS the org folder, and the org root is a git
+  // repo by design (D17) — the old "root must not be a repo" invariant is
+  // gone. Trash lives under <org>/.arxa/trash, and /.arxa/ is git-excluded
+  // (workspace openOrg + the shell's runtime exclusion), so trash never
+  // enters org history.
 
   const slug = path.basename(target)
   const base = `${fsStamp(now)}-${slug}`
@@ -184,7 +183,8 @@ export function softDelete(workspaceRoot, targetPath, { env = process.env, now =
     entryId,
     slug,
     originalPath: path.relative(workspaceRoot, target),
-    repoPath: repoAbove ? path.relative(workspaceRoot, repoAbove) : null,
+    // '.' = the repo's root IS the trash scope root (D69: the org folder).
+    repoPath: repoAbove ? path.relative(workspaceRoot, repoAbove) || '.' : null,
     orgId: ids.orgId,
     projectId: ids.projectId,
     deletedAt: now.toISOString(),

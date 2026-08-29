@@ -20,12 +20,18 @@ export {
   orgManifestPath,
   projectManifestPath,
 } from './manifest.js'
-export { CATEGORIES, scaffoldOrg, scaffoldProject } from './scaffold.js'
+export { CATEGORIES, scaffoldOrg, scaffoldOrgInRoot, scaffoldProject } from './scaffold.js'
 export {
   ROOT_FILE,
+  LEGACY_ROOT_FILE,
+  RECENTS_CAP,
   arxaHome,
   rootFilePath,
   validateWorkspaceRoot,
+  listRecents,
+  readRecents,
+  touchRecent,
+  removeRecent,
   saveWorkspaceRoot,
   loadWorkspaceRoot,
 } from './root.js'

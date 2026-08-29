@@ -15,8 +15,8 @@ import path from 'node:path'
 
 import { slugify, uniqueSlug } from './lib/slug.js'
 import { readManifest, renameInManifest, orgManifestPath } from './lib/manifest.js'
-import { CATEGORIES, scaffoldOrg, scaffoldProject } from './lib/scaffold.js'
-import { saveWorkspaceRoot, loadWorkspaceRoot, validateWorkspaceRoot, rootFilePath, legacyRootFilePath } from './lib/root.js'
+import { CATEGORIES, scaffoldOrg, scaffoldOrgInRoot, scaffoldProject } from './lib/scaffold.js'
+import { saveWorkspaceRoot, loadWorkspaceRoot, validateWorkspaceRoot, rootFilePath, legacyRootFilePath, listRecents, touchRecent, removeRecent, RECENTS_CAP } from './lib/root.js'
 import { scanWorkspace, resolveOrgById, resolveProjectById } from './lib/resolve.js'
 import { TEMPLATE_VERSION, getTemplate, stampFor, parseStamp, StampParseError } from './lib/template.js'
 import { StampRefusalError, readOrgStampVersion, checkOrgStamp, writeOrgStampVersion } from './lib/stamp.js'
@@ -74,7 +74,7 @@ try {
   })
 
   // --- scaffold org + project ---
-  const org = scaffoldOrg(workspaceRoot, 'Organisation A')
+  const org = scaffoldOrgInRoot(workspaceRoot, 'Organisation A')
   const project = scaffoldProject(org.path, 'Project One')
 
   check('org scaffold creates exactly the five fixed categories (D42)', () => {
@@ -126,18 +126,72 @@ try {
 
   // --- org slug collision on disk ---
   check('scaffolding a second org with the same name yields <slug>-2', () => {
-    const org2 = scaffoldOrg(workspaceRoot, 'Organisation A')
+    const org2 = scaffoldOrgInRoot(workspaceRoot, 'Organisation A')
     assert.equal(org2.slug, 'organisation-a-2')
     assert.notEqual(org2.manifest.id, org.manifest.id)
   })
 
-  // --- workspace-root persistence (D36) ---
-  check('workspace root persists to $ARXA_HOME/organisation.json and reloads', () => {
-    assert.equal(loadWorkspaceRoot(env), null, 'expected no root before save')
+  // --- D69: org-create targets the picked folder DIRECTLY ---
+  check('scaffoldOrg scaffolds IN PLACE: org.json + five categories inside the picked folder', () => {
+    const picked = path.join(tmp, 'picked-org')
+    fs.mkdirSync(picked, { recursive: true })
+    const inPlace = scaffoldOrg(picked, 'Picked Org')
+    assert.equal(inPlace.path, path.resolve(picked), 'wrapper directory created')
+    assert.equal(inPlace.slug, 'picked-org', 'slug is the folder basename (D41)')
+    assert.ok(fs.existsSync(path.join(picked, 'org.json')), 'org.json missing inside picked folder')
+    for (const c of CATEGORIES) {
+      assert.ok(fs.statSync(path.join(picked, c)).isDirectory(), `missing ${c}/ inside picked folder`)
+    }
+    assert.equal(readManifest(orgManifestPath(picked)).name, 'Picked Org')
+    assert.throws(() => scaffoldOrg(picked, 'Again'), /already-an-organisation/, 'double scaffold not refused')
+    assert.throws(() => scaffoldOrg(path.join(tmp, 'no-such-folder'), 'X'), /does not exist/, 'missing folder not refused')
+  })
+
+  // --- recents: ~/.arxa/organisation.json is { orgs: [...] } (D69) ---
+  check('recents start empty; saveWorkspaceRoot routes through touchRecent', () => {
+    assert.deepEqual(listRecents(env), [], 'expected empty recents before any save')
     saveWorkspaceRoot(workspaceRoot, env)
-    assert.equal(loadWorkspaceRoot(env), path.resolve(workspaceRoot))
+    assert.deepEqual(listRecents(env), [path.resolve(workspaceRoot)])
+    assert.equal(loadWorkspaceRoot(env), path.resolve(workspaceRoot), 'back-compat face serves the most recent')
     assert.equal(rootFilePath(env), path.join(fakeHome, 'organisation.json'), 'file renamed from workspace.json')
     assert.ok(fs.existsSync(rootFilePath(env)), 'organisation.json written')
+  })
+  check('recents are most-recent-first, deduped by move-to-front', () => {
+    const a = path.join(tmp, 'org-a')
+    const b = path.join(tmp, 'org-b')
+    fs.mkdirSync(a, { recursive: true })
+    fs.mkdirSync(b, { recursive: true })
+    touchRecent(a, env)
+    touchRecent(b, env)
+    assert.deepEqual(listRecents(env), [path.resolve(b), path.resolve(a), path.resolve(workspaceRoot)])
+    touchRecent(a, env) // re-open moves to front, no duplicate
+    assert.deepEqual(listRecents(env), [path.resolve(a), path.resolve(b), path.resolve(workspaceRoot)])
+  })
+  check(`recents cap at ${RECENTS_CAP}`, () => {
+    for (let n = 1; n <= RECENTS_CAP; n++) {
+      const dir = path.join(tmp, 'cap-org-' + n)
+      fs.mkdirSync(dir, { recursive: true })
+      touchRecent(dir, env)
+    }
+    const list = listRecents(env)
+    assert.equal(list.length, RECENTS_CAP, 'cap not enforced')
+    assert.equal(list[0], path.resolve(path.join(tmp, 'cap-org-' + RECENTS_CAP)))
+    assert.ok(!list.includes(path.resolve(workspaceRoot)), 'oldest entry should have been evicted')
+  })
+  check('removeRecent drops exactly one entry and is idempotent-safe', () => {
+    const gone = path.join(tmp, 'cap-org-10')
+    const before = listRecents(env).length
+    removeRecent(gone, env)
+    assert.equal(listRecents(env).length, before - 1)
+    removeRecent(gone, env) // removing again is a no-op
+    assert.equal(listRecents(env).length, before - 1)
+  })
+  check('file shape is { orgs: [...] } and the pre-D69 { root } shape migrates one-way', () => {
+    const onDisk = JSON.parse(fs.readFileSync(rootFilePath(env), 'utf8'))
+    assert.ok(Array.isArray(onDisk.orgs), 'expected { orgs: [...] } on disk')
+    fs.writeFileSync(rootFilePath(env), JSON.stringify({ root: path.resolve(workspaceRoot) }))
+    assert.deepEqual(listRecents(env), [path.resolve(workspaceRoot)], '{ root } shape still reads')
+    assert.deepEqual(JSON.parse(fs.readFileSync(rootFilePath(env), 'utf8')), { orgs: [path.resolve(workspaceRoot)] }, 'not migrated on read')
   })
   check('legacy workspace.json is migrated (one-way) on load', () => {
     fs.rmSync(rootFilePath(env), { force: true })
@@ -166,7 +220,7 @@ try {
   })
 
   // A dedicated org for the migration story, with its own git repo.
-  const migOrg = scaffoldOrg(workspaceRoot, 'Migration Org')
+  const migOrg = scaffoldOrgInRoot(workspaceRoot, 'Migration Org')
   initOrgRepo(migOrg.path)
   const testMigrations = [
     {
@@ -217,7 +271,7 @@ try {
   })
 
   check('dirty org tree → migration refused before any commit', () => {
-    const dirtyOrg = scaffoldOrg(workspaceRoot, 'Dirty Org')
+    const dirtyOrg = scaffoldOrgInRoot(workspaceRoot, 'Dirty Org')
     initOrgRepo(dirtyOrg.path)
     fs.writeFileSync(path.join(dirtyOrg.path, 'notes', 'stray.md'), 'uncommitted\n')
     assert.throws(
@@ -228,7 +282,7 @@ try {
   })
 
   check('failing migration rewinds to the pre commit; stamp stays put', () => {
-    const crashOrg = scaffoldOrg(workspaceRoot, 'Crash Org')
+    const crashOrg = scaffoldOrgInRoot(workspaceRoot, 'Crash Org')
     initOrgRepo(crashOrg.path)
     const crashing = [
       {
@@ -250,7 +304,7 @@ try {
   })
 
   check('corrupt format stamp → typed StampParseError, not a crash', () => {
-    const corruptOrg = scaffoldOrg(workspaceRoot, 'Corrupt Org')
+    const corruptOrg = scaffoldOrgInRoot(workspaceRoot, 'Corrupt Org')
     const mPath = orgManifestPath(corruptOrg.path)
     const manifest = readManifest(mPath)
     manifest.formatStamp = 'not-a-stamp'
@@ -261,7 +315,7 @@ try {
   })
 
   check('crash between pre and post commit → reopen rewinds and re-runs the migration', () => {
-    const interruptedOrg = scaffoldOrg(workspaceRoot, 'Interrupted Org')
+    const interruptedOrg = scaffoldOrgInRoot(workspaceRoot, 'Interrupted Org')
     initOrgRepo(interruptedOrg.path)
     // Simulate a run that died mid-step: pre commit made, apply half done,
     // stamp already bumped on disk, post commit never published.
@@ -283,8 +337,8 @@ try {
     // If TEMPLATE_VERSION ever bumps without a shipped migration, this throws.
     assert.equal(migrationChain(1, TEMPLATE_VERSION, MIGRATIONS).length, TEMPLATE_VERSION - 1)
     // Parity: the template and the migration chain must describe the same tree.
-    const fresh = scaffoldOrg(workspaceRoot, 'Parity Fresh')
-    const migrated = scaffoldOrg(workspaceRoot, 'Parity Migrated')
+    const fresh = scaffoldOrgInRoot(workspaceRoot, 'Parity Fresh')
+    const migrated = scaffoldOrgInRoot(workspaceRoot, 'Parity Migrated')
     initOrgRepo(migrated.path)
     openOrg(migrated.path, { appVersion: TEMPLATE_VERSION, migrations: MIGRATIONS })
     const tree = (root) => {
@@ -306,7 +360,7 @@ try {
   check('git absent: stamp + refusal still work; migration fails with git-unavailable reason', () => {
     const absentEnv = { ...process.env, ARXA_GIT_BIN: path.join(tmp, 'no-such-git') }
     resetProbe()
-    const gitlessOrg = scaffoldOrg(workspaceRoot, 'Gitless Org') // scaffold + stamp: no git needed
+    const gitlessOrg = scaffoldOrgInRoot(workspaceRoot, 'Gitless Org') // scaffold + stamp: no git needed
     assert.equal(readOrgStampVersion(gitlessOrg.path), 1)
     assert.throws(() => checkOrgStamp(migOrg.path, 1), StampRefusalError) // refusal: pure fs
     assert.throws(
@@ -353,7 +407,7 @@ try {
     assert.equal(fs.existsSync(lockFile), false)
   })
   // --- Phase 6: trash (D47) ---
-  const trashOrg = scaffoldOrg(workspaceRoot, 'Trash Org')
+  const trashOrg = scaffoldOrgInRoot(workspaceRoot, 'Trash Org')
   initOrgRepo(trashOrg.path)
   const doomed = scaffoldProject(trashOrg.path, 'Doomed Project')
   initProjectRepo(doomed.path)
@@ -412,7 +466,7 @@ try {
   })
 
   check('cross-repo restore refuses with history-boundary error (D41) unless accepted', () => {
-    const otherOrg = scaffoldOrg(workspaceRoot, 'Other Trash Org')
+    const otherOrg = scaffoldOrgInRoot(workspaceRoot, 'Other Trash Org')
     initOrgRepo(otherOrg.path)
     const drifting = path.join(trashOrg.path, 'notes', 'drifting')
     fs.mkdirSync(drifting, { recursive: true })
@@ -430,7 +484,7 @@ try {
   })
 
   check('trash is invisible to scanWorkspace and resolve-by-id', () => {
-    const ghostOrg = scaffoldOrg(workspaceRoot, 'Ghost Org')
+    const ghostOrg = scaffoldOrgInRoot(workspaceRoot, 'Ghost Org')
     const { entryId } = softDelete(workspaceRoot, ghostOrg.path)
     const scan = scanWorkspace(workspaceRoot)
     assert.equal(scan.orgs.has(ghostOrg.manifest.id), false)

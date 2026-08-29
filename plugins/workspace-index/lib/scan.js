@@ -15,7 +15,7 @@
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 export const CATEGORIES = [
   'projects',
@@ -63,22 +63,17 @@ export function scanWorkspace(root) {
   const projects = []
   const files = []
 
-  for (const entry of readdirSync(root, { withFileTypes: true })) {
-    // Top-level dot-dirs (e.g. the workspace's own .arxa index store) are
-    // not orgs and are never indexed.
-    if (!entry.isDirectory() || entry.name.startsWith('.')) continue
-    const orgSlug = entry.name
-    const orgDir = join(root, orgSlug)
-    const manifest = readManifest(join(orgDir, 'org.json'))
-    if (!manifest) continue // not an org dir
-
+  // Emit one org's rows (manifest row, project rows, file walk). Shared by
+  // the D69 in-place layout (root folder IS the org) and the legacy
+  // wrapper layout (orgs are subdirectories of the root).
+  const emitOrg = (orgDir, orgSlug, manifest, manifestPath) => {
     orgs.push({
       id: manifest.id ?? null,
       slug: orgSlug,
       name: manifest.name ?? null,
       createdAt: manifest.createdAt ?? null,
       formatStamp: manifest.formatStamp ?? null,
-      path: `${orgSlug}/org.json`,
+      path: manifestPath,
     })
 
     // Project manifests
@@ -120,6 +115,21 @@ export function scanWorkspace(root) {
         size: st.size,
       })
     })
+  }
+
+  // D69 in-place layout: the root itself carries org.json.
+  const rootManifest = readManifest(join(root, 'org.json'))
+  if (rootManifest) emitOrg(root, basename(root), rootManifest, 'org.json')
+
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    // Top-level dot-dirs (e.g. the workspace's own .arxa index store) are
+    // not orgs and are never indexed.
+    if (!entry.isDirectory() || entry.name.startsWith('.')) continue
+    const orgSlug = entry.name
+    const orgDir = join(root, orgSlug)
+    const manifest = readManifest(join(orgDir, 'org.json'))
+    if (!manifest) continue // not an org dir
+    emitOrg(orgDir, orgSlug, manifest, `${orgSlug}/org.json`)
   }
 
   const byPath = (a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)

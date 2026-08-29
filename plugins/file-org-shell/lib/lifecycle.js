@@ -6,12 +6,13 @@
  * (scaffold, stamp/migrate, index, git, mirror, rail) stays in its library.
  *
  * openOrg order (plan-mandated, one unwind stack):
- *   1. shell lock        — per-org process lock at the workspace root
+ *   1. shell lock        — per-org process lock at <org>/.arxa/locks (D69)
  *   2. stamp/migrate     — workspace openOrg: crash recovery → stamp check
  *                          (StampRefusalError when newer) → forward-only
  *                          migration; the library serializes rewind with its
  *                          own .git lock underneath
- *   3. index             — workspace-index backend, rebuild-if-missing
+ *   3. index             — workspace-index backend at <org>/.arxa/index.db,
+ *                          rebuild-if-missing
  *   4. git attach        — initOrgRepo (idempotent), requires git: fail loud
  *   5. sessions ready    — registry readable, archived ids derivable
  *   6. optional rails    — account-mirror / cairn-rail ONLY if configured;
@@ -34,6 +35,7 @@ import path from 'node:path'
 import {
   scanWorkspace,
   scaffoldOrg,
+  scaffoldOrgInRoot,
   scaffoldProject,
   openOrg as workspaceOpenOrg,
   validateWorkspaceRoot,
@@ -41,6 +43,7 @@ import {
   restoreFromTrash,
   renameInManifest,
   orgManifestPath,
+  touchRecent,
   CATEGORIES,
 } from '../../workspace/lib/index.js'
 import {
@@ -138,11 +141,14 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     const rowId = `${slug}/org.json`
     try {
       const owns = !(current && current.path === path.resolve(orgPath))
+      // Per-org index (D69): the backend lives at <org>/.arxa/index.db.
       const backend = owns ? openBackend(rootDir) : current.index.backend
       try {
-        // Parsed rows key on the org uuid; the row id rides in .path.
+        // Parsed rows key on the org uuid; the row id rides in .path
+        // ('org.json' in the per-org index, '<slug>/org.json' in the
+        // legacy root index) — keep the row's own id on the update.
         const hit = backend.query('orgs').find((o) => o.path === rowId || o.slug === slug)
-        if (hit) backend.put('orgs', rowId, { ...hit, name: displayName })
+        if (hit) backend.put('orgs', hit.path ?? rowId, { ...hit, name: displayName })
       } finally {
         if (owns) backend.close()
       }
@@ -157,7 +163,20 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
   }
 
   function createOrg(displayName) {
-    return scaffoldOrg(root, displayName)
+    // D69: org-create scaffolds IN PLACE into the picked folder. A service
+    // bound to a folder that is itself an org has no create verb; a service
+    // bound to a parent root (legacy shape) creates <root>/<slug>/ and
+    // scaffolds inside it.
+    if (fs.existsSync(orgManifestPath(root))) {
+      throw new Error('org-create is in-place since D69: scaffold into the picked folder directly (scaffoldOrg)')
+    }
+    const created = scaffoldOrgInRoot(root, displayName)
+    try {
+      touchRecent(created.path, env)
+    } catch {
+      /* recents are advisory */
+    }
+    return created
   }
 
   async function openOrg(orgPath) {
@@ -170,9 +189,11 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     const undo = []
     let step = STEPS[0]
     try {
-      // 1. shell lock — real from the very first step, repo or not.
+      // 1. shell lock — real from the very first step, repo or not. Per-org
+      //    state home: <org>/.arxa (D69) — lock, index, trash, rail all live
+      //    inside the opened org folder now.
       step = 'shell-lock'
-      const releaseLock = acquireShellLock(root, resolved)
+      const releaseLock = acquireShellLock(resolved, resolved)
       undo.push(releaseLock)
 
       // 2. crash recovery → stamp check → forward-only migration.
@@ -182,12 +203,12 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       // 3. index open, rebuild-if-missing (derived cache: rebuild is the
       //    whole recovery story — no migrations, no reconciliation).
       step = 'index'
-      const indexWasMissing = !fs.existsSync(path.join(root, INDEX_DIR, INDEX_FILE))
-      const backend = openBackend(root)
+      const indexWasMissing = !fs.existsSync(path.join(resolved, INDEX_DIR, INDEX_FILE))
+      const backend = openBackend(resolved) // <org>/.arxa/index.db
       undo.push(() => backend.close())
       let counts = null
       if (indexWasMissing || !backend.query('orgs').some((o) => o.slug === slug)) {
-        counts = rebuild(root, backend).counts
+        counts = rebuild(resolved, backend).counts
       }
 
       // 4. git repo attach — mandatory; no repo means no sessions and no
@@ -213,9 +234,19 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       step = 'cairn-rail'
       let cairn = { attached: false, reason: 'not-configured' }
       if (rails.cairn?.deviceId) {
-        claimMaterializer(root, slug, rails.cairn.deviceId)
-        const applied = materialize(root, slug, rails.cairn.deviceId)
-        cairn = { attached: true, deviceId: rails.cairn.deviceId, applied, edits: readEdits(root, slug).length }
+        claimMaterializer(resolved, slug, rails.cairn.deviceId)
+        const applied = materialize(resolved, slug, rails.cairn.deviceId)
+        cairn = { attached: true, deviceId: rails.cairn.deviceId, applied, edits: readEdits(resolved, slug).length }
+      }
+
+      // Recents (D69): a successful open records the org folder, the
+      // recents list being the org-discovery surface that replaced the
+      // workspace-root tree. Best-effort: a persistence failure must not
+      // fail an otherwise healthy open.
+      try {
+        touchRecent(resolved, env)
+      } catch {
+        /* recents are advisory */
       }
 
       current = {
@@ -236,7 +267,9 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
         // reads fresh state; the static `sessions` snapshot above is the
         // open-time record and stays for diagnostics.
         projects() {
-          return [...scanWorkspace(root).projects.values()]
+          // Org-local scan: the open org folder is itself scannable (D69
+          // in-place layout — root-self org detection in resolve.js).
+          return [...scanWorkspace(resolved).projects.values()]
             .filter((p) => p.orgId === opened.manifest.id)
             .map(({ id, name, slug: projectSlug, path: projectPath }) => (
               { id, name, slug: projectSlug, path: projectPath }
@@ -261,7 +294,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
             .map((s) => ({ id: s.id, name: s.name, state: s.state, parkedReason: s.parkedReason, project: s.project ?? null }))
         },
         trashCount() {
-          return listTrash(root).length
+          return listTrash(resolved).length // org-local trash: <org>/.arxa/trash
         },
         newProject(displayName) {
           return scaffoldProject(resolved, displayName)
@@ -273,7 +306,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           // silently org-level session.
           let projectSlug = null
           if (project != null) {
-            const hit = [...scanWorkspace(root).projects.values()]
+            const hit = [...scanWorkspace(resolved).projects.values()]
               .find((p) => p.orgId === opened.manifest.id && (p.slug === project || p.id === project))
             if (!hit) throw new Error(`unknown-project: ${project}`)
             projectSlug = hit.slug
@@ -301,9 +334,9 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           if (entryId == null) {
             const restored = []
             const failed = []
-            for (const entry of listTrash(root)) {
+            for (const entry of listTrash(resolved)) {
               try {
-                const r = restoreFromTrash(root, entry.entryId, { env, ...opts })
+                const r = restoreFromTrash(resolved, entry.entryId, { env, ...opts })
                 restored.push({ entryId: entry.entryId, restoredPath: r.restoredPath })
               } catch (e) {
                 failed.push({ entryId: entry.entryId, error: String(e?.message ?? e) })
@@ -311,7 +344,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
             }
             return { restored, failed }
           }
-          return restoreFromTrash(root, entryId, { env, ...opts })
+          return restoreFromTrash(resolved, entryId, { env, ...opts })
         },
         _undo: undo,
       }
@@ -373,7 +406,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     // pre-rename name forever (measured: SUPO→MIRA left name "SUPO" in
     // index.db while org.json said MIRA — listOrgs reads the manifest, but
     // every index consumer saw the stale name until a full rebuild).
-    indexRenameOrg(root, resolved, displayName)
+    indexRenameOrg(resolved, resolved, displayName) // per-org index (D69)
     return { path: resolved, slug: path.basename(resolved), manifest }
   }
 

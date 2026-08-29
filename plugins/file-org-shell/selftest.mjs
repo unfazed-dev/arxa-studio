@@ -23,7 +23,7 @@ import {
   ShellLockError,
 } from './lib/index.js'
 import { openBackend } from '../workspace-index/lib/index.js'
-import { readOrgStampVersion, softDelete } from '../workspace/lib/index.js'
+import { readOrgStampVersion, softDelete, listRecents } from '../workspace/lib/index.js'
 import { runGit, isRepo } from '../git-workspace/lib/index.js'
 import { createLocalProvider } from '../account-mirror/lib/index.js'
 import { railDir } from '../cairn-rail/lib/index.js'
@@ -49,7 +49,10 @@ async function throwsAsync(fn, check, label) {
 }
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-file-org-shell-'))
-const env = process.env
+const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-file-org-shell-home-'))
+// ARXA_HOME redirected: opening an org touches ~/.arxa/organisation.json
+// recents (D69) — the selftest must never write the operator's real home.
+const env = { ...process.env, ARXA_HOME: fakeHome }
 
 try {
   // ---- fixture ------------------------------------------------------------
@@ -63,7 +66,7 @@ try {
   console.log('open → index → git → sessions:')
   const h1 = await svc.openOrg(orgA.path)
   ok(h1.manifest?.name === 'Acme Corp', 'open returns the org manifest')
-  ok(fs.existsSync(shellLockPath(root, orgA.slug)), 'shell lock held while open')
+  ok(fs.existsSync(shellLockPath(orgA.path, orgA.slug)), 'shell lock held while open (at <org>/.arxa/locks)')
   ok(h1.index.backend.query('orgs').some((o) => o.slug === orgA.slug), 'index queryable and contains the org')
   ok(h1.index.rebuilt && h1.index.counts.orgs >= 1, 'missing index was rebuilt on first open')
   ok(isRepo(orgA.path, env) && h1.repoInitialised, 'git rail attached (org repo initialised)')
@@ -71,7 +74,11 @@ try {
   ok(h1.rails.account.attached === false, 'account-mirror absent by default (normal state)')
   ok(h1.rails.cairn.attached === false, 'cairn-rail absent by default (normal state)')
   ok(!fs.existsSync(path.join(orgA.path, ACCOUNT_DIR, MIRROR_MANIFEST)), 'no mirror manifest written when unconfigured')
-  ok(!fs.existsSync(railDir(root, orgA.slug)), 'no rail state created when unconfigured')
+  ok(!fs.existsSync(railDir(orgA.path, orgA.slug)), 'no rail state created when unconfigured')
+  // D69 per-org state home: everything stateful lives under <org>/.arxa.
+  ok(fs.existsSync(path.join(orgA.path, '.arxa', 'index.db')), 'index db resolved at <org>/.arxa/index.db')
+  ok(!fs.existsSync(path.join(root, '.arxa')), 'no studio state leaks to the parent folder')
+  ok(listRecents(env)[0] === orgA.path, 'opening an org touches the recents (most-recent-first)')
 
   await throwsAsync(
     () => svc.openOrg(orgA.path),
@@ -84,7 +91,7 @@ try {
   const backend1 = h1.index.backend
   svc.closeOrg()
   ok(svc.current === null, 'close clears the current handle')
-  ok(!fs.existsSync(shellLockPath(root, orgA.slug)), 'shell lock released on close')
+  ok(!fs.existsSync(shellLockPath(orgA.path, orgA.slug)), 'shell lock released on close')
   assert.throws(() => backend1.query('orgs'), undefined, 'backend closed')
   passed++
   console.log('  ✓ index backend closed on close')
@@ -102,7 +109,7 @@ try {
   // ---- crash safety: stale shell lock (dead pid) --------------------------
   console.log('crash safety — interrupted open:')
   const dead = spawnSync(process.execPath, ['-e', ''])
-  const lockFile = shellLockPath(root, orgA.slug)
+  const lockFile = shellLockPath(orgA.path, orgA.slug)
   fs.mkdirSync(path.dirname(lockFile), { recursive: true })
   fs.writeFileSync(lockFile, JSON.stringify({ pid: dead.pid, startedAt: new Date().toISOString() }))
   const h3 = await svc.openOrg(orgA.path)
@@ -154,8 +161,9 @@ try {
   const backendA = hA.index.backend
   const hB = await svc.switchOrg(orgB.path)
   ok(svc.current.slug === orgB.slug, 'switch lands on the new org')
-  ok(!fs.existsSync(shellLockPath(root, orgA.slug)), 'old org lock released on switch')
-  ok(fs.existsSync(shellLockPath(root, orgB.slug)), 'new org lock held')
+  ok(listRecents(env)[0] === orgB.path, 'switching orgs re-orders the recents')
+  ok(!fs.existsSync(shellLockPath(orgA.path, orgA.slug)), 'old org lock released on switch')
+  ok(fs.existsSync(shellLockPath(orgB.path, orgB.slug)), 'new org lock held')
   assert.throws(() => backendA.query('orgs'), undefined)
   passed++
   console.log('  ✓ old backend closed — no live handle can reach the old org')
@@ -163,8 +171,8 @@ try {
   const sameB = await svc.switchOrg(orgB.path)
   ok(sameB === hB, 'switch to the already-open org is a no-op')
   svc.closeOrg()
-  ok(!fs.existsSync(shellLockPath(root, orgB.slug)), 'no leftover locks after final close')
-  const lockDir = path.join(root, '.arxa', 'locks')
+  ok(!fs.existsSync(shellLockPath(orgB.path, orgB.slug)), 'no leftover locks after final close')
+  const lockDir = path.join(orgB.path, '.arxa', 'locks')
   ok(!fs.existsSync(lockDir) || fs.readdirSync(lockDir).length === 0, 'lock dir empty — nothing leaked')
 
   // ---- optional rails: configured path + partial-open unwind --------------
@@ -194,7 +202,7 @@ try {
     },
     'foreign materializer claim fails loud with OrgOpenError(cairn-rail)'
   )
-  ok(!fs.existsSync(shellLockPath(root, orgA.slug)), 'failed open released the shell lock (reverse unwind)')
+  ok(!fs.existsSync(shellLockPath(orgA.path, orgA.slug)), 'failed open released the shell lock (reverse unwind)')
   ok(svcOther.current === null, 'failed open leaves no current handle')
 
   // ---- trash restore-all (the sidebar's one Restore CTA) ------------------
@@ -204,7 +212,7 @@ try {
   const hT = svcTrash.current
   hT.newProject('Doomed')
   const doomedPath = path.join(orgA.path, 'projects', 'doomed')
-  softDelete(root, doomedPath, { env })
+  softDelete(orgA.path, doomedPath, { env }) // org-local trash (D69)
   ok(hT.trashCount() === 1, 'softDelete parks the project in the trash')
   const res = hT.restoreTrash()
   ok(res.restored.length === 1 && res.failed.length === 0, 'restore-all restores every entry, none blocked')
@@ -233,7 +241,7 @@ try {
 
   // ---- rename keeps the index row's denormalised name in step ----------
   {
-    const be = openBackend(root)
+    const be = openBackend(orgB.path) // per-org index (D69)
     const row = be.query('orgs').find((o) => o.slug === orgB.slug)
     ok(row?.name === 'Beta Renewed', 'index orgs row carries the renamed display name (no SUPO/MIRA drift)')
     be.close()
@@ -257,4 +265,5 @@ try {
   console.log(`\nfile-org-shell selftest: ${passed} checks passed`)
 } finally {
   fs.rmSync(root, { recursive: true, force: true })
+  fs.rmSync(fakeHome, { recursive: true, force: true })
 }
