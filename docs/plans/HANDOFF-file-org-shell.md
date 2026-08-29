@@ -205,3 +205,30 @@ and the absent `ci.run` action stay untouched, as reserved.
   deferred by decision; design ready in the doc above.
 - Evidence shots show dsh's stock first-run notice modal — cosmetic, fresh
   sandbox home, not a regression (stock dsh chrome; not actionable here).
+
+## Sidebar rethink — the Organisations rows world (latest)
+
+Grilled + blessed Q1–Q7; contract in `docs/plans/sidebar-org-rethink.md`.
+The stock dsh Workspaces section (dsh-client-ui-workspace) is REPLACED by
+the ORGANISATIONS rows world; the old OrgSection/CTA block is deleted
+(Run CI stays reserved for D3, now invisible). Built by
+`scripts/gen-workspace.mjs`: the stock bundle is transformed copy-whole
+(data hooks pinned at the OrgBrowser boundary, add flow = name prompt per
+Q3, org-row menu = Rename / Close organisation / New session / Trash per
+Q3+Q6, Open/Parked pills per Q5, archived held back per D39) and NESTED
+inside the shell module — two sibling __ModuleLoader__ ids do NOT work:
+the runtime only requires the package's own id, and its standard hooks
+(useSessions/useWorkspaces) override inject props, so the boundary pin in
+OrgBrowser is the only honest seam. Composition: shell part (gen-sidebar
+.mjs — its New-session CTA is org-aware per Q5) + workspace part.
+Lifecycle gained `renameOrg` (display-name-only, D41 — the originally
+proposed folder+slug rename was caught by the docs and dropped) and the
+`activeSessions`/`archiveSession` rows faces. Known v1 notes: session
+timestamps are registry order (order-by relabelled honestly), create-
+organisation uses window.prompt (kimitail note in the transform), project
+creation has no sidebar surface (folders + manifests via CLI/host verb);
+"56y" relative times on rows are the same registry-order artifact.
+Verified: selftest + smoke ALL GREEN (drift gate = regenerate both
+bundles, byte-compare), and the arxa-lens battery — boot rows, row-click
+open (`opened:true`), UI create (`created:true, autoOpened:true`),
+session leaves; shots in `designs/org-sidebar/evidence/`.
