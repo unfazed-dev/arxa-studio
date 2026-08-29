@@ -1,0 +1,12 @@
+{
+  "name": "arxa-github-link",
+  "version": "0.1.0",
+  "private": true,
+  "description": "arxa GitHub link (Phase B, D69 gate half): one-click browser+PKCE sign-in with device-flow fallback, token in the OS keychain, local-first link state. Faces: link/unlink/status/createPrivateRepo — not wired into any caller this phase.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  }
+}
