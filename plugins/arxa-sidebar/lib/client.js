@@ -2939,6 +2939,21 @@ window.__ModuleLoader__.load({
 				});
 			};
 			const field = { width: "100%", boxSizing: "border-box", fontSize: 13, padding: "6px 8px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 6, background: "transparent", color: "inherit" };
+			/** Click the location field → the OS folder locator (Tauri dialog).
+			* Falls through to plain typing where the dialog is unavailable
+			* (web/dev) — the field stays editable in every host. */
+			const browseLocation = (e) => {
+				const dlg = window.__TAURI__ && window.__TAURI__.dialog;
+				if (!dlg || typeof dlg.open !== "function") return;
+				e.preventDefault();
+				const opts = { directory: true, multiple: false, title: t("org.create.location") };
+				if (location.startsWith("/")) opts.defaultPath = location;
+				Promise.resolve(dlg.open(opts)).then((picked) => {
+					if (typeof picked === "string" && picked.trim() !== "") {
+						setLocation(picked.replace(/\/+$/, "") || picked);
+					}
+				}, () => {});
+			};
 			const label = { fontSize: 11, opacity: 0.55, margin: "10px 0 4px" };
 			return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Modal, {
 				open: true,
@@ -2975,6 +2990,8 @@ window.__ModuleLoader__.load({
 						(0, react_jsx_runtime.jsx)("input", {
 							value: location,
 							spellCheck: false,
+							placeholder: t("org.create.location"),
+							onClick: browseLocation,
 							onChange: (e) => setLocation(e.target.value),
 							onKeyDown: (e) => {
 								if (e.key === "Enter") submit();
@@ -3038,7 +3055,7 @@ window.__ModuleLoader__.load({
 			"org.create.title": "New organisation",
 			"org.create.submit": "Create organisation",
 			"org.create.location": "Location",
-			"org.create.locationHint": "Where organisations live — chosen once, at first run."
+			"org.create.locationHint": "Where organisations live — click the field to browse, or type a path."
 		};
 		const zhOver = {
 			"section.workspaces": "组织",
@@ -3064,7 +3081,7 @@ window.__ModuleLoader__.load({
 			"org.create.title": "新建组织",
 			"org.create.submit": "创建组织",
 			"org.create.location": "位置",
-			"org.create.locationHint": "组织的存放位置 — 仅在首次运行时选择一次。"
+			"org.create.locationHint": "组织的存放位置 — 点击输入框浏览，或直接输入路径。"
 		};
 		//#endregion
 		//#region lib/types/client/index.js

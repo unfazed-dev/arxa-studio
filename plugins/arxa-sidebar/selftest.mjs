@@ -55,6 +55,8 @@ check('rows: stock Workspaces label superseded in overrides only', !client.inclu
 check('rows: add flow opens the create-organisation modal (Q3, webview-safe)',
   client.includes('new Event("arxa-create-org")') && client.includes('function OrgCreateModal(') && client.includes('window.addEventListener("arxa-create-org", open)'))
 check('rows: window.prompt is gone (Tauri WKWebView never implements it)', !client.includes('window.prompt('))
+check('rows: location field opens the OS folder locator in the desktop shell (Tauri dialog), typed fallback elsewhere',
+  client.includes('window.__TAURI__.dialog') && client.includes('directory: true'))
 check('rows: first-run root action wired both sides (D36)',
   client.includes('"workspace.root"') && (() => {
     const hostSrc = readFileSync(join(here, 'lib', 'index.js'), 'utf8')
