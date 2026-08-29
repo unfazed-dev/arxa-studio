@@ -53,12 +53,39 @@ async function importShell() {
   }
 }
 
+/** Import-probe the Phase B github-link plugin in both deployment shapes
+  * (same rationale as importShell; D69 gate half — the account link). */
+async function importGithubLink() {
+  try {
+    return await import('arxa-github-link')
+  } catch {
+    return await import(new URL('../../github-link/lib/index.js', import.meta.url).href)
+  }
+}
+
 export function apply(ctx) {
   /** Singleton — holds the single open-org handle across requests. */
   let lifecycle = null
   let shell = null
   /** Singleton dsh bridge (Phase D, D71) — built once the shell module loads. */
   let dshBridge = null
+  /** GitHub link service (Phase B/W3, D69 gate half). ctx.github overrides
+    * for tests; otherwise the real local-first service (keyring + browser
+    * PKCE) is built once. Import failure degrades to null — the gate then
+    * reads as unlinked and says so, never silently open. */
+  let ghSvc = null
+  let ghResolved = false
+  const getGithub = async () => {
+    if (ctx.github) return ctx.github
+    if (ghResolved) return ghSvc
+    ghResolved = true
+    try {
+      ghSvc = importGithubLink().then((m) => m.createGithubLink({}))
+    } catch {
+      ghSvc = Promise.reject(new Error('github-link unavailable'))
+    }
+    return ghSvc
+  }
 
   /**
    * Real dsh faces over the engine's in-process services. sessions.create
@@ -350,6 +377,15 @@ export function apply(ctx) {
           const table = {
             /** Create + open: a freshly scaffolded org is the place you are about to work. */
             'org.create': async () => {
+              // D69 gate half: no org is created without a linked GitHub
+              // account. Degrades OPEN only when the github-link plugin
+              // itself is unavailable (import failure) — a loud condition
+              // surfaced by github.status, never a silent pass.
+              const g = await getGithub().catch(() => null)
+              if (g) {
+                const st = await g.status().catch(() => ({ linked: false }))
+                if (!st.linked) throw new Error('linked-required')
+              }
               const created = l.createOrg(typeof arg?.name === 'string' && arg.name.trim() !== '' ? arg.name : 'Untitled Organisation')
               await ensureOpen(created.path) // switch, not open — single handle
             },
@@ -384,6 +420,18 @@ export function apply(ctx) {
             'session.archive': async () => {
               const cur = await ensureOpen(arg?.orgId)
               return cur.archiveSession(arg?.sessionId)
+            },
+            'github.status': async () => {
+              const g = await getGithub()
+              return g.status()
+            },
+            'github.link': async () => {
+              const g = await getGithub()
+              return g.link() // long-running: system browser + loopback wait
+            },
+            'github.unlink': async () => {
+              const g = await getGithub()
+              return g.unlink() // orgs stay local (D69 rider); pushes fail loud (D23)
             },
             'trash.restore': () => handle().restoreTrash(arg?.entryId ?? null),
             // 'ci.run' reserved for Phase D3 — deliberately absent.
