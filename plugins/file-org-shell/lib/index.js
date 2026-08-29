@@ -17,6 +17,9 @@ export { loadWorkspaceRoot, saveWorkspaceRoot, arxaHome } from '../../workspace/
 export { listRecents, readRecents, touchRecent, removeRecent } from '../../workspace/lib/root.js'
 // Read-only rows faces (sidebar rethink): the host half serves every org's
 // session rows and the workspace-root trash without opening anything.
+// In-place scaffold (D69): the create modal's org.create-at verb targets the
+// picked folder itself — the org IS the folder the user chose.
+export { scaffoldOrg } from '../../workspace/lib/scaffold.js'
 export { listSessions } from '../../git-workspace/lib/sessions.js'
 export { listTrash, restoreFromTrash } from '../../workspace/lib/index.js'
 // dsh bridge (Phase D, D71): injectable spawn/attach/list/archive faces with

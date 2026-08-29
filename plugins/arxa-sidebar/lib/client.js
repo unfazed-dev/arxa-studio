@@ -2971,7 +2971,6 @@ window.__ModuleLoader__.load({
 		* ended in React #185. Same-value setState bails out; emits stay
 		* reserved for server-truth changes. */
 		function OrgCreateModal({ t, createWorkspace, open, onClose }) {
-			const hasRoot = useOrg((s) => s.root);
 			const [name, setName] = (0, react.useState)("");
 			const [location, setLocation] = (0, react.useState)("~/Arxa");
 			const [busy, setBusy] = (0, react.useState)(false);
@@ -2993,7 +2992,6 @@ window.__ModuleLoader__.load({
 				}
 			}, [open]);
 			if (!open) return null;
-			const needsRoot = !hasRoot;
 			const showSignin = ghLinked === false;
 			const signin = () => {
 				setBusy(true);
@@ -3008,7 +3006,7 @@ window.__ModuleLoader__.load({
 					setError(e instanceof Error ? e.message : String(e));
 				});
 			};
-			const canSubmit = name.trim() !== "" && !busy && !showSignin && (!needsRoot || location.trim() !== "");
+			const canSubmit = name.trim() !== "" && !busy && !showSignin && location.trim() !== "";
 			const dismiss = () => {
 				if (!busy) onClose();
 			};
@@ -3017,10 +3015,8 @@ window.__ModuleLoader__.load({
 				const orgName = name.trim();
 				setBusy(true);
 				setError(null);
-				const ready = needsRoot
-					? orgStore.mutate("workspace.root", { path: location.trim() })
-					: Promise.resolve();
-				ready.then(() => createWorkspace({ name: orgName })).then(() => {
+				const ready = ORG_POST("org.create-at", { name: orgName, path: location.trim() });
+				ready.then(() => {
 					onClose();
 				}, (e) => {
 					setBusy(false);
@@ -3101,7 +3097,7 @@ window.__ModuleLoader__.load({
 						},
 						style: field
 					}),
-					!showSignin && needsRoot && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+					!showSignin && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 						(0, react_jsx_runtime.jsx)("div", { style: label, children: t("org.create.location") }),
 						(0, react_jsx_runtime.jsx)("input", {
 							value: location,
@@ -3172,7 +3168,7 @@ window.__ModuleLoader__.load({
 			"org.create.title": "New organisation",
 			"org.create.submit": "Create organisation",
 			"org.create.location": "Location",
-			"org.create.locationHint": "Where organisations live — click the field to browse, or type a path.",
+			"org.create.locationHint": "The folder that becomes your organisation — click to browse, or type a path.",
 			"github.signin.desc": "arxa studio manages everything through git. Link your GitHub account to create an organisation — your projects publish as private repos under it.",
 			"github.signin.button": "Sign in with GitHub",
 			"github.signin.busy": "Waiting for GitHub…",
@@ -3211,7 +3207,7 @@ window.__ModuleLoader__.load({
 			"org.create.title": "新建组织",
 			"org.create.submit": "创建组织",
 			"org.create.location": "位置",
-			"org.create.locationHint": "组织的存放位置 — 点击输入框浏览，或直接输入路径。",
+			"org.create.locationHint": "该文件夹将成为你的组织 — 点击浏览，或直接输入路径。",
 			"github.signin.desc": "arxa studio 通过 git 管理一切。创建组织前请先关联你的 GitHub 账号 — 项目会以私有仓库的形式发布到该账号下。",
 			"github.signin.button": "使用 GitHub 登录",
 			"github.signin.busy": "正在等待 GitHub…",

@@ -59,10 +59,10 @@ check('rows: window.prompt is gone (Tauri WKWebView never implements it)', !clie
 check('rows: location field opens the OS folder locator (Tauri dialog when injected, host osascript locator otherwise)',
   client.includes('window.__TAURI__.dialog') && client.includes('directory: true') && client.includes('pick-folder'))
 check('host: macOS folder locator route exists', hostSrc().includes('choose folder') && hostSrc().includes('pick-folder'))
-check('rows: first-run root action wired both sides (D36)',
-  client.includes('"workspace.root"') && (() => {
+check('rows: first-run creates the org IN the picked folder (D69 supersedes D36)',
+  client.includes('"org.create-at"') && (() => {
     const hostSrc = readFileSync(join(here, 'lib', 'index.js'), 'utf8')
-    return hostSrc.includes("action === 'workspace.root'") && hostSrc.includes('saveWorkspaceRoot(expanded)')
+    return hostSrc.includes("action === 'org.create-at'") && hostSrc.includes('shell.scaffoldOrg(expanded, nm)')
   })())
 check('rows: shell New-session is org-aware (Q5)', client.includes('org.new-session') && client.includes('Open an organisation first'))
 check('rows: OrgSection block deleted', !client.includes('OrgSection'))

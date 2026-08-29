@@ -53,30 +53,44 @@ async function importShell() {
   }
 }
 
-/** Import-probe the Phase B github-link plugin in both deployment shapes
-  * (same rationale as importShell; D69 gate half — the account link). */
+/** Import-probe the Phase B github-link plugin in three deployment shapes
+  * (same rationale as importShell; D69 gate half — the account link):
+  *   1. bare "arxa-github-link" — once bin/arxa-studio.mjs carries the
+  *      imports-map entry (ONE line, blocked by a parallel session's WIP
+  *      as of 2026-08-29);
+  *   2. ARXA_GITHUB_LINK_PATH — absolute path to lib/index.js, for profile
+  *      boots (evidence server / desktop) that lack the map entry;
+  *   3. relative ../../github-link — repo checkout + pnpm file: symlink. */
 async function importGithubLink() {
   try {
     return await import('arxa-github-link')
-  } catch {
-    return await import(new URL('../../github-link/lib/index.js', import.meta.url).href)
+  } catch { /* not in the imports map (yet) — fall through */ }
+  const viaEnv = process.env.ARXA_GITHUB_LINK_PATH
+  if (viaEnv) {
+    try {
+      return await import(new URL('file://' + viaEnv).href)
+    } catch (envErr) {
+      console.error('[arxa-sidebar] ARXA_GITHUB_LINK_PATH failed:', envErr?.message)
+    }
   }
+  return await import(new URL('../../github-link/lib/index.js', import.meta.url).href)
 }
 
-export function apply(ctx) {
+export function apply(ctx, opts = {}) {
   /** Singleton — holds the single open-org handle across requests. */
   let lifecycle = null
   let shell = null
   /** Singleton dsh bridge (Phase D, D71) — built once the shell module loads. */
   let dshBridge = null
-  /** GitHub link service (Phase B/W3, D69 gate half). ctx.github overrides
-    * for tests; otherwise the real local-first service (keyring + browser
-    * PKCE) is built once. Import failure degrades to null — the gate then
-    * reads as unlinked and says so, never silently open. */
+  /** GitHub link service (Phase B/W3, D69 gate half). opts.github overrides
+    * for tests (the engine's ctx is inject-guarded — arbitrary properties
+    * throw); otherwise the real local-first service (keyring + browser PKCE)
+    * is built once. Import failure degrades to null — the gate then reads as
+    * unlinked and says so, never silently open. */
   let ghSvc = null
   let ghResolved = false
   const getGithub = async () => {
-    if (ctx.github) return ctx.github
+    if (opts.github) return opts.github
     if (ghResolved) return ghSvc
     ghResolved = true
     try {
@@ -351,6 +365,53 @@ export function apply(ctx) {
             const next = await getLifecycle()
             return json(res, { ok: true, action, root: !!next })
           }
+          /** GitHub link acts are ACCOUNT-level: they must work on the very
+            * first run — before any workspace/org exists (D69: the sign-in
+            * step is the first thing the create modal offers). Handled before
+            * the lifecycle guard for exactly that reason. */
+          if (action === 'github.status' || action === 'github.link' || action === 'github.unlink') {
+            const g = await getGithub()
+            if (!g) return json(res, { ok: false, error: 'github-unavailable', action })
+            const out = await (action === 'github.status' ? g.status() : action === 'github.link' ? g.link() : g.unlink())
+            return json(res, { ok: true, action, result: out })
+          }
+          /** org.create-at (D69 placement half): the picked folder ITSELF
+            * becomes the org — scaffold in place, touch recents, open. Works
+            * on the very first run (no lifecycle yet), like workspace.root.
+            * The account gate rides HERE, before any disk write. */
+          if (action === 'org.create-at') {
+            const requested = typeof arg?.path === 'string' ? arg.path.trim() : ''
+            const nm = typeof arg?.name === 'string' && arg.name.trim() !== '' ? arg.name.trim() : ''
+            if (requested === '') return json(res, { ok: false, error: 'org path required', action })
+            if (nm === '') return json(res, { ok: false, error: 'org name required', action })
+            const g = await getGithub().catch(() => null)
+            if (g) {
+              const st = await g.status().catch(() => ({ linked: false }))
+              if (!st.linked) return json(res, { ok: false, error: 'linked-required', action })
+            }
+            const [{ default: path }, { default: os }] = await Promise.all([import('node:path'), import('node:os')])
+            const expanded = requested.startsWith('~') ? path.join(os.homedir(), requested.slice(1)) : path.resolve(requested)
+            shell ??= await importShell().catch(() => null)
+            if (typeof shell?.scaffoldOrg !== 'function') {
+              return json(res, { ok: false, seam: SEAM_LIFECYCLE_STUBBED, error: 'shell-unavailable', action })
+            }
+            let created
+            try {
+              created = shell.scaffoldOrg(expanded, nm) // throws typed: bad folder / double scaffold
+            } catch (e) {
+              return json(res, { ok: false, error: String(e?.message ?? e), action })
+            }
+            if (typeof shell.touchRecent === 'function') { try { shell.touchRecent(created.path) } catch {} }
+            // Rebind the singleton: recents[0] is now the new org, and each
+            // org IS its own root (D69) — the cached lifecycle still points
+            // at the previous root. Graceful teardown first (reverse order,
+            // shell lock released), then a fresh lifecycle opens the new org.
+            if (lifecycle?.current) { try { await lifecycle.closeOrg() } catch {} }
+            lifecycle = null
+            const l2 = await getLifecycle()
+            if (l2) await l2.openOrg(created.path)
+            return json(res, { ok: true, action, result: { path: created.path, slug: created.slug ?? path.basename(created.path) } })
+          }
           const l = await getLifecycle()
           if (!l) return json(res, { ok: false, seam: SEAM_LIFECYCLE_STUBBED, error: 'no-workspace', action })
 
@@ -420,18 +481,6 @@ export function apply(ctx) {
             'session.archive': async () => {
               const cur = await ensureOpen(arg?.orgId)
               return cur.archiveSession(arg?.sessionId)
-            },
-            'github.status': async () => {
-              const g = await getGithub()
-              return g.status()
-            },
-            'github.link': async () => {
-              const g = await getGithub()
-              return g.link() // long-running: system browser + loopback wait
-            },
-            'github.unlink': async () => {
-              const g = await getGithub()
-              return g.unlink() // orgs stay local (D69 rider); pushes fail loud (D23)
             },
             'trash.restore': () => handle().restoreTrash(arg?.entryId ?? null),
             // 'ci.run' reserved for Phase D3 — deliberately absent.

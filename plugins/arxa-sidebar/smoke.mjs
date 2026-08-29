@@ -36,7 +36,7 @@ const fakeGh = {
   link: async () => { fakeGh.linked = true; return { linked: true, login: 'acme-owner' } },
   unlink: async () => { fakeGh.linked = false; return { unlinked: true } },
 }
-host.apply({ webServer: { register: (r) => { routes[r.path] = r.handler } }, github: fakeGh })
+host.apply({ webServer: { register: (r) => { routes[r.path] = r.handler } } }, { github: fakeGh })
 
 const call = (p, { method = 'GET', body, url = p } = {}) => new Promise((res) => {
   const req = { url, method, _h: {}, on(ev, fn) { this._h[ev] = fn } }
