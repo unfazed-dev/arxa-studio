@@ -4,9 +4,10 @@
 // resolves:  ZAI_API_KEY=... node scripts/zai-live-smoke.mjs
 // The key is read from the environment and never printed.
 import { createRequire } from 'node:module'
-const require = createRequire(new URL('../package.json', import.meta.url))
-const { stream } = await import(new URL('../node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js', import.meta.url))
-const catalog = require('../node_modules/@earendil-works/pi-ai/dist/providers/data/zai.json')
+import { fileURLToPath } from 'node:url'
+const require = createRequire(import.meta.url)
+const { stream } = await import(fileURLToPath(new URL('../node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js', import.meta.url)))
+const catalog = require(fileURLToPath(new URL('../node_modules/@earendil-works/pi-ai/dist/providers/data/zai.json', import.meta.url)))
 
 const apiKey = process.env.ZAI_API_KEY
 if (!apiKey) {
@@ -16,17 +17,13 @@ if (!apiKey) {
 }
 
 const catalogModel = catalog['openai-completions']['glm-5.3-flash']
+// Spread the catalog entry exactly as dsh materialization does — cost fields
+// included, or pi-ai's cost finalizer crashes on model.cost.tiers.
 const model = {
-  id: 'glm-5.3-flash',
-  name: 'GLM-5.3-Flash',
-  api: 'openai-completions',
+  ...catalogModel,
   baseUrl: 'https://api.z.ai/api/paas/v4',
-  contextWindow: 1000000,
-  maxTokens: 131072,
-  input: ['text', 'image'],
   reasoning: true,
-  thinkingLevelMap: { minimal: null, low: 'low', medium: 'low', high: 'high', max: 'max' },
-  compat: catalogModel.compat,
+  thinkingLevelMap: { minimal: null, low: null, medium: null, high: 'high', xhigh: null, max: 'max' },
 }
 const context = {
   systemPrompt: 'You are arxa, the agentic app studio harness by Totem Labs.',
@@ -40,13 +37,24 @@ const context = {
 }
 const options = { apiKey, maxTokens: 4096, sessionId: 'zai-live-smoke', reasoningEffort: 'max' }
 
-let text = '', toolCalls = [], stopReason, usage
+let text = '', toolCalls = [], stopReason, usage, doneEvent = null
+const seenTypes = new Set()
 for await (const ev of stream(model, context, options)) {
+  seenTypes.add(ev.type)
   if (ev.type === 'text' && ev.delta) text += ev.delta
-  if (ev.type === 'toolcall' && ev.delta?.id) toolCalls.push(ev.delta)
-  if (ev.type === 'done') { stopReason = ev.reason; usage = ev.usage }
-  if (ev.type === 'error') { console.error('STREAM ERROR:', JSON.stringify(ev.error ?? ev).slice(0, 400)); process.exit(1) }
+  const cand = ev.delta ?? ev.toolCall ?? null
+  if (cand && (cand.name || cand.id) && (cand.name?.includes('tool') || cand.name === 'demo_tool')) toolCalls.push(cand.name + ' ' + JSON.stringify(cand.arguments ?? ''))
+  if (ev.type === 'done') { doneEvent = ev; stopReason = ev.reason ?? ev.stopReason; usage = ev.usage }
+  if (ev.type === 'error') {
+    console.error('STREAM ERROR: ' + JSON.stringify({ errorMessage: ev.error?.errorMessage, stopReason: ev.error?.stopReason }))
+    process.exit(1)
+  }
 }
+console.log('event types seen:', [...seenTypes].join(', '))
+const msg = doneEvent?.message ?? doneEvent?.assistantMessage
+const msgToolCalls = (msg?.content ?? []).filter(c => c.type === 'toolCall').map(c => c.name + ' ' + JSON.stringify(c.arguments))
+if (msgToolCalls.length) toolCalls = msgToolCalls
+else if (!toolCalls.length && msg) toolCalls = ['(message content types: ' + (msg.content ?? []).map(c => c.type).join(', ') + ')']
 console.log('stopReason:', stopReason)
 console.log('toolCalls:', toolCalls.length ? toolCalls.map(t => t.name ?? t.id).join(', ') : '(none)')
 console.log('text tail:', JSON.stringify(text.slice(-80)))
