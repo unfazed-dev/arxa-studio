@@ -176,12 +176,16 @@
 		function WorkspaceRowsSection({ t }) {
 			const view = useOrg((s) => s.rowsView);
 			const selectedRowId = useOrg((s) => s.selectedRowId);
+			// Initial-snapshot state (2025-08 create-org hang): while the org's
+			// first git snapshot runs, session creation is gated with a reason —
+			// the state is server truth (hasHead), polled via the 5s refresh.
+			const snapPending = useOrg((s) => (s.orgs || []).some((o) => o.open && o.snapshotPending === true));
 			const rows = view.rows;
 			(0, react.useEffect)(() => {
 				const apply = () => {
 					for (const b of document.querySelectorAll(".aXa_sb_newSession")) {
-						b.disabled = !selectedRowId;
-						b.title = selectedRowId ? "" : t("newSession.selectFirst");
+						b.disabled = !selectedRowId || snapPending;
+						b.title = snapPending ? t("newSession.snapshotPending") : (selectedRowId ? "" : t("newSession.selectFirst"));
 					}
 				};
 				apply();
@@ -193,7 +197,7 @@
 						b.title = "";
 					}
 				};
-			}, [selectedRowId, t]);
+			}, [selectedRowId, snapPending, t]);
 			if (rows.length === 0) return null;
 			return (0, react_jsx_runtime.jsxs)("div", {
 				style: { padding: "0 4px 8px" },
@@ -202,10 +206,13 @@
 						style: { fontSize: 11, opacity: 0.55, textTransform: "uppercase", letterSpacing: "0.04em", padding: "4px 4px 2px" },
 						children: t("rows.section")
 					}),
-					selectedRowId === null && (0, react_jsx_runtime.jsx)("div", {
+					snapPending ? (0, react_jsx_runtime.jsx)("div", {
+						style: { fontSize: 11, opacity: 0.75, padding: "0 4px 4px" },
+						children: t("newSession.snapshotPending")
+					}) : (selectedRowId === null && (0, react_jsx_runtime.jsx)("div", {
 						style: { fontSize: 11, opacity: 0.55, padding: "0 4px 4px" },
 						children: t("newSession.selectFirst")
-					}),
+					})),
 					rows.map((r) => {
 						const isCat = r.kind === "category";
 						const selected = selectedRowId === r.rowId;
@@ -583,6 +590,7 @@
 			"github.signin.required": "Link your GitHub account first.",
 			"rows.section": "Workspaces",
 			"newSession.selectFirst": "Select a workspace to start a session",
+			"newSession.snapshotPending": "Preparing git snapshot — sessions unlock when it lands",
 			"welcome.title": "Welcome to arxa studio",
 			"welcome.desc": "Create your first organisation to start — arxa studio manages everything through git.",
 			"welcome.studio": "arxa studio",
@@ -627,6 +635,7 @@
 			"github.signin.required": "请先关联你的 GitHub 账号。",
 			"rows.section": "工作区",
 			"newSession.selectFirst": "先选择一个工作区再开始会话",
+			"newSession.snapshotPending": "正在准备 git 快照 — 完成后即可开始会话",
 			"welcome.title": "欢迎使用 arxa studio",
 			"welcome.desc": "创建你的第一个组织即可开始 — arxa studio 通过 git 管理一切。",
 			"welcome.studio": "arxa studio",

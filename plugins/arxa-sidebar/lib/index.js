@@ -220,6 +220,9 @@ export function apply(ctx, opts = {}) {
       slug,
       path,
       open: cur?.path === path,
+      // Initial-snapshot state (2025-08 create-org hang), open org only:
+      // the rows client disables the New Session CTA while true.
+      snapshotPending: cur?.path === path ? !!cur.snapshotPending?.() : false,
       createdAt: manifest?.createdAt ?? null,
       sessions: await orgSessions(l, { path }),
     })))
@@ -450,7 +453,7 @@ export function apply(ctx, opts = {}) {
             if (lifecycle?.current) { try { await lifecycle.closeOrg() } catch {} }
             lifecycle = null
             const l2 = await getLifecycle()
-            if (l2) await l2.openOrg(created.path)
+            if (l2) await l2.openOrg(created.path, { deferSnapshot: true }) // initial git snapshot runs detached — the request must never wait on bulk content (2025-08 hang)
             return json(res, { ok: true, action, result: { path: created.path, slug: created.slug ?? path.basename(created.path) } })
           }
           const l = await getLifecycle()

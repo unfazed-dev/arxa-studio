@@ -78,6 +78,18 @@ check('rows-c: selection face + gated startSession splice', client.includes('sel
 check('rows-c: selection hint + section label in both locales', client.includes('"rows.section": "Workspaces"') && client.includes('"newSession.selectFirst": "Select a workspace to start a session"') && client.includes('"rows.section": "工作区"'))
 check('rows-c: server snapshot serves rows (category + project rowIds)', hostSrc().includes("rowId: 'category:'") && hostSrc().includes("rowId: 'project:'"))
 check('rows-c: server act maps rowId → scoped session', hostSrc().includes("'workspace.new-session'") && hostSrc().includes('cur.newSession(undefined, proj)'))
+
+// ---- 3c. initial-snapshot gating (2025-08 create-org hang) ---------------------
+// An in-place org root full of bulk content made the inline git add -A run
+// for many minutes and froze the app mid-create. The contract now: create-at
+// defers the snapshot (detached worker), the rows client gates the New
+// Session CTA on the org's snapshotPending, and the message is human.
+check('rows-snap: New Session CTA gates on the org snapshot state (both locales)',
+  client.includes('b.disabled = !selectedRowId || snapPending')
+  && client.includes('"newSession.snapshotPending": "Preparing git snapshot — sessions unlock when it lands"')
+  && client.includes('"newSession.snapshotPending": "正在准备 git 快照 — 完成后即可开始会话"'))
+check('rows-snap: server snapshot exposes snapshotPending (open org)', hostSrc().includes('snapshotPending: cur?.path === path'))
+check('rows-snap: create-at defers the initial snapshot (request never waits on bulk content)', hostSrc().includes('openOrg(created.path, { deferSnapshot: true })'))
 check('welcome: blank-page gate with card when no org (D69 UX)', client.includes('function WelcomeGate(') && client.includes('"welcome.title": "Welcome to arxa studio"') && client.includes('"welcome.title": "欢迎使用 arxa studio"') && client.includes('!creating && (0, react_jsx_runtime.jsx)(WelcomeGate'))
 check('welcome: TWO buttons - arxa studio (create) + arxa business (disabled, later)', client.includes('t("welcome.studio")') && client.includes('t("welcome.business")') && client.includes('"welcome.businessSoon"') && !client.includes('t("welcome.cta")'))
 check('welcome: one-shot resume to newest session of the open org', client.includes('resumeTried') && client.includes('maybeResume(next.orgs)') && client.includes('action: "session.open"'))
@@ -157,6 +169,32 @@ check('seam: arxa-file-org-shell resolves with createOrgLifecycle', typeof mod?.
   const os = await import('node:os')
   const svc = mod.createOrgLifecycle({ workspaceRoot: mkdtempSync(join(os.tmpdir(), 'arxa-rows-')) })
   check('rows face: lifecycle exposes renameOrg (D41 manifest-only)', typeof svc.renameOrg === 'function')
+}
+{
+  // The 2025-08 create-org hang, end-to-end against the REAL lifecycle on a
+  // throwaway root: a deferred open leaves the snapshot pending (CTA-gated),
+  // session creation refuses with a human reason, and the detached worker
+  // lands HEAD on its own — the gate lifts itself without any caller waiting.
+  const { mkdtempSync, mkdirSync, rmSync } = await import('node:fs')
+  const os = await import('node:os')
+  const root = mkdtempSync(join(os.tmpdir(), 'arxa-snap-'))
+  try {
+    const orgPath = join(root, 'bulk-org')
+    mkdirSync(orgPath, { recursive: true }) // D69: scaffold IN PLACE — the folder exists first
+    mod.scaffoldOrg(orgPath, 'Snap Org')
+    const l2 = mod.createOrgLifecycle({ workspaceRoot: root })
+    await l2.openOrg(orgPath, { deferSnapshot: true })
+    check('rows-snap: deferred open reports snapshotPending true', l2.current.snapshotPending() === true)
+    let guardMsg = ''
+    try { await l2.current.newSession('probe', null) } catch (e) { guardMsg = String(e?.message ?? e) }
+    check('rows-snap: session creation refuses with a human reason while pending', guardMsg.includes('initial-snapshot-pending'))
+    const deadline = Date.now() + 20000
+    while (l2.current.snapshotPending() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100))
+    check('rows-snap: detached snapshot lands HEAD; gate lifts itself', l2.current.snapshotPending() === false)
+    try { l2.closeOrg() } catch {}
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 }
 check('rows face: host-served read-only exports (listSessions/listTrash)', typeof mod?.listSessions === 'function' && typeof mod?.listTrash === 'function')
 check('rows face: workspace-root discovery exported', typeof mod?.loadWorkspaceRoot === 'function')

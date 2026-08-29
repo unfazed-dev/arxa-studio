@@ -22,6 +22,7 @@ import {
   GitUnavailableError, probeGit, resetProbe,
   runGit, WIP_IDENTITY,
   isRepo, initOrgRepo, initProjectRepo,
+  hasHead, readSnapshotMarker, snapshotWorkerLive, spawnSnapshotOrgRepo,
   isDirty, wipCommit, wipRun, stageBoundarySquash, stageLog,
   mintAtStageBoundary, versionChip, readVersions,
   SessionMergeError, GATE_CHECK_SCRIPT,
@@ -324,4 +325,63 @@ ok('main history: every commit is a stage commit — no WIP identity, no direct 
 
   fs.rmSync(originTmp, { recursive: true, force: true })
 }
+
+// ---- 6. initial snapshot: defer / detached spawn / unborn-HEAD heal --------
+// The 2025-08 create-org hang: an in-place org root full of bulk content
+// made the inline 'add -A' run for many minutes and froze the app. The
+// contract now: deferSnapshot skips the sync snapshot; the detached
+// worker lands HEAD without anyone waiting; a repo left with an unborn
+// HEAD is healed on the next init.
+
+const deferPath = path.join(tmp, 'defer-org')
+fs.mkdirSync(path.join(deferPath, 'notes'), { recursive: true })
+fs.writeFileSync(path.join(deferPath, 'org.json'), '{"name":"defer"}\n')
+fs.writeFileSync(path.join(deferPath, 'notes', 'a.md'), '# a\n')
+
+ok('initOrgRepo deferSnapshot: repo attached, NO commit yet, deferred flagged', () => {
+  const res = initOrgRepo(deferPath, process.env, { deferSnapshot: true })
+  assert.equal(res.initialised, true)
+  assert.equal(res.deferred, true)
+  assert.equal(isRepo(deferPath), true)
+  assert.equal(hasHead(deferPath), false) // session gate holds
+})
+
+async function okA(label, fn) {
+  await fn()
+  passed += 1
+  console.log(`ok ${passed} - ${label}`)
+}
+
+await okA('spawnSnapshotOrgRepo: detached worker lands HEAD + done marker', async () => {
+  const { pid } = spawnSnapshotOrgRepo(deferPath)
+  assert.equal(typeof pid, 'number')
+  const deadline = Date.now() + 20000
+  while (!hasHead(deferPath)) {
+    if (Date.now() > deadline) throw new Error('detached snapshot never landed HEAD')
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  const m = readSnapshotMarker(deferPath)
+  assert.equal(m.state, 'done')
+  assert.equal(snapshotWorkerLive(deferPath), false) // worker exited
+  assert.match(runGit(['rev-parse', 'refs/arxa/stage-base'], { cwd: deferPath }), /^[0-9a-f]{40}$/)
+})
+
+ok('initOrgRepo heals an unborn-HEAD repo (interrupted snapshot)', () => {
+  const healPath = path.join(tmp, 'heal-org')
+  fs.mkdirSync(healPath, { recursive: true })
+  fs.writeFileSync(path.join(healPath, 'org.json'), '{"name":"heal"}\n')
+  runGit(['init'], { cwd: healPath }) // repo with unborn HEAD, no commit
+  assert.equal(hasHead(healPath), false)
+  const res = initOrgRepo(healPath) // default: heal synchronously
+  assert.equal(res.initialised, false) // repo already existed
+  assert.equal(res.deferred, false)
+  assert.equal(hasHead(healPath), true)
+})
+
+ok('initOrgRepo on a healthy repo stays a no-op (deferred or not)', () => {
+  const again = initOrgRepo(deferPath, process.env, { deferSnapshot: true })
+  assert.equal(again.initialised, false)
+  assert.equal(again.deferred, false) // hasHead → nothing to defer
+})
+
 console.log(`\nselftest: ${passed}/${passed} passed`)

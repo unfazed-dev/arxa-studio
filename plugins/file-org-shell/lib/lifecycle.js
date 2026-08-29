@@ -60,9 +60,12 @@ import {
 import {
   ensureGit,
   isRepo,
+  hasHead,
   initOrgRepo,
   initProjectRepo,
   setOrigin,
+  spawnSnapshotOrgRepo,
+  snapshotWorkerLive,
   listSessions,
   archivedSessionIds,
   openSession,
@@ -203,7 +206,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     return created
   }
 
-  async function openOrg(orgPath) {
+  async function openOrg(orgPath, opts = {}) {
     if (current) throw new OrgAlreadyOpenError(current.path, orgPath)
     const resolved = path.resolve(orgPath)
     const slug = orgSlugOf(resolved)
@@ -237,11 +240,21 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
 
       // 4. git repo attach — mandatory; no repo means no sessions and no
       //    rewind safety, so a missing git binary fails the open loudly.
+      //    The INITIAL SNAPSHOT may be deferred (opts.deferSnapshot — the
+      //    create-org request path): the initial 'add -A' is unbounded on
+      //    a D69 in-place root that already holds bulk content, and running
+      //    it inline froze the whole app for the length of the hashing
+      //    (2025-08 create-org hang). Deferred or interrupted snapshots
+      //    run DETACHED instead; hasHead() stays the session gate, and
+      //    every open re-vouches for (or respawns) a pending snapshot.
       step = 'git-attach'
       ensureGit(env)
-      const repo = initOrgRepo(resolved, env)
+      const existingUnborn = isRepo(resolved, env) && !hasHead(resolved, env)
+      const repo = initOrgRepo(resolved, env, { deferSnapshot: opts.deferSnapshot === true || existingUnborn })
       ensureRuntimeExcluded(resolved, env) // /.arxa/ runtime state never enters git
       ensureAccountExcluded(resolved, env) // belt-and-braces /account/ (D37)
+      const snapshotPending = repo.deferred === true || !hasHead(resolved, env)
+      if (snapshotPending && !snapshotWorkerLive(resolved, env)) spawnSnapshotOrgRepo(resolved, env)
 
       // 5. session lifecycle ready — registry readable, archived derivable.
       step = 'sessions'
@@ -326,6 +339,12 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
         trashCount() {
           return listTrash(resolved).length // org-local trash: <org>/.arxa/trash
         },
+        /** Initial-snapshot face (2025-08 create-org hang): true until the
+        * detached first git snapshot lands HEAD. The rows client disables
+        * session creation and says why while this is true. */
+        snapshotPending() {
+          return !hasHead(resolved, env)
+        },
         /**
          * W3b (D69 publish half): scaffold the local project, THEN — only
          * when github faces are injected AND linked — create the private
@@ -357,6 +376,10 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           return created
         },
         async newSession(name, project) {
+          // Sessions branch from HEAD; until the initial snapshot lands
+          // there is nothing to branch from. Loud, human, and the rows
+          // client normally prevents reaching this at all (CTA disabled).
+          if (!hasHead(resolved, env)) throw new Error('initial-snapshot-pending: the first git snapshot of this organisation is still running — sessions unlock the moment it completes')
           // Sessions carry an optional project scope (annotation in the
           // registry): accept project id or slug, store the slug (stable
           // across renames). Unknown project is a loud error, never a
@@ -385,6 +408,10 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           )
         },
         async resumeSession(id) {
+          // Sessions branch from HEAD; until the initial snapshot lands
+          // there is nothing to branch from. Loud, human, and the rows
+          // client normally prevents reaching this at all (CTA disabled).
+          if (!hasHead(resolved, env)) throw new Error('initial-snapshot-pending: the first git snapshot of this organisation is still running — sessions unlock the moment it completes')
           const row = listSessions(resolved, env).find((s) => s.id === id)
           const out = reviveSession(resolved, id, env)
           // Re-attach the dsh conversation (focus/open by dshSessionId) when
@@ -395,6 +422,10 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           return out
         },
         async archiveSession(id) {
+          // Sessions branch from HEAD; until the initial snapshot lands
+          // there is nothing to branch from. Loud, human, and the rows
+          // client normally prevents reaching this at all (CTA disabled).
+          if (!hasHead(resolved, env)) throw new Error('initial-snapshot-pending: the first git snapshot of this organisation is still running — sessions unlock the moment it completes')
           // D39/D40 archive: flag out of active views, WIP-commit, prune the
           // worktree, keep the branch. The rows face then holds it back.
           const row = listSessions(resolved, env).find((s) => s.id === id)

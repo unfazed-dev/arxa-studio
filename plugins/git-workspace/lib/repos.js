@@ -6,8 +6,23 @@
 // travel with the org repo when it is cloned/shared per D17.
 
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
-import { runGit } from './run.js'
+import { execFileSync, spawn } from 'node:child_process'
+import { runGit, STAGE_IDENTITY } from './run.js'
+import { ensureGit, gitBin } from './probe.js'
+
+// Pinned config for DETACHED git workers, same surface as run.js's -c
+// flags but carried as env (GIT_CONFIG_*) so a /bin/sh chain needs no
+// per-flag plumbing. Git >= 2.31 reads these; run.js still pins via -c
+// for its own execFileSync calls.
+const SNAPSHOT_CONFIG = Object.freeze([
+  ['init.defaultBranch', 'main'],
+  ['commit.gpgsign', 'false'],
+  ['tag.gpgsign', 'false'],
+  ['core.hooksPath', ''],
+  ['core.autocrlf', 'false'],
+])
 
 // Committed at the org root. The "/projects/" star pattern keeps every
 // nested project repo (and any stray folder under projects/) out of the
@@ -37,21 +52,141 @@ function initRepo(dir, env) {
 }
 
 /**
- * Turn a scaffolded org folder (plugins/workspace scaffoldOrg output)
- * into the org repo: git init, D37 ignore rules, and an initial stage
- * commit — so a stage-boundary squash base always exists from day one.
- * Idempotent: re-running on an existing org repo is a no-op.
- *
- * @returns {{ path: string, initialised: boolean }}
- */
-export function initOrgRepo(orgPath, env = process.env) {
-  if (isRepo(orgPath, env)) return { path: orgPath, initialised: false }
-  initRepo(orgPath, env)
-  fs.writeFileSync(path.join(orgPath, '.gitignore'), ORG_GITIGNORE)
+/** True when the repo at "dir" has at least one commit on HEAD. This is
+ * the SESSION-UNLOCK contract: worktrees need a commit to branch from,
+ * so has-head is exactly initial-snapshot-complete. */
+export function hasHead(dir, env = process.env) {
+  return runGit(['rev-parse', '-q', '--verify', 'HEAD'], { cwd: dir, env, allowFail: true }) !== null
+}
+
+function snapshotMarkerPath(orgPath) {
+  return path.join(orgPath, '.arxa', 'snapshot.json')
+}
+
+function writeSnapshotMarker(orgPath, body) {
+  try {
+    fs.mkdirSync(path.join(orgPath, '.arxa'), { recursive: true })
+    fs.writeFileSync(snapshotMarkerPath(orgPath), JSON.stringify(body))
+  } catch { /* the marker is advisory; snapshot truth lives in git itself */ }
+}
+
+/** The detached initial-snapshot marker, or null. Advisory diagnostics
+ * only (which pid, since when) — correctness NEVER depends on it:
+ * hasHead() is the truth; this merely says whether a worker may exist. */
+export function readSnapshotMarker(orgPath) {
+  try { return JSON.parse(fs.readFileSync(snapshotMarkerPath(orgPath), 'utf8')) } catch { return null }
+}
+
+// The out-of-process initial-snapshot worker: same pinned git surface as
+// runGit (config via -c, identity via env, no user git state touched),
+// argv-array execFileSync — no shell, no quoting. Written fresh per spawn
+// into the org runtime dir and run with the app's own node binary.
+const SNAPSHOT_WORKER = [
+  'import { execFileSync } from \'node:child_process\'',
+  'import fs from \'node:fs\'',
+  'const org = process.argv[2]',
+  'const git = process.argv[3]',
+  'const marker = org + \'/.arxa/snapshot.json\'',
+  'const pin = [\'-c\', \'init.defaultBranch=main\', \'-c\', \'commit.gpgsign=false\', \'-c\', \'tag.gpgsign=false\', \'-c\', \'core.hooksPath=\', \'-c\', \'core.autocrlf=false\', \'-c\', \'safe.directory=\' + org]',
+  'const opt = { cwd: org, env: process.env }',
+  'try {',
+  '  execFileSync(git, [...pin, \'add\', \'-A\'], opt)',
+  '  execFileSync(git, [...pin, \'commit\', \'-m\', \'stage: scaffold organisation\'], opt)',
+  '  execFileSync(git, [...pin, \'update-ref\', \'refs/arxa/stage-base\', \'HEAD\'], opt)',
+  '  fs.writeFileSync(marker, JSON.stringify({ state: \'done\', finishedAt: new Date().toISOString() }))',
+  '} catch (e) {',
+  '  try { fs.writeFileSync(marker, JSON.stringify({ state: \'error\', error: String(e && e.message ? e.message : e) })) } catch {}',
+  '  process.exit(1)',
+  '}',
+].join('\n')
+
+function snapshotWorkerEnv(orgPath, env) {
+  const child = { ...env }
+  for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_NAMESPACE', 'GIT_COMMON_DIR']) delete child[k]
+  child.GIT_CONFIG_NOSYSTEM = '1'
+  child.GIT_CONFIG_GLOBAL = os.devNull
+  child.GIT_AUTHOR_NAME = STAGE_IDENTITY.name
+  child.GIT_AUTHOR_EMAIL = STAGE_IDENTITY.email
+  child.GIT_COMMITTER_NAME = STAGE_IDENTITY.name
+  child.GIT_COMMITTER_EMAIL = STAGE_IDENTITY.email
+  return child
+}
+
+/** The initial stage snapshot, synchronously: stage everything, commit
+ * the scaffold stage, pin the stage-base ref. SYNCHRONOUS and unbounded —
+ * on a D69 in-place org root that already holds bulk content this can run
+ * for minutes and freeze the caller (execFileSync). Request paths MUST
+ * prefer spawnSnapshotOrgRepo; the sync form stays for tests, explicit
+ * healing, and callers with no event loop to protect. */
+export function snapshotOrgRepo(orgPath, env = process.env) {
   runGit(['add', '-A'], { cwd: orgPath, env })
   runGit(['commit', '-m', 'stage: scaffold organisation'], { cwd: orgPath, env })
   runGit(['update-ref', 'refs/arxa/stage-base', 'HEAD'], { cwd: orgPath, env })
-  return { path: orgPath, initialised: true }
+}
+
+/** True when a detached initial-snapshot worker for this org may still be
+ * alive: marker pid answers kill(0) AND /bin/ps shows the worker command
+ * for it (the second check defeats pid reuse). Conservative — verification
+ * failure reads as live, which only ever delays a respawn; a false "dead"
+ * would double-spawn competing git adds. */
+export function snapshotWorkerLive(orgPath) {
+  const m = readSnapshotMarker(orgPath)
+  if (!m || m.state !== 'running' || typeof m.pid !== 'number') return false
+  try { process.kill(m.pid, 0) } catch { return false }
+  try {
+    const cmd = execFileSync('/bin/ps', ['-o', 'command=', '-p', String(m.pid)], { encoding: 'utf8' })
+    return cmd.includes('snapshot-worker')
+  } catch { return true }
+}
+
+/** Run the initial snapshot DETACHED (survives app quit) and return the
+ * worker pid. Completion is announced by git itself: hasHead() flips true,
+ * and the worker leaves a done/error marker for diagnostics. A multi-minute
+ * add -A over bulk content can no longer freeze the app. */
+export function spawnSnapshotOrgRepo(orgPath, env = process.env) {
+  ensureGit(env)
+  const dir = path.join(orgPath, '.arxa')
+  fs.mkdirSync(dir, { recursive: true })
+  const worker = path.join(dir, 'snapshot-worker.mjs')
+  fs.writeFileSync(worker, SNAPSHOT_WORKER)
+  const marker = path.join(dir, 'snapshot.json')
+  // Pre-write the running marker so snapshotWorkerLive can vouch for the
+  // worker from the instant it exists; the worker overwrites it at the end.
+  writeSnapshotMarker(orgPath, { state: 'running', pid: null, startedAt: new Date().toISOString() })
+  const ch = spawn(process.execPath, [worker, orgPath, gitBin(env)], {
+    cwd: orgPath,
+    env: snapshotWorkerEnv(orgPath, env),
+    detached: true,
+    stdio: 'ignore',
+  })
+  writeSnapshotMarker(orgPath, { state: 'running', pid: ch.pid, startedAt: new Date().toISOString() })
+  ch.unref()
+  return { pid: ch.pid, marker }
+}
+
+/**
+ * Turn a scaffolded org folder (plugins/workspace scaffoldOrg output)
+ * into the org repo: git init, D37 ignore rules, and an initial stage
+ * commit — so a stage-boundary squash base always exists from day one.
+ * Idempotent: re-running on an existing org repo is a no-op, and a repo
+ * left with an UNBORN HEAD (a previous attempt died mid-snapshot) is
+ * healed by snapshotting — the exact wedge the 2025-08 create-org hang
+ * left on disk. deferSnapshot skips the (unbounded) initial snapshot for
+ * request-path callers: they return fast and spawn the detached worker
+ * instead. hasHead() remains the session gate either way.
+ *
+ * @returns {{ path: string, initialised: boolean, deferred: boolean }}
+ */
+export function initOrgRepo(orgPath, env = process.env, { deferSnapshot = false } = {}) {
+  if (isRepo(orgPath, env)) {
+    if (hasHead(orgPath, env)) return { path: orgPath, initialised: false, deferred: false }
+    if (!deferSnapshot) snapshotOrgRepo(orgPath, env) // heal an interrupted initial snapshot
+    return { path: orgPath, initialised: false, deferred: deferSnapshot }
+  }
+  initRepo(orgPath, env)
+  fs.writeFileSync(path.join(orgPath, '.gitignore'), ORG_GITIGNORE)
+  if (!deferSnapshot) snapshotOrgRepo(orgPath, env)
+  return { path: orgPath, initialised: true, deferred: deferSnapshot }
 }
 
 /** Read the URL of the `origin` remote, or null when absent (allowFail). */
