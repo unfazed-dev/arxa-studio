@@ -1761,7 +1761,7 @@ window.__ModuleLoader__.load({
 										open: () => { orgStore.mutate("org.open", { orgId: group.workspaceId }).catch(() => {}); }
 										}
 									}),
-									(0, react_jsx_runtime.jsx)(OrgCategoryRows, { orgId: group.workspaceId, t }),
+									(0, react_jsx_runtime.jsx)(OrgCategoryRows, { orgId: group.workspaceId }),
 										(expandedSessionGroups.includes(group.key) ? group.sessions : group.sessions.slice(0, COLLAPSED_SESSION_LIMIT)).map((node) => {
 										const sameGroupDrag = drag !== null && drag.accountKey === group.key;
 										return (0, react_jsx_runtime.jsx)(SessionNodeItem, {
@@ -2750,8 +2750,10 @@ window.__ModuleLoader__.load({
 					const sig = JSON.stringify([next.orgs, next.rows, next.trash, next.trashCount, next.root, next.selectedProject]);
 					if (sig !== state.__sig) {
 						// Client-side faces survive every server replacement (the trash
-						// toggle is not server data).
-						state = { ...next, loading: false, __sig: sig, trashOpen: state.trashOpen };
+						// toggle and the row selection are not server data — a bare
+						// spread would leave selectedRowId undefined where the
+						// contract says null).
+						state = { ...next, loading: false, __sig: sig, trashOpen: state.trashOpen, selectedRowId: state.selectedRowId ?? null };
 						state.trashView = { rows: state.trash ?? [], open: state.trashOpen ?? true };
 						// Derived faces computed ONCE per state replacement: stock hosts
 						// serve stable array identities, and per-render rebuilds would
@@ -2811,6 +2813,12 @@ window.__ModuleLoader__.load({
 			};
 		}
 		const orgStore = createOrgStore();
+		/** Locale capture for stock-scope render sites: SessionTree (where
+		 * OrgCategoryRows renders, gen splice 6c) has NO t prop — a t passed
+		 * there is an undefined identifier that kills the whole sidebar
+		 * section (seen live 2026-08-30: blank sidebar). OrgBrowser refreshes
+		 * the capture every render; identity-stable fallback until then. */
+		let orgT = (k) => k;
 		window.__ARXA_SIDEBAR__ = {
 			get orgOpen() {
 				return orgStore.get().orgs.some((o) => o.open);
@@ -2912,7 +2920,7 @@ window.__ModuleLoader__.load({
 		 * selection and the server switches orgs when the row belongs to a
 		 * non-open org. Counts are honest: project rows carry registry
 		 * counts; category counts wait for the live listing (phase D). */
-		function OrgCategoryRows({ orgId, t }) {
+		function OrgCategoryRows({ orgId }) {
 			const org = useOrg((s) => (s.orgs || []).find((o) => o.id === orgId));
 			const sel = useOrg((s) => s.selectedRowId);
 			const rows = org?.rows ?? [];
@@ -2921,16 +2929,16 @@ window.__ModuleLoader__.load({
 				style: { padding: "2px 4px" },
 				children: rows.map((r) => {
 					const isCat = r.kind === "category";
-					const selected = sel !== null && sel.orgId === orgId && sel.rowId === r.rowId;
+					const selected = !!sel && sel.orgId === orgId && sel.rowId === r.rowId;
 					return (0, react_jsx_runtime.jsxs)("div", {
 						onClick: () => orgStore.selectRow(selected ? null : { orgId, rowId: r.rowId }),
 						className: clsx(Rows_module_css_default.sessionRow, Rows_module_css_default.flatSessionRowWithoutStatus),
 						style: { paddingLeft: isCat ? 26 : 44, opacity: r.exists === false ? 0.55 : 1, cursor: "pointer", borderRadius: 6, background: selected ? "rgba(127,127,127,0.22)" : "transparent" },
-						title: isCat ? t("tree.category." + r.slug) : r.slug,
+						title: isCat ? orgT("tree.category." + r.slug) : r.slug,
 						children: [
 							(0, react_jsx_runtime.jsx)("span", {
 								style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: isCat ? 13 : 12 },
-								children: isCat ? t("tree.category." + r.slug) : (r.displayName || r.slug)
+								children: isCat ? orgT("tree.category." + r.slug) : (r.displayName || r.slug)
 							}),
 							r.sessionCount !== null && r.sessionCount !== void 0 ? (0, react_jsx_runtime.jsx)("span", {
 								style: { fontSize: 11, opacity: 0.55, flex: "none" },
@@ -3287,6 +3295,7 @@ window.__ModuleLoader__.load({
 			}, []);
 			// CTA gate lives here now (always mounted) — see useSessionCtaGate.
 			useSessionCtaGate(props.t);
+			orgT = props.t; // stock-scope render sites read the locale through this
 			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, {
 				children: [
 					!creating && (0, react_jsx_runtime.jsx)(WelcomeGate, { t: props.t }),

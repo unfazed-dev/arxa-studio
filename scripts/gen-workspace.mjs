@@ -108,10 +108,13 @@ out = out.replace(ROW_TOGGLE, 'onClick: () => { onToggle(); if (actions !== void
 //      every org group renders its five category rows + projects as the
 //      group's FIRST children — the nesting slot sessions held in stock
 //      dsh — replacing the detached WORKSPACES section. OrgCategoryRows
-//      lives in the region (module scope, render-time resolution).
+//      lives in the region (module scope, render-time resolution). NOTE:
+//      NO t here — SessionTree's scope has no t; the component reads the
+//      locale through the region's orgT capture (a passed t is an
+//      undefined identifier that blanks the whole sidebar).
 const GROUP_KIDS = '(expandedSessionGroups.includes(group.key) ? group.sessions : group.sessions.slice(0, COLLAPSED_SESSION_LIMIT)).map((node) => {'
 if (!out.includes(GROUP_KIDS)) throw new Error('group children anchor missing — stock shape moved?')
-out = out.replace(GROUP_KIDS, '(0, react_jsx_runtime.jsx)(OrgCategoryRows, { orgId: group.workspaceId, t }),\n' + T(10) + GROUP_KIDS)
+out = out.replace(GROUP_KIDS, '(0, react_jsx_runtime.jsx)(OrgCategoryRows, { orgId: group.workspaceId }),\n' + T(10) + GROUP_KIDS)
 
 
 // 7. menu routing: Trash toggles the inline section (client-side state).

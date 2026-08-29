@@ -73,7 +73,11 @@ check('rows: OrgSection block deleted', !client.includes('OrgSection'))
 
 // ---- 3b. workspace rows (org-model-v2 Phase C: D70/D71) ------------------------
 check('rows-c: OrgCategoryRows nest under each org (the rows ARE the tree, 2026-08-30 v1.2)',
-  client.includes('function OrgCategoryRows({ orgId, t })') && client.includes('OrgCategoryRows, { orgId: group.workspaceId, t }') && !client.includes('WorkspaceRowsSection'))
+  client.includes('function OrgCategoryRows({ orgId })') && client.includes('OrgCategoryRows, { orgId: group.workspaceId }') && !client.includes('WorkspaceRowsSection'))
+check('rows-c: scope gate — injected identifiers must be verified against the REAL stock scope (t rides SessionTree params; orgT makes the region locale-scope-independent)',
+  !client.includes('OrgCategoryRows, { orgId: group.workspaceId, t }')
+  && client.includes('let orgT =') && client.includes('orgT = props.t')
+  && /function SessionTree\(\{[^)]*\bt\b[^)]*\)\s*\{/.test(client))
 check('rows-c: OrgTreeSection dissolved', !client.includes('OrgTreeSection') && !client.includes('treeRows'))
 check('rows-c: selection face (org-scoped) + gated startSession splice', client.includes('selectRow(sel)') && client.includes('workspace.new-session') && client.includes('const sel = orgStore.get().selectedRowId;') && client.includes('{ orgId: sel.orgId, rowId: sel.rowId }'))
 check('rows-c: selection tooltip in both locales (section label gone with the detached section)', client.includes('"newSession.selectFirst": "Select a workspace to start a session"') && !client.includes('"rows.section"') && !client.includes('工作区": "'))
