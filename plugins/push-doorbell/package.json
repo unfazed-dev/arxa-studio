@@ -1,0 +1,12 @@
+{
+  "name": "arxa-push-doorbell",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The engine-side push doorbell (arxa/docs/plans/doorbell-decision-2026-08-29.md, option B1): one minimal caller that POSTs loopback /v1/send to the desktop's cairn-pushd sidecar for the approval-requested event class. Pure-library plugin — nothing registers into cordis until the approvals feature gains a call site. Config-gated off by default (ARXA_DOORBELL_PUSH=true); device tokens come from the desktop's pairing.json, the bearer from pushd.env, both overridable by env. Never throws into the engine: every failure is a logged, counted no-op.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  }
+}
