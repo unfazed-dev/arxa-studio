@@ -1745,7 +1745,7 @@ window.__ModuleLoader__.load({
 								},
 								children: [
 									...ARXA_CONTAINER_ROWS(group.workspaceId),
-									(0, react_jsx_runtime.jsx)(ProjectRowItem, {
+									...(ARXA_IS_CONTAINER_GROUP(group.workspaceId) ? [] : [(0, react_jsx_runtime.jsx)(ProjectRowItem, {
 										group,
 										home,
 										t,
@@ -1772,7 +1772,7 @@ window.__ModuleLoader__.load({
 										trash: () => orgStore.toggleTrash(),
 										open: () => { orgStore.mutate("org.open", { orgId: group.workspaceId }).catch(() => {}); }
 										}
-									}),
+									})]),
 									(expandedSessionGroups.includes(group.key) ? group.sessions : group.sessions.slice(0, COLLAPSED_SESSION_LIMIT)).map((node) => {
 										const sameGroupDrag = drag !== null && drag.accountKey === group.key;
 										return (0, react_jsx_runtime.jsx)(SessionNodeItem, {
@@ -2875,15 +2875,21 @@ window.__ModuleLoader__.load({
 			},
 			refresh: () => orgStore.refresh()
 		};
-		/** Leaf workspace feed (v2, grilled 2026-08-30): every workspace row
-		 * of every org becomes ONE stock workspace item — the stock tree
-		 * renders each as a full dsh workspace row (folder icon, hover +,
-		 * nested sessions, collapse, overflow). workspaceId encodes org +
-		 * workspace path: "<orgId>|notes", "<orgId>|meetings/scheduler",
-		 * "<orgId>|projects/topo/design". Sessions bind by workspace match;
-		 * a leaf inside a collapsed container STAYS in the feed (stable
-		 * group identity) — the group render gates display, never identity.
-		 * Degraded read (tree null): the org lists without rows. */
+		/** Workspace feed (v2 collapse fix, 2026-08-30): every CONTAINER
+		 * (org, dock, project) and every leaf workspace becomes ONE stock
+		 * workspace item. Containers are pseudo workspaces: their group
+		 * hosts the OrgContainerRow and never the stock folder row (the
+		 * gen splice suppresses it). v2 anchored container rows inside
+		 * their first LEAF's group — dead by construction: collapsing a
+		 * container hides every leaf group under it (leafHidden), so the
+		 * row vanished with its anchor; tapping an org removed it from the
+		 * tree entirely, org by org. A pseudo group hides only when an
+		 * ANCESTOR collapses (the org pseudo has ws "" and never hides),
+		 * so a row always survives its own collapse. Feed order IS render
+		 * order (groupByWorkspace preserves it). Sessions bind by workspace
+		 * match on leaves ("<orgId>|notes", "<orgId>|meetings/scheduler",
+		 * "<orgId>|projects/topo/design"); pseudo items carry none.
+		 * Degraded read (tree null): the org still lists its own row. */
 		const wsLabel = (p) => {
 			const parts = p.split("/");
 			if (parts[0] === "projects" && parts.length === 3) return orgT("tree.pc." + parts[2]);
@@ -2893,21 +2899,30 @@ window.__ModuleLoader__.load({
 			const items = [];
 			for (const o of s.orgs || []) {
 				const tree = o.tree;
-				if (!tree || !Array.isArray(tree.docks)) continue;
-				const push = (ws) => items.push({
-					workspaceId: o.id + "|" + ws,
-					title: wsLabel(ws),
-					path: o.path + "/" + ws,
+				const push = (ws, title, sessionIds) => items.push({
+					workspaceId: ws === null ? o.id : o.id + "|" + ws,
+					title,
+					path: ws === null ? o.path : o.path + "/" + ws,
 					createdAt: o.createdAt,
-					sessionIds: (o.sessions || []).filter((x) => (x.workspace ?? "") === ws).map((x) => x.id)
+					sessionIds: sessionIds ?? []
 				});
+				const leafIds = (ws) => (o.sessions || []).filter((x) => (x.workspace ?? "") === ws).map((x) => x.id);
+				// The org pseudo group comes first: the org row's permanent host.
+				push(null, o.name);
+				if (!tree || !Array.isArray(tree.docks)) continue;
 				for (const d of tree.docks) {
 					if (d.slug === "projects") {
-						for (const p of tree.projects || []) for (const c of p.containers || []) push("projects/" + p.slug + "/" + c);
+						push("projects", orgT("tree.dock.projects"));
+						for (const p of tree.projects || []) {
+							push("projects/" + p.slug, p.name);
+							for (const c of p.containers || []) push("projects/" + p.slug + "/" + c, wsLabel("projects/" + p.slug + "/" + c), leafIds("projects/" + p.slug + "/" + c));
+						}
 					} else if (d.workspace) {
-						push(d.slug);
+						// Bare dock (notes): the leaf IS the dock row — no pseudo.
+						push(d.slug, wsLabel(d.slug), leafIds(d.slug));
 					} else {
-						for (const c of d.containers || []) push(d.slug + "/" + c);
+						push(d.slug, orgT("tree.dock." + d.slug));
+						for (const c of d.containers || []) push(d.slug + "/" + c, wsLabel(d.slug + "/" + c), leafIds(d.slug + "/" + c));
 					}
 				}
 			}
@@ -2963,9 +2978,11 @@ window.__ModuleLoader__.load({
 		const wsIndent = (ws) => 18 + 12 * (ws.split("/").length - 1);
 		const ARXA_WS_INDENT = (workspaceId) => wsIndent(wsParts(workspaceId).ws) + "px";
 		const ARXA_WS_HIDDEN = (workspaceId) => leafHidden(workspaceId);
-		// Container rows render INSIDE a leaf group (they anchor to its first
-		// leaf), so they inherit that group's indent — compensate with a
-		// negative margin so every row lands at its OWN absolute depth:
+		// Container rows render INSIDE their own pseudo group (v2 collapse
+		// fix: never inside a leaf group — a collapsed container hides its
+		// leaves' groups, and a row living there vanished with its anchor).
+		// The pseudo group carries the container's own indent, so the row
+		// compensates to land at its absolute depth:
 		// org 4 < dock 18 < project 32 < leaves 18/30/42.
 		const ARXA_CONTAINER_ROWS = (workspaceId) => {
 			const host = wsIndent(wsParts(workspaceId).ws);
@@ -2974,74 +2991,38 @@ window.__ModuleLoader__.load({
 				offset: 4 + d.depth * 14 - host
 			}, d.key));
 		};
+		// True on container pseudo groups (org / dock / project): the stock
+		// folder row is suppressed there — the OrgContainerRow IS the row.
+		const ARXA_IS_CONTAINER_GROUP = (workspaceId) => ((orgStore.get().emit ?? {})[workspaceId] ?? []).length > 0;
 		const ARXA_SELECT_WS = (workspaceId) => {
 			const { orgId, ws } = wsParts(workspaceId);
 			if (ws !== "") orgStore.selectRow({ orgId, rowId: ws });
 		};
-		/** Container-row emission map (v2): every container row anchors to
-		 * its FIRST leaf in feed order — a stable position that survives
-		 * collapse (hidden leaves keep their groups; only display gates).
-		 * Order per anchor: org row, then dock, then project. */
+		/** Container-row emission map (v2 collapse fix, 2026-08-30): every
+		 * container row is keyed at its OWN pseudo workspace (orgItems pushes
+		 * one pseudo item per container) — no anchoring at leaves, no pending
+		 * rows: a leafless dock (empty Projects) renders its own group, so the
+		 * + to create the first project is always reachable. A container
+		 * group renders exactly its OrgContainerRow; collapse gates only
+		 * DESCENDANTS (leafHidden walks ancestor prefixes, never the
+		 * container's own key). */
 		const buildEmit = (s) => {
 			const emit = {};
 			for (const o of s.orgs || []) {
 				const tree = o.tree;
-				if (!tree || !Array.isArray(tree.docks)) continue;
-				const counts = tree.sessionsByWorkspace ?? {};
+				const counts = (tree && tree.sessionsByWorkspace) || {};
 				const total = Object.values(counts).reduce((a, b) => a + b, 0);
 				const countUnder = (prefix) => {
 					let n = 0;
 					for (const [k, v] of Object.entries(counts)) if (k === prefix || k.startsWith(prefix + "/")) n += v;
 					return n;
 				};
-				let orgEmitted = false;
-				const attach = (ws, rows) => {
-					const key = o.id + "|" + ws;
-					(emit[key] = emit[key] || []).push(...rows);
-				};
-				// Container rows waiting for the next leaf-bearing dock: a leafless
-				// dock (e.g. Projects with no projects yet) still has to render — its
-				// row rides the next anchor so the + to create the first project is
-				// always reachable.
-				let pendingRows = [];
-				let lastAnchor = null;
+				emit[o.id] = [{ kind: "org", orgId: o.id, key: o.id, depth: 0, label: o.name, open: o.open, count: total }];
+				if (!tree || !Array.isArray(tree.docks)) continue;
 				for (const d of tree.docks) {
-					const orgD = { kind: "org", orgId: o.id, key: o.id, depth: 0, label: o.name, open: o.open, count: total };
-					const head = () => {
-						const h = [];
-						if (!orgEmitted) { h.push(orgD); orgEmitted = true; }
-						h.push(...pendingRows);
-						pendingRows = [];
-						return h;
-					};
-					if (d.workspace) {
-						// Bare dock (notes): the leaf IS the dock row — no container row,
-						// or the label would render twice.
-						const h = head();
-						if (h.length > 0) { attach(d.slug, h); lastAnchor = d.slug; }
-						continue;
-					}
-					const dockLeaves = [];
-					const projAttach = [];
-					if (d.slug === "projects") {
-						for (const p of tree.projects || []) {
-							const pl = (p.containers || []).map((c) => "projects/" + p.slug + "/" + c);
-							if (pl.length > 0) projAttach.push([pl, { kind: "project", orgId: o.id, key: o.id + "|projects/" + p.slug, depth: 2, label: p.name, count: countUnder("projects/" + p.slug) }]);
-							dockLeaves.push(...pl);
-						}
-					} else {
-						for (const c of d.containers || []) dockLeaves.push(d.slug + "/" + c);
-					}
-					const dockD = { kind: "dock", orgId: o.id, key: o.id + "|" + d.slug, depth: 1, label: orgT("tree.dock." + d.slug), slug: d.slug, count: d.slug === "projects" ? countUnder("projects") : countUnder(d.slug), ...(d.slug === "projects" ? { plus: "project" } : {}) };
-					if (dockLeaves.length === 0) { pendingRows.push(dockD); continue; }
-					attach(dockLeaves[0], [...head(), dockD]);
-					lastAnchor = dockLeaves[0];
-					if (d.slug === "projects") for (const [pl, projD] of projAttach) attach(pl[0], [projD]);
-				}
-				// Degenerate tail (all remaining docks leafless): park on the last anchor.
-				if (pendingRows.length > 0 && lastAnchor !== null) {
-					attach(lastAnchor, pendingRows);
-					pendingRows = [];
+					if (d.workspace) continue;
+					emit[o.id + "|" + d.slug] = [{ kind: "dock", orgId: o.id, key: o.id + "|" + d.slug, depth: 1, label: orgT("tree.dock." + d.slug), slug: d.slug, count: d.slug === "projects" ? countUnder("projects") : countUnder(d.slug), ...(d.slug === "projects" ? { plus: "project" } : {}) }];
+					if (d.slug === "projects") for (const p of tree.projects || []) emit[o.id + "|projects/" + p.slug] = [{ kind: "project", orgId: o.id, key: o.id + "|projects/" + p.slug, depth: 2, label: p.name, count: countUnder("projects/" + p.slug) }];
 				}
 			}
 			return emit;

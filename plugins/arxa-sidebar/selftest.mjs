@@ -72,8 +72,12 @@ check('rows: org-level session creation is impossible (v2, grilled 2026-08-30) �
 check('rows: OrgSection block deleted', !client.includes('OrgSection'))
 
 // ---- 3b. workspace rows (org-model-v2 Phase C: D70/D71) ------------------------
-check('rows-c: container rows (org/dock/project) anchor before each container first leaf (v2, grilled 2026-08-30)',
-  client.includes('function OrgContainerRow({ d, offset })') && client.includes('...ARXA_CONTAINER_ROWS(group.workspaceId)') && client.includes('offset: 4 + d.depth * 14 - host') && !client.includes('WorkspaceRowsSection'))
+check('rows-c: container rows (org/dock/project) own pseudo groups — a row survives its own collapse (v2 fix, 2026-08-30)',
+  client.includes('function OrgContainerRow({ d, offset })') && client.includes('...ARXA_CONTAINER_ROWS(group.workspaceId)') && client.includes('offset: 4 + d.depth * 14 - host')
+  && client.includes('...(ARXA_IS_CONTAINER_GROUP(group.workspaceId) ? [] : [(0, react_jsx_runtime.jsx)(ProjectRowItem, {')
+  && client.includes('push(null, o.name)') && !client.includes('pendingRows') && !client.includes('WorkspaceRowsSection'))
+check('rows-c: collapse hides descendants only — the org pseudo group never hides, leaves keep stable identity',
+  client.includes('if (ws === "") return false;') && client.includes('ARXA_WS_HIDDEN(group.workspaceId)') && client.includes('emit[o.id] = [{ kind: "org"'))
 check('rows-c: leaves are full stock workspace rows — indent by depth; collapse hides via display (identity never churns)',
   client.includes('ARXA_WS_INDENT(group.workspaceId)') && client.includes('ARXA_WS_HIDDEN(group.workspaceId)') && client.includes('toggleCollapse(key)'))
 check('rows-c: leaf click selects the workspace (composite id parse) — the ONLY startSession path',

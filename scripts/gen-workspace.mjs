@@ -99,9 +99,14 @@ out = out.replace(GROUP_OPEN, [
   T(8) + 'className: clsx(WorkspaceBrowser_module_css_default.groupSection, workspaceMarker === "before" && WorkspaceBrowser_module_css_default.workspaceDropBefore, workspaceMarker === "after" && WorkspaceBrowser_module_css_default.workspaceDropAfter),',
 ].join('\n'))
 
-// 6b. container rows (org / dock / project) anchor inside the group
-//     children, before the leaf's own row — emitted at each container's
-//     FIRST leaf in feed order (region: buildEmit + ARXA_CONTAINER_ROWS).
+// 6b. (v2 collapse fix, 2026-08-30): container rows (org / dock /
+//     project) render inside their OWN pseudo group (region: orgItems
+//     pushes one pseudo workspace per container; buildEmit keys each
+//     row there) and the stock folder row is SUPPRESSED on those groups
+//     — the OrgContainerRow is the row. v2 anchored container rows at
+//     their first LEAF's group; collapsing the container hid that group
+//     (leafHidden) and the row vanished with it — tapping an org
+//     removed it from the tree entirely, org by org.
 const GROUP_KIDS = [
   T(8) + 'children: [',
   T(9) + '(0, react_jsx_runtime.jsx)(ProjectRowItem, {',
@@ -110,7 +115,18 @@ if (!out.includes(GROUP_KIDS) || out.indexOf(GROUP_KIDS) !== out.lastIndexOf(GRO
 out = out.replace(GROUP_KIDS, [
   T(8) + 'children: [',
   T(9) + '...ARXA_CONTAINER_ROWS(group.workspaceId),',
-  T(9) + '(0, react_jsx_runtime.jsx)(ProjectRowItem, {',
+  T(9) + '...(ARXA_IS_CONTAINER_GROUP(group.workspaceId) ? [] : [(0, react_jsx_runtime.jsx)(ProjectRowItem, {',
+].join('\n'))
+// …and close the conditional spread after the item expression — the
+// sessions map line is the unique witness that the item just ended.
+const GROUP_ITEM_END = [
+  T(9) + '}),',
+  T(9) + '(expandedSessionGroups.includes(group.key) ? group.sessions : group.sessions.slice(0, COLLAPSED_SESSION_LIMIT)).map((node) => {',
+].join('\n')
+if (!out.includes(GROUP_ITEM_END) || out.indexOf(GROUP_ITEM_END) !== out.lastIndexOf(GROUP_ITEM_END)) throw new Error('group item end anchor missing/dup — stock shape moved?')
+out = out.replace(GROUP_ITEM_END, [
+  T(9) + '})]),',
+  T(9) + '(expandedSessionGroups.includes(group.key) ? group.sessions : group.sessions.slice(0, COLLAPSED_SESSION_LIMIT)).map((node) => {',
 ].join('\n'))
 
 // 6c. leaf row click = stock expand/collapse AND selection (the New
