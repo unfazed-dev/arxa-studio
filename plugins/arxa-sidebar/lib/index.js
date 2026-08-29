@@ -32,7 +32,10 @@
 export const SEAM_LIFECYCLE_STUBBED = false
 
 export const name = 'arxa-sidebar'
-export const inject = ['webServer']
+// sessions / workspaceRegistry / sessionTitle — dsh's in-process cordis
+// services (dsh-session / dsh-workspace / dsh-session-title): the Phase D
+// bridge faces (sessions.create cwd contract, archivedSessionIds, titles).
+export const inject = ['webServer', 'sessions', 'workspaceRegistry', 'sessionTitle']
 
 /** Import-probe the Phase A plugin in both deployment shapes. A failure is
   * LOGGED: a silent null here made both routes serve the stub while the UI
@@ -54,6 +57,59 @@ export function apply(ctx) {
   /** Singleton — holds the single open-org handle across requests. */
   let lifecycle = null
   let shell = null
+  /** Singleton dsh bridge (Phase D, D71) — built once the shell module loads. */
+  let dshBridge = null
+
+  /**
+   * Real dsh faces over the engine's in-process services. sessions.create
+   * carries the worktree cwd (dsh's sessions.create cwd contract); the
+   * workspace registry owns the archivedSessionIds set (D39). Absent or
+   * misshapen services degrade to the unavailable stub (registry-only).
+   */
+  const makeDshFaces = () => {
+    try {
+      const sessions = ctx.sessions
+      if (!sessions || typeof sessions.create !== 'function') return {}
+      const faces = {
+        spawn: ({ cwd }) => ({ id: sessions.create(undefined, { meta: { cwd } }).id }),
+        list: async () => {
+          const title = ctx.sessionTitle
+          const rows = sessions.list().map(async (s) => {
+            let displayTitle
+            try {
+              const t = await Promise.resolve(typeof title?.get === 'function' ? title.get(s) : undefined)
+              displayTitle = typeof t === 'string' ? t : (t && typeof t.title === 'string' ? t.title : undefined)
+            } catch { /* title is presentation — degrade */ }
+            // running/pendingInteraction stay client-runtime-produced (D63
+            // resolution): the SessionManager mux classifies them; the
+            // server-side join leaves them undefined so the client's own
+            // pill data wins.
+            return { id: s.id, displayTitle }
+          })
+          return Promise.all(rows)
+        },
+      }
+      if (typeof sessions.get === 'function') {
+        faces.attach = async (id) => ({ ok: !!sessions.get(id) })
+      }
+      const registry = ctx.workspaceRegistry
+      if (registry && typeof registry.archiveSession === 'function') {
+        faces.archive = async (ids) => {
+          for (const id of ids) await registry.archiveSession(id)
+        }
+      }
+      return faces
+    } catch {
+      return {}
+    }
+  }
+
+  const getBridge = () => {
+    if (dshBridge) return dshBridge
+    if (typeof shell?.createDshBridge !== 'function') return null
+    dshBridge = shell.createDshBridge(makeDshFaces())
+    return dshBridge
+  }
 
   /**
    * Lazily create the lifecycle. Retried per-request while null because the
@@ -67,7 +123,7 @@ export function apply(ctx) {
       try { return shell.loadWorkspaceRoot?.() } catch { return null }
     })()
     if (!root) return null // no workspace chosen yet → no-org state
-    lifecycle = shell.createOrgLifecycle({ workspaceRoot: root })
+    lifecycle = shell.createOrgLifecycle({ workspaceRoot: root, dsh: getBridge() ?? undefined })
     return lifecycle
   }
 
@@ -86,11 +142,17 @@ export function apply(ctx) {
    * An org that never opened (no repo yet) or an unreadable registry lists
    * as empty; a row is presentation, not a lifecycle.
    */
-  const orgSessions = (l, org) => {
+  const orgSessions = async (l, org) => {
     try {
-      return shell.listSessions(org.path, process.env)
+      // Registry rows (durable worktree/branch record) joined with dsh's
+      // live session list by dshSessionId (Phase D, D71). Join failures
+      // degrade silently to the registry rows.
+      const rows = shell.listSessions(org.path, process.env)
         .filter((s) => s.state !== 'archived')
-        .map((s) => ({ id: s.id, name: s.name, state: s.state, parkedReason: s.parkedReason, project: s.project ?? null }))
+        .map((s) => ({ id: s.id, name: s.name, state: s.state, parkedReason: s.parkedReason, project: s.project ?? null, dshSessionId: s.dshSessionId ?? null }))
+      const bridge = getBridge()
+      const live = bridge ? await bridge.list() : []
+      return shell.joinDshLive(rows, live)
     } catch {
       return []
     }
@@ -111,15 +173,15 @@ export function apply(ctx) {
     const l = await getLifecycle()
     if (!l) return emptySnap(SEAM_LIFECYCLE_STUBBED)
     const cur = l.current
-    const orgs = l.listOrgs().map(({ id, name, slug, path, manifest }) => ({
+    const orgs = await Promise.all(l.listOrgs().map(async ({ id, name, slug, path, manifest }) => ({
       id,
       name,
       slug,
       path,
       open: cur?.path === path,
       createdAt: manifest?.createdAt ?? null,
-      sessions: orgSessions(l, { path }),
-    }))
+      sessions: await orgSessions(l, { path }),
+    })))
     // Project scope (open org only): the client's id-or-slug selection
     // resolves once against the registry's slug; unknown renders as none.
     const selSlug = (() => {

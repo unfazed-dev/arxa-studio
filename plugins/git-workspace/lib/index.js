@@ -48,6 +48,7 @@ export {
   SessionMergeError,
   listSessions,
   archivedSessionIds,
+  annotateSession,
   openSession,
   runGate,
   sessionStageBoundary,

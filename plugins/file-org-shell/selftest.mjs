@@ -16,6 +16,8 @@ import { spawnSync } from 'node:child_process'
 
 import {
   createOrgLifecycle,
+  createDshBridge,
+  joinDshLive,
   shellLockPath,
   OrgOpenError,
   OrgAlreadyOpenError,
@@ -24,7 +26,7 @@ import {
 } from './lib/index.js'
 import { openBackend } from '../workspace-index/lib/index.js'
 import { readOrgStampVersion, softDelete, listRecents } from '../workspace/lib/index.js'
-import { runGit, isRepo } from '../git-workspace/lib/index.js'
+import { runGit, isRepo, listSessions } from '../git-workspace/lib/index.js'
 import { createLocalProvider } from '../account-mirror/lib/index.js'
 import { railDir } from '../cairn-rail/lib/index.js'
 import { MIRROR_MANIFEST, ACCOUNT_DIR } from '../account-mirror/lib/index.js'
@@ -260,6 +262,84 @@ try {
     passed++
     console.log('  ✓ orgTree of a non-org fails loud')
     ok(svcTree.current === null, 'orgTree never opens — read-only face')
+  }
+
+  // ---- Phase D: dsh bridge (D71) ------------------------------------------
+  console.log('dsh bridge (Phase D, D71):')
+  {
+    // (a) default bridge: unavailable → registry-only with a loud annotation.
+    const svcNoDsh = createOrgLifecycle({ workspaceRoot: root, env })
+    await svcNoDsh.openOrg(orgB.path)
+    const hNo = svcNoDsh.current
+    const regRow = await hNo.newSession('no-dsh', null)
+    ok(regRow.dshSessionId === null && regRow.dshStatus === 'dsh-unavailable', 'default bridge degrades to registry-only with a loud dsh-unavailable annotation')
+    ok(fs.existsSync(regRow.worktree), 'branch + worktree still created without dsh (registry stays the durable record)')
+    ok(listSessions(orgB.path, env).find((s) => s.id === regRow.id).dshStatus === 'dsh-unavailable', 'annotation persisted on the registry row')
+    svcNoDsh.closeOrg()
+
+    // (b) mock faces: spawn records the worktree cwd; registry gains the id.
+    const spawnedSpecs = []
+    const archivedIds = []
+    const attachedIds = []
+    const mockFaces = {
+      spawn: ({ cwd, name }) => {
+        const id = 'dsh-' + (spawnedSpecs.length + 1)
+        spawnedSpecs.push({ id, cwd, name })
+        return { id }
+      },
+      attach: (id) => { attachedIds.push(id); return { ok: true } },
+      list: () => spawnedSpecs.map((s, i) => ({
+        id: s.id,
+        displayTitle: 'Live ' + s.name,
+        running: i === 0,
+        pendingInteraction: i === 0 ? 'approval' : null,
+      })),
+      archive: (ids) => { archivedIds.push(...ids) },
+    }
+    const svcDsh = createOrgLifecycle({ workspaceRoot: root, env, dsh: mockFaces })
+    await svcDsh.openOrg(orgB.path)
+    const hD = svcDsh.current
+    const liveRow = await hD.newSession('bridge', null)
+    ok(typeof liveRow.dshSessionId === 'string' && liveRow.dshSessionId.startsWith('dsh-'), 'mock spawn ran and its id landed on the returned row (dshSessionId)')
+    ok(spawnedSpecs[0].cwd === liveRow.worktree, 'dsh spawn cwd = the session worktree (sessions.create cwd contract)')
+    ok(listSessions(orgB.path, env).find((s) => s.id === liveRow.id).dshSessionId === liveRow.dshSessionId, 'registry (durable record) carries dshSessionId')
+
+    // (c) live join on the rows face.
+    const joined = hD.activeSessions().find((s) => s.id === liveRow.id)
+    ok(
+      joined.dshSessionId === liveRow.dshSessionId &&
+      joined.displayTitle === 'Live bridge' &&
+      joined.running === true &&
+      joined.pendingInteraction === 'approval',
+      'activeSessions join surfaces mock live fields (displayTitle, running, pendingInteraction D63 union)',
+    )
+    ok(
+      hD.activeSessions().filter((s) => s.id !== liveRow.id).every((s) => !('displayTitle' in s)),
+      'rows without a dshSessionId join degrade to registry fields',
+    )
+
+    // (d) resume re-attach by dshSessionId.
+    await hD.resumeSession(liveRow.id)
+    ok(attachedIds.includes(liveRow.dshSessionId), 'resume re-attaches the dsh session by dshSessionId')
+
+    // (e) archive feeds dsh's archivedSessionIds contract.
+    await hD.archiveSession(liveRow.id)
+    ok(archivedIds.includes(liveRow.dshSessionId), 'archive feeds the dsh archivedSessionIds contract')
+    ok(hD.activeSessions().every((s) => s.id !== liveRow.id), 'archived row held back from active views after the dsh feed')
+    svcDsh.closeOrg()
+
+    // (f) pure join: failure modes degrade silently.
+    const regRows = [{ id: 'a', name: 'A', dshSessionId: 'x' }, { id: 'b', name: 'B' }]
+    ok(joinDshLive(regRows, [{ id: 'x', displayTitle: 'T', running: false, pendingInteraction: 'question' }])[0].displayTitle === 'T', 'joinDshLive maps live fields by dshSessionId')
+    ok(joinDshLive(regRows, null)[1].name === 'B' && joinDshLive(regRows, null)[1].dshSessionId === null, 'joinDshLive with no dsh list degrades to registry rows (old rows read dshSessionId null)')
+    ok(joinDshLive(regRows, [{ id: 'unrelated' }]).every((r) => !('running' in r)), 'joinDshLive with an unresolved id keeps registry fields (silent degrade)')
+
+    // (g) throw-proof bridge: a throwing face never throws out.
+    const boom = createDshBridge({ spawn: () => { throw new Error('boom') }, list: () => { throw new Error('boom') }, archive: () => { throw new Error('boom') } })
+    ok((await boom.spawn({ cwd: '/x' })).ok === false && (await boom.list()).length === 0 && (await boom.archive(['x'])).ok === false, 'throwing dsh faces degrade to unavailable, never throw')
+    ok(createDshBridge().spawn({}).then((r) => r.reason === 'dsh-unavailable'), 'empty faces = dsh-unavailable')
+    passed++
+    console.log('  ✓ bridge is throw-proof across face failures')
   }
 
   console.log(`\nfile-org-shell selftest: ${passed} checks passed`)

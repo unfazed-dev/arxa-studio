@@ -19,5 +19,10 @@ export { listRecents, readRecents, touchRecent, removeRecent } from '../../works
 // session rows and the workspace-root trash without opening anything.
 export { listSessions } from '../../git-workspace/lib/sessions.js'
 export { listTrash, restoreFromTrash } from '../../workspace/lib/index.js'
+// dsh bridge (Phase D, D71): injectable spawn/attach/list/archive faces with
+// a default loud no-op, plus the pure live-rows join and the registry
+// annotation the lifecycle uses to store dshSessionId.
+export { createDshBridge, joinDshLive } from './dsh-bridge.js'
+export { annotateSession } from '../../git-workspace/lib/sessions.js'
 export { SHELL_LOCK_DIR, shellLockPath, acquireShellLock } from './shell-lock.js'
 export { OrgOpenError, OrgAlreadyOpenError, OrgNotOpenError, ShellLockError } from './errors.js'

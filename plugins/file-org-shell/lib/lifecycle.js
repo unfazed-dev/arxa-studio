@@ -59,6 +59,7 @@ import {
   listSessions,
   archivedSessionIds,
   openSession,
+  annotateSession,
   reviveSession,
   archiveSession as archiveSessionBranch,
   sessionStageBoundary,
@@ -69,6 +70,7 @@ import { claimMaterializer, materialize, readEdits } from '../../cairn-rail/lib/
 
 import { OrgOpenError, OrgAlreadyOpenError, OrgNotOpenError } from './errors.js'
 import { acquireShellLock } from './shell-lock.js'
+import { createDshBridge, joinDshLive } from './dsh-bridge.js'
 
 /** Step names carried by OrgOpenError.step, in execution order. */
 export const STEPS = Object.freeze([
@@ -119,12 +121,20 @@ function ensureRuntimeExcluded(orgPath, env) {
  *
  * @param {{ workspaceRoot: string, env?: NodeJS.ProcessEnv, rails?: object }} opts
  */
-export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {} } = {}) {
+export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {}, dsh } = {}) {
   if (typeof workspaceRoot !== 'string' || workspaceRoot === '') {
     throw new TypeError('createOrgLifecycle: workspaceRoot (string) is required')
   }
   validateWorkspaceRoot(workspaceRoot)
   const root = path.resolve(workspaceRoot)
+  // dsh bridge (Phase D, D71): injectable faces (spawn/attach/list/archive);
+  // absent or partial faces degrade to the loud no-op 'dsh-unavailable' stub.
+  const dshBridge = createDshBridge(dsh)
+  // Last-known dsh live list, refreshed whenever the lifecycle touches dsh.
+  // The rows faces stay SYNCHRONOUS (presentation joins must not open an
+  // async cycle) and join against this cache; a never-refreshed cache
+  // degrades to plain registry rows.
+  let dshLive = []
 
   /** @type {null | object} the single open-org handle */
   let current = null
@@ -279,9 +289,12 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           // Sessions carry an optional project scope: slug for project
           // sessions, null for org-level. Legacy registry entries predate
           // the field and read as null — no migration needed.
-          return listSessions(resolved, env)
-            .filter((s) => s.state !== 'open')
-            .map((s) => ({ id: s.id, name: s.name, state: s.state, parkedReason: s.parkedReason, project: s.project ?? null }))
+          return joinDshLive(
+            listSessions(resolved, env)
+              .filter((s) => s.state !== 'open')
+              .map((s) => ({ id: s.id, name: s.name, state: s.state, parkedReason: s.parkedReason, project: s.project ?? null, dshSessionId: s.dshSessionId ?? null })),
+            dshLive,
+          )
         },
         activeSessions() {
           // Rows face (sidebar rethink): every registry session that still
@@ -289,9 +302,12 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           // archived ones held back per the D39 archivedSessionIds contract.
           // Named around the static open-time `sessions` snapshot above,
           // which stays for diagnostics.
-          return listSessions(resolved, env)
-            .filter((s) => s.state !== 'archived')
-            .map((s) => ({ id: s.id, name: s.name, state: s.state, parkedReason: s.parkedReason, project: s.project ?? null }))
+          return joinDshLive(
+            listSessions(resolved, env)
+              .filter((s) => s.state !== 'archived')
+              .map((s) => ({ id: s.id, name: s.name, state: s.state, parkedReason: s.parkedReason, project: s.project ?? null, dshSessionId: s.dshSessionId ?? null })),
+            dshLive,
+          )
         },
         trashCount() {
           return listTrash(resolved).length // org-local trash: <org>/.arxa/trash
@@ -299,7 +315,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
         newProject(displayName) {
           return scaffoldProject(resolved, displayName)
         },
-        newSession(name, project) {
+        async newSession(name, project) {
           // Sessions carry an optional project scope (annotation in the
           // registry): accept project id or slug, store the slug (stable
           // across renames). Unknown project is a loud error, never a
@@ -311,15 +327,43 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
             if (!hit) throw new Error(`unknown-project: ${project}`)
             projectSlug = hit.slug
           }
-          return openSession(resolved, { name, project: projectSlug, env })
+          const session = openSession(resolved, { name, project: projectSlug, env })
+          // Phase D (D71): AFTER branch+worktree exist, spawn the dsh session
+          // with cwd = the worktree path (dsh sessions.create cwd contract)
+          // and store its id on the registry row. Unavailable dsh degrades to
+          // registry-only with a loud annotation — never a hard failure.
+          const spawned = await dshBridge.spawn({ cwd: session.worktree, name: session.name })
+          dshLive = await dshBridge.list()
+          return annotateSession(
+            resolved,
+            session.id,
+            spawned.ok
+              ? { dshSessionId: spawned.id, dshStatus: null }
+              : { dshSessionId: null, dshStatus: spawned.reason ?? 'dsh-unavailable' },
+            env,
+          )
         },
-        resumeSession(id) {
-          return reviveSession(resolved, id, env)
+        async resumeSession(id) {
+          const row = listSessions(resolved, env).find((s) => s.id === id)
+          const out = reviveSession(resolved, id, env)
+          // Re-attach the dsh conversation (focus/open by dshSessionId) when
+          // the row carries one. Best-effort: dsh absence never blocks git
+          // revival.
+          if (row?.dshSessionId) await dshBridge.attach(row.dshSessionId)
+          dshLive = await dshBridge.list()
+          return out
         },
-        archiveSession(id) {
+        async archiveSession(id) {
           // D39/D40 archive: flag out of active views, WIP-commit, prune the
           // worktree, keep the branch. The rows face then holds it back.
-          return archiveSessionBranch(resolved, id, env)
+          const row = listSessions(resolved, env).find((s) => s.id === id)
+          const out = archiveSessionBranch(resolved, id, env)
+          // Feed dsh's archivedSessionIds set (D39 contract): the archived
+          // session vanishes from dsh active views; its transcript persists
+          // dsh-side. Best-effort.
+          if (row?.dshSessionId) await dshBridge.archive([row.dshSessionId])
+          dshLive = await dshBridge.list()
+          return out
         },
         mergeSession(id, message) {
           reviveSession(resolved, id, env) // boundary requires an open session

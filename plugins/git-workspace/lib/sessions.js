@@ -124,6 +124,21 @@ export function archivedSessionIds(repoPath, env = process.env) {
     .map((s) => s.id)
 }
 
+/**
+ * Additive registry-row annotation (Phase D dsh bridge, D71): merge `fields`
+ * onto one session row — e.g. `{ dshSessionId }` after a dsh spawn. The
+ * registry stays the storage of record; the field is optional and old rows
+ * simply lack it (consumers read it as null). Unknown id throws like the
+ * rest of the module.
+ */
+export function annotateSession(repoPath, id, fields, env = process.env) {
+  const registry = readRegistry(repoPath, env)
+  const session = getSession(registry, id)
+  Object.assign(session, fields)
+  writeRegistry(repoPath, registry, env)
+  return session
+}
+
 // ---- open ------------------------------------------------------------------
 
 /** Ensure `.arxa/` never enters any worktree's `add -A` (exclude lives in the common dir). */
