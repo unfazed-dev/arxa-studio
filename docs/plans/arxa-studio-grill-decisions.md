@@ -674,6 +674,19 @@ Approval, Doorbell).
   pair, raise a pending, assert buzz → list → decide → agent
   unblocks) — the ADR-0041 D5 pattern with teeth: tracked as a
   closing condition, dark-gated off-default until then.
+  **CLOSING CONDITION MET 2026-08-29 (same day):** the full loop ran
+  green on the owner's physical iPhone 15 with REAL APNs delivery —
+  cairn-pushd armed with the operator .p8 (sandbox env), buzz presented
+  on-hardware (title 'Approval needed', asserted off the native
+  willPresent event), Approve tapped on the phone, agent unblocked
+  engine-side, pushd receipts outcome:"delivered" with duplicate rings
+  coalesced by collapse_key. Phone leg built app-side (no engine
+  change): Runner entitlements + raw-APNs native bridge +
+  ApnsNotificationsBackend + PHASE=phone integration test; pairhost
+  gained the pushd forward it was missing. Full record + evidence:
+  arxa/docs/plans/doorbell-decision-2026-08-29.md (PHONE LEG COMPLETE).
+  The ARXA_DOORBELL_PUSH gate stays off-default by design — arming is
+  an operator choice.
 
 ### Open (approvals)
 
