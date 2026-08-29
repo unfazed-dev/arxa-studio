@@ -6,20 +6,25 @@ vocabulary only.
 
 ## Terms
 
-- **Workspace root** — the single folder the user picks at first run
-  (e.g. `~/Arxa`) that holds the whole organisations tree. Never inside
-  the app checkout, never in OS app-data. (D36)
-- **Organisation (org)** — one top-level unit under the workspace root;
-  a company/client the user works for or with. On disk: one git repo.
-  (D37)
+- **Recents** — the list of organisation folders the user has opened,
+  stored at `~/.arxa/organisation.json`. Replaces the retired
+  workspace-root tree (D36 superseded by D69).
+- **Organisation (org)** — one folder the user picks at creation; the
+  org root directly holds `org.json` and the five categories (no nesting
+  parent). A company/client the user works for or with. On disk: one git
+  repo. Creation requires a linked GitHub account (D69).
 - **Category** — one of the five fixed studio-owned folders inside an
   org: `projects/ notes/ meetings/ account/ communications/`. Users
   cannot add top-level categories; free-form folders live inside
-  `projects/<name>` and `notes/`. (D42)
+  `projects/<name>` and `notes/`. Each category is a workspace with its
+  own sessions — org-repo worktrees, light gate, local-only. (D42, D70)
 - **Project** — a folder under `projects/`; its own git repo, nested
-  inside and ignored by the org repo. The unit of sharing. (D37)
+  inside and ignored by the org repo. Creation publishes a private
+  GitHub repo as its remote. The unit of sharing. (D37, D69)
 - **Slug** — the kebab-case folder name on disk (e.g. `totem-labs`).
-  Stable across renames; collisions get numeric suffixes. (D41)
+  Collisions get numeric suffixes. Renames move the folder and the
+  remote as one git-tracked operation (D72 supersedes D41's
+  slug-stability clause).
 - **Manifest** — the folder-local file (`org.json` / `project.json`)
   holding display name and stable id. Renames touch the manifest, not
   the slug. (Q3)
@@ -30,13 +35,16 @@ vocabulary only.
 - **Session** — one work context (chat/agent thread or interactive
   editing surface). Every session owns a git branch + worktree; main
   is never edited directly. Sessions never end — they are archived.
-  (D38)
-- **Org-level session** — a session with no project scope (registry
-  `project: null`). Branch and worktree live on the org repo; it is
-  visible and resumable from every project selection.
-- **Project session** — a session scoped to the project selected at
-  creation (registry `project: <slug>`, the slug at creation time).
-  Scope resolves resume/merge before the org-level fallback.
+  Belongs to exactly one workspace (category or project) — the live dsh
+  conversation runs inside the worktree. (D38, D71)
+- **Workspace** — a sidebar row that owns sessions: one of the five
+  categories or a project. Maps 1:1 onto the dsh workspace concept
+  (registry record over a directory, sessions grouped by cwd).
+  (D70, D71)
+- **GitHub link** — the user's connected GitHub account: one-click
+  browser sign-in (VSCode parity), token in the OS keychain, device
+  flow only as fallback. Required before an organisation can be
+  created; nothing pushes until a project exists. (D69)
 - **Stage boundary** — the moment continuous WIP auto-commits are
   squashed into one clean commit (D18); also the default gate + merge
   moment (D38).

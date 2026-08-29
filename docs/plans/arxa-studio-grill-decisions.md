@@ -698,3 +698,44 @@ Approval, Doorbell).
   fallback (first-class records) was never needed.
 - kit/cairn README "push pattern" paragraph (doorbell memo item A)
   — undecided rider; its own trivial commit if taken.
+
+## Org model v2 — sidebar/workspace reshape (grilled 2026-08-29, session 2)
+
+Grounded in: dsh-structure exploration (two parallel unconnected session
+worlds measured — sidebar shows git-registry rows only; dsh conversations
+persist under ~/.arxa/dsh/sessions keyed by launch cwd, never inside orgs)
+and research/github-auth-desktop-report.md (official-docs current).
+
+- **D69 — Org model v2: location = org root; GitHub link gate; project
+  publish.** The folder picked at creation IS the organisation root:
+  org.json + the five categories land directly inside it (MIRA/projects,
+  not MIRA/<org>/projects). The workspace-root tree (D36) is retired —
+  ~/.arxa/organisation.json becomes a recents index of opened org
+  folders. Creating an organisation requires a linked GitHub account
+  (one-click browser sign-in, VSCode parity; token in the OS keychain;
+  device flow only where no browser can open). Project creation
+  publishes a private GitHub repo as the project remote. Supersedes D36,
+  D37's placement rider, and D16's anonymity rider at org-creation
+  scope (the app itself still runs anonymous until an org is wanted).
+- **D70 — Categories are workspaces.** Each of the five categories
+  behaves like a dsh workspace: its own sessions as org-repo worktrees
+  (branch per session, D18 machinery), light gate (D38 content-repo
+  clause), local-only — never pushed to GitHub. Notes/meetings content
+  stays private to the org repo.
+- **D71 — Sessions live only in workspaces; dsh bridge is the product.**
+  Every session belongs to exactly one workspace (category or project);
+  the floating org-level session (registry project:null) is retired —
+  glossary term removed, supersedes sidebar-org-rethink Q4. The
+  dsh-session ↔ worktree bridge gets built: a session's live dsh
+  conversation runs with cwd inside the worktree and appears in the
+  sidebar (current state: registry stubs only, measured).
+- **D72 — Proper rename.** Rename = display name + folder on disk +
+  GitHub repo name (projects), executed as one git-tracked move with
+  registry rekey; worktrees revive from parked branches. Supersedes
+  D41's slug-stability clause. Display-name-only remains available when
+  a remote you don't own makes moving unsafe.
+
+Build riders (user, this session): keep using the stock DSH workspace UI
+via the splice pattern (gen-workspace.mjs — depend-don't-fork); compose
+and validate plugin surfaces in Creator mode (Cordis preset) per the
+integration plan's UI-harmony rule.
