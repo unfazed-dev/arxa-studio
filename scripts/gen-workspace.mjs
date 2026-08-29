@@ -9,7 +9,8 @@
 //      locale relabels) spliced before the last region; stock apply()
 //      tail REPLACED by the org-backed one
 //   3. the + affordance: header gate + add entry unconditional; the
-//      directory-picker flow becomes a name prompt (Q3)
+//      directory-picker flow opens the in-bundle create-organisation modal
+//      (Q3) — window.prompt is unusable in the Tauri WKWebView
 //   4. the org-row menu gains Trash on the open org row (Q6)
 // rc-bump policy: a dsh bump is an explicit re-transform — update
 // DSH_VERSION here and in gen-sidebar.mjs, refresh anchors/snippets if the
@@ -74,12 +75,13 @@ if (!out.includes(FLOW_ANCHOR)) throw new Error('openDirectoryFlow anchor missin
 const FLOW_SPLICED = [
   'const openDirectoryFlow = (0, react.useCallback)(() => {',
   T(4) + 'onClose();',
-  T(4) + '// Organisations world (Q3): orgs are scaffolded by name — no native',
-  T(4) + '// directory picker. kimitail: prompt until a real create-organisation',
-  T(4) + '// modal earns its keep.',
-  T(4) + 'const name = window.prompt(t("workspace.add"));',
-  T(4) + 'if (name && name.trim() !== "") createWorkspace({ name }).catch(() => {});',
-  T(3) + '}, [onClose, createWorkspace, t]);',
+  T(4) + '// Organisations world (Q3): scaffold-by-name runs in the in-bundle',
+  T(4) + '// create-organisation modal (org region). window.prompt is a silent',
+  T(4) + '// no-op in WKWebView (the Tauri shell) — never prompt. The event, not',
+  T(4) + '// a store emit: emits here tick the shell into re-firing this very',
+  T(4) + '// auto-open effect — an emit loop ending in React #185.',
+  T(4) + 'window.dispatchEvent(new Event("arxa-create-org"));',
+  T(3) + '}, [onClose]);',
 ].join('\n')
 out = out.replace(FLOW_ANCHOR, FLOW_SPLICED)
 

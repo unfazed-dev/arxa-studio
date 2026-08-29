@@ -1215,12 +1215,13 @@ window.__ModuleLoader__.load({
 			});
 			const openDirectoryFlow = (0, react.useCallback)(() => {
 				onClose();
-				// Organisations world (Q3): orgs are scaffolded by name — no native
-				// directory picker. kimitail: prompt until a real create-organisation
-				// modal earns its keep.
-				const name = window.prompt(t("workspace.add"));
-				if (name && name.trim() !== "") createWorkspace({ name }).catch(() => {});
-			}, [onClose, createWorkspace, t]);
+				// Organisations world (Q3): scaffold-by-name runs in the in-bundle
+				// create-organisation modal (org region). window.prompt is a silent
+				// no-op in WKWebView (the Tauri shell) — never prompt. The event, not
+				// a store emit: emits here tick the shell into re-firing this very
+				// auto-open effect — an emit loop ending in React #185.
+				window.dispatchEvent(new Event("arxa-create-org"));
+			}, [onClose]);
 			const listSettled = addOnly || workspaceSnapshot.phase === "ready";
 			const addIsTheOnlyEntry = !pinAdd && listSettled && addEntries.length === 1;
 			(0, react.useEffect)(() => {
@@ -2722,7 +2723,7 @@ window.__ModuleLoader__.load({
 			return b;
 		});
 		function createOrgStore() {
-			let state = { orgs: [], trash: [], trashCount: 0, root: false, selectedProject: null, loading: true, __sig: "", workspacesView: { items: [], phase: "ready", archivedSessionIds: [] }, sessionsView: { byId: {}, ids: [], current: void 0 } };
+			let state = { orgs: [], trash: [], trashCount: 0, root: false, selectedProject: null, trashView: { rows: [], open: true }, loading: true, __sig: "", workspacesView: { items: [], phase: "ready", archivedSessionIds: [] }, sessionsView: { byId: {}, ids: [], current: void 0 } };
 			const subs = new Set();
 			let timer = 0;
 			const emit = () => {
@@ -2734,15 +2735,20 @@ window.__ModuleLoader__.load({
 					const next = await ORG_FETCH();
 					const sig = JSON.stringify([next.orgs, next.trash, next.trashCount, next.root, next.selectedProject]);
 					if (sig !== state.__sig) {
-						state = { ...next, loading: false, __sig: sig };
+						// Client-side faces survive every server replacement (the trash
+						// toggle is not server data).
+						state = { ...next, loading: false, __sig: sig, trashOpen: state.trashOpen };
+						state.trashView = { rows: state.trash ?? [], open: state.trashOpen ?? true };
 						// Derived faces computed ONCE per state replacement: stock hosts
 						// serve stable array identities, and per-render rebuilds would
 						// re-fire the browser's store-sync effects every render (React #185).
 						state.workspacesView = { items: orgItems(state), phase: "ready", archivedSessionIds: [] };
 						state.sessionsView = sessionsList(state);
+						state.trashView = { rows: state.trash ?? [], open: state.trashOpen ?? true };
 						emit();
 					} else if (state.loading) {
 						state = { ...state, loading: false };
+						state.trashView = { rows: state.trash ?? [], open: state.trashOpen ?? true };
 						emit();
 					}
 				} catch {
@@ -2776,6 +2782,7 @@ window.__ModuleLoader__.load({
 				/** Client-side toggle only (Q6): the list itself is server data. */
 				toggleTrash() {
 					state = { ...state, trashOpen: !(state.trashOpen ?? true) };
+					state.trashView = { rows: state.trash ?? [], open: state.trashOpen ?? true };
 					emit();
 				}
 			};
@@ -2844,7 +2851,8 @@ window.__ModuleLoader__.load({
 		const orgUseDirectoryFlow = (sel) => sel(orgNoFlow.getSnapshot());
 		const orgUseHostDescription = (sel) => sel(orgHostDescription);
 		function TrashSection({ t }) {
-			const view = useOrg((s) => ({ rows: s.trash ?? [], open: s.trashOpen ?? true }));
+			// Cached face — a fresh selector object per call would loop #185.
+			const view = useOrg((s) => s.trashView);
 			const rows = view.rows;
 			if (rows.length === 0 || !view.open) return null;
 			const restore = (entryId) => {
@@ -2881,16 +2889,127 @@ window.__ModuleLoader__.load({
 				]
 			});
 		}
+		/** Create-organisation modal (Q3, webview-safe): replaces window.prompt,
+		* which WKWebView (the Tauri shell) does not implement — prompt returned
+		* null there and org creation silently no-oped. Also owns the D36 first
+		* run: with no workspace root chosen yet, the modal collects the root
+		* location and the host saves it before the org is scaffolded. Errors
+		* surface in the modal — nothing is swallowed.
+		* The open/close conversation is COMPONENT-LOCAL state driven by the
+		* "arxa-create-org" window event (fired by the spliced + flow): store
+		* emits here would tick the shell into re-rendering the slot, and each
+		* remount re-fired the stock auto-open effect — an emit loop that
+		* ended in React #185. Same-value setState bails out; emits stay
+		* reserved for server-truth changes. */
+		function OrgCreateModal({ t, createWorkspace, open, onClose }) {
+			const hasRoot = useOrg((s) => s.root);
+			const [name, setName] = (0, react.useState)("");
+			const [location, setLocation] = (0, react.useState)("~/Arxa");
+			const [busy, setBusy] = (0, react.useState)(false);
+			const [error, setError] = (0, react.useState)(null);
+			const nameRef = (0, react.useRef)(null);
+			(0, react.useEffect)(() => {
+				if (open) {
+					setName("");
+					setLocation("~/Arxa");
+					setBusy(false);
+					setError(null);
+					if (nameRef.current !== null) nameRef.current.focus();
+				}
+			}, [open]);
+			if (!open) return null;
+			const needsRoot = !hasRoot;
+			const canSubmit = name.trim() !== "" && !busy && (!needsRoot || location.trim() !== "");
+			const dismiss = () => {
+				if (!busy) onClose();
+			};
+			const submit = () => {
+				if (!canSubmit) return;
+				const orgName = name.trim();
+				setBusy(true);
+				setError(null);
+				const ready = needsRoot
+					? orgStore.mutate("workspace.root", { path: location.trim() })
+					: Promise.resolve();
+				ready.then(() => createWorkspace({ name: orgName })).then(() => {
+					onClose();
+				}, (e) => {
+					setBusy(false);
+					setError(e instanceof Error ? e.message : String(e));
+				});
+			};
+			const field = { width: "100%", boxSizing: "border-box", fontSize: 13, padding: "6px 8px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 6, background: "transparent", color: "inherit" };
+			const label = { fontSize: 11, opacity: 0.55, margin: "10px 0 4px" };
+			return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Modal, {
+				open: true,
+				onClose: dismiss,
+				closeLabel: t("cancel"),
+				title: t("org.create.title"),
+				footer: (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+					(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {
+						variant: "outline",
+						onClick: dismiss,
+						children: t("cancel")
+					}),
+					(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {
+						variant: "primary",
+						disabled: !canSubmit,
+						onClick: submit,
+						children: t("org.create.submit")
+					})
+				] }),
+				children: (0, react_jsx_runtime.jsxs)("div", { children: [
+					(0, react_jsx_runtime.jsx)("div", { style: label, children: t("field.workspaceName") }),
+					(0, react_jsx_runtime.jsx)("input", {
+						ref: nameRef,
+						value: name,
+						placeholder: t("field.workspaceName"),
+						onChange: (e) => setName(e.target.value),
+						onKeyDown: (e) => {
+							if (e.key === "Enter") submit();
+						},
+						style: field
+					}),
+					needsRoot && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+						(0, react_jsx_runtime.jsx)("div", { style: label, children: t("org.create.location") }),
+						(0, react_jsx_runtime.jsx)("input", {
+							value: location,
+							spellCheck: false,
+							onChange: (e) => setLocation(e.target.value),
+							onKeyDown: (e) => {
+								if (e.key === "Enter") submit();
+							},
+							style: field
+						}),
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.55, marginTop: 6 }, children: t("org.create.locationHint") })
+					] }),
+					error !== null && (0, react_jsx_runtime.jsx)("div", {
+						role: "alert",
+						style: { marginTop: 10, fontSize: 12, color: "var(--dsw-alias-status-danger, #e5484d)" },
+						children: error
+					})
+				] })
+			});
+		}
 		function OrgBrowser(props) {
 			// Data hooks are pinned HERE, at the component boundary: the slot
 			// renderer merges its STANDARD runtime hooks (useSessions/useWorkspaces)
 			// over inject props, so declaring them in the inject face loses. Passing
 			// them straight to the stock component cannot be overridden.
 			const patched = { ...props, useWorkspaces: orgUseWorkspaces, useSessions: orgUseSessions, useDirectoryFlow: orgUseDirectoryFlow, useHostDescription: orgUseHostDescription };
+			// Create-org conversation lives HERE (local state, event-triggered by
+			// the spliced + flow) — see OrgCreateModal for why it must not emit.
+			const [creating, setCreating] = (0, react.useState)(false);
+			(0, react.useEffect)(() => {
+				const open = () => setCreating(true);
+				window.addEventListener("arxa-create-org", open);
+				return () => window.removeEventListener("arxa-create-org", open);
+			}, []);
 			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, {
 				children: [
 					(0, react_jsx_runtime.jsx)(WorkspaceBrowser, patched),
-					(0, react_jsx_runtime.jsx)(TrashSection, { t: props.t })
+					(0, react_jsx_runtime.jsx)(TrashSection, { t: props.t }),
+					(0, react_jsx_runtime.jsx)(OrgCreateModal, { t: props.t, createWorkspace: props.createWorkspace, open: creating, onClose: () => setCreating(false) })
 				]
 			});
 		}
@@ -2915,7 +3034,11 @@ window.__ModuleLoader__.load({
 			"orderBy.updated": "Newest first",
 			"picker.loading": "Loading organisations…",
 			"status.idle": "Open",
-			"status.completed": "Parked"
+			"status.completed": "Parked",
+			"org.create.title": "New organisation",
+			"org.create.submit": "Create organisation",
+			"org.create.location": "Location",
+			"org.create.locationHint": "Where organisations live — chosen once, at first run."
 		};
 		const zhOver = {
 			"section.workspaces": "组织",
@@ -2937,7 +3060,11 @@ window.__ModuleLoader__.load({
 			"orderBy.updated": "最新在前",
 			"picker.loading": "正在加载组织…",
 			"status.idle": "打开",
-			"status.completed": "已停靠"
+			"status.completed": "已停靠",
+			"org.create.title": "新建组织",
+			"org.create.submit": "创建组织",
+			"org.create.location": "位置",
+			"org.create.locationHint": "组织的存放位置 — 仅在首次运行时选择一次。"
 		};
 		//#endregion
 		//#region lib/types/client/index.js

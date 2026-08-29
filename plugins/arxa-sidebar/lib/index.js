@@ -15,7 +15,7 @@
  *
  *   POST /__arxa/sidebar/action  body { action, arg }
  *        org.create | org.open | org.close | org.rename | org.new-session |
- *        session.open | session.archive | trash.restore
+ *        session.open | session.archive | trash.restore | workspace.root
  *        (ci.run stays reserved for Phase D3 — deliberately absent.)
  *
  * Import resolution is probed in two shapes so every deployment works
@@ -34,12 +34,19 @@ export const SEAM_LIFECYCLE_STUBBED = false
 export const name = 'arxa-sidebar'
 export const inject = ['webServer']
 
-/** Import-probe the Phase A plugin in both deployment shapes. */
+/** Import-probe the Phase A plugin in both deployment shapes. A failure is
+  * LOGGED: a silent null here made both routes serve the stub while the UI
+  * still rendered no-org — measured and cursed in bin/arxa-studio.mjs. */
 async function importShell() {
   try {
     return await import('arxa-file-org-shell')
-  } catch {
-    return import(new URL('../../file-org-shell/lib/index.js', import.meta.url).href)
+  } catch (bare) {
+    try {
+      return await import(new URL('../../file-org-shell/lib/index.js', import.meta.url).href)
+    } catch (rel) {
+      console.error('[arxa-sidebar] importShell failed from', import.meta.url, '— bare:', bare?.message, '| relative:', rel?.message)
+      return null
+    }
   }
 }
 
@@ -156,6 +163,30 @@ export function apply(ctx) {
       req.on('end', async () => {
         try {
           const { action, arg } = JSON.parse(raw || '{}')
+          /** D36 first run: pick the folder organisations live under. Handled
+            * before the lifecycle guard because its whole job is to make one
+            * exist. Expands ~, creates the folder, validates via the D36 rules
+            * (never the checkout, never OS app-data), then rebuilds the
+            * singleton against the new root. */
+          if (action === 'workspace.root') {
+            const requested = typeof arg?.path === 'string' ? arg.path.trim() : ''
+            if (requested === '') return json(res, { ok: false, error: 'root path required', action })
+            const [{ default: fs }, { default: os }, { default: path }] = await Promise.all([
+              import('node:fs'), import('node:os'), import('node:path'),
+            ])
+            const expanded = requested.startsWith('~')
+              ? path.join(os.homedir(), requested.slice(1))
+              : path.resolve(requested)
+            fs.mkdirSync(expanded, { recursive: true })
+            shell ??= await importShell().catch(() => null)
+            if (typeof shell?.saveWorkspaceRoot !== 'function') {
+              return json(res, { ok: false, seam: SEAM_LIFECYCLE_STUBBED, error: 'shell-unavailable', action })
+            }
+            shell.saveWorkspaceRoot(expanded)
+            lifecycle = null // force getLifecycle to re-read the saved root
+            const next = await getLifecycle()
+            return json(res, { ok: true, action, root: !!next })
+          }
           const l = await getLifecycle()
           if (!l) return json(res, { ok: false, seam: SEAM_LIFECYCLE_STUBBED, error: 'no-workspace', action })
 

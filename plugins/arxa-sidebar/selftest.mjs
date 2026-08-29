@@ -52,7 +52,14 @@ check('rows: honest content search (empty fetch)', client.includes('searchSessio
 check('rows: trash surface wired (Q6)', client.includes('function TrashSection(') && client.includes('trash: () => orgStore.toggleTrash()'))
 check('rows: locale relabels aboard', client.includes('"section.workspaces": "Organisations"'))
 check('rows: stock Workspaces label superseded in overrides only', !client.includes('"section.workspaces": "Workspaces",\n\t\t\t\t"section.sessions"'))
-check('rows: add flow is a name prompt (Q3)', client.includes('window.prompt(t("workspace.add"))'))
+check('rows: add flow opens the create-organisation modal (Q3, webview-safe)',
+  client.includes('new Event("arxa-create-org")') && client.includes('function OrgCreateModal(') && client.includes('window.addEventListener("arxa-create-org", open)'))
+check('rows: window.prompt is gone (Tauri WKWebView never implements it)', !client.includes('window.prompt('))
+check('rows: first-run root action wired both sides (D36)',
+  client.includes('"workspace.root"') && (() => {
+    const hostSrc = readFileSync(join(here, 'lib', 'index.js'), 'utf8')
+    return hostSrc.includes("action === 'workspace.root'") && hostSrc.includes('saveWorkspaceRoot(expanded)')
+  })())
 check('rows: shell New-session is org-aware (Q5)', client.includes('org.new-session') && client.includes('Open an organisation first'))
 check('rows: OrgSection block deleted', !client.includes('OrgSection'))
 
