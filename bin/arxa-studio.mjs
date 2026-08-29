@@ -115,6 +115,15 @@ if (!existsSync(settingsFile)) {
       apiKeyEnv: ZAI_API_KEY
       baseURL: https://api.z.ai/api/paas/v4
       models:
+        - id: glm-5.3-flash
+          name: GLM-5.3-Flash
+          contextWindow: 1000000
+          maxTokens: 131072
+          input: [ text, image ]
+          reasoningEfforts:
+            off:
+            high: high
+            max: max
         - id: glm-5.3
           name: GLM-5.3
           contextWindow: 1000000
@@ -124,9 +133,6 @@ if (!existsSync(settingsFile)) {
             off:
             high: high
             max: max
-          compat:
-            thinkingFormat: zai
-            supportsReasoningEffort: true
         - id: glm-4.6v
           name: GLM-4.6V
           input: [ text, image ]
@@ -152,16 +158,12 @@ if (!existsSync(settingsFile)) {
             medium: "low"
             high: "high"
             max: "max"
-          compat:
-            thinkingFormat: zai
-            supportsReasoningEffort: true
-            zaiToolStream: true
 agent-default-model:
-  # Wallet endpoint: glm-5.3 + effort max verified working 2026-08-21.
-  # zai-coding-cn stays configured — flip here to burn plan quota instead
-  # (weekly cap resets 2026-08-24 10:04).
+  # glm-5.3-flash + effort max — Z.ai's own recommended settings for the
+  # flash tier (near-Opus-4.8 benchmarks at ~10x lower cost; text+image).
+  # zai-coding-cn stays configured — flip provider here to burn plan quota.
   provider: zai
-  model: glm-5.3
+  model: glm-5.3-flash
   reasoningEffort: max
 agent-presets:
   default: code
@@ -267,8 +269,23 @@ const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa
 // so those are copied below under their plugins/ directory names to keep
 // `../../<lib>/lib/index.js` resolving inside node_modules).
 const packed = existsSync(join(here, 'packed.json'))
+// Relative-import targets of arxa-file-org-shell (directory names, not
+// package names — see the header note above). Copied in BOTH modes:
+// pnpm's virtual store isolates file: deps, so in checkout mode the
+// profile symlink of arxa-file-org-shell cannot see the five via
+// ../../<lib> unless they sit flat in the profile's node_modules.
+// Measured live: a fresh checkout profile without them made
+// importShell() fail and BOTH sidebar routes serve the stub (seam false,
+// every action no-workspace) while the UI still rendered no-org — silent.
+const fiveLibs = [
+  ['workspace', resolve(here, '..', 'plugins', 'workspace')],
+  ['workspace-index', resolve(here, '..', 'plugins', 'workspace-index')],
+  ['git-workspace', resolve(here, '..', 'plugins', 'git-workspace')],
+  ['account-mirror', resolve(here, '..', 'plugins', 'account-mirror')],
+  ['cairn-rail', resolve(here, '..', 'plugins', 'cairn-rail')],
+]
+const nm = join(profileDir, 'node_modules')
 if (packed) {
-  const nm = join(profileDir, 'node_modules')
   for (const [name, dir] of [
     ['arxa-design-panel', designPanelDir],
     ['arxa-brand', brandDir],
@@ -279,13 +296,7 @@ if (packed) {
     ['arxa-pairing', pairingDir],
     ['arxa-sidebar', sidebarDir],
     ['arxa-file-org-shell', fileOrgShellDir],
-    // Relative-import targets of arxa-file-org-shell (directory names, not
-    // package names — see the header note above).
-    ['workspace', resolve(here, '..', 'plugins', 'workspace')],
-    ['workspace-index', resolve(here, '..', 'plugins', 'workspace-index')],
-    ['git-workspace', resolve(here, '..', 'plugins', 'git-workspace')],
-    ['account-mirror', resolve(here, '..', 'plugins', 'account-mirror')],
-    ['cairn-rail', resolve(here, '..', 'plugins', 'cairn-rail')],
+    ...fiveLibs,
   ]) {
     rmSync(join(nm, name), { recursive: true, force: true })
     cpSync(dir, join(nm, name), { recursive: true })
@@ -296,6 +307,10 @@ if (packed) {
     console.error('arxa: could not pnpm-install the profile — the design '
       + 'panel will not mount. Run: dsh plugin --profile arxa add '
       + `file:${designPanelDir}`)
+  }
+  for (const [name, dir] of fiveLibs) {
+    rmSync(join(nm, name), { recursive: true, force: true })
+    cpSync(dir, join(nm, name), { recursive: true })
   }
 }
 
@@ -313,7 +328,7 @@ if (packed) {
 // port, bare host for a port-80 forward). Trust args go last on the argv so
 // the variadic flag can't swallow passthrough; an explicit --port in
 // passthrough wins by dropping ours.
-const ARXA_PORT = '7891'
+const ARXA_PORT = process.env.ARXA_PORT?.trim() || '7891'
 const portArgs = passthrough.includes('--port') ? [] : ['--port', ARXA_PORT]
 const trustArgs = headless
   ? []
