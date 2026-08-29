@@ -160,6 +160,73 @@ export function loadDoorbell(importBare = (s) => import(s), importRelative = (s)
   return doorbellProbe
 }
 
+/** TEST SEAM (gate: literal env ARXA_APPROVALS_TEST_SEAM=true — the
+ * ARXA_DOORBELL_PUSH convention). Raises a REAL user-questions ask through
+ * the real provider against a LIVE (idle is fine) agent, so the simulator
+ * e2e can exercise the whole approvals rail — mux frame, projection, phone
+ * decide via apiProxy.respond, agent-side ask() resolution — without an
+ * LLM-funded turn (the operator's zai key was 429-insufficient-balance on
+ * 2026-08-29; a synthetic question through the same provider is identical
+ * on the wire to a tool-raised one). Never enabled in production boots.
+ * Route shape (registered only when gated on):
+ *   POST /__arxa/approvals/__test_raise { sessionId, questions } → { raised }
+ *   GET  /__arxa/approvals/__test_raised → { pending: n, lastAnswer? } */
+function applyTestSeam(ctx, deps) {
+  const raised = []
+  const json = (res, status, body) => {
+    res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+    res.end(JSON.stringify(body))
+  }
+  ctx.webServer.register({
+    name: 'arxa-approvals-test-raise',
+    path: '/__arxa/approvals/__test_raise',
+    kind: 'exact',
+    handler: async (req, res) => {
+      let raw = ''
+      req.on('data', (c) => { raw += c })
+      req.on('end', async () => {
+        try {
+          const { sessionId, questions } = JSON.parse(raw || '{}')
+          const agents = ctx.get('agents')
+          const agent = agents?.get(String(sessionId ?? ''))
+          if (!agent) return json(res, 409, { ok: false, error: 'no-live-agent' })
+          const entry = { askedAt: Date.now(), answer: null }
+          raised.push(entry)
+          // Fire the ask; when ANYONE (phone or desktop composer) answers,
+          // apiProxy.respond resolves this promise — the agent-unblock proof.
+          deps.userQuestionsAsk?.(ctx, { questions, agent }).then(
+            (answer) => { entry.answer = answer },
+            (rejected) => { entry.answer = { rejected: String(rejected?.message ?? rejected) } },
+          )
+          json(res, 200, { ok: true, raised: raised.length })
+        } catch (e) {
+          json(res, 400, { ok: false, error: String(e?.message ?? e) })
+        }
+      })
+    },
+  })
+  ctx.webServer.register({
+    name: 'arxa-approvals-test-raised',
+    path: '/__arxa/approvals/__test_raised',
+    kind: 'exact',
+    handler: async (req, res) => json(res, 200, {
+      pending: raised.filter((r) => r.answer === null).length,
+      answered: raised.filter((r) => r.answer !== null).map((r) => r.answer),
+    }),
+  })
+}
+
+/** The real ask the seam fires (overridable in the selftest). Uses
+ * ctx.get, not ctx.userQuestions: the plugin's static inject is
+ * webServer+apiProxy, and cordis refuses property access to a service the
+ * plugin did not declare — the seam is optional, so it resolves
+ * dynamically and reports absence honestly. */
+function defaultUserQuestionsAsk(ctx, request) {
+  const service = ctx.get('userQuestions')
+  if (!service) return Promise.reject(new Error('user-questions service not composed'))
+  return service.ask(request)
+}
+
 /** Host half. deps is the test seam: { doorbell(record) } overrides the
  * library call so the selftest asserts first-sight-only firing without a
  * pushd. */
@@ -212,6 +279,10 @@ export function apply(ctx, deps = {}) {
       json(res, 200, { approvals })
     },
   })
+
+  if (process.env.ARXA_APPROVALS_TEST_SEAM === 'true') {
+    applyTestSeam(ctx, { userQuestionsAsk: deps.userQuestionsAsk ?? defaultUserQuestionsAsk })
+  }
 
   ctx.webServer.register({
     name: 'arxa-approvals-action',
