@@ -76,6 +76,27 @@ export function foldFrame(pending, frame, nowMs = Date.now()) {
   return undefined
 }
 
+/** Fold one session/jobs mux frame (last-wins snapshots per session) into
+ * the announced-jobs set. Returns [{id, outcome}] for every job FIRST seen
+ * in a terminal status — running/stopping never ring, and a replayed
+ * terminal id must not re-buzz (collapse_key task:<id> would coalesce it on
+ * the rail anyway). 'completed' → completed; 'failed' and 'killed' → failed
+ * (any non-success terminal is a failure to the owner). */
+export function foldJobsFrame(announced, frame) {
+  if (frame?.payload?.type !== 'session/jobs') return []
+  const jobs = Array.isArray(frame.payload.jobs) ? frame.payload.jobs : []
+  const fresh = []
+  for (const job of jobs) {
+    if (!job || typeof job.id !== 'string' || !job.id) continue
+    const status = String(job.status ?? '')
+    if (status !== 'completed' && status !== 'failed' && status !== 'killed') continue
+    if (announced.has(job.id)) continue
+    announced.add(job.id)
+    fresh.push({ id: job.id, outcome: status === 'completed' ? 'completed' : 'failed' })
+  }
+  return fresh
+}
+
 /** Shape-check a decide action against its pending record and build the
  * apiProxy.respond envelope (the same message shape the browser composer
  * sends). Mirrors the engine-side checks closely enough to fail fast with
@@ -244,15 +265,31 @@ export function apply(ctx, deps = {}) {
       .catch(() => {})
   }
 
+  // Task/job completions ride the SAME mux stream as session/jobs frames
+  // (last-wins snapshots; foldJobsFrame rings first-sight terminal ids
+  // only) and the SAME doorbell library + dark gate.
+  const announcedJobs = new Set()
+  const ringTaskDoorbell = (finished) => {
+    if (typeof deps.taskDoorbell === 'function') {
+      try { deps.taskDoorbell(finished) } catch { /* never throws into the engine */ }
+      return
+    }
+    void loadDoorbell()
+      .then((lib) => lib.notifyTaskFinished?.(finished))
+      .catch(() => {})
+  }
+
   // The mux stream: replay of every still-pending question on attach, then
-  // live requested/resolved frames. One long-lived consumer filtered to
-  // question frames; everything else the stream carries (session events,
-  // jobs) is ignored here.
+  // live requested/resolved frames. One long-lived consumer: question frames
+  // fold into approvals, session/jobs frames ring the task doorbell on first
+  // sight of a terminal job id; everything else the stream carries is
+  // ignored here.
   void (async () => {
     try {
       for await (const frame of ctx.apiProxy.events.mux({}, ac.signal)) {
         const fresh = foldFrame(pending, frame)
         if (fresh) ringDoorbell(fresh)
+        for (const finished of foldJobsFrame(announcedJobs, frame)) ringTaskDoorbell(finished)
       }
     } catch (ended) {
       if (!ac.signal.aborted) {

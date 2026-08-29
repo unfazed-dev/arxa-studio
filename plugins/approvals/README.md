@@ -25,6 +25,10 @@ UI already answers through its own composer; this plugin is the PHONE's path.
    copy; the summary rides the tunnel, never APNs/FCM). The doorbell stays
    gated by `ARXA_DOORBELL_PUSH=true` and never throws (library contract); a
    missing library degrades to routes-only, logged once.
+   The same stream's `session/jobs` frames ring the SECOND class on first
+   sight of a terminal job id: `notifyTaskFinished({ id, outcome })`
+   (`completed` → 'Task finished'; `failed`/`killed` → 'Task failed'), same
+   gate, same content-free discipline.
 3. Serves the phone (through the iroh pairing tunnel's loopback proxy —
    tunnel-layer AUTH gates the caller):
 

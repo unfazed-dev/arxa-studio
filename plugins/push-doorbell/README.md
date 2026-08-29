@@ -6,6 +6,16 @@ when the engine raises an approval that needs the owner on the phone, this
 library POSTs a Visible push to the desktop's cairn-pushd sidecar
 (`POST /v1/send`, loopback), once per paired device.
 
+Two event classes ride the same gate and the same rail:
+
+- **approval-requested** — `notifyApprovalRequested({ id })`, content-free
+  copy (`Approval needed`), `collapse_key = approval:<id>`.
+- **task-finished / task-failed** — `notifyTaskFinished({ id, outcome })`
+  fires when a background task/job reaches a terminal status
+  (`completed` → title `Task finished`; `failed`/`killed` → `Task failed`;
+  body `Open Arxa Studio to see the result.`), `collapse_key = task:<id>`.
+  Observed by `arxa-approvals` from `session/jobs` mux frames.
+
 **Pure library.** Nothing registers into cordis — the approvals feature owns
 the call site when it lands:
 
@@ -36,8 +46,8 @@ The bearer is the key **secret** only — the tenant is stamped daemon-side
 - Gate off → zero traffic, `{gated: true}`.
 - One POST per paired peer that carries a push token; peers without one are
   skipped.
-- `collapse_key = approval:<id>` — resends coalesce on the rail instead of
-  stacking.
+- `collapse_key = approval:<id>` / `task:<id>` — resends coalesce on the
+  rail instead of stacking.
 - pushd down, rail unconfigured, bad key, 429, timeout (2 s) → all counted
   in the returned `{sent, skipped, failed}` summary and debug-logged.
   **Nothing ever throws into the engine.**

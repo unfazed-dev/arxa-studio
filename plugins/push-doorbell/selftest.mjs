@@ -16,6 +16,7 @@ import {
   appDataDir,
   doorbellConfig,
   notifyApprovalRequested,
+  notifyTaskFinished,
   parseEnvFile,
   pushTargets,
 } from './lib/index.js'
@@ -171,6 +172,77 @@ assert.equal(apiKeyFromEnv(''), null)
   ])
   assert.deepEqual(pushTargets(path.join(dir, 'missing.json')), [])
   assert.deepEqual(parseEnvFile('# c\nA=1\n\nbad\nB = two\n'), { A: '1', B: 'two' })
+}
+
+// 8. Task class, gate OFF: the same literal 'true' gate; zero traffic for
+//    completions AND failures.
+{
+  const { server, hits, url } = await stubPushd()
+  const dir = tmpDataDir()
+  const off = await notifyTaskFinished(
+    { id: 'job-1', outcome: 'completed' },
+    { env: { ARXA_APP_DATA_DIR: dir, ARXA_PUSHD_URL: url } },
+  )
+  assert.equal(off.gated, true)
+  const offFail = await notifyTaskFinished(
+    { id: 'job-1', outcome: 'failed' },
+    { env: { ARXA_DOORBELL_PUSH: 'yes', ARXA_APP_DATA_DIR: dir, ARXA_PUSHD_URL: url } },
+  )
+  assert.equal(offFail.gated, true, 'task class rides the same literal-true gate')
+  assert.equal(hits.length, 0)
+  server.close()
+}
+
+// 9. Task class, gate ON: completion AND failure fire with the exact
+//    content-free copy, collapse_key task:<id>, category 'task', real job
+//    id in metadata — same bearer and /v1/send path as the approval class.
+{
+  const { server, hits, url } = await stubPushd()
+  const dir = tmpDataDir()
+  const done = await notifyTaskFinished(
+    { id: 'job-7', outcome: 'completed' },
+    { env: { ARXA_DOORBELL_PUSH: 'true', ARXA_APP_DATA_DIR: dir, ARXA_PUSHD_URL: url } },
+  )
+  assert.deepEqual(done, { sent: 2, skipped: 0, failed: 0 })
+  const failed = await notifyTaskFinished(
+    { id: 'job-8', outcome: 'failed' },
+    { env: { ARXA_DOORBELL_PUSH: 'true', ARXA_APP_DATA_DIR: dir, ARXA_PUSHD_URL: url } },
+  )
+  assert.deepEqual(failed, { sent: 2, skipped: 0, failed: 0 })
+  assert.equal(hits.length, 4)
+  const doneHits = hits.filter((h) => h.body.collapse_key === 'task:job-7')
+  const failHits = hits.filter((h) => h.body.collapse_key === 'task:job-8')
+  assert.equal(doneHits.length, 2, 'one POST per paired device, completion')
+  assert.equal(failHits.length, 2, 'one POST per paired device, failure')
+  for (const hit of hits) {
+    assert.equal(hit.url, '/v1/send')
+    assert.equal(hit.auth, 'Bearer s3cr3t')
+    assert.equal(hit.body.payload.visible.category, 'task')
+    assert.equal(hit.body.payload.visible.body, 'Open Arxa Studio to see the result.')
+    assert.equal(hit.body.metadata.task_id, hit.body.collapse_key.slice('task:'.length))
+  }
+  for (const hit of doneHits) {
+    assert.equal(hit.body.payload.visible.title, 'Task finished')
+    assert.equal(hit.body.metadata.kind, 'task-finished')
+  }
+  for (const hit of failHits) {
+    assert.equal(hit.body.payload.visible.title, 'Task failed')
+    assert.equal(hit.body.metadata.kind, 'task-failed')
+  }
+  server.close()
+}
+
+// 10. 'killed' is a failure to the owner: it rings the 'Task failed' title.
+{
+  const { server, hits, url } = await stubPushd()
+  const dir = tmpDataDir()
+  const killed = await notifyTaskFinished(
+    { id: 'job-9', outcome: 'killed' },
+    { env: { ARXA_DOORBELL_PUSH: 'true', ARXA_APP_DATA_DIR: dir, ARXA_PUSHD_URL: url }, log: () => {} },
+  )
+  assert.equal(killed.sent, 2)
+  assert.ok(hits.every((h) => h.body.payload.visible.title === 'Task failed'))
+  server.close()
 }
 
 console.log('arxa-push-doorbell selftest: all checks passed')

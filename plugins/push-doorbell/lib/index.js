@@ -119,7 +119,7 @@ export function pushTargets(storePath, readFile = fs.readFileSync) {
 
 /** POST one Visible push. Returns {ok, status?, error?}; NEVER throws —
  *  non-2xx, timeouts, and connection failures are all return values. */
-export async function sendDoorbell(cfg, { token, title, body, collapseKey, metadata }, fetchImpl = fetch) {
+export async function sendDoorbell(cfg, { token, title, body, collapseKey, category = 'approval', metadata }, fetchImpl = fetch) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), SEND_TIMEOUT_MS)
   try {
@@ -131,7 +131,7 @@ export async function sendDoorbell(cfg, { token, title, body, collapseKey, metad
       },
       body: JSON.stringify({
         token,
-        payload: { visible: { title, body, category: 'approval' } },
+        payload: { visible: { title, body, category } },
         collapse_key: collapseKey,
         ...(metadata ? { metadata } : {}),
       }),
@@ -146,40 +146,76 @@ export async function sendDoorbell(cfg, { token, title, body, collapseKey, metad
   }
 }
 
-/** The one wired event class: an approval needs the owner on the phone.
- *  Fans out to every paired device; collapse_key coalesces resends per
- *  device. Returns a counted summary; safe to fire-and-forget. */
-export async function notifyApprovalRequested(
-  { id, title, body },
-  { env = process.env, fetchImpl = fetch, readFile = fs.readFileSync, log = console.debug } = {},
+/** Shared fan-out: one Visible push per paired device, one counted
+ *  summary, never a throw. Both event classes ride this. */
+async function notifyClass(
+  { title, body, collapseKey, category, metadata, logId },
+  { env, fetchImpl, readFile, log },
 ) {
   const cfg = doorbellConfig(env, readFile)
   if (!cfg.enabled) return { sent: 0, skipped: 0, failed: 0, gated: true }
   if (!cfg.apiKey) return { sent: 0, skipped: 0, failed: 0, reason: 'no pushd api key' }
   const targets = pushTargets(cfg.pairingStorePath, readFile)
   if (targets.length === 0) return { sent: 0, skipped: 0, failed: 0, reason: 'no paired devices with push tokens' }
-  const safeTitle = String(title ?? 'Approval needed')
-  const safeBody = String(body ?? 'Open Arxa Studio on your phone to review.')
   const summary = { sent: 0, skipped: 0, failed: 0 }
   await Promise.all(
     targets.map(async (t) => {
       const r = await sendDoorbell(
         cfg,
-        {
-          token: t.token,
-          title: safeTitle,
-          body: safeBody,
-          collapseKey: `approval:${id}`,
-          metadata: { kind: 'approval-requested', approval_id: String(id) },
-        },
+        { token: t.token, title, body, collapseKey, category, metadata },
         fetchImpl,
       )
       if (r.ok) summary.sent += 1
       else {
         summary.failed += 1
-        log(`[arxa-push-doorbell] approval ${id} → ${t.label || 'device'} failed: ${r.status || r.error}`)
+        log(`[arxa-push-doorbell] ${logId} → ${t.label || 'device'} failed: ${r.status || r.error}`)
       }
     }),
   )
   return summary
+}
+
+/** Event class 1: an approval needs the owner on the phone. Content-free
+ *  copy (D60–D68); collapse_key = approval:<id> coalesces resends per
+ *  device. Returns a counted summary; safe to fire-and-forget. */
+export async function notifyApprovalRequested(
+  { id, title, body },
+  { env = process.env, fetchImpl = fetch, readFile = fs.readFileSync, log = console.debug } = {},
+) {
+  return notifyClass(
+    {
+      title: String(title ?? 'Approval needed'),
+      body: String(body ?? 'Open Arxa Studio on your phone to review.'),
+      collapseKey: `approval:${id}`,
+      category: 'approval',
+      metadata: { kind: 'approval-requested', approval_id: String(id) },
+      logId: `approval ${id}`,
+    },
+    { env, fetchImpl, readFile, log },
+  )
+}
+
+/** Event class 2: a background task/job reached a terminal status. Copy is
+ *  content-free exactly like the approval class (D60–D68 discipline): the
+ *  outcome picks the title, the body never names the task. collapse_key =
+ *  task:<id> with the real job id. 'failed' covers both the 'failed' and
+ *  'killed' wire statuses (any non-success terminal rings as a failure).
+ *  Same gate (ARXA_DOORBELL_PUSH=true), same POST path/auth, same counted
+ *  no-op contract. */
+export async function notifyTaskFinished(
+  { id, outcome },
+  { env = process.env, fetchImpl = fetch, readFile = fs.readFileSync, log = console.debug } = {},
+) {
+  const failed = outcome !== 'completed'
+  return notifyClass(
+    {
+      title: failed ? 'Task failed' : 'Task finished',
+      body: 'Open Arxa Studio to see the result.',
+      collapseKey: `task:${id}`,
+      category: 'task',
+      metadata: { kind: failed ? 'task-failed' : 'task-finished', task_id: String(id) },
+      logId: `task ${id} (${outcome})`,
+    },
+    { env, fetchImpl, readFile, log },
+  )
 }

@@ -14,6 +14,7 @@ import {
   approvalRecord,
   decideEnvelope,
   foldFrame,
+  foldJobsFrame,
 } from './lib/index.js'
 
 const QUESTION_FRAME = (rpcId, sessionId = 'sess-1') => ({
@@ -34,6 +35,11 @@ const QUESTION_FRAME = (rpcId, sessionId = 'sess-1') => ({
     ],
   },
 })
+
+const JOBS_FRAME = (jobs, sessionId = 'sess-1') => ({
+  payload: { type: 'session/jobs', sessionId, jobs },
+})
+const JOB = (id, status) => ({ id, kind: 'bash', label: 'job', status, startedAt: 1 })
 
 // 1. Projection: a requested frame → a cairn-row-shaped record (D61/D64).
 {
@@ -63,6 +69,27 @@ const QUESTION_FRAME = (rpcId, sessionId = 'sess-1') => ({
   assert.equal(pending.size, 1, 'session frames are not approvals')
   foldFrame(pending, { rpcId: 'rpc-2', payload: { type: 'question/resolved', sessionId: 'sess-1', outcome: 'answered' } })
   assert.equal(pending.size, 0, 'resolved deletes the record')
+}
+
+// 2b. Task folding: session/jobs snapshots ring ONLY first-sight terminal
+//     ids; running/stopping never ring; killed maps to failed; non-jobs
+//     frames are ignored.
+{
+  const announced = new Set()
+  assert.deepEqual(foldJobsFrame(announced, JOBS_FRAME([JOB('j1', 'running'), JOB('j2', 'stopping')])), [])
+  assert.deepEqual(foldJobsFrame(announced, QUESTION_FRAME('rpc-9')), [], 'question frames are not jobs')
+  assert.deepEqual(
+    foldJobsFrame(announced, JOBS_FRAME([JOB('j1', 'running'), JOB('j1b', 'completed'), JOB('j1c', 'failed'), JOB('j1d', 'killed')])),
+    [
+      { id: 'j1b', outcome: 'completed' },
+      { id: 'j1c', outcome: 'failed' },
+      { id: 'j1d', outcome: 'failed' },
+    ],
+  )
+  // Last-wins replay of the same snapshot must not re-buzz.
+  assert.deepEqual(foldJobsFrame(announced, JOBS_FRAME([JOB('j1b', 'completed')])), [])
+  // A job that completes while unobserved rings on first terminal sight.
+  assert.deepEqual(foldJobsFrame(new Set(), JOBS_FRAME([JOB('late', 'completed')])), [{ id: 'late', outcome: 'completed' }])
 }
 
 // 3. decideEnvelope: a legal approval becomes the exact respond message the
@@ -105,6 +132,7 @@ const QUESTION_FRAME = (rpcId, sessionId = 'sess-1') => ({
   const frames = []
   const responded = []
   const doorbelled = []
+  const taskDoorbelled = []
   const routes = new Map()
   const resFor = () => {
     const res = { status: 0, body: '' }
@@ -134,6 +162,12 @@ const QUESTION_FRAME = (rpcId, sessionId = 'sess-1') => ({
           yield QUESTION_FRAME('rpc-4')
           yield QUESTION_FRAME('rpc-4') // replay must not re-door
           yield QUESTION_FRAME('rpc-5', 'sess-2')
+          yield { payload: { type: 'session/jobs', sessionId: 'sess-1', jobs: [{ id: 'job-a', kind: 'bash', label: 'a', status: 'running', startedAt: 1 }] } }
+          yield { payload: { type: 'session/jobs', sessionId: 'sess-1', jobs: [
+            { id: 'job-a', kind: 'bash', label: 'a', status: 'completed', startedAt: 1, finishedAt: 2 },
+            { id: 'job-b', kind: 'bash', label: 'b', status: 'failed', startedAt: 1, finishedAt: 3 },
+          ] } }
+          yield { payload: { type: 'session/jobs', sessionId: 'sess-1', jobs: [{ id: 'job-a', kind: 'bash', label: 'a', status: 'completed', startedAt: 1, finishedAt: 2 }] } }
         },
       },
       respond: async (message) => {
@@ -146,7 +180,10 @@ const QUESTION_FRAME = (rpcId, sessionId = 'sess-1') => ({
     },
     effect: () => () => {},
   }
-  apply(ctx, { doorbell: (record) => doorbelled.push(record.id) })
+  apply(ctx, {
+    doorbell: (record) => doorbelled.push(record.id),
+    taskDoorbell: (finished) => taskDoorbelled.push(finished),
+  })
   await new Promise((resolve) => setTimeout(resolve, 20))
 
   const listRes = resFor()
@@ -154,6 +191,10 @@ const QUESTION_FRAME = (rpcId, sessionId = 'sess-1') => ({
   assert.equal(listRes.status, 200)
   assert.deepEqual(listRes.body.approvals.map((a) => a.id), ['rpc-4', 'rpc-5'], 'oldest first')
   assert.deepEqual(doorbelled, ['rpc-4', 'rpc-5'], 'doorbell fires once per pending, replay excluded')
+  assert.deepEqual(taskDoorbelled, [
+    { id: 'job-a', outcome: 'completed' },
+    { id: 'job-b', outcome: 'failed' },
+  ], 'task doorbell fires once per terminal job, running and replay excluded')
 
   const decided = resFor()
   await routes.get('/__arxa/approvals/action')(reqWith(JSON.stringify({
