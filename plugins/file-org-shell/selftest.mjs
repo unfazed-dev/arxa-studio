@@ -211,6 +211,25 @@ try {
   ok(fs.existsSync(doomedPath), 'project back at its origin path')
   svcTrash.closeOrg()
 
+  // ---- renameOrg: display-name-only (D41), open handle refreshes ---------
+  console.log('org rename:')
+  const svcRename = createOrgLifecycle({ workspaceRoot: root, env })
+  const renamed = svcRename.renameOrg(orgB.path, 'Beta Limited')
+  ok(renamed.manifest.name === 'Beta Limited', 'rename rewrites the manifest name')
+  ok(renamed.slug === orgB.slug && fs.existsSync(orgB.path), 'slug and folder untouched (D41)')
+  ok(svcRename.listOrgs().some((o) => o.id === renamed.manifest.id && o.name === 'Beta Limited'), 'listOrgs serves the new display name')
+  const hRen = await svcRename.openOrg(orgB.path)
+  svcRename.renameOrg(orgB.path, 'Beta Renewed')
+  ok(svcRename.current.manifest.name === 'Beta Renewed', 'open handle manifest refreshes in place')
+  ok(hRen.activeSessions().every((s) => s.state !== 'archived'), 'activeSessions holds archived back')
+  assert.throws(() => svcRename.renameOrg(path.join(root, 'not-an-org'), 'X'), /unknown-org/)
+  passed++
+  console.log('  ✓ rename of a non-org fails loud')
+  assert.throws(() => svcRename.renameOrg(orgB.path, '  '), /non-empty/)
+  passed++
+  console.log('  ✓ rename to blank fails loud')
+  svcRename.closeOrg()
+
   console.log(`\nfile-org-shell selftest: ${passed} checks passed`)
 } finally {
   fs.rmSync(root, { recursive: true, force: true })

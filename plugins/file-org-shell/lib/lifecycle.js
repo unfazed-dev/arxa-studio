@@ -39,6 +39,8 @@ import {
   validateWorkspaceRoot,
   listTrash,
   restoreFromTrash,
+  renameInManifest,
+  orgManifestPath,
 } from '../../workspace/lib/index.js'
 import {
   openBackend,
@@ -54,6 +56,7 @@ import {
   archivedSessionIds,
   openSession,
   reviveSession,
+  archiveSession as archiveSessionBranch,
   sessionStageBoundary,
 } from '../../git-workspace/lib/index.js'
 import { runGit } from '../../git-workspace/lib/index.js'
@@ -221,6 +224,16 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
             .filter((s) => s.state !== 'open')
             .map((s) => ({ id: s.id, name: s.name, state: s.state, parkedReason: s.parkedReason, project: s.project ?? null }))
         },
+        activeSessions() {
+          // Rows face (sidebar rethink): every registry session that still
+          // participates in the active views — open AND parked — with
+          // archived ones held back per the D39 archivedSessionIds contract.
+          // Named around the static open-time `sessions` snapshot above,
+          // which stays for diagnostics.
+          return listSessions(resolved, env)
+            .filter((s) => s.state !== 'archived')
+            .map((s) => ({ id: s.id, name: s.name, state: s.state, parkedReason: s.parkedReason, project: s.project ?? null }))
+        },
         trashCount() {
           return listTrash(root).length
         },
@@ -243,6 +256,11 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
         },
         resumeSession(id) {
           return reviveSession(resolved, id, env)
+        },
+        archiveSession(id) {
+          // D39/D40 archive: flag out of active views, WIP-commit, prune the
+          // worktree, keep the branch. The rows face then holds it back.
+          return archiveSessionBranch(resolved, id, env)
         },
         mergeSession(id, message) {
           reviveSession(resolved, id, env) // boundary requires an open session
@@ -307,6 +325,27 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     return openOrg(resolved)
   }
 
+  /**
+   * Rename an org: display-name-only (D41). The slug/folder on disk never
+   * moves — registry paths, worktrees and the index all key on it — so a
+   * rewrite of org.json's `name` is the whole operation. When the renamed
+   * org is the open one, refresh the handle's cached manifest in place so
+   * served state shows the new name without a reopen cycle.
+   */
+  function renameOrg(orgPath, displayName) {
+    if (typeof displayName !== 'string' || displayName.trim() === '') {
+      throw new TypeError('renameOrg: displayName must be a non-empty string')
+    }
+    const resolved = path.resolve(orgPath)
+    const manifestFile = orgManifestPath(resolved)
+    if (!fs.existsSync(manifestFile)) {
+      throw new Error('unknown-org: ' + resolved)
+    }
+    const manifest = renameInManifest(manifestFile, displayName)
+    if (current && current.path === resolved) current.manifest = manifest
+    return { path: resolved, slug: path.basename(resolved), manifest }
+  }
+
   return {
     workspaceRoot: root,
     listOrgs,
@@ -314,6 +353,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     openOrg,
     closeOrg,
     switchOrg,
+    renameOrg,
     /** The open org handle, or null. */
     get current() {
       return current
