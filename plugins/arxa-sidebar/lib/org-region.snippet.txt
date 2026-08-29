@@ -1,0 +1,92 @@
+		//#region arxa: per-org surface (spliced into regionArea, above sidebar.workspaces)
+		// Data faces are ours (/__arxa/sidebar/*); the section renders as a
+		// divided block INSIDE the copied shell so brand/toggle/new-session/
+		// workspaces/settings all keep their stock placement.
+		const fetchOrgState = async (selectedProject) => {
+			const q = selectedProject ? `?project=${encodeURIComponent(selectedProject)}` : "";
+			const r = await fetch(`/__arxa/sidebar/state${q}`);
+			return r.json();
+		};
+		const postOrgAction = (action, arg, project) => fetch("/__arxa/sidebar/action", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ action, arg, project })
+		});
+		function OrgSection({ wide }) {
+			const h = react.createElement;
+			const [state, setState] = (0, react.useState)(null);
+			const [selected, setSelected] = (0, react.useState)(null);
+			const refresh = (0, react.useCallback)(() => {
+				fetchOrgState(selected).then(setState).catch(() => {});
+			}, [selected]);
+			(0, react.useEffect)(() => {
+				refresh();
+				const t = setInterval(refresh, 5e3);
+				window.addEventListener("focus", refresh);
+				return () => {
+					clearInterval(t);
+					window.removeEventListener("focus", refresh);
+				};
+			}, [refresh]);
+			const act = (action, arg) => postOrgAction(action, arg, selected).then(refresh);
+			const org = state?.org;
+			const projects = state?.projects ?? [];
+			const ctas = state?.cta ?? [];
+			const sessions = state?.parkedSessions ?? [];
+			const selProj = projects.find((p) => p.id === selected) ?? null;
+			const sessRow = (s) => h("div", { key: s.id, className: "aXa_sb_sessRow", title: s.parkedReason || s.state }, h("span", null, s.name), h("span", { className: "aXa_sb_sessState" }, s.state));
+			const sessGroup = (key, label, rows) => rows.length ? h("div", { key, className: "aXa_sb_sessGroup" }, h("div", { className: "aXa_sb_sessLabel" }, label), ...rows.map(sessRow)) : null;
+			const sessBlock = h("div", { className: "aXa_sb_tree" }, selected ? [
+				sessGroup("sel", selProj ? selProj.name : "Project", sessions.filter((s) => selProj && s.project === selProj.slug)),
+				sessGroup("org", "Org", sessions.filter((s) => s.project == null))
+			].filter(Boolean) : [
+				...projects.map((p) => sessGroup(p.id, p.name, sessions.filter((s) => s.project === p.slug))),
+				sessGroup("org", "Org", sessions.filter((s) => s.project == null))
+			].filter(Boolean));
+			if (!wide) return h("div", { className: "aXa_sb_orgSection" }, h("span", { className: "aXa_sb_orgDot", title: org ? org.name : "arxa", "aria-hidden": "true" }));
+			const tree = projects.map((p) => h(
+				"div",
+				{
+					key: p.id,
+					className: "aXa_sb_proj",
+					"data-selected": String(selected === p.id),
+					onClick: () => setSelected(selected === p.id ? null : p.id)
+				},
+				h("span", null, p.name),
+				...(p.versionChips ?? []).map((c, i) => h("span", { key: `c${i}`, className: "aXa_sb_chip" }, c)),
+				...(p.sessionBadges ?? []).map((b, i) => h("span", { key: `b${i}`, className: "aXa_sb_badge" }, b))
+			));
+			return h(
+				"div",
+				{ className: "aXa_sb_orgSection" },
+				h(
+					"div",
+					{ className: "aXa_sb_org" },
+					h("span", { className: "aXa_sb_orgDot", "aria-hidden": "true" }),
+					h("span", null, org ? org.name : "No organisation open")
+				),
+				(state?.orgs?.length ?? 0) > 1 ? h(
+					"select",
+					{
+						className: "aXa_sb_switch",
+						value: org?.id ?? "",
+						onChange: (e) => act("org.switch", e.target.value)
+					},
+					...state.orgs.map((o) => h("option", { key: o.id, value: o.id }, o.name))
+				) : null,
+				org ? h("div", { className: "aXa_sb_tree" }, tree.length ? tree : h("div", { className: "aXa_sb_orgEmpty" }, "No projects yet")) : null,
+				org && sessions.length ? sessBlock : null,
+				h("div", { className: "aXa_sb_ctas" }, ...ctas.map((c) => h(
+					"button",
+					{
+						key: c.id,
+						className: "aXa_sb_cta",
+						disabled: !!c.disabled,
+						title: c.reserved ? "Reserved (Phase D3)" : void 0,
+						onClick: () => act(c.action)
+					},
+					c.label
+				)))
+			);
+		}
+		//#endregion
