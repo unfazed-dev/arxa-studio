@@ -1,0 +1,11 @@
+{
+  "name": "arxa-approvals",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Engine half of the approvals loop (grill D60-D68): derived projection over dsh pending questions, /__arxa/approvals routes for the phone, doorbell caller for arxa-push-doorbell.",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js"
+  }
+}

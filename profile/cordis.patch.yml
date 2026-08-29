@@ -198,3 +198,15 @@
 - insert:
   - id: arxa-sidebar
     name: arxa-sidebar
+
+# 14. Approvals loop engine half (grill D60–D68, 2026-08-29): consumes the
+#     apiProxy mux stream, projects pending dsh questions as approval
+#     records (derived — nothing persists), doors new pendings via
+#     arxa-push-doorbell (gated ARXA_DOORBELL_PUSH=true, content-free copy),
+#     and serves the phone over the pairing tunnel: GET /__arxa/approvals +
+#     POST decide → apiProxy.respond (first claimant wins, so the desktop
+#     composer and the phone can never double-answer). Host-only plugin,
+#     absolute path — same shape as rows 5/6 (arxa-memory, arxa-pi-delegate).
+- insert:
+  - id: arxa-approvals
+    name: /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/approvals/lib/index.js

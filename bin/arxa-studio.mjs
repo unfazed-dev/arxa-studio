@@ -76,6 +76,12 @@ const waitingPageDir = resolve(here, '..', 'plugins', 'waiting-page')
 const themeAccentDir = resolve(here, '..', 'plugins', 'theme-accent')
 const pairingDir = resolve(here, '..', 'plugins', 'pairing')
 const sidebarDir = resolve(here, '..', 'plugins', 'arxa-sidebar')
+// Approvals loop (grill D60–D68): approvals doors new pendings through the
+// push-doorbell library by bare-name-then-relative import probe (the sidebar
+// importShell pattern) — both dirs ride the flat copies below so the probe
+// resolves in packed mode AND inside pnpm's isolated profile node_modules.
+const approvalsDir = resolve(here, '..', 'plugins', 'approvals')
+const pushDoorbellDir = resolve(here, '..', 'plugins', 'push-doorbell')
 // Phase A lifecycle service (library, not a dsh client plugin — stays out of
 // BY_NAME_PLUGINS). arxa-sidebar's host half import-probes it by this name;
 // its own imports reach its five composed libraries by RELATIVE path, which
@@ -283,6 +289,10 @@ const fiveLibs = [
   ['git-workspace', resolve(here, '..', 'plugins', 'git-workspace')],
   ['account-mirror', resolve(here, '..', 'plugins', 'account-mirror')],
   ['cairn-rail', resolve(here, '..', 'plugins', 'cairn-rail')],
+  // arxa-approvals probes 'arxa-push-doorbell' bare, then the relative
+  // ../../push-doorbell/lib/index.js — both shapes need these two flat.
+  ['arxa-approvals', approvalsDir],
+  ['push-doorbell', pushDoorbellDir],
 ]
 const nm = join(profileDir, 'node_modules')
 if (packed) {

@@ -1,0 +1,256 @@
+// arxa-approvals — the approvals loop engine half (grill D60–D68,
+// arxa-studio docs/plans/arxa-studio-grill-decisions.md; doorbell decision
+// B1 in arxa docs/plans/doorbell-decision-2026-08-29.md).
+//
+// An Approval IS a dsh session's pending human-input request (D63: derived
+// projection, never a first-class record). This plugin consumes the apiProxy
+// mux stream — which replays every still-pending question on attach, then
+// pushes live — folds question frames into approval records (cairn-row-
+// shaped per D61, so the B2 sync swap changes transport, not model), rings
+// arxa-push-doorbell on FIRST sight of a pending (D65: the call passes only
+// the id; the library's fixed content-free copy stands), and serves the
+// phone over the pairing tunnel:
+//
+//   GET  /__arxa/approvals
+//        → { approvals: [record…] } oldest first
+//   POST /__arxa/approvals/action   body { action: 'decide',
+//        arg: { id, answers: [{ id, selected: [label…], custom? }] } }
+//        → ctx.apiProxy.respond — first claimant wins (D62), so the desktop
+//          web UI and the phone can never double-answer: whoever answers
+//          first claims the wait; the loser gets not-pending.
+//
+// Boundaries (deliberate, do not relax):
+// - Derived state ONLY. Nothing persists: a restart re-derives the list from
+//   the mux replay; a question/resolved frame deletes its record. raised_at
+//   is minted at first sight (replays of a known id keep the original).
+// - The doorbell never blocks and never throws into the engine (the
+//   arxa-push-doorbell library contract); a missing library degrades to
+//   routes-only, logged once.
+// - The decide action shape-checks cheaply here, but the ENGINE re-validates
+//   the batch against the live pending question (apiproxy matchesQuestions:
+//   every question answered, ids in order, labels legal) — this plugin is
+//   downstream of that fence and stays permissive.
+// - The record's status field ships 'pending' only: decided approvals DELETE
+//   (the projection is the live list, not history). The field exists for the
+//   future cairn table (D61) where history matters.
+
+export const name = 'arxa-approvals'
+export const inject = ['webServer', 'apiProxy']
+
+/** Project one question/requested mux frame into an approval record.
+ * Field names ARE the future cairn table's columns (D61). kind stays
+ * 'approval' for every pending question (D64: one class in practice; the
+ * plan-review/question split joins only on product evidence). */
+export function approvalRecord(frame, nowMs = Date.now()) {
+  const questions = Array.isArray(frame?.payload?.questions) ? frame.payload.questions : []
+  const first = questions[0]
+  const summary = typeof first?.question === 'string' && first.question.trim() !== ''
+    ? first.question
+    : 'Session needs your decision'
+  return {
+    id: String(frame.rpcId),
+    session_id: String(frame.payload?.sessionId ?? ''),
+    kind: 'approval',
+    summary,
+    questions,
+    raised_at: nowMs,
+    status: 'pending',
+  }
+}
+
+/** Fold one mux frame into the pending map. Returns the record to doorbell —
+ * first sight of an rpcId only: the mux replays every pending on reattach,
+ * and a replayed id must not re-buzz (collapse_key would coalesce it on the
+ * rail anyway, but the phone-side list must not churn either). */
+export function foldFrame(pending, frame, nowMs = Date.now()) {
+  const type = frame?.payload?.type
+  if (type === 'question/requested') {
+    if (!frame.rpcId) return undefined
+    const id = String(frame.rpcId)
+    if (pending.has(id)) return undefined
+    const record = approvalRecord(frame, nowMs)
+    pending.set(id, record)
+    return record
+  }
+  if (type === 'question/resolved') pending.delete(String(frame.rpcId ?? ''))
+  return undefined
+}
+
+/** Shape-check a decide action against its pending record and build the
+ * apiProxy.respond envelope (the same message shape the browser composer
+ * sends). Mirrors the engine-side checks closely enough to fail fast with
+ * honest errors; the engine remains the authority. */
+export function decideEnvelope(record, arg) {
+  const answers = Array.isArray(arg?.answers) ? arg.answers : null
+  if (!answers) return { ok: false, error: 'answers-required' }
+  if (answers.length !== record.questions.length) {
+    return { ok: false, error: 'every-question-must-be-answered' }
+  }
+  for (let i = 0; i < answers.length; i += 1) {
+    const answer = answers[i]
+    const question = record.questions[i]
+    if (String(answer?.id) !== String(question.id)) {
+      return { ok: false, error: 'answer-ids-must-match-question-order' }
+    }
+    const selected = Array.isArray(answer.selected) ? answer.selected : null
+    if (!selected) return { ok: false, error: 'selected-required' }
+    if (new Set(selected).size !== selected.length) {
+      return { ok: false, error: 'duplicate-selection' }
+    }
+    const custom = typeof answer.custom === 'string' ? answer.custom.trim() : undefined
+    if (custom === '') return { ok: false, error: 'custom-cannot-be-empty' }
+    if (question.multiSelect !== true) {
+      if (custom !== undefined && selected.length > 0) {
+        return { ok: false, error: 'single-select-cannot-combine-custom-and-selection' }
+      }
+      if (selected.length > 1) return { ok: false, error: 'single-select-allows-one' }
+    }
+    const labels = new Set((question.options ?? []).map((option) => option.label))
+    for (const label of selected) {
+      if (!labels.has(label)) return { ok: false, error: 'unknown-option-label' }
+    }
+  }
+  return {
+    ok: true,
+    message: {
+      rpcId: record.id,
+      result: {
+        ok: true,
+        value: {
+          sessionId: record.session_id,
+          answer: {
+            answers: answers.map((answer) => ({
+              id: answer.id,
+              selected: answer.selected,
+              ...(typeof answer.custom === 'string' && answer.custom.trim() !== ''
+                ? { custom: answer.custom }
+                : {}),
+            })),
+          },
+        },
+      },
+    },
+  }
+}
+
+/** Import-probe the doorbell library in both deployment shapes (the
+ * arxa-sidebar importShell pattern): bare package name (packed mode flat
+ * node_modules copy), then the repo-relative path (checkout mode). A failure
+ * is LOGGED once and cached — a missing doorbell degrades to routes-only,
+ * never an engine crash. */
+let doorbellProbe = null
+export function loadDoorbell(importBare = (s) => import(s), importRelative = (s) => import(s)) {
+  if (doorbellProbe !== null) return doorbellProbe
+  doorbellProbe = (async () => {
+    try {
+      return await importBare('arxa-push-doorbell')
+    } catch {
+      try {
+        return await importRelative(new URL('../../push-doorbell/lib/index.js', import.meta.url).href)
+      } catch (relative) {
+        console.error(
+          '[arxa-approvals] push-doorbell import failed from', import.meta.url,
+          '— bare and relative both refused; doorbell degraded to off. Relative cause:',
+          relative?.message ?? relative,
+        )
+        return {}
+      }
+    }
+  })()
+  return doorbellProbe
+}
+
+/** Host half. deps is the test seam: { doorbell(record) } overrides the
+ * library call so the selftest asserts first-sight-only firing without a
+ * pushd. */
+export function apply(ctx, deps = {}) {
+  const pending = new Map()
+  const ac = new AbortController()
+
+  const ringDoorbell = (record) => {
+    if (typeof deps.doorbell === 'function') {
+      try { deps.doorbell(record) } catch { /* never throws into the engine */ }
+      return
+    }
+    void loadDoorbell()
+      .then((lib) => lib.notifyApprovalRequested?.({ id: record.id }))
+      .catch(() => {})
+  }
+
+  // The mux stream: replay of every still-pending question on attach, then
+  // live requested/resolved frames. One long-lived consumer filtered to
+  // question frames; everything else the stream carries (session events,
+  // jobs) is ignored here.
+  void (async () => {
+    try {
+      for await (const frame of ctx.apiProxy.events.mux({}, ac.signal)) {
+        const fresh = foldFrame(pending, frame)
+        if (fresh) ringDoorbell(fresh)
+      }
+    } catch (ended) {
+      if (!ac.signal.aborted) {
+        console.error('[arxa-approvals] mux stream ended:', ended?.message ?? ended)
+      }
+    }
+  })()
+
+  ctx.effect(function* () {
+    yield () => ac.abort()
+  }, 'arxa-approvals: mux stream')
+
+  const json = (res, status, body) => {
+    res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+    res.end(JSON.stringify(body))
+  }
+
+  ctx.webServer.register({
+    name: 'arxa-approvals-list',
+    path: '/__arxa/approvals',
+    kind: 'exact',
+    handler: async (req, res) => {
+      const approvals = [...pending.values()].sort((a, b) => a.raised_at - b.raised_at)
+      json(res, 200, { approvals })
+    },
+  })
+
+  ctx.webServer.register({
+    name: 'arxa-approvals-action',
+    path: '/__arxa/approvals/action',
+    kind: 'exact',
+    handler: async (req, res) => {
+      let raw = ''
+      req.on('data', (c) => { raw += c })
+      req.on('end', async () => {
+        let action
+        let arg
+        try {
+          ;({ action, arg } = JSON.parse(raw || '{}'))
+        } catch {
+          return json(res, 400, { ok: false, error: 'malformed-json' })
+        }
+        if (action !== 'decide') return json(res, 400, { ok: false, error: 'unknown-action', action })
+        const record = pending.get(String(arg?.id ?? ''))
+        if (!record) return json(res, 409, { ok: false, error: 'not-pending', action })
+        const envelope = decideEnvelope(record, arg)
+        if (!envelope.ok) return json(res, 400, { ok: false, error: envelope.error, action })
+        let receipt
+        try {
+          receipt = await ctx.apiProxy.respond(envelope.message)
+        } catch (respondThrew) {
+          // Loud, never silent: D62 — a decision that cannot reach the
+          // engine reports inline instead of queueing.
+          return json(res, 502, { ok: false, error: String(respondThrew?.message ?? respondThrew), action })
+        }
+        if (receipt?.accepted !== true) {
+          // not-pending (someone answered first) or bad-response (engine
+          // re-validation refused the batch) — both are conflicts, not bugs.
+          return json(res, 409, { ok: false, error: receipt?.reason ?? 'respond-refused', action })
+        }
+        // First claimant won: drop immediately so the list never shows a
+        // decided approval while the question/resolved frame is in flight.
+        pending.delete(record.id)
+        json(res, 200, { ok: true, action, id: record.id })
+      })
+    },
+  })
+}
