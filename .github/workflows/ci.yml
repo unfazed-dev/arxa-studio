@@ -38,6 +38,9 @@ jobs:
         # (unpinned); it requires deps installed in the workspace itself.
         run: npm ci
 
+      - name: Plugin selftests + sidebar smoke (rebuild gate included)
+        run: npm test
+
       - name: Smoke-run studio CLI (--help)
         run: |
           # macOS has no `timeout`; guard against a hung CLI with a background killer.
