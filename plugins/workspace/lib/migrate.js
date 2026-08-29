@@ -40,7 +40,32 @@ export class MigrationError extends Error {
  * `apply(orgPath)` performs the tree transform. Day one: empty (D44 —
  * stamp-only until a real v1→v2 exists).
  */
-export const MIGRATIONS = Object.freeze([])
+export const MIGRATIONS = Object.freeze([
+  Object.freeze({
+    from: 1,
+    to: 2,
+    description: 'additive v2 containers: fixed dock containers (meetings/account/communications); project containers scaffold per project',
+    apply(orgPath) {
+      // Additive ONLY (grilled 2026-08-30): create missing template dirs,
+      // never touch existing content. Empty dirs are untracked by git — the
+      // post commit carries the stamp bump; restoreTemplateDirs heals rewinds.
+      const template = getTemplate(2)
+      for (const dir of template.org.dirs) {
+        fs.mkdirSync(path.join(orgPath, dir), { recursive: true })
+      }
+      // Existing projects gain their v2 containers the same additive way.
+      const projectsDir = path.join(orgPath, 'projects')
+      if (fs.existsSync(projectsDir)) {
+        for (const entry of fs.readdirSync(projectsDir, { withFileTypes: true })) {
+          if (!entry.isDirectory()) continue
+          for (const dir of template.project.dirs) {
+            fs.mkdirSync(path.join(projectsDir, entry.name, dir), { recursive: true })
+          }
+        }
+      }
+    },
+  }),
+])
 
 /** Resolve the step chain from one version to another, or throw. */
 export function migrationChain(fromVersion, toVersion, migrations = MIGRATIONS) {

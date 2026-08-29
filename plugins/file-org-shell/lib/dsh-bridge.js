@@ -99,7 +99,10 @@ export function joinDshLive(rows, liveRows) {
       dshSessionId: s?.dshSessionId ?? null,
       ...(live
         ? {
-            displayTitle: live.displayTitle ?? s.name,
+            // Registry name wins (grilled 2026-08-30 rename rule): one
+            // rename must read the same everywhere in arxa; dsh keeps
+            // only the live pills (running / pendingInteraction).
+            displayTitle: s.name ?? live.displayTitle ?? null,
             running: live.running ?? null,
             pendingInteraction: live.pendingInteraction ?? null,
           }

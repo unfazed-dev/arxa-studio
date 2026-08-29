@@ -85,52 +85,73 @@ const FLOW_SPLICED = [
 ].join('\n')
 out = out.replace(FLOW_ANCHOR, FLOW_SPLICED)
 
-// 6. org-row menu: add Trash on the open org row (Q6). The delete relabel to
-//    Close organisation is locale-only (see the region snippet).
-const MENU_TAIL = T(4) + 'danger: true' + '\n' + T(3) + '}];'
-if (!out.includes(MENU_TAIL)) throw new Error('workspace menu tail anchor missing — stock shape moved?')
-const MENU_NEW = [
-  T(4) + 'danger: true',
-  T(3) + '}, ...(active ? [{',
-  T(4) + 'id: "trash",',
-  T(4) + 'label: t("menu.trash"),',
-  T(4) + 'icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {})',
-  T(3) + '}] : [])];',
+// 6. v2 leaf rows (grilled 2026-08-30): the stock group div gains an
+//    indent-by-depth style and hides entirely when an ancestor
+//    container is collapsed (display gating — identity never churns).
+const GROUP_OPEN = [
+  T(7) + 'return (0, react_jsx_runtime.jsxs)("div", {',
+  T(8) + 'className: clsx(WorkspaceBrowser_module_css_default.groupSection, workspaceMarker === "before" && WorkspaceBrowser_module_css_default.workspaceDropBefore, workspaceMarker === "after" && WorkspaceBrowser_module_css_default.workspaceDropAfter),',
 ].join('\n')
-out = out.replace(MENU_TAIL, MENU_NEW)
-// 6b. org row click = expand AND open/switch (Q2). onToggle alone only
-//      expands; the lifecycle open rides the row actions object.
+if (!out.includes(GROUP_OPEN) || out.indexOf(GROUP_OPEN) !== out.lastIndexOf(GROUP_OPEN)) throw new Error('group open anchor missing/dup — stock shape moved?')
+out = out.replace(GROUP_OPEN, [
+  T(7) + 'return (0, react_jsx_runtime.jsxs)("div", {',
+  T(8) + 'style: { paddingLeft: ARXA_WS_INDENT(group.workspaceId), display: ARXA_WS_HIDDEN(group.workspaceId) ? "none" : void 0 },',
+  T(8) + 'className: clsx(WorkspaceBrowser_module_css_default.groupSection, workspaceMarker === "before" && WorkspaceBrowser_module_css_default.workspaceDropBefore, workspaceMarker === "after" && WorkspaceBrowser_module_css_default.workspaceDropAfter),',
+].join('\n'))
+
+// 6b. container rows (org / dock / project) anchor inside the group
+//     children, before the leaf's own row — emitted at each container's
+//     FIRST leaf in feed order (region: buildEmit + ARXA_CONTAINER_ROWS).
+const GROUP_KIDS = [
+  T(8) + 'children: [',
+  T(9) + '(0, react_jsx_runtime.jsx)(ProjectRowItem, {',
+].join('\n')
+if (!out.includes(GROUP_KIDS) || out.indexOf(GROUP_KIDS) !== out.lastIndexOf(GROUP_KIDS)) throw new Error('group children anchor missing/dup — stock shape moved?')
+out = out.replace(GROUP_KIDS, [
+  T(8) + 'children: [',
+  T(9) + '...ARXA_CONTAINER_ROWS(group.workspaceId),',
+  T(9) + '(0, react_jsx_runtime.jsx)(ProjectRowItem, {',
+].join('\n'))
+
+// 6c. leaf row click = stock expand/collapse AND selection (the New
+//     Session CTA targets the selected workspace row; region helper
+//     parses the composite id). The org-row open/switch rider is GONE —
+//     org rows are containers now (click = collapse, grilled decision).
 const ROW_TOGGLE = 'onClick: onToggle,'
-if (!out.includes(ROW_TOGGLE)) throw new Error('row toggle anchor missing — stock shape moved?')
-out = out.replace(ROW_TOGGLE, 'onClick: () => { onToggle(); if (actions !== void 0 && actions.open !== void 0) actions.open(); },')
+if (!out.includes(ROW_TOGGLE) || out.indexOf(ROW_TOGGLE) !== out.lastIndexOf(ROW_TOGGLE)) throw new Error('row toggle anchor missing/dup — stock shape moved?')
+out = out.replace(ROW_TOGGLE, 'onClick: () => { onToggle(); ARXA_SELECT_WS(row.workspaceId); },')
 
-// 6c. org tree rows nest under their org row (2026-08-30 sidebar v1.2):
-//      every org group renders its five category rows + projects as the
-//      group's FIRST children — the nesting slot sessions held in stock
-//      dsh — replacing the detached WORKSPACES section. OrgCategoryRows
-//      lives in the region (module scope, render-time resolution). NOTE:
-//      NO t here — SessionTree's scope has no t; the component reads the
-//      locale through the region's orgT capture (a passed t is an
-//      undefined identifier that blanks the whole sidebar).
-const GROUP_KIDS = '(expandedSessionGroups.includes(group.key) ? group.sessions : group.sessions.slice(0, COLLAPSED_SESSION_LIMIT)).map((node) => {'
-if (!out.includes(GROUP_KIDS)) throw new Error('group children anchor missing — stock shape moved?')
-out = out.replace(GROUP_KIDS, '(0, react_jsx_runtime.jsx)(OrgCategoryRows, { orgId: group.workspaceId }),\n' + T(10) + GROUP_KIDS)
+// 6d. hide the stock workspace-row ellipsis menu on leaf rows: fixed
+//     folders are neither renamable nor deletable; org actions live on
+//     the org container row's own menu (region OrgContainerRow).
+const MENU_ANCHOR = 'actions !== void 0 && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {'
+if (!out.includes(MENU_ANCHOR) || out.indexOf(MENU_ANCHOR) !== out.lastIndexOf(MENU_ANCHOR)) throw new Error('menu anchor missing/dup — stock shape moved?')
+out = out.replace(MENU_ANCHOR, 'false && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {')
+
+// 6e. v2 (grilled 2026-08-30): workspace rows WITH sessions start
+//     expanded — one shot per mount, AFTER the stock current-group
+//     effect; the user's own collapses are tracked in groupExpansion
+//     and always win.
+const DRAG_HOOK = 'useNativeDragAcceptance(drag !== null || workspaceDrag !== null);'
+if (!out.includes(DRAG_HOOK) || out.indexOf(DRAG_HOOK) !== out.lastIndexOf(DRAG_HOOK)) throw new Error('drag hook anchor missing/dup — stock shape moved?')
+out = out.replace(DRAG_HOOK, DRAG_HOOK + '\n' + [
+  T(3) + 'const arxaAutoExpanded = (0, react.useRef)(false);',
+  T(3) + '(0, react.useEffect)(() => {',
+  T(4) + '// arxa v2: workspace rows WITH sessions start expanded — one shot',
+  T(4) + '// per mount; the user\'s own collapses are tracked in',
+  T(4) + '// groupExpansion and always win.',
+  T(4) + 'if (arxaAutoExpanded.current) return;',
+  T(4) + 'const withSessions = workspaces.filter((w) => w.sessionIds.length > 0);',
+  T(4) + 'if (withSessions.length === 0) return;',
+  T(4) + 'arxaAutoExpanded.current = true;',
+  T(4) + 'for (const w of withSessions) {',
+  T(5) + 'if (!Object.hasOwn(groupExpansion, w.workspaceId)) setGroupExpanded(w.workspaceId, true);',
+  T(4) + '}',
+  T(3) + '}, [workspaces, groupExpansion, setGroupExpanded]);',
+].join('\n'))
 
 
-// 7. menu routing: Trash toggles the inline section (client-side state).
-const ROUTE_OLD = [
-  T(8) + 'if (id !== "rename" && id !== "delete") return;',
-  T(8) + 'if (id === "rename") actions.rename();',
-  T(8) + 'else actions.delete();',
-].join('\n')
-if (!out.includes(ROUTE_OLD)) throw new Error('menu routing anchor missing — stock shape moved?')
-const ROUTE_NEW = [
-  T(8) + 'if (id !== "rename" && id !== "delete" && id !== "trash") return;',
-  T(8) + 'if (id === "rename") actions.rename();',
-  T(8) + 'else if (id === "delete") actions.delete();',
-  T(8) + 'else if (id === "trash") actions.trash();',
-].join('\n')
-out = out.replace(ROUTE_OLD, ROUTE_NEW)
+// 7. (menu routing) — gone with the hidden ellipsis menu (see 6d).
 
 // 8. row actions gain the trash toggle.
 const DEL_ACT = [
@@ -162,12 +183,13 @@ const ourApply = [
   T(3) + 'orgHostDescription = ctx.get("connection").hostDescription;',
   T(3) + 'const browserInjected = () => ({',
   T(4) + '// use* hooks are pinned in OrgBrowser — see the region snippet.',
-  T(4) + 'startSession: (orgId) => {',
-  T(5) + 'const sel = orgStore.get().selectedRowId;',
-  T(5) + 'if (sel) { orgStore.mutate("workspace.new-session", { orgId: sel.orgId, rowId: sel.rowId }).catch(() => {}); return; }',
-  T(5) + '// D71: the top CTA is row-gated (no selection → no-op; the rows',
-  T(5) + '// section shows the hint). Org rows keep the legacy affordance.',
-  T(5) + 'if (orgId !== void 0) orgStore.mutate("org.new-session", { orgId }).catch(() => {});',
+  T(4) + 'startSession: (workspaceId) => {',
+  T(5) + '// v2 (grilled 2026-08-30): the ONLY creation path is a workspace',
+  T(5) + '// row own + — the composite id encodes org + workspace path. The',
+  T(5) + '// legacy org-level fallback is GONE (it created org-root worktrees).',
+  T(5) + 'const s = String(workspaceId ?? "");',
+  T(5) + 'const i = s.indexOf("|");',
+  T(5) + 'if (i > 0 && i < s.length - 1) orgStore.mutate("workspace.new-session", { orgId: s.slice(0, i), workspace: s.slice(i + 1) }).catch(() => {});',
   T(4) + '},',
   T(4) + 'open: (sessionId) => {',
   T(5) + 'const orgId = orgOfSession(sessionId);',
@@ -177,20 +199,20 @@ const ourApply = [
   T(4) + '// search fetch is an honest empty — we hold no transcript index.',
   T(4) + 'searchSessions: async () => ({ items: [], hasMore: false }),',
   T(4) + 'searchResultLimit: 20,',
-  T(4) + 'renameSession: async () => {},',
+  T(4) + 'renameSession: (sessionId, title) => {',
+  T(5) + '// One rename, every surface: the registry name is the display truth;',
+  T(5) + '// git stays keyed by the session id (grilled 2026-08-30).',
+  T(5) + 'const orgId = orgOfSession(sessionId);',
+  T(5) + 'if (orgId !== void 0 && typeof title === "string" && title.trim() !== "") orgStore.mutate("session.rename", { orgId, sessionId, name: title.trim() }).catch(() => {});',
+  T(4) + '},',
   T(4) + 'forkSession: () => {},',
   T(4) + 'archiveSession: (sessionId) => {',
   T(5) + 'const orgId = orgOfSession(sessionId);',
   T(5) + 'if (orgId !== void 0) orgStore.mutate("session.archive", { orgId, sessionId }).catch(() => {});',
   T(4) + '},',
   T(4) + 'insertSessionBefore: async () => {},',
-  T(4) + 'renameWorkspace: (orgId, title) => orgStore.mutate("org.rename", { orgId, name: title }),',
-  T(4) + 'deleteWorkspace: (orgId) => {',
-  T(5) + '// Relabelled Close-organisation: only meaningful on the open org.',
-  T(5) + 'const o = orgStore.get().orgs.find((x) => x.id === orgId);',
-  T(5) + 'if (o?.open) return orgStore.mutate("org.close", {});',
-  T(5) + 'return Promise.resolve();',
-  T(4) + '},',
+  T(4) + 'renameWorkspace: async () => {}, // fixed folders are not renamable (v2)',
+  T(4) + 'deleteWorkspace: async () => {}, // leaf rows never delete; org close lives on the org row menu (v2)',
   T(4) + 'insertWorkspaceBefore: async () => {},',
   T(4) + 'createWorkspace: async (input) => {',
   T(5) + 'await orgStore.mutate("org.create", { name: input?.name });',

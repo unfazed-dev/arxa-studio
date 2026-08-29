@@ -136,8 +136,30 @@ export function annotateSession(repoPath, id, fields, env = process.env) {
   const registry = readRegistry(repoPath, env)
   const session = getSession(registry, id)
   Object.assign(session, fields)
+  // Any annotation is session activity: keep the rendered age honest
+  // (the 56y bug was fake timestamps rendered as ages-from-epoch).
+  session.updatedAt = Date.now()
   writeRegistry(repoPath, registry, env)
   return session
+}
+
+/**
+ * Auto-name (grilled 2026-08-30): singular(folder) + per-folder counter,
+ * zero-padded to 3 — note-001, email-001, design-001. No ids in names:
+ * the worktree dir + branch keep the unique session id as the stable key,
+ * so display duplicates across different parents are safe (rows sit under
+ * their parent). Counter scans the SAME workspace folder only.
+ */
+export function nextSessionName(sessions, workspace) {
+  const folder = String(workspace || '').split('/').filter(Boolean).pop() || 'session'
+  const prefix = folder.length > 3 && folder.endsWith('s') ? folder.slice(0, -1) : folder
+  let max = 0
+  for (const s of sessions) {
+    if (s.workspace !== workspace || typeof s.name !== 'string') continue
+    const m = /^([A-Za-z][A-Za-z0-9._-]*)-(\d+)$/.exec(s.name)
+    if (m && m[1] === prefix) max = Math.max(max, Number(m[2]))
+  }
+  return prefix + '-' + String(max + 1).padStart(3, '0')
 }
 
 /**
@@ -189,9 +211,12 @@ function sessionWorktreePath(repoPath, id) {
  *
  * @returns {{ id, name, branch, worktree, state, project: string|null }}
  */
-export function openSession(repoPath, { id, name, project, env = process.env } = {}) {
+export function openSession(repoPath, { id, name, project, workspace, env = process.env } = {}) {
   if (project !== undefined && project !== null && (typeof project !== 'string' || project === '')) {
     throw new TypeError(`session project must be a slug string, null, or undefined; got ${JSON.stringify(project)}`)
+  }
+  if (workspace !== undefined && workspace !== null && (typeof workspace !== 'string' || workspace === '')) {
+    throw new TypeError(`session workspace must be a non-empty path string, null, or undefined; got ${JSON.stringify(workspace)}`)
   }
   ensureGit(env)
   if (!id) id = `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
@@ -213,7 +238,23 @@ export function openSession(repoPath, { id, name, project, env = process.env } =
   runGit(['worktree', 'add', '-b', branch, worktree, 'main'], { cwd: repoPath, env })
   // Per-session squash base (see header): starts at the branch point.
   runGit(['update-ref', `${SESSION_BASE_PREFIX}${id}`, mainSha], { cwd: repoPath, env })
-  const session = { id, name: name || id, branch, worktree, state: 'open', parkedReason: null, project: project ?? null }
+  const now = Date.now()
+  const session = {
+    id,
+    name: name || id,
+    branch,
+    worktree,
+    state: 'open',
+    parkedReason: null,
+    project: project ?? null,
+    // Workspace scope (grilled 2026-08-30): the org-relative folder this
+    // session belongs to — 'notes', 'meetings/scheduler',
+    // 'projects/<slug>/design'. Creation paths never produce org-level
+    // (null) sessions any more; null is a pre-v2 relic on old rows.
+    workspace: workspace ?? null,
+    createdAt: now,
+    updatedAt: now,
+  }
   registry.sessions.push(session)
   writeRegistry(repoPath, registry, env)
   return session

@@ -7,7 +7,7 @@
 // manifests (D41/Q3), and thin AGENTS.md context files (D43).
 
 /** The template version this build of the app scaffolds and expects. */
-export const TEMPLATE_VERSION = 1
+export const TEMPLATE_VERSION = 2
 
 /** Stamp string prefix; full stamps look like `arxa-tree/1` (D21/D44). */
 export const STAMP_PREFIX = 'arxa-tree/'
@@ -67,12 +67,52 @@ session working inside this project.
 }
 
 /**
+ * v2 tree shape (grilled 2026-08-30, session 3): the five docks are
+ * containers; their FIXED containers are the session workspaces, and so
+ * are the fixed containers of every project. A dock without containers
+ * (notes) is itself a workspace. Org rows, dock rows and project rows
+ * never host sessions directly.
+ */
+const DOCKS_V2 = Object.freeze([
+  Object.freeze({ slug: 'projects', containers: null }), // dynamic: user projects
+  Object.freeze({ slug: 'notes', containers: Object.freeze([]) }), // bare dock = workspace
+  Object.freeze({ slug: 'meetings', containers: Object.freeze(['scheduler', 'notes']) }),
+  Object.freeze({ slug: 'account', containers: Object.freeze(['receipts', 'invoices', 'subscriptions', 'profile']) }),
+  Object.freeze({ slug: 'communications', containers: Object.freeze(['emails', 'messages', 'comments']) }),
+])
+const PROJECT_CONTAINERS_V2 = Object.freeze([
+  'design', 'config', 'deploy', 'diagrams', 'intake',
+  'architecture', 'notes', 'build', 'moodboard', 'scaffold',
+])
+const PROJECT_TARGETS_V2 = Object.freeze(['website', 'application'])
+
+function orgDirsV2() {
+  const dirs = []
+  for (const dock of DOCKS_V2) {
+    dirs.push(dock.slug)
+    for (const c of dock.containers ?? []) dirs.push(`${dock.slug}/${c}`)
+  }
+  return dirs
+}
+
+function projectDirsV2() {
+  const dirs = []
+  for (const c of PROJECT_CONTAINERS_V2) {
+    dirs.push(c)
+    for (const t of PROJECT_TARGETS_V2) dirs.push(`${c}/${t}`)
+  }
+  return dirs
+}
+
+/**
  * The templates this build ships, keyed by version. Each template
  * describes the org tree and the project tree as plain data:
  *   dirs  — folders to create (org dirs are the fixed categories, D42)
  *   files — { path, content(ctx) } initial files; ctx = { displayName }
  * The manifest (org.json / project.json) is not listed here — it is the
  * identity + stamp carrier and is always written by the scaffolder.
+ * v2 adds the structured faces (docks, projectContainers, projectTargets,
+ * fixedWorkspaces) the sidebar tree and session validation read.
  */
 export const TEMPLATES = Object.freeze({
   1: Object.freeze({
@@ -83,6 +123,31 @@ export const TEMPLATES = Object.freeze({
     }),
     project: Object.freeze({
       dirs: Object.freeze([]),
+      files: Object.freeze([{ path: 'AGENTS.md', content: (ctx) => projectAgentsStub(ctx.displayName) }]),
+    }),
+  }),
+  2: Object.freeze({
+    version: 2,
+    docks: DOCKS_V2,
+    projectContainers: PROJECT_CONTAINERS_V2,
+    projectTargets: PROJECT_TARGETS_V2,
+    /** Fixed org-level workspace paths (project workspaces are dynamic):
+     * every bare dock (containers === [] — the dock IS the workspace) +
+     * every dock-container path. Container docks and projects are not
+     * themselves workspaces. */
+    fixedWorkspaces: Object.freeze(
+      orgDirsV2().filter((d) => {
+        if (d === 'projects') return false
+        const dock = DOCKS_V2.find((k) => k.slug === d)
+        return !dock || (dock.containers ?? []).length === 0
+      }),
+    ),
+    org: Object.freeze({
+      dirs: Object.freeze(orgDirsV2()),
+      files: Object.freeze([{ path: 'AGENTS.md', content: (ctx) => orgAgentsStub(ctx.displayName) }]),
+    }),
+    project: Object.freeze({
+      dirs: Object.freeze(projectDirsV2()),
       files: Object.freeze([{ path: 'AGENTS.md', content: (ctx) => projectAgentsStub(ctx.displayName) }]),
     }),
   }),

@@ -89,6 +89,16 @@ try {
       .sort()
     assert.deepEqual(dirs, [...CATEGORIES].sort(), 'extra top-level folders present')
   })
+  check('v2 scaffold creates fixed dock containers + project containers with targets (grilled 2026-08-30)', () => {
+    for (const w of getTemplate(2).fixedWorkspaces) {
+      assert.ok(fs.statSync(path.join(org.path, w)).isDirectory(), `missing ${w}`)
+    }
+    for (const c of getTemplate(2).projectContainers) {
+      assert.ok(fs.statSync(path.join(project.path, c)).isDirectory(), `missing project container ${c}`)
+      assert.ok(fs.statSync(path.join(project.path, c, 'website')).isDirectory(), `missing ${c}/website`)
+      assert.ok(fs.statSync(path.join(project.path, c, 'application')).isDirectory(), `missing ${c}/application`)
+    }
+  })
   check('AGENTS.md placed at org root and project root (D43)', () => {
     assert.ok(fs.existsSync(path.join(org.path, 'AGENTS.md')))
     assert.ok(fs.existsSync(path.join(project.path, 'AGENTS.md')))
@@ -210,18 +220,33 @@ try {
 
   // ===== Phase 5 — template, stamp, migrations (D21/D44) =====
 
-  check('template v1 IS the phase-1 tree; scaffold stamps the org with it (D44)', () => {
-    assert.equal(TEMPLATE_VERSION, 1)
-    assert.deepEqual([...getTemplate(1).org.dirs].sort(), [...CATEGORIES].sort())
-    assert.equal(stampFor(1), 'arxa-tree/1')
+  check('template v2 is the docks/containers tree; scaffold stamps the org with it (D44; grilled 2026-08-30)', () => {
+    assert.equal(TEMPLATE_VERSION, 2)
+    assert.deepEqual(
+      [...getTemplate(2).org.dirs].sort(),
+      [...CATEGORIES, ...getTemplate(2).fixedWorkspaces.filter((w) => w.includes('/'))].sort(),
+    )
+    assert.equal(getTemplate(2).fixedWorkspaces.length, 10, 'notes + nine fixed dock containers')
+    assert.equal(getTemplate(2).projectContainers.length, 10, 'ten project containers')
+    assert.equal(getTemplate(2).projectTargets.join('+'), 'website+application')
+    assert.equal(stampFor(2), 'arxa-tree/2')
     assert.equal(parseStamp('arxa-tree/7'), 7)
-    assert.equal(readOrgStampVersion(org.path), 1)
+    assert.equal(readOrgStampVersion(org.path), 2)
     assert.equal(org.manifest.formatStamp, stampFor(TEMPLATE_VERSION))
   })
 
   // A dedicated org for the migration story, with its own git repo.
   const migOrg = scaffoldOrgInRoot(workspaceRoot, 'Migration Org')
   initOrgRepo(migOrg.path)
+  // Fresh scaffolds stamp at the CURRENT version (v2); the migration
+  // story needs v1 orgs — downgrade the stamp and commit (migrations
+  // demand a clean tree).
+  const stampV1 = (orgPath) => {
+    writeOrgStampVersion(orgPath, 1)
+    runGit(['add', '-A'], { cwd: orgPath })
+    runGit(['commit', '-m', 'test: stamp at v1'], { cwd: orgPath })
+  }
+  stampV1(migOrg.path)
   const testMigrations = [
     {
       from: 1,
@@ -273,6 +298,7 @@ try {
   check('dirty org tree → migration refused before any commit', () => {
     const dirtyOrg = scaffoldOrgInRoot(workspaceRoot, 'Dirty Org')
     initOrgRepo(dirtyOrg.path)
+    stampV1(dirtyOrg.path)
     fs.writeFileSync(path.join(dirtyOrg.path, 'notes', 'stray.md'), 'uncommitted\n')
     assert.throws(
       () => migrateOrg(dirtyOrg.path, { toVersion: 2, migrations: testMigrations }),
@@ -284,6 +310,7 @@ try {
   check('failing migration rewinds to the pre commit; stamp stays put', () => {
     const crashOrg = scaffoldOrgInRoot(workspaceRoot, 'Crash Org')
     initOrgRepo(crashOrg.path)
+    stampV1(crashOrg.path)
     const crashing = [
       {
         from: 1,
@@ -317,6 +344,7 @@ try {
   check('crash between pre and post commit → reopen rewinds and re-runs the migration', () => {
     const interruptedOrg = scaffoldOrgInRoot(workspaceRoot, 'Interrupted Org')
     initOrgRepo(interruptedOrg.path)
+    stampV1(interruptedOrg.path)
     // Simulate a run that died mid-step: pre commit made, apply half done,
     // stamp already bumped on disk, post commit never published.
     runGit(['commit', '--allow-empty', '-m', `${STAGE_PREFIX} org format migration v1→v2 (pre)`], {
@@ -340,6 +368,7 @@ try {
     const fresh = scaffoldOrgInRoot(workspaceRoot, 'Parity Fresh')
     const migrated = scaffoldOrgInRoot(workspaceRoot, 'Parity Migrated')
     initOrgRepo(migrated.path)
+    stampV1(migrated.path)
     openOrg(migrated.path, { appVersion: TEMPLATE_VERSION, migrations: MIGRATIONS })
     const tree = (root) => {
       const out = []
@@ -361,6 +390,7 @@ try {
     const absentEnv = { ...process.env, ARXA_GIT_BIN: path.join(tmp, 'no-such-git') }
     resetProbe()
     const gitlessOrg = scaffoldOrgInRoot(workspaceRoot, 'Gitless Org') // scaffold + stamp: no git needed
+    writeOrgStampVersion(gitlessOrg.path, 1) // fresh scaffolds stamp at the current version; the story needs v1
     assert.equal(readOrgStampVersion(gitlessOrg.path), 1)
     assert.throws(() => checkOrgStamp(migOrg.path, 1), StampRefusalError) // refusal: pure fs
     assert.throws(

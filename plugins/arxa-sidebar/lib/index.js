@@ -190,7 +190,20 @@ export function apply(ctx, opts = {}) {
       // degrade silently to the registry rows.
       const rows = shell.listSessions(org.path, process.env)
         .filter((s) => s.state !== 'archived')
-        .map((s) => ({ id: s.id, name: s.name, state: s.state, parkedReason: s.parkedReason, project: s.project ?? null, dshSessionId: s.dshSessionId ?? null }))
+        .map((s) => ({
+          id: s.id,
+          name: s.name,
+          state: s.state,
+          parkedReason: s.parkedReason,
+          project: s.project ?? null,
+          // Workspace scope + real timestamps (grilled 2026-08-30): rows
+          // render under their workspace row; ages read from ms epochs —
+          // the 56y bug was fake ordinals rendered as ages from 1970.
+          workspace: s.workspace ?? null,
+          createdAt: s.createdAt ?? null,
+          updatedAt: s.updatedAt ?? null,
+          dshSessionId: s.dshSessionId ?? null,
+        }))
       const bridge = getBridge()
       const live = bridge ? await bridge.list() : []
       return shell.joinDshLive(rows, live)
@@ -214,29 +227,11 @@ export function apply(ctx, opts = {}) {
     const l = await getLifecycle()
     if (!l) return emptySnap(SEAM_LIFECYCLE_STUBBED)
     const cur = l.current
-    /** Rows for ONE org's tree (D70/D71): the rows ARE the tree — five
-     * category workspaces plus the org's projects, same shape for every
-     * org so they can nest under their own org row client-side. */
-    const rowsOf = (tree) => {
-      if (!tree) return []
-      const rs = tree.categories.map((c) => ({
-        kind: 'category',
-        rowId: 'category:' + c.slug,
-        slug: c.slug,
-        exists: c.exists,
-        sessionCount: null,
-      }))
-      for (const p of tree.projects) {
-        rs.push({
-          kind: 'project',
-          rowId: 'project:' + p.slug,
-          slug: p.slug,
-          displayName: p.name,
-          sessionCount: tree.sessionsByProject ? (tree.sessionsByProject[p.slug] ?? 0) : null,
-        })
-      }
-      return rs
-    }
+    /** Tree face for ONE org (v2, grilled 2026-08-30): docks with their
+     * fixed containers + projects with their fixed containers +
+     * per-workspace session counts. The client flattens this into
+     * container rows (org / dock / project) and leaf workspace rows —
+     * the leaves are the stock dsh workspace groups. */
     const treeOf = (p) => {
       if (typeof l.orgTree !== 'function') return null
       try { return l.orgTree(p) } catch { return null }
@@ -252,11 +247,9 @@ export function apply(ctx, opts = {}) {
       snapshotPending: cur?.path === path ? !!cur.snapshotPending?.() : false,
       createdAt: manifest?.createdAt ?? null,
       sessions: await orgSessions(l, { path }),
-      // Nested tree rows (2026-08-30 sidebar v1.2): every org carries its
-      // five categories + projects so they render UNDER their org row,
-      // replacing the detached WORKSPACES section. Read-only face;
-      // failures degrade to [].
-      rows: rowsOf(treeOf(path)),
+      // v2 tree face: docks/containers/projects for this org. Read-only;
+      // failures degrade to null (the client renders the org row only).
+      tree: treeOf(path),
     })))
     // Project scope (open org only): the client's id-or-slug selection
     // resolves once against the registry's slug; unknown renders as none.
@@ -265,20 +258,13 @@ export function apply(ctx, opts = {}) {
       const hit = cur.projects().find((p) => p.slug === selectedProject || p.id === selectedProject)
       return hit ? hit.slug : null
     })()
-    // Org tree for the OPEN org keeps the top-level rows face (v1.1
-    // compat): same rowsOf shape, now derived once for cur.
     const tree = cur ? treeOf(cur.path) : null
-    // Workspace rows (D70/D71): the rows ARE the tree now. Category rows
-    // are the five fixed workspaces (org-repo sessions, project:null —
-    // the registry has no category scope, so counts wait for the D live
-    // listing); project rows carry their registry counts. Projects render
-    // indented under the Projects row (client-side concern).
-    const rows = rowsOf(tree)
     return {
       seam: false,
       root: true,
       orgs,
-      rows,
+      // v2: the flat rows face is gone — every org carries its own tree
+      // (orgs[].tree) and the client nests from there.
       tree,
       trashCount: cur ? cur.trashCount() : 0,
       // Open-org view only: the trash lives at the workspace root, but the
@@ -541,28 +527,36 @@ export function apply(ctx, opts = {}) {
             'org.open': () => ensureOpen(arg?.orgId ?? arg),
             'org.close': () => l.closeOrg(),
             'org.rename': () => l.renameOrg(orgByRef(arg?.orgId).path, arg?.name),
-            'org.new-session': async () => {
-              // No orgId = the shell CTA: session in the CURRENT open org.
-              const cur = arg?.orgId ? await ensureOpen(arg.orgId) : handle()
-              // Rows start sessions at org level; the project scope stays a
-              // display/selection concept (Q4), not a creation default.
-              return cur.newSession(undefined, null)
-            },
+            // 'org.new-session' is GONE (grilled 2026-08-30): org rows
+            // never host sessions — the legacy + path that reached this
+            // action created org-level worktrees by accident. Unknown
+            // action is the loud default below.
             'workspace.new-session': async () => {
-              // Rows world (D70/D71): sessions are born in a WORKSPACE — a
-              // category row (org-repo worktree, project:null) or a project
-              // row (registry-scoped by slug). Unknown row is loud. The
-              // orgId rides along so a row selected under a NON-open org
+              // Sessions are born in a WORKSPACE (v2): a fixed dock
+              // container ('notes', 'meetings/scheduler') or a project
+              // container ('projects/<slug>/design'). Unknown workspace is
+              // loud. orgId rides along so a row under a NON-open org
               // switches there first (single open handle, ensureOpen).
               const cur = arg?.orgId ? await ensureOpen(arg.orgId) : handle()
-              const rowId = typeof arg?.rowId === 'string' ? arg.rowId : ''
-              const cat = rowId.startsWith('category:') ? rowId.slice('category:'.length) : null
-              const proj = rowId.startsWith('project:') ? rowId.slice('project:'.length) : null
-              if (!cat && !proj) throw new Error('unknown-row: ' + rowId)
-              if (cat && !l.orgTree(cur.path).categories.some((c) => c.slug === cat)) {
-                throw new Error('unknown-row: ' + rowId)
+              const ws = typeof arg?.workspace === 'string' ? arg.workspace : ''
+              if (ws === '') throw new Error('workspace-required')
+              return cur.newSession(undefined, ws)
+            },
+            'session.rename': async () => {
+              // One rename, every surface (grilled 2026-08-30): registry
+              // name is the display truth; git stays keyed by session id.
+              const cur = arg?.orgId ? await ensureOpen(arg.orgId) : handle()
+              if (typeof arg?.sessionId !== 'string' || typeof arg?.name !== 'string') {
+                throw new Error('session-id-and-name-required')
               }
-              return cur.newSession(undefined, proj)
+              return cur.renameSession(arg.sessionId, arg.name)
+            },
+            'project.create': async () => {
+              // v2 (grilled 2026-08-30): the Projects dock + creates an
+              // auto-named project (project-001…) with its 10 fixed
+              // containers; publish logic rides newProject unchanged.
+              const cur = arg?.orgId ? await ensureOpen(arg.orgId) : handle()
+              return cur.newProject(typeof arg?.name === 'string' ? arg.name : '')
             },
             'session.open': async () => {
               const cur = await ensureOpen(arg?.orgId)

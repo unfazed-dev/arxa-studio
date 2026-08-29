@@ -280,10 +280,12 @@ try {
   {
     const svcTree = createOrgLifecycle({ workspaceRoot: root, env })
     const tree = svcTree.orgTree(orgA.path)
-    ok(tree.categories.length === 5, 'all five fixed categories reported')
-    ok(tree.categories.every((c) => c.exists), 'scaffolded categories exist on disk')
-    ok(Array.isArray(tree.projects) && tree.projects.every((p) => p.path.startsWith(orgA.path)), 'projects scoped to the org')
-    ok(tree.sessionsByProject !== null, 'session counts readable for a repo-backed org')
+    ok(tree.docks.length === 5, 'all five docks reported (v2)')
+    ok(tree.docks.every((d) => d.exists), 'scaffolded docks exist on disk')
+    ok(tree.docks.find((d) => d.slug === 'notes').workspace === true, 'a dock without containers is itself a workspace')
+    ok(tree.docks.find((d) => d.slug === 'projects').containers === null, 'the projects dock holds dynamic projects')
+    ok(Array.isArray(tree.projects) && tree.projects.every((p) => p.path.startsWith(orgA.path) && p.containers.length === 10), 'projects scoped to the org with their 10 fixed containers')
+    ok(tree.sessionsByWorkspace !== null, 'workspace counts readable for a repo-backed org')
     assert.throws(() => svcTree.orgTree(path.join(root, 'not-an-org')), /unknown-org/)
     passed++
     console.log('  ✓ orgTree of a non-org fails loud')
@@ -297,10 +299,15 @@ try {
     const svcNoDsh = createOrgLifecycle({ workspaceRoot: root, env })
     await svcNoDsh.openOrg(orgB.path)
     const hNo = svcNoDsh.current
-    const regRow = await hNo.newSession('no-dsh', null)
+    const regRow = await hNo.newSession('no-dsh', 'notes')
     ok(regRow.dshSessionId === null && regRow.dshStatus === 'dsh-unavailable', 'default bridge degrades to registry-only with a loud dsh-unavailable annotation')
     ok(fs.existsSync(regRow.worktree), 'branch + worktree still created without dsh (registry stays the durable record)')
     ok(listSessions(orgB.path, env).find((s) => s.id === regRow.id).dshStatus === 'dsh-unavailable', 'annotation persisted on the registry row')
+    ok(regRow.workspace === 'notes' && typeof regRow.createdAt === 'number' && regRow.updatedAt >= regRow.createdAt, 'session row carries its workspace scope + real timestamps (v2; the 56y bug was fake ordinals)')
+    const autoRow = await hNo.newSession(undefined, 'notes')
+    ok(autoRow.name === 'note-001', 'auto-name: singular(folder)+counter, no ids (grilled 2026-08-30)')
+    try { await hNo.newSession('bad', null) } catch (e) { ok(/workspace-required/.test(String(e.message)), 'org-level sessions are impossible — workspace is required (v2)') }
+    try { await hNo.newSession('bad', 'nope/deep') } catch (e) { ok(/unknown-workspace/.test(String(e.message)), 'unknown workspace fails loud') }
     svcNoDsh.closeOrg()
 
     // (b) mock faces: spawn records the worktree cwd; registry gains the id.
@@ -325,16 +332,19 @@ try {
     const svcDsh = createOrgLifecycle({ workspaceRoot: root, env, dsh: mockFaces })
     await svcDsh.openOrg(orgB.path)
     const hD = svcDsh.current
-    const liveRow = await hD.newSession('bridge', null)
+    const liveRow = await hD.newSession('bridge', 'notes')
     ok(typeof liveRow.dshSessionId === 'string' && liveRow.dshSessionId.startsWith('dsh-'), 'mock spawn ran and its id landed on the returned row (dshSessionId)')
     ok(spawnedSpecs[0].cwd === liveRow.worktree, 'dsh spawn cwd = the session worktree (sessions.create cwd contract)')
     ok(listSessions(orgB.path, env).find((s) => s.id === liveRow.id).dshSessionId === liveRow.dshSessionId, 'registry (durable record) carries dshSessionId')
 
     // (c) live join on the rows face.
     const joined = hD.activeSessions().find((s) => s.id === liveRow.id)
+    // v2 rename rule (grilled 2026-08-30): the registry name is the display
+    // truth everywhere — dsh keeps only the live pills. displayTitle here is
+    // the REGISTRY name ('bridge'), NOT dsh's 'Live bridge'.
     ok(
       joined.dshSessionId === liveRow.dshSessionId &&
-      joined.displayTitle === 'Live bridge' &&
+      joined.displayTitle === 'bridge' &&
       joined.running === true &&
       joined.pendingInteraction === 'approval',
       'activeSessions join surfaces mock live fields (displayTitle, running, pendingInteraction D63 union)',
@@ -356,7 +366,8 @@ try {
 
     // (f) pure join: failure modes degrade silently.
     const regRows = [{ id: 'a', name: 'A', dshSessionId: 'x' }, { id: 'b', name: 'B' }]
-    ok(joinDshLive(regRows, [{ id: 'x', displayTitle: 'T', running: false, pendingInteraction: 'question' }])[0].displayTitle === 'T', 'joinDshLive maps live fields by dshSessionId')
+    const joinedPure = joinDshLive(regRows, [{ id: 'x', displayTitle: 'T', running: false, pendingInteraction: 'question' }])[0]
+    ok(joinedPure.displayTitle === 'A' && joinedPure.running === false && joinedPure.pendingInteraction === 'question', 'joinDshLive maps live pills by dshSessionId; the registry name stays the display truth (v2 rename rule)')
     ok(joinDshLive(regRows, null)[1].name === 'B' && joinDshLive(regRows, null)[1].dshSessionId === null, 'joinDshLive with no dsh list degrades to registry rows (old rows read dshSessionId null)')
     ok(joinDshLive(regRows, [{ id: 'unrelated' }]).every((r) => !('running' in r)), 'joinDshLive with an unresolved id keeps registry fields (silent degrade)')
 
@@ -438,7 +449,7 @@ try {
       const svcE = createOrgLifecycle({ workspaceRoot: eRoot, env: eEnv })
       const org = svcE.createOrg('Rename Me')
       await svcE.openOrg(org.path)
-      const sess = await svcE.current.newSession('worker', null)
+      const sess = await svcE.current.newSession('worker', 'notes')
       fs.writeFileSync(path.join(sess.worktree, 'note.md'), 'before rename\n')
       runGit(['add', '-A'], { cwd: sess.worktree, env: eEnv })
       runGit(['commit', '-m', 'wip: note'], { cwd: sess.worktree, env: eEnv })

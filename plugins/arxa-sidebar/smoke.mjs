@@ -83,10 +83,15 @@ const orgPath = s.orgs[0].path
 const proj = ws.scaffoldProject(orgPath, 'Rocket')
 check('project fixture scaffolded', !!proj?.path, JSON.stringify(proj))
 
+// v2 (grilled 2026-08-30): sessions are born in a WORKSPACE row —
+// org-level creation is gone (unknown-action is the loud default).
 r = await act('org.new-session', { orgId: acme.id })
-check('org.new-session ok', r.ok === true, r.error)
+check('org-level creation refused (v2)', r.ok === false && r.error === 'unknown-action', JSON.stringify(r))
+r = await act('workspace.new-session', { orgId: acme.id, workspace: 'notes' })
+check('workspace.new-session ok', r.ok === true, r.error)
 s = await state()
-check('session row served on its org', s.orgs[0].sessions.length === 1 && s.orgs[0].sessions[0].state === 'open',
+check('session row served on its org with workspace + auto-name', s.orgs[0].sessions.length === 1 && s.orgs[0].sessions[0].state === 'open'
+  && s.orgs[0].sessions[0].workspace === 'notes' && s.orgs[0].sessions[0].name === 'note-001',
   JSON.stringify(s.orgs[0].sessions))
 
 // park it, then open it back through the rows action
@@ -123,7 +128,7 @@ check('first org rows still served while closed', s.orgs.find((o) => o.id === ac
 r = await act('org.close', {})
 s = await state()
 check('org.close ok, back to zero open', r.ok === true && s.orgs.every((o) => !o.open), r.error)
-r = await act('org.new-session', {})
+r = await act('workspace.new-session', {})
 check('new-session without any open org fails loud', r.ok === false && r.error === 'no-org-open', JSON.stringify(r))
 
 // reopen acme by row id (the Q2 click-to-open path)
@@ -169,33 +174,43 @@ check('unknown scope renders as none (mutations throw instead)', s.selectedProje
 r = await act('org.create', { name: 'Rows Co' })
 check('rows-c: org.create ok', r.ok === true, r.error)
 s = await state()
-check('rows-c: five category rows served, no projects yet',
-  Array.isArray(s.rows) && s.rows.length === 5 && s.rows.every((x) => x.kind === 'category' && x.sessionCount === null)
-  && s.rows[0].rowId === 'category:' + s.rows[0].slug,
-  JSON.stringify(s.rows))
-r = await act('workspace.new-session', { rowId: 'category:notes' })
-check('rows-c: category row session ok (result carries the row)', r.ok === true && typeof r.result?.id === 'string' && r.result.project === null, JSON.stringify(r))
-s = await state()
-check('rows-c: category session registered on the org', s.orgs.find((o) => o.open).sessions.length === 1, JSON.stringify(s.orgs.find((o) => o.open).sessions))
-const rcPath = s.orgs.find((o) => o.open).path
+// v2: wait for the initial snapshot (session creation gates on HEAD)
+let snapTries = 0
+while (snapTries++ < 200) {
+  s = await state()
+  if (!s.orgs.find((o) => o.open).snapshotPending) break
+  await new Promise((res) => setTimeout(res, 100))
+}
+const rc = s.orgs.find((o) => o.open)
+const rcTree = rc.tree
+check('rows-c: tree face — five docks, notes a workspace, fixed containers',
+  rcTree.docks.length === 5
+  && rcTree.docks.find((d) => d.slug === 'notes').workspace === true
+  && rcTree.docks.find((d) => d.slug === 'meetings').containers.join('+') === 'scheduler+notes'
+  && rcTree.docks.find((d) => d.slug === 'communications').containers.length === 3
+  && rcTree.projects.length === 0,
+  JSON.stringify(rcTree))
+r = await act('workspace.new-session', { orgId: rc.id, workspace: 'notes' })
+check('rows-c: dock session ok (auto-named, workspace-scoped)', r.ok === true && r.result?.name === 'note-001' && r.result?.workspace === 'notes' && r.result?.project === null, JSON.stringify(r))
+const rcPath = rc.path
 const rcProj = ws.scaffoldProject(rcPath, 'Rocket')
 check('rows-c: project fixture scaffolded', !!rcProj?.path, JSON.stringify(rcProj))
 s = await state()
-const projRow = s.rows.find((x) => x.kind === 'project')
-check('rows-c: project row served indented data + zero count',
-  s.rows.length === 6 && projRow && projRow.rowId === 'project:rocket' && projRow.sessionCount === 0,
-  JSON.stringify(s.rows))
-r = await act('workspace.new-session', { rowId: 'project:rocket' })
-check('rows-c: project row session ok (slug-scoped)', r.ok === true && r.result?.project === 'rocket', JSON.stringify(r))
+const rcTree2 = s.orgs.find((o) => o.open).tree
+check('rows-c: project served with its 10 fixed containers',
+  rcTree2.projects.length === 1 && rcTree2.projects[0].containers.length === 10,
+  JSON.stringify(rcTree2.projects))
+r = await act('workspace.new-session', { orgId: rc.id, workspace: 'projects/rocket/design' })
+check('rows-c: project-container session ok (slug-scoped + auto-name)', r.ok === true && r.result?.project === 'rocket' && r.result?.workspace === 'projects/rocket/design' && r.result?.name === 'design-001', JSON.stringify(r))
 s = await state()
 const rcSessions = s.orgs.find((o) => o.open).sessions
-check('rows-c: project session registered + count pill honest',
-  rcSessions.length === 2 && s.rows.find((x) => x.rowId === 'project:rocket').sessionCount === 1,
-  JSON.stringify({ sessions: rcSessions, rows: s.rows }))
-r = await act('workspace.new-session', { rowId: 'category:nope' })
-check('rows-c: unknown category is loud', r.ok === false && String(r.error).startsWith('unknown-row'), JSON.stringify(r))
-r = await act('workspace.new-session', { rowId: 'garbage' })
-check('rows-c: malformed rowId is loud', r.ok === false && String(r.error).startsWith('unknown-row'), JSON.stringify(r))
+check('rows-c: both sessions registered under their workspaces with real timestamps',
+  rcSessions.length === 2 && rcSessions.every((x) => typeof x.createdAt === 'number' && typeof x.updatedAt === 'number'),
+  JSON.stringify(rcSessions))
+r = await act('workspace.new-session', { orgId: rc.id, workspace: 'notes/nope' })
+check('rows-c: unknown workspace is loud', r.ok === false && String(r.error).startsWith('unknown-workspace'), JSON.stringify(r))
+r = await act('workspace.new-session', { orgId: rc.id })
+check('rows-c: missing workspace is loud', r.ok === false && r.error === 'workspace-required', JSON.stringify(r))
 
 // ---- github gate (org-model-v2 W3: D69 gate half) — fake github above
 r = await act('github.status', {})

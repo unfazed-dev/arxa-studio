@@ -71,12 +71,14 @@ import {
   archivedSessionIds,
   openSession,
   annotateSession,
+  nextSessionName,
   reviveSession,
   archiveSession as archiveSessionBranch,
   sessionStageBoundary,
   rekeySessionsProject,
 } from '../../git-workspace/lib/index.js'
 import { runGit } from '../../git-workspace/lib/index.js'
+import { getTemplate, TEMPLATE_VERSION } from '../../workspace/lib/template.js'
 import { refreshAccountMirror, ensureAccountExcluded } from '../../account-mirror/lib/index.js'
 import { claimMaterializer, materialize, readEdits } from '../../cairn-rail/lib/index.js'
 
@@ -376,7 +378,21 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
          * local project always exists either way (CLAUDE.md local-first).
          */
         async newProject(displayName) {
-          const created = scaffoldProject(resolved, displayName)
+          // Auto-name (grilled 2026-08-30): project-001, project-002… when
+          // the caller leaves the name blank — per-dock counter, no ids.
+          let name = typeof displayName === 'string' ? displayName.trim() : ''
+          if (name === '') {
+            const slugs = [...scanWorkspace(resolved).projects.values()]
+              .filter((p) => p.orgId === opened.manifest.id)
+              .map((p) => p.slug)
+            let max = 0
+            for (const s of slugs) {
+              const m = /^project-(\d+)$/.exec(s)
+              if (m) max = Math.max(max, Number(m[1]))
+            }
+            name = 'project-' + String(max + 1).padStart(3, '0')
+          }
+          const created = scaffoldProject(resolved, name)
           try {
             initProjectRepo(created.path, env) // idempotent repo attach
             const st = await githubBridge.status()
@@ -397,23 +413,38 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           }
           return created
         },
-        async newSession(name, project) {
+        async newSession(name, workspace) {
           // Sessions branch from HEAD; until the initial snapshot lands
           // there is nothing to branch from. Loud, human, and the rows
           // client normally prevents reaching this at all (CTA disabled).
           if (!hasHead(resolved, env)) throw new Error('initial-snapshot-pending: the first git snapshot of this organisation is still running — sessions unlock the moment it completes')
-          // Sessions carry an optional project scope (annotation in the
-          // registry): accept project id or slug, store the slug (stable
-          // across renames). Unknown project is a loud error, never a
-          // silently org-level session.
+          // Workspace-born sessions (grilled 2026-08-30): a session lives
+          // in a WORKSPACE row — a fixed dock container ('notes',
+          // 'meetings/scheduler', …) or a project container
+          // ('projects/<slug>/design'). Org-level sessions are gone: the
+          // legacy + path that created them was removed with the org-row
+          // affordance. Unknown workspace is loud, never a fallback.
+          const ws = typeof workspace === 'string' && workspace !== '' ? workspace : null
+          if (!ws) throw new Error('workspace-required: sessions are born in a workspace row (a dock container or a project container), never at org level')
+          const template = getTemplate(TEMPLATE_VERSION)
           let projectSlug = null
-          if (project != null) {
+          const projectScope = /^projects\/([a-z0-9][a-z0-9._-]*)\/([a-z0-9][a-z0-9._-]*)$/.exec(ws)
+          if (projectScope) {
             const hit = [...scanWorkspace(resolved).projects.values()]
-              .find((p) => p.orgId === opened.manifest.id && (p.slug === project || p.id === project))
-            if (!hit) throw new Error(`unknown-project: ${project}`)
+              .find((p) => p.orgId === opened.manifest.id && p.slug === projectScope[1])
+            if (!hit || !template.projectContainers.includes(projectScope[2])) {
+              throw new Error('unknown-workspace: ' + ws)
+            }
             projectSlug = hit.slug
+          } else if (!template.fixedWorkspaces.includes(ws)) {
+            throw new Error('unknown-workspace: ' + ws)
           }
-          const session = openSession(resolved, { name, project: projectSlug, env })
+          // Auto-name (grilled 2026-08-30): singular(folder)+counter, no
+          // ids — the branch/worktree keep the session id as stable key.
+          const title = typeof name === 'string' && name.trim() !== ''
+            ? name.trim()
+            : nextSessionName(listSessions(resolved, env), ws)
+          const session = openSession(resolved, { name: title, project: projectSlug, workspace: ws, env })
           // Phase D (D71): AFTER branch+worktree exist, spawn the dsh session
           // with cwd = the worktree path (dsh sessions.create cwd contract)
           // and store its id on the registry row. Unavailable dsh degrades to
@@ -428,6 +459,15 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
               : { dshSessionId: null, dshStatus: spawned.reason ?? 'dsh-unavailable' },
             env,
           )
+        },
+        /** Rename (grilled 2026-08-30): the registry name is the single
+        * display truth — every arxa surface reads it. Git never moves:
+        * branch + worktree stay keyed by the session id. */
+        async renameSession(id, name) {
+          const title = typeof name === 'string' ? name.trim() : ''
+          if (title === '') throw new Error('name-required: a session name cannot be empty')
+          if (listSessions(resolved, env).every((s) => s.id !== id)) throw new Error('unknown-session: ' + id)
+          return annotateSession(resolved, id, { name: title }, env)
         },
         async resumeSession(id) {
           // Sessions branch from HEAD; until the initial snapshot lands
@@ -693,27 +733,37 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     const { orgs, projects } = scanWorkspace(resolved)
     const org = [...orgs.values()].find((o) => o.path === resolved)
     if (!org) throw new Error('unknown-org: ' + resolved)
-    const categories = CATEGORIES.map((slug) => ({
-      slug,
-      exists: fs.existsSync(path.join(resolved, slug)),
+    // v2 tree face (grilled 2026-08-30): docks + their fixed containers,
+    // projects + their fixed containers. The client flattens this into
+    // container rows (orgs, docks, projects) and leaf workspace rows.
+    const template = getTemplate(TEMPLATE_VERSION)
+    const docks = template.docks.map((d) => ({
+      slug: d.slug,
+      exists: fs.existsSync(path.join(resolved, d.slug)),
+      // A dock with no fixed containers (notes) is itself a workspace;
+      // the projects dock holds projects instead.
+      workspace: d.slug !== 'projects' && (d.containers ?? []).length === 0,
+      containers: d.containers, // null = projects dock (dynamic children)
     }))
     const orgProjects = [...projects.values()]
       .filter((p) => p.orgId === org.id)
-      .map(({ id, name, slug, path: projectPath }) => ({ id, name, slug, path: projectPath }))
-    let sessionsByProject = null
-    let orgSessionCount = 0
+      .map(({ id, name, slug, path: projectPath }) => ({
+        id, name, slug, path: projectPath,
+        containers: [...template.projectContainers],
+      }))
+    let sessionsByWorkspace = null
     try {
       const rows = listSessions(resolved, env)
-      sessionsByProject = {}
+      sessionsByWorkspace = {}
       for (const s of rows) {
         if (s.state === 'archived') continue // D39: archived never surfaces
-        if (s.project) sessionsByProject[s.project] = (sessionsByProject[s.project] ?? 0) + 1
-        else orgSessionCount += 1
+        const key = s.workspace ?? '' // '' = pre-v2 org-level relic
+        sessionsByWorkspace[key] = (sessionsByWorkspace[key] ?? 0) + 1
       }
     } catch {
-      sessionsByProject = null // no repo / unreadable registry — counts stay hidden
+      sessionsByWorkspace = null // no repo / unreadable registry — counts stay hidden
     }
-    return { categories, projects: orgProjects, sessionsByProject, orgSessionCount }
+    return { docks, projects: orgProjects, sessionsByWorkspace }
   }
 
   return {

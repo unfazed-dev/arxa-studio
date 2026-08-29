@@ -68,22 +68,31 @@ check('rows: first-run creates the org IN the picked folder (D69 supersedes D36)
     const hostSrc = readFileSync(join(here, 'lib', 'index.js'), 'utf8')
     return hostSrc.includes("action === 'org.create-at'") && hostSrc.includes('shell.scaffoldOrg(expanded, nm)')
   })())
-check('rows: shell New-session is org-aware (Q5)', client.includes('org.new-session') && client.includes('Open an organisation first'))
+check('rows: org-level session creation is impossible (v2, grilled 2026-08-30) — the legacy + path is gone client AND host', !client.includes('\"org.new-session\"') && !hostSrc().includes("'org.new-session':"))
 check('rows: OrgSection block deleted', !client.includes('OrgSection'))
 
 // ---- 3b. workspace rows (org-model-v2 Phase C: D70/D71) ------------------------
-check('rows-c: OrgCategoryRows nest under each org (the rows ARE the tree, 2026-08-30 v1.2)',
-  client.includes('function OrgCategoryRows({ orgId })') && client.includes('OrgCategoryRows, { orgId: group.workspaceId }') && !client.includes('WorkspaceRowsSection'))
-check('rows-c: scope gate — injected identifiers must be verified against the REAL stock scope (t rides SessionTree params; orgT makes the region locale-scope-independent)',
-  !client.includes('OrgCategoryRows, { orgId: group.workspaceId, t }')
-  && client.includes('let orgT =') && client.includes('orgT = props.t')
+check('rows-c: container rows (org/dock/project) anchor before each container first leaf (v2, grilled 2026-08-30)',
+  client.includes('function OrgContainerRow({ d, offset })') && client.includes('...ARXA_CONTAINER_ROWS(group.workspaceId)') && client.includes('offset: 4 + d.depth * 14 - host') && !client.includes('WorkspaceRowsSection'))
+check('rows-c: leaves are full stock workspace rows — indent by depth; collapse hides via display (identity never churns)',
+  client.includes('ARXA_WS_INDENT(group.workspaceId)') && client.includes('ARXA_WS_HIDDEN(group.workspaceId)') && client.includes('toggleCollapse(key)'))
+check('rows-c: leaf click selects the workspace (composite id parse) — the ONLY startSession path',
+  client.includes('ARXA_SELECT_WS(row.workspaceId)') && client.includes('workspace.new-session') && client.includes('const i = s.indexOf("|")'))
+check('rows-c: real session timestamps (the 56y bug fed ordinals as ages from 1970)',
+  client.includes('x.updatedAt ?? x.createdAt ?? Date.now()') && !client.includes('updatedAt: order++'))
+check('rows-c: rename rides the registry — one rename, every surface',
+  client.includes('"session.rename"') && client.includes('renameSession: (sessionId, title)'))
+check('rows-c: leaf-row ellipsis menu hidden (fixed folders are neither renamable nor deletable)',
+  client.includes('false && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {'))
+check('rows-c: scope gate — orgT capture keeps stock-scope render sites locale-safe',
+  client.includes('let orgT =') && client.includes('orgT = props.t')
   && /function SessionTree\(\{[^)]*\bt\b[^)]*\)\s*\{/.test(client))
 check('rows-c: OrgTreeSection dissolved', !client.includes('OrgTreeSection') && !client.includes('treeRows'))
-check('rows-c: selection face (org-scoped) + gated startSession splice', client.includes('selectRow(sel)') && client.includes('workspace.new-session') && client.includes('const sel = orgStore.get().selectedRowId;') && client.includes('{ orgId: sel.orgId, rowId: sel.rowId }'))
-check('rows-c: selection tooltip in both locales (section label gone with the detached section)', client.includes('"newSession.selectFirst": "Select a workspace to start a session"') && !client.includes('"rows.section"') && !client.includes('工作区": "'))
-check('rows-c: server snapshot serves rows (category + project rowIds)', hostSrc().includes("rowId: 'category:'") && hostSrc().includes("rowId: 'project:'"))
-check('rows-c: server act maps rowId → scoped session (org-switching when the row belongs to a non-open org)', hostSrc().includes("'workspace.new-session'") && hostSrc().includes('arg?.orgId ? await ensureOpen(arg.orgId) : handle()') && hostSrc().includes('cur.newSession(undefined, proj)'))
-check('rows-c: every org carries its nested tree rows (recents switcher, 2026-08-30)', hostSrc().includes('rows: rowsOf(treeOf(path))'))
+check('rows-c: selection tooltip in both locales', client.includes('"newSession.selectFirst": "Select a workspace to start a session"') && client.includes('"newSession.selectFirst": "先选择一个工作区再开始会话"'))
+check('rows-c: server snapshot serves the per-org tree face + workspace-scoped sessions with real timestamps',
+  hostSrc().includes('tree: treeOf(path)') && hostSrc().includes('workspace: s.workspace ?? null') && hostSrc().includes('createdAt: s.createdAt ?? null'))
+check('rows-c: workspace.new-session takes a workspace path (loud on unknown); session.rename wired',
+  hostSrc().includes("'workspace.new-session'") && hostSrc().includes('cur.newSession(undefined, ws)') && hostSrc().includes("'session.rename'"))
 
 // ---- 3c. initial-snapshot gating (2025-08 create-org hang) ---------------------
 // An in-place org root full of bulk content made the inline git add -A run
@@ -184,12 +193,16 @@ check('seam: arxa-file-org-shell resolves with createOrgLifecycle', typeof mod?.
   // throwaway root: a deferred open leaves the snapshot pending (CTA-gated),
   // session creation refuses with a human reason, and the detached worker
   // lands HEAD on its own — the gate lifts itself without any caller waiting.
-  const { mkdtempSync, mkdirSync, rmSync } = await import('node:fs')
+  const { mkdtempSync, mkdirSync, rmSync, writeFileSync } = await import('node:fs')
   const os = await import('node:os')
   const root = mkdtempSync(join(os.tmpdir(), 'arxa-snap-'))
   try {
     const orgPath = join(root, 'bulk-org')
     mkdirSync(orgPath, { recursive: true }) // D69: scaffold IN PLACE — the folder exists first
+    // Real bulk: an empty fixture let the detached snapshot land before the
+    // probe raced it (seen live 2026-08-30) — give the worker actual work so
+    // \"pending\" holds long enough to observe.
+    for (let i = 0; i < 400; i++) writeFileSync(join(orgPath, 'bulk-' + i + '.md'), 'bulk content\n')
     mod.scaffoldOrg(orgPath, 'Snap Org')
     // env is NOT optional here: openOrg → touchRecent inherits process.env
     // by default and would front-load this throwaway root into the REAL
@@ -199,7 +212,7 @@ check('seam: arxa-file-org-shell resolves with createOrgLifecycle', typeof mod?.
     await l2.openOrg(orgPath, { deferSnapshot: true })
     check('rows-snap: deferred open reports snapshotPending true', l2.current.snapshotPending() === true)
     let guardMsg = ''
-    try { await l2.current.newSession('probe', null) } catch (e) { guardMsg = String(e?.message ?? e) }
+    try { await l2.current.newSession('probe', 'notes') } catch (e) { guardMsg = String(e?.message ?? e) }
     check('rows-snap: session creation refuses with a human reason while pending', guardMsg.includes('initial-snapshot-pending'))
     const deadline = Date.now() + 20000
     while (l2.current.snapshotPending() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100))

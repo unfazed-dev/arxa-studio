@@ -52,13 +52,15 @@ const ssStart = out.indexOf(SS_ANCHOR)
 const ssEnd = out.indexOf('},', ssStart) + 2
 out = out.slice(0, ssStart) + [
   'startSession: () => {',
-  '					// Organisations world: the shell CTA creates a session in the',
-  '					// current open org (host errors loudly when none is open; the',
-  '					// button is disabled in that case — see the button splice below).',
-  '					fetch("/__arxa/sidebar/action", {',
+  '					// Organisations world (v2, grilled 2026-08-30): the shell CTA',
+  '					// creates a session in the SELECTED workspace row — org-level',
+  '					// creation is gone. No selection → no-op (the button is',
+  '					// disabled — see the button splice below).',
+  '					const sel = window.__ARXA_SIDEBAR__ && window.__ARXA_SIDEBAR__.selectedWorkspace ? window.__ARXA_SIDEBAR__.selectedWorkspace() : null;',
+  '					if (sel) fetch("/__arxa/sidebar/action", {',
   '						method: "POST",',
   '						headers: { "content-type": "application/json" },',
-  '						body: JSON.stringify({ action: "org.new-session" })',
+  '						body: JSON.stringify({ action: "workspace.new-session", arg: { orgId: sel.orgId, workspace: sel.rowId } })',
   '					}).catch(() => {});',
   '				},',
 ].join('\n') + out.slice(ssEnd)

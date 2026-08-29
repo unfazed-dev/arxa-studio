@@ -360,7 +360,15 @@ await okA('spawnSnapshotOrgRepo: detached worker lands HEAD + done marker', asyn
     if (Date.now() > deadline) throw new Error('detached snapshot never landed HEAD')
     await new Promise((r) => setTimeout(r, 100))
   }
-  const m = readSnapshotMarker(deferPath)
+  // HEAD lands mid-run; the done marker + stage-base land at the END — the
+  // v2 template's bigger tree widened that gap, so poll for done (bounded).
+  const doneDeadline = Date.now() + 20000
+  let m = readSnapshotMarker(deferPath)
+  while (m.state !== 'done') {
+    if (Date.now() > doneDeadline) throw new Error('detached snapshot never reached done')
+    await new Promise((r) => setTimeout(r, 100))
+    m = readSnapshotMarker(deferPath)
+  }
   assert.equal(m.state, 'done')
   assert.equal(snapshotWorkerLive(deferPath), false) // worker exited
   assert.match(runGit(['rev-parse', 'refs/arxa/stage-base'], { cwd: deferPath }), /^[0-9a-f]{40}$/)

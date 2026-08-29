@@ -20,8 +20,9 @@ import {
   projectManifestPath,
 } from './manifest.js'
 
-/** The five fixed categories inside every org (D42). Exactly these. */
-export const CATEGORIES = getTemplate(TEMPLATE_VERSION).org.dirs
+/** The five fixed dock slugs inside every org (D42; v2 names them docks —
+ *  the top-level dir set is still exactly these). */
+export const CATEGORIES = ['projects', 'notes', 'meetings', 'account', 'communications']
 
 function existingSlugs(dir) {
   if (!fs.existsSync(dir)) return []

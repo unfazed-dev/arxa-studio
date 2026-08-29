@@ -295,13 +295,15 @@ window.__ModuleLoader__.load({
 			}), "ui-sidebar: dictionaries");
 			const injectProps = () => ({
 				startSession: () => {
-					// Organisations world: the shell CTA creates a session in the
-					// current open org (host errors loudly when none is open; the
-					// button is disabled in that case — see the button splice below).
-					fetch("/__arxa/sidebar/action", {
+					// Organisations world (v2, grilled 2026-08-30): the shell CTA
+					// creates a session in the SELECTED workspace row — org-level
+					// creation is gone. No selection → no-op (the button is
+					// disabled — see the button splice below).
+					const sel = window.__ARXA_SIDEBAR__ && window.__ARXA_SIDEBAR__.selectedWorkspace ? window.__ARXA_SIDEBAR__.selectedWorkspace() : null;
+					if (sel) fetch("/__arxa/sidebar/action", {
 						method: "POST",
 						headers: { "content-type": "application/json" },
-						body: JSON.stringify({ action: "org.new-session" })
+						body: JSON.stringify({ action: "workspace.new-session", arg: { orgId: sel.orgId, workspace: sel.rowId } })
 					}).catch(() => {});
 				},
 				toggleSidebar: () => {
@@ -815,16 +817,12 @@ window.__ModuleLoader__.load({
 				label: t("delete.workspace"),
 				icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}),
 				danger: true
-			}, ...(active ? [{
-				id: "trash",
-				label: t("menu.trash"),
-				icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {})
-			}] : [])];
+			}];
 			const ownRow = (0, react_jsx_runtime.jsxs)("div", {
 				className: clsx(Rows_module_css_default.projectRow, menuOpen && Rows_module_css_default.menuOpen),
 				role: "treeitem",
 				"aria-expanded": row.expanded,
-				onClick: () => { onToggle(); if (actions !== void 0 && actions.open !== void 0) actions.open(); },
+				onClick: () => { onToggle(); ARXA_SELECT_WS(row.workspaceId); },
 				draggable: drag !== void 0,
 				onDragStart: drag === void 0 ? void 0 : (e) => {
 					e.dataTransfer.effectAllowed = "move";
@@ -850,7 +848,7 @@ window.__ModuleLoader__.load({
 					}),
 					(0, react_jsx_runtime.jsxs)("span", {
 						className: Rows_module_css_default.rowActions,
-						children: [actions !== void 0 && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {
+						children: [false && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {
 							open: menuOpen,
 							onClose: () => {
 								setMenuOpen(false);
@@ -859,10 +857,9 @@ window.__ModuleLoader__.load({
 							onSelect: (id) => {
 								setMenuOpen(false);
 								/* v8 ignore next -- workspaceMenuItems carries exactly these two rows today. */
-								if (id !== "rename" && id !== "delete" && id !== "trash") return;
+								if (id !== "rename" && id !== "delete") return;
 								if (id === "rename") actions.rename();
-								else if (id === "delete") actions.delete();
-								else if (id === "trash") actions.trash();
+								else actions.delete();
 							},
 							portal: true,
 							closeOnPointerLeave: true,
@@ -1565,6 +1562,19 @@ window.__ModuleLoader__.load({
 			const workspaceDropCommitted = (0, react.useRef)(false);
 			const previousOrderBy = (0, react.useRef)(orderBy);
 			useNativeDragAcceptance(drag !== null || workspaceDrag !== null);
+			const arxaAutoExpanded = (0, react.useRef)(false);
+			(0, react.useEffect)(() => {
+				// arxa v2: workspace rows WITH sessions start expanded — one shot
+				// per mount; the user's own collapses are tracked in
+				// groupExpansion and always win.
+				if (arxaAutoExpanded.current) return;
+				const withSessions = workspaces.filter((w) => w.sessionIds.length > 0);
+				if (withSessions.length === 0) return;
+				arxaAutoExpanded.current = true;
+				for (const w of withSessions) {
+					if (!Object.hasOwn(groupExpansion, w.workspaceId)) setGroupExpanded(w.workspaceId, true);
+				}
+			}, [workspaces, groupExpansion, setGroupExpanded]);
 			const currentGroup = current === void 0 ? void 0 : workspaces.find((w) => w.sessionIds.includes(current))?.workspaceId ?? "";
 			(0, react.useEffect)(() => {
 				if (current === void 0 || currentGroup === void 0 || Object.hasOwn(groupExpansion, currentGroup)) return;
@@ -1722,6 +1732,7 @@ window.__ModuleLoader__.load({
 								});
 							};
 							return (0, react_jsx_runtime.jsxs)("div", {
+								style: { paddingLeft: ARXA_WS_INDENT(group.workspaceId), display: ARXA_WS_HIDDEN(group.workspaceId) ? "none" : void 0 },
 								className: clsx(WorkspaceBrowser_module_css_default.groupSection, workspaceMarker === "before" && WorkspaceBrowser_module_css_default.workspaceDropBefore, workspaceMarker === "after" && WorkspaceBrowser_module_css_default.workspaceDropAfter),
 								onDragOver: workspaceDrag === null || hoverWorkspace === void 0 ? void 0 : (e) => {
 									e.preventDefault();
@@ -1733,6 +1744,7 @@ window.__ModuleLoader__.load({
 									dropWorkspace(workspaceGroupHalf(e));
 								},
 								children: [
+									...ARXA_CONTAINER_ROWS(group.workspaceId),
 									(0, react_jsx_runtime.jsx)(ProjectRowItem, {
 										group,
 										home,
@@ -1761,8 +1773,7 @@ window.__ModuleLoader__.load({
 										open: () => { orgStore.mutate("org.open", { orgId: group.workspaceId }).catch(() => {}); }
 										}
 									}),
-									(0, react_jsx_runtime.jsx)(OrgCategoryRows, { orgId: group.workspaceId }),
-										(expandedSessionGroups.includes(group.key) ? group.sessions : group.sessions.slice(0, COLLAPSED_SESSION_LIMIT)).map((node) => {
+									(expandedSessionGroups.includes(group.key) ? group.sessions : group.sessions.slice(0, COLLAPSED_SESSION_LIMIT)).map((node) => {
 										const sameGroupDrag = drag !== null && drag.accountKey === group.key;
 										return (0, react_jsx_runtime.jsx)(SessionNodeItem, {
 											node,
@@ -2725,7 +2736,11 @@ window.__ModuleLoader__.load({
 		});
 		function createOrgStore() {
 			let resumeTried = false;
-			let state = { orgs: [], rows: [], trash: [], trashCount: 0, root: false, selectedProject: null, trashView: { rows: [], open: true }, rowsView: { rows: [] }, selectedRowId: null, loading: true, __sig: "", workspacesView: { items: [], phase: "ready", archivedSessionIds: [] }, sessionsView: { byId: {}, ids: [], current: void 0 } };
+			// Client-side current session (stock auto-expand + highlight key off it):
+			// set by resume + session.open; server truth is which org is open, not
+			// which session is focused — dsh owns focus, we mirror the last open.
+			let currentSessionId = null;
+			let state = { orgs: [], trash: [], trashCount: 0, root: false, selectedProject: null, trashView: { rows: [], open: true }, selectedRowId: null, collapsed: {}, emit: {}, currentSessionId: null, loading: true, __sig: "", workspacesView: { items: [], phase: "ready", archivedSessionIds: [] }, sessionsView: { byId: {}, ids: [], current: void 0 } };
 			const subs = new Set();
 			let timer = 0;
 			/** Resume (D71 UX): on first sight of an org with sessions, open the
@@ -2733,12 +2748,21 @@ window.__ModuleLoader__.load({
 			 * user left off. One-shot — never fights the user afterwards. */
 			const maybeResume = (orgs) => {
 				if (resumeTried || !orgs || orgs.length === 0) return;
-				resumeTried = true;
+				// No org open YET (fresh boot): keep the shot — a later poll may
+				// see one (org.open switches server-side).
 				const open = orgs.find((o) => o.open);
 				if (!open || !open.sessions || open.sessions.length === 0) return;
+				resumeTried = true;
 			 const openSessions = open.sessions.filter((x) => x.state === "open");
 				const cand = openSessions.length ? openSessions[openSessions.length - 1] : open.sessions[open.sessions.length - 1];
-				fetch("/__arxa/sidebar/action", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "session.open", arg: { orgId: open.id, sessionId: cand.id } }) }).catch(() => {});
+				currentSessionId = cand.id;
+			// The sig gate blocks the next state replacement when server data is
+			// unchanged — surface current NOW or the stock auto-expand (which
+			// keys off sessionsView.current) never sees the resumed session.
+			state = { ...state, currentSessionId: cand.id };
+			state.sessionsView = sessionsList(state);
+			emit();
+			fetch("/__arxa/sidebar/action", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "session.open", arg: { orgId: open.id, sessionId: cand.id } }) }).catch(() => {});
 			};
 			const emit = () => {
 				subs.forEach((l) => l());
@@ -2747,20 +2771,20 @@ window.__ModuleLoader__.load({
 			const refresh = async () => {
 				try {
 					const next = await ORG_FETCH();
-					const sig = JSON.stringify([next.orgs, next.rows, next.trash, next.trashCount, next.root, next.selectedProject]);
+					const sig = JSON.stringify([next.orgs, next.trash, next.trashCount, next.root, next.selectedProject]);
 					if (sig !== state.__sig) {
 						// Client-side faces survive every server replacement (the trash
-						// toggle and the row selection are not server data — a bare
-						// spread would leave selectedRowId undefined where the
-						// contract says null).
-						state = { ...next, loading: false, __sig: sig, trashOpen: state.trashOpen, selectedRowId: state.selectedRowId ?? null };
+						// toggle, the row selection and the container collapse are not
+						// server data — a bare spread would leave selectedRowId
+						// undefined where the contract says null).
+						state = { ...next, loading: false, __sig: sig, trashOpen: state.trashOpen, selectedRowId: state.selectedRowId ?? null, collapsed: state.collapsed ?? {}, currentSessionId: currentSessionId ?? state.currentSessionId ?? null };
 						state.trashView = { rows: state.trash ?? [], open: state.trashOpen ?? true };
 						// Derived faces computed ONCE per state replacement: stock hosts
 						// serve stable array identities, and per-render rebuilds would
 						// re-fire the browser's store-sync effects every render (React #185).
 						state.workspacesView = { items: orgItems(state), phase: "ready", archivedSessionIds: [] };
 						state.sessionsView = sessionsList(state);
-						state.rowsView = { rows: state.rows ?? [] };
+						state.emit = buildEmit(state);
 						state.trashView = { rows: state.trash ?? [], open: state.trashOpen ?? true };
 						emit();
 						maybeResume(next.orgs);
@@ -2791,6 +2815,12 @@ window.__ModuleLoader__.load({
 				},
 				refresh,
 				mutate(action, arg) {
+					if (action === "session.open" && arg && typeof arg.sessionId === "string") {
+						currentSessionId = arg.sessionId;
+						state = { ...state, currentSessionId };
+						state.sessionsView = sessionsList(state);
+						emit();
+					}
 					return ORG_POST(action, arg).then((r) => refresh()).then(() => {}, (e) => {
 						refresh();
 						throw e;
@@ -2803,11 +2833,25 @@ window.__ModuleLoader__.load({
 					state.trashView = { rows: state.trash ?? [], open: state.trashOpen ?? true };
 					emit();
 				},
-				/** Client-side selection only (D70/D71, org-scoped 2026-08-30):
-				* which org's workspace row the New Session CTA targets —
-				* { orgId, rowId } | null. Server truth is untouched. */
+				/** Client-side selection only (D70/D71, org-scoped): which
+				* workspace row the New Session CTA targets — { orgId, rowId }
+				* where rowId is the workspace path ("notes",
+				* "projects/topo/design") | null. Server truth is untouched. */
 				selectRow(sel) {
 					state = { ...state, selectedRowId: sel };
+					emit();
+				},
+				/** Client-side container collapse (grilled 2026-08-30): key =
+				* orgId (the org row) or orgId + "|" + container path (dock /
+				* project). Toggling re-derives the emit map instantly — no server
+				* round trip; hidden leaves keep their group identity (display
+				* gating, never identity churn). */
+				toggleCollapse(key) {
+					const c = { ...(state.collapsed ?? {}) };
+					if (c[key]) delete c[key];
+					else c[key] = true;
+					state = { ...state, collapsed: c };
+					state.emit = buildEmit(state);
 					emit();
 				}
 			};
@@ -2823,42 +2867,184 @@ window.__ModuleLoader__.load({
 			get orgOpen() {
 				return orgStore.get().orgs.some((o) => o.open);
 			},
+			/** Selected workspace row (v2): the shell New Session CTA target —
+			* { orgId, rowId } | null. Org-level creation is gone; a null
+			* selection no-ops (the CTA is disabled). */
+			selectedWorkspace() {
+				return orgStore.get().selectedRowId ?? null;
+			},
 			refresh: () => orgStore.refresh()
 		};
-		/** Org rows → stock workspace items (groupByWorkspace reads exactly these fields). */
-		const orgItems = (s) => s.orgs.map((o) => ({
-			workspaceId: o.id,
-			title: o.name,
-			path: o.path,
-			createdAt: o.createdAt,
-			sessionIds: o.sessions.map((x) => x.id)
-		}));
-		/** Registry rows → stock session summaries. Pills stay honest (Q5): the
-		* registry cannot see live dsh agent state, so nothing ever reports
-		* running; parked rides the completed slot and the locale relabels it.
-		* updatedAt is registry order (stable creation order — there are no
-		* session timestamps server-side; the order-by labels say so). */
+		/** Leaf workspace feed (v2, grilled 2026-08-30): every workspace row
+		 * of every org becomes ONE stock workspace item — the stock tree
+		 * renders each as a full dsh workspace row (folder icon, hover +,
+		 * nested sessions, collapse, overflow). workspaceId encodes org +
+		 * workspace path: "<orgId>|notes", "<orgId>|meetings/scheduler",
+		 * "<orgId>|projects/topo/design". Sessions bind by workspace match;
+		 * a leaf inside a collapsed container STAYS in the feed (stable
+		 * group identity) — the group render gates display, never identity.
+		 * Degraded read (tree null): the org lists without rows. */
+		const wsLabel = (p) => {
+			const parts = p.split("/");
+			if (parts[0] === "projects" && parts.length === 3) return orgT("tree.pc." + parts[2]);
+			return orgT("tree.ws." + p);
+		};
+		const orgItems = (s) => {
+			const items = [];
+			for (const o of s.orgs || []) {
+				const tree = o.tree;
+				if (!tree || !Array.isArray(tree.docks)) continue;
+				const push = (ws) => items.push({
+					workspaceId: o.id + "|" + ws,
+					title: wsLabel(ws),
+					path: o.path + "/" + ws,
+					createdAt: o.createdAt,
+					sessionIds: (o.sessions || []).filter((x) => (x.workspace ?? "") === ws).map((x) => x.id)
+				});
+				for (const d of tree.docks) {
+					if (d.slug === "projects") {
+						for (const p of tree.projects || []) for (const c of p.containers || []) push("projects/" + p.slug + "/" + c);
+					} else if (d.workspace) {
+						push(d.slug);
+					} else {
+						for (const c of d.containers || []) push(d.slug + "/" + c);
+					}
+				}
+			}
+			return items;
+		};
+		/** Registry rows → stock session summaries. Pills stay honest (Q5):
+		* running/pendingInteraction ride the Phase D dsh join only; parked
+		* rides the completed slot and the locale relabels it. updatedAt is
+		* the registry's real ms epoch — the 56y bug fed ordinals, which
+		* the stock renderer read as ages from 1970. */
 		const sessionsList = (s) => {
 			const byId = {};
 			const ids = [];
-			let order = 0;
-			for (const o of s.orgs) for (const x of o.sessions) {
+			for (const o of s.orgs || []) for (const x of o.sessions || []) {
 				byId[x.id] = {
 					id: x.id,
 					displayTitle: x.name,
 					blank: false,
 					origin: "user",
-					running: false,
+					running: x.running ?? false,
 					completed: x.state === "parked",
-					updatedAt: order++
+					updatedAt: x.updatedAt ?? x.createdAt ?? Date.now(),
+					...(x.pendingInteraction === void 0 ? {} : { pendingInteraction: x.pendingInteraction })
 				};
 				ids.push(x.id);
 			}
-			return { byId, ids, current: void 0 };
+			return { byId, ids, current: s.currentSessionId ?? void 0 };
 		};
 		const orgOfSession = (sessionId) => {
-			for (const o of orgStore.get().orgs) if (o.sessions.some((x) => x.id === sessionId)) return o.id;
+			for (const o of orgStore.get().orgs) if ((o.sessions || []).some((x) => x.id === sessionId)) return o.id;
 			return void 0;
+		};
+		/** Parse "<orgId>|<wsPath>" composite ids. */
+		const wsParts = (workspaceId) => {
+			const s = String(workspaceId ?? "");
+			const i = s.indexOf("|");
+			if (i < 0) return { orgId: s, ws: "" };
+			return { orgId: s.slice(0, i), ws: s.slice(i + 1) };
+		};
+		/** A leaf hides when its org or any ancestor container is collapsed. */
+		const leafHidden = (workspaceId) => {
+			const { orgId, ws } = wsParts(workspaceId);
+			if (ws === "") return false;
+			const c = orgStore.get().collapsed ?? {};
+			if (c[orgId]) return true;
+			const parts = ws.split("/");
+			for (let i = 1; i < parts.length; i++) if (c[orgId + "|" + parts.slice(0, i).join("/")]) return true;
+			return false;
+		};
+		/** Stock-tree render hooks (gen splices call these by name). */
+		// Leaf indent by depth, in px (a unitless paddingLeft is silently
+		// dropped by the CSSOM, which once left every leaf at the stock 8px).
+		const wsIndent = (ws) => 18 + 12 * (ws.split("/").length - 1);
+		const ARXA_WS_INDENT = (workspaceId) => wsIndent(wsParts(workspaceId).ws) + "px";
+		const ARXA_WS_HIDDEN = (workspaceId) => leafHidden(workspaceId);
+		// Container rows render INSIDE a leaf group (they anchor to its first
+		// leaf), so they inherit that group's indent — compensate with a
+		// negative margin so every row lands at its OWN absolute depth:
+		// org 4 < dock 18 < project 32 < leaves 18/30/42.
+		const ARXA_CONTAINER_ROWS = (workspaceId) => {
+			const host = wsIndent(wsParts(workspaceId).ws);
+			return ((orgStore.get().emit ?? {})[workspaceId] ?? []).map((d) => (0, react_jsx_runtime.jsx)(OrgContainerRow, {
+				d,
+				offset: 4 + d.depth * 14 - host
+			}, d.key));
+		};
+		const ARXA_SELECT_WS = (workspaceId) => {
+			const { orgId, ws } = wsParts(workspaceId);
+			if (ws !== "") orgStore.selectRow({ orgId, rowId: ws });
+		};
+		/** Container-row emission map (v2): every container row anchors to
+		 * its FIRST leaf in feed order — a stable position that survives
+		 * collapse (hidden leaves keep their groups; only display gates).
+		 * Order per anchor: org row, then dock, then project. */
+		const buildEmit = (s) => {
+			const emit = {};
+			for (const o of s.orgs || []) {
+				const tree = o.tree;
+				if (!tree || !Array.isArray(tree.docks)) continue;
+				const counts = tree.sessionsByWorkspace ?? {};
+				const total = Object.values(counts).reduce((a, b) => a + b, 0);
+				const countUnder = (prefix) => {
+					let n = 0;
+					for (const [k, v] of Object.entries(counts)) if (k === prefix || k.startsWith(prefix + "/")) n += v;
+					return n;
+				};
+				let orgEmitted = false;
+				const attach = (ws, rows) => {
+					const key = o.id + "|" + ws;
+					(emit[key] = emit[key] || []).push(...rows);
+				};
+				// Container rows waiting for the next leaf-bearing dock: a leafless
+				// dock (e.g. Projects with no projects yet) still has to render — its
+				// row rides the next anchor so the + to create the first project is
+				// always reachable.
+				let pendingRows = [];
+				let lastAnchor = null;
+				for (const d of tree.docks) {
+					const orgD = { kind: "org", orgId: o.id, key: o.id, depth: 0, label: o.name, open: o.open, count: total };
+					const head = () => {
+						const h = [];
+						if (!orgEmitted) { h.push(orgD); orgEmitted = true; }
+						h.push(...pendingRows);
+						pendingRows = [];
+						return h;
+					};
+					if (d.workspace) {
+						// Bare dock (notes): the leaf IS the dock row — no container row,
+						// or the label would render twice.
+						const h = head();
+						if (h.length > 0) { attach(d.slug, h); lastAnchor = d.slug; }
+						continue;
+					}
+					const dockLeaves = [];
+					const projAttach = [];
+					if (d.slug === "projects") {
+						for (const p of tree.projects || []) {
+							const pl = (p.containers || []).map((c) => "projects/" + p.slug + "/" + c);
+							if (pl.length > 0) projAttach.push([pl, { kind: "project", orgId: o.id, key: o.id + "|projects/" + p.slug, depth: 2, label: p.name, count: countUnder("projects/" + p.slug) }]);
+							dockLeaves.push(...pl);
+						}
+					} else {
+						for (const c of d.containers || []) dockLeaves.push(d.slug + "/" + c);
+					}
+					const dockD = { kind: "dock", orgId: o.id, key: o.id + "|" + d.slug, depth: 1, label: orgT("tree.dock." + d.slug), slug: d.slug, count: d.slug === "projects" ? countUnder("projects") : countUnder(d.slug), ...(d.slug === "projects" ? { plus: "project" } : {}) };
+					if (dockLeaves.length === 0) { pendingRows.push(dockD); continue; }
+					attach(dockLeaves[0], [...head(), dockD]);
+					lastAnchor = dockLeaves[0];
+					if (d.slug === "projects") for (const [pl, projD] of projAttach) attach(pl[0], [projD]);
+				}
+				// Degenerate tail (all remaining docks leafless): park on the last anchor.
+				if (pendingRows.length > 0 && lastAnchor !== null) {
+					attach(lastAnchor, pendingRows);
+					pendingRows = [];
+				}
+			}
+			return emit;
 		};
 		// Stable subscribe identity — a fresh arrow per render would make React
 		// resubscribe every time, and each 0-to-1 resubscription fires refresh(),
@@ -2913,41 +3099,105 @@ window.__ModuleLoader__.load({
 				};
 			}, [sel, snapPending, t]);
 		}
-		/** Org tree rows (2026-08-30 sidebar v1.2): the five category folders
-		 * plus projects nest DIRECTLY under their org row — the nesting slot
-		 * sessions held in stock dsh — replacing the detached WORKSPACES
-		 * section. A click selects org-scoped; the New Session CTA targets the
-		 * selection and the server switches orgs when the row belongs to a
-		 * non-open org. Counts are honest: project rows carry registry
-		 * counts; category counts wait for the live listing (phase D). */
-		function OrgCategoryRows({ orgId }) {
-			const org = useOrg((s) => (s.orgs || []).find((o) => o.id === orgId));
-			const sel = useOrg((s) => s.selectedRowId);
-			const rows = org?.rows ?? [];
-			if (rows.length === 0) return null;
-			return (0, react_jsx_runtime.jsx)("div", {
-				style: { padding: "2px 4px" },
-				children: rows.map((r) => {
-					const isCat = r.kind === "category";
-					const selected = !!sel && sel.orgId === orgId && sel.rowId === r.rowId;
-					return (0, react_jsx_runtime.jsxs)("div", {
-						onClick: () => orgStore.selectRow(selected ? null : { orgId, rowId: r.rowId }),
-						className: clsx(Rows_module_css_default.sessionRow, Rows_module_css_default.flatSessionRowWithoutStatus),
-						style: { paddingLeft: isCat ? 26 : 44, opacity: r.exists === false ? 0.55 : 1, cursor: "pointer", borderRadius: 6, background: selected ? "rgba(127,127,127,0.22)" : "transparent" },
-						title: isCat ? orgT("tree.category." + r.slug) : r.slug,
+		/** Container row (v2, grilled 2026-08-30): org, dock, or project —
+		 * NEVER hosts sessions (no +). Org rows carry the org actions menu
+		 * (open / close / trash); docks and projects are fixed containers:
+		 * collapse only. Click = collapse/expand ALL children; switching
+		 * orgs is implicit through any action inside one, or explicit via
+		 * the org menu. Docks/projects use the stock folder glyph
+		 * (open/closed by expansion) — the exact folder icon the docks
+		 * always had; the org row gets the organisation glyph. */
+		function OrgContainerRow({ d, offset }) {
+			const collapsed = useOrg((s) => s.collapsed ?? {});
+			const isOrg = d.kind === "org";
+			const open = !collapsed[d.key];
+			const [menuOpen, setMenuOpen] = (0, react.useState)(false);
+			const items = isOrg ? [
+				{ id: "open", label: orgT("menu.org.open"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) },
+				{ id: "close", label: orgT("menu.org.close"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}), danger: true },
+				{ id: "trash", label: orgT("menu.trash"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}) }
+			] : [];
+			const onSelect = (id) => {
+				setMenuOpen(false);
+				if (id === "open") orgStore.mutate("org.open", { orgId: d.orgId }).catch(() => {});
+				else if (id === "close") orgStore.mutate("org.close", {}).catch(() => {});
+				else if (id === "trash") orgStore.toggleTrash();
+			};
+			return (0, react_jsx_runtime.jsxs)("div", {
+				className: clsx(Rows_module_css_default.projectRow, menuOpen && Rows_module_css_default.menuOpen),
+				role: "treeitem",
+				"aria-expanded": open,
+				onClick: () => orgStore.toggleCollapse(d.key),
+				style: { marginLeft: (offset ?? 4 + d.depth * 14) + "px", cursor: "pointer", borderRadius: 6, marginTop: isOrg ? 4 : 0, fontWeight: isOrg ? 600 : void 0 },
+				children: [
+					(0, react_jsx_runtime.jsx)("span", {
+						className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder),
+						children: isOrg ? (0, react_jsx_runtime.jsxs)("svg", {
+							width: 15,
+							height: 15,
+							viewBox: "0 0 16 16",
+							fill: "none",
+							stroke: "currentColor",
+							strokeWidth: 1.3,
+							strokeLinecap: "round",
+							strokeLinejoin: "round",
+							"aria-hidden": "true",
+							children: [
+								(0, react_jsx_runtime.jsx)("rect", { x: "2.5", y: "1.5", width: "8", height: "13", rx: "1" }),
+								(0, react_jsx_runtime.jsx)("path", { d: "M10.5 6h3v8.5" }),
+								(0, react_jsx_runtime.jsx)("path", { d: "M5 4.5h3M5 7.5h3M5 10.5h3" })
+							]
+							}) : open ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {})
+					}),
+					(0, react_jsx_runtime.jsx)("span", {
+						className: clsx(Rows_module_css_default.slot, Rows_module_css_default.chevron),
+						children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTriangleRightFill14, { className: clsx(Rows_module_css_default.arrow, open && Rows_module_css_default.arrowOpen) })
+					}),
+					(0, react_jsx_runtime.jsx)("span", {
+						className: Rows_module_css_default.projectText,
+						children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: d.label })
+					}),
+					d.count > 0 ? (0, react_jsx_runtime.jsx)("span", {
+						style: { fontSize: 11, opacity: 0.55, flex: "none", marginRight: 4 },
+						children: String(d.count)
+					}) : null,
+					(0, react_jsx_runtime.jsx)("span", {
+						className: Rows_module_css_default.rowActions,
 						children: [
-							(0, react_jsx_runtime.jsx)("span", {
-								style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: isCat ? 13 : 12 },
-								children: isCat ? orgT("tree.category." + r.slug) : (r.displayName || r.slug)
+							d.plus === "project" && (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								className: Rows_module_css_default.iconButton,
+								"aria-label": orgT("menu.org.newProject"),
+								title: orgT("menu.org.newProject"),
+								onClick: (e) => {
+									e.stopPropagation();
+									orgStore.mutate("project.create", { orgId: d.orgId }).catch(() => {});
+								},
+								children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconPlusOutline16, {})
 							}),
-							r.sessionCount !== null && r.sessionCount !== void 0 ? (0, react_jsx_runtime.jsx)("span", {
-								style: { fontSize: 11, opacity: 0.55, flex: "none" },
-								children: String(r.sessionCount)
-							}) : null
-						]
-					}, r.rowId);
-				})
-			});
+							isOrg && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {
+							open: menuOpen,
+							onClose: () => {
+								setMenuOpen(false);
+							},
+							items,
+							onSelect,
+							portal: true,
+							closeOnPointerLeave: true,
+							anchor: (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								className: Rows_module_css_default.iconButton,
+								"aria-label": orgT("actions.workspace.aria", { name: d.label }),
+								onClick: (e) => {
+									e.stopPropagation();
+									setMenuOpen((v) => !v);
+								},
+								children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconEllipsisOutline16, {})
+							})
+						})]
+					})
+				]
+			}, d.key);
 		}
 		function TrashSection({ t }) {
 			// Cached face — a fresh selector object per call would loop #185.
@@ -3350,12 +3600,34 @@ window.__ModuleLoader__.load({
 			"welcome.studio": "arxa studio",
 			"welcome.business": "arxa business",
 			"welcome.businessSoon": "arxa business (agency) — coming soon",
-			"tree.category.projects": "Projects",
-			"tree.category.notes": "Notes",
-			"tree.category.meetings": "Meetings",
-			"tree.category.account": "Account",
-			"tree.category.communications": "Communications",
-			"tree.missing": "Missing on disk — scaffold did not create this category"
+			"tree.dock.projects": "Projects",
+			"tree.dock.notes": "Notes",
+			"tree.dock.meetings": "Meetings",
+			"tree.dock.account": "Account",
+			"tree.dock.communications": "Communications",
+			"tree.ws.notes": "Notes",
+			"tree.ws.meetings/scheduler": "Scheduler",
+			"tree.ws.meetings/notes": "Notes",
+			"tree.ws.account/receipts": "Receipts",
+			"tree.ws.account/invoices": "Invoices",
+			"tree.ws.account/subscriptions": "Subscriptions",
+			"tree.ws.account/profile": "Profile",
+			"tree.ws.communications/emails": "Emails",
+			"tree.ws.communications/messages": "Messages",
+			"tree.ws.communications/comments": "Comments",
+			"tree.pc.design": "Design",
+			"tree.pc.config": "Config",
+			"tree.pc.deploy": "Deploy",
+			"tree.pc.diagrams": "Diagrams",
+			"tree.pc.intake": "Intake",
+			"tree.pc.architecture": "Architecture",
+			"tree.pc.notes": "Notes",
+			"tree.pc.build": "Build",
+			"tree.pc.moodboard": "Moodboard",
+			"tree.pc.scaffold": "Scaffold",
+			"menu.org.open": "Open organisation",
+			"menu.org.close": "Close organisation",
+			"menu.org.newProject": "New project",
 		};
 		const zhOver = {
 			"section.workspaces": "组织",
@@ -3397,12 +3669,34 @@ window.__ModuleLoader__.load({
 			"welcome.studio": "arxa studio",
 			"welcome.business": "arxa business",
 			"welcome.businessSoon": "arxa business（代理）— 即将推出",
-			"tree.category.projects": "项目",
-			"tree.category.notes": "笔记",
-			"tree.category.meetings": "会议",
-			"tree.category.account": "账户",
-			"tree.category.communications": "通讯",
-			"tree.missing": "磁盘上缺失 — 脚手架未创建此分类"
+			"tree.dock.projects": "项目",
+			"tree.dock.notes": "笔记",
+			"tree.dock.meetings": "会议",
+			"tree.dock.account": "账户",
+			"tree.dock.communications": "通讯",
+			"tree.ws.notes": "笔记",
+			"tree.ws.meetings/scheduler": "日程",
+			"tree.ws.meetings/notes": "笔记",
+			"tree.ws.account/receipts": "收据",
+			"tree.ws.account/invoices": "发票",
+			"tree.ws.account/subscriptions": "订阅",
+			"tree.ws.account/profile": "档案",
+			"tree.ws.communications/emails": "邮件",
+			"tree.ws.communications/messages": "消息",
+			"tree.ws.communications/comments": "评论",
+			"tree.pc.design": "设计",
+			"tree.pc.config": "配置",
+			"tree.pc.deploy": "部署",
+			"tree.pc.diagrams": "图表",
+			"tree.pc.intake": "需求",
+			"tree.pc.architecture": "架构",
+			"tree.pc.notes": "笔记",
+			"tree.pc.build": "构建",
+			"tree.pc.moodboard": "情绪板",
+			"tree.pc.scaffold": "脚手架",
+			"menu.org.open": "打开组织",
+			"menu.org.close": "关闭组织",
+			"menu.org.newProject": "新建项目",
 		};
 		//#endregion
 		//#region lib/types/client/index.js
@@ -3434,12 +3728,13 @@ window.__ModuleLoader__.load({
 			orgHostDescription = ctx.get("connection").hostDescription;
 			const browserInjected = () => ({
 				// use* hooks are pinned in OrgBrowser — see the region snippet.
-				startSession: (orgId) => {
-					const sel = orgStore.get().selectedRowId;
-					if (sel) { orgStore.mutate("workspace.new-session", { orgId: sel.orgId, rowId: sel.rowId }).catch(() => {}); return; }
-					// D71: the top CTA is row-gated (no selection → no-op; the rows
-					// section shows the hint). Org rows keep the legacy affordance.
-					if (orgId !== void 0) orgStore.mutate("org.new-session", { orgId }).catch(() => {});
+				startSession: (workspaceId) => {
+					// v2 (grilled 2026-08-30): the ONLY creation path is a workspace
+					// row own + — the composite id encodes org + workspace path. The
+					// legacy org-level fallback is GONE (it created org-root worktrees).
+					const s = String(workspaceId ?? "");
+					const i = s.indexOf("|");
+					if (i > 0 && i < s.length - 1) orgStore.mutate("workspace.new-session", { orgId: s.slice(0, i), workspace: s.slice(i + 1) }).catch(() => {});
 				},
 				open: (sessionId) => {
 					const orgId = orgOfSession(sessionId);
@@ -3449,20 +3744,20 @@ window.__ModuleLoader__.load({
 				// search fetch is an honest empty — we hold no transcript index.
 				searchSessions: async () => ({ items: [], hasMore: false }),
 				searchResultLimit: 20,
-				renameSession: async () => {},
+				renameSession: (sessionId, title) => {
+					// One rename, every surface: the registry name is the display truth;
+					// git stays keyed by the session id (grilled 2026-08-30).
+					const orgId = orgOfSession(sessionId);
+					if (orgId !== void 0 && typeof title === "string" && title.trim() !== "") orgStore.mutate("session.rename", { orgId, sessionId, name: title.trim() }).catch(() => {});
+				},
 				forkSession: () => {},
 				archiveSession: (sessionId) => {
 					const orgId = orgOfSession(sessionId);
 					if (orgId !== void 0) orgStore.mutate("session.archive", { orgId, sessionId }).catch(() => {});
 				},
 				insertSessionBefore: async () => {},
-				renameWorkspace: (orgId, title) => orgStore.mutate("org.rename", { orgId, name: title }),
-				deleteWorkspace: (orgId) => {
-					// Relabelled Close-organisation: only meaningful on the open org.
-					const o = orgStore.get().orgs.find((x) => x.id === orgId);
-					if (o?.open) return orgStore.mutate("org.close", {});
-					return Promise.resolve();
-				},
+				renameWorkspace: async () => {}, // fixed folders are not renamable (v2)
+				deleteWorkspace: async () => {}, // leaf rows never delete; org close lives on the org row menu (v2)
 				insertWorkspaceBefore: async () => {},
 				createWorkspace: async (input) => {
 					await orgStore.mutate("org.create", { name: input?.name });
