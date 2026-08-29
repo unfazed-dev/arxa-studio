@@ -146,5 +146,26 @@ check('seam: arxa-file-org-shell resolves with createOrgLifecycle', typeof mod?.
 check('rows face: host-served read-only exports (listSessions/listTrash)', typeof mod?.listSessions === 'function' && typeof mod?.listTrash === 'function')
 check('rows face: workspace-root discovery exported', typeof mod?.loadWorkspaceRoot === 'function')
 
+// ---- 8. pendingInteraction producer-consumer wiring (D63) ----------------------
+// The producer is dsh itself: client-runtime SessionManager classifies
+// question/requested mux frames into SessionSummary.pendingInteraction
+// (approval | plan-review | question — 0.1.1-rc.2). The sidebar consumes it
+// in three places; regeneration dropping any one silently strands the union
+// (rows would never show the waiting pills), so pin all three.
+check('wiring: session rows spread pendingInteraction',
+  client.includes('...s.pendingInteraction === void 0 ? {} : { pendingInteraction: s.pendingInteraction }'))
+check('wiring: search rows spread pendingInteraction',
+  client.includes('...summary.pendingInteraction === void 0 ? {} : { pendingInteraction: summary.pendingInteraction }'))
+check('wiring: status switch covers the closed union',
+  client.includes('case "approval":') && client.includes('case "plan-review":')
+  && client.includes('case "question":') && client.includes('assertNever(node.pendingInteraction)'))
+check('wiring: runtime producer present (SessionManager pendingInteractions)',
+  (() => {
+    try {
+      const rt = readFileSync(join(repo, 'node_modules', '@deepseek-ai', 'dsh-client-runtime', 'lib', 'client.js'), 'utf8')
+      return rt.includes('pendingInteractions') && rt.includes('questionInteractionStatus')
+    } catch { return false }
+  })())
+
 console.log(failures === 0 ? '\narxa-sidebar selftest: ALL GREEN' : `\narxa-sidebar selftest: ${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)

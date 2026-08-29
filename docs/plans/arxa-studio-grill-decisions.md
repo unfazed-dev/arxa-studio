@@ -696,8 +696,19 @@ Approval, Doorbell).
   attach, then live requested/resolved), and `ctx.apiProxy.respond`
   settles a pending wait first-claimant-wins (dsh-host-apiproxy). The
   fallback (first-class records) was never needed.
-- kit/cairn README "push pattern" paragraph (doorbell memo item A)
-  — undecided rider; its own trivial commit if taken.
+- ~~kit/cairn README "push pattern" paragraph~~ — RESOLVED 2026-08-29
+  (arxa kit commit: "The push pattern" in the README Push section).
+- ~~sidebar pendingInteraction producer wiring~~ — RESOLVED 2026-08-29,
+  by verification rather than construction: dsh 0.1.1-rc.2's
+  client-runtime SessionManager IS the producer (classifies
+  question/requested mux frames into SessionSummary.pendingInteraction,
+  replay-deduped, connection-generation scoped), and the sidebar's
+  ui-workspace-derived client already consumes it in all three sites.
+  arxa-sidebar selftest section 8 now pins the chain (runtime producer
+  present + rows/search spread + closed-union switch) so regeneration
+  cannot strand the union again. Approvals surface as the generic
+  pending pill per D64 one-class; dsh's separate approval/requested
+  frames are its own mechanism, deliberately not adopted in v1.
 
 ## Org model v2 — sidebar/workspace reshape (grilled 2026-08-29, session 2)
 
