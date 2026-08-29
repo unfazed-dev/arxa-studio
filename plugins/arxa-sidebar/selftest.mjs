@@ -170,7 +170,7 @@ check('seam: arxa-file-org-shell resolves with createOrgLifecycle', typeof mod?.
   // renameOrg is a verb ON an instance — build one against a throwaway root.
   const { mkdtempSync } = await import('node:fs')
   const os = await import('node:os')
-  const svc = mod.createOrgLifecycle({ workspaceRoot: mkdtempSync(join(os.tmpdir(), 'arxa-rows-')) })
+  const svc = mod.createOrgLifecycle({ workspaceRoot: mkdtempSync(join(os.tmpdir(), 'arxa-rows-')), env: { ARXA_HOME: os.tmpdir() } })
   check('rows face: lifecycle exposes renameOrg (D41 manifest-only)', typeof svc.renameOrg === 'function')
 }
 {
@@ -185,7 +185,11 @@ check('seam: arxa-file-org-shell resolves with createOrgLifecycle', typeof mod?.
     const orgPath = join(root, 'bulk-org')
     mkdirSync(orgPath, { recursive: true }) // D69: scaffold IN PLACE — the folder exists first
     mod.scaffoldOrg(orgPath, 'Snap Org')
-    const l2 = mod.createOrgLifecycle({ workspaceRoot: root })
+    // env is NOT optional here: openOrg → touchRecent inherits process.env
+    // by default and would front-load this throwaway root into the REAL
+    // ~/.arxa/organisation.json on every npm test run (seen live 2025-08:
+    // eight dead arxa-snap-* entries squatting the user's recents).
+    const l2 = mod.createOrgLifecycle({ workspaceRoot: root, env: { ARXA_HOME: root } })
     await l2.openOrg(orgPath, { deferSnapshot: true })
     check('rows-snap: deferred open reports snapshotPending true', l2.current.snapshotPending() === true)
     let guardMsg = ''
