@@ -448,7 +448,19 @@
 					children: [
 						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 17, fontWeight: 600, marginBottom: 8 }, children: t("welcome.title") }),
 						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, opacity: 0.65, marginBottom: 18 }, children: t("welcome.desc") }),
-						(0, react_jsx_runtime.jsx)("span", { style: { display: "inline-block", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 8, padding: "7px 16px", fontSize: 13 }, children: t("welcome.cta") })
+						(0, react_jsx_runtime.jsxs)("div", { style: { display: "flex", gap: 10, justifyContent: "center" }, children: [
+							(0, react_jsx_runtime.jsx)("button", {
+								onClick: () => window.dispatchEvent(new Event("arxa-create-org")),
+								style: { border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 8, padding: "8px 18px", fontSize: 13, cursor: "pointer", background: "var(--dsw-alias-bg-raised, rgba(255,255,255,0.06))", color: "inherit" },
+								children: t("welcome.studio")
+							}),
+							(0, react_jsx_runtime.jsx)("button", {
+								disabled: true,
+								title: t("welcome.businessSoon"),
+								style: { border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 8, padding: "8px 18px", fontSize: 13, cursor: "not-allowed", background: "transparent", color: "inherit", opacity: 0.5 },
+								children: t("welcome.business")
+							})
+						] })
 					]
 				})
 			});
@@ -512,7 +524,9 @@
 			"newSession.selectFirst": "Select a workspace to start a session",
 			"welcome.title": "Welcome to arxa studio",
 			"welcome.desc": "Create your first organisation to start — arxa studio manages everything through git.",
-			"welcome.cta": "Create organisation",
+			"welcome.studio": "arxa studio",
+			"welcome.business": "arxa business",
+			"welcome.businessSoon": "arxa business (agency) — coming soon",
 			"tree.category.projects": "Projects",
 			"tree.category.notes": "Notes",
 			"tree.category.meetings": "Meetings",
@@ -554,7 +568,9 @@
 			"newSession.selectFirst": "先选择一个工作区再开始会话",
 			"welcome.title": "欢迎使用 arxa studio",
 			"welcome.desc": "创建你的第一个组织即可开始 — arxa studio 通过 git 管理一切。",
-			"welcome.cta": "创建组织",
+			"welcome.studio": "arxa studio",
+			"welcome.business": "arxa business",
+			"welcome.businessSoon": "arxa business（代理）— 即将推出",
 			"tree.category.projects": "项目",
 			"tree.category.notes": "笔记",
 			"tree.category.meetings": "会议",
