@@ -153,6 +153,45 @@ export function apply(ctx) {
     },
   })
 
+  /** macOS native folder locator for the create-org modal: `choose folder`
+    * runs in the user's GUI session (the engine IS on the user's machine),
+    * so the real system panel opens over the app. Other platforms answer
+    * unsupported and keep the typed-path fallback. Cancel is not an error. */
+  ctx.webServer.register({
+    name: 'arxa-sidebar-pick-folder',
+    path: '/__arxa/sidebar/pick-folder',
+    kind: 'exact',
+    handler: async (req, res) => {
+      let raw = ''
+      req.on('data', (c) => { raw += c })
+      req.on('end', async () => {
+        try {
+          if (process.platform !== 'darwin') {
+            return json(res, { ok: false, error: 'folder picker unsupported on ' + process.platform })
+          }
+          const { title } = JSON.parse(raw || '{}')
+          const prompt = String(title ?? 'Choose a folder').replace(/["\\]/g, '')
+          const { spawn } = await import('node:child_process')
+          const child = spawn('/usr/bin/osascript', ['-e',
+            'POSIX path of (choose folder with prompt "' + prompt + '")'])
+          let out = ''
+          let err = ''
+          child.stdout.on('data', (c) => { out += c })
+          child.stderr.on('data', (c) => { err += c })
+          const code = await new Promise((r) => child.on('exit', r))
+          if (code === 0) {
+            const p = out.trim().replace(/\/+$/, '') || '/'
+            return json(res, { ok: true, path: p })
+          }
+          const canceled = code === 128 || /User canceled/.test(err)
+          return json(res, { ok: false, canceled, error: canceled ? 'canceled' : err.trim() || ('osascript exited ' + code) })
+        } catch (e) {
+          json(res, { ok: false, error: String(e?.message ?? e) })
+        }
+      })
+    },
+  })
+
   ctx.webServer.register({
     name: 'arxa-sidebar-action',
     path: '/__arxa/sidebar/action',

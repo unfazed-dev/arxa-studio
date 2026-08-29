@@ -2939,19 +2939,31 @@ window.__ModuleLoader__.load({
 				});
 			};
 			const field = { width: "100%", boxSizing: "border-box", fontSize: 13, padding: "6px 8px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 6, background: "transparent", color: "inherit" };
-			/** Click the location field → the OS folder locator (Tauri dialog).
-			* Falls through to plain typing where the dialog is unavailable
-			* (web/dev) — the field stays editable in every host. */
+			/** Click the location field → the OS folder locator. Desktop shell:
+			* the Tauri dialog when the global API is injected; otherwise the
+			* host-side macOS locator (osascript choose folder in the user's
+			* GUI session). Plain typing remains the fallback everywhere. */
 			const browseLocation = (e) => {
-				const dlg = window.__TAURI__ && window.__TAURI__.dialog;
-				if (!dlg || typeof dlg.open !== "function") return;
 				e.preventDefault();
-				const opts = { directory: true, multiple: false, title: t("org.create.location") };
-				if (location.startsWith("/")) opts.defaultPath = location;
-				Promise.resolve(dlg.open(opts)).then((picked) => {
-					if (typeof picked === "string" && picked.trim() !== "") {
-						setLocation(picked.replace(/\/+$/, "") || picked);
-					}
+				const dlg = window.__TAURI__ && window.__TAURI__.dialog;
+				if (dlg && typeof dlg.open === "function") {
+					const opts = { directory: true, multiple: false, title: t("org.create.location") };
+					if (location.startsWith("/")) opts.defaultPath = location;
+					Promise.resolve(dlg.open(opts)).then((picked) => {
+						if (typeof picked === "string" && picked.trim() !== "") {
+							setLocation(picked.replace(/\/+$/, "") || picked);
+						}
+					}, () => {});
+					return;
+				}
+				setError(null);
+				fetch("/__arxa/sidebar/pick-folder", {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ title: t("org.create.location") })
+				}).then((r) => r.json()).then((b) => {
+					if (b && b.ok && typeof b.path === "string" && b.path.trim() !== "") setLocation(b.path);
+					else if (b && !b.canceled) setError(b.error || "folder locator unavailable");
 				}, () => {});
 			};
 			const label = { fontSize: 11, opacity: 0.55, margin: "10px 0 4px" };
