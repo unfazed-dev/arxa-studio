@@ -491,6 +491,54 @@ open questions tracked at the bottom.
   - Renames stay safe via D41 (slug stability). Cross-repo *moves*
     get a "history won't follow" confirm dialog, no extra machinery.
 
+## Z.ai wire-params grill (2026-08-29) — D48–D54
+
+- **D48 — Seed templates never set catalog-owned compat keys.** The
+  launcher's seed template carried `zaiToolStream: true` inside a settings
+  compat block; dsh withholds that key and hard-errors at route resolution
+  (proven empirically red on the old template, green without it). Fresh
+  installs since 2026-08-21 would not boot. Rule: vendor compat flags belong
+  to the installed pi-ai catalog; settings entries stay compat-clean.
+- **D49 — tool_stream via a temporary pi-ai override.** dsh 0.1.1-rc.2 pins
+  pi-ai ^0.82.1 (<0.83 on a 0.x range); pi-ai 0.84.4's catalog serves
+  glm-5.3/glm-5.3-flash with zaiToolStream. arxa pins pi-ai 0.84.4 via npm
+  `overrides` — explicitly temporary until a dsh release bumps llm-pi-ai
+  (issue drafted at docs/upstream/dsh-llm-pi-ai-bump-request.md). The gate
+  reclassification PR (option C) was declined as contrary to dsh's design;
+  "wait for upstream" (A) runs in parallel via the issue; "accept nothing"
+  (D) declined.
+- **D50 — Config entries merge with the catalog; keep minimal entries.**
+  dsh's resolveRouteModels replaces the served catalog when a route declares
+  a `models:` list, but merges a configured entry OVER the catalog entry of
+  the same id (compat inherited when not restated). Since glm-4.6v (absent
+  from the 0.84.4 catalog) must stay listable, the 5.3 entries remain as
+  MINIMAL entries — id/name/windows/effort maps, zero compat keys — so the
+  catalog owns maxTokensField, zaiToolStream, thinkingFormat. This supersedes
+  the handoff's literal "delete the hand-written entries" advice.
+- **D51 — Default model: zai / glm-5.3-flash / effort max.** Z.ai's own
+  recommended settings for the flash tier (near-Opus-4.8 at ~10x lower
+  cost; text+image input). Applied to the seed template and the live
+  operator file. glm-5.3 stays configured, non-default.
+- **D52 — Delegated Pi follows; personal ~/.dsh does not.** piHome
+  models.json gains glm-5.3-flash (first position); pi-delegate's default
+  model flips to match. The operator's personal ~/.dsh is a separate
+  dependency tree (npx-resolved), not the product — untouched.
+- **D53 — temperature/top_p: closed as a non-issue.** Z.ai's OpenAPI spec
+  states server defaults temperature 1, top_p 0.95 for the GLM-5.3 series —
+  identical to the documented recommendations. Omit both from the wire and
+  inherit the defaults. No adapter plugin, proxy, or upstream PR (§5 of the
+  handoff closed).
+- **D54 — Acceptance gate and its limits.** Override accepted only after:
+  route-validation proof against installed dsh code (red→green), a
+  wire-capture test through pi-ai 0.84.4's real stream path (tool_stream
+  true, max_tokens field, effort max, sampling params omitted — 8/8), and a
+  full web boot (HTTP 200, plugins active). The published dsh-llm-pi-ai
+  tarball ships no selftest harness, so the "selftest sweep" resolved to the
+  route-validation proof. The live authenticated smoke is delivered as
+  scripts/zai-live-smoke.mjs (environment-blocked in the grill sandbox:
+  no appbox, no env key). No migration machinery: the landmine never
+  shipped in a release.
+
 ## File-organisation grill — COMPLETE (Q1–Q9 → D39–D47)
 
 ## Open

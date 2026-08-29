@@ -83,3 +83,11 @@ vocabulary only.
   items move there with an origin manifest and move back on restore.
   Excluded from indexing and export. Hard delete happens only from
   trash. (D47)
+- **Seeded profile** — a config file (dsh `settings.yaml`, pi
+  `models.json`) the launcher writes once on first boot and the
+  operator owns thereafter; template changes never propagate to
+  already-seeded homes. (D48)
+- **Catalog-owned compat** — vendor wire flags (`zaiToolStream`,
+  `maxTokensField`, `thinkingFormat`) belong to the installed pi-ai
+  catalog, never to settings compat blocks; configured model entries
+  merge over their catalog entry and inherit them. (D50)

@@ -1,6 +1,7 @@
 # Handoff — giving arxa studio the missing Z.ai wire params
 
-**Status:** research complete, nothing built. Input for a `/grill-me` session.
+**Status:** IMPLEMENTED 2026-08-29 — see §10 for the grill outcome and
+evidence. §4B (override) was chosen; §5 closed as a non-issue (Q4).
 **Date:** 2026-08-29.
 **Scope:** three Z.ai-recommended request parameters that arxa studio / dsh
 currently cannot put on the wire — `tool_stream`, `temperature`, `top_p` —
@@ -208,3 +209,44 @@ doc-only by request.**
   (`stream=true` **and** `tool_stream=true`; tool-calling models only)
 - DeepSeek Harness — https://github.com/deepseek-ai/deepseek-harness (MIT)
 - pi — https://github.com/earendil-works/pi (MIT)
+
+---
+
+## 10. Outcome — grill 2026-08-29 (decisions D48–D54)
+
+**Q4 (defaults) closed with primary evidence.** Z.ai's OpenAPI spec
+(docs.z.ai/api-reference/llm/chat-completion) states server defaults
+`temperature: 1`, `top_p: 0.95` for the GLM-5.3 series — identical to the
+recommendations. §5 (adapter plugin / proxy / upstream PR) closed; both
+params are omitted from the wire and the defaults apply.
+
+**A live bug this doc missed: the seed template was a boot landmine.**
+`bin/arxa-studio.mjs` seeded `zaiToolStream: true` into a settings compat
+block; dsh withholds that key and hard-errors at route resolution.
+Empirically proven: red on the old template seed, green without it. Every
+fresh install since 2026-08-21 would fail to boot. No release ever shipped
+with it (repo has no version tags; the one live home predates the line).
+
+**What shipped (D48–D54 in arxa-studio-grill-decisions.md):**
+- npm `overrides` pinning pi-ai **0.84.4** — temporary until a dsh release
+  bumps llm-pi-ai (draft: `docs/upstream/dsh-llm-pi-ai-bump-request.md`).
+- Template + live `settings.yaml`: landmine removed; 5.3 entries kept as
+  MINIMAL entries (effort maps only, zero compat keys) so the catalog owns
+  `zaiToolStream`/`maxTokensField`/`thinkingFormat`. This supersedes §3a's
+  "delete the entries" advice, forced by glm-4.6v retention + dsh's merge
+  semantics (`resolveRouteModels`: a models list replaces the catalog; a
+  configured entry merges over its catalog id and inherits compat).
+- Default model flipped to **zai / glm-5.3-flash / effort max** (Z.ai's
+  recommended settings) in template + live file.
+- Delegated Pi: flash added to `~/.arxa/pi/models.json` (first position),
+  pi-delegate default flipped. Personal `~/.dsh` untouched (D52).
+
+**Acceptance evidence:**
+- Route validation (installed dsh code, scratch seed): red → green.
+- Wire capture through pi-ai 0.84.4's real `stream` path, glm-5.3-flash:
+  8/8 — `tool_stream: true`, `max_tokens: 131072` (not
+  `max_completion_tokens`), `thinking: {type: "enabled", clear_thinking:
+  false}` + `reasoning_effort: max`, temperature/top_p omitted, stream on.
+- Full web boot on the new template config: HTTP 200, plugins active.
+- Live authenticated smoke: run `scripts/zai-live-smoke.mjs` from a shell
+  where the Z.ai credential resolves (blocked in the grill sandbox).
