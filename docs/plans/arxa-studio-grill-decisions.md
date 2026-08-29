@@ -546,3 +546,138 @@ open questions tracked at the bottom.
 - Write `docs/plans/file-organisation-implementation.md` from
   D39–D47, then build.
 - Glossary of settled terms now lives in `CONTEXT.md` (repo root).
+
+## Z.ai latency grill — COMPLETE (2026-08-29, Q1–Q9 → D55–D59)
+
+- **D55 — The 7.7s/40 vs 5.5s/62 gap is model tier, not harness.**
+  Controlled A/B against Z.ai (`scripts/zai-ab-bench.mjs`, 22 runs):
+  flash+tools @ max = 7.3–7.4s TTFT / 26–50 tok/s (arxa's numbers
+  reproduced exactly); glm-5.3+tools = 2.3–2.9s / 85–89 tok/s
+  (stock's numbers once diluted by dsh's full tool-schema prefill).
+  Same instrument on both sides (client.js: TTFT = dispatch → first
+  delta, reasoning included; tok/s = completion_tokens ÷ decode
+  wall). `tool_stream` showed no consistent effect (run-to-run
+  variance dominates); system prompt, plugins, credential
+  resolution, context growth, and endpoint all ruled out. The
+  "100+ tok/s era" ended the day the default flipped to flash
+  (2026-08-21) — flash is currently Z.ai's slow tier.
+- **D56 — Default flips to glm-5.3 @ max; flash stays routed for
+  vision.** Live settings + seed template. Flash remains first-class
+  for text+image turns and stays pi-delegate's default model.
+- **D57 — Effort vocabulary becomes low/high/max.** `off: null`
+  dropped — fake off (thinking cannot be disabled on the 5.3 series;
+  selecting it sent nothing, the model still thought at default).
+  `low` added — bench: low eliminates thinking entirely (0 thinking
+  tokens, first delta = content) and cuts total response time ~3×;
+  the only real speed lever.
+- **D58 — baseURL pinned to the coding endpoint everywhere;
+  provider renamed zai-coding.** The stored key is coding-plan
+  scoped (general endpoint → 429 insufficient balance,
+  bench-verified). Live settings zai route, live models.json, and
+  seed template all pin `https://api.z.ai/api/coding/paas/v4` with
+  a wallet-flip comment. models.json provider id `zai-wallet` →
+  `zai-coding` (swept through README, arxa-explore, pi-delegate);
+  the live file also carried a pre-rename `!appbox` credential shim
+  (dead — `appbox` is not on PATH) now `!arxa credentials exec`,
+  which resolves via inherited env inside the studio process tree.
+- **D59 — zai-coding-cn provider dropped from the seed.** After the
+  pin it duplicated the zai route (same endpoint, same key) with
+  only historical labels; dead config removed.
+
+## Open (latency)
+
+- Restart the running studio (booted 15:07, before the settings
+  edit) to load the new default. The `~/.arxa/engine` copy of the
+  launcher carries the old seed until the next engine build — no
+  live impact (seeds only fire on fresh homes).
+- Repo changes from this grill are uncommitted (the operator's
+  parallel session is mid-flight); commit when clear.
+- If a wallet-funded key ever exists, flip baseURL to
+  `https://api.z.ai/api/paas/v4` per the pinned comment.
+
+## Approvals-loop grill — COMPLETE (2026-08-29, Q1–Q9 → D60–D68)
+
+Closes the doorbell decision memo's open caller question
+(arxa/docs/plans/doorbell-decision-2026-08-29.md, B1): what the
+approvals feature is, how it reaches the phone, and what "done"
+means. Term definitions live in CONTEXT.md (Pending interaction,
+Approval, Doorbell).
+
+- **D60 — v1 loop shape: full loop.** Approvals are actionable on the
+  phone: native approvals_shell lists pending approvals, the owner
+  approves/denies there, the agent unblocks. A list you can't act on
+  trains the owner to ignore the buzz — worse than no buzz.
+- **D61 — data path: engine HTTP over the iroh tunnel, cairn-shaped.**
+  `GET` pending approvals as JSON from the studio engine through the
+  existing loopback proxy; the mobile kit entity caches the response
+  as the phone's projection. Payload fields ARE the future cairn row
+  (same ids, same columns) so B2 (desktop hosts cairn-server,
+  approvals ride sync, visible push → silent wake) is a transport
+  swap, not a model migration. Refresh = foreground / pull-to-refresh
+  / post-decision; no polling. D46 stays intact: approvals are
+  session state, not tree-derivable; the HTTP fetch is the
+  projection's v1 transport per D46's own "mobile online-only" v1
+  note.
+- **D62 — decision path: direct engine POST, loud failure, no queue.**
+  `POST` the decision through the loopback proxy (tunnel-layer AUTH
+  already gates the caller); on dead tunnel redial once via
+  `resume()`, then fail loudly inline ("reconnect to act"). Never a
+  silent queue. The cairn-rail edit log is NOT used — it exists to
+  materialize tree edits, and an approval decision is session state;
+  shoehorning it in would blur the D46 disjointness the rail
+  protects.
+- **D63 — model: derived projection, not first-class records.** An
+  Approval IS a dsh session's pending human-input request
+  (`ask_user_question`). The approvals list is computed from dsh
+  session state; deciding = remotely answering that session. No new
+  durable store — the pending question is the record, the projection
+  is rebuildable by scan (index tier per D46). Side effect:
+  `pendingInteraction` (sidebar union, until now producerless) gets
+  its first engine-side producer. Build must first verify dsh exposes
+  (1) server-side listing of sessions with pending interactions and
+  (2) an answer-submission API — the web UI has both; if host plugins
+  cannot reach them, first-class records (rejected here) return as
+  the fallback.
+- **D64 — one class in practice.** Every pending question IS the
+  approval in v1; `kind` ships in the record but stays `'approval'`.
+  plan-review/question split only when a real second class emerges
+  (doorbell memo: later classes join after approvals prove the UX).
+  No heuristic classifier over prompt text.
+- **D65 — copy: fixed generic English, content-free, engine-side.**
+  Caller passes `{id}` only; plugin defaults stand ("Approval needed"
+  / "Open Arxa Studio on your phone to review."). The rail learns
+  THAT an approval exists; the summary rides the encrypted tunnel,
+  never APNs/FCM (ADR-0038 §2 caller-side templates; D8 privacy
+  posture). Locale-aware copy is a future additive registration
+  field, not a redesign.
+- **D66 — placement: new `plugins/approvals` (studio) + app-owned
+  mobile slice.** Engine: host half injects dsh `webServer`, owns the
+  session-state seam, registers `/__arxa/approvals` routes
+  (sidebar-style convention), fires `notifyApprovalRequested`
+  (push-doorbell stays a pure never-throwing library) on new pendings
+  via cheap polling with dedup by session+id. Mobile: entity +
+  repository over ArxaKitRepository ports + tunnel API client live in
+  mobile_flutter (the app is the only consumer); entity registers at
+  boot through kit/data, not as a new kit package. This slice does
+  NOT touch the sidebar plugin.
+- **D67 — repo hygiene: push before building.** arxa (11 ahead) and
+  arxa-studio (8 ahead, including the push-doorbell foundation) push
+  BEFORE the slice lands, so its diff reviews in isolation — same
+  pin-visibility discipline as the kit audit. The unrelated dirty
+  sidebar WIP (5 files, +314/−27) stays untouched and unswept, with a
+  named warning in the slice's commit message.
+- **D68 — done: simulated gates AND phone demo.** Merging requires
+  the simulated suite green (plugin selftest riding ci.mjs with fake
+  fetch; route contract tests; mobile analyze + tests with mocked
+  transport). The feature is NOT done until the owner demonstrates
+  the full loop on the physical phone (arm ARXA_DOORBELL_PUSH=true,
+  pair, raise a pending, assert buzz → list → decide → agent
+  unblocks) — the ADR-0041 D5 pattern with teeth: tracked as a
+  closing condition, dark-gated off-default until then.
+
+### Open (approvals)
+
+- dsh seam verification (D63's precondition) is the build's first
+  step; fallback = first-class records.
+- kit/cairn README "push pattern" paragraph (doorbell memo item A)
+  — undecided rider; its own trivial commit if taken.

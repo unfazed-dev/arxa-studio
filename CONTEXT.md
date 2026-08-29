@@ -91,3 +91,26 @@ vocabulary only.
   `maxTokensField`, `thinkingFormat`) belong to the installed pi-ai
   catalog, never to settings compat blocks; configured model entries
   merge over their catalog entry and inherit them. (D50)
+- **TTFT (time to first token)** — elapsed from dispatching a turn to
+  the first streamed token of any kind, thinking included. The studio's
+  headline latency number. (D55)
+- **Decode throughput** — output tokens per second after first token;
+  thinking tokens count in both the numerator and the window. What the
+  stats line calls tok/s. (D55)
+- **Coding endpoint / Wallet endpoint** — Z.ai's two API surfaces:
+  plan-quota keys work only on the coding endpoint, wallet-funded keys
+  on the general one; a key on the wrong surface fails with
+  insufficient balance. (D58)
+- **Pending interaction** — a dsh session paused awaiting human input
+  (the `ask_user_question` mechanism). Kinds: approval, plan-review,
+  question. The sidebar's `pendingInteraction` union displays it; the
+  approvals feature is its first engine-side producer. (D63)
+- **Approval** — a pending interaction of kind approval, surfaced to the
+  phone as a *derived projection* over dsh session state — never a
+  first-class stored record. Deciding (approve/deny) = remotely answering
+  the session's pending question; the projection is rebuildable by scan,
+  so it lives in the index tier per D46. (D61, D63)
+- **Doorbell** — the push notification that tells the owner a session
+  needs them: engine-side caller (`notifyApprovalRequested`) → desktop
+  pushd `POST /v1/send` → paired phone. Text-only, best-effort, never a
+  data path. (doorbell decision 2026-08-29; D65–D66)
