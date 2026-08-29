@@ -22,7 +22,12 @@ client of the Mac-hosted engine. Companion to
 
 - **M4 — Surface: full studio.** The mobile app is the full studio, trimmed
   per-view only where a surface genuinely cannot work on mobile — decided
-  as we go, not upfront. Native iOS/Android app, not a web wrapper.
+  as we go, not upfront. Webview for online surfaces (the full studio
+  session view), native for pairing/push/offline — a real native shell,
+  not a thin wrapper. (Reworded 2026-08-30: the old "not a web wrapper"
+  headline contradicted this log's own webview delivery contract; see arxa
+  docs/research/2026-08-29-hybrid-webview-b2-briefing.md and the B2
+  decision in arxa docs/plans/doorbell-decision-2026-08-29.md §4.)
 
 - **M5 — Distribution: TestFlight + APK sideload** for now; store release is
   a later decision.
