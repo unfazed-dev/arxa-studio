@@ -74,6 +74,8 @@ check('rows-c: selection face + gated startSession splice', client.includes('sel
 check('rows-c: selection hint + section label in both locales', client.includes('"rows.section": "Workspaces"') && client.includes('"newSession.selectFirst": "Select a workspace to start a session"') && client.includes('"rows.section": "工作区"'))
 check('rows-c: server snapshot serves rows (category + project rowIds)', hostSrc().includes("rowId: 'category:'") && hostSrc().includes("rowId: 'project:'"))
 check('rows-c: server act maps rowId → scoped session', hostSrc().includes("'workspace.new-session'") && hostSrc().includes('cur.newSession(undefined, proj)'))
+check('welcome: blank-page gate with card when no org (D69 UX)', client.includes('function WelcomeGate(') && client.includes('"welcome.title": "Welcome to arxa studio"') && client.includes('"welcome.title": "欢迎使用 arxa studio"') && client.includes('!creating && (0, react_jsx_runtime.jsx)(WelcomeGate'))
+check('welcome: one-shot resume to newest session of the open org', client.includes('resumeTried') && client.includes('maybeResume(next.orgs)') && client.includes('action: "session.open"'))
 
 // ---- 4. drift gate ------------------------------------------------------------
 // The committed client.js must equal shell+workspace regenerated, byte for
