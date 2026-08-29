@@ -72,20 +72,22 @@ check('rows: shell New-session is org-aware (Q5)', client.includes('org.new-sess
 check('rows: OrgSection block deleted', !client.includes('OrgSection'))
 
 // ---- 3b. workspace rows (org-model-v2 Phase C: D70/D71) ------------------------
-check('rows-c: WorkspaceRowsSection aboard (the rows ARE the tree)', client.includes('function WorkspaceRowsSection('))
+check('rows-c: OrgCategoryRows nest under each org (the rows ARE the tree, 2026-08-30 v1.2)',
+  client.includes('function OrgCategoryRows({ orgId, t })') && client.includes('OrgCategoryRows, { orgId: group.workspaceId, t }') && !client.includes('WorkspaceRowsSection'))
 check('rows-c: OrgTreeSection dissolved', !client.includes('OrgTreeSection') && !client.includes('treeRows'))
-check('rows-c: selection face + gated startSession splice', client.includes('selectRow(rowId)') && client.includes('workspace.new-session') && client.includes('const sel = orgStore.get().selectedRowId;'))
-check('rows-c: selection hint + section label in both locales', client.includes('"rows.section": "Workspaces"') && client.includes('"newSession.selectFirst": "Select a workspace to start a session"') && client.includes('"rows.section": "工作区"'))
+check('rows-c: selection face (org-scoped) + gated startSession splice', client.includes('selectRow(sel)') && client.includes('workspace.new-session') && client.includes('const sel = orgStore.get().selectedRowId;') && client.includes('{ orgId: sel.orgId, rowId: sel.rowId }'))
+check('rows-c: selection tooltip in both locales (section label gone with the detached section)', client.includes('"newSession.selectFirst": "Select a workspace to start a session"') && !client.includes('"rows.section"') && !client.includes('工作区": "'))
 check('rows-c: server snapshot serves rows (category + project rowIds)', hostSrc().includes("rowId: 'category:'") && hostSrc().includes("rowId: 'project:'"))
-check('rows-c: server act maps rowId → scoped session', hostSrc().includes("'workspace.new-session'") && hostSrc().includes('cur.newSession(undefined, proj)'))
+check('rows-c: server act maps rowId → scoped session (org-switching when the row belongs to a non-open org)', hostSrc().includes("'workspace.new-session'") && hostSrc().includes('arg?.orgId ? await ensureOpen(arg.orgId) : handle()') && hostSrc().includes('cur.newSession(undefined, proj)'))
+check('rows-c: every org carries its nested tree rows (recents switcher, 2026-08-30)', hostSrc().includes('rows: rowsOf(treeOf(path))'))
 
 // ---- 3c. initial-snapshot gating (2025-08 create-org hang) ---------------------
 // An in-place org root full of bulk content made the inline git add -A run
 // for many minutes and froze the app mid-create. The contract now: create-at
 // defers the snapshot (detached worker), the rows client gates the New
 // Session CTA on the org's snapshotPending, and the message is human.
-check('rows-snap: New Session CTA gates on the org snapshot state (both locales)',
-  client.includes('b.disabled = !selectedRowId || snapPending')
+check('rows-snap: New Session CTA gates on the org-scoped selection + selected org snapshot state (both locales)',
+  client.includes('b.disabled = !sel || snapPending')
   && client.includes('"newSession.snapshotPending": "Preparing git snapshot — sessions unlock when it lands"')
   && client.includes('"newSession.snapshotPending": "正在准备 git 快照 — 完成后即可开始会话"'))
 check('rows-snap: server snapshot exposes snapshotPending (open org)', hostSrc().includes('snapshotPending: cur?.path === path'))

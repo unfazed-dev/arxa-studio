@@ -214,6 +214,33 @@ export function apply(ctx, opts = {}) {
     const l = await getLifecycle()
     if (!l) return emptySnap(SEAM_LIFECYCLE_STUBBED)
     const cur = l.current
+    /** Rows for ONE org's tree (D70/D71): the rows ARE the tree — five
+     * category workspaces plus the org's projects, same shape for every
+     * org so they can nest under their own org row client-side. */
+    const rowsOf = (tree) => {
+      if (!tree) return []
+      const rs = tree.categories.map((c) => ({
+        kind: 'category',
+        rowId: 'category:' + c.slug,
+        slug: c.slug,
+        exists: c.exists,
+        sessionCount: null,
+      }))
+      for (const p of tree.projects) {
+        rs.push({
+          kind: 'project',
+          rowId: 'project:' + p.slug,
+          slug: p.slug,
+          displayName: p.name,
+          sessionCount: tree.sessionsByProject ? (tree.sessionsByProject[p.slug] ?? 0) : null,
+        })
+      }
+      return rs
+    }
+    const treeOf = (p) => {
+      if (typeof l.orgTree !== 'function') return null
+      try { return l.orgTree(p) } catch { return null }
+    }
     const orgs = await Promise.all(l.listOrgs().map(async ({ id, name, slug, path, manifest }) => ({
       id,
       name,
@@ -225,6 +252,11 @@ export function apply(ctx, opts = {}) {
       snapshotPending: cur?.path === path ? !!cur.snapshotPending?.() : false,
       createdAt: manifest?.createdAt ?? null,
       sessions: await orgSessions(l, { path }),
+      // Nested tree rows (2026-08-30 sidebar v1.2): every org carries its
+      // five categories + projects so they render UNDER their org row,
+      // replacing the detached WORKSPACES section. Read-only face;
+      // failures degrade to [].
+      rows: rowsOf(treeOf(path)),
     })))
     // Project scope (open org only): the client's id-or-slug selection
     // resolves once against the registry's slug; unknown renders as none.
@@ -233,36 +265,15 @@ export function apply(ctx, opts = {}) {
       const hit = cur.projects().find((p) => p.slug === selectedProject || p.id === selectedProject)
       return hit ? hit.slug : null
     })()
-    // Org tree for the OPEN org (rows world v1.1): the five fixed D42
-    // categories + projects, so the default scaffold is VISIBLE in the
-    // app, not just on disk. Read-only face; failures degrade to null.
-    let tree = null
-    if (cur && typeof l.orgTree === 'function') {
-      try { tree = l.orgTree(cur.path) } catch { tree = null }
-    }
+    // Org tree for the OPEN org keeps the top-level rows face (v1.1
+    // compat): same rowsOf shape, now derived once for cur.
+    const tree = cur ? treeOf(cur.path) : null
     // Workspace rows (D70/D71): the rows ARE the tree now. Category rows
     // are the five fixed workspaces (org-repo sessions, project:null —
     // the registry has no category scope, so counts wait for the D live
     // listing); project rows carry their registry counts. Projects render
     // indented under the Projects row (client-side concern).
-    const rows = tree ? tree.categories.map((c) => ({
-      kind: 'category',
-      rowId: 'category:' + c.slug,
-      slug: c.slug,
-      exists: c.exists,
-      sessionCount: null,
-    })) : []
-    if (tree) {
-      for (const p of tree.projects) {
-        rows.push({
-          kind: 'project',
-          rowId: 'project:' + p.slug,
-          slug: p.slug,
-          displayName: p.name,
-          sessionCount: tree.sessionsByProject ? (tree.sessionsByProject[p.slug] ?? 0) : null,
-        })
-      }
-    }
+    const rows = rowsOf(tree)
     return {
       seam: false,
       root: true,
@@ -540,8 +551,10 @@ export function apply(ctx, opts = {}) {
             'workspace.new-session': async () => {
               // Rows world (D70/D71): sessions are born in a WORKSPACE — a
               // category row (org-repo worktree, project:null) or a project
-              // row (registry-scoped by slug). Unknown row is loud.
-              const cur = handle()
+              // row (registry-scoped by slug). Unknown row is loud. The
+              // orgId rides along so a row selected under a NON-open org
+              // switches there first (single open handle, ensureOpen).
+              const cur = arg?.orgId ? await ensureOpen(arg.orgId) : handle()
               const rowId = typeof arg?.rowId === 'string' ? arg.rowId : ''
               const cat = rowId.startsWith('category:') ? rowId.slice('category:'.length) : null
               const proj = rowId.startsWith('project:') ? rowId.slice('project:'.length) : null

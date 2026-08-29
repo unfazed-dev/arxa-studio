@@ -64,6 +64,27 @@ try {
   ok(svc.listOrgs().some((o) => o.slug === orgA.slug), 'boot discovery lists the org, none auto-opened')
   ok(svc.current === null, 'boot opens nothing')
 
+  // ---- listOrgs is RECENTS-based (2026-08-30) --------------------------------
+  // Regression: the old single-root scan listed only the most-recent org
+  // folder and its children, so creating a second org anywhere made the
+  // first vanish from the sidebar switcher (seen live: RESTO hid TOPO).
+  // The contract (org-model-v2 Phase A): recents IS the registry — an org
+  // outside workspaceRoot still lists; dead pointers skip silently.
+  {
+    const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-elsewhere-'))
+    const svcOtherRoot = createOrgLifecycle({ workspaceRoot: elsewhere, env })
+    const orgFar = svcOtherRoot.createOrg('Far Corp') // scaffolded under elsewhere, enters the SAME recents
+    const listed = svc.listOrgs() // svc's root never contained orgFar
+    ok(listed.some((o) => o.id === orgFar.manifest.id), 'listOrgs reaches orgs beyond workspaceRoot (recents switcher)')
+    const recentsFile = path.join(fakeHome, 'organisation.json')
+    const readRecentsFile = () => JSON.parse(fs.readFileSync(recentsFile, 'utf8'))
+    const deadBefore = readRecentsFile().orgs.length
+    fs.writeFileSync(recentsFile, JSON.stringify({ orgs: [...readRecentsFile().orgs, path.join(elsewhere, 'does-not-exist')] }))
+    ok(svc.listOrgs().every((o) => fs.existsSync(path.join(o.path, 'org.json'))), 'dead recents pointers skip silently')
+    fs.writeFileSync(recentsFile, JSON.stringify({ orgs: readRecentsFile().orgs.slice(0, deadBefore) }))
+    fs.rmSync(elsewhere, { recursive: true, force: true })
+  }
+
   // ---- open: full rail ----------------------------------------------------
   console.log('open → index → git → sessions:')
   const h1 = await svc.openOrg(orgA.path)

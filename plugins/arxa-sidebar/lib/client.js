@@ -1761,7 +1761,8 @@ window.__ModuleLoader__.load({
 										open: () => { orgStore.mutate("org.open", { orgId: group.workspaceId }).catch(() => {}); }
 										}
 									}),
-									(expandedSessionGroups.includes(group.key) ? group.sessions : group.sessions.slice(0, COLLAPSED_SESSION_LIMIT)).map((node) => {
+									(0, react_jsx_runtime.jsx)(OrgCategoryRows, { orgId: group.workspaceId, t }),
+										(expandedSessionGroups.includes(group.key) ? group.sessions : group.sessions.slice(0, COLLAPSED_SESSION_LIMIT)).map((node) => {
 										const sameGroupDrag = drag !== null && drag.accountKey === group.key;
 										return (0, react_jsx_runtime.jsx)(SessionNodeItem, {
 											node,
@@ -2800,10 +2801,11 @@ window.__ModuleLoader__.load({
 					state.trashView = { rows: state.trash ?? [], open: state.trashOpen ?? true };
 					emit();
 				},
-				/** Client-side selection only (D70/D71): which workspace row the
-				* New Session CTA targets. Server truth is untouched. */
-				selectRow(rowId) {
-					state = { ...state, selectedRowId: rowId };
+				/** Client-side selection only (D70/D71, org-scoped 2026-08-30):
+				* which org's workspace row the New Session CTA targets —
+				* { orgId, rowId } | null. Server truth is untouched. */
+				selectRow(sel) {
+					state = { ...state, selectedRowId: sel };
 					emit();
 				}
 			};
@@ -2871,25 +2873,25 @@ window.__ModuleLoader__.load({
 		const orgUseSessions = (sel) => useOrg((s) => sel(s.sessionsView));
 		const orgUseDirectoryFlow = (sel) => sel(orgNoFlow.getSnapshot());
 		const orgUseHostDescription = (sel) => sel(orgHostDescription);
-		/** Workspace rows (D70/D71): the rows ARE the tree — the five category
-		 * workspaces plus the org's projects (indented). A click selects; the
-		 * selection gates the New Session CTA (stock disabled + tooltip on the
-		 * CTA class, plus an always-visible hint while nothing is selected).
-		 * Counts are honest: project rows carry registry counts; category
-		 * counts wait for the live listing (phase D). */
-		function WorkspaceRowsSection({ t }) {
-			const view = useOrg((s) => s.rowsView);
-			const selectedRowId = useOrg((s) => s.selectedRowId);
-			// Initial-snapshot state (2025-08 create-org hang): while the org's
-			// first git snapshot runs, session creation is gated with a reason —
-			// the state is server truth (hasHead), polled via the 5s refresh.
-			const snapPending = useOrg((s) => (s.orgs || []).some((o) => o.open && o.snapshotPending === true));
-			const rows = view.rows;
+		/** CTA gate (D70/D71; moved 2026-08-30 out of the dissolved rows
+		 * section): the shell New Session button needs an org-scoped row
+		 * selection whose org has landed its initial git snapshot. Stock
+		 * disabled + tooltip on the CTA class. */
+		function useSessionCtaGate(t) {
+			const sel = useOrg((s) => s.selectedRowId);
+			// Initial-snapshot state (2025-08 create-org hang), for the SELECTED
+			// org: server truth (hasHead), polled via the 5s refresh.
+			const snapPending = useOrg((s) => {
+				const x = s.selectedRowId;
+				if (!x) return false;
+				const o = (s.orgs || []).find((y) => y.id === x.orgId);
+				return !!(o && o.open && o.snapshotPending === true);
+			});
 			(0, react.useEffect)(() => {
 				const apply = () => {
 					for (const b of document.querySelectorAll(".aXa_sb_newSession")) {
-						b.disabled = !selectedRowId || snapPending;
-						b.title = snapPending ? t("newSession.snapshotPending") : (selectedRowId ? "" : t("newSession.selectFirst"));
+						b.disabled = !sel || snapPending;
+						b.title = snapPending ? t("newSession.snapshotPending") : (sel ? "" : t("newSession.selectFirst"));
 					}
 				};
 				apply();
@@ -2901,43 +2903,42 @@ window.__ModuleLoader__.load({
 						b.title = "";
 					}
 				};
-			}, [selectedRowId, snapPending, t]);
+			}, [sel, snapPending, t]);
+		}
+		/** Org tree rows (2026-08-30 sidebar v1.2): the five category folders
+		 * plus projects nest DIRECTLY under their org row — the nesting slot
+		 * sessions held in stock dsh — replacing the detached WORKSPACES
+		 * section. A click selects org-scoped; the New Session CTA targets the
+		 * selection and the server switches orgs when the row belongs to a
+		 * non-open org. Counts are honest: project rows carry registry
+		 * counts; category counts wait for the live listing (phase D). */
+		function OrgCategoryRows({ orgId, t }) {
+			const org = useOrg((s) => (s.orgs || []).find((o) => o.id === orgId));
+			const sel = useOrg((s) => s.selectedRowId);
+			const rows = org?.rows ?? [];
 			if (rows.length === 0) return null;
-			return (0, react_jsx_runtime.jsxs)("div", {
-				style: { padding: "0 4px 8px" },
-				children: [
-					(0, react_jsx_runtime.jsx)("div", {
-						style: { fontSize: 11, opacity: 0.55, textTransform: "uppercase", letterSpacing: "0.04em", padding: "4px 4px 2px" },
-						children: t("rows.section")
-					}),
-					snapPending ? (0, react_jsx_runtime.jsx)("div", {
-						style: { fontSize: 11, opacity: 0.75, padding: "0 4px 4px" },
-						children: t("newSession.snapshotPending")
-					}) : (selectedRowId === null && (0, react_jsx_runtime.jsx)("div", {
-						style: { fontSize: 11, opacity: 0.55, padding: "0 4px 4px" },
-						children: t("newSession.selectFirst")
-					})),
-					rows.map((r) => {
-						const isCat = r.kind === "category";
-						const selected = selectedRowId === r.rowId;
-						return (0, react_jsx_runtime.jsxs)("div", {
-							onClick: () => orgStore.selectRow(selected ? null : r.rowId),
-							className: clsx(Rows_module_css_default.sessionRow, Rows_module_css_default.flatSessionRowWithoutStatus),
-							style: { paddingLeft: isCat ? 12 : 24, opacity: r.exists === false ? 0.55 : 1, cursor: "pointer", borderRadius: 6, background: selected ? "rgba(127,127,127,0.22)" : "transparent" },
-							title: isCat ? t("tree.category." + r.slug) : r.slug,
-							children: [
-								(0, react_jsx_runtime.jsx)("span", {
-									style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: isCat ? 13 : 12 },
-									children: isCat ? t("tree.category." + r.slug) : (r.displayName || r.slug)
-								}),
-								r.sessionCount !== null && r.sessionCount !== void 0 ? (0, react_jsx_runtime.jsx)("span", {
-									style: { fontSize: 11, opacity: 0.55, flex: "none" },
-									children: String(r.sessionCount)
-								}) : null
-							]
-						}, r.rowId);
-					})
-				]
+			return (0, react_jsx_runtime.jsx)("div", {
+				style: { padding: "2px 4px" },
+				children: rows.map((r) => {
+					const isCat = r.kind === "category";
+					const selected = sel !== null && sel.orgId === orgId && sel.rowId === r.rowId;
+					return (0, react_jsx_runtime.jsxs)("div", {
+						onClick: () => orgStore.selectRow(selected ? null : { orgId, rowId: r.rowId }),
+						className: clsx(Rows_module_css_default.sessionRow, Rows_module_css_default.flatSessionRowWithoutStatus),
+						style: { paddingLeft: isCat ? 26 : 44, opacity: r.exists === false ? 0.55 : 1, cursor: "pointer", borderRadius: 6, background: selected ? "rgba(127,127,127,0.22)" : "transparent" },
+						title: isCat ? t("tree.category." + r.slug) : r.slug,
+						children: [
+							(0, react_jsx_runtime.jsx)("span", {
+								style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: isCat ? 13 : 12 },
+								children: isCat ? t("tree.category." + r.slug) : (r.displayName || r.slug)
+							}),
+							r.sessionCount !== null && r.sessionCount !== void 0 ? (0, react_jsx_runtime.jsx)("span", {
+								style: { fontSize: 11, opacity: 0.55, flex: "none" },
+								children: String(r.sessionCount)
+							}) : null
+						]
+					}, r.rowId);
+				})
 			});
 		}
 		function TrashSection({ t }) {
@@ -3284,11 +3285,12 @@ window.__ModuleLoader__.load({
 				window.addEventListener("arxa-create-org", open);
 				return () => window.removeEventListener("arxa-create-org", open);
 			}, []);
+			// CTA gate lives here now (always mounted) — see useSessionCtaGate.
+			useSessionCtaGate(props.t);
 			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, {
 				children: [
 					!creating && (0, react_jsx_runtime.jsx)(WelcomeGate, { t: props.t }),
 					(0, react_jsx_runtime.jsx)(WorkspaceBrowser, patched),
-					(0, react_jsx_runtime.jsx)(WorkspaceRowsSection, { t: props.t }),
 				(0, react_jsx_runtime.jsx)(TrashSection, { t: props.t }),
 					(0, react_jsx_runtime.jsx)(OrgCreateModal, { t: props.t, createWorkspace: props.createWorkspace, open: creating, onClose: () => setCreating(false) })
 				]
@@ -3332,7 +3334,6 @@ window.__ModuleLoader__.load({
 			"github.signin.busy": "Waiting for GitHub…",
 			"github.signin.failed": "GitHub sign-in did not complete — try again.",
 			"github.signin.required": "Link your GitHub account first.",
-			"rows.section": "Workspaces",
 			"newSession.selectFirst": "Select a workspace to start a session",
 			"newSession.snapshotPending": "Preparing git snapshot — sessions unlock when it lands",
 			"welcome.title": "Welcome to arxa studio",
@@ -3380,7 +3381,6 @@ window.__ModuleLoader__.load({
 			"github.signin.busy": "正在等待 GitHub…",
 			"github.signin.failed": "GitHub 登录未完成 — 请重试。",
 			"github.signin.required": "请先关联你的 GitHub 账号。",
-			"rows.section": "工作区",
 			"newSession.selectFirst": "先选择一个工作区再开始会话",
 			"newSession.snapshotPending": "正在准备 git 快照 — 完成后即可开始会话",
 			"welcome.title": "欢迎使用 arxa studio",
@@ -3427,7 +3427,7 @@ window.__ModuleLoader__.load({
 				// use* hooks are pinned in OrgBrowser — see the region snippet.
 				startSession: (orgId) => {
 					const sel = orgStore.get().selectedRowId;
-					if (sel) { orgStore.mutate("workspace.new-session", { rowId: sel }).catch(() => {}); return; }
+					if (sel) { orgStore.mutate("workspace.new-session", { orgId: sel.orgId, rowId: sel.rowId }).catch(() => {}); return; }
 					// D71: the top CTA is row-gated (no selection → no-op; the rows
 					// section shows the hint). Org rows keep the legacy affordance.
 					if (orgId !== void 0) orgStore.mutate("org.new-session", { orgId }).catch(() => {});

@@ -104,6 +104,15 @@ const ROW_TOGGLE = 'onClick: onToggle,'
 if (!out.includes(ROW_TOGGLE)) throw new Error('row toggle anchor missing — stock shape moved?')
 out = out.replace(ROW_TOGGLE, 'onClick: () => { onToggle(); if (actions !== void 0 && actions.open !== void 0) actions.open(); },')
 
+// 6c. org tree rows nest under their org row (2026-08-30 sidebar v1.2):
+//      every org group renders its five category rows + projects as the
+//      group's FIRST children — the nesting slot sessions held in stock
+//      dsh — replacing the detached WORKSPACES section. OrgCategoryRows
+//      lives in the region (module scope, render-time resolution).
+const GROUP_KIDS = '(expandedSessionGroups.includes(group.key) ? group.sessions : group.sessions.slice(0, COLLAPSED_SESSION_LIMIT)).map((node) => {'
+if (!out.includes(GROUP_KIDS)) throw new Error('group children anchor missing — stock shape moved?')
+out = out.replace(GROUP_KIDS, '(0, react_jsx_runtime.jsx)(OrgCategoryRows, { orgId: group.workspaceId, t }),\n' + T(10) + GROUP_KIDS)
+
 
 // 7. menu routing: Trash toggles the inline section (client-side state).
 const ROUTE_OLD = [
@@ -152,7 +161,7 @@ const ourApply = [
   T(4) + '// use* hooks are pinned in OrgBrowser — see the region snippet.',
   T(4) + 'startSession: (orgId) => {',
   T(5) + 'const sel = orgStore.get().selectedRowId;',
-  T(5) + 'if (sel) { orgStore.mutate("workspace.new-session", { rowId: sel }).catch(() => {}); return; }',
+  T(5) + 'if (sel) { orgStore.mutate("workspace.new-session", { orgId: sel.orgId, rowId: sel.rowId }).catch(() => {}); return; }',
   T(5) + '// D71: the top CTA is row-gated (no selection → no-op; the rows',
   T(5) + '// section shows the hint). Org rows keep the legacy affordance.',
   T(5) + 'if (orgId !== void 0) orgStore.mutate("org.new-session", { orgId }).catch(() => {});',

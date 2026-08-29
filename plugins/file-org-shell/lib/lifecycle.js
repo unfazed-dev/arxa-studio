@@ -48,6 +48,7 @@ import {
   projectManifestPath,
   slugify,
   touchRecent,
+  readRecents,
   removeRecent,
   CATEGORIES,
 } from '../../workspace/lib/index.js'
@@ -185,8 +186,22 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
   }
 
   function listOrgs() {
-    // workspace scanWorkspace returns Maps keyed by id; expose plain rows.
-    return [...scanWorkspace(root).orgs.values()]
+    // Recents IS the org registry (org-model-v2 Phase A: "sidebar serves
+    // recents for the org switcher"). The old single-root scan listed only
+    // the most-recent org folder and its children — creating a second org
+    // anywhere made the first vanish from the switcher (seen live
+    // 2026-08-30: RESTO hid TOPO). A recents row is a pointer, not a
+    // promise: dead paths and manifest-less folders skip silently.
+    const out = []
+    for (const p of readRecents(env)) {
+      try {
+        const manifest = readManifest(orgManifestPath(p))
+        out.push({ id: manifest.id, name: manifest.name, slug: path.basename(p), path: p, manifest })
+      } catch {
+        /* dead pointer — not an org today */
+      }
+    }
+    return out
   }
 
   function createOrg(displayName) {
@@ -671,7 +686,11 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
    */
   function orgTree(orgPath) {
     const resolved = path.resolve(orgPath)
-    const { orgs, projects } = scanWorkspace(root)
+    // Scan the ORG FOLDER itself (2026-08-30): scanning the lifecycle root
+    // tied every tree to the most-recent org — any other registered org
+    // threw unknown-org and lost its rows (TOPO under RESTO's root). The
+    // org folder is its own truth (D69 in-place layout).
+    const { orgs, projects } = scanWorkspace(resolved)
     const org = [...orgs.values()].find((o) => o.path === resolved)
     if (!org) throw new Error('unknown-org: ' + resolved)
     const categories = CATEGORIES.map((slug) => ({
