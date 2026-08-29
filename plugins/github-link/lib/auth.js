@@ -64,6 +64,14 @@ export function getClientId(env = process.env) {
   return env.ARXA_GITHUB_CLIENT_ID || loadClientId(env)
 }
 
+/**
+ * Client id baked into the packed app (VS Code ships its GitHub client id
+ * the same way): PUBLIC by design — it rides every authorize redirect — and
+ * the device flow needs no secret. The production OAuth app is owned by
+ * Arxa Digital Solutions; its client SECRET never ships and is not needed.
+ */
+export const SHIPPED_CLIENT_ID = 'Iv23licJCFFRwp664uwa'
+
 // ---- token exchange (shared by both flows) ------------------------------------
 
 /** POST {tokenBase}/login/oauth/access_token, JSON in and out. */

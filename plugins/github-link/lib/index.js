@@ -9,7 +9,7 @@
  * keyring; no cloud database anywhere (CLAUDE.md boundary, D16).
  */
 
-import { getClientId, defaultApiBase, defaultTokenBase, linkViaBrowser, linkViaDevice, createPrivateRepoApi, SCOPES } from './auth.js'
+import { getClientId, defaultApiBase, defaultTokenBase, linkViaBrowser, linkViaDevice, createPrivateRepoApi, SCOPES, SHIPPED_CLIENT_ID } from './auth.js'
 import { createKeyring } from './keyring.js'
 import { readState, writeState, clearState } from './state.js'
 
@@ -36,9 +36,20 @@ export function createGithubLink({
   tokenBase = defaultTokenBase(),
   apiBase = defaultApiBase(),
   env = process.env,
-  useDeviceFlow = false,
+  /** Production default: the shipped OAuth app completes sign-in via the
+   * DEVICE flow — the only secret-less path GitHub gives OAuth apps
+   * (probed 2025-08: the PKCE web-flow exchange still answers
+   * incorrect_client_credentials without a client secret). The browser
+   * PKCE flow stays available for a future GitHub App: useDeviceFlow:false. */
+  useDeviceFlow = true,
+  /** Public-by-design client id baked in VS Code-style; env/config still
+   * win. This is NOT a secret — the client secret never ships anywhere. */
+  shippedClientId = SHIPPED_CLIENT_ID,
 } = {}) {
   const ring = keyring ?? createKeyring({ bridge: keyringBridge })
+  /** Latest device-flow code, surfaced to the UI via deviceCode() so the
+   * sign-in step can display it while the poll runs. */
+  let lastDeviceCode = null
 
   /** Fetch the authenticated /user login for a fresh token. */
   async function whoAmI(accessToken) {
@@ -59,7 +70,7 @@ export function createGithubLink({
    * login, persist the non-secret state. Resolves the new state.
    */
   async function link() {
-    const clientId = getClientId(env)
+    const clientId = getClientId(env) ?? shippedClientId
     if (!clientId) {
       throw new Error(
         'github-link: no client id. Set ARXA_GITHUB_CLIENT_ID or write ' +
@@ -68,7 +79,19 @@ export function createGithubLink({
       )
     }
     const result = useDeviceFlow
-      ? await linkViaDevice({ clientId, fetch, tokenBase })
+      ? await linkViaDevice({
+          clientId,
+          fetch,
+          tokenBase,
+          onCode: ({ userCode, verificationUri }) => {
+            lastDeviceCode = { userCode, verificationUri }
+            if (typeof open === 'function') {
+              Promise.resolve()
+                .then(() => open(verificationUri))
+                .catch(() => {})
+            }
+          },
+        })
       : await linkViaBrowser({ clientId, fetch, open, tokenBase })
 
     const login = await whoAmI(result.accessToken)
@@ -80,6 +103,7 @@ export function createGithubLink({
       linkedAt: new Date().toISOString(),
     }
     writeState(state, env)
+    lastDeviceCode = null
     return state
   }
 
@@ -116,11 +140,17 @@ export function createGithubLink({
     return createPrivateRepoApi({ name, accessToken, fetch, apiBase })
   }
 
+  /** Latest device-flow code for the UI (null until a link() starts one). */
+  function deviceCode() {
+    return lastDeviceCode
+  }
+
   return {
     backend: ring.backend,
     link,
     unlink,
     status,
     createPrivateRepo,
+    deviceCode,
   }
 }

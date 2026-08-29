@@ -2994,6 +2994,7 @@ window.__ModuleLoader__.load({
 			const [busy, setBusy] = (0, react.useState)(false);
 			const [error, setError] = (0, react.useState)(null);
 			const [ghLinked, setGhLinked] = (0, react.useState)(null);
+			const [devCode, setDevCode] = (0, react.useState)(null);
 			const nameRef = (0, react.useRef)(null);
 			const checkGh = () => {
 				ORG_POST("github.status").then((r) => setGhLinked(!!(r.result && r.result.linked)), () => setGhLinked(null));
@@ -3005,6 +3006,7 @@ window.__ModuleLoader__.load({
 					setBusy(false);
 					setError(null);
 					setGhLinked(null);
+					setDevCode(null);
 					checkGh();
 					if (nameRef.current !== null) nameRef.current.focus();
 				}
@@ -3014,13 +3016,26 @@ window.__ModuleLoader__.load({
 			const signin = () => {
 				setBusy(true);
 				setError(null);
+				setDevCode(null);
+				/** Device flow: the server surfaces the one-time code via the
+				 * github.device act as soon as GitHub issues it; poll until then. */
+				const poll = setInterval(() => {
+					ORG_POST("github.device").then((r) => {
+						const d = r.result;
+						if (d && d.userCode) setDevCode(d);
+					}, () => {});
+				}, 700);
 				ORG_POST("github.link").then(() => ORG_POST("github.status")).then((r) => {
+					clearInterval(poll);
 					setBusy(false);
+					setDevCode(null);
 					const linked = !!(r.result && r.result.linked);
 					setGhLinked(linked);
 					if (!linked) setError(t("github.signin.failed"));
 				}, (e) => {
+					clearInterval(poll);
 					setBusy(false);
+					setDevCode(null);
 					setError(e instanceof Error ? e.message : String(e));
 				});
 			};
@@ -3105,7 +3120,11 @@ window.__ModuleLoader__.load({
 								(0, react_jsx_runtime.jsx)("svg", { width: 16, height: 16, viewBox: "0 0 16 16", fill: "currentColor", "aria-hidden": "true", children: (0, react_jsx_runtime.jsx)("path", { d: GH_MARK }) }),
 								busy ? t("github.signin.busy") : t("github.signin.button")
 							] })
-						}) })
+						}) }),
+						busy && devCode && (0, react_jsx_runtime.jsxs)("div", { style: { marginTop: 12, fontSize: 12 }, children: [
+							(0, react_jsx_runtime.jsx)("div", { style: { opacity: 0.75 }, children: t("github.signin.codeHint") }),
+							(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 22, fontWeight: 700, letterSpacing: 2, marginTop: 4 }, children: devCode.userCode })
+						] })
 					] }),
 					!showSignin && (0, react_jsx_runtime.jsx)("div", { style: label, children: t("field.workspaceName") }),
 					!showSignin && (0, react_jsx_runtime.jsx)("input", {
@@ -3228,6 +3247,7 @@ window.__ModuleLoader__.load({
 			"org.create.locationHint": "The folder that becomes your organisation — click to browse, or type a path.",
 			"github.signin.desc": "arxa studio manages everything through git. Link your GitHub account to create an organisation — your projects publish as private repos under it.",
 			"github.signin.button": "Sign in with GitHub",
+			"github.signin.codeHint": "Enter this one-time code at github.com/login/device — your browser should have opened there",
 			"github.signin.busy": "Waiting for GitHub…",
 			"github.signin.failed": "GitHub sign-in did not complete — try again.",
 			"github.signin.required": "Link your GitHub account first.",

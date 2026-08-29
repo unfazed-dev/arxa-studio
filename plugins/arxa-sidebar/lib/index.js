@@ -369,9 +369,12 @@ export function apply(ctx, opts = {}) {
             * first run — before any workspace/org exists (D69: the sign-in
             * step is the first thing the create modal offers). Handled before
             * the lifecycle guard for exactly that reason. */
-          if (action === 'github.status' || action === 'github.link' || action === 'github.unlink') {
+          if (action === 'github.status' || action === 'github.link' || action === 'github.unlink' || action === 'github.device') {
             const g = await getGithub()
             if (!g) return json(res, { ok: false, error: 'github-unavailable', action })
+            if (action === 'github.device') {
+              return json(res, { ok: true, action, result: typeof g.deviceCode === 'function' ? g.deviceCode() : null })
+            }
             const out = await (action === 'github.status' ? g.status() : action === 'github.link' ? g.link() : g.unlink())
             return json(res, { ok: true, action, result: out })
           }

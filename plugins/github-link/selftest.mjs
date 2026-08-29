@@ -138,7 +138,7 @@ try {
   state.expectedCode = 'auth-code-1'
   state.login = 'octocat'
   state.expectBearer = 'browser-token'
-  const svcB = createGithubLink({ fetch: mockFetch, open: fakeOpen, tokenBase: mockBase, apiBase: mockBase, env })
+  const svcB = createGithubLink({ fetch: mockFetch, open: fakeOpen, tokenBase: mockBase, apiBase: mockBase, env, useDeviceFlow: false })
   const linkState = await svcB.link()
 
   ok(linkState.login === 'octocat', 'link() resolves state with the linked login')
@@ -162,7 +162,7 @@ try {
         cb.searchParams.set('state', 'WRONG')
         http.get(cb, (res) => { res.resume(); res.on('end', () => resolve()) })
       }
-      createGithubLink({ fetch: mockFetch, open: fakeOpenBad, tokenBase: mockBase, apiBase: mockBase, env })
+      createGithubLink({ fetch: mockFetch, open: fakeOpenBad, tokenBase: mockBase, apiBase: mockBase, env, useDeviceFlow: false })
         .link().then(resolve, reject)
     }),
     /state mismatch/,
@@ -192,6 +192,33 @@ try {
   await keyring.setSecret(devState.login, device.accessToken)
   ok(await keyring.getSecret('octocat') === 'dev-token', 'device token stored via the same keyring face as the service')
 
+  // ---- shipped defaults: device flow ON, client id baked --------------------------
+  console.log('shipped defaults:')
+  state.expectBearer = 'dev-token'
+  let openedUrl = null
+  const homeD = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-gh-d-'))
+  const svcD = createGithubLink({
+    fetch: mockFetch,
+    open: async (u) => { openedUrl = String(u) },
+    tokenBase: mockBase,
+    apiBase: mockBase,
+    env: { ...process.env, ARXA_HOME: homeD },
+  })
+  const pending = svcD.link()
+  await new Promise((r) => setTimeout(r, 300))
+  ok(svcD.deviceCode() !== null && svcD.deviceCode().userCode === 'ABCD-1234', 'deviceCode() surfaces the live one-time code to the UI face')
+  ok(openedUrl === 'https://github.com/login/device', 'device flow auto-opens the verification page once the code is issued')
+  const dState = await pending
+  ok(dState.login === 'octocat', 'default flow is the device flow — no useDeviceFlow flag needed (OAuth app: secret-less path)')
+  ok(svcD.deviceCode() === null, 'deviceCode() clears after a successful link')
+  await keyring.deleteSecret('octocat')
+  await keyring.setSecret('octocat', 'dev-token') // restore what the faces section asserts on
+  const homeE = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-gh-e-'))
+  const svcE = createGithubLink({ fetch: mockFetch, tokenBase: mockBase, apiBase: mockBase, env: { ...process.env, ARXA_HOME: homeE }, shippedClientId: null })
+  await assert.rejects(() => svcE.link(), /no client id/, 'link() refuses loud when no client id exists anywhere (shipped fallback disabled)')
+  passed++
+  console.log('  ✓ device-flow default + shipped client-id fallback + loud refusal')
+
   // ---- keyring round-trip --------------------------------------------------------
   console.log('keyring (' + keyring.backend + ' backend):')
   if (!haveSecurity) console.log('  (note: /usr/bin/security unavailable — exercising the memory fallback)')
@@ -209,7 +236,7 @@ try {
 
   // ---- faces: status / createPrivateRepo / unlink ----------------------------------
   console.log('faces:')
-  const svc = createGithubLink({ fetch: mockFetch, tokenBase: mockBase, apiBase: mockBase, env })
+  const svc = createGithubLink({ fetch: mockFetch, tokenBase: mockBase, apiBase: mockBase, env, useDeviceFlow: false })
   state.expectBearer = 'dev-token'
   const st = await svc.status()
   ok(st.linked === true && st.login === 'octocat' && st.tokenAvailable === true, 'status reports linked + tokenAvailable')
