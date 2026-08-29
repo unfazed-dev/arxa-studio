@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 /**
- * arxa-sidebar wiring smoke — real Phase A lifecycle, fake webServer, fully
- * sandboxed (temp ARXA_HOME + workspace). Exercises the wired route pair:
- * boot (no org) → org.new → org.open → project.new → session.new → park →
- * session.resume → org.close, asserting CTA transitions at each step.
+ * arxa-sidebar wiring smoke — ROWS WORLD (docs/plans/sidebar-org-rethink.md).
+ * Real Phase A lifecycle, fake webServer, fully sandboxed (temp ARXA_HOME +
+ * workspace). Exercises the wired route pair end to end:
+ *   boot (root, no orgs) → org.create (auto-open) → rename (D41 manifest-only)
+ *   → project fixture → org.new-session (row appears) → park → session.open
+ *   → session.archive (hidden per D39) → second org auto-switch → rows served
+ *   for BOTH orgs read-only → trash surface + restore / restore-all.
  * Exit 0 = every assertion held.
  */
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
@@ -19,6 +22,9 @@ mkdirSync(process.env.ARXA_HOME, { recursive: true })
 const here = path.dirname(new URL(import.meta.url).pathname)
 const shell = await import(path.join(here, '..', 'file-org-shell', 'lib', 'index.js'))
 shell.saveWorkspaceRoot(root)
+// Filesystem-level fixtures only: the host holds ITS lifecycle instance on
+// this root — a second lifecycle here would be a different single-handle world.
+const ws = await import(path.join(here, '..', 'workspace', 'lib', 'index.js'))
 
 const routes = {}
 const host = await import(path.join(here, 'lib', 'index.js'))
@@ -33,111 +39,120 @@ const call = (p, { method = 'GET', body, url = p } = {}) => new Promise((res) =>
   })
 })
 const state = (q = '') => call('/__arxa/sidebar/state', { url: '/__arxa/sidebar/state' + q })
-const act = (action, arg, project) => call('/__arxa/sidebar/action', { method: 'POST', body: { action, arg, project } })
+const act = (action, arg) => call('/__arxa/sidebar/action', { method: 'POST', body: { action, arg } })
 
 let failures = 0
 const check = (label, ok, extra = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok ? '' : '  ' + extra}`)
   if (!ok) failures++
 }
-const ids = (s) => s.cta.map((c) => c.id).join(',')
 
 let s = await state()
-check('boot: seam flipped, no org, org CTAs', s.seam === false && s.org === null && ids(s).includes('org-new') && ids(s).includes('org-open'), JSON.stringify(s))
+check('boot: root chosen, no orgs yet, empty trash',
+  s.seam === false && s.root === true && s.orgs.length === 0 && s.trashCount === 0 && s.trash.length === 0,
+  JSON.stringify(s))
 
-let r = await act('org.new', 'Acme Labs')
-check('org.new ok', r.ok === true, r.error)
+let r = await act('org.create', { name: 'Acme Labs' })
+check('org.create ok (auto-open)', r.ok === true, r.error)
 s = await state()
-const orgId = s.orgs[0]?.id
-check('org discovered', s.orgs.length === 1 && !!orgId)
+const acme = s.orgs[0]
+check('org row served: open + no sessions yet',
+  s.orgs.length === 1 && acme.open === true && Array.isArray(acme.sessions) && acme.sessions.length === 0,
+  JSON.stringify(s))
 
-r = await act('org.open', orgId)
+// rename (D41): display name only — slug/path stable, open handle refreshes
+r = await act('org.rename', { orgId: acme.id, name: 'Acme Labs Renamed' })
+check('org.rename ok', r.ok === true, r.error)
+s = await state()
+check('rename served (open handle refreshed in place)',
+  s.orgs[0].name === 'Acme Labs Renamed' && s.orgs[0].slug === acme.slug && s.orgs[0].open === true,
+  JSON.stringify({ name: s.orgs[0].name, slug: s.orgs[0].slug }))
+
+// project fixture (v1: no project-create UI — the rows face serves what the
+// filesystem + manifests declare; scaffoldProject stays the CLI/host verb).
+const orgPath = s.orgs[0].path
+const proj = ws.scaffoldProject(orgPath, 'Rocket')
+check('project fixture scaffolded', !!proj?.path, JSON.stringify(proj))
+
+r = await act('org.new-session', { orgId: acme.id })
+check('org.new-session ok', r.ok === true, r.error)
+s = await state()
+check('session row served on its org', s.orgs[0].sessions.length === 1 && s.orgs[0].sessions[0].state === 'open',
+  JSON.stringify(s.orgs[0].sessions))
+
+// park it, then open it back through the rows action
+const gw = await import(path.join(here, '..', 'git-workspace', 'lib', 'index.js'))
+const sid = s.orgs[0].sessions[0].id
+gw.holdSession(orgPath, sid)
+s = await state()
+const parked = s.orgs[0].sessions[0]
+check('parked row keeps state + reason fields',
+  parked.state === 'parked' && 'parkedReason' in parked && parked.project === null,
+  JSON.stringify(parked))
+r = await act('session.open', { orgId: acme.id, sessionId: sid })
+check('session.open (row click resume) ok', r.ok === true, r.error)
+s = await state()
+check('row back to open', s.orgs[0].sessions[0].state === 'open', JSON.stringify(s.orgs[0].sessions[0]))
+
+// archive: D39 — the row disappears from the served rows entirely
+gw.holdSession(orgPath, sid) // re-park so archive starts from a parked state
+r = await act('session.archive', { orgId: acme.id, sessionId: sid })
+check('session.archive ok', r.ok === true, r.error)
+s = await state()
+check('archived row held back from active views', s.orgs[0].sessions.length === 0, JSON.stringify(s.orgs[0].sessions))
+
+// second org: create auto-SWITCHES (single-handle lifecycle), and the first
+// org's rows are still served read-only — no open cycle needed to LIST.
+r = await act('org.create', { name: 'Beta LLC' })
+check('second org.create ok', r.ok === true, r.error)
+s = await state()
+check('auto-switch: exactly one open org, the new one',
+  s.orgs.length === 2 && s.orgs.filter((o) => o.open).length === 1 && s.orgs.find((o) => o.open).name === 'Beta LLC',
+  JSON.stringify(s.orgs.map((o) => ({ name: o.name, open: o.open }))))
+check('first org rows still served while closed', s.orgs.find((o) => o.id === acme.id).sessions.length === 0)
+
+r = await act('org.close', {})
+s = await state()
+check('org.close ok, back to zero open', r.ok === true && s.orgs.every((o) => !o.open), r.error)
+r = await act('org.new-session', {})
+check('new-session without any open org fails loud', r.ok === false && r.error === 'no-org-open', JSON.stringify(r))
+
+// reopen acme by row id (the Q2 click-to-open path)
+r = await act('org.open', { orgId: acme.id })
 check('org.open by id ok', r.ok === true, r.error)
 s = await state()
-check('org open: name + project-new CTA', s.org?.name === 'Acme Labs' && ids(s).includes('project-new'), JSON.stringify({ org: s.org, ctas: ids(s) }))
+check('acme open again', s.orgs.find((o) => o.id === acme.id).open === true, JSON.stringify(s.orgs.map((o) => o.open)))
 
-r = await act('project.new', 'Rocket')
-check('project.new ok', r.ok === true, r.error)
+// ---- trash surface (Q6): entries served on the open org, restore / restore-all
+const doomed = ws.scaffoldProject(orgPath, 'Doomed')
+ws.softDelete(root, doomed.path)
 s = await state()
-const projId = s.projects[0]?.id
-check('project listed', s.projects.length === 1 && s.projects[0].name === 'Rocket')
-
-s = await state('?project=' + projId)
-check('project selected → session-new CTA', ids(s).includes('session-new'), ids(s))
-
-r = await act('session.new', 'feat-x', projId)
-check('session.new ok', r.ok === true, r.error)
-
-const gw = await import(path.join(here, '..', 'git-workspace', 'lib', 'index.js'))
-const orgPath = s.orgs[0].path
-const sid = gw.listSessions(orgPath).find((x) => x.state === 'open')?.id
-gw.holdSession(orgPath, sid)
-s = await state('?project=' + projId)
-check('parked project session tagged + resume/merge CTAs', s.parkedSessions.length === 1 && s.parkedSessions[0].project === 'rocket' && ids(s).includes('session-resume') && ids(s).includes('session-merge'), JSON.stringify({ parked: s.parkedSessions, ctas: ids(s) }))
-
-r = await act('session.resume', null, projId)
-check('session.resume (project scope) ok', r.ok === true, r.error)
-s = await state('?project=' + projId)
-check('resumed: no parked, session-new back', s.parkedSessions.length === 0 && ids(s).includes('session-new'), ids(s))
-
-r = await act('org.close')
-check('org.close ok', r.ok === true, r.error)
+check('trash entry served with a display name', s.trash.length === 1 && s.trash[0].name === 'doomed' && s.trashCount === 1,
+  JSON.stringify(s.trash))
+r = await act('trash.restore', { entryId: s.trash[0].entryId })
+check('trash.restore (single entry) ok', r.ok === true, r.error)
 s = await state()
-check('closed: back to org rows, open CTA', s.org === null && s.orgs.length === 1 && ids(s).includes('org-open'), JSON.stringify({ ctas: ids(s) }))
+check('trash empty after single restore', s.trash.length === 0 && s.trashCount === 0, JSON.stringify(s.trash))
 
-r = await act('project.new', 'Nope')
-check('verb on closed org fails loud', r.ok === false && r.error === 'no-org-open', JSON.stringify(r))
-
-// ---- project-scope semantics: tagged sessions, sole-org open, scope ladder ----
-r = await act('org.open')
-check('org.open with no arg (sole-org fallback) ok', r.ok === true, r.error)
-r = await act('session.new', 'feat-y', projId)
-check('session.new with project body ok', r.ok === true, r.error)
-const featY = gw.listSessions(orgPath).find((x) => x.name === 'feat-y')
-check('project session tagged with slug', featY?.project === 'rocket', JSON.stringify(featY))
-gw.holdSession(orgPath, featY.id)
-s = await state('?project=' + projId)
-check('tagged session parked under its project', s.parkedSessions.some((x) => x.id === featY.id && x.project === 'rocket'), JSON.stringify(s.parkedSessions))
-
-r = await act('project.new', 'Rocket2')
-check('second project ok', r.ok === true, r.error)
+// restore-all: park two entries, restore with no id
+const doomed2 = ws.scaffoldProject(orgPath, 'Doomed 2')
+ws.softDelete(root, doomed2.path)
+const doomed3 = ws.scaffoldProject(orgPath, 'Doomed 3')
+ws.softDelete(root, doomed3.path)
 s = await state()
-const proj2 = s.projects.find((p) => p.name === 'Rocket2')
-s = await state('?project=' + proj2.id)
-check('other project scoped out → session-new only', ids(s).includes('session-new') && !ids(s).includes('session-resume'), ids(s))
-
-r = await act('session.new', 'org-x')
-check('org-level session ok', r.ok === true, r.error)
-const orgX = gw.listSessions(orgPath).find((x) => x.name === 'org-x')
-check('org-level session untagged', orgX?.project === null, JSON.stringify(orgX))
-gw.holdSession(orgPath, orgX.id)
-s = await state('?project=' + proj2.id)
-check('org-level surfaces from any selection', s.parkedSessions.some((x) => x.id === orgX.id) && ids(s).includes('session-resume'), JSON.stringify({ parked: s.parkedSessions, ctas: ids(s) }))
-r = await act('session.resume', null, proj2.id)
-check('org-level resume resolves in foreign scope', r.ok === true, r.error)
-
-r = await act('session.new', 'org-z')
-const orgZ = gw.listSessions(orgPath).find((x) => x.name === 'org-z')
-gw.holdSession(orgPath, orgZ.id)
-gw.holdSession(orgPath, orgX.id) // re-park: the foreign-scope resume above reopened it
-r = await act('session.resume')
-check('two org-level parked, no scope → ambiguous', r.ok === false && r.error === 'ambiguous-parked-session', JSON.stringify(r))
-r = await act('session.resume', orgX.id)
-check('exact id beats ambiguity', r.ok === true, r.error)
-
-// ---- trash restore-all through the action route ----
-r = await act('project.new', 'Doomed')
-check('trash fixture project ok', r.ok === true, r.error)
-s = await state()
-const doomedPath = s.projects.find((p) => p.name === 'Doomed')?.path
-const ws = await import(path.join(here, '..', 'workspace', 'lib', 'index.js'))
-ws.softDelete(path.dirname(s.orgs[0].path), doomedPath) // orgs sit one level under the workspace root
-s = await state()
-check('trash CTA appears when trash non-empty', ids(s).includes('trash-restore') && s.trashCount === 1, JSON.stringify({ cta: ids(s), trash: s.trashCount }))
-r = await act('trash.restore')
+check('two trash entries served', s.trash.length === 2, JSON.stringify(s.trash))
+r = await act('trash.restore', { entryId: null })
 check('trash.restore (restore-all) ok', r.ok === true, r.error)
 s = await state()
-check('trash empty after restore-all', s.trashCount === 0 && !ids(s).includes('trash-restore'), JSON.stringify(s.trashCount))
+check('trash empty after restore-all', s.trash.length === 0 && s.trashCount === 0, JSON.stringify(s.trash))
+
+// unknown action + project-scope resolution still loud/precise
+r = await act('ci.run', {})
+check('ci.run stays reserved (unknown-action)', r.ok === false && r.error === 'unknown-action', JSON.stringify(r))
+s = await state('?project=' + proj.manifest.id)
+check('project scope resolves by id', s.selectedProject === 'rocket', JSON.stringify(s.selectedProject))
+s = await state('?project=nonexistent')
+check('unknown scope renders as none (mutations throw instead)', s.selectedProject === null, JSON.stringify(s.selectedProject))
 
 console.log(failures === 0 ? '\narxa-sidebar smoke: ALL GREEN' : `\narxa-sidebar smoke: ${failures} FAILURE(S)`)
 rmSync(sandbox, { recursive: true, force: true })
