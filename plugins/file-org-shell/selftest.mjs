@@ -22,7 +22,7 @@ import {
   OrgNotOpenError,
   ShellLockError,
 } from './lib/index.js'
-import { readOrgStampVersion } from '../workspace/lib/index.js'
+import { readOrgStampVersion, softDelete } from '../workspace/lib/index.js'
 import { runGit, isRepo } from '../git-workspace/lib/index.js'
 import { createLocalProvider } from '../account-mirror/lib/index.js'
 import { railDir } from '../cairn-rail/lib/index.js'
@@ -195,6 +195,21 @@ try {
   )
   ok(!fs.existsSync(shellLockPath(root, orgA.slug)), 'failed open released the shell lock (reverse unwind)')
   ok(svcOther.current === null, 'failed open leaves no current handle')
+
+  // ---- trash restore-all (the sidebar's one Restore CTA) ------------------
+  console.log('trash restore-all:')
+  const svcTrash = createOrgLifecycle({ workspaceRoot: root, env })
+  await svcTrash.openOrg(orgA.path)
+  const hT = svcTrash.current
+  hT.newProject('Doomed')
+  const doomedPath = path.join(orgA.path, 'projects', 'doomed')
+  softDelete(root, doomedPath, { env })
+  ok(hT.trashCount() === 1, 'softDelete parks the project in the trash')
+  const res = hT.restoreTrash()
+  ok(res.restored.length === 1 && res.failed.length === 0, 'restore-all restores every entry, none blocked')
+  ok(hT.trashCount() === 0, 'trash empty after restore-all')
+  ok(fs.existsSync(doomedPath), 'project back at its origin path')
+  svcTrash.closeOrg()
 
   console.log(`\nfile-org-shell selftest: ${passed} checks passed`)
 } finally {

@@ -125,6 +125,20 @@ check('two org-level parked, no scope → ambiguous', r.ok === false && r.error 
 r = await act('session.resume', orgX.id)
 check('exact id beats ambiguity', r.ok === true, r.error)
 
+// ---- trash restore-all through the action route ----
+r = await act('project.new', 'Doomed')
+check('trash fixture project ok', r.ok === true, r.error)
+s = await state()
+const doomedPath = s.projects.find((p) => p.name === 'Doomed')?.path
+const ws = await import(path.join(here, '..', 'workspace', 'lib', 'index.js'))
+ws.softDelete(path.dirname(s.orgs[0].path), doomedPath) // orgs sit one level under the workspace root
+s = await state()
+check('trash CTA appears when trash non-empty', ids(s).includes('trash-restore') && s.trashCount === 1, JSON.stringify({ cta: ids(s), trash: s.trashCount }))
+r = await act('trash.restore')
+check('trash.restore (restore-all) ok', r.ok === true, r.error)
+s = await state()
+check('trash empty after restore-all', s.trashCount === 0 && !ids(s).includes('trash-restore'), JSON.stringify(s.trashCount))
+
 console.log(failures === 0 ? '\narxa-sidebar smoke: ALL GREEN' : `\narxa-sidebar smoke: ${failures} FAILURE(S)`)
 rmSync(sandbox, { recursive: true, force: true })
 process.exit(failures === 0 ? 0 : 1)

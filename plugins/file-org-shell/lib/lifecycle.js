@@ -249,6 +249,24 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           return sessionStageBoundary(resolved, id, { message, env })
         },
         restoreTrash(entryId, opts = {}) {
+          // No entry id → restore EVERYTHING in the trash: the sidebar has
+          // one "Restore from trash" CTA, not per-entry rows. Each entry is
+          // independent — one conflict (occupied destination, history
+          // boundary) must not block the rest. An explicit entryId restores
+          // just that one and returns the single-entry result.
+          if (entryId == null) {
+            const restored = []
+            const failed = []
+            for (const entry of listTrash(root)) {
+              try {
+                const r = restoreFromTrash(root, entry.entryId, { env, ...opts })
+                restored.push({ entryId: entry.entryId, restoredPath: r.restoredPath })
+              } catch (e) {
+                failed.push({ entryId: entry.entryId, error: String(e?.message ?? e) })
+              }
+            }
+            return { restored, failed }
+          }
           return restoreFromTrash(root, entryId, { env, ...opts })
         },
         _undo: undo,
