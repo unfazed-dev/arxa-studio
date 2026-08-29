@@ -27,6 +27,7 @@ import {
   SessionMergeError, GATE_CHECK_SCRIPT,
   openSession, sessionStageBoundary, archiveSession, reviveSession,
   listSessions, archivedSessionIds,
+  getOrigin, setOrigin, rekeySessionsProject,
 } from './lib/index.js'
 
 let passed = 0
@@ -264,4 +265,63 @@ ok('main history: every commit is a stage commit — no WIP identity, no direct 
   assert.ok(subjects.every((s) => s.startsWith('stage:')), `non-stage commit on main: ${subjects}`)
 })
 
+
+
+// ---- W3b additive faces: setOrigin + boundary push + registry rekey --------
+
+{
+  const originTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-git-origin-'))
+  const proj = path.join(originTmp, 'proj')
+  fs.mkdirSync(proj)
+  fs.writeFileSync(path.join(proj, 'project.json'), '{"name":"proj"}\n')
+  initProjectRepo(proj)
+
+  ok('setOrigin: creates origin when absent, UPDATES when present (never throws)', () => {
+    assert.equal(getOrigin(proj), null)
+    const created = setOrigin(proj, 'https://github.com/octo/a.git')
+    assert.equal(created.updated, false)
+    assert.equal(getOrigin(proj), 'https://github.com/octo/a.git')
+    const updated = setOrigin(proj, 'https://github.com/octo/b.git')
+    assert.equal(updated.updated, true)
+    assert.equal(getOrigin(proj), 'https://github.com/octo/b.git')
+  })
+
+  ok('stage boundary with no origin: merged stands, pushed:false no-origin', () => {
+    const bare = path.join(originTmp, 'plain')
+    fs.mkdirSync(bare)
+    fs.writeFileSync(path.join(bare, 'project.json'), '{"name":"plain"}\n')
+    initProjectRepo(bare)
+    const s = openSession(bare, { id: 'push-none', name: 'Push none' })
+    fs.writeFileSync(path.join(s.worktree, 'x.md'), 'x\n')
+    const res = sessionStageBoundary(bare, 'push-none')
+    assert.equal(res.merged, true)
+    assert.deepEqual(res.push, { pushed: false, reason: 'no-origin' })
+  })
+
+  ok('stage boundary with a local bare origin: first push happens here (D18/D69)', () => {
+    const remote = path.join(originTmp, 'origin.git')
+    runGit(['init', '--bare', remote], { cwd: originTmp })
+    setOrigin(proj, remote)
+    const s = openSession(proj, { id: 'push-local', name: 'Push local' })
+    fs.writeFileSync(path.join(s.worktree, 'y.md'), 'y\n')
+    const res = sessionStageBoundary(proj, 'push-local')
+    assert.equal(res.merged, true)
+    assert.equal(res.push.pushed, true)
+    assert.equal(runGit(['rev-parse', 'main'], { cwd: remote }), runGit(['rev-parse', 'main'], { cwd: proj }),
+      'bare origin main does not match local main after the boundary push')
+  })
+
+  ok('rekeySessionsProject: project scope rekeyed oldSlug→newSlug, others untouched (D72)', () => {
+    openSession(proj, { id: 'rk1', project: 'old-slug' })
+    openSession(proj, { id: 'rk2', project: 'other' })
+    openSession(proj, { id: 'rk3', project: 'old-slug' })
+    assert.equal(rekeySessionsProject(proj, 'old-slug', 'new-slug'), 2)
+    const byId = Object.fromEntries(listSessions(proj).map((s) => [s.id, s.project]))
+    assert.equal(byId.rk1, 'new-slug')
+    assert.equal(byId.rk2, 'other')
+    assert.equal(byId.rk3, 'new-slug')
+  })
+
+  fs.rmSync(originTmp, { recursive: true, force: true })
+}
 console.log(`\nselftest: ${passed}/${passed} passed`)

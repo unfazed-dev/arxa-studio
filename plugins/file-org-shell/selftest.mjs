@@ -158,7 +158,7 @@ try {
 
   // ---- org switch: full reverse teardown ----------------------------------
   console.log('org switch teardown:')
-  const orgB = svc.createOrg('Beta LLC')
+  let orgB = svc.createOrg('Beta LLC')
   const hA = await svc.openOrg(orgA.path)
   const backendA = hA.index.backend
   const hB = await svc.switchOrg(orgB.path)
@@ -212,7 +212,7 @@ try {
   const svcTrash = createOrgLifecycle({ workspaceRoot: root, env })
   await svcTrash.openOrg(orgA.path)
   const hT = svcTrash.current
-  hT.newProject('Doomed')
+  await hT.newProject('Doomed')
   const doomedPath = path.join(orgA.path, 'projects', 'doomed')
   softDelete(orgA.path, doomedPath, { env }) // org-local trash (D69)
   ok(hT.trashCount() === 1, 'softDelete parks the project in the trash')
@@ -222,21 +222,26 @@ try {
   ok(fs.existsSync(doomedPath), 'project back at its origin path')
   svcTrash.closeOrg()
 
-  // ---- renameOrg: display-name-only (D41), open handle refreshes ---------
-  console.log('org rename:')
+  // ---- renameOrg: proper rename (D72 — display name + folder as ONE move) --
+  console.log('org rename (D72):')
   const svcRename = createOrgLifecycle({ workspaceRoot: root, env })
-  const renamed = svcRename.renameOrg(orgB.path, 'Beta Limited')
-  ok(renamed.manifest.name === 'Beta Limited', 'rename rewrites the manifest name')
-  ok(renamed.slug === orgB.slug && fs.existsSync(orgB.path), 'slug and folder untouched (D41)')
+  const renamed = await svcRename.renameOrg(orgB.path, 'Beta Limited')
+  ok(renamed.moved === true && renamed.slug === 'beta-limited', 'rename derives the slug from the display name and moves the folder (D72)')
+  ok(!fs.existsSync(orgB.path) && fs.existsSync(renamed.path), 'old folder gone, new folder in place')
+  ok(fs.existsSync(path.join(renamed.path, '.git')), 'org repo .git moved with the folder')
   ok(svcRename.listOrgs().some((o) => o.id === renamed.manifest.id && o.name === 'Beta Limited'), 'listOrgs serves the new display name')
+  orgB = { ...orgB, path: renamed.path, slug: renamed.slug }
   const hRen = await svcRename.openOrg(orgB.path)
-  svcRename.renameOrg(orgB.path, 'Beta Renewed')
-  ok(svcRename.current.manifest.name === 'Beta Renewed', 'open handle manifest refreshes in place')
-  ok(hRen.activeSessions().every((s) => s.state !== 'archived'), 'activeSessions holds archived back')
-  assert.throws(() => svcRename.renameOrg(path.join(root, 'not-an-org'), 'X'), /unknown-org/)
+  const renamed2 = await svcRename.renameOrg(orgB.path, 'Beta Renewed')
+  ok(svcRename.current.path === renamed2.path && svcRename.current.manifest.name === 'Beta Renewed', 'open handle re-opens on the new path with the new manifest')
+  ok(hRen.activeSessions !== undefined && svcRename.current.activeSessions().every((s) => s.state !== 'archived'), 're-opened handle serves activeSessions')
+  orgB = { ...orgB, path: renamed2.path, slug: renamed2.slug }
+  const dnOnly = await svcRename.renameOrg(orgB.path, 'Beta Renewed')
+  ok(dnOnly.moved === false && dnOnly.path === orgB.path, 'same-slug rename degrades to display-name-only (D72 rider)')
+  await assert.rejects(() => svcRename.renameOrg(path.join(root, 'not-an-org'), 'X'), /unknown-org/)
   passed++
   console.log('  ✓ rename of a non-org fails loud')
-  assert.throws(() => svcRename.renameOrg(orgB.path, '  '), /non-empty/)
+  await assert.rejects(() => svcRename.renameOrg(orgB.path, '  '), /non-empty/)
   passed++
   console.log('  ✓ rename to blank fails loud')
   svcRename.closeOrg()
@@ -340,6 +345,129 @@ try {
     ok(createDshBridge().spawn({}).then((r) => r.reason === 'dsh-unavailable'), 'empty faces = dsh-unavailable')
     passed++
     console.log('  ✓ bridge is throw-proof across face failures')
+  }
+
+  
+  // ---- W3b: project publish (D69 gate half) --------------------------------
+  console.log('project publish (W3b):')
+  {
+    // (a) linked mock github: private repo + origin + manifest annotation.
+    const createdRepos = []
+    const svcGh = createOrgLifecycle({
+      workspaceRoot: root,
+      env,
+      github: {
+        status: async () => ({ linked: true, login: 'octocat' }),
+        createPrivateRepo: async (name) => {
+          createdRepos.push(name)
+          return {
+            name,
+            full_name: 'octocat/' + name,
+            private: true,
+            html_url: 'https://github.com/octocat/' + name,
+            owner: { login: 'octocat' },
+          }
+        },
+      },
+    })
+    await svcGh.openOrg(orgA.path)
+    const proj = await svcGh.current.newProject('Skunkworks')
+    ok(createdRepos[0] === proj.slug, 'linked github: createPrivateRepo called with the project slug')
+    ok(runGit(['remote', 'get-url', 'origin'], { cwd: proj.path, env }) === 'https://github.com/octocat/' + proj.slug, 'origin wired to the new private repo')
+    const pm = JSON.parse(fs.readFileSync(path.join(proj.path, 'project.json'), 'utf8'))
+    ok(
+      pm.repoOwner === 'octocat' && pm.repoName === proj.slug && pm.repoPrivate === true &&
+      pm.repoUrl === 'https://github.com/octocat/' + proj.slug,
+      'manifest annotated with repoOwner/repoName/repoPrivate/repoUrl',
+    )
+    ok(!('githubStatus' in pm), 'no error annotation on the happy path')
+    svcGh.closeOrg()
+
+    // (b) no github faces at all: unavailable stub annotates, project exists.
+    const svcNoGh = createOrgLifecycle({ workspaceRoot: root, env })
+    await svcNoGh.openOrg(orgA.path)
+    const local = await svcNoGh.current.newProject('Local Only')
+    ok(fs.existsSync(path.join(local.path, 'project.json')), 'unavailable github: the local project still exists (never blocks local work)')
+    const lm = JSON.parse(fs.readFileSync(path.join(local.path, 'project.json'), 'utf8'))
+    ok(lm.githubStatus === 'github-unavailable', 'unavailable github: loud githubStatus manifest annotation')
+    ok(!('repoUrl' in lm), 'no repo fields faked')
+
+    // (c) linked faces that THROW: publish failure is a loud annotation, never a throw.
+    const svcBoom = createOrgLifecycle({
+      workspaceRoot: root,
+      env,
+      github: { status: async () => ({ linked: true }), createPrivateRepo: async () => { throw new Error('api 422') } },
+    })
+    await svcBoom.openOrg(orgA.path)
+    const boomP = await svcBoom.current.newProject('Boom Project')
+    ok(fs.existsSync(path.join(boomP.path, 'project.json')), 'throwing github: project exists')
+    const bm = JSON.parse(fs.readFileSync(path.join(boomP.path, 'project.json'), 'utf8'))
+    ok(typeof bm.githubStatus === 'string' && bm.githubStatus.startsWith('publish-failed:'), 'throwing github: publish-failed annotation, never a throw')
+    svcNoGh.closeOrg()
+    svcBoom.closeOrg()
+  }
+
+  // ---- Phase E: renameOrg end-to-end + all-or-nothing proof (D72) ----------
+  console.log('org rename end-to-end (Phase E, D72):')
+  {
+    const eRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-rename-e2e-'))
+    const eHome = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-rename-home-'))
+    const eEnv = { ...process.env, ARXA_HOME: eHome }
+    try {
+      const svcE = createOrgLifecycle({ workspaceRoot: eRoot, env: eEnv })
+      const org = svcE.createOrg('Rename Me')
+      await svcE.openOrg(org.path)
+      const sess = await svcE.current.newSession('worker', null)
+      fs.writeFileSync(path.join(sess.worktree, 'note.md'), 'before rename\n')
+      runGit(['add', '-A'], { cwd: sess.worktree, env: eEnv })
+      runGit(['commit', '-m', 'wip: note'], { cwd: sess.worktree, env: eEnv })
+
+      const moved = await svcE.renameOrg(org.path, 'Renamed Org')
+      ok(moved.moved === true && moved.slug === 'renamed-org', 'e2e: folder moved to the slugified new name')
+      ok(!fs.existsSync(org.path), 'e2e: old path gone')
+      ok(fs.existsSync(path.join(moved.path, '.git', 'arxa', 'sessions.json')), 'e2e: session registry (git-common-dir/arxa/) moved with the folder')
+      ok(listSessions(moved.path, eEnv).some((s) => s.id === sess.id && s.state === 'open'), 'e2e: registry rows intact at the new path')
+      const wt = path.join(moved.path, '.arxa', 'worktrees', sess.id)
+      ok(fs.existsSync(wt), 'e2e: session worktree moved with the folder')
+      fs.writeFileSync(path.join(wt, 'note.md'), 'after rename\n')
+      runGit(['add', '-A'], { cwd: wt, env: eEnv })
+      runGit(['commit', '-m', 'stage: post-rename work'], { cwd: wt, env: eEnv })
+      ok(runGit(['status', '--porcelain'], { cwd: wt, env: eEnv }) === '', 'e2e: worktree repaired and functional (write + commit inside)')
+      ok(
+        listRecents(eEnv).includes(moved.path) && !listRecents(eEnv).includes(org.path),
+        'e2e: recents updated (old path removed, new path touched)',
+      )
+      {
+        const be = openBackend(moved.path)
+        ok(be.query('orgs').some((o) => o.name === 'Renamed Org'), 'e2e: index row renamed')
+        be.close()
+      }
+      ok(svcE.current.path === moved.path, 'e2e: current open handle re-opened on the new path')
+      svcE.closeOrg()
+
+      // Forced failure AFTER the mv → all-or-nothing. Plant a live foreign
+      // holder for the FUTURE slug's shell lock INSIDE the org folder: it
+      // moves with the folder and the post-mv re-open must fail loud.
+      const svcF = createOrgLifecycle({ workspaceRoot: eRoot, env: eEnv })
+      await svcF.openOrg(moved.path)
+      fs.mkdirSync(path.join(moved.path, '.arxa', 'locks'), { recursive: true })
+      fs.writeFileSync(
+        path.join(moved.path, '.arxa', 'locks', 'renamed-again.lock'),
+        JSON.stringify({ pid: process.ppid, startedAt: new Date().toISOString() }),
+      )
+      await assert.rejects(() => svcF.renameOrg(moved.path, 'Renamed Again'), /renamed-again/)
+      passed++
+      console.log('  ✓ e2e: post-mv failure surfaces loud (live lock on the new path)')
+      ok(fs.existsSync(moved.path), 'e2e: folder renamed BACK after the failure (all-or-nothing)')
+      ok(!fs.existsSync(path.join(eRoot, 'renamed-again')), 'e2e: no partial folder left at the destination')
+      const restored = JSON.parse(fs.readFileSync(path.join(moved.path, 'org.json'), 'utf8'))
+      ok(restored.name === 'Renamed Org', 'e2e: manifest name restored on rollback')
+      ok(svcF.current?.path === moved.path, 'e2e: open handle restored at the old path on rollback')
+      if (svcF.current) svcF.closeOrg()
+    } finally {
+      fs.rmSync(eRoot, { recursive: true, force: true })
+      fs.rmSync(eHome, { recursive: true, force: true })
+    }
   }
 
   console.log(`\nfile-org-shell selftest: ${passed} checks passed`)

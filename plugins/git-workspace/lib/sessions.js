@@ -55,6 +55,7 @@ import path from 'node:path'
 import { ensureGit } from './probe.js'
 import { runGit, STAGE_IDENTITY } from './run.js'
 import { wipCommit, stageBoundarySquash, STAGE_BASE_REF } from './commits.js'
+import { getOrigin } from './repos.js'
 
 export const SESSION_BRANCH_PREFIX = 'arxa/session/'
 export const SESSION_BASE_PREFIX = 'refs/arxa/session-base/'
@@ -137,6 +138,27 @@ export function annotateSession(repoPath, id, fields, env = process.env) {
   Object.assign(session, fields)
   writeRegistry(repoPath, registry, env)
   return session
+}
+
+/**
+ * Rekey the project scope of every session row (D72 proper rename): after a
+ * project's folder+slug move, registry rows carrying `project: oldSlug`
+ * are stamped with the new slug. The registry stores slugs, not paths
+ * (stable across renames) — this keeps that promise true after a rename.
+ * Returns the number of rekeyed rows.
+ */
+export function rekeySessionsProject(repoPath, oldSlug, newSlug, env = process.env) {
+  if (!oldSlug || !newSlug) throw new TypeError('rekeySessionsProject: both slugs are required')
+  const registry = readRegistry(repoPath, env)
+  let n = 0
+  for (const s of registry.sessions) {
+    if (s.project === oldSlug) {
+      s.project = newSlug
+      n++
+    }
+  }
+  if (n > 0) writeRegistry(repoPath, registry, env)
+  return n
 }
 
 // ---- open ------------------------------------------------------------------
@@ -292,7 +314,19 @@ export function sessionStageBoundary(repoPath, id, { message, env = process.env 
   // Keep the repo-level stage base (phase 3) on the new main tip so
   // main-side tooling still sees the last boundary.
   runGit(['update-ref', STAGE_BASE_REF, 'refs/heads/main'], { cwd: repoPath, env })
-  return { ...squash, gate, merged: true, parked: false, session }
+
+  // Boundary push (D18 via D69): the FIRST push happens only here — after
+  // the green merge to main. Best-effort and never session-fatal (D23:
+  // pushes fail loud in the RESULT, the local merge stands; nothing parks
+  // for a push failure). No origin = a normal local-only state.
+  let push = { pushed: false, reason: 'no-origin' }
+  const origin = getOrigin(repoPath, env)
+  if (origin !== null) {
+    const pushed = runGit(['push', '-u', 'origin', 'main'], { cwd: repoPath, env, allowFail: true })
+    push = pushed !== null ? { pushed: true, origin } : { pushed: false, reason: 'push-failed' }
+  }
+
+  return { ...squash, gate, merged: true, parked: false, session, push }
 }
 
 /** User holds a session's work back from main (parks it; D40: never deleted). */

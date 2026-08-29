@@ -42,8 +42,13 @@ import {
   listTrash,
   restoreFromTrash,
   renameInManifest,
+  readManifest,
+  writeManifest,
   orgManifestPath,
+  projectManifestPath,
+  slugify,
   touchRecent,
+  removeRecent,
   CATEGORIES,
 } from '../../workspace/lib/index.js'
 import {
@@ -56,6 +61,8 @@ import {
   ensureGit,
   isRepo,
   initOrgRepo,
+  initProjectRepo,
+  setOrigin,
   listSessions,
   archivedSessionIds,
   openSession,
@@ -63,6 +70,7 @@ import {
   reviveSession,
   archiveSession as archiveSessionBranch,
   sessionStageBoundary,
+  rekeySessionsProject,
 } from '../../git-workspace/lib/index.js'
 import { runGit } from '../../git-workspace/lib/index.js'
 import { refreshAccountMirror, ensureAccountExcluded } from '../../account-mirror/lib/index.js'
@@ -71,6 +79,7 @@ import { claimMaterializer, materialize, readEdits } from '../../cairn-rail/lib/
 import { OrgOpenError, OrgAlreadyOpenError, OrgNotOpenError } from './errors.js'
 import { acquireShellLock } from './shell-lock.js'
 import { createDshBridge, joinDshLive } from './dsh-bridge.js'
+import { createGithubBridge, annotateProjectManifest } from './github-bridge.js'
 
 /** Step names carried by OrgOpenError.step, in execution order. */
 export const STEPS = Object.freeze([
@@ -121,7 +130,7 @@ function ensureRuntimeExcluded(orgPath, env) {
  *
  * @param {{ workspaceRoot: string, env?: NodeJS.ProcessEnv, rails?: object }} opts
  */
-export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {}, dsh } = {}) {
+export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {}, dsh, github } = {}) {
   if (typeof workspaceRoot !== 'string' || workspaceRoot === '') {
     throw new TypeError('createOrgLifecycle: workspaceRoot (string) is required')
   }
@@ -130,6 +139,11 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
   // dsh bridge (Phase D, D71): injectable faces (spawn/attach/list/archive);
   // absent or partial faces degrade to the loud no-op 'dsh-unavailable' stub.
   const dshBridge = createDshBridge(dsh)
+  // github bridge (W3b, D69 publish half): injectable status/createPrivateRepo
+  // faces; absent faces degrade to the loud 'github-unavailable' stub —
+  // publishing never blocks or fails local project creation (CLAUDE.md
+  // boundary: local-first, no cloud dependency for core function).
+  const githubBridge = createGithubBridge(github)
   // Last-known dsh live list, refreshed whenever the lifecycle touches dsh.
   // The rows faces stay SYNCHRONOUS (presentation joins must not open an
   // async cycle) and join against this cache; a never-refreshed cache
@@ -312,8 +326,35 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
         trashCount() {
           return listTrash(resolved).length // org-local trash: <org>/.arxa/trash
         },
-        newProject(displayName) {
-          return scaffoldProject(resolved, displayName)
+        /**
+         * W3b (D69 publish half): scaffold the local project, THEN — only
+         * when github faces are injected AND linked — create the private
+         * repo, wire it as the project repo's origin, and annotate the
+         * manifest with repoOwner/repoName/repoPrivate/repoUrl. ANY failure
+         * is a loud manifest annotation (githubStatus), NEVER a throw: the
+         * local project always exists either way (CLAUDE.md local-first).
+         */
+        async newProject(displayName) {
+          const created = scaffoldProject(resolved, displayName)
+          try {
+            initProjectRepo(created.path, env) // idempotent repo attach
+            const st = await githubBridge.status()
+            if (st.ok && st.linked) {
+              const made = await githubBridge.createPrivateRepo(created.slug)
+              if (!made.ok) throw new Error(made.reason ?? 'github-unavailable')
+              setOrigin(created.path, made.repo.repoUrl, env)
+              created.manifest = annotateProjectManifest(created.path, made.repo)
+            } else {
+              annotateProjectManifest(created.path, {
+                githubStatus: st.ok ? 'not-linked' : (st.reason ?? 'github-unavailable'),
+              })
+            }
+          } catch (err) {
+            annotateProjectManifest(created.path, {
+              githubStatus: 'publish-failed: ' + String(err?.message ?? err),
+            })
+          }
+          return created
         },
         async newSession(name, project) {
           // Sessions carry an optional project scope (annotation in the
@@ -429,29 +470,158 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
   }
 
   /**
-   * Rename an org: display-name-only (D41). The slug/folder on disk never
-   * moves — registry paths, worktrees and the index all key on it — so a
-   * rewrite of org.json's `name` is the whole operation. When the renamed
-   * org is the open one, refresh the handle's cached manifest in place so
-   * served state shows the new name without a reopen cycle.
+   * Rename an org (D72 proper rename — supersedes D41's slug-stability
+   * clause): display name + folder + remote move as ONE all-or-nothing
+   * operation. The slug is derived from the new display name; the folder
+   * moves via fs.renameSync (same-volume parent-sibling assumption —
+   * documented; a cross-volume move is out of scope). The org repo's .git,
+   * the session registry (git-common-dir/arxa/), and the session worktrees
+   * (<org>/.arxa/worktrees) all move WITH the folder; worktrees register
+   * absolute paths, so `git worktree repair` re-points them best-effort
+   * after the move (`worktree prune` is FORBIDDEN — D40: never deletes).
+   *
+   * A same-slug rename degrades to the D41 display-name-only write. When
+   * the renamed org is the CURRENT open handle it is re-opened on the new
+   * path (switchOrg semantics). ROLLBACK: any step after the mv renames
+   * the folder back, restores the manifest name, and rethrows.
    */
-  function renameOrg(orgPath, displayName) {
+  async function renameOrg(orgPath, displayName) {
     if (typeof displayName !== 'string' || displayName.trim() === '') {
       throw new TypeError('renameOrg: displayName must be a non-empty string')
     }
-    const resolved = path.resolve(orgPath)
-    const manifestFile = orgManifestPath(resolved)
+    const oldPath = path.resolve(orgPath)
+    const manifestFile = orgManifestPath(oldPath)
     if (!fs.existsSync(manifestFile)) {
-      throw new Error('unknown-org: ' + resolved)
+      throw new Error('unknown-org: ' + oldPath)
     }
+    const oldSlug = path.basename(oldPath)
+    const oldName = readManifest(manifestFile).name // for rollback
+    const newSlug = slugify(displayName)
+    const newPath = path.join(path.dirname(oldPath), newSlug)
     const manifest = renameInManifest(manifestFile, displayName)
-    if (current && current.path === resolved) current.manifest = manifest
-    // Index rows carry a denormalised name; without this the index kept the
-    // pre-rename name forever (measured: SUPO→MIRA left name "SUPO" in
-    // index.db while org.json said MIRA — listOrgs reads the manifest, but
-    // every index consumer saw the stale name until a full rebuild).
-    indexRenameOrg(resolved, resolved, displayName) // per-org index (D69)
-    return { path: resolved, slug: path.basename(resolved), manifest }
+
+    if (newSlug === oldSlug) {
+      // display-name-only (D72 rider): no folder move, no rekey.
+      if (current && current.path === oldPath) current.manifest = manifest
+      indexRenameOrg(oldPath, oldPath, displayName) // per-org index (D69)
+      return { path: oldPath, slug: oldSlug, manifest, moved: false }
+    }
+    if (fs.existsSync(newPath)) {
+      throw new Error('renameOrg: destination already exists: ' + newPath)
+    }
+
+    fs.renameSync(oldPath, newPath)
+    try {
+      // Worktrees register ABSOLUTE paths; after the folder move each one
+      // needs an explicit repair (bare 'worktree repair' fatals on the
+      // first stale gitdir). Best-effort; prune is FORBIDDEN (D40).
+      try {
+        const wtRoot = path.join(newPath, '.arxa', 'worktrees')
+        for (const entry of fs.existsSync(wtRoot) ? fs.readdirSync(wtRoot) : []) {
+          runGit(['worktree', 'repair', path.join(wtRoot, entry)], { cwd: newPath, env, allowFail: true })
+        }
+      } catch {
+        /* repair is best-effort; nothing is ever pruned (D40) */
+      }
+      try {
+        removeRecent(oldPath, env) // recents: drop old path …
+      } catch { /* recents are advisory */ }
+      try {
+        touchRecent(newPath, env) // … and record the new one
+      } catch { /* recents are advisory */ }
+      indexRenameOrg(newPath, newPath, displayName)
+      if (current && current.path === oldPath) {
+        closeOrg() // reverse teardown on the moved handle …
+        try {
+          // … the old-slug lock file moved with the folder; release pointed
+          // at the pre-move path, so sweep it (idempotent).
+          fs.rmSync(path.join(newPath, '.arxa', 'locks', oldSlug + '.lock'), { force: true })
+        } catch { /* best-effort */ }
+        await openOrg(newPath) // … and re-open on the new path
+      }
+      return { path: newPath, slug: newSlug, manifest, moved: true }
+    } catch (err) {
+      // All-or-nothing (D72): put the folder AND the manifest back, then
+      // re-open the handle at the old path (best-effort — the org was open
+      // when the rename started) before surfacing the failure.
+      fs.renameSync(newPath, oldPath)
+      try {
+        renameInManifest(orgManifestPath(oldPath), oldName)
+      } catch { /* best-effort under the rethrow */ }
+      try {
+        fs.rmSync(path.join(oldPath, '.arxa', 'locks', newSlug + '.lock'), { force: true })
+      } catch { /* best-effort */ }
+      if (!current) {
+        try {
+          await openOrg(oldPath)
+        } catch { /* the original error is the one that matters */ }
+      }
+      throw err
+    }
+  }
+
+  /**
+   * Rename a project (D72): folder + manifest name + slug as one
+   * all-or-nothing move. The session registry's project field is rekeyed
+   * oldSlug → newSlug (slugs are the stable scope the registry stores).
+   * When the manifest carries a repoUrl, `repoRenamePending` is recorded —
+   * the GitHub repo-name PATCH rides the production client id later
+   * (recorded, never faked); the LOCAL origin URL is rewritten best-effort
+   * ONLY when github faces report linked. Rollback: any step after the mv
+   * renames the folder back and rethrows.
+   */
+  async function renameProject(orgPath, oldSlug, newName) {
+    if (typeof newName !== 'string' || newName.trim() === '') {
+      throw new TypeError('renameProject: newName must be a non-empty string')
+    }
+    if (typeof oldSlug !== 'string' || oldSlug.trim() === '') {
+      throw new TypeError('renameProject: oldSlug must be a non-empty string')
+    }
+    const org = path.resolve(orgPath)
+    if (!fs.existsSync(orgManifestPath(org))) throw new Error('unknown-org: ' + org)
+    const oldPath = path.join(org, 'projects', oldSlug)
+    const manifestFile = projectManifestPath(oldPath)
+    if (!fs.existsSync(manifestFile)) throw new Error('unknown-project: ' + oldSlug)
+    const newSlug = slugify(newName)
+    const newPath = path.join(org, 'projects', newSlug)
+    if (newSlug !== oldSlug && fs.existsSync(newPath)) {
+      throw new Error('renameProject: destination already exists: ' + newPath)
+    }
+
+    const manifest = readManifest(manifestFile)
+    const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    fs.renameSync(oldPath, newPath)
+    try {
+      manifest.name = newName
+      manifest.slug = newSlug
+      const pending = Boolean(manifest.repoUrl)
+      if (pending) manifest.repoRenamePending = true
+      writeManifest(projectManifestPath(newPath), manifest)
+
+      let rekeyed = 0
+      try {
+        rekeyed = rekeySessionsProject(org, oldSlug, newSlug, env)
+      } catch { /* registry optional — no sessions yet is a normal state */ }
+
+      let originUpdated = false
+      if (pending && manifest.repoOwner) {
+        const st = await githubBridge.status()
+        if (st.ok && st.linked) {
+          try {
+            setOrigin(
+              newPath,
+              manifest.repoUrl.replace(new RegExp('/' + esc(oldSlug) + '(\\.git)?$'), '/' + newSlug),
+              env,
+            )
+            originUpdated = true
+          } catch { /* best-effort: the PATCH ride owns the remote rename */ }
+        }
+      }
+      return { path: newPath, slug: newSlug, manifest, rekeyed, originUpdated, repoRenamePending: pending }
+    } catch (err) {
+      fs.renameSync(newPath, oldPath) // all-or-nothing (D72)
+      throw err
+    }
   }
 
   /**
@@ -498,6 +668,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     closeOrg,
     switchOrg,
     renameOrg,
+    renameProject,
     /** The open org handle, or null. */
     get current() {
       return current

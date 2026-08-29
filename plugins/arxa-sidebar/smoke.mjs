@@ -68,13 +68,14 @@ check('org row served: open + no sessions yet',
   s.orgs.length === 1 && acme.open === true && Array.isArray(acme.sessions) && acme.sessions.length === 0,
   JSON.stringify(s))
 
-// rename (D41): display name only — slug/path stable, open handle refreshes
+// rename (D72): display name + folder move as one operation — the open
+// handle is re-opened on the new path; the manifest id stays stable
 r = await act('org.rename', { orgId: acme.id, name: 'Acme Labs Renamed' })
 check('org.rename ok', r.ok === true, r.error)
 s = await state()
-check('rename served (open handle refreshed in place)',
-  s.orgs[0].name === 'Acme Labs Renamed' && s.orgs[0].slug === acme.slug && s.orgs[0].open === true,
-  JSON.stringify({ name: s.orgs[0].name, slug: s.orgs[0].slug }))
+check('rename served (D72: moved folder, new slug, still open)',
+  s.orgs[0].name === 'Acme Labs Renamed' && s.orgs[0].slug === 'acme-labs-renamed' && s.orgs[0].open === true && s.orgs[0].path !== acme.path,
+  JSON.stringify({ name: s.orgs[0].name, slug: s.orgs[0].slug, path: s.orgs[0].path }))
 
 // project fixture (v1: no project-create UI — the rows face serves what the
 // filesystem + manifests declare; scaffoldProject stays the CLI/host verb).

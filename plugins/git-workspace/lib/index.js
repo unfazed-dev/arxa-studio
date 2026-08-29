@@ -19,7 +19,7 @@ export const name = 'arxa-git-workspace'
 
 export { GitUnavailableError, probeGit, resetProbe, ensureGit, gitBin } from './probe.js'
 export { runGit, STAGE_IDENTITY, WIP_IDENTITY } from './run.js'
-export { ORG_GITIGNORE, isRepo, initOrgRepo, initProjectRepo } from './repos.js'
+export { ORG_GITIGNORE, isRepo, initOrgRepo, initProjectRepo, getOrigin, setOrigin } from './repos.js'
 export {
   STAGE_BASE_REF,
   WIP_PREFIX,
@@ -49,6 +49,7 @@ export {
   listSessions,
   archivedSessionIds,
   annotateSession,
+  rekeySessionsProject,
   openSession,
   runGate,
   sessionStageBoundary,

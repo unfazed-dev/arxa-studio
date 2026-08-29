@@ -54,6 +54,31 @@ export function initOrgRepo(orgPath, env = process.env) {
   return { path: orgPath, initialised: true }
 }
 
+/** Read the URL of the `origin` remote, or null when absent (allowFail). */
+export function getOrigin(dir, env = process.env) {
+  return runGit(['remote', 'get-url', 'origin'], { cwd: dir, env, allowFail: true })
+}
+
+/**
+ * Point a repo's `origin` remote at `url` — create it when absent,
+ * UPDATE it when one already exists (W3b: republish/rename must never
+ * throw on a pre-existing remote).
+ *
+ * @returns {{ path: string, url: string, updated: boolean }}
+ */
+export function setOrigin(dir, url, env = process.env) {
+  if (typeof url !== 'string' || url.trim() === '') {
+    throw new TypeError('setOrigin: url must be a non-empty string')
+  }
+  const existing = getOrigin(dir, env)
+  if (existing !== null) {
+    runGit(['remote', 'set-url', 'origin', url], { cwd: dir, env })
+    return { path: dir, url, updated: true }
+  }
+  runGit(['remote', 'add', 'origin', url], { cwd: dir, env })
+  return { path: dir, url, updated: false }
+}
+
 /**
  * Turn a scaffolded project folder (scaffoldProject output) into its own
  * repo, nested inside and ignored by the org repo (D37). Initial stage
