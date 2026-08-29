@@ -67,6 +67,14 @@ check('rows: first-run root action wired both sides (D36)',
 check('rows: shell New-session is org-aware (Q5)', client.includes('org.new-session') && client.includes('Open an organisation first'))
 check('rows: OrgSection block deleted', !client.includes('OrgSection'))
 
+// ---- 3b. workspace rows (org-model-v2 Phase C: D70/D71) ------------------------
+check('rows-c: WorkspaceRowsSection aboard (the rows ARE the tree)', client.includes('function WorkspaceRowsSection('))
+check('rows-c: OrgTreeSection dissolved', !client.includes('OrgTreeSection') && !client.includes('treeRows'))
+check('rows-c: selection face + gated startSession splice', client.includes('selectRow(rowId)') && client.includes('workspace.new-session') && client.includes('const sel = orgStore.get().selectedRowId;'))
+check('rows-c: selection hint + section label in both locales', client.includes('"rows.section": "Workspaces"') && client.includes('"newSession.selectFirst": "Select a workspace to start a session"') && client.includes('"rows.section": "工作区"'))
+check('rows-c: server snapshot serves rows (category + project rowIds)', hostSrc().includes("rowId: 'category:'") && hostSrc().includes("rowId: 'project:'"))
+check('rows-c: server act maps rowId → scoped session', hostSrc().includes("'workspace.new-session'") && hostSrc().includes('cur.newSession(undefined, proj)'))
+
 // ---- 4. drift gate ------------------------------------------------------------
 // The committed client.js must equal shell+workspace regenerated, byte for
 // byte. A hand-edit to client.js (or a stale snippet) goes RED here — fix the

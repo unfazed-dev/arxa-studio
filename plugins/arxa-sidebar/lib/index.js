@@ -100,6 +100,7 @@ export function apply(ctx) {
     seam,
     root: false,
     orgs: [],
+    rows: [],
     tree: null,
     trashCount: 0,
     selectedProject: null,
@@ -133,15 +134,41 @@ export function apply(ctx) {
     if (cur && typeof l.orgTree === 'function') {
       try { tree = l.orgTree(cur.path) } catch { tree = null }
     }
+    // Workspace rows (D70/D71): the rows ARE the tree now. Category rows
+    // are the five fixed workspaces (org-repo sessions, project:null —
+    // the registry has no category scope, so counts wait for the D live
+    // listing); project rows carry their registry counts. Projects render
+    // indented under the Projects row (client-side concern).
+    const rows = tree ? tree.categories.map((c) => ({
+      kind: 'category',
+      rowId: 'category:' + c.slug,
+      slug: c.slug,
+      exists: c.exists,
+      sessionCount: null,
+    })) : []
+    if (tree) {
+      for (const p of tree.projects) {
+        rows.push({
+          kind: 'project',
+          rowId: 'project:' + p.slug,
+          slug: p.slug,
+          displayName: p.name,
+          sessionCount: tree.sessionsByProject ? (tree.sessionsByProject[p.slug] ?? 0) : null,
+        })
+      }
+    }
     return {
       seam: false,
       root: true,
       orgs,
+      rows,
       tree,
       trashCount: cur ? cur.trashCount() : 0,
       // Open-org view only: the trash lives at the workspace root, but the
       // surface (Q6) hangs off the open org's row menu.
-      trash: cur ? shell.listTrash(l.workspaceRoot).map((e) => ({
+      // D69: trash is org-local (<org>/.arxa/trash) — the surface (Q6)
+      // hangs off the open org's row menu and lists THAT org's trash.
+      trash: cur ? shell.listTrash(cur.path).map((e) => ({
         entryId: e.entryId,
         name: (e.origin?.originalPath ?? e.entryId).replace(/[/\\]+$/, '').split('/').pop() || e.entryId,
       })) : [],
@@ -274,6 +301,20 @@ export function apply(ctx) {
               // display/selection concept (Q4), not a creation default.
               return cur.newSession(undefined, null)
             },
+            'workspace.new-session': async () => {
+              // Rows world (D70/D71): sessions are born in a WORKSPACE — a
+              // category row (org-repo worktree, project:null) or a project
+              // row (registry-scoped by slug). Unknown row is loud.
+              const cur = handle()
+              const rowId = typeof arg?.rowId === 'string' ? arg.rowId : ''
+              const cat = rowId.startsWith('category:') ? rowId.slice('category:'.length) : null
+              const proj = rowId.startsWith('project:') ? rowId.slice('project:'.length) : null
+              if (!cat && !proj) throw new Error('unknown-row: ' + rowId)
+              if (cat && !l.orgTree(cur.path).categories.some((c) => c.slug === cat)) {
+                throw new Error('unknown-row: ' + rowId)
+              }
+              return cur.newSession(undefined, proj)
+            },
             'session.open': async () => {
               const cur = await ensureOpen(arg?.orgId)
               return cur.resumeSession(arg?.sessionId)
@@ -287,8 +328,8 @@ export function apply(ctx) {
           }
           const fn = table[action]
           if (!fn) return json(res, { ok: false, error: 'unknown-action', action })
-          await fn()
-          json(res, { ok: true, action })
+          const out = await fn()
+          json(res, out !== undefined ? { ok: true, action, result: out } : { ok: true, action })
         } catch (e) {
           json(res, { ok: false, error: String(e?.message ?? e) })
         }

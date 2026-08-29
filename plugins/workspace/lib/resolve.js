@@ -27,12 +27,6 @@ function subdirs(dir) {
 export function scanWorkspace(workspaceRoot) {
   const orgs = new Map()
   const projects = new Map()
-  // D69 in-place layout: the scanned folder itself may BE the org —
-  // org.json sits directly inside it (no wrapper directory).
-  const rootSelf = path.join(workspaceRoot, ORG_MANIFEST)
-  if (fs.existsSync(rootSelf)) {
-    addOrg(workspaceRoot)
-  }
   const addOrg = (orgPath) => {
     const orgManifest = readManifest(path.join(orgPath, ORG_MANIFEST))
     orgs.set(orgManifest.id, {
@@ -55,6 +49,12 @@ export function scanWorkspace(workspaceRoot) {
         manifest: projectManifest,
       })
     }
+  }
+  // D69 in-place layout: the scanned folder itself may BE the org —
+  // org.json sits directly inside it (no wrapper directory).
+  const rootSelf = path.join(workspaceRoot, ORG_MANIFEST)
+  if (fs.existsSync(rootSelf)) {
+    addOrg(workspaceRoot)
   }
   for (const orgPath of subdirs(workspaceRoot)) {
     if (!fs.existsSync(path.join(orgPath, ORG_MANIFEST))) continue // not an org folder
