@@ -41,6 +41,7 @@ import {
   restoreFromTrash,
   renameInManifest,
   orgManifestPath,
+  CATEGORIES,
 } from '../../workspace/lib/index.js'
 import {
   openBackend,
@@ -124,6 +125,31 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
 
   /** @type {null | object} the single open-org handle */
   let current = null
+
+  /**
+   * Keep the index orgs row's denormalised name in step with a manifest
+   * rename. Reuses the open org's backend when the renamed org is open;
+   * otherwise opens a short-lived backend. The index is a derived cache —
+   * a failed sync degrades to a stale name, so it must never fail the
+   * rename itself.
+   */
+  function indexRenameOrg(rootDir, orgPath, displayName) {
+    const slug = path.basename(orgPath)
+    const rowId = `${slug}/org.json`
+    try {
+      const owns = !(current && current.path === path.resolve(orgPath))
+      const backend = owns ? openBackend(rootDir) : current.index.backend
+      try {
+        // Parsed rows key on the org uuid; the row id rides in .path.
+        const hit = backend.query('orgs').find((o) => o.path === rowId || o.slug === slug)
+        if (hit) backend.put('orgs', rowId, { ...hit, name: displayName })
+      } finally {
+        if (owns) backend.close()
+      }
+    } catch {
+      /* derived cache — a stale name heals on the next rebuild */
+    }
+  }
 
   function listOrgs() {
     // workspace scanWorkspace returns Maps keyed by id; expose plain rows.
@@ -343,12 +369,53 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     }
     const manifest = renameInManifest(manifestFile, displayName)
     if (current && current.path === resolved) current.manifest = manifest
+    // Index rows carry a denormalised name; without this the index kept the
+    // pre-rename name forever (measured: SUPO→MIRA left name "SUPO" in
+    // index.db while org.json said MIRA — listOrgs reads the manifest, but
+    // every index consumer saw the stale name until a full rebuild).
+    indexRenameOrg(root, resolved, displayName)
     return { path: resolved, slug: path.basename(resolved), manifest }
+  }
+
+  /**
+   * Read-only org tree for sidebar surfaces: the five fixed categories
+   * (D42) with on-disk presence, the org's projects, and a per-project
+   * session count off the registry. Reads never take the shell lock —
+   * listing is presentation, not lifecycle (same contract as listOrgs).
+   * Sessions are omitted entirely when the org has no repo yet.
+   */
+  function orgTree(orgPath) {
+    const resolved = path.resolve(orgPath)
+    const { orgs, projects } = scanWorkspace(root)
+    const org = [...orgs.values()].find((o) => o.path === resolved)
+    if (!org) throw new Error('unknown-org: ' + resolved)
+    const categories = CATEGORIES.map((slug) => ({
+      slug,
+      exists: fs.existsSync(path.join(resolved, slug)),
+    }))
+    const orgProjects = [...projects.values()]
+      .filter((p) => p.orgId === org.id)
+      .map(({ id, name, slug, path: projectPath }) => ({ id, name, slug, path: projectPath }))
+    let sessionsByProject = null
+    let orgSessionCount = 0
+    try {
+      const rows = listSessions(resolved, env)
+      sessionsByProject = {}
+      for (const s of rows) {
+        if (s.state === 'archived') continue // D39: archived never surfaces
+        if (s.project) sessionsByProject[s.project] = (sessionsByProject[s.project] ?? 0) + 1
+        else orgSessionCount += 1
+      }
+    } catch {
+      sessionsByProject = null // no repo / unreadable registry — counts stay hidden
+    }
+    return { categories, projects: orgProjects, sessionsByProject, orgSessionCount }
   }
 
   return {
     workspaceRoot: root,
     listOrgs,
+    orgTree,
     createOrg,
     openOrg,
     closeOrg,

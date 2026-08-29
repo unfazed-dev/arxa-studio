@@ -2,23 +2,32 @@
 // folder the user picks at first run (e.g. ~/Arxa) that holds the whole
 // organisations tree. It is NEVER inside the app checkout and NEVER in
 // OS app-data — those are rejected on save and on load. The chosen path
-// is stored in <ARXA_HOME or ~/.arxa>/workspace.json.
+// is stored in <ARXA_HOME or ~/.arxa>/organisation.json (renamed from
+// workspace.json 2026-08-29; a legacy file is migrated on first load).
 
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-export const ROOT_FILE = 'workspace.json'
+export const ROOT_FILE = 'organisation.json'
+
+/** Pre-rename name (2026-08-29); read as a fallback, migrated on load. */
+export const LEGACY_ROOT_FILE = 'workspace.json'
 
 /** Directory holding studio-level config: $ARXA_HOME or ~/.arxa. */
 export function arxaHome(env = process.env) {
   return env.ARXA_HOME || path.join(os.homedir(), '.arxa')
 }
 
-/** Full path of the workspace.json persistence file. */
+/** Full path of the organisation.json persistence file. */
 export function rootFilePath(env = process.env) {
   return path.join(arxaHome(env), ROOT_FILE)
+}
+
+/** Full path of the legacy workspace.json file, when one exists. */
+export function legacyRootFilePath(env = process.env) {
+  return path.join(arxaHome(env), LEGACY_ROOT_FILE)
 }
 
 /** Walk up from this module to the app checkout root (nearest package.json above plugins/). */
@@ -92,15 +101,26 @@ export function saveWorkspaceRoot(candidate, env = process.env) {
  */
 export function loadWorkspaceRoot(env = process.env) {
   const file = rootFilePath(env)
-  if (!fs.existsSync(file)) return null
+  const legacy = legacyRootFilePath(env)
+  const usingLegacy = !fs.existsSync(file) && fs.existsSync(legacy)
+  const source = usingLegacy ? legacy : file
+  if (!fs.existsSync(source)) return null
   let data
   try {
-    data = JSON.parse(fs.readFileSync(file, 'utf8'))
+    data = JSON.parse(fs.readFileSync(source, 'utf8'))
   } catch (err) {
-    throw new Error(`${file} is not valid JSON: ${err.message}`)
+    throw new Error(`${source} is not valid JSON: ${err.message}`)
   }
   if (typeof data?.root !== 'string') {
-    throw new Error(`${file} is missing the "root" field`)
+    throw new Error(`${source} is missing the "root" field`)
   }
-  return validateWorkspaceRoot(data.root, env)
+  const resolved = validateWorkspaceRoot(data.root, env)
+  if (usingLegacy) {
+    // One-way migration: write the new name, then remove the legacy file.
+    // Rename, not copy — two live copies would invite divergence.
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify({ root: resolved }, null, 2) + '\n')
+    fs.rmSync(legacy, { force: true })
+  }
+  return resolved
 }

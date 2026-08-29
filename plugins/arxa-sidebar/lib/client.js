@@ -2723,7 +2723,7 @@ window.__ModuleLoader__.load({
 			return b;
 		});
 		function createOrgStore() {
-			let state = { orgs: [], trash: [], trashCount: 0, root: false, selectedProject: null, trashView: { rows: [], open: true }, loading: true, __sig: "", workspacesView: { items: [], phase: "ready", archivedSessionIds: [] }, sessionsView: { byId: {}, ids: [], current: void 0 } };
+			let state = { orgs: [], tree: null, trash: [], trashCount: 0, root: false, selectedProject: null, trashView: { rows: [], open: true }, treeView: { rows: [] }, loading: true, __sig: "", workspacesView: { items: [], phase: "ready", archivedSessionIds: [] }, sessionsView: { byId: {}, ids: [], current: void 0 } };
 			const subs = new Set();
 			let timer = 0;
 			const emit = () => {
@@ -2733,7 +2733,7 @@ window.__ModuleLoader__.load({
 			const refresh = async () => {
 				try {
 					const next = await ORG_FETCH();
-					const sig = JSON.stringify([next.orgs, next.trash, next.trashCount, next.root, next.selectedProject]);
+					const sig = JSON.stringify([next.orgs, next.tree, next.trash, next.trashCount, next.root, next.selectedProject]);
 					if (sig !== state.__sig) {
 						// Client-side faces survive every server replacement (the trash
 						// toggle is not server data).
@@ -2744,6 +2744,7 @@ window.__ModuleLoader__.load({
 						// re-fire the browser's store-sync effects every render (React #185).
 						state.workspacesView = { items: orgItems(state), phase: "ready", archivedSessionIds: [] };
 						state.sessionsView = sessionsList(state);
+						state.treeView = { rows: treeRows(state) };
 						state.trashView = { rows: state.trash ?? [], open: state.trashOpen ?? true };
 						emit();
 					} else if (state.loading) {
@@ -2850,6 +2851,68 @@ window.__ModuleLoader__.load({
 		const orgUseSessions = (sel) => useOrg((s) => sel(s.sessionsView));
 		const orgUseDirectoryFlow = (sel) => sel(orgNoFlow.getSnapshot());
 		const orgUseHostDescription = (sel) => sel(orgHostDescription);
+		/** Org tree rows (rows world v1.1): the five fixed D42 categories with
+		 * the org's projects under Projects — the default scaffold each org
+		 * gets, made VISIBLE. Pure derivation off state.tree (open org only);
+		 * flat rows so OrgTreeSection renders with the same primitives as the
+		 * trash list. Counts are honest: projects carry their session count
+		 * when the registry is readable, none when it is not (no repo yet). */
+		const treeRows = (s) => {
+			const tree = s.tree;
+			if (!tree || !Array.isArray(tree.categories)) return [];
+			const rows = [];
+			for (const c of tree.categories) {
+				rows.push({ kind: "category", slug: c.slug, exists: !!c.exists });
+				if (c.slug === "projects" && Array.isArray(tree.projects)) {
+					for (const p of tree.projects) {
+						const n = tree.sessionsByProject ? (tree.sessionsByProject[p.slug] ?? 0) : null;
+						rows.push({ kind: "project", slug: p.slug, name: p.name, sessions: n });
+					}
+				}
+			}
+			return rows;
+		};
+		/** Folders section for the open org (TrashSection's sibling pattern):
+		 * category rows + nested project rows, stock row classes, no clicks —
+		 * visibility is the whole feature; scope selection stays with the
+		 * session grouping (Q4) where it already works. */
+		function OrgTreeSection({ t }) {
+			const view = useOrg((s) => s.treeView);
+			const rows = view.rows;
+			if (rows.length === 0) return null;
+			return (0, react_jsx_runtime.jsxs)("div", {
+				style: { padding: "0 4px 8px" },
+				children: [
+					(0, react_jsx_runtime.jsx)("div", {
+						style: { fontSize: 11, opacity: 0.55, textTransform: "uppercase", letterSpacing: "0.04em", padding: "4px 4px 2px" },
+						children: t("tree.section")
+					}),
+					rows.map((r) => r.kind === "category" ? (0, react_jsx_runtime.jsx)("div", {
+						className: clsx(Rows_module_css_default.sessionRow, Rows_module_css_default.flatSessionRowWithoutStatus),
+						style: { paddingLeft: 12, opacity: r.exists ? 1 : 0.55 },
+						title: r.exists ? t("tree.category." + r.slug) : t("tree.missing"),
+						children: (0, react_jsx_runtime.jsx)("span", {
+							style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13 },
+							children: t("tree.category." + r.slug) + (r.exists ? "" : " ·")
+						})
+					}, "cat-" + r.slug) : (0, react_jsx_runtime.jsxs)("div", {
+						className: clsx(Rows_module_css_default.sessionRow, Rows_module_css_default.flatSessionRowWithoutStatus),
+						style: { paddingLeft: 24 },
+						title: r.slug,
+						children: [
+							(0, react_jsx_runtime.jsx)("span", {
+								style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12 },
+								children: (r.name || r.slug)
+							}),
+							r.sessions !== null ? (0, react_jsx_runtime.jsx)("span", {
+								style: { fontSize: 11, opacity: 0.55, flex: "none" },
+								children: String(r.sessions)
+							}) : null
+						]
+					}, "proj-" + r.slug))
+				]
+			})
+		}
 		function TrashSection({ t }) {
 			// Cached face — a fresh selector object per call would loop #185.
 			const view = useOrg((s) => s.trashView);
@@ -3037,7 +3100,8 @@ window.__ModuleLoader__.load({
 			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, {
 				children: [
 					(0, react_jsx_runtime.jsx)(WorkspaceBrowser, patched),
-					(0, react_jsx_runtime.jsx)(TrashSection, { t: props.t }),
+					(0, react_jsx_runtime.jsx)(OrgTreeSection, { t: props.t }),
+				(0, react_jsx_runtime.jsx)(TrashSection, { t: props.t }),
 					(0, react_jsx_runtime.jsx)(OrgCreateModal, { t: props.t, createWorkspace: props.createWorkspace, open: creating, onClose: () => setCreating(false) })
 				]
 			});
@@ -3067,7 +3131,14 @@ window.__ModuleLoader__.load({
 			"org.create.title": "New organisation",
 			"org.create.submit": "Create organisation",
 			"org.create.location": "Location",
-			"org.create.locationHint": "Where organisations live — click the field to browse, or type a path."
+			"org.create.locationHint": "Where organisations live — click the field to browse, or type a path.",
+			"tree.section": "Folders",
+			"tree.category.projects": "Projects",
+			"tree.category.notes": "Notes",
+			"tree.category.meetings": "Meetings",
+			"tree.category.account": "Account",
+			"tree.category.communications": "Communications",
+			"tree.missing": "Missing on disk — scaffold did not create this category"
 		};
 		const zhOver = {
 			"section.workspaces": "组织",
@@ -3093,7 +3164,14 @@ window.__ModuleLoader__.load({
 			"org.create.title": "新建组织",
 			"org.create.submit": "创建组织",
 			"org.create.location": "位置",
-			"org.create.locationHint": "组织的存放位置 — 点击输入框浏览，或直接输入路径。"
+			"org.create.locationHint": "组织的存放位置 — 点击输入框浏览，或直接输入路径。",
+			"tree.section": "文件夹",
+			"tree.category.projects": "项目",
+			"tree.category.notes": "笔记",
+			"tree.category.meetings": "会议",
+			"tree.category.account": "账户",
+			"tree.category.communications": "通讯",
+			"tree.missing": "磁盘上缺失 — 脚手架未创建此分类"
 		};
 		//#endregion
 		//#region lib/types/client/index.js

@@ -16,7 +16,7 @@ import path from 'node:path'
 import { slugify, uniqueSlug } from './lib/slug.js'
 import { readManifest, renameInManifest, orgManifestPath } from './lib/manifest.js'
 import { CATEGORIES, scaffoldOrg, scaffoldProject } from './lib/scaffold.js'
-import { saveWorkspaceRoot, loadWorkspaceRoot, validateWorkspaceRoot } from './lib/root.js'
+import { saveWorkspaceRoot, loadWorkspaceRoot, validateWorkspaceRoot, rootFilePath, legacyRootFilePath } from './lib/root.js'
 import { scanWorkspace, resolveOrgById, resolveProjectById } from './lib/resolve.js'
 import { TEMPLATE_VERSION, getTemplate, stampFor, parseStamp, StampParseError } from './lib/template.js'
 import { StampRefusalError, readOrgStampVersion, checkOrgStamp, writeOrgStampVersion } from './lib/stamp.js'
@@ -132,10 +132,19 @@ try {
   })
 
   // --- workspace-root persistence (D36) ---
-  check('workspace root persists to $ARXA_HOME/workspace.json and reloads', () => {
+  check('workspace root persists to $ARXA_HOME/organisation.json and reloads', () => {
     assert.equal(loadWorkspaceRoot(env), null, 'expected no root before save')
     saveWorkspaceRoot(workspaceRoot, env)
     assert.equal(loadWorkspaceRoot(env), path.resolve(workspaceRoot))
+    assert.equal(rootFilePath(env), path.join(fakeHome, 'organisation.json'), 'file renamed from workspace.json')
+    assert.ok(fs.existsSync(rootFilePath(env)), 'organisation.json written')
+  })
+  check('legacy workspace.json is migrated (one-way) on load', () => {
+    fs.rmSync(rootFilePath(env), { force: true })
+    fs.writeFileSync(legacyRootFilePath(env), JSON.stringify({ root: path.resolve(workspaceRoot) }))
+    assert.equal(loadWorkspaceRoot(env), path.resolve(workspaceRoot), 'legacy root still loads')
+    assert.ok(fs.existsSync(rootFilePath(env)), 'migrated to organisation.json')
+    assert.ok(!fs.existsSync(legacyRootFilePath(env)), 'legacy file removed — no two live copies')
   })
   check('root validation rejects app checkout and app-data locations (D36)', () => {
     const checkoutDir = path.resolve(path.dirname(new URL(import.meta.url).pathname))

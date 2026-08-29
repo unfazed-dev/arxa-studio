@@ -22,6 +22,7 @@ import {
   OrgNotOpenError,
   ShellLockError,
 } from './lib/index.js'
+import { openBackend } from '../workspace-index/lib/index.js'
 import { readOrgStampVersion, softDelete } from '../workspace/lib/index.js'
 import { runGit, isRepo } from '../git-workspace/lib/index.js'
 import { createLocalProvider } from '../account-mirror/lib/index.js'
@@ -229,6 +230,29 @@ try {
   passed++
   console.log('  ✓ rename to blank fails loud')
   svcRename.closeOrg()
+
+  // ---- rename keeps the index row's denormalised name in step ----------
+  {
+    const be = openBackend(root)
+    const row = be.query('orgs').find((o) => o.slug === orgB.slug)
+    ok(row?.name === 'Beta Renewed', 'index orgs row carries the renamed display name (no SUPO/MIRA drift)')
+    be.close()
+  }
+
+  // ---- orgTree: the five D42 categories + projects, read-only ----------
+  console.log('org tree:')
+  {
+    const svcTree = createOrgLifecycle({ workspaceRoot: root, env })
+    const tree = svcTree.orgTree(orgA.path)
+    ok(tree.categories.length === 5, 'all five fixed categories reported')
+    ok(tree.categories.every((c) => c.exists), 'scaffolded categories exist on disk')
+    ok(Array.isArray(tree.projects) && tree.projects.every((p) => p.path.startsWith(orgA.path)), 'projects scoped to the org')
+    ok(tree.sessionsByProject !== null, 'session counts readable for a repo-backed org')
+    assert.throws(() => svcTree.orgTree(path.join(root, 'not-an-org')), /unknown-org/)
+    passed++
+    console.log('  ✓ orgTree of a non-org fails loud')
+    ok(svcTree.current === null, 'orgTree never opens — read-only face')
+  }
 
   console.log(`\nfile-org-shell selftest: ${passed} checks passed`)
 } finally {

@@ -100,6 +100,7 @@ export function apply(ctx) {
     seam,
     root: false,
     orgs: [],
+    tree: null,
     trashCount: 0,
     selectedProject: null,
   })
@@ -125,10 +126,18 @@ export function apply(ctx) {
       const hit = cur.projects().find((p) => p.slug === selectedProject || p.id === selectedProject)
       return hit ? hit.slug : null
     })()
+    // Org tree for the OPEN org (rows world v1.1): the five fixed D42
+    // categories + projects, so the default scaffold is VISIBLE in the
+    // app, not just on disk. Read-only face; failures degrade to null.
+    let tree = null
+    if (cur && typeof l.orgTree === 'function') {
+      try { tree = l.orgTree(cur.path) } catch { tree = null }
+    }
     return {
       seam: false,
       root: true,
       orgs,
+      tree,
       trashCount: cur ? cur.trashCount() : 0,
       // Open-org view only: the trash lives at the workspace root, but the
       // surface (Q6) hangs off the open org's row menu.
