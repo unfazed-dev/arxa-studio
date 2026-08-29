@@ -50,6 +50,11 @@ check('cta: project-selected → new session', got.includes('session-new'))
 got = ids({ org: { id: 'o' }, projects: [{ id: 'p' }], selectedProject: 'p', parkedSessions: [{ id: 's', project: 'p' }] })
 check('cta: parked → resume+merge, no new-session',
   got.includes('session-resume') && got.includes('session-merge') && !got.includes('session-new'))
+// 4b. project scope: scoped-out sessions don't surface; org-level always does
+got = ids({ org: { id: 'o' }, projects: [{ id: 'p' }], selectedProject: 'rocket', parkedSessions: [{ id: 's', project: 'rocket2' }] })
+check('cta: scoped-out project session → no resume', got.includes('session-new') && !got.includes('session-resume'))
+got = ids({ org: { id: 'o' }, projects: [{ id: 'p' }], selectedProject: 'rocket', parkedSessions: [{ id: 's', project: null }] })
+check('cta: org-level session counts for any selection', got.includes('session-resume') && got.includes('session-merge'))
 // 5. trash-non-empty (additive)
 got = ids({ org: { id: 'o' }, projects: [], trashCount: 2 })
 check('cta: trash non-empty → restore', got.includes('trash-restore'))

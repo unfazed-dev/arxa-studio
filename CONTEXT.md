@@ -31,6 +31,12 @@ vocabulary only.
   editing surface). Every session owns a git branch + worktree; main
   is never edited directly. Sessions never end — they are archived.
   (D38)
+- **Org-level session** — a session with no project scope (registry
+  `project: null`). Branch and worktree live on the org repo; it is
+  visible and resumable from every project selection.
+- **Project session** — a session scoped to the project selected at
+  creation (registry `project: <slug>`, the slug at creation time).
+  Scope resolves resume/merge before the org-level fallback.
 - **Stage boundary** — the moment continuous WIP auto-commits are
   squashed into one clean commit (D18); also the default gate + merge
   moment (D38).

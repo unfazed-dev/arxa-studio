@@ -102,7 +102,14 @@ export function apply(ctx) {
       projects: cur.projects(),
       parkedSessions: cur.parkedSessions(),
       trashCount: cur.trashCount(),
-      selectedProject: selectedProject ?? null,
+      // Machine + consumers compare against the registry's project scope,
+      // which stores slugs; resolve the client's id-or-slug selection once.
+      // Unknown selection renders as no selection (mutations throw instead).
+      selectedProject: (() => {
+        if (selectedProject == null) return null
+        const hit = cur.projects().find((p) => p.slug === selectedProject || p.id === selectedProject)
+        return hit ? hit.slug : null
+      })(),
     }
   }
 
@@ -129,7 +136,7 @@ export function apply(ctx) {
       req.on('data', (c) => { raw += c })
       req.on('end', async () => {
         try {
-          const { action, arg } = JSON.parse(raw || '{}')
+          const { action, arg, project } = JSON.parse(raw || '{}')
           const l = await getLifecycle()
           if (!l) return json(res, { ok: false, seam: SEAM_LIFECYCLE_STUBBED, error: 'no-workspace', action })
 
@@ -145,35 +152,51 @@ export function apply(ctx) {
             if (!l.current) throw new Error('no-org-open')
             return l.current
           }
+          /** Sole-org convenience for the Open CTA — the shell has no picker. */
+          const soleOrgId = () => {
+            const orgs = l.listOrgs()
+            if (orgs.length === 1) return orgs[0].id
+            throw new Error(orgs.length === 0 ? 'org-not-found' : 'org-choice-required — use the org switcher')
+          }
           /**
-           * CTA clicks pass the selected PROJECT id as arg; sessions are
-           * org-level. Match a session id first, then a project association,
-           * then fall back to the only parked session. Ambiguity is an error,
-           * never a guess.
+           * Selected project (id or slug) → registry scope value (slug).
+           * Loud on unknown: mutations never silently degrade scope.
            */
-          const parkedId = (a) => {
+          const projectSlug = (sel) => {
+            if (sel == null) return null
+            const hit = handle().projects().find((p) => p.slug === sel || p.id === sel)
+            if (!hit) throw new Error(`unknown-project: ${sel}`)
+            return hit.slug
+          }
+          /**
+           * Resolution ladder: exact session id → sole match in scope
+           * (selected project's sessions + org-level ones) → sole parked
+           * anywhere → error. Ambiguity is an error, never a guess.
+           */
+          const parkedId = (a, selSlug) => {
             const parked = handle().parkedSessions()
-            const byId = parked.find((s) => s.id === a)
-            if (byId) return byId.id
-            const byProject = parked.filter((s) => s.project != null && s.project === a)
-            if (byProject.length === 1) return byProject[0].id
-            const pool = byProject.length ? byProject : parked
-            if (pool.length === 1) return pool[0].id
-            throw new Error(pool.length === 0 ? 'no-parked-session' : 'ambiguous-parked-session')
+            if (a != null) {
+              const byId = parked.find((s) => s.id === a)
+              if (byId) return byId.id
+            }
+            const scoped = parked.filter((s) => s.project == null || s.project === selSlug)
+            if (scoped.length === 1) return scoped[0].id
+            if (parked.length === 1) return parked[0].id
+            throw new Error(parked.length === 0 ? 'no-parked-session' : 'ambiguous-parked-session')
           }
 
           // Plan contract: ONE org-open entry point; switch/close tear down
           // in reverse before opening the next org. Untitled defaults keep
           // the New-* CTAs one-click (slugs are uniquified downstream).
           const table = {
-            'org.open': () => l.openOrg(orgPath(arg)),
+            'org.open': () => l.openOrg(orgPath(arg ?? soleOrgId())),
             'org.new': () => l.createOrg(arg || 'Untitled Organisation'),
             'org.switch': () => l.switchOrg(orgPath(arg)),
             'org.close': () => l.closeOrg(),
             'project.new': () => handle().newProject(arg || 'Untitled Project'),
-            'session.new': () => handle().newSession(typeof arg === 'string' ? arg : undefined),
-            'session.resume': () => handle().resumeSession(parkedId(arg)),
-            'session.merge': () => handle().mergeSession(parkedId(arg)),
+            'session.new': () => handle().newSession(typeof arg === 'string' ? arg : undefined, projectSlug(project)),
+            'session.resume': () => handle().resumeSession(parkedId(arg, projectSlug(project))),
+            'session.merge': () => handle().mergeSession(parkedId(arg, projectSlug(project))),
             'trash.restore': () => handle().restoreTrash(arg),
             // 'ci.run' reserved for Phase D3 — deliberately absent.
           }

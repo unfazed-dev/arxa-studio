@@ -198,6 +198,15 @@ ok('session open → edit → boundary: green merges to main; main never edited 
   assert.equal(wipRun(projectPath).length, 0)
 })
 
+ok('session registry records the project scope: slug stamped, default null, junk rejected', () => {
+  const scoped = openSession(projectPath, { id: 'scoped1', name: 'Scoped', project: 'acme-website' })
+  assert.equal(scoped.project, 'acme-website')
+  const orgLevel = openSession(projectPath, { id: 'orglevel1', name: 'Org level' })
+  assert.equal(orgLevel.project, null)
+  assert.throws(() => openSession(projectPath, { id: 'bad1', project: 42 }), TypeError)
+  assert.throws(() => openSession(projectPath, { id: 'bad2', project: '' }), TypeError)
+})
+
 ok('red gate parks the branch — never deleted (D40)', () => {
   const s = openSession(projectPath, { id: 'red1', name: 'Red session' })
   fs.writeFileSync(path.join(s.worktree, GATE_CHECK_SCRIPT), 'exit 1\n')

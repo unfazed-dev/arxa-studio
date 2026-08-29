@@ -214,8 +214,9 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
             ))
         },
         parkedSessions() {
-          // Sessions are org-level (git-workspace registry carries no project
-          // field); `project` stays null unless a future migration adds one.
+          // Sessions carry an optional project scope: slug for project
+          // sessions, null for org-level. Legacy registry entries predate
+          // the field and read as null — no migration needed.
           return listSessions(resolved, env)
             .filter((s) => s.state !== 'open')
             .map((s) => ({ id: s.id, name: s.name, state: s.state, parkedReason: s.parkedReason, project: s.project ?? null }))
@@ -226,8 +227,19 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
         newProject(displayName) {
           return scaffoldProject(resolved, displayName)
         },
-        newSession(name) {
-          return openSession(resolved, { name, env })
+        newSession(name, project) {
+          // Sessions carry an optional project scope (annotation in the
+          // registry): accept project id or slug, store the slug (stable
+          // across renames). Unknown project is a loud error, never a
+          // silently org-level session.
+          let projectSlug = null
+          if (project != null) {
+            const hit = [...scanWorkspace(root).projects.values()]
+              .find((p) => p.orgId === opened.manifest.id && (p.slug === project || p.id === project))
+            if (!hit) throw new Error(`unknown-project: ${project}`)
+            projectSlug = hit.slug
+          }
+          return openSession(resolved, { name, project: projectSlug, env })
         },
         resumeSession(id) {
           return reviveSession(resolved, id, env)

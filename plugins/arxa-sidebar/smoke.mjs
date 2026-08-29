@@ -33,7 +33,7 @@ const call = (p, { method = 'GET', body, url = p } = {}) => new Promise((res) =>
   })
 })
 const state = (q = '') => call('/__arxa/sidebar/state', { url: '/__arxa/sidebar/state' + q })
-const act = (action, arg) => call('/__arxa/sidebar/action', { method: 'POST', body: { action, arg } })
+const act = (action, arg, project) => call('/__arxa/sidebar/action', { method: 'POST', body: { action, arg, project } })
 
 let failures = 0
 const check = (label, ok, extra = '') => {
@@ -65,7 +65,7 @@ check('project listed', s.projects.length === 1 && s.projects[0].name === 'Rocke
 s = await state('?project=' + projId)
 check('project selected → session-new CTA', ids(s).includes('session-new'), ids(s))
 
-r = await act('session.new', 'feat-x')
+r = await act('session.new', 'feat-x', projId)
 check('session.new ok', r.ok === true, r.error)
 
 const gw = await import(path.join(here, '..', 'git-workspace', 'lib', 'index.js'))
@@ -73,10 +73,10 @@ const orgPath = s.orgs[0].path
 const sid = gw.listSessions(orgPath).find((x) => x.state === 'open')?.id
 gw.holdSession(orgPath, sid)
 s = await state('?project=' + projId)
-check('parked session surfaces resume/merge CTAs', s.parkedSessions.length === 1 && ids(s).includes('session-resume') && ids(s).includes('session-merge'), JSON.stringify({ parked: s.parkedSessions, ctas: ids(s) }))
+check('parked project session tagged + resume/merge CTAs', s.parkedSessions.length === 1 && s.parkedSessions[0].project === 'rocket' && ids(s).includes('session-resume') && ids(s).includes('session-merge'), JSON.stringify({ parked: s.parkedSessions, ctas: ids(s) }))
 
-r = await act('session.resume', projId)
-check('session.resume (selected-project arg) ok', r.ok === true, r.error)
+r = await act('session.resume', null, projId)
+check('session.resume (project scope) ok', r.ok === true, r.error)
 s = await state('?project=' + projId)
 check('resumed: no parked, session-new back', s.parkedSessions.length === 0 && ids(s).includes('session-new'), ids(s))
 
@@ -87,6 +87,43 @@ check('closed: back to org rows, open CTA', s.org === null && s.orgs.length === 
 
 r = await act('project.new', 'Nope')
 check('verb on closed org fails loud', r.ok === false && r.error === 'no-org-open', JSON.stringify(r))
+
+// ---- project-scope semantics: tagged sessions, sole-org open, scope ladder ----
+r = await act('org.open')
+check('org.open with no arg (sole-org fallback) ok', r.ok === true, r.error)
+r = await act('session.new', 'feat-y', projId)
+check('session.new with project body ok', r.ok === true, r.error)
+const featY = gw.listSessions(orgPath).find((x) => x.name === 'feat-y')
+check('project session tagged with slug', featY?.project === 'rocket', JSON.stringify(featY))
+gw.holdSession(orgPath, featY.id)
+s = await state('?project=' + projId)
+check('tagged session parked under its project', s.parkedSessions.some((x) => x.id === featY.id && x.project === 'rocket'), JSON.stringify(s.parkedSessions))
+
+r = await act('project.new', 'Rocket2')
+check('second project ok', r.ok === true, r.error)
+s = await state()
+const proj2 = s.projects.find((p) => p.name === 'Rocket2')
+s = await state('?project=' + proj2.id)
+check('other project scoped out → session-new only', ids(s).includes('session-new') && !ids(s).includes('session-resume'), ids(s))
+
+r = await act('session.new', 'org-x')
+check('org-level session ok', r.ok === true, r.error)
+const orgX = gw.listSessions(orgPath).find((x) => x.name === 'org-x')
+check('org-level session untagged', orgX?.project === null, JSON.stringify(orgX))
+gw.holdSession(orgPath, orgX.id)
+s = await state('?project=' + proj2.id)
+check('org-level surfaces from any selection', s.parkedSessions.some((x) => x.id === orgX.id) && ids(s).includes('session-resume'), JSON.stringify({ parked: s.parkedSessions, ctas: ids(s) }))
+r = await act('session.resume', null, proj2.id)
+check('org-level resume resolves in foreign scope', r.ok === true, r.error)
+
+r = await act('session.new', 'org-z')
+const orgZ = gw.listSessions(orgPath).find((x) => x.name === 'org-z')
+gw.holdSession(orgPath, orgZ.id)
+gw.holdSession(orgPath, orgX.id) // re-park: the foreign-scope resume above reopened it
+r = await act('session.resume')
+check('two org-level parked, no scope → ambiguous', r.ok === false && r.error === 'ambiguous-parked-session', JSON.stringify(r))
+r = await act('session.resume', orgX.id)
+check('exact id beats ambiguity', r.ok === true, r.error)
 
 console.log(failures === 0 ? '\narxa-sidebar smoke: ALL GREEN' : `\narxa-sidebar smoke: ${failures} FAILURE(S)`)
 rmSync(sandbox, { recursive: true, force: true })

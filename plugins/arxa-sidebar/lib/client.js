@@ -35,7 +35,7 @@ window.__ModuleLoader__.load({
 		//#endregion
 		//#region \0dsh-css:/home/runner/work/deepseek-harness/deepseek-harness/packages/client/ui-sidebar/src/client/SidebarRoot.module.css.mjs
 		const css = ".aXa_sb_root{--dsh-sidebar-inline-padding:12px;height:100%;padding:6px var(--dsh-sidebar-inline-padding);box-sizing:border-box;background:var(--dsw-specific-sidebar-fill);color:var(--dsw-alias-label-primary);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);flex-direction:column;font-size:14px;display:flex}.aXa_sb_root.aXa_sb_collapsed{padding:18px 10px 6px}.aXa_sb_root.aXa_sb_quietBars{--dsh-scrollbar-thumb:transparent;--dsh-scrollbar-thumb-hover:transparent}.aXa_sb_fading>*{opacity:0;transition:opacity .15s var(--ds-ease-in-out)}.aXa_sb_wide{animation:aXa_sb_wide-in .2s var(--ds-ease-in-out)}@keyframes aXa_sb_wide-in{0%{opacity:0}}.aXa_sb_railIn .aXa_sb_iconButton,.aXa_sb_railIn .aXa_sb_newSession,.aXa_sb_railIn .aXa_sb_regionArea{animation:aXa_sb_rail-in .15s var(--ds-ease-in-out) backwards}.aXa_sb_railIn .aXa_sb_footArea{animation:aXa_sb_rail-fade-in .15s var(--ds-ease-in-out) backwards}@keyframes aXa_sb_rail-in{0%{opacity:0;transform:translate(49px)}}@keyframes aXa_sb_rail-fade-in{0%{opacity:0}}.aXa_sb_logoRow{box-sizing:border-box;flex:none;justify-content:flex-end;align-items:center;gap:8px;height:60px;margin-bottom:8px;padding:8px 0 8px 4px;display:flex;overflow:hidden}.aXa_sb_collapsed .aXa_sb_logoRow{justify-content:flex-start;height:36px;margin-bottom:12px;padding:0}.aXa_sb_brand{min-width:0;color:inherit;cursor:pointer;background:0 0;border:none;flex:1;align-items:center;padding:0;display:inline-flex;overflow:hidden}.aXa_sb_brandIdentity{align-items:center;gap:8px;min-width:0;height:24px;display:inline-flex}.aXa_sb_brandMark{flex:none;justify-content:center;align-items:center;display:inline-flex}.aXa_sb_brandName{letter-spacing:.04em;align-items:center;gap:6px;min-width:0;height:24px;font-size:18px;font-weight:600;line-height:24px;display:inline-flex}.aXa_sb_fallbackBrandName{letter-spacing:0;white-space:nowrap;font-size:17px}.aXa_sb_iconButton{cursor:pointer;width:28px;height:28px;color:var(--dsw-alias-label-secondary);background:0 0;border:none;border-radius:50%;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}.aXa_sb_iconButton:hover{background:var(--dsw-alias-interactive-bg-hover)}.aXa_sb_collapsed .aXa_sb_iconButton{width:36px;height:36px}.aXa_sb_collapsed .aXa_sb_toggle .aXa_sb_panelIcon{display:none}.aXa_sb_collapsed .aXa_sb_toggle:hover .aXa_sb_panelIcon{display:inline}.aXa_sb_collapsed .aXa_sb_toggle:hover .aXa_sb_railMark{display:none}.aXa_sb_railMark{justify-content:center;align-items:center;display:inline-flex}.aXa_sb_collapsed .aXa_sb_iconButton{color:var(--dsw-alias-label-primary)}.aXa_sb_buildRevision{height:16px;color:var(--dsw-alias-label-primary-inverted);background:var(--dsw-alias-label-primary);font-family:var(--ds-font-family-code);border-radius:3px;align-items:center;padding:0 4px;font-size:8px;font-weight:500;line-height:16px;display:inline-flex}.aXa_sb_newSession{box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-button-elevated-fill);height:38px;color:var(--dsw-alias-label-primary);cursor:pointer;border-radius:12px;flex:none;justify-content:center;align-items:center;gap:6px;margin:0 2px 8px;padding:8px 16px;font-size:14px;font-weight:500;line-height:22px;display:flex;overflow:hidden}.aXa_sb_newSession:hover{background:var(--dsw-alias-button-floating-hover)}.aXa_sb_collapsed .aXa_sb_newSession{background:0 0;border-color:#0000;align-self:flex-start;gap:0;width:36px;height:36px;margin:0 0 12px;padding:0}.aXa_sb_collapsed .aXa_sb_newSession:hover{background:var(--dsw-alias-interactive-bg-hover)}.aXa_sb_newSessionLabel{white-space:nowrap;max-width:200px;overflow:hidden}.aXa_sb_collapsed .aXa_sb_newSessionLabel{max-width:0}.aXa_sb_regionArea{min-height:0;margin-left:-4px;margin-right:calc(-1 * var(--dsh-sidebar-inline-padding));flex-direction:column;flex:1;padding-left:4px;display:flex;overflow:hidden}.aXa_sb_collapsed .aXa_sb_regionArea{margin-left:0;margin-right:0;padding-left:0}.aXa_sb_footArea{flex-direction:column;flex:none;display:flex}.aXa_sb_settingsArea,.aXa_sb_footerActions{flex:none;width:100%;min-width:0}.aXa_sb_footerActions{display:flex}.aXa_sb_collapsed .aXa_sb_footArea{align-items:center}.aXa_sb_collapsed .aXa_sb_settingsArea,.aXa_sb_collapsed .aXa_sb_footerActions{justify-content:center;width:auto;display:flex}@media (prefers-reduced-motion:reduce){.aXa_sb_wide,.aXa_sb_fading>*,.aXa_sb_railIn .aXa_sb_iconButton,.aXa_sb_railIn .aXa_sb_newSession,.aXa_sb_railIn .aXa_sb_footArea,.aXa_sb_railIn .aXa_sb_regionArea{transition:none;animation:none}}";
-		const orgCss = ".aXa_sb_orgSection{flex:none;border-bottom:1px solid var(--dsw-alias-border-l2);margin-bottom:6px;padding-bottom:6px;font-size:13px}.aXa_sb_org{display:flex;align-items:center;gap:8px;padding:8px 4px;font-weight:600}.aXa_sb_orgDot{width:10px;height:10px;border-radius:50%;background:var(--dsw-alias-label-primary);flex:none}.aXa_sb_switch{margin:0 4px 8px;padding:4px;border-radius:6px;border:1px solid var(--dsw-alias-border-l2);background:transparent;color:inherit;width:calc(100% - 8px)}.aXa_sb_tree{max-height:180px;overflow-y:auto;padding:0 2px}.aXa_sb_proj{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:6px;cursor:pointer}.aXa_sb_proj:hover{background:var(--dsw-alias-interactive-bg-hover)}.aXa_sb_proj[data-selected=true]{background:var(--dsw-alias-interactive-bg-hover)}.aXa_sb_chip{font-size:10px;padding:1px 5px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);opacity:.8}.aXa_sb_badge{font-size:10px;padding:1px 5px;border-radius:8px;background:var(--dsw-alias-interactive-bg-hover)}.aXa_sb_ctas{display:flex;flex-direction:column;gap:6px;padding:8px 4px 2px}.aXa_sb_cta{padding:6px 10px;border-radius:6px;border:1px solid var(--dsw-alias-border-l2);background:transparent;color:inherit;cursor:pointer;text-align:left}.aXa_sb_cta:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.aXa_sb_cta:disabled{opacity:.45;cursor:default}.aXa_sb_orgEmpty{opacity:.6;padding:4px}";
+		const orgCss = ".aXa_sb_orgSection{flex:none;border-bottom:1px solid var(--dsw-alias-border-l2);margin-bottom:6px;padding-bottom:6px;font-size:13px}.aXa_sb_org{display:flex;align-items:center;gap:8px;padding:8px 4px;font-weight:600}.aXa_sb_orgDot{width:10px;height:10px;border-radius:50%;background:var(--dsw-alias-label-primary);flex:none}.aXa_sb_switch{margin:0 4px 8px;padding:4px;border-radius:6px;border:1px solid var(--dsw-alias-border-l2);background:transparent;color:inherit;width:calc(100% - 8px)}.aXa_sb_tree{max-height:180px;overflow-y:auto;padding:0 2px}.aXa_sb_proj{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:6px;cursor:pointer}.aXa_sb_proj:hover{background:var(--dsw-alias-interactive-bg-hover)}.aXa_sb_proj[data-selected=true]{background:var(--dsw-alias-interactive-bg-hover)}.aXa_sb_chip{font-size:10px;padding:1px 5px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);opacity:.8}.aXa_sb_badge{font-size:10px;padding:1px 5px;border-radius:8px;background:var(--dsw-alias-interactive-bg-hover)}.aXa_sb_ctas{display:flex;flex-direction:column;gap:6px;padding:8px 4px 2px}.aXa_sb_cta{padding:6px 10px;border-radius:6px;border:1px solid var(--dsw-alias-border-l2);background:transparent;color:inherit;cursor:pointer;text-align:left}.aXa_sb_cta:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.aXa_sb_cta:disabled{opacity:.45;cursor:default}.aXa_sb_orgEmpty{opacity:.6;padding:4px}.aXa_sb_sessGroup{margin:2px 0 4px}.aXa_sb_sessLabel{opacity:.55;font-size:11px;text-transform:uppercase;letter-spacing:.04em;padding:4px 4px 2px}.aXa_sb_sessRow{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px 4px;border-radius:6px}.aXa_sb_sessRow:hover{background:var(--dsw-alias-interactive-bg-hover)}.aXa_sb_sessState{opacity:.5;font-size:11px}";
 		const tagId = "arxa-sidebar/SidebarRoot.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -82,10 +82,10 @@ window.__ModuleLoader__.load({
 			const r = await fetch(`/__arxa/sidebar/state${q}`);
 			return r.json();
 		};
-		const postOrgAction = (action, arg) => fetch("/__arxa/sidebar/action", {
+		const postOrgAction = (action, arg, project) => fetch("/__arxa/sidebar/action", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ action, arg })
+			body: JSON.stringify({ action, arg, project })
 		});
 		function OrgSection({ wide }) {
 			const h = react.createElement;
@@ -103,10 +103,21 @@ window.__ModuleLoader__.load({
 					window.removeEventListener("focus", refresh);
 				};
 			}, [refresh]);
-			const act = (action, arg) => postOrgAction(action, arg).then(refresh);
+			const act = (action, arg) => postOrgAction(action, arg, selected).then(refresh);
 			const org = state?.org;
 			const projects = state?.projects ?? [];
 			const ctas = state?.cta ?? [];
+			const sessions = state?.parkedSessions ?? [];
+			const selProj = projects.find((p) => p.id === selected) ?? null;
+			const sessRow = (s) => h("div", { key: s.id, className: "aXa_sb_sessRow", title: s.parkedReason || s.state }, h("span", null, s.name), h("span", { className: "aXa_sb_sessState" }, s.state));
+			const sessGroup = (key, label, rows) => rows.length ? h("div", { key, className: "aXa_sb_sessGroup" }, h("div", { className: "aXa_sb_sessLabel" }, label), ...rows.map(sessRow)) : null;
+			const sessBlock = h("div", { className: "aXa_sb_tree" }, selected ? [
+				sessGroup("sel", selProj ? selProj.name : "Project", sessions.filter((s) => selProj && s.project === selProj.slug)),
+				sessGroup("org", "Org", sessions.filter((s) => s.project == null))
+			].filter(Boolean) : [
+				...projects.map((p) => sessGroup(p.id, p.name, sessions.filter((s) => s.project === p.slug))),
+				sessGroup("org", "Org", sessions.filter((s) => s.project == null))
+			].filter(Boolean));
 			if (!wide) return h("div", { className: "aXa_sb_orgSection" }, h("span", { className: "aXa_sb_orgDot", title: org ? org.name : "arxa", "aria-hidden": "true" }));
 			const tree = projects.map((p) => h(
 				"div",
@@ -139,6 +150,7 @@ window.__ModuleLoader__.load({
 					...state.orgs.map((o) => h("option", { key: o.id, value: o.id }, o.name))
 				) : null,
 				org ? h("div", { className: "aXa_sb_tree" }, tree.length ? tree : h("div", { className: "aXa_sb_orgEmpty" }, "No projects yet")) : null,
+				org && sessions.length ? sessBlock : null,
 				h("div", { className: "aXa_sb_ctas" }, ...ctas.map((c) => h(
 					"button",
 					{
@@ -146,7 +158,7 @@ window.__ModuleLoader__.load({
 						className: "aXa_sb_cta",
 						disabled: !!c.disabled,
 						title: c.reserved ? "Reserved (Phase D3)" : void 0,
-						onClick: () => act(c.action, selected ?? void 0)
+						onClick: () => act(c.action)
 					},
 					c.label
 				)))

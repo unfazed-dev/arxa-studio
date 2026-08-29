@@ -145,9 +145,17 @@ function sessionWorktreePath(repoPath, id) {
  * Open a session (D38): branch + worktree off main. Main itself is
  * never edited directly — all edits happen in the session worktree.
  *
- * @returns {{ id, name, branch, worktree, state }}
+ * `project` scopes the session (annotation only — the branch/worktree
+ * still live on the repo given here): a project slug for project
+ * sessions, null/undefined for org-level sessions. Registry is the
+ * storage of record; consumers (file-org-shell, sidebar) interpret it.
+ *
+ * @returns {{ id, name, branch, worktree, state, project: string|null }}
  */
-export function openSession(repoPath, { id, name, env = process.env } = {}) {
+export function openSession(repoPath, { id, name, project, env = process.env } = {}) {
+  if (project !== undefined && project !== null && (typeof project !== 'string' || project === '')) {
+    throw new TypeError(`session project must be a slug string, null, or undefined; got ${JSON.stringify(project)}`)
+  }
   ensureGit(env)
   if (!id) id = `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id)) {
@@ -168,7 +176,7 @@ export function openSession(repoPath, { id, name, env = process.env } = {}) {
   runGit(['worktree', 'add', '-b', branch, worktree, 'main'], { cwd: repoPath, env })
   // Per-session squash base (see header): starts at the branch point.
   runGit(['update-ref', `${SESSION_BASE_PREFIX}${id}`, mainSha], { cwd: repoPath, env })
-  const session = { id, name: name || id, branch, worktree, state: 'open', parkedReason: null }
+  const session = { id, name: name || id, branch, worktree, state: 'open', parkedReason: null, project: project ?? null }
   registry.sessions.push(session)
   writeRegistry(repoPath, registry, env)
   return session
