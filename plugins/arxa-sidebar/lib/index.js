@@ -334,6 +334,39 @@ export function apply(ctx, opts = {}) {
     },
   })
 
+  /** Folder info for the create-time history question (2025-08): how many
+    * top-level entries does the picked folder already hold? A COUNT only —
+    * names and contents never leave the machine. Non-existent folder = 0
+    * (typed paths may not exist yet; scaffold creates them). */
+  ctx.webServer.register({
+    name: 'arxa-sidebar-folder-info',
+    path: '/__arxa/sidebar/folder-info',
+    kind: 'exact',
+    handler: async (req, res) => {
+      let raw = ''
+      req.on('data', (c) => { raw += c })
+      req.on('end', async () => {
+        try {
+          const parsed = JSON.parse(raw || '{}')
+          const requested = typeof parsed?.path === 'string' ? parsed.path.trim() : ''
+          if (requested === '') return json(res, { ok: false, error: 'path required' })
+          const [{ default: path }, { default: os }, { default: fs }] = await Promise.all([
+            import('node:path'), import('node:os'), import('node:fs'),
+          ])
+          const expanded = requested.startsWith('~') ? path.join(os.homedir(), requested.slice(1)) : path.resolve(requested)
+          let entryCount = 0
+          let exists = false
+          try {
+            entryCount = fs.readdirSync(expanded).length
+            exists = true
+          } catch { exists = false }
+          return json(res, { ok: true, path: expanded, exists, entryCount })
+        } catch (e) {
+          json(res, { ok: false, error: String(e?.message ?? e) })
+        }
+      })
+    },
+  })
   /** Open an https URL in the user's default browser (device-flow hand-off:
     * github.com/login/device). https + github.com allowlisted — this route
     * must never become a generic command surface. Non-darwin: xdg-open. */
@@ -453,7 +486,7 @@ export function apply(ctx, opts = {}) {
             if (lifecycle?.current) { try { await lifecycle.closeOrg() } catch {} }
             lifecycle = null
             const l2 = await getLifecycle()
-            if (l2) await l2.openOrg(created.path, { deferSnapshot: true }) // initial git snapshot runs detached — the request must never wait on bulk content (2025-08 hang)
+            if (l2) await l2.openOrg(created.path, { deferSnapshot: true, includeExisting: arg?.includeExisting !== false }) // snapshot runs detached; includeExisting = the create-time history question
             return json(res, { ok: true, action, result: { path: created.path, slug: created.slug ?? path.basename(created.path) } })
           }
           const l = await getLifecycle()

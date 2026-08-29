@@ -164,6 +164,30 @@ export function spawnSnapshotOrgRepo(orgPath, env = process.env) {
   return { pid: ch.pid, marker }
 }
 
+/** The .gitignore the org repo gets at init. includeExisting (the
+ * create-time choice, 2025-08) picks between two contracts: the D37
+ * default that versions the whole folder minus projects//account, and a
+ * whitelist that versions only arxa-managed org files — pre-existing
+ * content in the picked folder stays untracked and untouched. managedDirs
+ * is the workspace template's category list; projects (own repos) and
+ * account (secrets) are never whitelisted. */
+export function orgIgnoreFor({ includeExisting = true, managedDirs = [] } = {}) {
+  if (includeExisting) return ORG_GITIGNORE
+  const lines = [
+    '# arxa studio (create-time choice): only arxa-managed org files are',
+    '# versioned — pre-existing content in this folder stays untracked and',
+    '# untouched. Nested project repos and account/ are never tracked (D37).',
+    '/*',
+    '!/.gitignore',
+    '!/org.json',
+    '!/AGENTS.md',
+  ]
+  for (const d of managedDirs) {
+    if (d !== 'projects' && d !== 'account') lines.push('!/' + d + '/')
+  }
+  return lines.join('\n') + '\n'
+}
+
 /**
  * Turn a scaffolded org folder (plugins/workspace scaffoldOrg output)
  * into the org repo: git init, D37 ignore rules, and an initial stage
@@ -177,14 +201,15 @@ export function spawnSnapshotOrgRepo(orgPath, env = process.env) {
  *
  * @returns {{ path: string, initialised: boolean, deferred: boolean }}
  */
-export function initOrgRepo(orgPath, env = process.env, { deferSnapshot = false } = {}) {
+export function initOrgRepo(orgPath, env = process.env, { deferSnapshot = false, includeExisting = true, managedDirs = [] } = {}) {
+  const ignore = orgIgnoreFor({ includeExisting, managedDirs })
   if (isRepo(orgPath, env)) {
     if (hasHead(orgPath, env)) return { path: orgPath, initialised: false, deferred: false }
     if (!deferSnapshot) snapshotOrgRepo(orgPath, env) // heal an interrupted initial snapshot
     return { path: orgPath, initialised: false, deferred: deferSnapshot }
   }
   initRepo(orgPath, env)
-  fs.writeFileSync(path.join(orgPath, '.gitignore'), ORG_GITIGNORE)
+  fs.writeFileSync(path.join(orgPath, '.gitignore'), ignore)
   if (!deferSnapshot) snapshotOrgRepo(orgPath, env)
   return { path: orgPath, initialised: true, deferred: deferSnapshot }
 }

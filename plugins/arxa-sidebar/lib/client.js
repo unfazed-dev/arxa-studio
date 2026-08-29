@@ -3003,6 +3003,13 @@ window.__ModuleLoader__.load({
 			const [ghLinked, setGhLinked] = (0, react.useState)(null);
 			const [devCode, setDevCode] = (0, react.useState)(null);
 			const [copied, setCopied] = (0, react.useState)(false);
+			/** Create-time history question (2025-08): when the picked folder
+			 * already holds content, does org history track it? Default = arxa's
+			 * files only (non-intrusive, VS Code-parity); opting in versions the
+			 * whole folder. The folder-info route answers has-content? — a count
+			 * only, nothing else leaves the machine. */
+			const [snapChoice, setSnapChoice] = (0, react.useState)(false);
+			const [folderHasFiles, setFolderHasFiles] = (0, react.useState)(false);
 			const nameRef = (0, react.useRef)(null);
 			const checkGh = () => {
 				ORG_POST("github.status").then((r) => setGhLinked(!!(r.result && r.result.linked)), () => setGhLinked(null));
@@ -3015,10 +3022,24 @@ window.__ModuleLoader__.load({
 					setError(null);
 					setGhLinked(null);
 					setDevCode(null);
+					setSnapChoice(false);
+					setFolderHasFiles(false);
 					checkGh();
 					if (nameRef.current !== null) nameRef.current.focus();
 				}
 			}, [open]);
+			/** Ask the host whether the typed/picked folder already holds
+			 * content — debounced per keystroke, a count-only round trip. */
+			(0, react.useEffect)(() => {
+				const loc = location.trim();
+				if (!loc || busy) return;
+				const id = window.setTimeout(() => {
+					fetch("/__arxa/sidebar/folder-info", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: loc }) }).then((r) => r.json()).then((b) => {
+						setFolderHasFiles(!!(b && b.ok && b.exists && b.entryCount > 0));
+					}, () => {});
+				}, 250);
+				return () => window.clearTimeout(id);
+			}, [location, busy]);
 			if (!open) return null;
 			const showSignin = ghLinked === false;
 			const signin = () => {
@@ -3056,7 +3077,7 @@ window.__ModuleLoader__.load({
 				const orgName = name.trim();
 				setBusy(true);
 				setError(null);
-				const ready = ORG_POST("org.create-at", { name: orgName, path: location.trim() });
+				const ready = ORG_POST("org.create-at", { name: orgName, path: location.trim(), includeExisting: snapChoice });
 				ready.then(() => {
 					onClose();
 				}, (e) => {
@@ -3188,7 +3209,18 @@ window.__ModuleLoader__.load({
 							},
 							style: field
 						}),
-						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.55, marginTop: 6 }, children: t("org.create.locationHint") })
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.55, marginTop: 6 }, children: t("org.create.locationHint") }),
+						folderHasFiles && (0, react_jsx_runtime.jsxs)("div", { style: { marginTop: 10, padding: "8px 10px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 6 }, children: [
+							(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 6 }, children: t("org.create.existing.title") }),
+							(0, react_jsx_runtime.jsxs)("label", { style: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }, children: [
+								(0, react_jsx_runtime.jsx)("input", { type: "radio", name: "arxa-org-existing", checked: !snapChoice, onChange: () => setSnapChoice(false) }),
+								t("org.create.existing.only")
+							] }),
+							(0, react_jsx_runtime.jsxs)("label", { style: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer", marginTop: 4 }, children: [
+								(0, react_jsx_runtime.jsx)("input", { type: "radio", name: "arxa-org-existing", checked: snapChoice, onChange: () => setSnapChoice(true) }),
+								t("org.create.existing.all")
+							] })
+						] })
 					] }),
 					error !== null && (0, react_jsx_runtime.jsx)("div", {
 						role: "alert",
@@ -3283,6 +3315,9 @@ window.__ModuleLoader__.load({
 			"org.create.submit": "Create organisation",
 			"org.create.location": "Location",
 			"org.create.locationHint": "The folder that becomes your organisation — click to browse, or type a path.",
+			"org.create.existing.title": "This folder already has content — track it in org history?",
+			"org.create.existing.only": "arxa's files only (recommended) — your existing files stay untouched and untracked",
+			"org.create.existing.all": "Track existing files too (slower first snapshot, full rewind history)",
 			"github.signin.desc": "arxa studio manages everything through git. Link your GitHub account to create an organisation — your projects publish as private repos under it.",
 			"github.signin.button": "Sign in with GitHub",
 			"github.signin.codeHint": "Enter this one-time code at github.com/login/device — your browser should have opened there",
@@ -3332,6 +3367,9 @@ window.__ModuleLoader__.load({
 			"org.create.submit": "创建组织",
 			"org.create.location": "位置",
 			"org.create.locationHint": "该文件夹将成为你的组织 — 点击浏览，或直接输入路径。",
+			"org.create.existing.title": "此文件夹已有内容 — 是否纳入组织历史？",
+			"org.create.existing.only": "仅 arxa 文件（推荐）— 现有文件保持原样、不被跟踪",
+			"org.create.existing.all": "同时跟踪现有文件（首次快照较慢，完整回溯历史）",
 			"github.signin.desc": "arxa studio 通过 git 管理一切。创建组织前请先关联你的 GitHub 账号 — 项目会以私有仓库的形式发布到该账号下。",
 			"github.signin.button": "使用 GitHub 登录",
 			"github.signin.busy": "正在等待 GitHub…",

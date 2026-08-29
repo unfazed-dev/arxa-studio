@@ -250,7 +250,14 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       step = 'git-attach'
       ensureGit(env)
       const existingUnborn = isRepo(resolved, env) && !hasHead(resolved, env)
-      const repo = initOrgRepo(resolved, env, { deferSnapshot: opts.deferSnapshot === true || existingUnborn })
+      const repo = initOrgRepo(resolved, env, {
+        deferSnapshot: opts.deferSnapshot === true || existingUnborn,
+        // Create-time contract (2025-08): false = version arxa-managed org
+        // files only; pre-existing content in the picked folder stays
+        // untracked. Default true = the D37 everything-but-projects/account.
+        includeExisting: opts.includeExisting !== false,
+        managedDirs: opts.managedDirs ?? CATEGORIES,
+      })
       ensureRuntimeExcluded(resolved, env) // /.arxa/ runtime state never enters git
       ensureAccountExcluded(resolved, env) // belt-and-braces /account/ (D37)
       const snapshotPending = repo.deferred === true || !hasHead(resolved, env)

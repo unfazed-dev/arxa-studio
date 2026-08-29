@@ -384,4 +384,20 @@ ok('initOrgRepo on a healthy repo stays a no-op (deferred or not)', () => {
   assert.equal(again.deferred, false) // hasHead → nothing to defer
 })
 
+ok('orgIgnoreFor: includeExisting=false versions only arxa-managed files', () => {
+  const wl = path.join(tmp, 'whitelist-org')
+  fs.mkdirSync(path.join(wl, 'notes'), { recursive: true })
+  fs.writeFileSync(path.join(wl, 'org.json'), '{"name":"wl"}\n')
+  fs.writeFileSync(path.join(wl, 'notes', 'a.md'), '# a\n')
+  fs.writeFileSync(path.join(wl, 'bulk.bin'), 'BULK'.repeat(100))
+  const res = initOrgRepo(wl, process.env, { includeExisting: false, managedDirs: ['projects', 'notes', 'meetings', 'account', 'communications'] })
+  assert.equal(res.initialised, true)
+  const tracked = runGit(['ls-files'], { cwd: wl }).split('\n')
+  assert.ok(tracked.includes('notes/a.md'), 'managed org files are tracked')
+  assert.ok(tracked.includes('org.json'))
+  assert.ok(!tracked.includes('bulk.bin'), 'pre-existing bulk is NOT tracked')
+  assert.equal(fs.existsSync(path.join(wl, 'bulk.bin')), true) // untouched on disk
+})
+
+
 console.log(`\nselftest: ${passed}/${passed} passed`)
