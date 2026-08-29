@@ -677,7 +677,11 @@ Approval, Doorbell).
 
 ### Open (approvals)
 
-- dsh seam verification (D63's precondition) is the build's first
-  step; fallback = first-class records.
+- ~~dsh seam verification (D63's precondition)~~ — VERIFIED while
+  building: `ctx.apiProxy.events.mux(request, signal)` is a public
+  host face (async frame iterable; replays every pending question on
+  attach, then live requested/resolved), and `ctx.apiProxy.respond`
+  settles a pending wait first-claimant-wins (dsh-host-apiproxy). The
+  fallback (first-class records) was never needed.
 - kit/cairn README "push pattern" paragraph (doorbell memo item A)
   — undecided rider; its own trivial commit if taken.
