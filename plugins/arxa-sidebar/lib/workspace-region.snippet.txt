@@ -1,0 +1,239 @@
+		//#region arxa: rows world (docs/plans/sidebar-org-rethink.md)
+		// The stock component tree (groups, rows, search box, view-options menu,
+		// hover menus, pills) is kept whole above; this region re-points its data
+		// hooks at /__arxa/sidebar/*, relabels the locale dicts, and adds the one
+		// genuinely new surface: the trash list (Q6). Everything else is stock
+		// behaviour over org data.
+		const ORG_FETCH = async (selectedProject) => {
+			const q = selectedProject ? "?project=" + encodeURIComponent(selectedProject) : "";
+			const r = await fetch("/__arxa/sidebar/state" + q);
+			return r.json();
+		};
+		const ORG_POST = (action, arg) => fetch("/__arxa/sidebar/action", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ action, arg })
+		}).then(async (r) => {
+			const b = await r.json();
+			if (!b.ok) throw new Error(b.error || action);
+			return b;
+		});
+		function createOrgStore() {
+			let state = { orgs: [], trash: [], trashCount: 0, root: false, selectedProject: null, loading: true, __sig: "", workspacesView: { items: [], phase: "ready", archivedSessionIds: [] }, sessionsView: { byId: {}, ids: [], current: void 0 } };
+			const subs = new Set();
+			let timer = 0;
+			const emit = () => {
+				subs.forEach((l) => l());
+				window.dispatchEvent(new Event("arxa-sidebar-state"));
+			};
+			const refresh = async () => {
+				try {
+					const next = await ORG_FETCH();
+					const sig = JSON.stringify([next.orgs, next.trash, next.trashCount, next.root, next.selectedProject]);
+					if (sig !== state.__sig) {
+						state = { ...next, loading: false, __sig: sig };
+						// Derived faces computed ONCE per state replacement: stock hosts
+						// serve stable array identities, and per-render rebuilds would
+						// re-fire the browser's store-sync effects every render (React #185).
+						state.workspacesView = { items: orgItems(state), phase: "ready", archivedSessionIds: [] };
+						state.sessionsView = sessionsList(state);
+						emit();
+					} else if (state.loading) {
+						state = { ...state, loading: false };
+						emit();
+					}
+				} catch {
+					/* transient — keep the last good snapshot */
+				}
+			};
+			return {
+				subscribe(l) {
+					subs.add(l);
+					if (subs.size === 1) {
+						refresh();
+						timer = window.setInterval(refresh, 5e3);
+						window.addEventListener("focus", refresh);
+					}
+					return () => {
+						subs.delete(l);
+						if (subs.size === 0) {
+							window.clearInterval(timer);
+							window.removeEventListener("focus", refresh);
+						}
+					};
+				},
+				refresh,
+				mutate(action, arg) {
+					return ORG_POST(action, arg).then((r) => refresh()).then(() => {}, (e) => {
+						refresh();
+						throw e;
+					});
+				},
+				get: () => state,
+				/** Client-side toggle only (Q6): the list itself is server data. */
+				toggleTrash() {
+					state = { ...state, trashOpen: !(state.trashOpen ?? true) };
+					emit();
+				}
+			};
+		}
+		const orgStore = createOrgStore();
+		window.__ARXA_SIDEBAR__ = {
+			get orgOpen() {
+				return orgStore.get().orgs.some((o) => o.open);
+			},
+			refresh: () => orgStore.refresh()
+		};
+		/** Org rows → stock workspace items (groupByWorkspace reads exactly these fields). */
+		const orgItems = (s) => s.orgs.map((o) => ({
+			workspaceId: o.id,
+			title: o.name,
+			path: o.path,
+			createdAt: o.createdAt,
+			sessionIds: o.sessions.map((x) => x.id)
+		}));
+		/** Registry rows → stock session summaries. Pills stay honest (Q5): the
+		* registry cannot see live dsh agent state, so nothing ever reports
+		* running; parked rides the completed slot and the locale relabels it.
+		* updatedAt is registry order (stable creation order — there are no
+		* session timestamps server-side; the order-by labels say so). */
+		const sessionsList = (s) => {
+			const byId = {};
+			const ids = [];
+			let order = 0;
+			for (const o of s.orgs) for (const x of o.sessions) {
+				byId[x.id] = {
+					id: x.id,
+					displayTitle: x.name,
+					blank: false,
+					origin: "user",
+					running: false,
+					completed: x.state === "parked",
+					updatedAt: order++
+				};
+				ids.push(x.id);
+			}
+			return { byId, ids, current: void 0 };
+		};
+		const orgOfSession = (sessionId) => {
+			for (const o of orgStore.get().orgs) if (o.sessions.some((x) => x.id === sessionId)) return o.id;
+			return void 0;
+		};
+		// Stable subscribe identity — a fresh arrow per render would make React
+		// resubscribe every time, and each 0-to-1 resubscription fires refresh(),
+		// looping the render (React #185).
+		const orgSubscribe = (l) => orgStore.subscribe(l);
+		function useOrg(selector) {
+			const snap = (0, react.useSyncExternalStore)(orgSubscribe, orgStore.get, orgStore.get);
+			return selector(snap);
+		}
+		/** Constant-false directory-flow source: the stock add path is spliced to
+		* a name prompt (orgs are scaffolded, not adopted folders), so the native
+		* directory picker flow stays permanently unavailable. */
+		const orgNoFlow = { getSnapshot: () => false, subscribe: () => () => {} };
+		// Hook faces are STABLE module-scope identities, bound at the component
+		// boundary (see OrgBrowser): the slot renderer merges its STANDARD runtime
+		// hooks (useSessions/useWorkspaces) OVER inject props, so declaring them in
+		// the inject face loses — passing them as plain props cannot be overridden.
+		let orgHostDescription = void 0;
+		const orgUseWorkspaces = (sel) => useOrg((s) => sel(s.workspacesView));
+		const orgUseSessions = (sel) => useOrg((s) => sel(s.sessionsView));
+		const orgUseDirectoryFlow = (sel) => sel(orgNoFlow.getSnapshot());
+		const orgUseHostDescription = (sel) => sel(orgHostDescription);
+		function TrashSection({ t }) {
+			const view = useOrg((s) => ({ rows: s.trash ?? [], open: s.trashOpen ?? true }));
+			const rows = view.rows;
+			if (rows.length === 0 || !view.open) return null;
+			const restore = (entryId) => {
+				orgStore.mutate("trash.restore", { entryId }).catch(() => {});
+			};
+			return (0, react_jsx_runtime.jsxs)("div", {
+				style: { padding: "0 4px 8px" },
+				children: [
+					(0, react_jsx_runtime.jsx)("div", {
+						style: { fontSize: 11, opacity: 0.55, textTransform: "uppercase", letterSpacing: "0.04em", padding: "4px 4px 2px" },
+						children: t("trash.section") + " (" + rows.length + ")"
+					}),
+					rows.map((e) => (0, react_jsx_runtime.jsxs)("div", {
+						className: clsx(Rows_module_css_default.sessionRow, Rows_module_css_default.flatSessionRowWithoutStatus),
+						style: { paddingLeft: 12 },
+						children: [
+							(0, react_jsx_runtime.jsx)("span", {
+								style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13 },
+								title: e.entryId,
+								children: e.name
+							}),
+							(0, react_jsx_runtime.jsx)("button", {
+								onClick: () => restore(e.entryId),
+								style: { border: "1px solid var(--dsw-alias-border-l2)", background: "transparent", color: "inherit", borderRadius: 6, fontSize: 11, padding: "1px 6px", cursor: "pointer", flex: "none" },
+								children: t("trash.restore")
+							})
+						]
+					}, e.entryId)),
+					(0, react_jsx_runtime.jsx)("button", {
+						onClick: () => restore(null),
+						style: { marginTop: 4, border: "1px solid var(--dsw-alias-border-l2)", background: "transparent", color: "inherit", borderRadius: 6, fontSize: 11, padding: "2px 8px", cursor: "pointer" },
+						children: t("trash.restoreAll")
+					})
+				]
+			});
+		}
+		function OrgBrowser(props) {
+			// Data hooks are pinned HERE, at the component boundary: the slot
+			// renderer merges its STANDARD runtime hooks (useSessions/useWorkspaces)
+			// over inject props, so declaring them in the inject face loses. Passing
+			// them straight to the stock component cannot be overridden.
+			const patched = { ...props, useWorkspaces: orgUseWorkspaces, useSessions: orgUseSessions, useDirectoryFlow: orgUseDirectoryFlow, useHostDescription: orgUseHostDescription };
+			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, {
+				children: [
+					(0, react_jsx_runtime.jsx)(WorkspaceBrowser, patched),
+					(0, react_jsx_runtime.jsx)(TrashSection, { t: props.t })
+				]
+			});
+		}
+		/** Locale relabels: same menu shapes, honest org vocabulary (Q3–Q5). */
+		const enOver = {
+			"section.workspaces": "Organisations",
+			"workspace.add": "New organisation…",
+			"menu.addWorkspace": "New organisation…",
+			"menu.trash": "Trash",
+			"trash.section": "Trash",
+			"trash.restore": "Restore",
+			"trash.restoreAll": "Restore all",
+			"delete.workspace": "Close organisation",
+			"delete.desc": "This closes “{name}”. Its sessions stay in the org registry; nothing on disk is deleted.",
+			"delete.pending": "Closing organisation…",
+			"rename.workspace.title": "Rename organisation",
+			"field.workspaceName": "Organisation name",
+			"conflict.named": "An organisation named “{name}” already exists.",
+			"actions.workspace.aria": "Organisation actions for {name}",
+			"groupBy.workspace": "Project",
+			"orderBy.manual": "As created",
+			"orderBy.updated": "Newest first",
+			"picker.loading": "Loading organisations…",
+			"status.idle": "Open",
+			"status.completed": "Parked"
+		};
+		const zhOver = {
+			"section.workspaces": "组织",
+			"workspace.add": "新建组织…",
+			"menu.addWorkspace": "新建组织…",
+			"menu.trash": "回收站",
+			"trash.section": "回收站",
+			"trash.restore": "恢复",
+			"trash.restoreAll": "全部恢复",
+			"delete.workspace": "关闭组织",
+			"delete.desc": "这将关闭“{name}”。其会话仍保留在组织注册表中；不会删除任何磁盘内容。",
+			"delete.pending": "正在关闭组织…",
+			"rename.workspace.title": "重命名组织",
+			"field.workspaceName": "组织名称",
+			"conflict.named": "已存在名为“{name}”的组织。",
+			"actions.workspace.aria": "{name} 的组织操作",
+			"groupBy.workspace": "按项目",
+			"orderBy.manual": "按创建顺序",
+			"orderBy.updated": "最新在前",
+			"picker.loading": "正在加载组织…",
+			"status.idle": "打开",
+			"status.completed": "已停靠"
+		};
+		//#endregion

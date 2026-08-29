@@ -2,13 +2,12 @@
   "name": "arxa-sidebar",
   "version": "0.1.0",
   "private": true,
-  "description": "arxa's own sidebar: org header with brand accent + org switcher, per-org project tree (org manifest, git version chips, worktree session badges), and state-dependent CTAs driving the file-org shell lifecycle. Replaces @deepseek-ai/dsh-client-ui-sidebar (disabled in profile/cordis.patch.yml — one-line revert); the dsh package stays byte-identical as reference.",
+  "description": "arxa's own sidebar: the stock shell (brand, fold, New-session CTA) plus the ORGANISATIONS rows world — the stock workspace section transformed to list orgs, projects, sessions and trash from the file-org-shell lifecycle. Replaces @deepseek-ai/dsh-client-ui-sidebar and the sidebar.workspaces registrant; the dsh packages stay byte-identical as reference.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
-    "./cta-state": "./lib/cta-state.mjs",
     "./package.json": "./package.json"
   },
   "dsh": {

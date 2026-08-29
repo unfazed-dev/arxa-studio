@@ -189,6 +189,12 @@
 #     byte-identical — plugins/arxa-sidebar/selftest.mjs hashes it).
 - id: ui-sidebar
   disabled: true
+# 11b. The same arxa-sidebar client also replaces the sidebar.workspaces
+#     registrant (dsh-client-ui-workspace): the ORGANISATIONS rows world
+#     (docs/plans/sidebar-org-rethink.md). Same revert shape: delete this
+#     disable row to return the stock Workspaces section (package untouched).
+- id: ui-workspace
+  disabled: true
 - insert:
   - id: arxa-sidebar
     name: arxa-sidebar

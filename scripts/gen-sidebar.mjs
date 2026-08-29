@@ -1,24 +1,25 @@
-// gen-sidebar — regenerate plugins/arxa-sidebar/lib/client.js from the stock
-// @deepseek-ai/dsh-client-ui-sidebar lib/client.js plus the four deltas, so
-// the copy is always reproducible and never hand-edited (hand-edits are
-// caught by the drift gate in plugins/arxa-sidebar/selftest.mjs, which
-// regenerates and byte-compares).
+// gen-sidebar — regenerate the SIDEBAR SHELL half of
+// plugins/arxa-sidebar/lib/client.js from the stock
+// @deepseek-ai/dsh-client-ui-sidebar lib/client.js (dsh 0.1.1-rc.2).
+// The WORKSPACE SECTION half is produced by scripts/gen-workspace.mjs,
+// which runs this script, transforms dsh-client-ui-workspace the same way,
+// and writes client.js = shell + workspace parts. Hand-edits are caught by
+// the drift gate in plugins/arxa-sidebar/selftest.mjs.
 //
-// The first-party splices live verbatim in two snippet files next to the
-// generated client:
-//   lib/org-region.snippet.txt — the whole "//#region arxa: per-org surface"
-//                                block (fetch/postOrgAction + OrgSection)
-//   lib/org-css.snippet.txt    — the orgCss const line
-// Deltas applied to stock:
+// Deltas applied to the stock shell (sidebar rethink — the old OrgSection
+// region/CSS splices are GONE; the organisations rows live in the
+// workspace-section half):
 //   1. class prefix hHd-Xa_ → aXa_sb_, module id/tag arxa-sidebar
 //   2. brand fallbacks "arxa"/"studio" (arxa-brand registrants override)
-//   3. orgCss rides the same injected <style> tag
-//   4. OrgSection spliced into regionArea above sidebar.workspaces
-// rc-bump policy: a dsh bump is an explicit re-transform — update the version
-// note below, refresh the anchors/snippets if the stock shape moved, run this
-// script, then the lens visual gate (HANDOFF §6) before committing.
+//   3. the shell's New-session CTA becomes org-aware: it creates a session
+//      in the CURRENT open org (Q5) and is disabled with a tooltip while no
+//      org is open (state arrives via window.__ARXA_SIDEBAR__ + the
+//      arxa-sidebar-state event the workspace half dispatches).
+// rc-bump policy: a dsh bump is an explicit re-transform — update DSH_VERSION,
+// refresh the anchors if the stock shape moved, run scripts/gen-workspace.mjs,
+// then the lens visual gate before committing.
 //
-// Usage: node scripts/gen-sidebar.mjs [--write]   (default: stdout)
+// Usage: node scripts/gen-sidebar.mjs   (writes the shell part to stdout)
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -27,8 +28,6 @@ const here = dirname(fileURLToPath(import.meta.url))
 const root = dirname(here)
 const DSH_VERSION = '0.1.1-rc.2'
 const stockPath = join(root, 'node_modules', '@deepseek-ai', 'dsh-client-ui-sidebar', 'lib', 'client.js')
-const regionPath = join(root, 'plugins', 'arxa-sidebar', 'lib', 'org-region.snippet.txt')
-const cssPath = join(root, 'plugins', 'arxa-sidebar', 'lib', 'org-css.snippet.txt')
 
 let out = readFileSync(stockPath, 'utf8')
 
@@ -45,52 +44,56 @@ out = out.replace('tag.dataset.plugin = "@deepseek-ai/dsh-client-ui-sidebar";', 
 out = out.replace('children: "DSH Local Build"', 'children: "arxa"')
 out = out.replace('children: "29b22c5"', 'children: "studio"')
 
-// 4. org CSS rides the same injected tag
-const orgCss = readFileSync(cssPath, 'utf8').replace(/\n$/, '')
-const CSS_CONST_ANCHOR = 'const tagId = "arxa-sidebar/SidebarRoot.module.css";'
-if (!out.includes(CSS_CONST_ANCHOR)) throw new Error('tagId anchor missing — stock shape moved? (rc bump: refresh anchors per header policy)')
-out = out.replace(CSS_CONST_ANCHOR, orgCss + '\n\t\t' + CSS_CONST_ANCHOR)
+// 4. shell New-session CTA → org-aware (Q5). Marker surgery on the inject
+//    factory: no orgId — the host uses the current open-org handle.
+const SS_ANCHOR = 'startSession: (workspaceId) => {'
+if (!out.includes(SS_ANCHOR)) throw new Error('shell startSession anchor missing — stock shape moved?')
+const ssStart = out.indexOf(SS_ANCHOR)
+const ssEnd = out.indexOf('},', ssStart) + 2
+out = out.slice(0, ssStart) + [
+  'startSession: () => {',
+  '					// Organisations world: the shell CTA creates a session in the',
+  '					// current open org (host errors loudly when none is open; the',
+  '					// button is disabled in that case — see the button splice below).',
+  '					fetch("/__arxa/sidebar/action", {',
+  '						method: "POST",',
+  '						headers: { "content-type": "application/json" },',
+  '						body: JSON.stringify({ action: "org.new-session" })',
+  '					}).catch(() => {});',
+  '				},',
+].join('\n') + out.slice(ssEnd)
 
-// 5. org region before the SidebarRoot region
-const ROOT_REGION = '\t\t//#region lib/types/client/SidebarRoot.js'
-if (!out.includes(ROOT_REGION)) throw new Error('SidebarRoot region anchor missing — stock shape moved?')
-const orgRegion = readFileSync(regionPath, 'utf8').replace(/\n$/, '')
-out = out.replace(ROOT_REGION, orgRegion + '\n' + ROOT_REGION)
+// 5. disabled + tooltip on the shell CTA while no org is open. A tiny tick
+//    hook re-renders SidebarRoot whenever the workspace half re-poll state.
+const WIDE_ANCHOR = 'const wide = !collapsed || !settled;'
+if (!out.includes(WIDE_ANCHOR)) throw new Error('SidebarRoot wide anchor missing — stock shape moved?')
+out = out.replace(WIDE_ANCHOR, [
+  WIDE_ANCHOR,
+  '		const [orgTick, setOrgTick] = (0, react.useState)(0);',
+  '		(0, react.useEffect)(() => {',
+  '			const onOrgState = () => setOrgTick((x) => x + 1);',
+  '			window.addEventListener("arxa-sidebar-state", onOrgState);',
+  '			return () => window.removeEventListener("arxa-sidebar-state", onOrgState);',
+  '		}, []);',
+].join('\n'))
+const NS_BUTTON_ANCHOR = 'className: SidebarRoot_module_css_default.newSession,'
+if (!out.includes(NS_BUTTON_ANCHOR)) throw new Error('shell new-session button anchor missing — stock shape moved?')
+out = out.replace(NS_BUTTON_ANCHOR, [
+  NS_BUTTON_ANCHOR,
+  '								disabled: orgTick > -1 && window.__ARXA_SIDEBAR__?.orgOpen === false,',
+  '								title: window.__ARXA_SIDEBAR__?.orgOpen === false ? "Open an organisation first" : void 0,',
+].join('\n'))
 
-// 6. splice OrgSection into regionArea — marker surgery, not a literal
-// anchor, so stock whitespace/formatting shifts don't break regeneration.
-const SLOT = 'children: renderSlot("sidebar.workspaces", {'
-const slotAt = out.indexOf(SLOT)
-if (slotAt < 0) throw new Error('workspaces slot missing — stock shape moved?')
-const jsxStart = out.lastIndexOf('(0, react_jsx_runtime.jsx)("div", {', slotAt)
-if (jsxStart < 0) throw new Error('regionArea jsx start missing — stock shape moved?')
-const blockEnd = out.indexOf('}),', slotAt)
-if (blockEnd < 0) throw new Error('regionArea block end missing — stock shape moved?')
-const block = out.slice(jsxStart, blockEnd + 4)
-const spliced = block
-  .replace('(0, react_jsx_runtime.jsx)(', '(0, react_jsx_runtime.jsxs)(')
-  .replace('children: renderSlot(', 'children: [(0, react_jsx_runtime.jsx)(OrgSection, { wide }), renderSlot(')
-  .replace(/\}(\)|[ \t]*\n([ \t]*)\}[ \t]*\n[ \t]*\}\),[ \t]*$)/, '})]$1$2')
-if (spliced === block) throw new Error('regionArea splice produced no change — check markers')
-out = out.slice(0, jsxStart) + spliced + out.slice(blockEnd + 4)
-
-// 7. provenance header
-out = `// Browser half of arxa-sidebar.
-// GENERATED by scripts/gen-sidebar.mjs from @deepseek-ai/dsh-client-ui-sidebar
-// lib/client.js (dsh ${DSH_VERSION}) + lib/org-region.snippet.txt +
-// lib/org-css.snippet.txt. Do not hand-edit: edit the snippets or this
-// script, regenerate, and let the selftest drift gate compare bytes.
-// The stock SidebarRoot shell is kept whole — logoRow (brand mark/name slots
-// + fold toggle), New-session CTA, sidebar.workspaces region, foot
-// (sidebar.settings + sidebar.footer.action), collapse/rail/scrollbar-linger
-// behaviour, locale dicts, slot children map.
+// 6. provenance header
+out = `// Browser half of arxa-sidebar (shell part; the workspace-section part is
+// appended by scripts/gen-workspace.mjs). GENERATED from
+// @deepseek-ai/dsh-client-ui-sidebar lib/client.js (dsh ${DSH_VERSION}) +
+// scripts/gen-sidebar.mjs deltas. Do not hand-edit: regenerate and let the
+// selftest drift gate compare bytes. The stock SidebarRoot shell is kept
+// whole — logoRow (brand slots + fold toggle), New-session CTA, regionArea
+// (the sidebar.workspaces slot renders the ORGANISATIONS rows), foot,
+// collapse/rail/scrollbar-linger behaviour, locale dicts, slot children map.
 // The original package stays untouched in node_modules as reference.
 ` + out
 
-if (process.argv.includes('--write')) {
-  const { writeFileSync } = await import('node:fs')
-  writeFileSync(join(root, 'plugins', 'arxa-sidebar', 'lib', 'client.js'), out)
-  console.log('written', out.length, 'bytes')
-} else {
-  process.stdout.write(out)
-}
+process.stdout.write(out)
