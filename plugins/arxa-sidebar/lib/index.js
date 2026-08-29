@@ -1,23 +1,22 @@
 /**
- * arxa-sidebar (host half) — serves the sidebar's data faces over the same
- * webServer route pattern arxa-waiting-page uses (/__arxa/*):
+ * arxa-sidebar (host half) — ROWS WORLD (sidebar rethink, docs/plans/sidebar-org-rethink.md).
  *
- *   GET  /__arxa/sidebar/state?project=<id>
- *        → { seam, org, orgs, projects, parkedSessions, trashCount, cta }
- *        CTAs are computed HERE (lib/cta-state.mjs) so the state machine has
- *        one testable home; the client renders what it receives.
- *   POST /__arxa/sidebar/action  body { id, action, arg? }
- *        → dispatches to the Phase A lifecycle API.
+ * The stock Workspaces section (dsh-client-ui-workspace, transformed by
+ * scripts/gen-workspace.mjs) renders orgs as rows; this host half is its
+ * only data face. Two routes on the same webServer pattern as before:
  *
- * PHASE A SEAM — FLIPPED. The real plugin (plugins/file-org-shell/) is on
- * this branch and this host half consumes its actual surface:
- *   createOrgLifecycle({ workspaceRoot }) → { listOrgs, createOrg, openOrg,
- *   closeOrg, switchOrg, current (getter) }, with the contract faces
- *   (projects / parkedSessions / trashCount and the project/session/trash
- *   verbs) exposed ON the open-org handle so switch/close teardown stays
- *   the lifecycle's job. Workspace root comes from the persisted
- *   loadWorkspaceRoot() (ARXA_HOME-scoped workspace.json); no root chosen
- *   yet renders the no-org state, not an error.
+ *   GET  /__arxa/sidebar/state?project=<id|slug>
+ *        → { seam, root, orgs: [{ id, name, slug, path, open, sessions }],
+ *            trashCount, selectedProject }
+ *        Every org carries its registry session rows (read-only listSessions
+ *        — no shell lock needed to LIST); the open org additionally serves
+ *        projects and the selected scope. Archived sessions never leave the
+ *        host (D39 archivedSessionIds contract).
+ *
+ *   POST /__arxa/sidebar/action  body { action, arg }
+ *        org.create | org.open | org.close | org.rename | org.new-session |
+ *        session.open | session.archive | trash.restore
+ *        (ci.run stays reserved for Phase D3 — deliberately absent.)
  *
  * Import resolution is probed in two shapes so every deployment works
  * without a declared dependency (this package stays zero-dep by convention):
@@ -28,7 +27,6 @@
  * from the local lifecycle API (filesystem + git). No localStorage on the
  * client; layout state stays transient per the dsh layout contract.
  */
-import { computeCtas } from './cta-state.mjs'
 
 /** Flipped by the integrator: plugins/file-org-shell is merged on this branch. */
 export const SEAM_LIFECYCLE_STUBBED = false
@@ -75,41 +73,63 @@ export function apply(ctx) {
   }
   const params = (req) => new URL(req.url, 'http://x').searchParams
 
+  /**
+   * One org's session rows off the plain registry read — no shell lock, no
+   * open cycle: LISTING sessions is read-only fs (+ git common-dir walk).
+   * An org that never opened (no repo yet) or an unreadable registry lists
+   * as empty; a row is presentation, not a lifecycle.
+   */
+  const orgSessions = (l, org) => {
+    try {
+      return shell.listSessions(org.path, process.env)
+        .filter((s) => s.state !== 'archived')
+        .map((s) => ({ id: s.id, name: s.name, state: s.state, parkedReason: s.parkedReason, project: s.project ?? null }))
+    } catch {
+      return []
+    }
+  }
+
   const emptySnap = (seam) => ({
     seam,
-    org: null,
+    root: false,
     orgs: [],
-    projects: [],
-    parkedSessions: [],
     trashCount: 0,
     selectedProject: null,
   })
 
-  /** Snapshot of the open org through the plan contract faces. */
+  /** Snapshot for the rows client: orgs with their session rows inline. */
   const snapshot = async (selectedProject) => {
     const l = await getLifecycle()
     if (!l) return emptySnap(SEAM_LIFECYCLE_STUBBED)
-    const orgs = l.listOrgs().map(({ id, name: orgName, slug, path }) => ({ id, name: orgName, slug, path }))
     const cur = l.current
-    if (!cur) return { ...emptySnap(false), orgs }
+    const orgs = l.listOrgs().map(({ id, name, slug, path, manifest }) => ({
+      id,
+      name,
+      slug,
+      path,
+      open: cur?.path === path,
+      createdAt: manifest?.createdAt ?? null,
+      sessions: orgSessions(l, { path }),
+    }))
+    // Project scope (open org only): the client's id-or-slug selection
+    // resolves once against the registry's slug; unknown renders as none.
+    const selSlug = (() => {
+      if (!cur || selectedProject == null) return null
+      const hit = cur.projects().find((p) => p.slug === selectedProject || p.id === selectedProject)
+      return hit ? hit.slug : null
+    })()
     return {
       seam: false,
-      org: { id: cur.manifest.id, name: cur.manifest.name },
+      root: true,
       orgs,
-      // Contract faces: org manifest (workspace plugin), session registry
-      // (worktree lifecycle), trash — all through the open org handle so
-      // teardown on switch/close stays the lifecycle's job.
-      projects: cur.projects(),
-      parkedSessions: cur.parkedSessions(),
-      trashCount: cur.trashCount(),
-      // Machine + consumers compare against the registry's project scope,
-      // which stores slugs; resolve the client's id-or-slug selection once.
-      // Unknown selection renders as no selection (mutations throw instead).
-      selectedProject: (() => {
-        if (selectedProject == null) return null
-        const hit = cur.projects().find((p) => p.slug === selectedProject || p.id === selectedProject)
-        return hit ? hit.slug : null
-      })(),
+      trashCount: cur ? cur.trashCount() : 0,
+      // Open-org view only: the trash lives at the workspace root, but the
+      // surface (Q6) hangs off the open org's row menu.
+      trash: cur ? shell.listTrash(l.workspaceRoot).map((e) => ({
+        entryId: e.entryId,
+        name: (e.origin?.originalPath ?? e.entryId).replace(/[/\\]+$/, '').split('/').pop() || e.entryId,
+      })) : [],
+      selectedProject: selSlug,
     }
   }
 
@@ -119,8 +139,7 @@ export function apply(ctx) {
     kind: 'exact',
     handler: async (req, res) => {
       try {
-        const snap = await snapshot(params(req).get('project'))
-        json(res, { ...snap, cta: computeCtas(snap) })
+        json(res, await snapshot(params(req).get('project')))
       } catch (e) {
         json(res, { ...emptySnap(SEAM_LIFECYCLE_STUBBED), error: String(e?.message ?? e) })
       }
@@ -136,68 +155,55 @@ export function apply(ctx) {
       req.on('data', (c) => { raw += c })
       req.on('end', async () => {
         try {
-          const { action, arg, project } = JSON.parse(raw || '{}')
+          const { action, arg } = JSON.parse(raw || '{}')
           const l = await getLifecycle()
           if (!l) return json(res, { ok: false, seam: SEAM_LIFECYCLE_STUBBED, error: 'no-workspace', action })
 
-          /** Client rows send org ids; openOrg wants a path. Accept both. */
-          const orgPath = (idOrPath) => {
-            const hit = l.listOrgs().find((o) => o.id === idOrPath || o.path === idOrPath)
-            if (hit) return hit.path
-            if (typeof idOrPath === 'string' && idOrPath !== '') return idOrPath
-            throw new Error('org-not-found')
+          /** Client rows send org ids; openOrg wants a path. */
+          const orgByRef = (ref) => {
+            const hit = l.listOrgs().find((o) => o.id === ref || o.slug === ref || o.path === ref)
+            if (!hit) throw new Error('org-not-found: ' + ref)
+            return hit
           }
-          /** Open-org handle or loud failure — no silent ok on a closed org. */
+          /** The single open-org handle or loud failure — no silent ok. */
           const handle = () => {
             if (!l.current) throw new Error('no-org-open')
             return l.current
           }
-          /** Sole-org convenience for the Open CTA — the shell has no picker. */
-          const soleOrgId = () => {
-            const orgs = l.listOrgs()
-            if (orgs.length === 1) return orgs[0].id
-            throw new Error(orgs.length === 0 ? 'org-not-found' : 'org-choice-required — use the org switcher')
-          }
-          /**
-           * Selected project (id or slug) → registry scope value (slug).
-           * Loud on unknown: mutations never silently degrade scope.
-           */
-          const projectSlug = (sel) => {
-            if (sel == null) return null
-            const hit = handle().projects().find((p) => p.slug === sel || p.id === sel)
-            if (!hit) throw new Error(`unknown-project: ${sel}`)
-            return hit.slug
-          }
-          /**
-           * Resolution ladder: exact session id → sole match in scope
-           * (selected project's sessions + org-level ones) → sole parked
-           * anywhere → error. Ambiguity is an error, never a guess.
-           */
-          const parkedId = (a, selSlug) => {
-            const parked = handle().parkedSessions()
-            if (a != null) {
-              const byId = parked.find((s) => s.id === a)
-              if (byId) return byId.id
-            }
-            const scoped = parked.filter((s) => s.project == null || s.project === selSlug)
-            if (scoped.length === 1) return scoped[0].id
-            if (parked.length === 1) return parked[0].id
-            throw new Error(parked.length === 0 ? 'no-parked-session' : 'ambiguous-parked-session')
+          /** Open exactly this org (switch tears the old one down first). */
+          const ensureOpen = async (ref) => {
+            const org = orgByRef(ref)
+            if (l.current?.path === org.path) return l.current
+            if (l.current) await l.switchOrg(org.path)
+            else await l.openOrg(org.path)
+            return l.current
           }
 
-          // Plan contract: ONE org-open entry point; switch/close tear down
-          // in reverse before opening the next org. Untitled defaults keep
-          // the New-* CTAs one-click (slugs are uniquified downstream).
           const table = {
-            'org.open': () => l.openOrg(orgPath(arg ?? soleOrgId())),
-            'org.new': () => l.createOrg(arg || 'Untitled Organisation'),
-            'org.switch': () => l.switchOrg(orgPath(arg)),
+            /** Create + open: a freshly scaffolded org is the place you are about to work. */
+            'org.create': async () => {
+              const created = l.createOrg(typeof arg?.name === 'string' && arg.name.trim() !== '' ? arg.name : 'Untitled Organisation')
+              await ensureOpen(created.path) // switch, not open — single handle
+            },
+            'org.open': () => ensureOpen(arg?.orgId ?? arg),
             'org.close': () => l.closeOrg(),
-            'project.new': () => handle().newProject(arg || 'Untitled Project'),
-            'session.new': () => handle().newSession(typeof arg === 'string' ? arg : undefined, projectSlug(project)),
-            'session.resume': () => handle().resumeSession(parkedId(arg, projectSlug(project))),
-            'session.merge': () => handle().mergeSession(parkedId(arg, projectSlug(project))),
-            'trash.restore': () => handle().restoreTrash(arg),
+            'org.rename': () => l.renameOrg(orgByRef(arg?.orgId).path, arg?.name),
+            'org.new-session': async () => {
+              // No orgId = the shell CTA: session in the CURRENT open org.
+              const cur = arg?.orgId ? await ensureOpen(arg.orgId) : handle()
+              // Rows start sessions at org level; the project scope stays a
+              // display/selection concept (Q4), not a creation default.
+              return cur.newSession(undefined, null)
+            },
+            'session.open': async () => {
+              const cur = await ensureOpen(arg?.orgId)
+              return cur.resumeSession(arg?.sessionId)
+            },
+            'session.archive': async () => {
+              const cur = await ensureOpen(arg?.orgId)
+              return cur.archiveSession(arg?.sessionId)
+            },
+            'trash.restore': () => handle().restoreTrash(arg?.entryId ?? null),
             // 'ci.run' reserved for Phase D3 — deliberately absent.
           }
           const fn = table[action]
