@@ -389,8 +389,13 @@ export function apply(ctx, opts = {}) {
               const st = await g.status().catch(() => ({ linked: false }))
               if (!st.linked) return json(res, { ok: false, error: 'linked-required', action })
             }
-            const [{ default: path }, { default: os }] = await Promise.all([import('node:path'), import('node:os')])
+            const [{ default: path }, { default: os }, { default: fs }] = await Promise.all([
+              import('node:path'), import('node:os'), import('node:fs'),
+            ])
             const expanded = requested.startsWith('~') ? path.join(os.homedir(), requested.slice(1)) : path.resolve(requested)
+            // Typed paths may not exist yet — create, then let the D36 rules
+            // validate (same precedent as the workspace.root verb).
+            fs.mkdirSync(expanded, { recursive: true })
             shell ??= await importShell().catch(() => null)
             if (typeof shell?.scaffoldOrg !== 'function') {
               return json(res, { ok: false, seam: SEAM_LIFECYCLE_STUBBED, error: 'shell-unavailable', action })
