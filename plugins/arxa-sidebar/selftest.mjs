@@ -121,6 +121,8 @@ check('content area (2026-08-30): arxa is the sole driver — row open + resume 
   client.includes('arxaOpenConversation(sessionId)') && client.includes('arxaOpenConversation(cand.id)') && client.includes('arxaClientSessions.open(dshId)') && client.includes('snap.ids.includes(dshId)'))
 check('content area: a boot with nothing to resume clears the selection — stranding pre-arxa/hero sessions stop riding along',
   client.includes('arxaClientSessions.clear()') && client.includes('clearIfNothingToResume') && client.includes('let bootDecided = false;'))
+check('content area: the boot clear SURVIVES dsh startup reconnect (workspaces.startInitialSelection re-opens the recent workspace blank session over an early clear) — bounded re-assert, org/user opens win',
+  client.includes('reassertEmpty') && client.includes('workspaces.startInitialSelection') && client.includes('if (orgIds.has(cur)) return;') && client.includes('if (tries > 20) return;'))
 check('content area: the hero workspace picker is replaced by arxa guidance (raw engine sessions cannot be born from the hero)',
   client.includes('ArxaHeroGuide') && client.includes('"conversation.hero.workspace"') && client.includes('"hero.guide": "Sessions start inside a workspace') && client.includes('"hero.guide": "会话从工作区开始'))
 check('content area: with NOTHING bound the text composer is hidden outright (2026-08-30 user ask) — a bound blank session keeps its composer',

@@ -2740,13 +2740,35 @@ window.__ModuleLoader__.load({
 			 * the org world has landed and there is NOTHING to resume, the
 			 * content area lands on the empty state (clear() wipes the
 			 * persisted selection — raw pre-arxa/hero sessions stop riding
-			 * along every boot). One-shot — never fights the user. */
+			 * along every boot) and re-asserts empty while dsh's startup
+			 * workspace-reconnect settles. Never fights the user. */
 			const clearIfNothingToResume = () => {
 				if (bootDecided || state.loading) return;
 				bootDecided = true;
-				if (arxaClientSessions && typeof arxaClientSessions.clear === "function") {
+				if (!arxaClientSessions || typeof arxaClientSessions.clear !== "function") return;
+				try { arxaClientSessions.clear() } catch { /* degrade */ }
+				// dsh's startup policy (workspaces.startInitialSelection) connects the
+				// recent workspace's resident blank session right after the first
+				// baseline and re-opens it OVER a clear that landed mid-connect (the
+				// .then re-checks current). A rider is definitionally a session
+				// outside the org model, so re-assert empty while the boot policy
+				// settles (bounded); user and resume opens always win (the org-row
+				// and current-session guards bail out on either).
+				let tries = 0;
+				const reassertEmpty = () => {
+					tries += 1;
+					const snap = arxaClientSessions.list && typeof arxaClientSessions.list.getSnapshot === "function" ? arxaClientSessions.list.getSnapshot() : null;
+					const cur = snap ? snap.current : void 0;
+					if (cur === void 0 || cur === null) return;
+					if (currentSessionId) return;
+					const orgIds = new Set();
+					for (const o of state.orgs || []) for (const x of o.sessions || []) if (x.dshSessionId) orgIds.add(x.dshSessionId);
+					if (orgIds.has(cur)) return;
+					if (tries > 20) return;
 					try { arxaClientSessions.clear() } catch { /* degrade */ }
-				}
+					window.setTimeout(reassertEmpty, 250);
+				};
+				window.setTimeout(reassertEmpty, 250);
 			};
 			const maybeResume = (orgs) => {
 				if (resumeTried) return;
