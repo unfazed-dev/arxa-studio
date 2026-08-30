@@ -1452,7 +1452,7 @@
 			"purge.done": "Deleted forever",
 			// D85: the in-modal delete_repo upgrade path (device flow + auto-retry).
 			"purge.relink": "Re-link GitHub & retry",
-			"purge.relinkHint": "One-time permission upgrade: the saved GitHub link predates the delete permission. Enter this code at the URL below to authorize — the delete retries automatically."
+			"purge.relinkHint": "One-time permission upgrade: the saved GitHub link predates the delete permission. Enter this code at the URL below to authorize — the delete retries automatically.",
 			"purge.close": "Close",
 			"groupBy.workspace": "Project",
 			"orderBy.manual": "As created",
@@ -1580,7 +1580,7 @@
 			"purge.busy": "正在删除——正在移除 GitHub 仓库与废纸篓文件夹…",
 			"purge.done": "已永久删除",
 			"purge.relink": "重新关联 GitHub 并重试",
-			"purge.relinkHint": "一次性权限升级：已保存的 GitHub 关联早于删除权限。在下方网址输入该代码完成授权——删除会自动重试。"
+			"purge.relinkHint": "一次性权限升级：已保存的 GitHub 关联早于删除权限。在下方网址输入该代码完成授权——删除会自动重试。",
 			"purge.close": "关闭",
 			"groupBy.workspace": "按项目",
 			"orderBy.manual": "按创建顺序",

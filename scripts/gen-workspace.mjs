@@ -363,8 +363,14 @@ const client = shellPart.slice(0, shellReturnAt) + nestBlock + '\n' + shellPart.
 
 if (process.argv.includes('--write')) {
   const { writeFileSync } = await import('node:fs')
+  // D86 fail-fast: refuse to write a bundle that does not parse — a syntax
+  // error ships an unloadable sidebar (the app loads client.js as a <script>).
+  const vm = await import('node:vm')
+  try { new vm.Script(client, { filename: 'lib/client.js' }) } catch (e) {
+    throw new Error('gen-workspace: generated client.js does not parse — not writing: ' + e)
+  }
   writeFileSync(join(root, 'plugins', 'arxa-sidebar', 'lib', 'client.js'), client)
-  console.log('written', client.length, 'bytes (shell', shellPart.length, '+ workspace', out.length, ')')
+  console.log('written', client.length, 'bytes (shell', shellPart.length, '+ workspace', out.length, ') — parse-checked')
 } else {
   process.stdout.write(client)
 }
