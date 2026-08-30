@@ -112,7 +112,20 @@ body, body[data-ds-dark-theme] {
      no gap applied, which is why the margin was needed then and is wrong now. */
   color: var(--dsw-static-deepseek-400, color-mix(in oklab, #0EBAE4 78%, white));
 }
-[class*="_fishHitbox"], [class*="_previewBadge"] { display: none !important; }
+[class*="_previewBadge"] { display: none !important; }
+/* Hero lockup: the fishHitbox span wraps the brand.mark slot (FishLogo
+   fallback). Hide the fallback svg and paint the arxa glyph in its place —
+   the same accent-tinted mask treatment as the sidebar marks, so it follows
+   accent rewrites. The mark beside the headline is dsh's brand.mark seat. */
+[class*="_fishHitbox"] svg { display: none !important; }
+[class*="_fishHitbox"]::before {
+  content: "";
+  display: block;
+  width: 30px; height: 30px;
+  background: var(--dsw-static-deepseek-450, #0EBAE4);
+  -webkit-mask: var(--arxa-brand-mark-white) center / contain no-repeat;
+          mask: var(--arxa-brand-mark-white) center / contain no-repeat;
+}
 /* HeroGlow: the blurred backdrop ellipse behind the composer is a hardcoded
    figma blue (#6187D8 @ .08) on the SVG, not a token. CSS fill beats the
    presentation attribute. Same for the reference chips' #6187d838 wash. */

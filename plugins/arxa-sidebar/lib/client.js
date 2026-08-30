@@ -3059,7 +3059,6 @@ window.__ModuleLoader__.load({
 			return (0, react_jsx_runtime.jsx)("div", {
 				ref,
 				"data-arxa-hero-guide": "",
-				style: { fontSize: 12.5, opacity: 0.72, lineHeight: 1.55, maxWidth: 470, textAlign: "left" },
 				children: t("hero.guide")
 			});
 		}
@@ -3069,7 +3068,11 @@ window.__ModuleLoader__.load({
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=arxa-sidebar-empty-state]") === null) {
 			const tag = document.createElement("style");
 			tag.dataset.pluginCss = "arxa-sidebar-empty-state";
-			tag.textContent = "[data-arxa-empty] [data-slot='conversation.composer.bar']{display:none!important}[data-arxa-empty] .wSkVaW_heroWorkspaceRow>button{display:none!important}[data-arxa-empty] [data-slot='conversation.hero.agentPreset']{display:none!important}";
+			tag.textContent = "[data-arxa-hero-guide]{font-size:12.5px;opacity:.72;line-height:1.55;max-width:470px}"
+				+ "[data-arxa-empty] [data-slot='conversation.composer.bar']{display:none!important}"
+				+ "[data-arxa-empty] .wSkVaW_heroWorkspaceRow>button{display:none!important}"
+				+ "[data-arxa-empty] [data-slot='conversation.hero.agentPreset']{display:none!important}"
+				+ "[data-arxa-empty] [data-arxa-hero-guide]{text-align:center;max-width:560px;margin:12px auto 0;font-size:13px;opacity:.78;line-height:1.7}";
 			document.head.appendChild(tag);
 		}
 		/** Parse "<orgId>|<wsPath>" composite ids. */
