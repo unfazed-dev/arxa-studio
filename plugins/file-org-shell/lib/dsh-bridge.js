@@ -101,10 +101,15 @@ export function joinDshLive(rows, liveRows) {
         ? {
             // Registry name wins (grilled 2026-08-30 rename rule): one
             // rename must read the same everywhere in arxa; dsh keeps
-            // only the live pills (running / pendingInteraction).
+            // only the live pills (running / pendingInteraction). The
+            // pills are OMITTED when absent — the stock renderer's
+            // pendingInteraction switch is exhaustive over undefined |
+            // the literal union, and a served null crashes it
+            // (assertNever, seen live 2026-08-30 the moment the first
+            // resume-spawn landed a live row).
             displayTitle: s.name ?? live.displayTitle ?? null,
-            running: live.running ?? null,
-            pendingInteraction: live.pendingInteraction ?? null,
+            ...(live.running === void 0 ? {} : { running: live.running }),
+            ...(live.pendingInteraction === void 0 || live.pendingInteraction === null ? {} : { pendingInteraction: live.pendingInteraction }),
           }
         : {}),
     }

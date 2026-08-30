@@ -116,7 +116,13 @@ check('rows-snap: modal asks the history question when the folder has content (b
 check('rows-snap: create submit refreshes through the store (gate lifts at once, no create-again loop)', client.includes('orgStore.mutate("org.create-at"') && !client.includes('ORG_POST("org.create-at"'))
 check('welcome: blank-page gate with card when no org (D69 UX)', client.includes('function WelcomeGate(') && client.includes('"welcome.title": "Welcome to arxa studio"') && client.includes('"welcome.title": "欢迎使用 arxa studio"') && client.includes('!creating && (0, react_jsx_runtime.jsx)(WelcomeGate'))
 check('welcome: TWO buttons - arxa studio (create) + arxa business (disabled, later)', client.includes('t("welcome.studio")') && client.includes('t("welcome.business")') && client.includes('"welcome.businessSoon"') && !client.includes('t("welcome.cta")'))
-check('welcome: one-shot resume to newest session of the open org', client.includes('resumeTried') && client.includes('maybeResume(next.orgs)') && client.includes('action: "session.open"'))
+check('welcome: one-shot resume to newest session of the open org', client.includes('resumeTried') && client.includes('maybeResume(next.orgs)') && client.includes('orgStore.mutate("session.open"'))
+check('content area (2026-08-30): arxa is the sole driver — row open + resume focus the conversation via the client sessions service (dsh own open call)',
+  client.includes('arxaOpenConversation(sessionId)') && client.includes('arxaOpenConversation(cand.id)') && client.includes('arxaClientSessions.open(dshId)') && client.includes('snap.ids.includes(dshId)'))
+check('content area: a boot with nothing to resume clears the selection — stranding pre-arxa/hero sessions stop riding along',
+  client.includes('arxaClientSessions.clear()') && client.includes('clearIfNothingToResume') && client.includes('let bootDecided = false;'))
+check('content area: the hero workspace picker is replaced by arxa guidance (raw engine sessions cannot be born from the hero)',
+  client.includes('ArxaHeroGuide') && client.includes('"conversation.hero.workspace"') && client.includes('"hero.guide": "Sessions start inside a workspace') && client.includes('"hero.guide": "会话从工作区开始'))
 
 // ---- 4. drift gate ------------------------------------------------------------
 // The committed client.js must equal shell+workspace regenerated, byte for

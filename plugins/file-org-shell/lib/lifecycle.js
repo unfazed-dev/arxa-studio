@@ -477,9 +477,16 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           const row = listSessions(resolved, env).find((s) => s.id === id)
           const out = reviveSession(resolved, id, env)
           // Re-attach the dsh conversation (focus/open by dshSessionId) when
-          // the row carries one. Best-effort: dsh absence never blocks git
-          // revival.
+          // the row carries one. Rows born while dsh was unavailable (or
+          // pre-Phase-D) have none — SPAWN the engine conversation now
+          // (cwd = the worktree) so every opened session owns one; the
+          // sidebar client then focuses it via the client sessions service
+          // (2026-08-30). Best-effort: dsh absence never blocks git revival.
           if (row?.dshSessionId) await dshBridge.attach(row.dshSessionId)
+          else if (out?.worktree) {
+            const spawned = await dshBridge.spawn({ cwd: out.worktree, name: out.name })
+            if (spawned.ok) await annotateSession(resolved, id, { dshSessionId: spawned.id, dshStatus: null }, env)
+          }
           dshLive = await dshBridge.list()
           return out
         },

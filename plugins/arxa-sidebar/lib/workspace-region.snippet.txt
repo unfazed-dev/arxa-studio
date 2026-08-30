@@ -20,6 +20,7 @@
 		});
 		function createOrgStore() {
 			let resumeTried = false;
+		let bootDecided = false;
 			// Client-side current session (stock auto-expand + highlight key off it):
 			// set by resume + session.open; server truth is which org is open, not
 			// which session is focused — dsh owns focus, we mirror the last open.
@@ -27,17 +28,41 @@
 			let state = { orgs: [], trash: [], trashCount: 0, root: false, selectedProject: null, trashView: { rows: [], open: true }, selectedRowId: null, expanded: {}, emit: {}, currentSessionId: null, loading: true, __sig: "", workspacesView: { items: [], phase: "ready", archivedSessionIds: [] }, sessionsView: { byId: {}, ids: [], current: void 0 } };
 			const subs = new Set();
 			let timer = 0;
-			/** Resume (D71 UX): on first sight of an org with sessions, open the
-			 * newest open one (else newest overall) so the app lands where the
-			 * user left off. One-shot — never fights the user afterwards. */
+			/** Resume (D71 UX + 2026-08-30): on first sight of an org with
+			 * sessions, open the newest open one (else newest overall) so the
+			 * app lands where the user left off — and RESUME IT LIKE DSH: the
+			 * host revive (which spawns the engine conversation when the row
+			 * lacks one) is followed by the client sessions service open() —
+			 * the same call stock dsh makes when a session row opens. When
+			 * the org world has landed and there is NOTHING to resume, the
+			 * content area lands on the empty state (clear() wipes the
+			 * persisted selection — raw pre-arxa/hero sessions stop riding
+			 * along every boot). One-shot — never fights the user. */
+			const clearIfNothingToResume = () => {
+				if (bootDecided || state.loading) return;
+				bootDecided = true;
+				if (arxaClientSessions && typeof arxaClientSessions.clear === "function") {
+					try { arxaClientSessions.clear() } catch { /* degrade */ }
+				}
+			};
 			const maybeResume = (orgs) => {
-				if (resumeTried || !orgs || orgs.length === 0) return;
+				if (resumeTried) return;
+				if (!orgs || orgs.length === 0) {
+					// Welcome world (no orgs): land on the empty state too.
+					clearIfNothingToResume();
+					return;
+				}
 				// No org open YET (fresh boot): keep the shot — a later poll may
-				// see one (org.open switches server-side).
+				// see one (org.open switches server-side); once the data has
+				// settled with nothing openable, clear once.
 				const open = orgs.find((o) => o.open);
-				if (!open || !open.sessions || open.sessions.length === 0) return;
+				if (!open || !open.sessions || open.sessions.length === 0) {
+					clearIfNothingToResume();
+					return;
+				}
 				resumeTried = true;
-			 const openSessions = open.sessions.filter((x) => x.state === "open");
+				bootDecided = true;
+				const openSessions = open.sessions.filter((x) => x.state === "open");
 				const cand = openSessions.length ? openSessions[openSessions.length - 1] : open.sessions[open.sessions.length - 1];
 				currentSessionId = cand.id;
 			// The sig gate blocks the next state replacement when server data is
@@ -46,7 +71,10 @@
 			state = { ...state, currentSessionId: cand.id };
 			state.sessionsView = sessionsList(state);
 			emit();
-			fetch("/__arxa/sidebar/action", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "session.open", arg: { orgId: open.id, sessionId: cand.id } }) }).catch(() => {});
+			// Host revive first (may spawn the engine conversation), then the
+			// refresh the mutate carries lands the fresh dshSessionId, then
+			// open the conversation — dsh's own resume call.
+			orgStore.mutate("session.open", { orgId: open.id, sessionId: cand.id }).then(() => arxaOpenConversation(cand.id)).catch(() => {});
 			};
 			const emit = () => {
 				subs.forEach((l) => l());
@@ -159,6 +187,18 @@
 			selectedWorkspace() {
 				return orgStore.get().selectedRowId ?? null;
 			},
+			/** Diagnostic (2026-08-30): is the client sessions service bound?
+			 * Drives conversation focus (resume like dsh + row open). */
+			get clientSessionsReady() {
+				return !!(arxaClientSessions && typeof arxaClientSessions.open === "function");
+			},
+			/** Diagnostic: the client session catalog ids (empty array when the
+			 * service or its list store is unavailable). */
+			clientSessionIds() {
+				const s = arxaClientSessions;
+				const snap = s && s.list && typeof s.list.getSnapshot === "function" ? s.list.getSnapshot() : null;
+				return { ids: snap && Array.isArray(snap.ids) ? snap.ids.slice() : [], current: snap ? snap.current ?? null : null };
+			},
 			refresh: () => orgStore.refresh()
 		};
 		/** Workspace feed (v2 collapse fix, 2026-08-30): every CONTAINER
@@ -231,7 +271,7 @@
 					running: x.running ?? false,
 					completed: x.state === "parked",
 					updatedAt: x.updatedAt ?? x.createdAt ?? Date.now(),
-					...(x.pendingInteraction === void 0 ? {} : { pendingInteraction: x.pendingInteraction })
+					...(x.pendingInteraction == null ? {} : { pendingInteraction: x.pendingInteraction })
 				};
 				ids.push(x.id);
 			}
@@ -241,6 +281,47 @@
 			for (const o of orgStore.get().orgs) if ((o.sessions || []).some((x) => x.id === sessionId)) return o.id;
 			return void 0;
 		};
+		/** Focus an org session's conversation into the content area (the
+		 * client sessions service open — dsh's own row-open call). Called
+		 * AFTER the host action + refresh so a just-spawned dshSessionId has
+		 * landed on the row. A freshly spawned engine session can take a
+		 * beat to reach the client's session catalog — retry until it is
+		 * listed (open before then is a silent no-op, and the content area
+		 * would stay on the empty state). */
+		const arxaOpenConversation = (sessionId, tries = 0) => {
+			if (!arxaClientSessions || typeof arxaClientSessions.open !== "function") return;
+			let dshId = null;
+			for (const o of orgStore.get().orgs || []) {
+				const row = (o.sessions || []).find((x) => x.id === sessionId);
+				if (row) { dshId = row.dshSessionId ?? null; break; }
+			}
+			if (!dshId) return;
+			const snap = arxaClientSessions.list && typeof arxaClientSessions.list.getSnapshot === "function" ? arxaClientSessions.list.getSnapshot() : null;
+			if (snap && Array.isArray(snap.ids) && !snap.ids.includes(dshId) && tries < 12) {
+				window.setTimeout(() => arxaOpenConversation(sessionId, tries + 1), 400);
+				return;
+			}
+			try {
+				arxaClientSessions.open(dshId);
+			} catch (err) {
+				window.__arxaOpenError = String(err && err.message || err);
+			}
+		};
+		/** Empty-state guidance (2026-08-30): the stock hero workspace
+		 * picker is deliberately GONE from this build — its menu fed dsh's
+		 * own workspace registry, and picking one + submitting created a
+		 * raw engine session OUTSIDE the org model (the stranding-session
+		 * factory: the runtime's persisted selection then restored it on
+		 * every boot). This slot face replaces it with the arxa way;
+		 * without a picked workspace the hero composer stays inert, so no
+		 * raw session can be born from the hero. */
+		function ArxaHeroGuide({ t }) {
+			return (0, react_jsx_runtime.jsx)("div", {
+				"data-arxa-hero-guide": "",
+				style: { fontSize: 12.5, opacity: 0.72, lineHeight: 1.55, maxWidth: 470, textAlign: "left" },
+				children: t("hero.guide")
+			});
+		}
 		/** Parse "<orgId>|<wsPath>" composite ids. */
 		const wsParts = (workspaceId) => {
 			const s = String(workspaceId ?? "");
@@ -334,6 +415,14 @@
 		// hooks (useSessions/useWorkspaces) OVER inject props, so declaring them in
 		// the inject face loses — passing them as plain props cannot be overridden.
 		let orgHostDescription = void 0;
+		// Client runtime sessions service (dsh-client-runtime): open(id)
+		// focuses a conversation into the content area; clear() empties it
+		// AND wipes the persisted selection (the restore source at boot).
+		// arxa is the sole driver of the content area (2026-08-30): rows and
+		// resume open conversations by the row's dshSessionId; a boot with
+		// nothing to resume clears — pre-arxa/hero stranding sessions stop
+		// riding along. Null when the service is absent (degrade silently).
+		let arxaClientSessions = null;
 		const orgUseWorkspaces = (sel) => useOrg((s) => sel(s.workspacesView));
 		const orgUseSessions = (sel) => useOrg((s) => sel(s.sessionsView));
 		const orgUseDirectoryFlow = (sel) => sel(orgNoFlow.getSnapshot());
@@ -872,6 +961,7 @@
 			"welcome.business": "arxa business",
 			"welcome.businessSoon": "arxa business (agency) — coming soon",
 			"tree.dock.projects": "Projects",
+			"hero.guide": "Sessions start inside a workspace — open an organisation, expand to a folder row, hover it and press + to start a session.",
 			"tree.dock.notes": "Notes",
 			"tree.dock.meetings": "Meetings",
 			"tree.dock.account": "Account",
@@ -941,6 +1031,7 @@
 			"welcome.business": "arxa business",
 			"welcome.businessSoon": "arxa business（代理）— 即将推出",
 			"tree.dock.projects": "项目",
+			"hero.guide": "会话从工作区开始 — 展开组织到文件夹行，悬停并按 + 新建会话。",
 			"tree.dock.notes": "笔记",
 			"tree.dock.meetings": "会议",
 			"tree.dock.account": "账户",

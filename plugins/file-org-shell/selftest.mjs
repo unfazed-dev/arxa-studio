@@ -358,6 +358,17 @@ try {
     await hD.resumeSession(liveRow.id)
     ok(attachedIds.includes(liveRow.dshSessionId), 'resume re-attaches the dsh session by dshSessionId')
 
+    // (d2) resume SPAWNS the engine conversation when the row has none
+    // (rows born while dsh was unavailable — 2026-08-30): every opened
+    // session owns a conversation the sidebar client can then focus via
+    // the client sessions service.
+    const beforeSpawn = spawnedSpecs.length
+    const revived = await hD.resumeSession(regRow.id)
+    ok(spawnedSpecs.length === beforeSpawn + 1, 'resume spawns the engine session when the row lacks one')
+    ok(spawnedSpecs[spawnedSpecs.length - 1].cwd === revived.worktree, 'resume-spawn cwd = the session worktree (sessions.create cwd contract)')
+    ok(!attachedIds.includes(spawnedSpecs[spawnedSpecs.length - 1].id), 'a freshly spawned row attaches nothing (spawn IS the attach)')
+    ok(listSessions(orgB.path, env).find((s) => s.id === regRow.id).dshSessionId === spawnedSpecs[spawnedSpecs.length - 1].id, 'registry carries the resume-spawned dshSessionId')
+
     // (e) archive feeds dsh's archivedSessionIds contract.
     await hD.archiveSession(liveRow.id)
     ok(archivedIds.includes(liveRow.dshSessionId), 'archive feeds the dsh archivedSessionIds contract')
