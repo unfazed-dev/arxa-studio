@@ -580,7 +580,9 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           if (!ws) throw new Error('workspace-required: sessions are born in a workspace row (a dock container or a project container), never at org level')
           const template = getTemplate(TEMPLATE_VERSION)
           let projectSlug = null
-          const projectScope = /^projects\/([a-z0-9][a-z0-9._-]*)\/([a-z0-9][a-z0-9._-]*)$/.exec(ws)
+          // D79: slugs preserve case — "projects/POLO/00-moodboard" is a
+          // legal workspace key and must parse.
+          const projectScope = /^projects\/([A-Za-z0-9][A-Za-z0-9._-]*)\/([A-Za-z0-9][A-Za-z0-9._-]*)$/.exec(ws)
           if (projectScope) {
             const hit = [...scanWorkspace(resolved).projects.values()]
               .find((p) => p.orgId === opened.manifest.id && p.slug === projectScope[1])

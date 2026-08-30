@@ -74,13 +74,13 @@ r = await act('org.rename', { orgId: acme.id, name: 'Acme Labs Renamed' })
 check('org.rename ok', r.ok === true, r.error)
 s = await state()
 check('rename served (D72: moved folder, new slug, still open)',
-  s.orgs[0].name === 'Acme Labs Renamed' && s.orgs[0].slug === 'acme-labs-renamed' && s.orgs[0].open === true && s.orgs[0].path !== acme.path,
+  s.orgs[0].name === 'Acme Labs Renamed' && s.orgs[0].slug === 'Acme-Labs-Renamed' && s.orgs[0].open === true && s.orgs[0].path !== acme.path,
   JSON.stringify({ name: s.orgs[0].name, slug: s.orgs[0].slug, path: s.orgs[0].path }))
 
 // project fixture (v1: no project-create UI — the rows face serves what the
 // filesystem + manifests declare; scaffoldProject stays the CLI/host verb).
 const orgPath = s.orgs[0].path
-const proj = ws.scaffoldProject(orgPath, 'Rocket')
+const proj = ws.scaffoldProject(orgPath, 'rocket') // lowercase literal: smoke pins hardcode projects/rocket/… keys (D79 slugs keep case)
 check('project fixture scaffolded', !!proj?.path, JSON.stringify(proj))
 
 // v2 (grilled 2026-08-30): sessions are born in a WORKSPACE row —
@@ -141,7 +141,7 @@ check('acme open again', s.orgs.find((o) => o.id === acme.id).open === true, JSO
 const doomed = ws.scaffoldProject(orgPath, 'Doomed')
 ws.softDelete(orgPath, doomed.path) // D69: trash is org-local
 s = await state()
-check('trash entry served with a display name', s.trash.length === 1 && s.trash[0].name === 'doomed' && s.trashCount === 1,
+check('trash entry served with a display name', s.trash.length === 1 && s.trash[0].name === 'Doomed' && s.trashCount === 1, // D79: slug keeps the fixture's case
   JSON.stringify(s.trash))
 r = await act('trash.restore', { entryId: s.trash[0].entryId })
 check('trash.restore (single entry) ok', r.ok === true, r.error)
@@ -193,7 +193,7 @@ check('rows-c: tree face — five docks, notes a workspace, fixed containers',
 r = await act('workspace.new-session', { orgId: rc.id, workspace: 'notes' })
 check('rows-c: dock session ok (auto-named, workspace-scoped)', r.ok === true && r.result?.name === 'note-001' && r.result?.workspace === 'notes' && r.result?.project === null, JSON.stringify(r))
 const rcPath = rc.path
-const rcProj = ws.scaffoldProject(rcPath, 'Rocket')
+const rcProj = ws.scaffoldProject(rcPath, 'rocket')
 check('rows-c: project fixture scaffolded', !!rcProj?.path, JSON.stringify(rcProj))
 s = await state()
 const rcTree2 = s.orgs.find((o) => o.open).tree

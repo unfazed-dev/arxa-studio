@@ -2945,16 +2945,14 @@ window.__ModuleLoader__.load({
 			const parts = p.split("/");
 			if (parts[0] === "projects" && parts.length === 3) {
 				const c = parts[2];
-				// D78: containers carry 2-digit stage prefixes (00-moodboard…).
-				// Prefer an exact dictionary hit, then the STEM's entry (reuse
-				// tree.pc.design for 02-design — zh keeps 设计), and only then
-				// fall back to a TitleCased stem — never the raw key.
+				// D79: GitHub parity — the tree shows the REAL directory name
+				// ("00-moodboard" on GitHub, "00-moodboard" here). Only a
+				// genuine dictionary hit (a pre-v3 folder like "moodboard")
+				// prettifies; v3 names render raw — never stem-mapped, never
+				// TitleCased, never a leaked tree.pc key.
 				const hit = orgT("tree.pc." + c);
 				if (hit && hit !== "tree.pc." + c) return hit;
-				const stem = c.replace(/^\d{2}-/, "");
-				const stemHit = orgT("tree.pc." + stem);
-				if (stemHit && stemHit !== "tree.pc." + stem) return stemHit;
-				return stem.charAt(0).toUpperCase() + stem.slice(1);
+				return c;
 			}
 			return orgT("tree.ws." + p);
 		};

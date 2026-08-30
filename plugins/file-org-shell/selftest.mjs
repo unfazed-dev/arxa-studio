@@ -247,7 +247,7 @@ try {
   console.log('org rename (D72):')
   const svcRename = createOrgLifecycle({ workspaceRoot: root, env })
   const renamed = await svcRename.renameOrg(orgB.path, 'Beta Limited')
-  ok(renamed.moved === true && renamed.slug === 'beta-limited', 'rename derives the slug from the display name and moves the folder (D72)')
+  ok(renamed.moved === true && renamed.slug === 'Beta-Limited', 'rename derives the slug from the display name (case preserved, D79) and moves the folder (D72)')
   ok(!fs.existsSync(orgB.path) && fs.existsSync(renamed.path), 'old folder gone, new folder in place')
   ok(fs.existsSync(path.join(renamed.path, '.git')), 'org repo .git moved with the folder')
   ok(svcRename.listOrgs().some((o) => o.id === renamed.manifest.id && o.name === 'Beta Limited'), 'listOrgs serves the new display name')
@@ -466,6 +466,19 @@ try {
       'D78: empty stage folders carry .gitkeep (git/GitHub can track them)',
     )
 
+    // (b3) D79: CASE IS PRESERVED end to end — "POLO" is never folded to
+    // "polo": not the folder, not the manifest slug, not the workspace key
+    // the session scope parses.
+    const polo = await svcNoGh.current.newProject('POLO')
+    ok(path.basename(polo.path) === 'POLO', 'D79: uppercase name keeps its case on disk')
+    const pm79 = JSON.parse(fs.readFileSync(path.join(polo.path, 'project.json'), 'utf8'))
+    ok(pm79.name === 'POLO', 'D79: manifest display name preserves case (slug IS the folder)')
+    const sess79 = await svcNoGh.current.newSession(null, 'projects/POLO/00-moodboard')
+    ok(
+      sess79.workspace === 'projects/POLO/00-moodboard' && sess79.project === 'POLO',
+      'D79: uppercase slugs parse as workspace keys (session scope accepts them)',
+    )
+
     // (c) linked faces that THROW: publish failure is a loud annotation, never a throw.
     const svcBoom = createOrgLifecycle({
       workspaceRoot: root,
@@ -503,7 +516,7 @@ try {
     await svcPre.openOrg(orgHeal.path)
     await svcPre.current.newProject('Pre Existing')
     svcPre.closeOrg()
-    const orgBare = bareFor('heal-corp')
+    const orgBare = bareFor('Heal-Corp')
     await svcHeal.openOrg(orgHeal.path)
     const healRes = await svcHeal.current.githubHeal
     ok(healRes?.ok === true && healRes.repoUrl === orgBare, 'D74 heal: open-time detached publish resolves ok with the repo url')
@@ -513,10 +526,10 @@ try {
       runGit(['rev-parse', '--verify', 'main'], { cwd: orgBare, env, allowFail: true }) !== null,
       'D74 heal: org history reached the remote (main on the bare)',
     )
-    const healedProj = healRes.projects?.find((x) => x.slug === 'pre-existing')
+    const healedProj = healRes.projects?.find((x) => x.slug === 'Pre-Existing')
     ok(healedProj?.ok === true, 'D74 heal: existing projects retrofit on the same pass')
     ok(
-      runGit(['rev-parse', '--verify', 'main'], { cwd: bareFor('pre-existing'), env, allowFail: true }) !== null,
+      runGit(['rev-parse', '--verify', 'main'], { cwd: bareFor('Pre-Existing'), env, allowFail: true }) !== null,
       'D74 heal: project history pushed (pre-existing main on its bare)',
     )
     const again = await svcHeal.current.publishGithub()
@@ -540,7 +553,7 @@ try {
       runGit(['commit', '-m', 'wip: note'], { cwd: sess.worktree, env: eEnv })
 
       const moved = await svcE.renameOrg(org.path, 'Renamed Org')
-      ok(moved.moved === true && moved.slug === 'renamed-org', 'e2e: folder moved to the slugified new name')
+      ok(moved.moved === true && moved.slug === 'Renamed-Org', 'e2e: folder moved to the slugified new name (case preserved, D79)')
       ok(!fs.existsSync(org.path), 'e2e: old path gone')
       ok(fs.existsSync(path.join(moved.path, '.git', 'arxa', 'sessions.json')), 'e2e: session registry (git-common-dir/arxa/) moved with the folder')
       ok(listSessions(moved.path, eEnv).some((s) => s.id === sess.id && s.state === 'open'), 'e2e: registry rows intact at the new path')
@@ -569,14 +582,14 @@ try {
       await svcF.openOrg(moved.path)
       fs.mkdirSync(path.join(moved.path, '.arxa', 'locks'), { recursive: true })
       fs.writeFileSync(
-        path.join(moved.path, '.arxa', 'locks', 'renamed-again.lock'),
+        path.join(moved.path, '.arxa', 'locks', 'Renamed-Again.lock'),
         JSON.stringify({ pid: process.ppid, startedAt: new Date().toISOString() }),
       )
-      await assert.rejects(() => svcF.renameOrg(moved.path, 'Renamed Again'), /renamed-again/)
+      await assert.rejects(() => svcF.renameOrg(moved.path, 'Renamed Again'), /Renamed-Again/)
       passed++
       console.log('  ✓ e2e: post-mv failure surfaces loud (live lock on the new path)')
       ok(fs.existsSync(moved.path), 'e2e: folder renamed BACK after the failure (all-or-nothing)')
-      ok(!fs.existsSync(path.join(eRoot, 'renamed-again')), 'e2e: no partial folder left at the destination')
+      ok(!fs.existsSync(path.join(eRoot, 'Renamed-Again')), 'e2e: no partial folder left at the destination')
       const restored = JSON.parse(fs.readFileSync(path.join(moved.path, 'org.json'), 'utf8'))
       ok(restored.name === 'Renamed Org', 'e2e: manifest name restored on rollback')
       ok(svcF.current?.path === moved.path, 'e2e: open handle restored at the old path on rollback')

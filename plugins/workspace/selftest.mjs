@@ -64,13 +64,17 @@ const env = { ...process.env, ARXA_HOME: fakeHome }
 
 try {
   // --- slugs ---
-  check('slugify kebab-cases display names', () => {
-    assert.equal(slugify('Totem Labs'), 'totem-labs')
-    assert.equal(slugify("Org & Café #1!"), 'org-cafe-1')
+  check('slugify kebab-cases display names, PRESERVING case (D79)', () => {
+    assert.equal(slugify('Totem Labs'), 'Totem-Labs')
+    assert.equal(slugify("Org & Café #1!"), 'Org-Cafe-1')
+    assert.equal(slugify('POLO'), 'POLO')
+    assert.equal(slugify('project-001'), 'project-001')
   })
-  check('slug collision produces -2 suffix', () => {
-    assert.equal(uniqueSlug('Totem Labs', ['totem-labs']), 'totem-labs-2')
-    assert.equal(uniqueSlug('Totem Labs', ['totem-labs', 'totem-labs-2']), 'totem-labs-3')
+  check('slug collision produces -2 suffix, case-insensitive (D79)', () => {
+    assert.equal(uniqueSlug('Totem Labs', ['totem-labs']), 'Totem-Labs-2')
+    assert.equal(uniqueSlug('Totem Labs', ['totem-labs', 'totem-labs-2']), 'Totem-Labs-3')
+    assert.equal(uniqueSlug('POLO', ['polo']), 'POLO-2')
+    assert.equal(uniqueSlug('polo', ['POLO']), 'polo-2')
   })
 
   // --- scaffold org + project ---
@@ -116,7 +120,7 @@ try {
     renameInManifest(orgManifestPath(org.path), 'Organisation A (rebranded)')
     renameInManifest(orgManifestPath(org.path), 'OrgA Final')
     assert.ok(fs.existsSync(org.path), 'org folder moved')
-    assert.equal(path.basename(org.path), 'organisation-a')
+    assert.equal(path.basename(org.path), 'Organisation-A')
     assert.equal(readManifest(orgManifestPath(org.path)).name, 'OrgA Final')
     assert.equal(readManifest(orgManifestPath(org.path)).id, org.manifest.id, 'id changed on rename')
   })
@@ -137,7 +141,7 @@ try {
   // --- org slug collision on disk ---
   check('scaffolding a second org with the same name yields <slug>-2', () => {
     const org2 = scaffoldOrgInRoot(workspaceRoot, 'Organisation A')
-    assert.equal(org2.slug, 'organisation-a-2')
+    assert.equal(org2.slug, 'Organisation-A-2')
     assert.notEqual(org2.manifest.id, org.manifest.id)
   })
 

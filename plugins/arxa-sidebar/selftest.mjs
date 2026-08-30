@@ -298,12 +298,16 @@ check('publish: modal runs the phase machine over the publish result',
 check('publish: modal localized (en + zh)',
   client.includes('"publish.confirmCta": "Publish"') && client.includes('"publish.confirmCta": "发布"'))
 
-// ---- D78 riders: stage-label stems + named project creation ----
-// The v3 container names (00-moodboard…) had no tree.pc.* dictionary keys,
-// so the raw key leaked into the tree ("tree.pc.00-moodboard"). The label
-// falls back to the stem's entry, then a TitleCased stem — never the key.
-check('labels: stage containers never leak the raw tree.pc key (stem fallback)',
-  client.includes('const stem = c.replace(/^\\d{2}-/, "")') && client.includes('if (stemHit && stemHit !== "tree.pc." + stem) return stemHit;'))
+// ---- D79: GitHub-parity labels + named project creation (D78 riders) ----
+// v3 containers carry their stage prefix on GitHub ("00-moodboard"); the
+// tree shows the SAME real directory name. Only a genuine dictionary hit
+// (a pre-v3 folder like "moodboard") prettifies — no stem mapping, no
+// TitleCase, and never a leaked raw tree.pc key.
+check('labels: stage containers render their real directory name (GitHub parity)',
+  client.includes('const hit = orgT("tree.pc." + c);') &&
+  client.includes('if (hit && hit !== "tree.pc." + c) return hit;') &&
+  client.includes('return c;') &&
+  !client.includes('stemHit') && !client.includes('const stem ='))
 check('project create: the dock + opens a NAME modal (no pregenerated names in the UI)',
   client.includes('"arxa-create-project"') && client.includes('function OrgProjectModal') && !client.includes('orgStore.mutate("project.create"'))
 check('project create: modal sends the typed name through project.create',

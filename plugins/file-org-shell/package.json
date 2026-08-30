@@ -1,6 +1,6 @@
 {
   "name": "arxa-file-org-shell",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "arxa file-org shell service (Phase A): org lifecycle composing workspace, workspace-index, git-workspace, account-mirror and cairn-rail. Server-side only — no client surface this phase.",
   "type": "module",

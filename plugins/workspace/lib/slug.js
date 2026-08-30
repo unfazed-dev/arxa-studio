@@ -1,17 +1,21 @@
 // Slug generation (D41). A slug is the kebab-case folder name on disk
-// (e.g. "totem-labs"). Slugs are immutable after creation: renames touch
+// (e.g. "totem-labs"). D79: CASE IS PRESERVED — "POLO" stays "POLO" on
+// disk and as the GitHub repo name; only non-letters kebab ("Zephyr App"
+// → "Zephyr-App"). Slugs are immutable after creation: renames touch
 // the manifest's display name only, never the folder. Collisions among
-// sibling slugs resolve by numeric suffix (-2, -3, ...).
+// sibling slugs resolve by numeric suffix (-2, -3, ...) and compare
+// CASE-INSENSITIVELY — a case-preserving name must never land on the
+// same directory as an existing lowercase twin (macOS APFS is
+// case-insensitive by default; GitHub routes repo names case-insensitively).
 
-/** Kebab-case a display name into a filesystem slug. */
+/** Kebab-case a display name into a filesystem slug, preserving case (D79). */
 export function slugify(displayName) {
   if (typeof displayName !== 'string') throw new TypeError('displayName must be a string')
   const slug = displayName
     .normalize('NFKD')
     .replace(/[̀-ͯ]/g, '') // strip combining diacritics left by NFKD (U+0300–U+036F)
-    .toLowerCase()
     .replace(/['’]/g, '') // apostrophes vanish rather than hyphenate
-    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/[^a-zA-Z0-9]+/g, '-') // D79: keep a-z AND A-Z
     .replace(/^-+|-+$/g, '')
   return slug || 'untitled'
 }
@@ -26,11 +30,13 @@ export function slugify(displayName) {
  * @returns {string}
  */
 export function uniqueSlug(displayName, existingSlugs = []) {
-  const taken = new Set(existingSlugs)
+  // D79: the collision set is CASE-INSENSITIVE ("polo" blocks "POLO");
+  // the emitted slug keeps its own case.
+  const taken = new Set([...existingSlugs].map((s) => String(s).toLowerCase()))
   const base = slugify(displayName)
-  if (!taken.has(base)) return base
+  if (!taken.has(base.toLowerCase())) return base
   for (let n = 2; ; n++) {
     const candidate = `${base}-${n}`
-    if (!taken.has(candidate)) return candidate
+    if (!taken.has(candidate.toLowerCase())) return candidate
   }
 }
