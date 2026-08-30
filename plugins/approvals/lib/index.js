@@ -320,6 +320,10 @@ export function applyCairnProxy(ctx, deps = {}) {
     handler: (req, socket, head) => spliceCairnUpgrade(bind, req, socket, head, httpImpl),
   })
 
+  // Boot observability: the phone's sync-decision hinges on whether this
+  // bootstrap was ever reached. Two counters, exposed for the rig.
+  const bootStats = { hits: 0, ok: 0, lastHitAt: null }
+
   // Bootstrap bearer for the paired phone: the sync session it opens
   // through the proxy must present the mirror's CAIRN_SYNC_BEARER_TOKEN
   // (ADR-0010 addendum) so the session is AUTHENTICATED and its push-token
@@ -332,6 +336,8 @@ export function applyCairnProxy(ctx, deps = {}) {
     path: '/__arxa/cairn-sync',
     kind: 'exact',
     handler: async (req, res) => {
+      bootStats.hits += 1
+      bootStats.lastHitAt = new Date().toISOString()
       const token = deps.cairnSyncToken
         ? await deps.cairnSyncToken()
         : await cairnSyncToken(deps.env ?? process.env)
@@ -342,6 +348,16 @@ export function applyCairnProxy(ctx, deps = {}) {
       }
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
       res.end(JSON.stringify({ token }))
+      bootStats.ok += 1
+    },
+  })
+  ctx.webServer.register({
+    name: 'arxa-approvals-cairn-sync-stats',
+    path: '/__arxa/cairn-sync/_stats',
+    kind: 'exact',
+    handler: async (req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+      res.end(JSON.stringify({ ...bootStats }))
     },
   })
 }
