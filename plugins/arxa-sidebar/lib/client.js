@@ -4216,6 +4216,40 @@ window.__ModuleLoader__.load({
 			// opens the org session conversation like dsh; a boot with nothing
 			// to resume clears (stranding pre-arxa sessions stop riding along).
 			try { arxaClientSessions = ctx.get("sessions") } catch { arxaClientSessions = null }
+			// Live cross-client propagation (2026-08-30): dsh pushes registry
+			// changes (archive/rename/open from ANY client) into the runtime
+			// stores over the live connection; the org view used to learn of
+			// them only on the 5s poll. Refresh on every store bump — the
+			// trailing debounce coalesces bursts and refresh() is sig-gated,
+			// so an unchanged snapshot is a no-op. The poll stays as the
+			// backstop for arxa-only mutations that never touch a dsh store.
+			let liveRefreshTimer = 0;
+			// Once and for all (2026-08-30): dsh startup policy re-opens the recent
+			// workspace resident blank session on slow boots AFTER the bounded
+			// re-assert window — the rider must lose every race, not just fast
+			// ones. Invariant: with no user/resume open (currentSessionId null)
+			// the only legal bound session is an OPEN org one. Enforced on every
+			// store bump, forever; org/user opens win via the same guards.
+			const orgDshIds = () => {
+				const ids = new Set();
+				const st = orgStore.get();
+				for (const o of st.orgs || []) for (const x of o.sessions || []) if (x.dshSessionId && x.state === "open") ids.add(x.dshSessionId);
+				return ids;
+			};
+			const enforceNoRiders = () => {
+				if (orgStore.get().currentSessionId) return;
+				const snap = arxaClientSessions && arxaClientSessions.list && typeof arxaClientSessions.list.getSnapshot === "function" ? arxaClientSessions.list.getSnapshot() : null;
+				const cur = snap ? snap.current : void 0;
+				if (cur === void 0 || cur === null) return;
+				if (orgDshIds().has(cur)) return;
+				try { arxaClientSessions.clear() } catch { /* degrade */ }
+			};
+			const liveRefresh = () => {
+				if (liveRefreshTimer) return;
+				liveRefreshTimer = window.setTimeout(() => { liveRefreshTimer = 0; orgStore.refresh().then(enforceNoRiders).catch(() => {}); }, 250);
+			};
+			try { ctx.get("workspaces").list.subscribe(() => { enforceNoRiders(); liveRefresh(); }) } catch { /* degrade */ }
+			try { if (arxaClientSessions && typeof arxaClientSessions.list.subscribe === "function") arxaClientSessions.list.subscribe(() => { enforceNoRiders(); liveRefresh(); }) } catch { /* degrade */ }
 			const browserInjected = () => ({
 				// use* hooks are pinned in OrgBrowser — see the region snippet.
 				startSession: (workspaceId) => {

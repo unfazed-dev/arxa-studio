@@ -123,6 +123,10 @@ check('content area: a boot with nothing to resume clears the selection — stra
   client.includes('arxaClientSessions.clear()') && client.includes('clearIfNothingToResume') && client.includes('let bootDecided = false;'))
 check('content area: the boot clear SURVIVES dsh startup reconnect (workspaces.startInitialSelection re-opens the recent workspace blank session over an early clear) — bounded re-assert, org/user opens win',
   client.includes('reassertEmpty') && client.includes('workspaces.startInitialSelection') && client.includes('if (orgIds.has(cur)) return;') && client.includes('if (tries > 20) return;'))
+check('content area (live, once-and-for-all): the rider kill is condition-driven, not a stopwatch — any current session that is not an OPEN org one is cleared on every store bump while no user/resume open owns the content (slow-boot stranding loses every race)',
+  client.includes('enforceNoRiders') && client.includes('x.state === "open"') && client.includes('orgStore.refresh().then(enforceNoRiders)'))
+check('content area (live): cross-client archive/rename reach every client without waiting on the 5s poll — the org view refreshes on dsh store bumps (sig-gated refresh makes repeats a no-op)',
+  client.includes('ctx.get("workspaces").list.subscribe') && client.includes('arxaClientSessions.list.subscribe') && client.includes('orgStore.refresh()'))
 check('content area: the hero workspace picker is replaced by arxa guidance (raw engine sessions cannot be born from the hero)',
   client.includes('ArxaHeroGuide') && client.includes('"conversation.hero.workspace"') && client.includes('"hero.guide": "Sessions start inside a workspace') && client.includes('"hero.guide": "会话从工作区开始'))
 check('content area: with NOTHING bound the text composer is hidden outright (2026-08-30 user ask) — a bound blank session keeps its composer',
