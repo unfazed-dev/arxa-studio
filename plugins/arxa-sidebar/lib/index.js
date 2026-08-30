@@ -467,16 +467,31 @@ export function apply(ctx, opts = {}) {
               import('node:path'), import('node:os'), import('node:fs'),
             ])
             const expanded = requested.startsWith('~') ? path.join(os.homedir(), requested.slice(1)) : path.resolve(requested)
+            // D77 placement lesson (the PLATO incident): the modal collects a
+            // NAME and a LOCATION; scaffolding in place ignored the name, so
+            // picking a volume root ("create PLATO here") made the ROOT the
+            // org — git init + snapshot over the whole disk, publish silently
+            // refused (no HEAD). The picked folder becomes the org only when
+            // it already carries the org's name (D69 intent: the user named
+            // the folder); otherwise the org is a NEW subfolder named for the
+            // org inside the picked location.
+            const { slugify } = await import(new URL('../../workspace/lib/slug.js', import.meta.url).href)
+            const nameSlug = slugify(nm)
+            const pickedSlug = slugify(path.basename(expanded))
+            if (nameSlug === '' || nameSlug === 'untitled') {
+              return json(res, { ok: false, error: 'org name has no slug: ' + nm, action })
+            }
+            const target = pickedSlug === nameSlug ? expanded : path.join(expanded, nameSlug)
             // Typed paths may not exist yet — create, then let the D36 rules
             // validate (same precedent as the workspace.root verb).
-            fs.mkdirSync(expanded, { recursive: true })
+            fs.mkdirSync(target, { recursive: true })
             shell ??= await importShell().catch(() => null)
             if (typeof shell?.scaffoldOrg !== 'function') {
               return json(res, { ok: false, seam: SEAM_LIFECYCLE_STUBBED, error: 'shell-unavailable', action })
             }
             let created
             try {
-              created = shell.scaffoldOrg(expanded, nm) // throws typed: bad folder / double scaffold
+              created = shell.scaffoldOrg(target, nm) // throws typed: bad folder / double scaffold
             } catch (e) {
               return json(res, { ok: false, error: String(e?.message ?? e), action })
             }

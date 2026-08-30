@@ -531,7 +531,7 @@
 			const onSelect = (id) => {
 				setMenuOpen(false);
 				if (id === "open") orgStore.mutate("org.open", { orgId: d.orgId }).catch(() => {});
-				else if (id === "publish") orgStore.mutate("github.publish", { orgId: d.orgId }).catch(() => {});
+				else if (id === "publish") window.dispatchEvent(new CustomEvent("arxa-publish-org", { detail: { orgId: d.orgId, orgName: d.label || d.orgId } }));
 				else if (id === "close") orgStore.mutate("org.close", {}).catch(() => {});
 				else if (id === "trash") orgStore.toggleTrash();
 			};
@@ -906,6 +906,86 @@
 				] })
 			});
 		}
+		/** D77 publish modal (the PLATO lesson): publish used to be a swallowed
+		 * mutate — `.catch(() => {})` meant confirm/loading/success/error never
+		 * existed and a refused publish looked like nothing happened. The org
+		 * menu now dispatches "arxa-publish-org"; OrgBrowser owns the open
+		 * conversation (same component-local pattern as OrgCreateModal — store
+		 * emits here would re-render the slot mid-flight) and THIS modal runs
+		 * the phases: confirm → busy → done | error. ORG_POST, not mutate:
+		 * mutate discards the response body, and the publish result carries
+		 * ok/reason/repoUrl/projects that every phase needs to name WHY. */
+		function OrgPublishModal({ t, target, onClose }) {
+			const [phase, setPhase] = (0, react.useState)("confirm");
+			const [result, setResult] = (0, react.useState)(null);
+			const [errMsg, setErrMsg] = (0, react.useState)(null);
+			(0, react.useEffect)(() => {
+				setPhase("confirm"); setResult(null); setErrMsg(null);
+			}, [target]);
+			if (!target) return null;
+			const dismiss = () => { if (phase !== "busy") onClose(); };
+			const reasonText = (reason) => {
+				const r = String(reason || "");
+				if (r.indexOf("initial-snapshot-pending") === 0) return t("publish.errPending");
+				if (r === "not-linked" || r === "linked-required") return t("publish.errNotLinked");
+				if (r === "github-unavailable") return t("publish.errUnavailable");
+				return r || t("publish.errGeneric");
+			};
+			const confirm = () => {
+				setPhase("busy"); setErrMsg(null);
+				ORG_POST("github.publish", { orgId: target.orgId }).then((b) => {
+					const res = b && b.result;
+					if (res && res.ok) { setResult(res); setPhase("done"); orgStore.refresh(); }
+					else { setErrMsg(reasonText(res && res.reason)); setPhase("error"); }
+				}, (e) => {
+					setErrMsg(reasonText(e instanceof Error ? e.message : String(e))); setPhase("error");
+				});
+			};
+			const openExternal = (url) => (e) => {
+				e.preventDefault();
+				fetch("/__arxa/sidebar/open-external", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url }) });
+			};
+			const projects = (result && result.projects) || [];
+			const allSkipped = result && result.skipped === "published" && projects.every((p) => p.ok && p.skipped === "published");
+			const linkStyle = { color: "var(--dsw-alias-text-link, #6ea8fe)", cursor: "pointer" };
+			const footer = (phase === "done" || phase === "error") ? (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+				phase === "done" && result && result.repoUrl ? (0, react_jsx_runtime.jsx)("a", { href: result.repoUrl, onClick: openExternal(result.repoUrl), style: { ...linkStyle, fontSize: 13, marginRight: "auto" }, children: t("publish.openOnGithub") }) : null,
+				(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "primary", onClick: onClose, children: t("publish.close") })
+			] }) : (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+				(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "outline", onClick: dismiss, children: t("publish.cancel") }),
+				(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "primary", disabled: phase !== "confirm", onClick: confirm, children: phase === "busy" ? t("publish.busyCta") : t("publish.confirmCta") })
+			] });
+			return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Modal, {
+				open: true,
+				onClose: dismiss,
+				closeLabel: t("publish.cancel"),
+				title: t("publish.title"),
+				footer,
+				children: (0, react_jsx_runtime.jsxs)("div", { children: [
+					phase === "confirm" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 14, fontWeight: 600, marginBottom: 8 }, children: target.orgName }),
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75 }, children: t("publish.confirmDesc") })
+					] }),
+					phase === "busy" && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75 }, children: t("publish.busy") }),
+					phase === "done" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, fontWeight: 600, marginBottom: 10 }, children: allSkipped ? t("publish.already") : t("publish.done") }),
+						result && result.repoUrl ? (0, react_jsx_runtime.jsxs)("div", { style: { fontSize: 12, marginBottom: 8 }, children: [
+							result.slug || target.orgName, " — ",
+							(0, react_jsx_runtime.jsx)("a", { href: result.repoUrl, onClick: openExternal(result.repoUrl), style: linkStyle, children: result.repoUrl })
+						] }) : null,
+						projects.map((p, i) => (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: p.ok ? 0.85 : 1, marginTop: 4 }, children: (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+							p.slug, " — ",
+							p.ok ? (0, react_jsx_runtime.jsx)("a", { href: p.repoUrl, onClick: openExternal(p.repoUrl), style: linkStyle, children: p.repoUrl }) : (0, react_jsx_runtime.jsx)("span", { style: { color: "var(--dsw-alias-text-critical, #e5534b)" }, children: reasonText(p.reason) })
+						] }) }, p.slug + ":" + i))
+					] }),
+					phase === "error" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, fontWeight: 600, marginBottom: 8, color: "var(--dsw-alias-text-critical, #e5534b)" }, children: t("publish.errTitle") }),
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.85 }, children: errMsg }),
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.5, marginTop: 8 }, children: target.orgName })
+					] })
+				] })
+			});
+		}
 		/** Welcome gate (D69): with no organisation in recents the app IS a
 		 * blank page with one clickable card — covering any stray dsh-home
 		 * sessions the stock boot may restore. Creating the first org (or
@@ -950,10 +1030,21 @@
 			// Create-org conversation lives HERE (local state, event-triggered by
 			// the spliced + flow) — see OrgCreateModal for why it must not emit.
 			const [creating, setCreating] = (0, react.useState)(false);
+			/** D77: the publish conversation rides the same pattern — the menu
+			 * row dispatches, this boundary holds { orgId, orgName } | null. */
+			const [publishing, setPublishing] = (0, react.useState)(null);
 			(0, react.useEffect)(() => {
 				const open = () => setCreating(true);
+				const onPublish = (e) => {
+					const d = (e && e.detail) || {};
+					if (d && d.orgId) setPublishing({ orgId: String(d.orgId), orgName: String(d.orgName || d.orgId) });
+				};
 				window.addEventListener("arxa-create-org", open);
-				return () => window.removeEventListener("arxa-create-org", open);
+				window.addEventListener("arxa-publish-org", onPublish);
+				return () => {
+					window.removeEventListener("arxa-create-org", open);
+					window.removeEventListener("arxa-publish-org", onPublish);
+				};
 			}, []);
 			// CTA gate lives here now (always mounted) — see useSessionCtaGate.
 			useSessionCtaGate(props.t);
@@ -963,7 +1054,8 @@
 					!creating && (0, react_jsx_runtime.jsx)(WelcomeGate, { t: props.t }),
 					(0, react_jsx_runtime.jsx)(WorkspaceBrowser, patched),
 				(0, react_jsx_runtime.jsx)(TrashSection, { t: props.t }),
-					(0, react_jsx_runtime.jsx)(OrgCreateModal, { t: props.t, createWorkspace: props.createWorkspace, open: creating, onClose: () => setCreating(false) })
+					(0, react_jsx_runtime.jsx)(OrgCreateModal, { t: props.t, createWorkspace: props.createWorkspace, open: creating, onClose: () => setCreating(false) }),
+					(0, react_jsx_runtime.jsx)(OrgPublishModal, { t: props.t, target: publishing, onClose: () => setPublishing(null) })
 				]
 			});
 		}
@@ -1042,6 +1134,21 @@
 			"menu.org.close": "Close organisation",
 			"menu.org.newProject": "New project",
 			"menu.org.publish": "Publish to GitHub",
+			"publish.title": "Publish to GitHub",
+			"publish.confirmDesc": "Creates one private GitHub repo for this organisation and one per project, then pushes the full commit history. Session branches stay local.",
+			"publish.confirmCta": "Publish",
+			"publish.busyCta": "Publishing…",
+			"publish.busy": "Publishing… first publish can take a moment while history is pushed.",
+			"publish.done": "Published to GitHub",
+			"publish.already": "Already published — everything is up to date",
+			"publish.openOnGithub": "Open on GitHub",
+			"publish.close": "Close",
+			"publish.cancel": "Cancel",
+			"publish.errTitle": "Publish failed",
+			"publish.errGeneric": "The publish failed — try again.",
+			"publish.errNotLinked": "GitHub isn\u2019t linked. Create an organisation and sign in with GitHub first, then publish again.",
+			"publish.errUnavailable": "The GitHub link is unavailable right now — try again in a moment.",
+			"publish.errPending": "The first git snapshot of this organisation is still running — publishing unlocks the moment it completes.",
 		};
 		const zhOver = {
 			"section.workspaces": "组织",
@@ -1113,5 +1220,20 @@
 			"menu.org.close": "关闭组织",
 			"menu.org.newProject": "新建项目",
 			"menu.org.publish": "发布到 GitHub",
+			"publish.title": "发布到 GitHub",
+			"publish.confirmDesc": "为该组织及其每个项目各创建一个私有 GitHub 仓库，并推送完整提交历史。会话分支保留在本地。",
+			"publish.confirmCta": "发布",
+			"publish.busyCta": "发布中…",
+			"publish.busy": "正在发布…首次推送历史可能需要一些时间。",
+			"publish.done": "已发布到 GitHub",
+			"publish.already": "已发布过 — 一切都是最新的",
+			"publish.openOnGithub": "在 GitHub 中打开",
+			"publish.close": "关闭",
+			"publish.cancel": "取消",
+			"publish.errTitle": "发布失败",
+			"publish.errGeneric": "发布失败 — 请重试。",
+			"publish.errNotLinked": "GitHub 未连接。请先创建组织并使用 GitHub 登录，然后再发布。",
+			"publish.errUnavailable": "GitHub 连接暂时不可用 — 请稍后重试。",
+			"publish.errPending": "该组织的首次 git 快照仍在进行中 — 完成后即可发布。",
 		};
 		//#endregion

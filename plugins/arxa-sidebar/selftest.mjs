@@ -63,10 +63,10 @@ check('rows: window.prompt is gone (Tauri WKWebView never implements it)', !clie
 check('rows: location field opens the OS folder locator (Tauri dialog when injected, host osascript locator otherwise)',
   client.includes('window.__TAURI__.dialog') && client.includes('directory: true') && client.includes('pick-folder'))
 check('host: macOS folder locator route exists', hostSrc().includes('choose folder') && hostSrc().includes('pick-folder'))
-check('rows: first-run creates the org IN the picked folder (D69 supersedes D36)',
+check('rows: first-run scaffolds into the picked folder or a subfolder named for the org (D77 supersedes in-place D69 — the PLATO incident)',
   client.includes('"org.create-at"') && (() => {
     const hostSrc = readFileSync(join(here, 'lib', 'index.js'), 'utf8')
-    return hostSrc.includes("action === 'org.create-at'") && hostSrc.includes('shell.scaffoldOrg(expanded, nm)')
+    return hostSrc.includes("action === 'org.create-at'") && hostSrc.includes('shell.scaffoldOrg(target, nm)')
   })())
 check('rows: org-level session creation is impossible (v2, grilled 2026-08-30) — the legacy + path is gone client AND host', !client.includes('\"org.new-session\"') && !hostSrc().includes("'org.new-session':"))
 check('rows: OrgSection block deleted', !client.includes('OrgSection'))
@@ -279,6 +279,24 @@ check('github: org menu carries the Publish row (en + zh)',
   client.includes('"github.publish"') && client.includes('menu.org.publish'))
 check('github: publish label localized',
   client.includes('"menu.org.publish": "Publish to GitHub"') && client.includes('"menu.org.publish": "发布到 GitHub"'))
+
+// ---- D77 (the PLATO incident): publish silence + placement trap ----
+// The menu's publish row used to fire-and-forget (mutate().catch(() => {})):
+// a refused publish (no HEAD, not linked) looked like NOTHING happened, and
+// the create modal's location semantics made a volume ROOT the org (git init
+// over the whole disk). Pin the redirect and the modal phase machine.
+check('create-at: org scaffolds into picked/<org-name> unless the folder already carries the name (D77)',
+  hostSrc().includes('const target = pickedSlug === nameSlug ? expanded : path.join(expanded, nameSlug)'))
+check('create-at: the redirect reuses the real slugify (no drift from D41 slugs)',
+  hostSrc().includes("import(new URL('../../workspace/lib/slug.js', import.meta.url).href)"))
+check('create-at: an org name with no slug fails loud before any disk write',
+  hostSrc().includes("'org name has no slug: '"))
+check('publish: the menu row dispatches the modal event (no swallowed mutate)',
+  client.includes('"arxa-publish-org"') && !client.includes('orgStore.mutate("github.publish"'))
+check('publish: modal runs the phase machine over the publish result',
+  client.includes('function OrgPublishModal') && client.includes('ORG_POST("github.publish"') && client.includes('initial-snapshot-pending'))
+check('publish: modal localized (en + zh)',
+  client.includes('"publish.confirmCta": "Publish"') && client.includes('"publish.confirmCta": "发布"'))
 
 console.log(failures === 0 ? '\narxa-sidebar selftest: ALL GREEN' : `\narxa-sidebar selftest: ${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)
