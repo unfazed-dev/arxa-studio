@@ -453,7 +453,7 @@
 				for (const d of tree.docks) {
 					if (d.workspace) continue;
 					emit[o.id + "|" + d.slug] = [{ kind: "dock", orgId: o.id, key: o.id + "|" + d.slug, depth: 1, label: orgT("tree.dock." + d.slug), slug: d.slug, count: d.slug === "projects" ? countUnder("projects") : countUnder(d.slug), ...(d.slug === "projects" ? { plus: "project" } : {}) }];
-					if (d.slug === "projects") for (const p of tree.projects || []) emit[o.id + "|projects/" + p.slug] = [{ kind: "project", orgId: o.id, key: o.id + "|projects/" + p.slug, depth: 2, label: p.name, count: countUnder("projects/" + p.slug) }];
+					if (d.slug === "projects") for (const p of tree.projects || []) emit[o.id + "|projects/" + p.slug] = [{ kind: "project", orgId: o.id, key: o.id + "|projects/" + p.slug, depth: 2, label: p.name, slug: p.slug, count: countUnder("projects/" + p.slug) }];
 				}
 			}
 			return emit;
@@ -532,18 +532,26 @@
 			const isOrg = d.kind === "org";
 			const open = !!expandedMap[d.key];
 			const [menuOpen, setMenuOpen] = (0, react.useState)(false);
+			// D80: BOTH row kinds carry a menu. The org menu gains Rename (and
+			// loses Trash — the always-visible Trash row replaces it); the project
+			// menu is Rename + Trash (local-only, restorable).
 			const items = isOrg ? [
+				{ id: "rename", label: orgT("menu.org.rename") },
 				{ id: "open", label: orgT("menu.org.open"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) },
 				{ id: "publish", label: orgT("menu.org.publish"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) },
-				{ id: "close", label: orgT("menu.org.close"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}), danger: true },
-				{ id: "trash", label: orgT("menu.trash"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}) }
-			] : [];
+				{ id: "close", label: orgT("menu.org.close"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}), danger: true }
+			] : [
+				{ id: "rename", label: orgT("menu.project.rename") },
+				{ id: "trash", label: orgT("menu.project.trash"), danger: true }
+			];
 			const onSelect = (id) => {
 				setMenuOpen(false);
 				if (id === "open") orgStore.mutate("org.open", { orgId: d.orgId }).catch(() => {});
 				else if (id === "publish") window.dispatchEvent(new CustomEvent("arxa-publish-org", { detail: { orgId: d.orgId, orgName: d.label || d.orgId } }));
 				else if (id === "close") orgStore.mutate("org.close", {}).catch(() => {});
-				else if (id === "trash") orgStore.toggleTrash();
+				else if (id === "rename" && isOrg) window.dispatchEvent(new CustomEvent("arxa-rename-org", { detail: { orgId: d.orgId, orgName: d.label || "" } }));
+				else if (id === "rename") window.dispatchEvent(new CustomEvent("arxa-rename-project", { detail: { orgId: d.orgId, projectSlug: d.slug, projectName: d.label || "" } }));
+				else if (id === "trash") orgStore.mutate("project.trash", { orgId: d.orgId, projectSlug: d.slug }).catch(() => {});
 			};
 			return (0, react_jsx_runtime.jsxs)("div", {
 				className: clsx(Rows_module_css_default.projectRow, menuOpen && Rows_module_css_default.menuOpen),
@@ -600,7 +608,7 @@
 								},
 								children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconPlusOutline16, {})
 							}),
-							isOrg && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {
+							(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {
 							open: menuOpen,
 							onClose: () => {
 								setMenuOpen(false);
@@ -625,40 +633,52 @@
 			}, d.key);
 		}
 		function TrashSection({ t }) {
-			// Cached face — a fresh selector object per call would loop #185.
+			// D80: the trash is a PERMANENT, discoverable row — hairline divider
+			// on top, count badge, expandable restore list. Visible (dimmed) even
+			// when empty: the org menu trash toggle is gone; this row is the one door.
 			const view = useOrg((s) => s.trashView);
-			const rows = view.rows;
-			if (rows.length === 0 || !view.open) return null;
+			const rows = view.rows || [];
+			const [open, setOpen] = (0, react.useState)(false);
 			const restore = (entryId) => {
 				orgStore.mutate("trash.restore", { entryId }).catch(() => {});
 			};
 			return (0, react_jsx_runtime.jsxs)("div", {
-				style: { padding: "0 4px 8px" },
+				style: { borderTop: "1px solid var(--dsw-alias-border-l2, rgba(255,255,255,0.08))", marginTop: 8, padding: "6px 4px 8px", opacity: rows.length === 0 ? 0.45 : 1 },
 				children: [
-					(0, react_jsx_runtime.jsx)("div", {
-						style: { fontSize: 11, opacity: 0.55, textTransform: "uppercase", letterSpacing: "0.04em", padding: "4px 4px 2px" },
-						children: t("trash.section") + " (" + rows.length + ")"
+					(0, react_jsx_runtime.jsxs)("div", {
+						role: "button",
+						tabIndex: 0,
+						onClick: () => setOpen((v) => !v),
+						onKeyDown: (e) => { if (e.key === "Enter" || e.key === " ") setOpen((v) => !v); },
+						style: { display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 6, cursor: "pointer" },
+						children: [
+							(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}),
+							(0, react_jsx_runtime.jsx)("span", { style: { fontSize: 13, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: t("trash.section") }),
+							rows.length > 0 && (0, react_jsx_runtime.jsx)("span", { style: { fontSize: 11, opacity: 0.7, border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 8, padding: "0 6px" }, children: String(rows.length) }),
+							(0, react_jsx_runtime.jsx)("span", { style: { fontSize: 10, opacity: 0.6, display: "inline-block", transform: open ? "rotate(90deg)" : "none", transition: "transform 120ms ease" }, children: "▶" })
+						]
 					}),
-					rows.map((e) => (0, react_jsx_runtime.jsxs)("div", {
+					open && rows.length === 0 && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.55, padding: "4px 8px 2px" }, children: t("trash.empty") }),
+					open && rows.map((e) => (0, react_jsx_runtime.jsxs)("div", {
 						className: clsx(Rows_module_css_default.sessionRow, Rows_module_css_default.flatSessionRowWithoutStatus),
 						style: { paddingLeft: 12 },
 						children: [
 							(0, react_jsx_runtime.jsx)("span", {
-								style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13 },
-								title: e.entryId,
-								children: e.name
+							style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13 },
+							title: e.entryId,
+							children: e.name
 							}),
 							(0, react_jsx_runtime.jsx)("button", {
-								onClick: () => restore(e.entryId),
-								style: { border: "1px solid var(--dsw-alias-border-l2)", background: "transparent", color: "inherit", borderRadius: 6, fontSize: 11, padding: "1px 6px", cursor: "pointer", flex: "none" },
-								children: t("trash.restore")
+							onClick: () => restore(e.entryId),
+							style: { border: "1px solid var(--dsw-alias-border-l2)", background: "transparent", color: "inherit", borderRadius: 6, fontSize: 11, padding: "1px 6px", cursor: "pointer", flex: "none" },
+							children: t("trash.restore")
 							})
 						]
 					}, e.entryId)),
-					(0, react_jsx_runtime.jsx)("button", {
-						onClick: () => restore(null),
-						style: { marginTop: 4, border: "1px solid var(--dsw-alias-border-l2)", background: "transparent", color: "inherit", borderRadius: 6, fontSize: 11, padding: "2px 8px", cursor: "pointer" },
-						children: t("trash.restoreAll")
+					open && rows.length > 0 && (0, react_jsx_runtime.jsx)("button", {
+					onClick: () => restore(null),
+					style: { marginTop: 4, marginLeft: 12, border: "1px solid var(--dsw-alias-border-l2)", background: "transparent", color: "inherit", borderRadius: 6, fontSize: 11, padding: "2px 8px", cursor: "pointer" },
+					children: t("trash.restoreAll")
 					})
 				]
 			});
@@ -1068,6 +1088,72 @@
 				] })
 			});
 		}
+		/** D80 (grilled): rename is a FULL MOVE — folder + manifest +
+		 * sessions + the GitHub repo PATCH, pre-flighted synchronously.
+		 * Same phase machine as create/publish; repoRenamePending is the
+		 * net for post-move failures (the next heal finishes the ride). */
+		function OrgRenameModal({ t, target, onClose }) {
+			const [name, setName] = (0, react.useState)("",);
+			const [phase, setPhase] = (0, react.useState)("input");
+			const [errMsg, setErrMsg] = (0, react.useState)(null);
+			const [renamed, setRenamed] = (0, react.useState)(null);
+			const nameRef = (0, react.useRef)(null);
+			(0, react.useEffect)(() => {
+				setName(target ? String(target.currentName || "") : ""); setPhase("input"); setErrMsg(null); setRenamed(null);
+				if (target && nameRef.current) window.setTimeout(() => { try { nameRef.current.focus(); nameRef.current.select(); } catch {} }, 50);
+			}, [target]);
+			if (!target) return null;
+			const dismiss = () => { if (phase !== "busy") onClose(); };
+			const submit = () => {
+				const n = name.trim();
+				if (n === "" || n === target.currentName || phase === "busy") return;
+				setPhase("busy"); setErrMsg(null);
+				const call = target.kind === "org"
+					? ORG_POST("org.rename", { orgId: target.orgId, name: n })
+					: ORG_POST("project.rename", { orgId: target.orgId, projectSlug: target.projectSlug, name: n });
+				call.then((b) => {
+					setRenamed((b && b.result) || {});
+					setPhase("done");
+					orgStore.refresh();
+				}, (e) => {
+					const msg = e instanceof Error ? e.message : String(e);
+					setErrMsg(msg === "linked-required" ? t("project.errNotLinked") : msg);
+					setPhase("input");
+				});
+			};
+			const field = { width: "100%", boxSizing: "border-box", fontSize: 13, padding: "6px 8px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 6, background: "transparent", color: "inherit" };
+			const footer = (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+				(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "outline", onClick: dismiss, children: phase === "done" ? t("rename.close") : t("publish.cancel") }),
+				phase !== "done" && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "primary", disabled: name.trim() === "" || name.trim() === target.currentName || phase === "busy", onClick: submit, children: phase === "busy" ? t("rename.busy") : t("rename.cta") })
+			] });
+			return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Modal, {
+				open: true,
+				onClose: dismiss,
+				closeLabel: t("publish.cancel"),
+				title: target.kind === "org" ? t("rename.orgTitle") : t("rename.projectTitle"),
+				footer,
+				children: (0, react_jsx_runtime.jsxs)("div", { children: [
+					phase !== "done" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.55, marginBottom: 4 }, children: t("rename.nameLabel") }),
+						(0, react_jsx_runtime.jsx)("input", {
+						ref: nameRef,
+						value: name,
+						onChange: (e) => setName(e.target.value),
+						onKeyDown: (e) => { if (e.key === "Enter") submit(); },
+						style: field
+						}),
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.55, marginTop: 8 }, children: target.kind === "org" ? t("rename.orgNote") : t("rename.projectNote") }),
+						phase === "busy" && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginTop: 10 }, children: t("rename.busy") }),
+						errMsg && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, color: "var(--dsw-alias-text-critical, #e5534b)", marginTop: 10 }, children: errMsg })
+					] }),
+					phase === "done" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, fontWeight: 600, marginBottom: 8 }, children: t("rename.done") }),
+						renamed && renamed.slug && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75 }, children: renamed.slug }),
+						renamed && renamed.manifest && renamed.manifest.repoUrl && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginTop: 6 }, children: renamed.manifest.repoUrl })
+					] })
+				] })
+			});
+		}
 		/** Welcome gate (D69): with no organisation in recents the app IS a
 		 * blank page with one clickable card — covering any stray dsh-home
 		 * sessions the stock boot may restore. Creating the first org (or
@@ -1117,6 +1203,8 @@
 			 * D78: the same for named project creation (the Projects dock +). */
 			const [publishing, setPublishing] = (0, react.useState)(null);
 			const [creatingProject, setCreatingProject] = (0, react.useState)(null);
+			// D80: the rename conversation — { kind, orgId, projectSlug?, currentName } | null.
+			const [renaming, setRenaming] = (0, react.useState)(null);
 			(0, react.useEffect)(() => {
 				const open = () => setCreating(true);
 				const onPublish = (e) => {
@@ -1130,10 +1218,22 @@
 				window.addEventListener("arxa-create-org", open);
 				window.addEventListener("arxa-publish-org", onPublish);
 				window.addEventListener("arxa-create-project", onCreateProject);
+				const onRenameOrg = (e) => {
+					const d = (e && e.detail) || {};
+					if (d && d.orgId) setRenaming({ kind: "org", orgId: String(d.orgId), currentName: String(d.orgName || d.orgId) });
+				};
+				const onRenameProject = (e) => {
+					const d = (e && e.detail) || {};
+					if (d && d.orgId && d.projectSlug) setRenaming({ kind: "project", orgId: String(d.orgId), projectSlug: String(d.projectSlug), currentName: String(d.projectName || d.projectSlug) });
+				};
+				window.addEventListener("arxa-rename-org", onRenameOrg);
+				window.addEventListener("arxa-rename-project", onRenameProject);
 				return () => {
 					window.removeEventListener("arxa-create-org", open);
 					window.removeEventListener("arxa-publish-org", onPublish);
 					window.removeEventListener("arxa-create-project", onCreateProject);
+				window.removeEventListener("arxa-rename-org", onRenameOrg);
+				window.removeEventListener("arxa-rename-project", onRenameProject);
 				};
 			}, []);
 			// CTA gate lives here now (always mounted) — see useSessionCtaGate.
@@ -1146,7 +1246,8 @@
 				(0, react_jsx_runtime.jsx)(TrashSection, { t: props.t }),
 					(0, react_jsx_runtime.jsx)(OrgCreateModal, { t: props.t, createWorkspace: props.createWorkspace, open: creating, onClose: () => setCreating(false) }),
 					(0, react_jsx_runtime.jsx)(OrgPublishModal, { t: props.t, target: publishing, onClose: () => setPublishing(null) }),
-					(0, react_jsx_runtime.jsx)(OrgProjectModal, { t: props.t, target: creatingProject, onClose: () => setCreatingProject(null) })
+					(0, react_jsx_runtime.jsx)(OrgProjectModal, { t: props.t, target: creatingProject, onClose: () => setCreatingProject(null) }),
+				(0, react_jsx_runtime.jsx)(OrgRenameModal, { t: props.t, target: renaming, onClose: () => setRenaming(null) })
 				]
 			});
 		}
@@ -1156,6 +1257,19 @@
 			"workspace.add": "New organisation…",
 			"menu.addWorkspace": "New organisation…",
 			"menu.trash": "Trash",
+			"menu.org.rename": "Rename…",
+			"menu.project.rename": "Rename…",
+			"menu.project.trash": "Move to Trash",
+			"trash.empty": "Trash is empty",
+			"rename.orgTitle": "Rename organisation",
+			"rename.projectTitle": "Rename project",
+			"rename.nameLabel": "New name",
+			"rename.cta": "Rename",
+			"rename.busy": "Renaming — moving the folder and syncing GitHub…",
+			"rename.done": "Renamed",
+			"rename.close": "Close",
+			"rename.orgNote": "The organisation folder and its GitHub repo are renamed together.",
+			"rename.projectNote": "The project folder and its GitHub repo are renamed together."
 			"trash.section": "Trash",
 			"trash.restore": "Restore",
 			"trash.restoreAll": "Restore all",
@@ -1256,6 +1370,19 @@
 			"workspace.add": "新建组织…",
 			"menu.addWorkspace": "新建组织…",
 			"menu.trash": "回收站",
+			"menu.org.rename": "重命名…",
+			"menu.project.rename": "重命名…",
+			"menu.project.trash": "移到废纸篓",
+			"trash.empty": "废纸篓是空的",
+			"rename.orgTitle": "重命名组织",
+			"rename.projectTitle": "重命名项目",
+			"rename.nameLabel": "新名称",
+			"rename.cta": "重命名",
+			"rename.busy": "正在重命名——移动目录并同步 GitHub…",
+			"rename.done": "已重命名",
+			"rename.close": "关闭",
+			"rename.orgNote": "组织文件夹与其 GitHub 仓库将一并重命名。",
+			"rename.projectNote": "项目文件夹与其 GitHub 仓库将一并重命名。"
 			"trash.section": "回收站",
 			"trash.restore": "恢复",
 			"trash.restoreAll": "全部恢复",

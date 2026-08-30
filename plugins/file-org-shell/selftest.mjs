@@ -600,6 +600,72 @@ try {
     }
   }
 
+  // ---- D80: project rename rides GitHub (grilled 2026-08-30) --------------
+  console.log('project rename rides GitHub (D80):')
+  {
+    const rRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-rename-gh-'))
+    const bareRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-rename-bare-'))
+    const bareFor = (name) => {
+      const p = path.join(bareRoot, name + '.git')
+      runGit(['init', '--bare', p], { cwd: bareRoot, env })
+      return p
+    }
+    const createdRenames = []
+    try {
+      const svcR = createOrgLifecycle({
+        workspaceRoot: rRoot,
+        env,
+        github: {
+          status: async () => ({ linked: true, login: 'octocat' }),
+          createPrivateRepo: async (name) => ({ name, full_name: 'octocat/' + name, private: true, html_url: bareFor(name), owner: { login: 'octocat' } }),
+          renameRepo: async (owner, name, newName) => {
+            createdRenames.push(name + '->' + newName)
+            return { name: newName, full_name: owner + '/' + newName, private: true, html_url: bareFor(newName), owner: { login: owner } }
+          },
+          repoNameTaken: async (owner, name) => name === 'Taken',
+          gitCredentials: async () => ({ login: 'octocat', token: 'test-token' }),
+        },
+      })
+      const orgR = svcR.createOrg('Rename GH')
+      await svcR.openOrg(orgR.path)
+      const p1 = await svcR.current.newProject('Patcher')
+      ok(p1.slug === 'Patcher', 'D80: fixture project keeps its case (create)')
+      // (a) linked rename: PATCH + canonical URL + origin, no pending flag.
+      const ren1 = await svcR.renameProject(orgR.path, 'Patcher', 'Patcher Two')
+      ok(ren1.slug === 'Patcher-Two' && ren1.manifest.repoUrl === bareFor('Patcher-Two'), 'D80: linked rename PATCHes GitHub and adopts the canonical URL')
+      ok(ren1.repoRenamePending === false, 'D80: no pending flag when the PATCH lands')
+      ok(createdRenames.includes('Patcher->Patcher-Two'), 'D80: the PATCH carried the old and new names')
+      ok(runGit(['remote', 'get-url', 'origin'], { cwd: ren1.path, env }) === bareFor('Patcher-Two'), 'D80: origin rewired to the canonical URL')
+      ok(runGit(['status', '--porcelain'], { cwd: ren1.path, env }).trim() === '', 'D80: manifest change committed (clean tree)')
+      // (b) pre-flight: a GitHub-taken name aborts BEFORE the move.
+      await assert.rejects(() => svcR.renameProject(orgR.path, 'Patcher-Two', 'Taken'), /already taken/)
+      ok(fs.existsSync(path.join(orgR.path, 'projects', 'Patcher-Two')), 'D80: taken name aborts with the project untouched')
+      svcR.closeOrg()
+      // (c) pending net: an unlinked lifecycle renames — flag recorded.
+      const svcNo = createOrgLifecycle({ workspaceRoot: rRoot, env })
+      await svcNo.openOrg(orgR.path)
+      const ren2 = await svcNo.renameProject(orgR.path, 'Patcher-Two', 'Patcher Three')
+      ok(ren2.repoRenamePending === true, 'D80: unlinked rename records repoRenamePending (the net)')
+      svcNo.closeOrg()
+      // (d) heal consumes the flag: linked open PATCHes to the folder slug.
+      createdRenames.length = 0
+      await svcR.openOrg(orgR.path)
+      await svcR.current.githubHeal // the heal is DETACHED at open — await it before reading (D74 contract)
+      const pm80 = JSON.parse(fs.readFileSync(path.join(orgR.path, 'projects', 'Patcher-Three', 'project.json'), 'utf8'))
+      ok(!pm80.repoRenamePending && pm80.repoName === 'Patcher-Three' && pm80.repoUrl === bareFor('Patcher-Three'), 'D80: heal consumes the pending flag (canonical URL, flag cleared)')
+      ok(createdRenames.includes('Patcher-Two->Patcher-Three'), 'D80: heal PATCHed the old name to the folder slug')
+      // (e) case-only rename straight through the machinery.
+      await svcR.current.newProject('Kappa')
+      const ren3 = await svcR.renameProject(orgR.path, 'Kappa', 'KAPPA')
+      ok(ren3.slug === 'KAPPA' && fs.existsSync(path.join(orgR.path, 'projects', 'KAPPA')), 'D80: case-only rename lands (internal two-hop)')
+      svcR.closeOrg()
+    } finally {
+      fs.rmSync(rRoot, { recursive: true, force: true })
+      fs.rmSync(bareRoot, { recursive: true, force: true })
+    }
+  }
+
+
   console.log(`\nfile-org-shell selftest: ${passed} checks passed`)
 } finally {
   fs.rmSync(root, { recursive: true, force: true })

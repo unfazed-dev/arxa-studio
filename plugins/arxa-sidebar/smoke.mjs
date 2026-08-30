@@ -209,6 +209,26 @@ check('rows-c: both sessions registered under their workspaces with real timesta
   JSON.stringify(rcSessions))
 r = await act('workspace.new-session', { orgId: rc.id, workspace: 'notes/nope' })
 check('rows-c: unknown workspace is loud', r.ok === false && String(r.error).startsWith('unknown-workspace'), JSON.stringify(r))
+
+// D80: full-move rename through the action — folder + manifest + rekey;
+// session workspaces rekey to the new slug.
+r = await act('project.rename', { orgId: rc.id, projectSlug: 'rocket', name: 'Rocket Pool' })
+check('rows-c: project.rename ok (D80 full move, case preserved)', r.ok === true && r.result?.slug === 'Rocket-Pool', JSON.stringify(r))
+s = await state()
+const renamedTree = s.orgs.find((o) => o.open).tree
+check('rows-c: renamed project serves under the new slug with its containers',
+  renamedTree.projects.some((p) => p.slug === 'Rocket-Pool' && p.containers.length === 10), JSON.stringify(renamedTree.projects))
+r = await act('workspace.new-session', { orgId: rc.id, workspace: 'projects/Rocket-Pool/01-intake' })
+check('rows-c: session under the renamed slug parses (D79 keys)', r.ok === true && r.result?.project === 'Rocket-Pool', JSON.stringify(r))
+// D80: project.trash parks the renamed project in the org trash (local-only).
+r = await act('project.trash', { orgId: rc.id, projectSlug: 'Rocket-Pool' })
+check('rows-c: project.trash ok', r.ok === true, JSON.stringify(r))
+s = await state()
+check('rows-c: trash row data served after park', s.trash.length === 1 && s.trash[0].name === 'Rocket-Pool', JSON.stringify(s.trash))
+r = await act('trash.restore', { entryId: null })
+check('rows-c: restore-all brings the project back', r.ok === true, r.error)
+s = await state()
+check('rows-c: trash empty after restore-all', s.trash.length === 0 && s.trashCount === 0, JSON.stringify(s.trash))
 r = await act('workspace.new-session', { orgId: rc.id })
 check('rows-c: missing workspace is loud', r.ok === false && r.error === 'workspace-required', JSON.stringify(r))
 

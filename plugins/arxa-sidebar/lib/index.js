@@ -588,6 +588,26 @@ export function apply(ctx, opts = {}) {
               const cur = arg?.orgId ? await ensureOpen(arg.orgId) : handle()
               return cur.newProject(typeof arg?.name === 'string' ? arg.name : '')
             },
+            'project.rename': async () => {
+              // D80: FULL-MOVE rename (grilled 2026-08-30) — folder +
+              // manifest + session rekeys + the GitHub repo PATCH,
+              // pre-flighted synchronously; any post-move failure rides
+              // repoRenamePending and the next heal finishes it.
+              const cur = await ensureOpen(arg?.orgId)
+              if (typeof arg?.projectSlug !== 'string' || arg.projectSlug.trim() === '' ||
+                  typeof arg?.name !== 'string' || arg.name.trim() === '') {
+                throw new Error('project-slug-and-name-required')
+              }
+              return l.renameProject(cur.path, arg.projectSlug, arg.name)
+            },
+            'project.trash': async () => {
+              // D80: local-only soft delete (restorable in the Trash row).
+              const cur = await ensureOpen(arg?.orgId)
+              if (typeof arg?.projectSlug !== 'string' || arg.projectSlug.trim() === '') {
+                throw new Error('project-slug-required')
+              }
+              return cur.trashProject(arg.projectSlug)
+            },
             'session.open': async () => {
               const cur = await ensureOpen(arg?.orgId)
               return cur.resumeSession(arg?.sessionId)

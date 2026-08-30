@@ -41,6 +41,7 @@ import {
   validateWorkspaceRoot,
   listTrash,
   restoreFromTrash,
+  softDelete,
   renameInManifest,
   readManifest,
   writeManifest,
@@ -234,6 +235,31 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       try {
         const creds = await githubBridge.gitCredentials()
         if (creds && creds.ok) {
+          // D80: consume a pending rename BEFORE the sync push — PATCH the
+          // repo to the folder's current slug, adopt the canonical URL,
+          // clear the flag, commit the manifest, then push (which now lands
+          // on the new name). A failed PATCH keeps the flag, annotates loud,
+          // and falls through: the old URL still redirects, nothing lost.
+          if (manifest.repoRenamePending && manifest.repoOwner) {
+            const target = path.basename(repoPath)
+            const made = await githubBridge.renameRepo(manifest.repoOwner, manifest.repoName || target, target)
+            if (made.ok) {
+              const fresh = readManifest(manifestFile)
+              fresh.repoUrl = made.repo.repoUrl
+              fresh.repoName = target
+              fresh.githubStatus = 'published'
+              delete fresh.repoRenamePending
+              writeManifest(manifestFile, fresh)
+              commitManifest()
+              manifest.repoUrl = made.repo.repoUrl
+              manifest.repoName = target
+              manifest.repoRenamePending = undefined
+              try { setOrigin(repoPath, made.repo.repoUrl, env) } catch { /* best-effort */ }
+              pushRepo(repoPath, pushUrlFor(made.repo.repoUrl, creds), env)
+              return { ok: true, skipped: 'published', slug, repoUrl: made.repo.repoUrl }
+            }
+            annotate({ githubStatus: 'publish-failed: repo rename failed: ' + String(made.error ?? made.reason ?? 'unknown') + ' — pending flag kept' })
+          }
           pushRepo(repoPath, pushUrlFor(manifest.repoUrl, creds), env)
         }
       } catch (err) {
@@ -516,6 +542,16 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
         trashCount() {
           return listTrash(resolved).length // org-local trash: <org>/.arxa/trash
         },
+        trashProject(projectSlug) {
+          // D80 project menu: a trashed project parks in the ORG trash
+          // (restorable). The GitHub repo is deliberately untouched —
+          // Trash is LOCAL by contract (grilled 2026-08-30); repo deletion
+          // stays a CLI-side act and is never faked here.
+          const hit = [...scanWorkspace(resolved).projects.values()]
+            .find((p) => p.orgId === opened.manifest.id && p.slug === projectSlug)
+          if (!hit) throw new Error('unknown-project: ' + projectSlug)
+          return softDelete(resolved, hit.path, { env })
+        },
         /** Initial-snapshot face (2025-08 create-org hang): true until the
         * detached first git snapshot lands HEAD. The rows client disables
         * session creation and says why while this is true. */
@@ -760,11 +796,36 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       indexRenameOrg(oldPath, oldPath, displayName) // per-org index (D69)
       return { path: oldPath, slug: oldSlug, manifest, moved: false }
     }
-    if (fs.existsSync(newPath)) {
+    // D80: case-only renames hop through a temp name (same directory on
+    // case-insensitive filesystems); every other collision stays an error.
+    const caseOnly = newSlug.toLowerCase() === oldSlug.toLowerCase()
+    if (!caseOnly && fs.existsSync(newPath)) {
       throw new Error('renameOrg: destination already exists: ' + newPath)
     }
+    // D80: pre-flight the GitHub rename BEFORE the move — a taken name
+    // aborts with the org untouched; unverifiable degrades to the net.
+    const ghManifest = readManifest(orgManifestPath(oldPath))
+    const st80 = await githubBridge.status()
+    const linked80 = Boolean(st80.ok && st80.linked)
+    let ride80 = 'none'
+    if (ghManifest.repoUrl) {
+      ride80 = linked80 && ghManifest.repoOwner ? 'patch' : 'pending'
+      if (ride80 === 'patch') {
+        const taken = await githubBridge.repoNameTaken(ghManifest.repoOwner, newSlug)
+        if (taken.ok && taken.taken) {
+          throw new Error('renameOrg: GitHub repo name already taken: ' + ghManifest.repoOwner + '/' + newSlug)
+        }
+        if (!taken.ok) ride80 = 'pending'
+      }
+    }
 
-    fs.renameSync(oldPath, newPath)
+    if (caseOnly) {
+      const tmpPath = oldPath + '-case-tmp'
+      fs.renameSync(oldPath, tmpPath)
+      fs.renameSync(tmpPath, newPath)
+    } else {
+      fs.renameSync(oldPath, newPath)
+    }
     try {
       // Worktrees register ABSOLUTE paths; after the folder move each one
       // needs an explicit repair (bare 'worktree repair' fatals on the
@@ -793,7 +854,41 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
         } catch { /* best-effort */ }
         await openOrg(newPath) // … and re-open on the new path
       }
-      return { path: newPath, slug: newSlug, manifest, moved: true }
+      // D80: ride the GitHub rename now that the move succeeded — failure
+      // lands in repoRenamePending (the heal consumes it), never in a
+      // thrown-away local move.
+      let originUpdated80 = false
+      let pending80 = false
+      if (ride80 !== 'none') {
+        const fields = {}
+        if (ride80 === 'patch') {
+          const made = await githubBridge.renameRepo(ghManifest.repoOwner, ghManifest.repoName || oldSlug, newSlug)
+          if (made.ok) {
+            fields.repoUrl = made.repo.repoUrl
+            fields.repoName = newSlug
+            fields.githubStatus = 'published'
+            try {
+              setOrigin(newPath, made.repo.repoUrl, env)
+              originUpdated80 = true
+            } catch { /* canonical URL recorded in the manifest */ }
+          } else {
+            fields.repoRenamePending = true
+          }
+        } else {
+          fields.repoRenamePending = true
+        }
+        if (Object.keys(fields).length > 0) {
+          pending80 = fields.repoRenamePending === true
+          annotateOrgManifest(newPath, fields)
+          try {
+            runGit(['add', 'org.json'], { cwd: newPath, env, allowFail: true })
+            runGit(['commit', '-m', 'rename: ' + oldSlug + ' to ' + newSlug, '--', 'org.json'], { cwd: newPath, env, allowFail: true })
+          } catch { /* best-effort — the annotation lesson (D78) */ }
+        }
+      }
+      let finalManifest = manifest
+      try { finalManifest = readManifest(orgManifestPath(newPath)) } catch { /* keep the pre-ride read */ }
+      return { path: newPath, slug: newSlug, manifest: finalManifest, moved: true, originUpdated: originUpdated80, repoRenamePending: pending80 }
     } catch (err) {
       // All-or-nothing (D72): put the folder AND the manifest back, then
       // re-open the handle at the old path (best-effort — the org was open
@@ -838,40 +933,90 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     if (!fs.existsSync(manifestFile)) throw new Error('unknown-project: ' + oldSlug)
     const newSlug = slugify(newName)
     const newPath = path.join(org, 'projects', newSlug)
-    if (newSlug !== oldSlug && fs.existsSync(newPath)) {
+    // D80: a case-only rename (polo → POLO) resolves onto the SAME
+    // directory on case-insensitive filesystems — the plain guard would
+    // refuse it. It is legal, handled by the internal two-hop below.
+    const caseOnly = newSlug.toLowerCase() === oldSlug.toLowerCase() && newSlug !== oldSlug
+    if (newSlug !== oldSlug && !caseOnly && fs.existsSync(newPath)) {
       throw new Error('renameProject: destination already exists: ' + newPath)
     }
 
     const manifest = readManifest(manifestFile)
     const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    fs.renameSync(oldPath, newPath)
+    // D80: resolve the GitHub side BEFORE the local move — a taken name
+    // aborts here and leaves the project untouched. An unverifiable check
+    // (unlinked / unavailable face) degrades to the pending net, never a
+    // silent go.
+    const st = await githubBridge.status()
+    const linked = Boolean(st.ok && st.linked)
+    const hasRepo = Boolean(manifest.repoUrl)
+    let ride = 'none' // 'patch' | 'pending' | 'none'
+    if (hasRepo && newSlug !== oldSlug) {
+      ride = linked && manifest.repoOwner ? 'patch' : 'pending'
+      if (ride === 'patch') {
+        const taken = await githubBridge.repoNameTaken(manifest.repoOwner, newSlug)
+        if (taken.ok && taken.taken) {
+          throw new Error('renameProject: GitHub repo name already taken: ' + manifest.repoOwner + '/' + newSlug)
+        }
+        if (!taken.ok) ride = 'pending'
+      }
+    }
+    let originUpdated = false
+    if (newSlug !== oldSlug) {
+      if (caseOnly) {
+        const tmpPath = path.join(org, 'projects', oldSlug + '-case-tmp')
+        fs.renameSync(oldPath, tmpPath)
+        fs.renameSync(tmpPath, newPath)
+      } else {
+        fs.renameSync(oldPath, newPath)
+      }
+    }
     try {
       manifest.name = newName
       manifest.slug = newSlug
-      const pending = Boolean(manifest.repoUrl)
-      if (pending) manifest.repoRenamePending = true
+      if (hasRepo && newSlug !== oldSlug) {
+        if (ride === 'patch') {
+          const made = await githubBridge.renameRepo(manifest.repoOwner, manifest.repoName || oldSlug, newSlug)
+          if (made.ok) {
+            manifest.repoUrl = made.repo.repoUrl
+            manifest.repoName = newSlug
+            delete manifest.repoRenamePending
+            manifest.githubStatus = 'published'
+            try {
+              setOrigin(newPath, made.repo.repoUrl, env)
+              originUpdated = true
+            } catch { /* best-effort: the canonical URL is in the manifest */ }
+          } else {
+            manifest.repoRenamePending = true // the heal ride PATCHes it (D80 net)
+          }
+        } else {
+          manifest.repoRenamePending = true
+          if (linked && manifest.repoOwner) {
+            try {
+              setOrigin(
+                newPath,
+                manifest.repoUrl.replace(new RegExp('/' + esc(oldSlug) + '(\\\\.git)?$'), '/' + newSlug),
+                env,
+              )
+              originUpdated = true
+            } catch { /* the heal ride owns the remote rename */ }
+          }
+        }
+      }
       writeManifest(projectManifestPath(newPath), manifest)
+      // D78 annotation lesson: commit the manifest the moment it changes —
+      // dirty project repos would fail the next open's clean-tree gate.
+      try {
+        runGit(['add', 'project.json'], { cwd: newPath, env, allowFail: true })
+        runGit(['commit', '-m', 'rename: ' + oldSlug + ' to ' + newSlug, '--', 'project.json'], { cwd: newPath, env, allowFail: true })
+      } catch { /* best-effort — the manifest edit still stands */ }
 
       let rekeyed = 0
       try {
         rekeyed = rekeySessionsProject(org, oldSlug, newSlug, env)
       } catch { /* registry optional — no sessions yet is a normal state */ }
 
-      let originUpdated = false
-      if (pending && manifest.repoOwner) {
-        const st = await githubBridge.status()
-        if (st.ok && st.linked) {
-          try {
-            setOrigin(
-              newPath,
-              manifest.repoUrl.replace(new RegExp('/' + esc(oldSlug) + '(\\.git)?$'), '/' + newSlug),
-              env,
-            )
-            originUpdated = true
-          } catch { /* best-effort: the PATCH ride owns the remote rename */ }
-        }
-      }
-      return { path: newPath, slug: newSlug, manifest, rekeyed, originUpdated, repoRenamePending: pending }
+      return { path: newPath, slug: newSlug, manifest, rekeyed, originUpdated, repoRenamePending: manifest.repoRenamePending === true }
     } catch (err) {
       fs.renameSync(newPath, oldPath) // all-or-nothing (D72)
       throw err

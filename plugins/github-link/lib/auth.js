@@ -289,3 +289,48 @@ export async function createPrivateRepoApi({ name, accessToken, fetch = globalTh
   if (!res.ok) throw new Error('github-link: repo creation failed (' + res.status + ')')
   return res.json()
 }
+
+/**
+ * PATCH /repos/{owner}/{repo} - rename a repository (D80). The response
+ * carries the canonical full_name (GitHub preserves case); 403/404 mean
+ * the token or the repo is out of reach. Old names keep working via
+ * GitHub's redirects, but callers must adopt the returned canonical name.
+ */
+export async function renameRepoApi({ owner, name, newName, accessToken, fetch = globalThis.fetch, apiBase = defaultApiBase() } = {}) {
+  if (!owner || !name || !newName) throw new Error('github-link: rename needs owner, repo name and new name')
+  if (!accessToken) throw new Error('github-link: not linked (link before renaming)')
+  const res = await fetch(new URL('/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(name), apiBase), {
+    method: 'PATCH',
+    headers: {
+      'content-type': 'application/json',
+      accept: 'application/vnd.github+json',
+      authorization: 'Bearer ' + accessToken,
+      'user-agent': 'arxa-studio',
+    },
+    body: JSON.stringify({ name: newName }),
+  })
+  if (!res.ok) throw new Error('github-link: repo rename failed (' + res.status + ')')
+  return res.json()
+}
+
+/**
+ * Pre-flight for renames (D80): is `newName` free under `owner`?
+ *   404 -> available (true); 200/301 -> taken (false, 301 covers renames
+ *   that GitHub still redirects); other statuses throw - an unverifiable
+ *   name is an error, never a silent go.
+ */
+export async function repoNameAvailableApi({ owner, name, accessToken, fetch = globalThis.fetch, apiBase = defaultApiBase() } = {}) {
+  if (!owner || !name) throw new Error('github-link: name check needs owner and repo name')
+  if (!accessToken) throw new Error('github-link: not linked (link before renaming)')
+  const res = await fetch(new URL('/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(name), apiBase), {
+    method: 'GET',
+    headers: {
+      accept: 'application/vnd.github+json',
+      authorization: 'Bearer ' + accessToken,
+      'user-agent': 'arxa-studio',
+    },
+  })
+  if (res.status === 404) return true
+  if (res.ok || res.status === 301) return false
+  throw new Error('github-link: repo name check failed (' + res.status + ')')
+}

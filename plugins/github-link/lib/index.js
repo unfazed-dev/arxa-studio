@@ -13,7 +13,7 @@ import { getClientId, defaultApiBase, defaultTokenBase, linkViaBrowser, linkViaD
 import { createKeyring } from './keyring.js'
 import { readState, writeState, clearState } from './state.js'
 
-export { SCOPES, createPkcePair, pkceChallenge, getClientId, loadClientId, linkViaBrowser, linkViaDevice, createPrivateRepoApi } from './auth.js'
+export { SCOPES, createPkcePair, pkceChallenge, getClientId, loadClientId, linkViaBrowser, linkViaDevice, createPrivateRepoApi, renameRepoApi, repoNameAvailableApi } from './auth.js'
 export { createKeyring, KEYCHAIN_SERVICE, SECURITY_PATH } from './keyring.js'
 export { readState, writeState, clearState, statePath, arxaHome } from './state.js'
 
@@ -198,6 +198,28 @@ export function createGithubLink({
     }
   }
 
+  /** Rename a repository under the linked account (D80). Returns the
+    * canonical repo JSON — callers adopt full_name verbatim. */
+  async function renameRepo(owner, name, newName) {
+    const accessToken = await getToken()
+    try {
+      return await renameRepoApi({ owner, name, newName, accessToken, fetch, apiBase })
+    } catch (err) {
+      // A revoked/rotated token can 401 while the clock says alive — one
+      // forced refresh + one retry before giving up (mirrors D76).
+      if (!String(err?.message ?? err).includes('(401)')) throw err
+      return renameRepoApi({ owner, name, newName, accessToken: await getToken(true), fetch, apiBase })
+    }
+  }
+
+  /** Pre-flight (D80): is `name` free under `owner`? Throws when the
+    * check cannot be answered — an unverifiable name is an error, never
+    * a silent go. */
+  async function repoNameTaken(owner, name) {
+    const accessToken = await getToken()
+    return !(await repoNameAvailableApi({ owner, name, accessToken, fetch, apiBase }))
+  }
+
   /**
    * Credentials for git-over-HTTPS pushes (D73): { login, token } for the
    * linked account. The token NEVER leaves this call chain except into the
@@ -222,6 +244,8 @@ export function createGithubLink({
     unlink,
     status,
     createPrivateRepo,
+    renameRepo,
+    repoNameTaken,
     gitCredentials,
     deviceCode,
   }

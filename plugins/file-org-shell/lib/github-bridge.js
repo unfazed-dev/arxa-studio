@@ -51,6 +51,31 @@ export function createGithubBridge(faces = {}) {
     }
   }
 
+  /** Rename a repo (D80): { ok:true, repo } | { ok:false, reason }.
+    * Canonical repo JSON lands in `repo` — callers adopt full_name. */
+  async function renameRepo(owner, name, newName) {
+    if (typeof f.renameRepo !== 'function') return { ok: false, reason: 'github-unavailable' }
+    try {
+      const repo = normalizeRepo(await f.renameRepo(owner, name, newName))
+      return repo ? { ok: true, repo } : { ok: false, reason: 'github-unavailable' }
+    } catch (err) {
+      return { ok: false, reason: 'rename-failed', error: String(err?.message ?? err) }
+    }
+  }
+
+  /** Pre-flight (D80): { ok:true, taken:boolean } | { ok:false, reason }.
+    * An unavailable face must BLOCK the rename, not wave it through:
+    * ok:false means 'cannot rename now' — callers keep the local move
+    * and let the pending ride finish it. */
+  async function repoNameTaken(owner, name) {
+    if (typeof f.repoNameTaken !== 'function') return { ok: false, reason: 'github-unavailable' }
+    try {
+      return { ok: true, taken: Boolean(await f.repoNameTaken(owner, name)) }
+    } catch (err) {
+      return { ok: false, reason: 'name-check-failed', error: String(err?.message ?? err) }
+    }
+  }
+
   /** → { ok:true, login, token } | { ok:false, reason } — throw-proof
     * (D73): the push half needs HTTPS credentials; an unavailable face
     * degrades exactly like the others. The token is handed ONLY to the
@@ -68,7 +93,7 @@ export function createGithubBridge(faces = {}) {
     }
   }
 
-  return { status, createPrivateRepo, gitCredentials }
+  return { status, createPrivateRepo, renameRepo, repoNameTaken, gitCredentials }
 }
 
 /**

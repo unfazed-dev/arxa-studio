@@ -315,5 +315,19 @@ check('project create: modal sends the typed name through project.create',
 check('project create: modal localized (en + zh)',
   client.includes('"project.create": "Create project"') && client.includes('"project.create": "创建项目"'))
 
+// ---- D80: row menus, the rename ride, the Trash row ----
+check('menus: both row kinds carry the kebab (the org-only gate is gone)',
+  client.includes('(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {') && !client.includes('isOrg && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu'))
+check('menus: org Rename + project Rename/Trash items',
+  client.includes('"menu.org.rename"') && client.includes('"menu.project.rename"') && client.includes('"menu.project.trash"') && !client.includes('id: "trash", label: orgT("menu.trash")'))
+check('rename: the modal drives org.rename and project.rename',
+  client.includes('function OrgRenameModal') && client.includes('ORG_POST("org.rename"') && client.includes('ORG_POST("project.rename"'))
+check('rename: events wired both directions',
+  client.includes('"arxa-rename-org"') && client.includes('"arxa-rename-project"') && client.includes('window.addEventListener("arxa-rename-org", onRenameOrg)') && client.includes('window.addEventListener("arxa-rename-project", onRenameProject)'))
+check('trash: a permanent divider row with count badge + empty state (en + zh)',
+  client.includes('function TrashSection') && client.includes('borderTop: "1px solid var(--dsw-alias-border-l2') && client.includes('"trash.empty": "Trash is empty"') && client.includes('"trash.empty": "废纸篓是空的"') && !client.includes('if (rows.length === 0 || !view.open) return null;'))
+check('routes: project.rename drives the full-move machinery; project.trash parks locally',
+  hostSrc().includes("'project.rename'") && hostSrc().includes('l.renameProject(cur.path, arg.projectSlug, arg.name)') && hostSrc().includes("'project.trash'") && hostSrc().includes('cur.trashProject(arg.projectSlug)'))
+
 console.log(failures === 0 ? '\narxa-sidebar selftest: ALL GREEN' : `\narxa-sidebar selftest: ${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)
