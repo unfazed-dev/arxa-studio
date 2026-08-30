@@ -472,7 +472,6 @@ try {
     // publishes at open with pushed history; a second publish is a loud
     // idempotent skip. (orgA was already published by (a)'s heal — the
     // fixture org carries the proof that heal runs on EVERY open.)
-    const orgBare = bareFor('healcheck')
     const hRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-heal-org-'))
     const svcHeal = createOrgLifecycle({
       workspaceRoot: hRoot,
@@ -480,12 +479,19 @@ try {
       github: {
         status: async () => ({ linked: true, login: 'octocat' }),
         createPrivateRepo: async (name) => ({
-          name, full_name: 'octocat/' + name, private: true, html_url: orgBare, owner: { login: 'octocat' },
+          name, full_name: 'octocat/' + name, private: true, html_url: bareFor(name), owner: { login: 'octocat' },
         }),
         gitCredentials: async () => ({ login: 'octocat', token: 'test-token' }),
       },
     })
     const orgHeal = svcHeal.createOrg('Heal Corp')
+    // A PRE-D73 project: created while unlinked (annotated github-unavailable),
+    // so the linked heal must retrofit it alongside the org repo.
+    const svcPre = createOrgLifecycle({ workspaceRoot: hRoot, env })
+    await svcPre.openOrg(orgHeal.path)
+    await svcPre.current.newProject('Pre Existing')
+    svcPre.closeOrg()
+    const orgBare = bareFor('heal-corp')
     await svcHeal.openOrg(orgHeal.path)
     const healRes = await svcHeal.current.githubHeal
     ok(healRes?.ok === true && healRes.repoUrl === orgBare, 'D74 heal: open-time detached publish resolves ok with the repo url')
@@ -494,6 +500,12 @@ try {
     ok(
       runGit(['rev-parse', '--verify', 'main'], { cwd: orgBare, env, allowFail: true }) !== null,
       'D74 heal: org history reached the remote (main on the bare)',
+    )
+    const healedProj = healRes.projects?.find((x) => x.slug === 'pre-existing')
+    ok(healedProj?.ok === true, 'D74 heal: existing projects retrofit on the same pass')
+    ok(
+      runGit(['rev-parse', '--verify', 'main'], { cwd: bareFor('pre-existing'), env, allowFail: true }) !== null,
+      'D74 heal: project history pushed (pre-existing main on its bare)',
     )
     const again = await svcHeal.current.publishGithub()
     ok(again.ok === true && again.skipped === 'published', 'D74 manual publish: idempotent skip when already published')

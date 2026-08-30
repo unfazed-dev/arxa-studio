@@ -171,6 +171,27 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
   }
 
   /**
+   * D74 heal face: the org repo, THEN every existing project under it —
+   * projects created before D73 (or while unlinked) retrofit on the same
+   * idempotent pass. Each project is independent: one failure annotates
+   * its own manifest and never blocks the others.
+   */
+  async function publishOrgAndProjects(orgPath, orgSlug) {
+    const orgRes = await publishRepoOnce(orgPath, orgSlug, 'org')
+    let orgId = null
+    try {
+      orgId = readManifest(orgManifestPath(orgPath)).id
+    } catch { /* unreadable org manifest — no project scoping possible */ }
+    const projectResults = []
+    if (orgId) {
+      for (const p of [...scanWorkspace(orgPath).projects.values()].filter((x) => x.orgId === orgId)) {
+        projectResults.push({ slug: p.slug, ...(await publishRepoOnce(p.path, p.slug, 'project')) })
+      }
+    }
+    return { ...orgRes, projects: projectResults }
+  }
+
+  /**
    * Idempotent publish of ONE repo (org root or nested project). Skips
    * when the manifest already carries repoUrl (published). Reuses an
    * existing origin from an earlier partial publish; creates the private
@@ -396,7 +417,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
             await new Promise((resolveTick) => setTimeout(resolveTick, 250))
           }
           if (!hasHead(resolved, env)) return { ok: false, reason: 'initial-snapshot-pending' }
-          return await publishRepoOnce(resolved, slug, 'org')
+          return await publishOrgAndProjects(resolved, slug)
         } catch {
           /* publish is throw-proof by contract — this is belt-and-braces */
         }
@@ -423,7 +444,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
             return { ok: false, reason: 'initial-snapshot-pending: the first git snapshot of this organisation is still running — publishing unlocks the moment it completes' }
           }
           try { await githubHeal } catch { /* throw-proof */ }
-          return publishRepoOnce(resolved, slug, 'org')
+          return publishOrgAndProjects(resolved, slug)
         },
         // ---- contract faces (Phase B, docs/plans/file-org-shell-integration.md):
         // the sidebar consumes projects / parked sessions / trash and the
