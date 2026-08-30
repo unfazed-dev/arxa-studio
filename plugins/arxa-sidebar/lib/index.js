@@ -280,6 +280,12 @@ export function apply(ctx, opts = {}) {
         entryId: e.entryId,
         name: (e.origin?.originalPath ?? e.entryId).replace(/[/\\]+$/, '').split('/').pop() || e.entryId,
       })) : [],
+      // D81: orgs trashed whole (workspace-root trash) — restore or purge
+      // (GitHub repos deleted) from the Trash row.
+      orgTrash: (l.listOrgTrash ? l.listOrgTrash() : []).map((e) => ({
+        entryId: e.entryId,
+        name: (e.origin?.slug ?? e.entryId),
+      })),
       selectedProject: selSlug,
     }
   }
@@ -599,6 +605,17 @@ export function apply(ctx, opts = {}) {
                 throw new Error('project-slug-and-name-required')
               }
               return l.renameProject(cur.path, arg.projectSlug, arg.name)
+            },
+            'org.trash': () => l.trashOrg(orgByRef(arg?.orgId).path),
+            'orgtrash.restore': () => l.restoreOrg(arg?.entryId),
+            'orgtrash.purge': async () => {
+              if (typeof arg?.entryId !== 'string' || arg.entryId.trim() === '') throw new Error('entry-id-required')
+              return l.purgeOrgTrash(arg.entryId)
+            },
+            'projecttrash.purge': async () => {
+              if (typeof arg?.entryId !== 'string' || arg.entryId.trim() === '') throw new Error('entry-id-required')
+              const cur = handle()
+              return cur.purgeTrash(arg.entryId)
             },
             'project.trash': async () => {
               // D80: local-only soft delete (restorable in the Trash row).

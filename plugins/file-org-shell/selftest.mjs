@@ -604,6 +604,9 @@ try {
   console.log('project rename rides GitHub (D80):')
   {
     const rRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-rename-gh-'))
+    // home isolation: restoreOrg touches the REAL recents unless ARXA_HOME
+    // points at a sandbox (measured: CI polluted ~/.arxa/organisation.json)
+    const env = { ...process.env, ARXA_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-home-gh-')) }
     const bareRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-rename-bare-'))
     const bareFor = (name) => {
       const p = path.join(bareRoot, name + '.git')
@@ -661,6 +664,64 @@ try {
       svcR.closeOrg()
     } finally {
       fs.rmSync(rRoot, { recursive: true, force: true })
+      fs.rmSync(bareRoot, { recursive: true, force: true })
+    }
+  }
+
+
+  // ---- D81: the org itself is trashable; purge deletes the remotes -------
+  console.log('org trash + purge (D81):')
+  {
+    const tRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-orgtrash-'))
+    const env = { ...process.env, ARXA_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-home-ot-')) }
+    const bareRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-orgtrash-bare-'))
+    const bareFor = (name) => {
+      const p = path.join(bareRoot, name + '.git')
+      runGit(['init', '--bare', p], { cwd: bareRoot, env })
+      return p
+    }
+    const deletedRepos = []
+    let refuseDeletes = false
+    try {
+      const svcT = createOrgLifecycle({
+        workspaceRoot: tRoot,
+        env,
+        github: {
+          status: async () => ({ linked: true, login: 'octocat' }),
+          createPrivateRepo: async (name) => ({ name, full_name: 'octocat/' + name, private: true, html_url: bareFor(name), owner: { login: 'octocat' } }),
+          deleteRepo: async (owner, name) => {
+            if (refuseDeletes) throw new Error('github-link: repo deletion refused (403) — re-link')
+            deletedRepos.push(owner + '/' + name)
+            return { deleted: true }
+          },
+          gitCredentials: async () => ({ login: 'octocat', token: 'test-token' }),
+        },
+      })
+      const orgT = svcT.createOrg('Trash Me')
+      await svcT.openOrg(orgT.path)
+      await svcT.current.newProject('Inner')
+      svcT.closeOrg()
+      // trash the ORG itself through the real API (writes the index)
+      const trashed = svcT.trashOrg(orgT.path)
+      ok(svcT.listOrgTrash().some((e) => e.entryId === trashed.entryId && e.name === 'Trash-Me'), 'D81: trashed org listed in the org-trash index')
+
+      // purge refusal when GitHub deletes are refused (403 posture)
+      refuseDeletes = true
+      await assert.rejects(() => svcT.purgeOrgTrash(trashed.entryId), /purge incomplete/)
+      ok(fs.existsSync(trashed.entryPath), 'D81: refused purge keeps the trash entry')
+      refuseDeletes = false
+      // real purge: both repos deleted, then the folder
+      const res = await svcT.purgeOrgTrash(trashed.entryId)
+      ok(res.deletedRepos.includes('octocat/Trash-Me') && res.deletedRepos.includes('octocat/Inner'), 'D81: purge deletes the org repo AND each published project repo')
+      ok(!fs.existsSync(trashed.entryPath), 'D81: purge hard-deletes the trashed folder')
+      // restore path: trash another org and restore it back
+      const org2 = svcT.createOrg('Restore Me')
+      const t2e = svcT.trashOrg(org2.path)
+      const res2 = svcT.restoreOrg(t2e.entryId)
+      ok(fs.existsSync(res2.restoredPath) && path.basename(res2.restoredPath) === 'Restore-Me', 'D81: restore puts the trashed org back at its origin')
+      if (svcT.current) svcT.closeOrg()
+    } finally {
+      fs.rmSync(tRoot, { recursive: true, force: true })
       fs.rmSync(bareRoot, { recursive: true, force: true })
     }
   }

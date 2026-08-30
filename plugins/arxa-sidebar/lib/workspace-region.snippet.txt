@@ -636,17 +636,28 @@
 			}, d.key);
 		}
 		function TrashSection({ t }) {
-			// D80: the trash is a PERMANENT, discoverable row — hairline divider
-			// on top, count badge, expandable restore list. Visible (dimmed) even
-			// when empty: the org menu trash toggle is gone; this row is the one door.
+			// D80/D81: the trash is a PERMANENT, discoverable row. Two groups:
+			// trashed ORGANISATIONS (workspace-root trash) and the open org's
+			// trashed projects (org-local). Restore is always available;
+  			// Delete forever is the destructive door — it rides the confirmation
+			// modal and REALLY deletes the GitHub repos (grilled 2026-08-30).
 			const view = useOrg((s) => s.trashView);
+			const orgRows = useOrg((s) => s.orgTrash) || [];
 			const rows = view.rows || [];
+			const total = rows.length + orgRows.length;
 			const [open, setOpen] = (0, react.useState)(false);
 			const restore = (entryId) => {
 				orgStore.mutate("trash.restore", { entryId }).catch(() => {});
 			};
+			const restoreOrg = (entryId) => {
+				orgStore.mutate("orgtrash.restore", { entryId }).catch(() => {});
+			};
+			const purge = (scope, entryId, name) => {
+				window.dispatchEvent(new CustomEvent("arxa-purge-trash", { detail: { scope, entryId, name } }));
+			};
+			const entryBtn = (label, onClick, danger) => (0, react_jsx_runtime.jsx)("button", { onClick, style: { border: "1px solid var(--dsw-alias-border-l2)", background: "transparent", color: danger ? "var(--dsw-alias-text-critical, #e5534b)" : "inherit", borderRadius: 6, fontSize: 11, padding: "1px 6px", cursor: "pointer", flex: "none" } }, label);
 			return (0, react_jsx_runtime.jsxs)("div", {
-				style: { borderTop: "1px solid var(--dsw-alias-border-l2, rgba(255,255,255,0.08))", marginTop: 8, padding: "6px 4px 8px", opacity: rows.length === 0 ? 0.45 : 1 },
+				style: { borderTop: "1px solid var(--dsw-alias-border-l2, rgba(255,255,255,0.08))", marginTop: 8, padding: "6px 4px 8px", opacity: total === 0 ? 0.45 : 1 },
 				children: [
 					(0, react_jsx_runtime.jsxs)("div", {
 						role: "button",
@@ -657,32 +668,31 @@
 						children: [
 							(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}),
 							(0, react_jsx_runtime.jsx)("span", { style: { fontSize: 13, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: t("trash.section") }),
-							rows.length > 0 && (0, react_jsx_runtime.jsx)("span", { style: { fontSize: 11, opacity: 0.7, border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 8, padding: "0 6px" }, children: String(rows.length) }),
+							total > 0 && (0, react_jsx_runtime.jsx)("span", { style: { fontSize: 11, opacity: 0.7, border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 8, padding: "0 6px" }, children: String(total) }),
 							(0, react_jsx_runtime.jsx)("span", { style: { fontSize: 10, opacity: 0.6, display: "inline-block", transform: open ? "rotate(90deg)" : "none", transition: "transform 120ms ease" }, children: "▶" })
 						]
 					}),
-					open && rows.length === 0 && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.55, padding: "4px 8px 2px" }, children: t("trash.empty") }),
+					open && total === 0 && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.55, padding: "4px 8px 2px" }, children: t("trash.empty") }),
+					open && orgRows.length > 0 && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.55, textTransform: "uppercase", letterSpacing: "0.04em", padding: "6px 8px 2px" }, children: t("trash.orgSection") }),
+					open && orgRows.map((e) => (0, react_jsx_runtime.jsxs)("div", {
+						className: clsx(Rows_module_css_default.sessionRow, Rows_module_css_default.flatSessionRowWithoutStatus),
+						style: { paddingLeft: 12 },
+						children: [
+							(0, react_jsx_runtime.jsx)("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, flex: "1 1 auto" }, title: e.entryId, children: e.name }),
+							entryBtn(t("trash.restore"), () => restoreOrg(e.entryId)),
+							entryBtn(t("trash.deleteForever"), () => purge("org", e.entryId, e.name), true)
+						]
+					}, e.entryId)),
+					open && rows.length > 0 && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.55, textTransform: "uppercase", letterSpacing: "0.04em", padding: "6px 8px 2px" }, children: t("trash.projectSection") }),
 					open && rows.map((e) => (0, react_jsx_runtime.jsxs)("div", {
 						className: clsx(Rows_module_css_default.sessionRow, Rows_module_css_default.flatSessionRowWithoutStatus),
 						style: { paddingLeft: 12 },
 						children: [
-							(0, react_jsx_runtime.jsx)("span", {
-							style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13 },
-							title: e.entryId,
-							children: e.name
-							}),
-							(0, react_jsx_runtime.jsx)("button", {
-							onClick: () => restore(e.entryId),
-							style: { border: "1px solid var(--dsw-alias-border-l2)", background: "transparent", color: "inherit", borderRadius: 6, fontSize: 11, padding: "1px 6px", cursor: "pointer", flex: "none" },
-							children: t("trash.restore")
-							})
+							(0, react_jsx_runtime.jsx)("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, flex: "1 1 auto" }, title: e.entryId, children: e.name }),
+							entryBtn(t("trash.restore"), () => restore(e.entryId)),
+							entryBtn(t("trash.deleteForever"), () => purge("project", e.entryId, e.name), true)
 						]
 					}, e.entryId)),
-					open && rows.length > 0 && (0, react_jsx_runtime.jsx)("button", {
-					onClick: () => restore(null),
-					style: { marginTop: 4, marginLeft: 12, border: "1px solid var(--dsw-alias-border-l2)", background: "transparent", color: "inherit", borderRadius: 6, fontSize: 11, padding: "2px 8px", cursor: "pointer" },
-					children: t("trash.restoreAll")
-					})
 				]
 			});
 		}
@@ -1157,6 +1167,48 @@
 				] })
 			});
 		}
+		/** D81: the FINAL gate for Delete forever — the trash entry goes
+		 * away AND its GitHub repos are really deleted. The wording states
+		 * the blast radius; a 403 (token without delete_repo) surfaces the
+		 * re-link guidance verbatim. */
+		function OrgPurgeModal({ t, target, onClose }) {
+			const [phase, setPhase] = (0, react.useState)("confirm");
+			const [errMsg, setErrMsg] = (0, react.useState)(null);
+			const [done, setDone] = (0, react.useState)(false);
+			(0, react.useEffect)(() => { setPhase("confirm"); setErrMsg(null); setDone(false); }, [target]);
+			if (!target) return null;
+			const dismiss = () => { if (phase !== "busy") onClose(); };
+			const submit = () => {
+				if (phase === "busy") return;
+				setPhase("busy"); setErrMsg(null);
+				ORG_POST(target.scope === "org" ? "orgtrash.purge" : "projecttrash.purge", { entryId: target.entryId }).then(() => {
+					setDone(true); setPhase("done");
+					orgStore.refresh();
+				}, (e) => {
+					const msg = e instanceof Error ? e.message : String(e);
+					setErrMsg(msg); setPhase("confirm");
+				});
+			};
+			const footer = (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+				(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "outline", onClick: dismiss, children: phase === "done" ? t("purge.close") : t("publish.cancel") }),
+				phase !== "done" && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "primary", disabled: phase === "busy", onClick: submit, children: phase === "busy" ? t("purge.busy") : t("purge.confirm") })
+			] });
+			return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Modal, {
+				open: true,
+				onClose: dismiss,
+				closeLabel: t("publish.cancel"),
+				title: target.scope === "org" ? t("purge.orgTitle") : t("purge.projectTitle"),
+				footer,
+				children: (0, react_jsx_runtime.jsxs)("div", { children: [
+					phase !== "done" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, marginBottom: 8 }, children: target.name }),
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginBottom: 8 }, children: target.scope === "org" ? t("purge.orgWarn") : t("purge.projectWarn") }),
+						errMsg && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, color: "var(--dsw-alias-text-critical, #e5534b)", marginTop: 10 }, children: errMsg })
+					] }),
+					phase === "done" && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, fontWeight: 600 }, children: t("purge.done") })
+				] })
+			});
+		}
 		/** Welcome gate (D69): with no organisation in recents the app IS a
 		 * blank page with one clickable card — covering any stray dsh-home
 		 * sessions the stock boot may restore. Creating the first org (or
@@ -1208,6 +1260,8 @@
 			const [creatingProject, setCreatingProject] = (0, react.useState)(null);
 			// D80: the rename conversation — { kind, orgId, projectSlug?, currentName } | null.
 			const [renaming, setRenaming] = (0, react.useState)(null);
+			// D81: the purge conversation — { scope, entryId, name } | null.
+			const [purging, setPurging] = (0, react.useState)(null);
 			(0, react.useEffect)(() => {
 				const open = () => setCreating(true);
 				const onPublish = (e) => {
@@ -1231,12 +1285,18 @@
 				};
 				window.addEventListener("arxa-rename-org", onRenameOrg);
 				window.addEventListener("arxa-rename-project", onRenameProject);
+				const onPurge = (e) => {
+					const d = (e && e.detail) || {};
+					if (d && d.entryId) setPurging({ scope: String(d.scope || "project"), entryId: String(d.entryId), name: String(d.name || d.entryId) });
+				};
+				window.addEventListener("arxa-purge-trash", onPurge);
 				return () => {
 					window.removeEventListener("arxa-create-org", open);
 					window.removeEventListener("arxa-publish-org", onPublish);
 					window.removeEventListener("arxa-create-project", onCreateProject);
 				window.removeEventListener("arxa-rename-org", onRenameOrg);
 				window.removeEventListener("arxa-rename-project", onRenameProject);
+				window.removeEventListener("arxa-purge-trash", onPurge);
 				};
 			}, []);
 			// CTA gate lives here now (always mounted) — see useSessionCtaGate.
@@ -1250,7 +1310,8 @@
 					(0, react_jsx_runtime.jsx)(OrgCreateModal, { t: props.t, createWorkspace: props.createWorkspace, open: creating, onClose: () => setCreating(false) }),
 					(0, react_jsx_runtime.jsx)(OrgPublishModal, { t: props.t, target: publishing, onClose: () => setPublishing(null) }),
 					(0, react_jsx_runtime.jsx)(OrgProjectModal, { t: props.t, target: creatingProject, onClose: () => setCreatingProject(null) }),
-				(0, react_jsx_runtime.jsx)(OrgRenameModal, { t: props.t, target: renaming, onClose: () => setRenaming(null) })
+				(0, react_jsx_runtime.jsx)(OrgRenameModal, { t: props.t, target: renaming, onClose: () => setRenaming(null) }),
+				(0, react_jsx_runtime.jsx)(OrgPurgeModal, { t: props.t, target: purging, onClose: () => setPurging(null) })
 				]
 			});
 		}
@@ -1284,6 +1345,17 @@
 			"conflict.named": "An organisation named “{name}” already exists.",
 			"actions.workspace.aria": "Organisation actions for {name}",
 			"actions.project.aria": "Project actions for {name}",
+			"trash.orgSection": "Trashed organisations",
+			"trash.projectSection": "Trashed projects",
+			"trash.deleteForever": "Delete forever",
+			"purge.orgTitle": "Delete organisation forever?",
+			"purge.projectTitle": "Delete project forever?",
+			"purge.orgWarn": "This permanently deletes the organisation folder AND every GitHub repo it owns — the org repo and each published project repo. This cannot be undone.",
+			"purge.projectWarn": "This permanently deletes the trashed folder AND the project's GitHub repo. This cannot be undone.",
+			"purge.confirm": "Delete forever",
+			"purge.busy": "Deleting — removing the GitHub repos and the trashed folder…",
+			"purge.done": "Deleted forever",
+			"purge.close": "Close",
 			"groupBy.workspace": "Project",
 			"orderBy.manual": "As created",
 			"orderBy.updated": "Newest first",
@@ -1398,6 +1470,17 @@
 			"conflict.named": "已存在名为“{name}”的组织。",
 			"actions.workspace.aria": "{name} 的组织操作",
 			"actions.project.aria": "{name} 的项目操作",
+			"trash.orgSection": "已删除的组织",
+			"trash.projectSection": "已删除的项目",
+			"trash.deleteForever": "永久删除",
+			"purge.orgTitle": "永久删除该组织？",
+			"purge.projectTitle": "永久删除该项目？",
+			"purge.orgWarn": "这将永久删除组织文件夹及其拥有的所有 GitHub 仓库——组织仓库与每个已发布的项目仓库。此操作无法撤销。",
+			"purge.projectWarn": "这将永久删除废纸篓中的文件夹以及该项目的 GitHub 仓库。此操作无法撤销。",
+			"purge.confirm": "永久删除",
+			"purge.busy": "正在删除——正在移除 GitHub 仓库与废纸篓文件夹…",
+			"purge.done": "已永久删除",
+			"purge.close": "关闭",
 			"groupBy.workspace": "按项目",
 			"orderBy.manual": "按创建顺序",
 			"orderBy.updated": "最新在前",

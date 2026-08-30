@@ -42,6 +42,8 @@ import {
   listTrash,
   restoreFromTrash,
   softDelete,
+  hardDelete,
+  hardDeleteToken,
   renameInManifest,
   readManifest,
   writeManifest,
@@ -81,6 +83,7 @@ import {
   rekeySessionsProject,
 } from '../../git-workspace/lib/index.js'
 import { runGit } from '../../git-workspace/lib/index.js'
+import { arxaHome } from '../../workspace/lib/root.js'
 import { getTemplate, TEMPLATE_VERSION } from '../../workspace/lib/template.js'
 import { refreshAccountMirror, ensureAccountExcluded } from '../../account-mirror/lib/index.js'
 import { claimMaterializer, materialize, readEdits } from '../../cairn-rail/lib/index.js'
@@ -541,6 +544,29 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
         },
         trashCount() {
           return listTrash(resolved).length // org-local trash: <org>/.arxa/trash
+        },
+        async purgeTrash(entryId) {
+          // D81: hard delete of a trashed PROJECT — its GitHub repo goes
+          // first (linked required, loud refusal otherwise), then the D23
+          // token purge. The entry lives in THIS org's local trash.
+          const entry = listTrash(resolved).find((e) => e.entryId === entryId)
+          if (!entry) throw new Error('no-trash-entry: ' + entryId)
+          const st = await githubBridge.status()
+          if (!st.ok || !st.linked) {
+            throw new Error('linked-required: purging ' + entryId + ' must delete its GitHub repo, and GitHub is not linked — nothing was deleted')
+          }
+          let repo = null
+          if (entry.origin && entry.origin.slug) {
+            try {
+              const pm = readManifest(path.join(entry.entryPath, entry.origin.slug, 'project.json'))
+              if (pm && pm.repoUrl && pm.repoOwner) repo = { owner: pm.repoOwner, name: pm.repoName || entry.origin.slug }
+            } catch { /* damaged entry: purge locally, nothing remote to delete */ }
+          }
+          if (repo) {
+            const made = await githubBridge.deleteRepo(repo.owner, repo.name)
+            if (!made.ok) throw new Error('purge incomplete: GitHub deletion failed (' + (made.error || made.reason) + ') — the trash entry was kept')
+          }
+          return hardDelete(resolved, entryId, { confirm: hardDeleteToken(entryId) })
         },
         trashProject(projectSlug) {
           // D80 project menu: a trashed project parks in the ORG trash
@@ -1022,6 +1048,107 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       throw err
     }
   }
+  // ---- D81: the org itself is trashable. D69 in-place layout: the org
+  // folder IS its own workspace root, so the trash scope is the PARENT
+  // directory (<parent>/.arxa/trash, a scanner-skipped dot-dir) and a
+  // small index in ARXA_HOME tracks trashed orgs across parents.
+  function orgTrashIndexPath() {
+    return path.join(arxaHome(env), 'org-trash.json')
+  }
+  function readOrgTrashIndex() {
+    try { return JSON.parse(fs.readFileSync(orgTrashIndexPath(), 'utf8')) } catch { return [] }
+  }
+  function writeOrgTrashIndex(list) {
+    fs.mkdirSync(path.dirname(orgTrashIndexPath()), { recursive: true })
+    fs.writeFileSync(orgTrashIndexPath(), JSON.stringify(list, null, 2) + '\n')
+  }
+  /** Repos a trashed org owns: the org repo + each published project.
+   * Pure manifest reads inside the trash entry — no network. */
+  function orgTrashEntryRepos(entryPath) {
+    const repos = []
+    const slug = fs.readdirSync(entryPath).find((d) => fs.existsSync(path.join(entryPath, d, 'org.json')))
+    if (!slug) return repos
+    const orgDir = path.join(entryPath, slug)
+    const read = (p) => { try { return readManifest(p) } catch { return null } }
+    const om = read(path.join(orgDir, 'org.json'))
+    if (om && om.repoUrl && om.repoOwner) repos.push({ owner: om.repoOwner, name: om.repoName || slug, kind: 'org' })
+    const projectsDir = path.join(orgDir, 'projects')
+    for (const d of fs.existsSync(projectsDir) ? fs.readdirSync(projectsDir) : []) {
+      const pm = read(path.join(projectsDir, d, 'project.json'))
+      if (pm && pm.repoUrl && pm.repoOwner) repos.push({ owner: pm.repoOwner, name: pm.repoName || d, kind: 'project', project: d })
+    }
+    return repos
+  }
+
+  /** Move the org itself into its parent trash (D81). Local-only:
+   * GitHub repos are untouched — the trash is restorable by contract.
+   * Closes the open handle first (single open-handle contract). */
+  function trashOrg(orgPath) {
+    const resolved = path.resolve(orgPath)
+    if (!fs.existsSync(orgManifestPath(resolved))) throw new Error('unknown-org: ' + resolved)
+    if (current && current.path === resolved) closeOrg()
+    const scope = path.dirname(resolved)
+    const entry = softDelete(scope, resolved, { env })
+    const list = readOrgTrashIndex()
+    list.push({ entryId: entry.entryId, scope, name: path.basename(resolved), deletedAt: new Date().toISOString() })
+    writeOrgTrashIndex(list)
+    try { removeRecent(resolved) } catch { /* recents are advisory */ }
+    return { ...entry, scope }
+  }
+
+  /** Org-scope trash listing: index entries whose folder still exists. */
+  function listOrgTrash() {
+    return readOrgTrashIndex()
+      .map((e) => {
+        const entryPath = path.join(e.scope, '.arxa', 'trash', e.entryId)
+        return fs.existsSync(entryPath) ? { entryId: e.entryId, entryPath, name: e.name, scope: e.scope } : null
+      })
+      .filter(Boolean)
+  }
+
+  /** Restore a trashed org to its original path (collision = typed error). */
+  function restoreOrg(entryId) {
+    const rec = readOrgTrashIndex().find((e) => e.entryId === entryId)
+    if (!rec) throw new Error('no-trash-entry: ' + entryId)
+    const res = restoreFromTrash(rec.scope, entryId, { env })
+    writeOrgTrashIndex(readOrgTrashIndex().filter((e) => e.entryId !== entryId))
+    try { touchRecent(res.restoredPath, env) } catch { /* recents are advisory */ }
+    return res
+  }
+
+  /**
+   * Purge a trashed org (D81): delete every GitHub repo it owns (linked
+   * required — a 403 surfaces the re-link guidance) and only then hard
+   * delete the folder behind the D23 confirm token. ANY failed deletion
+   * keeps the entry and reports exactly what happened, so a partial
+   * purge is always loud and always retryable.
+   */
+  async function purgeOrgTrash(entryId) {
+    const rec = readOrgTrashIndex().find((e) => e.entryId === entryId)
+    if (!rec) throw new Error('no-trash-entry: ' + entryId)
+    const entryPath = path.join(rec.scope, '.arxa', 'trash', entryId)
+    const repos = orgTrashEntryRepos(entryPath)
+    const st = await githubBridge.status()
+    if (!st.ok || !st.linked) {
+      throw new Error('linked-required: purging ' + entryId + ' must delete its GitHub repos, and GitHub is not linked — nothing was deleted')
+    }
+    const deleted = []
+    const failed = []
+    for (const r of repos) {
+      const made = await githubBridge.deleteRepo(r.owner, r.name)
+      if (made.ok) deleted.push(r.owner + '/' + r.name)
+      else failed.push({ repo: r.owner + '/' + r.name, error: made.error || made.reason })
+    }
+    if (failed.length > 0) {
+      const err = new Error('purge incomplete: deleted [' + deleted.join(', ') + '] but failed [' + failed.map((f2) => f2.repo + ' (' + f2.error + ')').join('; ') + '] — the trash entry was kept')
+      err.deleted = deleted
+      err.failed = failed
+      throw err
+    }
+    const purged = hardDelete(rec.scope, entryId, { confirm: hardDeleteToken(entryId) })
+    writeOrgTrashIndex(readOrgTrashIndex().filter((e) => e.entryId !== entryId))
+    return { ...purged, deletedRepos: deleted }
+  }
 
   /**
    * Read-only org tree for sidebar surfaces: the five fixed categories
@@ -1082,6 +1209,10 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     switchOrg,
     renameOrg,
     renameProject,
+    trashOrg,
+    listOrgTrash,
+    restoreOrg,
+    purgeOrgTrash,
     /** The open org handle, or null. */
     get current() {
       return current

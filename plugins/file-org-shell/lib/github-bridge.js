@@ -76,6 +76,19 @@ export function createGithubBridge(faces = {}) {
     }
   }
 
+  /** Permanently delete a repo (D80 trash purge): { ok:true } |
+    * { ok:false, reason, error }. The error text carries the 403
+    * re-link guidance verbatim for the UI. */
+  async function deleteRepo(owner, name) {
+    if (typeof f.deleteRepo !== 'function') return { ok: false, reason: 'github-unavailable' }
+    try {
+      await f.deleteRepo(owner, name)
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, reason: 'delete-failed', error: String(err?.message ?? err) }
+    }
+  }
+
   /** → { ok:true, login, token } | { ok:false, reason } — throw-proof
     * (D73): the push half needs HTTPS credentials; an unavailable face
     * degrades exactly like the others. The token is handed ONLY to the
@@ -93,7 +106,7 @@ export function createGithubBridge(faces = {}) {
     }
   }
 
-  return { status, createPrivateRepo, renameRepo, repoNameTaken, gitCredentials }
+  return { status, createPrivateRepo, renameRepo, repoNameTaken, deleteRepo, gitCredentials }
 }
 
 /**

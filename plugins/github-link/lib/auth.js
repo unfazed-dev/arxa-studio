@@ -26,7 +26,7 @@ import { spawn } from 'node:child_process'
 
 import { statePath } from './state.js'
 
-export const SCOPES = ['repo', 'read:user']
+export const SCOPES = ['repo', 'read:user', 'delete_repo']
 
 export function defaultTokenBase() { return 'https://github.com' }
 export function defaultApiBase() { return 'https://api.github.com' }
@@ -333,4 +333,26 @@ export async function repoNameAvailableApi({ owner, name, accessToken, fetch = g
   if (res.status === 404) return true
   if (res.ok || res.status === 301) return false
   throw new Error('github-link: repo name check failed (' + res.status + ')')
+}
+
+/**
+ * DELETE /repos/{owner}/{repo} (D80 trash purge) — PERMANENT, no undo.
+ * 204 → deleted. 403 → the linked token lacks delete_repo (pre-D81
+ * links must re-link to upgrade); the caller surfaces that loudly.
+ */
+export async function deleteRepoApi({ owner, name, accessToken, fetch = globalThis.fetch, apiBase = defaultApiBase() } = {}) {
+  if (!owner || !name) throw new Error('github-link: repo deletion needs owner and repo name')
+  if (!accessToken) throw new Error('github-link: not linked (link before deleting)')
+  const res = await fetch(new URL('/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(name), apiBase), {
+    method: 'DELETE',
+    headers: {
+      accept: 'application/vnd.github+json',
+      authorization: 'Bearer ' + accessToken,
+      'user-agent': 'arxa-studio',
+    },
+  })
+  if (res.status === 204) return { deleted: true }
+  if (res.status === 403) throw new Error('github-link: repo deletion refused (403) — the linked token lacks the delete_repo permission; re-link GitHub (Settings) to upgrade')
+  if (res.status === 404) throw new Error('github-link: repo not found (404) — it may already be gone')
+  throw new Error('github-link: repo deletion failed (' + res.status + ')')
 }

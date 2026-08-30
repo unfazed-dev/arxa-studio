@@ -57,13 +57,13 @@ const mock = http.createServer((req, res) => {
       if (body.grant_type === 'refresh_token') {
         if (body.refresh_token !== 'dev-refresh') return json(400, { error: 'bad_refresh_token' })
         state.expectBearer = 'dev-token-2'
-        return json(200, { access_token: 'dev-token-2', scope: 'repo,read:user', refresh_token: 'dev-refresh-2', expires_in: 28800 })
+        return json(200, { access_token: 'dev-token-2', scope: 'repo,read:user,delete_repo', refresh_token: 'dev-refresh-2', expires_in: 28800 })
       }
       // Device-flow poll.
       if (body.grant_type === 'urn:ietf:params:oauth:grant-type:device_code') {
         if (body.device_code !== state.deviceCode) return json(400, { error: 'bad_verification_code' })
         if (state.devicePolls++ === 0) return json(200, { error: 'authorization_pending' })
-        return json(200, { access_token: 'dev-token', scope: 'repo,read:user', refresh_token: 'dev-refresh', expires_in: 28800 })
+        return json(200, { access_token: 'dev-token', scope: 'repo,read:user,delete_repo', refresh_token: 'dev-refresh', expires_in: 28800 })
       }
       // Authorization-code exchange — the mock ENFORCES the PKCE round-trip.
       if (!state.expectedChallenge) return json(400, { error: 'no_authorize_observed' })
@@ -71,7 +71,7 @@ const mock = http.createServer((req, res) => {
         return json(400, { error: 'pkce_mismatch' })
       }
       if (body.code !== state.expectedCode) return json(400, { error: 'bad_code' })
-      return json(200, { access_token: 'browser-token', scope: 'repo read:user' })
+      return json(200, { access_token: 'browser-token', scope: 'repo read:user delete_repo' })
     }
     if (req.method === 'POST' && req.url === '/login/device/code') {
       state.deviceCode = 'dc-' + Math.random().toString(36).slice(2)
@@ -148,11 +148,11 @@ try {
   const linkState = await svcB.link()
 
   ok(linkState.login === 'octocat', 'link() resolves state with the linked login')
-  assert.deepEqual(linkState.scopes, ['repo', 'read:user'])
+  assert.deepEqual(linkState.scopes, ['repo', 'read:user', 'delete_repo'])
   passed++
-  console.log('  ✓ minimal scopes repo + read:user recorded')
+  console.log('  ✓ scopes repo + read:user + delete_repo recorded (D81: trash purge deletes repos)')
   ok(capturedAuthorizeUrl.searchParams.get('code_challenge_method') === 'S256', 'authorize URL asks for S256')
-  ok(capturedAuthorizeUrl.searchParams.get('scope') === 'repo read:user', 'authorize URL carries the minimal scopes')
+  ok(capturedAuthorizeUrl.searchParams.get('scope') === 'repo read:user delete_repo', 'authorize URL carries the scopes incl. delete_repo (D81 trash purge)')
   ok(/^http:\/\/127\.0\.0\.1:\d+\/callback$/.test(capturedAuthorizeUrl.searchParams.get('redirect_uri')), 'redirect_uri is a 127.0.0.1 loopback on an ephemeral port')
   ok(capturedAuthorizeUrl.searchParams.get('client_id') === CLIENT_ID, 'authorize URL carries the configured client id')
   ok(JSON.parse(fs.readFileSync(path.join(arxaHome, 'github-link.json'), 'utf8')).linked === true, 'link state persisted locally under ~/.arxa (github-link.json)')
@@ -191,7 +191,7 @@ try {
   ok(state.userCode === 'ABCD-1234', 'device flow surfaces the user code')
   ok(device.accessToken === 'dev-token', 'device poll completes: authorization_pending → access_token')
   ok(state.devicePolls >= 2, 'device poll honoured authorization_pending before succeeding')
-  assert.deepEqual(device.scopes, ['repo', 'read:user'])
+  assert.deepEqual(device.scopes, ['repo', 'read:user', 'delete_repo'])
   passed++
   console.log('  ✓ device flow returns the minimal scopes')
   const devState = writeState({ linked: true, login: 'octocat', scopes: device.scopes, linkedAt: new Date().toISOString() }, env)

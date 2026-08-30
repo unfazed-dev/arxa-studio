@@ -333,5 +333,15 @@ check('trash: a permanent divider row with count badge + empty state (en + zh)',
 check('routes: project.rename drives the full-move machinery; project.trash parks locally',
   hostSrc().includes("'project.rename'") && hostSrc().includes('l.renameProject(cur.path, arg.projectSlug, arg.name)') && hostSrc().includes("'project.trash'") && hostSrc().includes('cur.trashProject(arg.projectSlug)'))
 
+// ---- D81: the org itself is trashable; Delete forever really deletes ----
+check('purge: the modal drives orgtrash.purge and projecttrash.purge',
+  client.includes('function OrgPurgeModal') && client.includes('"orgtrash.purge" : "projecttrash.purge"'))
+check('purge: the trash row dispatches the confirmation event',
+  client.includes('"arxa-purge-trash"') && client.includes('window.addEventListener("arxa-purge-trash", onPurge)'))
+check('trash: org group + delete-forever + project group (localized en + zh)',
+  client.includes('"trash.orgSection": "Trashed organisations"') && client.includes('"trash.orgSection": "已删除的组织"') && client.includes('"trash.deleteForever": "Delete forever"') && client.includes('"trash.deleteForever": "永久删除"'))
+check('routes: org trash/restore/purge wired to the service faces',
+  hostSrc().includes("'org.trash'") && hostSrc().includes('l.trashOrg(orgByRef(arg?.orgId).path)') && hostSrc().includes("'orgtrash.restore'") && hostSrc().includes('l.restoreOrg(arg?.entryId)') && hostSrc().includes('l.purgeOrgTrash(arg.entryId)') && hostSrc().includes('cur.purgeTrash(arg.entryId)'))
+
 console.log(failures === 0 ? '\narxa-sidebar selftest: ALL GREEN' : `\narxa-sidebar selftest: ${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)

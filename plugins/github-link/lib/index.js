@@ -9,7 +9,7 @@
  * keyring; no cloud database anywhere (CLAUDE.md boundary, D16).
  */
 
-import { getClientId, defaultApiBase, defaultTokenBase, linkViaBrowser, linkViaDevice, createPrivateRepoApi, renameRepoApi, repoNameAvailableApi, refreshAccessToken, SCOPES, SHIPPED_CLIENT_ID, defaultOpen } from './auth.js'
+import { getClientId, defaultApiBase, defaultTokenBase, linkViaBrowser, linkViaDevice, createPrivateRepoApi, renameRepoApi, repoNameAvailableApi, deleteRepoApi, refreshAccessToken, SCOPES, SHIPPED_CLIENT_ID, defaultOpen } from './auth.js'
 import { createKeyring } from './keyring.js'
 import { readState, writeState, clearState } from './state.js'
 
@@ -212,6 +212,19 @@ export function createGithubLink({
     }
   }
 
+  /** Permanently delete a repository (D80 trash purge). No undo — the
+    * caller owns the confirmation UX. A 403 means the linked token
+    * predates the delete_repo scope: re-link to upgrade, loudly. */
+  async function deleteRepo(owner, name) {
+    const accessToken = await getToken()
+    try {
+      return await deleteRepoApi({ owner, name, accessToken, fetch, apiBase })
+    } catch (err) {
+      if (!String(err?.message ?? err).includes('(401)')) throw err
+      return deleteRepoApi({ owner, name, accessToken: await getToken(true), fetch, apiBase })
+    }
+  }
+
   /** Pre-flight (D80): is `name` free under `owner`? Throws when the
     * check cannot be answered — an unverifiable name is an error, never
     * a silent go. */
@@ -246,6 +259,7 @@ export function createGithubLink({
     createPrivateRepo,
     renameRepo,
     repoNameTaken,
+    deleteRepo,
     gitCredentials,
     deviceCode,
   }
