@@ -1,5 +1,9 @@
 node_modules/
 
+# updater signing keys — never commit (D79 follow-up)
+keys/
+
+
 
 .claude-flow/
 .mcp.json
