@@ -15,6 +15,8 @@ import {
   decideEnvelope,
   foldFrame,
   foldJobsFrame,
+  mirrorOutBody,
+  mirrorOutConfig,
 } from './lib/index.js'
 
 const QUESTION_FRAME = (rpcId, sessionId = 'sess-1') => ({
@@ -427,5 +429,65 @@ const JOB = (id, status) => ({ id, kind: 'bash', label: 'job', status, startedAt
 
 // Every assertion above passed — exit explicitly so a leaked handle can
 // never turn a green suite into a CI hang.
-console.log('arxa-approvals selftest: 5 checks green')
+// 6. mirror-out writer (B2 phase-1b, gated): config gate literalism, the
+//    ingest body shape (org_id tenant tag), and the fold→writer wiring —
+//    exactly one POST body per folded record, gated off by default.
+{
+  assert.deepEqual(mirrorOutConfig({}), { enabled: false, ingestUrl: 'http://127.0.0.1:8190/ingest' },
+      'gate is OFF unless the literal env speaks')
+  assert.equal(mirrorOutConfig({ ARXA_MIRROR_OUT: 'true' }).enabled, true)
+  assert.equal(
+    mirrorOutConfig({ ARXA_MIRROR_OUT: 'true', ARXA_CAIRN_MIRROR_BIND: '127.0.0.1:9999' }).ingestUrl,
+    'http://127.0.0.1:9999/ingest',
+    'bind override flows into the ingest URL',
+  )
+  const record = approvalRecord(QUESTION_FRAME('rpc-7'), 5000)
+  const body = mirrorOutBody(record)
+  assert.deepEqual(body.events, [{
+    table: 'approvals', op: 'upsert',
+    row: { ...record, org_id: 'local' },
+  }], 'one upsert event, row tagged with the tenant the doorbell hint needs')
+
+  // fold → writer wiring: with the gate on, every folded record reaches the
+  // writer exactly once; the gate-off path never calls it.
+  const routes5 = new Map()
+  const mirrorOutSeen = []
+  const mirrorOutCtx = {
+    apiProxy: {
+      events: {
+        mux: async function* () {
+          yield QUESTION_FRAME('rpc-8')
+        },
+      },
+      respond: async () => ({ accepted: true }),
+    },
+    webServer: { register: (route) => routes5.set(route.path, route.handler) },
+    effect: () => () => {},
+  }
+  apply(mirrorOutCtx, {
+    env: { ARXA_MIRROR_OUT: 'true' },
+    doorbell: () => {},
+    taskDoorbell: () => {},
+    cairnSyncToken: async () => null,
+    mirrorOut: (rec) => mirrorOutSeen.push(rec),
+  })
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.deepEqual(mirrorOutSeen.map((x) => x.id), ['rpc-8'], 'fold reaches the writer once')
+
+  // Gate-off case: NO mirrorOut seam — the real path must never reach fetch.
+  let fetchCalls = 0
+  const origFetch = globalThis.fetch
+  globalThis.fetch = (...args) => { fetchCalls += 1; return origFetch(...args) }
+  const quietCtx = {
+    apiProxy: { events: { mux: async function* () { yield QUESTION_FRAME('rpc-9') } }, respond: async () => ({ accepted: true }) },
+    webServer: { register: (route) => routes5.set(route.path, route.handler) },
+    effect: () => () => {},
+  }
+  apply(quietCtx, { doorbell: () => {}, taskDoorbell: () => {} })
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  globalThis.fetch = origFetch
+  assert.equal(fetchCalls, 0, 'gate off → the writer is never invoked')
+}
+
+console.log('arxa-approvals selftest: 6 checks green')
 process.exit(0)

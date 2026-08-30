@@ -370,6 +370,77 @@ export async function cairnSyncToken(env = process.env, readFile = fs.readFileSy
     return null
   }
 }
+// ---- mirror-out writer (B2 phase-1b, gated) -----------------------------
+//
+// OFF by default (the push-doorbell convention): ARXA_MIRROR_OUT=true makes
+// every fold POST its cairn-row to the desktop mirror's /ingest — the
+// phone's sync rail then carries it (row payload + org_id tenant tag), and
+// the doorbell fires per the mirror's table config. The admin bearer comes
+// from the same keystore the bootstrap route reads. Best-effort like the
+// doorbell: a failed POST is a counted debug log, never a throw — sync
+// correctness rides the durable LSN checkpoint, not this hint.
+
+/** The mirror-out runtime config. Enabled only by the literal env gate;
+ *  the ingest base rides the SAME bind as the proxy (ARXA_CAIRN_MIRROR_BIND). */
+export function mirrorOutConfig(env = process.env) {
+  const enabled = typeof env.ARXA_MIRROR_OUT === 'string' && env.ARXA_MIRROR_OUT.trim() === 'true'
+  return { enabled, ingestUrl: 'http://' + cairnMirrorBind(env) + '/ingest' }
+}
+
+/** The admin bearer for /ingest (ADR-0042): ARXA_MIRROR_ADMIN_TOKEN wins;
+ *  else the sidecar keystore's CAIRN_ADMIN_TOKEN (cairn-server.env, the
+ *  same file the bootstrap route reads). Null = not configured → skip.
+ *  Ingest stamping makes this the WRITE-side credential: the rows land
+ *  under the mirror's own identity, so keep it loopback-only. */
+export async function mirrorAdminToken(env = process.env, readFile = fs.readFileSync, loadLib = loadDoorbell) {
+  const override = typeof env.ARXA_MIRROR_ADMIN_TOKEN === 'string' ? env.ARXA_MIRROR_ADMIN_TOKEN.trim() : ''
+  if (override) return override
+  let lib
+  try {
+    lib = await loadLib()
+  } catch {
+    return null
+  }
+  if (typeof lib?.appDataDir !== 'function' || typeof lib?.parseEnvFile !== 'function') return null
+  try {
+    const keystore = lib.parseEnvFile(readFile(path.join(lib.appDataDir(env), 'cairn-server.env'), 'utf8'))
+    const token = typeof keystore.CAIRN_ADMIN_TOKEN === 'string' ? keystore.CAIRN_ADMIN_TOKEN.trim() : ''
+    return token || null
+  } catch {
+    return null
+  }
+}
+
+/** The /ingest body for one folded approval (ADR-0042 contract). The row
+ *  carries org_id=local — the tenant tag the mirror's tenant-wide doorbell
+ *  hint needs (ADR-0010 addendum + fanout's tenant-column source). */
+export function mirrorOutBody(record) {
+  return { events: [{ table: 'approvals', op: 'upsert', row: { ...record, org_id: 'local' } }] }
+}
+
+/** One mirror-out POST. Returns {ok, status?|error?}; NEVER throws. */
+export async function postMirrorOut(cfg, record, adminToken, fetchImpl = fetch) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 2000)
+  try {
+    const res = await fetchImpl(cfg.ingestUrl, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer ' + adminToken,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(mirrorOutBody(record)),
+      signal: controller.signal,
+    })
+    if (!res.ok) return { ok: false, status: res.status }
+    return { ok: true, status: res.status }
+  } catch (err) {
+    return { ok: false, error: String(err && err.message ? err.message : err) }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /** TEST SEAM (gate: literal env ARXA_APPROVALS_TEST_SEAM=true — the
  * ARXA_DOORBELL_PUSH convention). Raises a REAL user-questions ask through
  * the real provider against a LIVE (idle is fine) agent, so the simulator
@@ -468,6 +539,31 @@ export function apply(ctx, deps = {}) {
       .catch(() => {})
   }
 
+  // The gated mirror-out writer (B2 phase-1b): folds POST to the mirror's
+  // /ingest so the phone's sync rail carries approvals. The deps seam keeps
+  // the selftest fetch-free; the real path reads the keystore bearer.
+  const mirrorOut = (record) => {
+    if (typeof deps.mirrorOut === 'function') {
+      try { deps.mirrorOut(record) } catch { /* never throws into the engine */ }
+      return
+    }
+    void (async () => {
+      try {
+        const cfg = mirrorOutConfig(deps.env ?? process.env)
+        if (!cfg.enabled) return
+        const adminToken = await mirrorAdminToken(deps.env ?? process.env)
+        if (!adminToken) {
+          console.error('[arxa-approvals] mirror-out gated on but no admin bearer (cairn-server.env)')
+          return
+        }
+        const result = await postMirrorOut(cfg, record, adminToken)
+        if (!result.ok) {
+          console.error('[arxa-approvals] mirror-out failed:', result.status ?? result.error)
+        }
+      } catch { /* never throws into the engine */ }
+    })()
+  }
+
   // The mux stream: replay of every still-pending question on attach, then
   // live requested/resolved frames. One long-lived consumer: question frames
   // fold into approvals, session/jobs frames ring the task doorbell on first
@@ -477,7 +573,10 @@ export function apply(ctx, deps = {}) {
     try {
       for await (const frame of ctx.apiProxy.events.mux({}, ac.signal)) {
         const fresh = foldFrame(pending, frame)
-        if (fresh) ringDoorbell(fresh)
+        if (fresh) {
+          ringDoorbell(fresh)
+          mirrorOut(fresh)
+        }
         for (const finished of foldJobsFrame(announcedJobs, frame)) ringTaskDoorbell(finished)
       }
     } catch (ended) {
@@ -550,7 +649,6 @@ export function apply(ctx, deps = {}) {
       })
     },
   })
-
   // The cairn sync rail rides the same tunnel (B2 phase-1b) - always on;
   // a missing sidecar is the handlers' honest 502, never a boot failure.
   applyCairnProxy(ctx, deps)
