@@ -123,6 +123,8 @@ check('content area: a boot with nothing to resume clears the selection — stra
   client.includes('arxaClientSessions.clear()') && client.includes('clearIfNothingToResume') && client.includes('let bootDecided = false;'))
 check('content area: the hero workspace picker is replaced by arxa guidance (raw engine sessions cannot be born from the hero)',
   client.includes('ArxaHeroGuide') && client.includes('"conversation.hero.workspace"') && client.includes('"hero.guide": "Sessions start inside a workspace') && client.includes('"hero.guide": "会话从工作区开始'))
+check('content area: with NOTHING bound the text composer is hidden outright (2026-08-30 user ask) — a bound blank session keeps its composer',
+  client.includes('[data-arxa-empty] [data-slot=') && client.includes('data-arxa-empty') && client.includes('const unbound = !snap || snap.current === void 0 || snap.current === null;'))
 
 // ---- 4. drift gate ------------------------------------------------------------
 // The committed client.js must equal shell+workspace regenerated, byte for

@@ -312,15 +312,40 @@
 		 * own workspace registry, and picking one + submitting created a
 		 * raw engine session OUTSIDE the org model (the stranding-session
 		 * factory: the runtime's persisted selection then restored it on
-		 * every boot). This slot face replaces it with the arxa way;
-		 * without a picked workspace the hero composer stays inert, so no
-		 * raw session can be born from the hero. */
+		 * every boot). This slot face replaces it with the arxa way; and
+		 * when NOTHING is bound (the client sessions service has no
+		 * current) the component marks the composer stack data-arxa-empty,
+		 * which hides the text composer entirely (arxa CSS below) — the
+		 * user asked for a blank page with guidance, not an inert input.
+		 * A BOUND blank session keeps its composer: typing there is a
+		 * legitimate first message into an org worktree. */
 		function ArxaHeroGuide({ t }) {
+			const ref = (0, react.useRef)(null);
+			(0, react.useEffect)(() => {
+				const stack = ref.current ? ref.current.parentElement?.parentElement?.parentElement : null;
+				if (!stack) return;
+				const s = arxaClientSessions;
+				const snap = s && s.list && typeof s.list.getSnapshot === "function" ? s.list.getSnapshot() : null;
+				const unbound = !snap || snap.current === void 0 || snap.current === null;
+				if (unbound) stack.setAttribute("data-arxa-empty", "");
+				else stack.removeAttribute("data-arxa-empty");
+				return () => { stack.removeAttribute("data-arxa-empty"); };
+			});
 			return (0, react_jsx_runtime.jsx)("div", {
+				ref,
 				"data-arxa-hero-guide": "",
 				style: { fontSize: 12.5, opacity: 0.72, lineHeight: 1.55, maxWidth: 470, textAlign: "left" },
 				children: t("hero.guide")
 			});
+		}
+		// Empty-state CSS (2026-08-30): inside a marked stack the text
+		// composer is gone — the data-slot anchor is the framework outlet
+		// wrapper (stable), unlike hashed module classes.
+		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=arxa-sidebar-empty-state]") === null) {
+			const tag = document.createElement("style");
+			tag.dataset.pluginCss = "arxa-sidebar-empty-state";
+			tag.textContent = "[data-arxa-empty] [data-slot='conversation.composer.bar']{display:none!important}[data-arxa-empty] .wSkVaW_heroWorkspaceRow>button{display:none!important}[data-arxa-empty] [data-slot='conversation.hero.agentPreset']{display:none!important}";
+			document.head.appendChild(tag);
 		}
 		/** Parse "<orgId>|<wsPath>" composite ids. */
 		const wsParts = (workspaceId) => {
