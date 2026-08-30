@@ -202,9 +202,22 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
    */
   async function publishRepoOnce(repoPath, slug, kind) {
     const manifestFile = kind === 'org' ? orgManifestPath(repoPath) : projectManifestPath(repoPath)
+    // D78: an annotation left uncommitted dirties the repo, and the NEXT
+    // open's clean-tree gate then refuses the org (measured on PLATO/TOPO:
+    // "uncommitted or untracked changes" at stamp-migrate). The git repo is
+    // the source of truth — commit the manifest the moment it is annotated.
+    const commitManifest = () => {
+      const file = path.basename(manifestFile)
+      try {
+        runGit(['add', file], { cwd: repoPath, allowFail: true })
+        runGit(['commit', '-m', 'publish: record GitHub link state', '--', file], { cwd: repoPath, allowFail: true })
+      } catch { /* best effort — annotation still stands in the worktree */ }
+    }
     const annotate = (fields) => {
       try {
-        return kind === 'org' ? annotateOrgManifest(repoPath, fields) : annotateProjectManifest(repoPath, fields)
+        const out = kind === 'org' ? annotateOrgManifest(repoPath, fields) : annotateProjectManifest(repoPath, fields)
+        commitManifest()
+        return out
       } catch { return null }
     }
     let manifest
