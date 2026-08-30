@@ -1,6 +1,6 @@
 {
   "name": "arxa-theme-accent",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Settings > General accent swatches (3 fixed choices). Overrides the dsh --dsw-static-deepseek-* accent scale with color-mix tints of the chosen hex, inline on <body> so it wins over both the :root and dark-theme token blocks. Persisted in localStorage, synced across tabs/windows via the storage event.",
   "type": "module",

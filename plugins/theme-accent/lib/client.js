@@ -21,8 +21,15 @@ window.__ModuleLoader__.load({
     const h = React.createElement
 
     const STORE_KEY = 'arxa.themeAccent'
+    const SERVER_PATH = '/__arxa/theme-accent'
     const SWATCHES = ['#0EBAE4', '#0EE4E0', '#12D49A']
     const DEFAULT = SWATCHES[0]
+    // Cross-DEVICE convergence cadence: the engine is the source of truth,
+    // so a desktop-side change reaches the phone's webview within one tick.
+    const POLL_MS = 5000
+    // Same-tab localStorage writes never fire the storage event - row UI
+    // (and any other listener) learns about converges through this set.
+    const listeners = new Set()
 
     // Tint ladders mirroring the stock lightness curves. oklab keeps hue
     // steady across mixes. ponytail: eyeballed percentages, tune per-stop if
@@ -71,6 +78,42 @@ window.__ModuleLoader__.load({
         const v = localStorage.getItem(STORE_KEY)
         return SWATCHES.includes(v) ? v : DEFAULT
       } catch { return DEFAULT }
+    }
+
+    // Apply an accent everywhere THIS document tracks it: CSS vars,
+    // localStorage cache, and in-tab listeners. No server I/O.
+    function converge(hex) {
+      if (!SWATCHES.includes(hex) || hex === stored()) return
+      try { localStorage.setItem(STORE_KEY, hex) } catch { /* still applies */ }
+      applyAccent(hex)
+      for (const fn of listeners) fn(hex)
+    }
+
+    // The engine is the source of truth; localStorage is the instant cache.
+    // Divergence means another device chose - follow it.
+    async function syncFromServer() {
+      try {
+        const res = await fetch(SERVER_PATH, { cache: 'no-store' })
+        if (!res.ok) return
+        const hex = (await res.json())?.accent
+        if (SWATCHES.includes(hex)) {
+          // Engine has a choice: it wins (localStorage is only a cache).
+          converge(hex)
+        } else {
+          // Migration: the engine file starts empty while this device may
+          // already carry a choice - promote it to the source of truth once.
+          const local = stored()
+          if (local !== DEFAULT) pushToServer(local)
+        }
+      } catch { /* engine unreachable - the cached accent keeps rendering */ }
+    }
+
+    function pushToServer(hex) {
+      fetch(SERVER_PATH, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ accent: hex }),
+      }).catch(() => { /* offline: local stays, converges on a later poll */ })
     }
 
     function applyAccent(hex) {
@@ -136,20 +179,28 @@ window.__ModuleLoader__.load({
 
     function AccentRow() {
       const [accent, setAccent] = React.useState(stored)
-      // Cross-tab: another window picked a swatch — follow it live.
+      // Cross-tab AND cross-device: another window picked a swatch - follow
+      // it live (storage event covers other tabs; converge() covers the
+      // engine-pulled value landing in this tab).
       React.useEffect(() => {
         const onStorage = (e) => {
           if (e.key === STORE_KEY && SWATCHES.includes(e.newValue)) {
             setAccent(e.newValue)
           }
         }
+        const onConverge = (hex) => setAccent(hex)
         window.addEventListener('storage', onStorage)
-        return () => window.removeEventListener('storage', onStorage)
+        listeners.add(onConverge)
+        return () => {
+          window.removeEventListener('storage', onStorage)
+          listeners.delete(onConverge)
+        }
       }, [])
       const pick = (hex) => {
         try { localStorage.setItem(STORE_KEY, hex) } catch { /* still applies locally */ }
         applyAccent(hex)
         setAccent(hex)
+        pushToServer(hex)
       }
       return h('div', { className: css.row },
         h('div', { className: css.rowText },
@@ -178,6 +229,14 @@ window.__ModuleLoader__.load({
         if (e.key === STORE_KEY && SWATCHES.includes(e.newValue)) {
           applyAccent(e.newValue)
         }
+      })
+      // Cross-device sync: resolve the engine's choice immediately (the
+      // cached paint above avoids a flash), then keep converging on the poll
+      // cadence and whenever the page becomes visible again.
+      syncFromServer()
+      setInterval(syncFromServer, POLL_MS)
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) syncFromServer()
       })
       ctx.slots.inject('settings.general.item', () =>
         ctx.slots.register({
