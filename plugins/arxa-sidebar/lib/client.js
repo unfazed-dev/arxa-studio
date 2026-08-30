@@ -3265,18 +3265,18 @@ window.__ModuleLoader__.load({
 			// D80: BOTH row kinds carry a menu; D80 scope fix: ONLY org + project
 			// rows — fixed docks (Meetings/Account/…) and containers are
 			// infrastructure, never renamable. D82: every row gets a proper
-			// design-system glyph (edit / folder / GitHub mark / close / trash),
-			// Close drops its misleading trash icon, and the org menu REGAINS
-			// "Move to Trash" (danger, local-only + restorable) — the Trash row
-			// LISTS entries but the verb that creates them must live on the org.
+			// design-system glyph (edit / folder / GitHub mark / trash).
+			// D87: "Close" is GONE from the menu — it closed whatever org was
+			// open server-side (unscoped, invisible, switch already tears down).
+			// "Move to Trash" (danger, local-only + restorable) stays — the Trash
+			// row LISTS entries but the verb that creates them must live on the org.
 			const showMenu = isOrg || d.kind === "project";
 			const ghMark16 = (0, react_jsx_runtime.jsx)("svg", { width: 16, height: 16, viewBox: "0 0 16 16", fill: "currentColor", "aria-hidden": "true", children: (0, react_jsx_runtime.jsx)("path", { d: GH_MARK }) });
 			const items = isOrg ? [
 				{ id: "rename", label: orgT("menu.org.rename"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconEditOutline16, {}) },
 				{ id: "open", label: orgT("menu.org.open"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) },
 				{ id: "publish", label: orgT("menu.org.publish"), icon: ghMark16 },
-				{ type: "separator", id: "sep-org-close" },
-				{ id: "close", label: orgT("menu.org.close"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconCloseOutline16, {}) },
+				{ type: "separator", id: "sep-org-trash" },
 				{ id: "trash", label: orgT("menu.org.trash"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}), danger: true }
 			] : [
 				{ id: "rename", label: orgT("menu.project.rename"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconEditOutline16, {}) },
@@ -3286,7 +3286,6 @@ window.__ModuleLoader__.load({
 				setMenuOpen(false);
 				if (id === "open") orgStore.mutate("org.open", { orgId: d.orgId }).catch(() => {});
 				else if (id === "publish") window.dispatchEvent(new CustomEvent("arxa-publish-org", { detail: { orgId: d.orgId, orgName: d.label || d.orgId } }));
-				else if (id === "close") orgStore.mutate("org.close", {}).catch(() => {});
 				else if (id === "rename" && isOrg) window.dispatchEvent(new CustomEvent("arxa-rename-org", { detail: { orgId: d.orgId, orgName: d.label || "" } }));
 				else if (id === "rename") window.dispatchEvent(new CustomEvent("arxa-rename-project", { detail: { orgId: d.orgId, projectSlug: d.slug, projectName: d.label || "" } }));
 				else if (id === "trash" && isOrg) orgStore.mutate("org.trash", { orgId: d.orgId }).catch(() => {});
@@ -4213,7 +4212,6 @@ window.__ModuleLoader__.load({
 			"tree.pc.moodboard": "Moodboard",
 			"tree.pc.scaffold": "Scaffold",
 			"menu.org.open": "Open organisation",
-			"menu.org.close": "Close organisation",
 			"menu.org.newProject": "New project",
 			"menu.org.publish": "Publish to GitHub",
 			"publish.title": "Publish to GitHub",
@@ -4337,7 +4335,6 @@ window.__ModuleLoader__.load({
 			"tree.pc.moodboard": "情绪板",
 			"tree.pc.scaffold": "脚手架",
 			"menu.org.open": "打开组织",
-			"menu.org.close": "关闭组织",
 			"menu.org.newProject": "新建项目",
 			"menu.org.publish": "发布到 GitHub",
 			"publish.title": "发布到 GitHub",

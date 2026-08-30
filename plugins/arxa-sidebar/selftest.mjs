@@ -353,8 +353,10 @@ check('routes: org trash/restore/purge wired to the service faces',
 // ---- D82: org-menu Move to Trash + design-system trash surface ----
 check('menus: org menu REGAINS Move to Trash (danger) dispatching org.trash',
   client.includes('id: "trash", label: orgT("menu.org.trash")') && client.includes('orgStore.mutate("org.trash", { orgId: d.orgId })') && client.includes('"menu.org.trash": "Move to Trash"') && client.includes('"menu.org.trash": "移到废纸篓"'))
-check('menus: every row-menu item carries a design-system glyph (edit/folder/github/close/trash)',
-  client.includes('IconEditOutline16') && client.includes('IconCloseOutline16, {})') && client.includes('icon: ghMark16') && client.includes('IconTrashOutline16, {}), danger: true }'))
+check('menus: every row-menu item carries a design-system glyph (edit/folder/github/trash)',
+  client.includes('IconEditOutline16') && client.includes('icon: ghMark16') && client.includes('IconTrashOutline16, {}), danger: true }'))
+check('menus: D87 close is GONE (unscoped verb — opening another org already switches)',
+  !client.includes('id: "close"') && !client.includes('menu.org.close') && !client.includes('IconCloseOutline16'))
 check('trash: header rides the tree-row chevron (arrow/arrowOpen) — no text glyph',
   client.includes('IconTriangleRightFill14, { className: clsx(Rows_module_css_default.arrow, open && Rows_module_css_default.arrowOpen) })') && !client.includes('children: "▶"'))
 check('trash: entries use rowActions icon buttons under Tooltips (restore=refresh, delete=trash in critical ink)',
