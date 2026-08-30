@@ -343,5 +343,18 @@ check('trash: org group + delete-forever + project group (localized en + zh)',
 check('routes: org trash/restore/purge wired to the service faces',
   hostSrc().includes("'org.trash'") && hostSrc().includes('l.trashOrg(orgByRef(arg?.orgId).path)') && hostSrc().includes("'orgtrash.restore'") && hostSrc().includes('l.restoreOrg(arg?.entryId)') && hostSrc().includes('l.purgeOrgTrash(arg.entryId)') && hostSrc().includes('cur.purgeTrash(arg.entryId)'))
 
+// ---- D82: org-menu Move to Trash + design-system trash surface ----
+check('menus: org menu REGAINS Move to Trash (danger) dispatching org.trash',
+  client.includes('id: "trash", label: orgT("menu.org.trash")') && client.includes('orgStore.mutate("org.trash", { orgId: d.orgId })') && client.includes('"menu.org.trash": "Move to Trash"') && client.includes('"menu.org.trash": "移到废纸篓"'))
+check('menus: every row-menu item carries a design-system glyph (edit/folder/github/close/trash)',
+  client.includes('IconEditOutline16') && client.includes('IconCloseOutline16, {})') && client.includes('icon: ghMark16') && client.includes('IconTrashOutline16, {}), danger: true }'))
+check('trash: header rides the tree-row chevron (arrow/arrowOpen) — no text glyph',
+  client.includes('IconTriangleRightFill14, { className: clsx(Rows_module_css_default.arrow, open && Rows_module_css_default.arrowOpen) })') && !client.includes('children: "▶"'))
+check('trash: entries use rowActions icon buttons under Tooltips (restore=refresh, delete=trash in critical ink)',
+  client.includes('.Tooltip, {') && client.includes('IconRefreshOutline16, onRestore') && client.includes('IconTrashOutline16, onPurge, true') && client.includes('className: Rows_module_css_default.iconButton'))
+check('trash: auto-opens while anything is trashed; manual toggle wins',
+  client.includes('const [manual, setManual] = (0, react.useState)(null);') && client.includes('const open = manual === null ? total > 0 : manual;'))
+check('trash: org glyph shared between tree row and trash group header (single def)',
+  client.includes('function OrgGlyph({ size })') && client.split('function OrgGlyph({ size })').length === 2 && client.includes('groupLabel((0, react_jsx_runtime.jsx)(OrgGlyph, { size: 12 }), t("trash.orgSection"))'))
 console.log(failures === 0 ? '\narxa-sidebar selftest: ALL GREEN' : `\narxa-sidebar selftest: ${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)

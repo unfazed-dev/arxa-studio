@@ -3230,25 +3230,51 @@ window.__ModuleLoader__.load({
 		 * the org menu. Docks/projects use the stock folder glyph
 		 * (open/closed by expansion) — the exact folder icon the docks
 		 * always had; the org row gets the organisation glyph. */
+		/** Organisation glyph (D82 hoisted from the org row): the building
+		 * mark every org surface shares — the tree row AND the trash
+		 * section's org group read as "organisation" through it. */
+		function OrgGlyph({ size }) {
+			return (0, react_jsx_runtime.jsxs)("svg", {
+				width: size ?? 15,
+				height: size ?? 15,
+				viewBox: "0 0 16 16",
+				fill: "none",
+				stroke: "currentColor",
+				strokeWidth: 1.3,
+				strokeLinecap: "round",
+				strokeLinejoin: "round",
+				"aria-hidden": "true",
+				children: [
+					(0, react_jsx_runtime.jsx)("rect", { x: "2.5", y: "1.5", width: "8", height: "13", rx: "1" }),
+					(0, react_jsx_runtime.jsx)("path", { d: "M10.5 6h3v8.5" }),
+					(0, react_jsx_runtime.jsx)("path", { d: "M5 4.5h3M5 7.5h3M5 10.5h3" })
+				]
+			});
+		}
 		function OrgContainerRow({ d, offset }) {
 			const expandedMap = useOrg((s) => s.expanded ?? {});
 			const isOrg = d.kind === "org";
 			const open = !!expandedMap[d.key];
 			const [menuOpen, setMenuOpen] = (0, react.useState)(false);
-			// D80: BOTH row kinds carry a menu. The org menu gains Rename (and
-			// loses Trash — the always-visible Trash row replaces it); the project
-			// menu is Rename + Trash (local-only, restorable).
-			// D80 scope fix: ONLY org + project rows carry the menu — fixed docks
-			// (Meetings/Account/…) and containers are infrastructure, never renamable.
+			// D80: BOTH row kinds carry a menu; D80 scope fix: ONLY org + project
+			// rows — fixed docks (Meetings/Account/…) and containers are
+			// infrastructure, never renamable. D82: every row gets a proper
+			// design-system glyph (edit / folder / GitHub mark / close / trash),
+			// Close drops its misleading trash icon, and the org menu REGAINS
+			// "Move to Trash" (danger, local-only + restorable) — the Trash row
+			// LISTS entries but the verb that creates them must live on the org.
 			const showMenu = isOrg || d.kind === "project";
+			const ghMark16 = (0, react_jsx_runtime.jsx)("svg", { width: 16, height: 16, viewBox: "0 0 16 16", fill: "currentColor", "aria-hidden": "true", children: (0, react_jsx_runtime.jsx)("path", { d: GH_MARK }) });
 			const items = isOrg ? [
-				{ id: "rename", label: orgT("menu.org.rename") },
+				{ id: "rename", label: orgT("menu.org.rename"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconEditOutline16, {}) },
 				{ id: "open", label: orgT("menu.org.open"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) },
-				{ id: "publish", label: orgT("menu.org.publish"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) },
-				{ id: "close", label: orgT("menu.org.close"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}), danger: true }
+				{ id: "publish", label: orgT("menu.org.publish"), icon: ghMark16 },
+				{ type: "separator", id: "sep-org-close" },
+				{ id: "close", label: orgT("menu.org.close"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconCloseOutline16, {}) },
+				{ id: "trash", label: orgT("menu.org.trash"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}), danger: true }
 			] : [
-				{ id: "rename", label: orgT("menu.project.rename") },
-				{ id: "trash", label: orgT("menu.project.trash"), danger: true }
+				{ id: "rename", label: orgT("menu.project.rename"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconEditOutline16, {}) },
+				{ id: "trash", label: orgT("menu.project.trash"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}), danger: true }
 			];
 			const onSelect = (id) => {
 				setMenuOpen(false);
@@ -3257,6 +3283,7 @@ window.__ModuleLoader__.load({
 				else if (id === "close") orgStore.mutate("org.close", {}).catch(() => {});
 				else if (id === "rename" && isOrg) window.dispatchEvent(new CustomEvent("arxa-rename-org", { detail: { orgId: d.orgId, orgName: d.label || "" } }));
 				else if (id === "rename") window.dispatchEvent(new CustomEvent("arxa-rename-project", { detail: { orgId: d.orgId, projectSlug: d.slug, projectName: d.label || "" } }));
+				else if (id === "trash" && isOrg) orgStore.mutate("org.trash", { orgId: d.orgId }).catch(() => {});
 				else if (id === "trash") orgStore.mutate("project.trash", { orgId: d.orgId, projectSlug: d.slug }).catch(() => {});
 			};
 			return (0, react_jsx_runtime.jsxs)("div", {
@@ -3268,22 +3295,7 @@ window.__ModuleLoader__.load({
 				children: [
 					(0, react_jsx_runtime.jsx)("span", {
 						className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder),
-						children: isOrg ? (0, react_jsx_runtime.jsxs)("svg", {
-							width: 15,
-							height: 15,
-							viewBox: "0 0 16 16",
-							fill: "none",
-							stroke: "currentColor",
-							strokeWidth: 1.3,
-							strokeLinecap: "round",
-							strokeLinejoin: "round",
-							"aria-hidden": "true",
-							children: [
-								(0, react_jsx_runtime.jsx)("rect", { x: "2.5", y: "1.5", width: "8", height: "13", rx: "1" }),
-								(0, react_jsx_runtime.jsx)("path", { d: "M10.5 6h3v8.5" }),
-								(0, react_jsx_runtime.jsx)("path", { d: "M5 4.5h3M5 7.5h3M5 10.5h3" })
-							]
-							}) : open ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {})
+						children: isOrg ? (0, react_jsx_runtime.jsx)(OrgGlyph, {}) : open ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {})
 					}),
 					(0, react_jsx_runtime.jsx)("span", {
 						className: clsx(Rows_module_css_default.slot, Rows_module_css_default.chevron),
@@ -3339,16 +3351,24 @@ window.__ModuleLoader__.load({
 			}, d.key);
 		}
 		function TrashSection({ t }) {
-			// D80/D81: the trash is a PERMANENT, discoverable row. Two groups:
+			// D80/D81/D82: the trash is a PERMANENT, discoverable row. Two groups:
 			// trashed ORGANISATIONS (workspace-root trash) and the open org's
-			// trashed projects (org-local). Restore is always available;
+			// trashed projects (org-local). D82 redesign in the design-system
+			// idiom: header reuses the tree-row chevron (arrow/arrowOpen),
+			// entries reuse the 28px rowActions icon buttons under Tooltips
+			// (restore = refresh glyph, delete-forever = trash glyph in the
+			// critical ink), and the section auto-opens while anything is
+			// trashed so the destructive door is reachable the moment it exists.
   			// Delete forever is the destructive door — it rides the confirmation
 			// modal and REALLY deletes the GitHub repos (grilled 2026-08-30).
 			const view = useOrg((s) => s.trashView);
 			const orgRows = useOrg((s) => s.orgTrash) || [];
 			const rows = view.rows || [];
 			const total = rows.length + orgRows.length;
-			const [open, setOpen] = (0, react.useState)(false);
+			// D82: auto-open while entries exist; the user's first toggle wins.
+			const [manual, setManual] = (0, react.useState)(null);
+			const open = manual === null ? total > 0 : manual;
+			const toggle = () => setManual(!open);
 			const restore = (entryId) => {
 				orgStore.mutate("trash.restore", { entryId }).catch(() => {});
 			};
@@ -3358,44 +3378,53 @@ window.__ModuleLoader__.load({
 			const purge = (scope, entryId, name) => {
 				window.dispatchEvent(new CustomEvent("arxa-purge-trash", { detail: { scope, entryId, name } }));
 			};
-			const entryBtn = (label, onClick, danger) => (0, react_jsx_runtime.jsx)("button", { onClick, style: { border: "1px solid var(--dsw-alias-border-l2)", background: "transparent", color: danger ? "var(--dsw-alias-text-critical, #e5534b)" : "inherit", borderRadius: 6, fontSize: 11, padding: "1px 6px", cursor: "pointer", flex: "none" } }, label);
+			const entryAction = (label, Icon, onClick, danger) => (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Tooltip, {
+				label,
+				side: "bottom",
+				children: (0, react_jsx_runtime.jsx)("button", {
+					type: "button",
+					className: Rows_module_css_default.iconButton,
+					"aria-label": label,
+					onClick: (e) => { e.stopPropagation(); onClick(); },
+					style: danger ? { color: "var(--dsw-alias-text-critical, #e5534b)" } : void 0,
+					children: (0, react_jsx_runtime.jsx)(Icon, {})
+				})
+			});
+			const groupLabel = (glyph, text) => (0, react_jsx_runtime.jsxs)("div", {
+				style: { display: "flex", alignItems: "center", gap: 6, fontSize: 11, opacity: 0.55, textTransform: "uppercase", letterSpacing: "0.04em", padding: "6px 8px 2px" },
+				children: [glyph, (0, react_jsx_runtime.jsx)("span", { children: text })]
+			});
+			const entryRow = (e, glyph, onRestore, onPurge) => (0, react_jsx_runtime.jsxs)("div", {
+				className: clsx(Rows_module_css_default.sessionRow, Rows_module_css_default.flatSessionRowWithoutStatus),
+				style: { paddingLeft: 12 },
+				children: [
+					(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.slot, style: { opacity: 0.75 }, children: glyph }),
+					(0, react_jsx_runtime.jsx)("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, flex: "1 1 auto" }, title: e.entryId, children: e.name }),
+					entryAction(t("trash.restore"), _deepseek_ai_dsh_client_ui_primitives.IconRefreshOutline16, onRestore),
+					entryAction(t("trash.deleteForever"), _deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, onPurge, true)
+				]
+			}, e.entryId);
 			return (0, react_jsx_runtime.jsxs)("div", {
 				style: { borderTop: "1px solid var(--dsw-alias-border-l2, rgba(255,255,255,0.08))", marginTop: 8, padding: "6px 4px 8px", opacity: total === 0 ? 0.45 : 1 },
 				children: [
 					(0, react_jsx_runtime.jsxs)("div", {
 						role: "button",
 						tabIndex: 0,
-						onClick: () => setOpen((v) => !v),
-						onKeyDown: (e) => { if (e.key === "Enter" || e.key === " ") setOpen((v) => !v); },
+						onClick: toggle,
+						onKeyDown: (e) => { if (e.key === "Enter" || e.key === " ") toggle(); },
 						style: { display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 6, cursor: "pointer" },
 						children: [
-							(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}),
+							(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder), children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}) }),
 							(0, react_jsx_runtime.jsx)("span", { style: { fontSize: 13, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: t("trash.section") }),
 							total > 0 && (0, react_jsx_runtime.jsx)("span", { style: { fontSize: 11, opacity: 0.7, border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 8, padding: "0 6px" }, children: String(total) }),
-							(0, react_jsx_runtime.jsx)("span", { style: { fontSize: 10, opacity: 0.6, display: "inline-block", transform: open ? "rotate(90deg)" : "none", transition: "transform 120ms ease" }, children: "▶" })
+							(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.chevron), children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTriangleRightFill14, { className: clsx(Rows_module_css_default.arrow, open && Rows_module_css_default.arrowOpen) }) })
 						]
 					}),
 					open && total === 0 && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.55, padding: "4px 8px 2px" }, children: t("trash.empty") }),
-					open && orgRows.length > 0 && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.55, textTransform: "uppercase", letterSpacing: "0.04em", padding: "6px 8px 2px" }, children: t("trash.orgSection") }),
-					open && orgRows.map((e) => (0, react_jsx_runtime.jsxs)("div", {
-						className: clsx(Rows_module_css_default.sessionRow, Rows_module_css_default.flatSessionRowWithoutStatus),
-						style: { paddingLeft: 12 },
-						children: [
-							(0, react_jsx_runtime.jsx)("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, flex: "1 1 auto" }, title: e.entryId, children: e.name }),
-							entryBtn(t("trash.restore"), () => restoreOrg(e.entryId)),
-							entryBtn(t("trash.deleteForever"), () => purge("org", e.entryId, e.name), true)
-						]
-					}, e.entryId)),
-					open && rows.length > 0 && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.55, textTransform: "uppercase", letterSpacing: "0.04em", padding: "6px 8px 2px" }, children: t("trash.projectSection") }),
-					open && rows.map((e) => (0, react_jsx_runtime.jsxs)("div", {
-						className: clsx(Rows_module_css_default.sessionRow, Rows_module_css_default.flatSessionRowWithoutStatus),
-						style: { paddingLeft: 12 },
-						children: [
-							(0, react_jsx_runtime.jsx)("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, flex: "1 1 auto" }, title: e.entryId, children: e.name }),
-							entryBtn(t("trash.restore"), () => restore(e.entryId)),
-							entryBtn(t("trash.deleteForever"), () => purge("project", e.entryId, e.name), true)
-						]
-					}, e.entryId)),
+					open && orgRows.length > 0 && groupLabel((0, react_jsx_runtime.jsx)(OrgGlyph, { size: 12 }), t("trash.orgSection")),
+					open && orgRows.map((e) => entryRow(e, (0, react_jsx_runtime.jsx)(OrgGlyph, {}), () => restoreOrg(e.entryId), () => purge("org", e.entryId, e.name))),
+					open && rows.length > 0 && groupLabel((0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {}), t("trash.projectSection")),
+					open && rows.map((e) => entryRow(e, (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {}), () => restore(e.entryId), () => purge("project", e.entryId, e.name))),
 				]
 			});
 		}
@@ -4025,6 +4054,7 @@ window.__ModuleLoader__.load({
 			"menu.addWorkspace": "New organisation…",
 			"menu.trash": "Trash",
 			"menu.org.rename": "Rename…",
+"menu.org.trash": "Move to Trash",
 			"menu.project.rename": "Rename…",
 			"menu.project.trash": "Move to Trash",
 			"trash.empty": "Trash is empty",
@@ -4150,6 +4180,7 @@ window.__ModuleLoader__.load({
 			"menu.addWorkspace": "新建组织…",
 			"menu.trash": "回收站",
 			"menu.org.rename": "重命名…",
+"menu.org.trash": "移到废纸篓",
 			"menu.project.rename": "重命名…",
 			"menu.project.trash": "移到废纸篓",
 			"trash.empty": "废纸篓是空的",
