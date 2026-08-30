@@ -2808,7 +2808,11 @@ window.__ModuleLoader__.load({
 			const refresh = async () => {
 				try {
 					const next = await ORG_FETCH();
-					const sig = JSON.stringify([next.orgs, next.trash, next.trashCount, next.root, next.selectedProject]);
+					// D88: orgTrash rides the change signature — a purge changes ONLY
+			// orgTrash (the org left orgs when it was trashed), so without this
+			// the post-purge snapshot was silently discarded and the ghost row
+			// survived every refresh and poll.
+			const sig = JSON.stringify([next.orgs, next.trash, next.orgTrash, next.trashCount, next.root, next.selectedProject]);
 					if (sig !== state.__sig) {
 						// Client-side faces survive every server replacement (the trash
 						// toggle, the row selection and the container expansion are not
@@ -3921,14 +3925,18 @@ window.__ModuleLoader__.load({
 				] })
 			});
 		}
-		/** D81: the FINAL gate for Delete forever — the trash entry goes
-		 * away AND its GitHub repos are really deleted. The wording states
-		 * the blast radius; a 403 (token without delete_repo) surfaces the
-		 * re-link guidance verbatim. */
+		/** D81→D88: the FINAL gate for Delete forever — GitHub-style, the
+		 * user must retype the entry's exact row label before the button
+		 * arms; the trash entry goes away AND its GitHub repos are really
+		 * deleted. The wording states the blast radius; a 403 (token without
+		 * delete_repo) surfaces the re-link guidance verbatim. */
 		function OrgPurgeModal({ t, target, onClose }) {
 			const [phase, setPhase] = (0, react.useState)("confirm");
 			const [errMsg, setErrMsg] = (0, react.useState)(null);
-			const [done, setDone] = (0, react.useState)(false);
+			// D88: the typed confirmation (case-sensitive row label) plus the
+			// success summary of exactly what was removed.
+			const [typed, setTyped] = (0, react.useState)("");
+			const [summary, setSummary] = (0, react.useState)(null);
 			// D85: a 403 delete_repo refusal upgrades IN place — the device flow
 			// runs from the modal (code shows inline) and the purge auto-retries
 			// the moment the re-link lands. Root cause: OAuth refresh tokens can
@@ -3938,15 +3946,25 @@ window.__ModuleLoader__.load({
 			// later that day).
 			const [relinking, setRelinking] = (0, react.useState)(false);
 			const [devCode, setDevCode] = (0, react.useState)(null);
-			(0, react.useEffect)(() => { setPhase("confirm"); setErrMsg(null); setDone(false); setRelinking(false); setDevCode(null); }, [target]);
+			(0, react.useEffect)(() => { setPhase("confirm"); setErrMsg(null); setTyped(""); setRelinking(false); setDevCode(null); setSummary(null); }, [target]);
 			if (!target) return null;
+			// D88: busy LOCKS the modal — Close and Escape are dead while the
+			// irreversible purge is in flight; you cannot walk away from a
+			// half-answered destructive operation.
 			const dismiss = () => { if (phase !== "busy") onClose(); };
+			const matches = typed === target.name;
 			const submit = () => {
 				if (phase === "busy") return;
 				setPhase("busy"); setErrMsg(null);
-				ORG_POST(target.scope === "org" ? "orgtrash.purge" : "projecttrash.purge", { entryId: target.entryId }).then(() => {
-					setDone(true); setPhase("done");
+				ORG_POST(target.scope === "org" ? "orgtrash.purge" : "projecttrash.purge", { entryId: target.entryId }).then((r) => {
+					// D88 success summary: exactly what left the machine.
+					const res = r && r.result;
+					const parts = [target.name];
+					if (res && Array.isArray(res.deletedRepos) && res.deletedRepos.length > 0) parts.push(res.deletedRepos.join(", "));
+					setSummary(parts.join(" — "));
+					setPhase("done");
 					orgStore.refresh();
+					setTimeout(onClose, 1100);
 				}, (e) => {
 					const msg = e instanceof Error ? e.message : String(e);
 					setErrMsg(msg); setPhase("confirm");
@@ -3976,8 +3994,8 @@ window.__ModuleLoader__.load({
 				});
 			};
 			const footer = (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-				(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "outline", onClick: dismiss, children: phase === "done" ? t("purge.close") : t("publish.cancel") }),
-				phase !== "done" && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "primary", disabled: phase === "busy", onClick: submit, children: phase === "busy" ? t("purge.busy") : t("purge.confirm") })
+				(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "outline", disabled: phase === "busy", onClick: dismiss, children: phase === "done" ? t("purge.close") : t("publish.cancel") }),
+				phase !== "done" && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "primary", disabled: !matches || phase === "busy", onClick: submit, children: phase === "busy" ? t("purge.busy") : t("purge.confirm") })
 			] });
 			return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Modal, {
 				open: true,
@@ -3989,18 +4007,36 @@ window.__ModuleLoader__.load({
 					phase !== "done" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, marginBottom: 8 }, children: target.name }),
 						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginBottom: 8 }, children: target.scope === "org" ? t("purge.orgWarn") : t("purge.projectWarn") }),
+						// D88: GitHub-style typed gate — Delete forever stays dead until
+						// the EXACT row label (case-sensitive) is retyped.
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.55, margin: "10px 0 4px" }, children: t("purge.typeName").replace("{name}", target.name) }),
+						(0, react_jsx_runtime.jsx)("input", {
+							value: typed,
+							onChange: (e) => setTyped(e.target.value),
+							onKeyDown: (e) => { if (e.key === "Enter" && matches) submit(); },
+							placeholder: target.name,
+							disabled: phase === "busy",
+							autoComplete: "off",
+							spellCheck: false,
+							style: { width: "100%", boxSizing: "border-box", fontSize: 13, padding: "6px 8px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 6, background: "transparent", color: "inherit", fontFamily: "inherit" }
+						}),
 						errMsg && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, color: "var(--dsw-alias-text-critical, #e5534b)", marginTop: 10 }, children: errMsg }),
 						// D85: the scope-stale 403 carries "re-link GitHub" verbatim — offer
 						// the upgrade HERE instead of dead-ending: button first, then the
 						// one-time code + URL once the flow starts, auto-retry on success.
 						errMsg && errMsg.includes("re-link GitHub") && !relinking && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "outline", onClick: relink, style: { marginTop: 10 }, children: t("purge.relink") }),
+					// D88: any other failure gets an explicit retry.
+					errMsg && !errMsg.includes("re-link GitHub") && !relinking && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "outline", onClick: submit, style: { marginTop: 10 }, children: t("purge.retry") }),
 						relinking && (0, react_jsx_runtime.jsxs)("div", { style: { marginTop: 10, padding: "10px 12px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 8, fontSize: 12 }, children: [
 							(0, react_jsx_runtime.jsx)("div", { style: { opacity: 0.75, marginBottom: 6 }, children: t("purge.relinkHint") }),
 							(0, react_jsx_runtime.jsx)("div", { children: devCode ? devCode.verificationUri : "https://github.com/login/device" }),
 							devCode && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 16, fontWeight: 600, letterSpacing: "0.08em", marginTop: 4 }, children: devCode.userCode })
 						] }),
 					] }),
-					phase === "done" && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, fontWeight: 600 }, children: t("purge.done") })
+					phase === "done" && (0, react_jsx_runtime.jsxs)("div", { children: [
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, fontWeight: 600 }, children: t("purge.done") }),
+						summary && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginTop: 6 }, children: summary })
+					] })
 				] })
 			});
 		}
@@ -4155,6 +4191,8 @@ window.__ModuleLoader__.load({
 			// D85: the in-modal delete_repo upgrade path (device flow + auto-retry).
 			"purge.relink": "Re-link GitHub & retry",
 			"purge.relinkHint": "One-time permission upgrade: the saved GitHub link predates the delete permission. Enter this code at the URL below to authorize — the delete retries automatically.",
+			"purge.typeName": "Type {name} exactly to confirm.",
+			"purge.retry": "Try again",
 			"purge.close": "Close",
 			"groupBy.workspace": "Project",
 			"orderBy.manual": "As created",
@@ -4282,6 +4320,8 @@ window.__ModuleLoader__.load({
 			"purge.done": "已永久删除",
 			"purge.relink": "重新关联 GitHub 并重试",
 			"purge.relinkHint": "一次性权限升级：已保存的 GitHub 关联早于删除权限。在下方网址输入该代码完成授权——删除会自动重试。",
+			"purge.typeName": "输入 {name} 以确认。",
+			"purge.retry": "重试",
 			"purge.close": "关闭",
 			"groupBy.workspace": "按项目",
 			"orderBy.manual": "按创建顺序",

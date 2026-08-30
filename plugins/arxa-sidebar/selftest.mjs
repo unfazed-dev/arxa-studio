@@ -386,5 +386,14 @@ check('purge: the re-link surfaces the one-time code and AUTO-retries the same p
   client.includes('ORG_POST("github.device").then((r) => {') && client.includes('if (d && d.userCode) setDevCode(d);') && client.includes('children: devCode.userCode') && client.includes('setRelinking(false); setDevCode(null);\n\t\t\t\t\tsubmit();'))
 check('purge: re-link strings localized (en + zh)',
   client.includes('"purge.relink": "Re-link GitHub & retry"') && client.includes('"purge.relink": "重新关联 GitHub 并重试"') && client.includes('"purge.relinkHint"'))
+// ---- D88: ghost-row sync fix + GitHub-style typed delete gate ----
+check('store: orgTrash rides the change signature (purge-only mutations must land)',
+  client.includes('next.orgTrash, next.trashCount'))
+check('purge: D88 typed-name gate arms Delete forever (exact, case-sensitive row label)',
+  client.includes('const matches = typed === target.name;') && client.includes('disabled: !matches || phase === "busy"') && client.includes('t("purge.typeName").replace("{name}", target.name)') && client.includes('placeholder: target.name'))
+check('purge: D88 busy LOCK (Close dead while deleting) + retry + auto-close + summary',
+  client.includes('variant: "outline", disabled: phase === "busy", onClick: dismiss') && client.includes('t("purge.retry")') && client.includes('setTimeout(onClose, 1100)') && client.includes('res.deletedRepos.join(", ")'))
+check('purge: D88 typed gate + retry localized (en + zh)',
+  client.includes('"purge.typeName": "Type {name} exactly to confirm."') && client.includes('"purge.typeName": "输入 {name} 以确认。"') && client.includes('"purge.retry": "Try again"') && client.includes('"purge.retry": "重试"'))
 console.log(failures === 0 ? '\narxa-sidebar selftest: ALL GREEN' : `\narxa-sidebar selftest: ${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)
