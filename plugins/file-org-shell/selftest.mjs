@@ -391,10 +391,20 @@ try {
   }
 
   
-  // ---- W3b: project publish (D69 gate half) --------------------------------
-  console.log('project publish (W3b):')
+  // ---- W3b/D73: publish (gate + push halves) -------------------------------
+  console.log('publish (W3b gate half + D73 push half):')
   {
-    // (a) linked mock github: private repo + origin + manifest annotation.
+    // The mock repo URL is a LOCAL BARE repo: the push half runs for real
+    // (git push --all over a plain path) with zero network — the offline
+    // contract every selftest keeps.
+    const bareRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-publish-bare-'))
+    const bareFor = (name) => {
+      const p = path.join(bareRoot, name + '.git')
+      runGit(['init', '--bare', p], { cwd: bareRoot, env })
+      return p
+    }
+
+    // (a) linked mock github: private repo + origin + PUSH + manifest annotation.
     const createdRepos = []
     const svcGh = createOrgLifecycle({
       workspaceRoot: root,
@@ -407,23 +417,32 @@ try {
             name,
             full_name: 'octocat/' + name,
             private: true,
-            html_url: 'https://github.com/octocat/' + name,
+            html_url: bareFor(name),
             owner: { login: 'octocat' },
           }
         },
+        gitCredentials: async () => ({ login: 'octocat', token: 'test-token' }),
       },
     })
     await svcGh.openOrg(orgA.path)
     const proj = await svcGh.current.newProject('Skunkworks')
-    ok(createdRepos[0] === proj.slug, 'linked github: createPrivateRepo called with the project slug')
-    ok(runGit(['remote', 'get-url', 'origin'], { cwd: proj.path, env }) === 'https://github.com/octocat/' + proj.slug, 'origin wired to the new private repo')
+    // D74: the org heal publishes at open, so the org slug lands in this
+    // list too — the CONTRACT is that the project slug is served verbatim.
+    ok(createdRepos.includes(proj.slug), 'linked github: createPrivateRepo called with the project slug')
+    ok(createdRepos[0] === path.basename(orgA.path), 'D74 heal: openOrg published the org itself (org slug served first)')
+    const originUrl = runGit(['remote', 'get-url', 'origin'], { cwd: proj.path, env })
+    ok(originUrl === bareFor(proj.slug), 'origin wired to the new private repo')
+    ok(
+      runGit(['rev-parse', '--verify', 'main'], { cwd: bareFor(proj.slug), env, allowFail: true }) !== null,
+      'D73 push half: history really reached the remote (main exists on the bare)',
+    )
     const pm = JSON.parse(fs.readFileSync(path.join(proj.path, 'project.json'), 'utf8'))
     ok(
       pm.repoOwner === 'octocat' && pm.repoName === proj.slug && pm.repoPrivate === true &&
-      pm.repoUrl === 'https://github.com/octocat/' + proj.slug,
+      pm.repoUrl === bareFor(proj.slug),
       'manifest annotated with repoOwner/repoName/repoPrivate/repoUrl',
     )
-    ok(!('githubStatus' in pm), 'no error annotation on the happy path')
+    ok(pm.githubStatus === 'published' && typeof pm.githubPublishedAt === 'string', 'happy path annotates githubStatus=published + timestamp')
     svcGh.closeOrg()
 
     // (b) no github faces at all: unavailable stub annotates, project exists.
@@ -448,6 +467,37 @@ try {
     ok(typeof bm.githubStatus === 'string' && bm.githubStatus.startsWith('publish-failed:'), 'throwing github: publish-failed annotation, never a throw')
     svcNoGh.closeOrg()
     svcBoom.closeOrg()
+
+    // (d) D74 heal-on-open + manual publish: a FRESH org (never published)
+    // publishes at open with pushed history; a second publish is a loud
+    // idempotent skip. (orgA was already published by (a)'s heal — the
+    // fixture org carries the proof that heal runs on EVERY open.)
+    const orgBare = bareFor('healcheck')
+    const hRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-heal-org-'))
+    const svcHeal = createOrgLifecycle({
+      workspaceRoot: hRoot,
+      env,
+      github: {
+        status: async () => ({ linked: true, login: 'octocat' }),
+        createPrivateRepo: async (name) => ({
+          name, full_name: 'octocat/' + name, private: true, html_url: orgBare, owner: { login: 'octocat' },
+        }),
+        gitCredentials: async () => ({ login: 'octocat', token: 'test-token' }),
+      },
+    })
+    const orgHeal = svcHeal.createOrg('Heal Corp')
+    await svcHeal.openOrg(orgHeal.path)
+    const healRes = await svcHeal.current.githubHeal
+    ok(healRes?.ok === true && healRes.repoUrl === orgBare, 'D74 heal: open-time detached publish resolves ok with the repo url')
+    const om = JSON.parse(fs.readFileSync(path.join(orgHeal.path, 'org.json'), 'utf8'))
+    ok(om.repoUrl === orgBare && om.githubStatus === 'published', 'D74 heal: org.json annotated repoUrl + published')
+    ok(
+      runGit(['rev-parse', '--verify', 'main'], { cwd: orgBare, env, allowFail: true }) !== null,
+      'D74 heal: org history reached the remote (main on the bare)',
+    )
+    const again = await svcHeal.current.publishGithub()
+    ok(again.ok === true && again.skipped === 'published', 'D74 manual publish: idempotent skip when already published')
+    svcHeal.closeOrg()
   }
 
   // ---- Phase E: renameOrg end-to-end + all-or-nothing proof (D72) ----------

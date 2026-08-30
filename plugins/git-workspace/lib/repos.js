@@ -214,6 +214,34 @@ export function initOrgRepo(orgPath, env = process.env, { deferSnapshot = false,
   return { path: orgPath, initialised: true, deferred: deferSnapshot }
 }
 
+/**
+ * Push the repo's PRIMARY branch to `url` (D73 publish half). Session
+ * branches (`arxa/session/*`) are local working state — they never publish;
+ * when HEAD sits on one (a session is open), the primary branch resolves
+ * main → master instead. The URL carries its own credentials when GitHub
+ * (token embedded by the caller, NEVER persisted — it rides this one
+ * command line only). GIT_TERMINAL_PROMPT=0 turns a credentials problem
+ * into a loud failure instead of a hang.
+ *
+ * @returns {{ ref: string, output: string }} the pushed branch ref + git stdout
+ */
+export function pushRepo(dir, url, env = process.env) {
+  if (typeof url !== 'string' || url.trim() === '') {
+    throw new TypeError('pushRepo: url must be a non-empty string')
+  }
+  let ref = runGit(['symbolic-ref', '--short', 'HEAD'], { cwd: dir, env, allowFail: true })
+  if (!ref || ref.startsWith('arxa/session/')) {
+    ref = runGit(['show-ref', '--verify', '--hash', 'refs/heads/main'], { cwd: dir, env, allowFail: true }) !== null
+      ? 'main'
+      : 'master'
+  }
+  const output = runGit(['push', url, 'refs/heads/' + ref + ':refs/heads/' + ref], {
+    cwd: dir,
+    env: { ...env, GIT_TERMINAL_PROMPT: '0' },
+  })
+  return { ref, output }
+}
+
 /** Read the URL of the `origin` remote, or null when absent (allowFail). */
 export function getOrigin(dir, env = process.env) {
   return runGit(['remote', 'get-url', 'origin'], { cwd: dir, env, allowFail: true })

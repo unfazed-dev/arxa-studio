@@ -29,6 +29,7 @@ import {
   openSession, sessionStageBoundary, archiveSession, reviveSession,
   listSessions, archivedSessionIds,
   getOrigin, setOrigin, rekeySessionsProject,
+  pushRepo,
 } from './lib/index.js'
 
 let passed = 0
@@ -405,6 +406,25 @@ ok('orgIgnoreFor: includeExisting=false versions only arxa-managed files', () =>
   assert.ok(tracked.includes('org.json'))
   assert.ok(!tracked.includes('bulk.bin'), 'pre-existing bulk is NOT tracked')
   assert.equal(fs.existsSync(path.join(wl, 'bulk.bin')), true) // untouched on disk
+})
+
+ok('pushRepo: pushes the PRIMARY branch to a remote URL (D73 push half, offline bare)', () => {
+  const src = path.join(tmp, 'push-src')
+  fs.mkdirSync(src, { recursive: true }) // real callers always scaffold the folder first
+  const bare = path.join(tmp, 'push-remote.git')
+  initOrgRepo(src, process.env, { managedDirs: ['projects', 'notes', 'meetings', 'account', 'communications'] })
+  runGit(['init', '--bare', bare], { cwd: tmp })
+  // a session branch exists locally but must NEVER publish
+  runGit(['branch', 'arxa/session/noise'], { cwd: src })
+  const res = pushRepo(src, bare, process.env)
+  assert.equal(res.ref, 'main', 'primary branch resolved (HEAD was main)')
+  assert.ok(runGit(['rev-parse', '--verify', 'main'], { cwd: bare, allowFail: true }) !== null, 'main landed on the remote')
+  assert.equal(runGit(['rev-parse', '--verify', 'refs/heads/arxa/session/noise'], { cwd: bare, allowFail: true }), null, 'session branches never publish')
+  // HEAD on a session branch (session open) → falls back to main, still not the session branch
+  runGit(['checkout', '-b', 'arxa/session/open'], { cwd: src })
+  const res2 = pushRepo(src, bare, process.env)
+  assert.equal(res2.ref, 'main', 'session-branch HEAD falls back to the primary branch')
+  assert.throws(() => pushRepo(src, '', process.env), TypeError, 'empty url is a loud TypeError')
 })
 
 

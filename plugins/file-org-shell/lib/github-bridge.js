@@ -8,7 +8,7 @@
  *
  * Every method is throw-proof: callers never need try/catch around github.
  */
-import { readManifest, writeManifest, projectManifestPath } from '../../workspace/lib/index.js'
+import { readManifest, writeManifest, projectManifestPath, orgManifestPath } from '../../workspace/lib/index.js'
 
 /** Normalize a createPrivateRepo payload (GitHub REST shape) → the fields the manifest stores. */
 function normalizeRepo(r) {
@@ -23,7 +23,7 @@ function normalizeRepo(r) {
 /**
  * Create the throw-proof bridge over injected faces (or the unavailable stub).
  *
- * @param {{ status?: Function, createPrivateRepo?: Function }} faces
+ * @param {{ status?: Function, createPrivateRepo?: Function, gitCredentials?: Function }} faces
  */
 export function createGithubBridge(faces = {}) {
   const f = faces && typeof faces === 'object' ? faces : {}
@@ -51,7 +51,24 @@ export function createGithubBridge(faces = {}) {
     }
   }
 
-  return { status, createPrivateRepo }
+  /** → { ok:true, login, token } | { ok:false, reason } — throw-proof
+    * (D73): the push half needs HTTPS credentials; an unavailable face
+    * degrades exactly like the others. The token is handed ONLY to the
+    * lifecycle's push call, never logged, never persisted. */
+  async function gitCredentials() {
+    if (typeof f.gitCredentials !== 'function') return { ok: false, reason: 'github-unavailable' }
+    try {
+      const c = await f.gitCredentials()
+      if (!c || typeof c !== 'object' || typeof c.login !== 'string' || typeof c.token !== 'string') {
+        return { ok: false, reason: 'github-unavailable' }
+      }
+      return { ok: true, login: c.login, token: c.token }
+    } catch (err) {
+      return { ok: false, reason: 'github-unavailable', error: String(err?.message ?? err) }
+    }
+  }
+
+  return { status, createPrivateRepo, gitCredentials }
 }
 
 /**
@@ -61,6 +78,30 @@ export function createGithubBridge(faces = {}) {
  *
  * @returns {object} the annotated manifest (or a tombstone object on read failure)
  */
+/**
+ * Annotate the ORG manifest (org.json) with publish fields (D73). Same
+ * merge-only, throw-proof contract as the project twin: a manifest that
+ * cannot be read or written is reported, never thrown — the local org is
+ * the source of truth and must survive any GitHub-shaped failure.
+ *
+ * @returns {object} the annotated manifest (or a tombstone object on read failure)
+ */
+export function annotateOrgManifest(orgPath, fields) {
+  let manifest
+  try {
+    manifest = readManifest(orgManifestPath(orgPath))
+  } catch (err) {
+    return { annotateError: String(err?.message ?? err) }
+  }
+  Object.assign(manifest, fields)
+  try {
+    writeManifest(orgManifestPath(orgPath), manifest)
+  } catch (err) {
+    return { ...manifest, annotateError: String(err?.message ?? err) }
+  }
+  return manifest
+}
+
 export function annotateProjectManifest(projectPath, fields) {
   let manifest
   try {

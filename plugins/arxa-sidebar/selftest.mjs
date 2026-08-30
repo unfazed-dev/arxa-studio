@@ -264,5 +264,21 @@ check('wiring: runtime producer present (SessionManager pendingInteractions)',
     } catch { return false }
   })())
 
+// ---- 9. D73/D74 github publish wiring ------------------------------------------
+// The silent drop: getLifecycle built the lifecycle WITHOUT github faces, so
+// the throw-proof stub answered github-unavailable for every publish while
+// the account was linked (measured 2026-08-30 on TOPO project-001). Pin the
+// exact injection expression, the manual-publish action, and the menu row.
+check('github: the lifecycle is created WITH github faces injected (D73 root-cause fix)',
+  hostSrc().includes('github: github ?? undefined'))
+check('github: import failure degrades to the loud stub, never a crash',
+  hostSrc().includes('await getGithub().catch(() => undefined)'))
+check('github: manual publish action routes to the open-org handle (D74 hybrid heal)',
+  hostSrc().includes("'github.publish'") && hostSrc().includes('cur.publishGithub()'))
+check('github: org menu carries the Publish row (en + zh)',
+  client.includes('"github.publish"') && client.includes('menu.org.publish'))
+check('github: publish label localized',
+  client.includes('"menu.org.publish": "Publish to GitHub"') && client.includes('"menu.org.publish": "发布到 GitHub"'))
+
 console.log(failures === 0 ? '\narxa-sidebar selftest: ALL GREEN' : `\narxa-sidebar selftest: ${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)

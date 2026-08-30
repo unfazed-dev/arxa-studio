@@ -142,6 +142,20 @@ export function createGithubLink({
     return createPrivateRepoApi({ name, accessToken, fetch, apiBase })
   }
 
+  /**
+   * Credentials for git-over-HTTPS pushes (D73): { login, token } for the
+   * linked account. The token NEVER leaves this call chain except into the
+   * push command line — it is not logged, not persisted, not returned to
+   * any client surface. Throws loud when unlinked / token unavailable.
+   */
+  async function gitCredentials() {
+    const state = readState(env)
+    if (!state?.linked) throw new Error('github-link: not linked (push needs a linked GitHub account)')
+    const accessToken = await ring.getSecret(state.login)
+    if (!accessToken) throw new Error('github-link: token unavailable for ' + state.login + ' — link again')
+    return { login: state.login, token: accessToken }
+  }
+
   /** Latest device-flow code for the UI (null until a link() starts one). */
   function deviceCode() {
     return lastDeviceCode
@@ -153,6 +167,7 @@ export function createGithubLink({
     unlink,
     status,
     createPrivateRepo,
+    gitCredentials,
     deviceCode,
   }
 }

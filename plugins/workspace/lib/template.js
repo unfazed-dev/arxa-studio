@@ -56,6 +56,30 @@ session working anywhere inside this organisation.
 `
 }
 
+/** Project .gitignore (D73): local noise and secrets ONLY — never project
+ * content (the managed containers ARE content). Nested project repos are
+ * published to GitHub as-is, so this list stays deliberately small and
+ * extendable by the user. `build/` is a MANAGED CONTAINER (template v2)
+ * and must never be ignored. */
+export const PROJECT_GITIGNORE = [
+  '# arxa studio (project scaffold): local noise and secrets only — never',
+  '# project content. Extend freely.',
+  '.DS_Store',
+  'Thumbs.db',
+  '~$*',
+  '.env',
+  '.env.*',
+  '!.env.example',
+  'node_modules/',
+  '__pycache__/',
+  '*.pyc',
+  '.venv/',
+  'dist/',
+  'out/',
+  'coverage/',
+  '',
+].join('\n')
+
 function projectAgentsStub(displayName) {
   return `# ${displayName} — standing instructions
 
@@ -148,7 +172,12 @@ export const TEMPLATES = Object.freeze({
     }),
     project: Object.freeze({
       dirs: Object.freeze(projectDirsV2()),
-      files: Object.freeze([{ path: 'AGENTS.md', content: (ctx) => projectAgentsStub(ctx.displayName) }]),
+      files: Object.freeze([
+        { path: 'AGENTS.md', content: (ctx) => projectAgentsStub(ctx.displayName) },
+        // D73: nested project repos publish to GitHub — scaffold carries an
+        // ignore from day one (git init alone was the old behaviour).
+        { path: '.gitignore', content: () => PROJECT_GITIGNORE },
+      ]),
     }),
   }),
 })

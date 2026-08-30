@@ -164,7 +164,12 @@ export function apply(ctx, opts = {}) {
       try { return shell.loadWorkspaceRoot?.() } catch { return null }
     })()
     if (!root) return null // no workspace chosen yet → no-org state
-    lifecycle = shell.createOrgLifecycle({ workspaceRoot: root, dsh: getBridge() ?? undefined })
+    // D73 root-cause fix: the github faces MUST reach the lifecycle or its
+    // throw-proof stub answers github-unavailable for every publish (the
+    // exact silent drop that kept TOPO/RESTO off GitHub while linked).
+    // Import failure degrades to undefined → the loud stub — never a crash.
+    const github = await getGithub().catch(() => undefined)
+    lifecycle = shell.createOrgLifecycle({ workspaceRoot: root, dsh: getBridge() ?? undefined, github: github ?? undefined })
     return lifecycle
   }
 
@@ -527,6 +532,16 @@ export function apply(ctx, opts = {}) {
             'org.open': () => ensureOpen(arg?.orgId ?? arg),
             'org.close': () => l.closeOrg(),
             'org.rename': () => l.renameOrg(orgByRef(arg?.orgId).path, arg?.name),
+            /** D74 manual publish (the org menu affordance): idempotent —
+              * create the private repo when missing, push all branches,
+              * annotate the manifest. Opens the org first when a ref is
+              * given (single-handle contract, same as workspace.new-session).
+              * The result carries ok/reason so the UI can say WHY when the
+              * account is unlinked or the snapshot is still pending. */
+            'github.publish': async () => {
+              const cur = arg?.orgId ? await ensureOpen(arg.orgId) : handle()
+              return cur.publishGithub()
+            },
             // 'org.new-session' is GONE (grilled 2026-08-30): org rows
             // never host sessions — the legacy + path that reached this
             // action created org-level worktrees by accident. Unknown

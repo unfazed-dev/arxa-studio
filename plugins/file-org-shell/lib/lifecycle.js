@@ -65,6 +65,8 @@ import {
   initOrgRepo,
   initProjectRepo,
   setOrigin,
+  getOrigin,
+  pushRepo,
   spawnSnapshotOrgRepo,
   snapshotWorkerLive,
   listSessions,
@@ -85,7 +87,7 @@ import { claimMaterializer, materialize, readEdits } from '../../cairn-rail/lib/
 import { OrgOpenError, OrgAlreadyOpenError, OrgNotOpenError } from './errors.js'
 import { acquireShellLock } from './shell-lock.js'
 import { createDshBridge, joinDshLive } from './dsh-bridge.js'
-import { createGithubBridge, annotateProjectManifest } from './github-bridge.js'
+import { createGithubBridge, annotateProjectManifest, annotateOrgManifest } from './github-bridge.js'
 
 /** Step names carried by OrgOpenError.step, in execution order. */
 export const STEPS = Object.freeze([
@@ -150,6 +152,77 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
   // publishing never blocks or fails local project creation (CLAUDE.md
   // boundary: local-first, no cloud dependency for core function).
   const githubBridge = createGithubBridge(github)
+
+  // ---- D73 publish half (grilled 2026-08-30): orgs AND projects publish.
+  // The unit is the repo; the flow is always: linked? → repo exists?
+  // (origin reuse counts) → create → origin → push --all → manifest.
+  // ANY failure is a loud manifest annotation, NEVER a throw — the local
+  // repo is the source of truth and must survive every GitHub-shaped
+  // failure (CLAUDE.md local-first boundary).
+
+  /** Token-carrying push URL for a GitHub html_url. The token rides THIS
+    * command line only — it is never persisted, never logged, and never
+    * written into .git/config (origin keeps the clean URL). Non-GitHub
+    * URLs (test doubles point at local bare repos) pass through as-is. */
+  function pushUrlFor(repoUrl, creds) {
+    if (typeof repoUrl !== 'string' || !repoUrl.startsWith('https://github.com/')) return repoUrl
+    return 'https://' + encodeURIComponent(creds.login) + ':' + encodeURIComponent(creds.token)
+      + '@' + repoUrl.slice('https://'.length)
+  }
+
+  /**
+   * Idempotent publish of ONE repo (org root or nested project). Skips
+   * when the manifest already carries repoUrl (published). Reuses an
+   * existing origin from an earlier partial publish; creates the private
+   * repo when absent; pushes all branches; annotates the manifest with
+   * the repo fields + githubStatus. Throw-proof by contract.
+   *
+   * @param {'org' | 'project'} kind
+   */
+  async function publishRepoOnce(repoPath, slug, kind) {
+    const manifestFile = kind === 'org' ? orgManifestPath(repoPath) : projectManifestPath(repoPath)
+    const annotate = (fields) => {
+      try {
+        return kind === 'org' ? annotateOrgManifest(repoPath, fields) : annotateProjectManifest(repoPath, fields)
+      } catch { return null }
+    }
+    let manifest
+    try {
+      manifest = readManifest(manifestFile)
+    } catch {
+      return { ok: false, reason: 'manifest-unreadable' }
+    }
+    if (manifest.repoUrl) return { ok: true, skipped: 'published', slug, repoUrl: manifest.repoUrl }
+    const st = await githubBridge.status()
+    if (!st.ok || !st.linked) {
+      annotate({ githubStatus: st.ok ? 'not-linked' : (st.reason ?? 'github-unavailable') })
+      return { ok: false, reason: st.ok ? 'not-linked' : (st.reason ?? 'github-unavailable') }
+    }
+    try {
+      let repoUrl = getOrigin(repoPath, env)
+      if (!repoUrl) {
+        const made = await githubBridge.createPrivateRepo(slug)
+        if (!made.ok) throw new Error(made.reason ?? 'github-unavailable')
+        setOrigin(repoPath, made.repo.repoUrl, env)
+        repoUrl = made.repo.repoUrl
+      }
+      const creds = await githubBridge.gitCredentials()
+      if (!creds.ok) throw new Error(creds.reason ?? 'github-unavailable')
+      pushRepo(repoPath, pushUrlFor(repoUrl, creds), env)
+      annotate({
+        repoUrl,
+        repoOwner: creds.login,
+        repoName: slug,
+        repoPrivate: true,
+        githubStatus: 'published',
+        githubPublishedAt: new Date().toISOString(),
+      })
+      return { ok: true, slug, repoUrl }
+    } catch (err) {
+      annotate({ githubStatus: 'publish-failed: ' + String(err?.message ?? err) })
+      return { ok: false, reason: String(err?.message ?? err) }
+    }
+  }
   // Last-known dsh live list, refreshed whenever the lifecycle touches dsh.
   // The rows faces stay SYNCHRONOUS (presentation joins must not open an
   // async cycle) and join against this cache; a never-refreshed cache
@@ -310,6 +383,25 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
         /* recents are advisory */
       }
 
+      // D74 heal-on-open: an org with a linked GitHub account and no
+      // published repo gets one — DETACHED (publish involves the network;
+      // open must stay instant, the same discipline as the detached
+      // initial snapshot). Waits (bounded, condition-polled) for HEAD so
+      // a freshly created org publishes in THIS session once its
+      // deferred snapshot lands. The in-flight promise parks on the
+      // handle so a manual publish can await it instead of racing it.
+      const githubHeal = (async () => {
+        try {
+          for (let tries = 0; !hasHead(resolved, env) && tries < 240; tries++) {
+            await new Promise((resolveTick) => setTimeout(resolveTick, 250))
+          }
+          if (!hasHead(resolved, env)) return { ok: false, reason: 'initial-snapshot-pending' }
+          return await publishRepoOnce(resolved, slug, 'org')
+        } catch {
+          /* publish is throw-proof by contract — this is belt-and-braces */
+        }
+      })()
+
       current = {
         path: resolved,
         slug,
@@ -321,6 +413,18 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
         archivedSessionIds: archived,
         index: { backend, rebuilt: counts !== null, counts },
         rails: { account: mirror, cairn },
+        /** Detached D74 heal — the manual publish below awaits it so a
+          * click never races the open-time attempt. */
+        githubHeal,
+        /** D74 manual publish (the menu affordance): idempotent, awaits the
+          * heal first, loud not-linked / pending reasons for the UI. */
+        async publishGithub() {
+          if (!hasHead(resolved, env)) {
+            return { ok: false, reason: 'initial-snapshot-pending: the first git snapshot of this organisation is still running — publishing unlocks the moment it completes' }
+          }
+          try { await githubHeal } catch { /* throw-proof */ }
+          return publishRepoOnce(resolved, slug, 'org')
+        },
         // ---- contract faces (Phase B, docs/plans/file-org-shell-integration.md):
         // the sidebar consumes projects / parked sessions / trash and the
         // project/session/trash verbs THROUGH the open org handle, so
@@ -395,17 +499,12 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           const created = scaffoldProject(resolved, name)
           try {
             initProjectRepo(created.path, env) // idempotent repo attach
-            const st = await githubBridge.status()
-            if (st.ok && st.linked) {
-              const made = await githubBridge.createPrivateRepo(created.slug)
-              if (!made.ok) throw new Error(made.reason ?? 'github-unavailable')
-              setOrigin(created.path, made.repo.repoUrl, env)
-              created.manifest = annotateProjectManifest(created.path, made.repo)
-            } else {
-              annotateProjectManifest(created.path, {
-                githubStatus: st.ok ? 'not-linked' : (st.reason ?? 'github-unavailable'),
-              })
-            }
+            // D73: the whole publish half (linked? → create → origin →
+            // push --all → manifest annotation) is shared with the org path.
+            await publishRepoOnce(created.path, created.slug, 'project')
+            try {
+              created.manifest = readManifest(projectManifestPath(created.path))
+            } catch { /* annotation read-back is presentation */ }
           } catch (err) {
             annotateProjectManifest(created.path, {
               githubStatus: 'publish-failed: ' + String(err?.message ?? err),

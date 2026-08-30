@@ -259,5 +259,25 @@ try {
   await new Promise((r) => mock.close(r))
 }
 
+// ---- D73: gitCredentials face (push half) -----------------------------------
+{
+  const { writeState, clearState } = await import('./lib/index.js')
+  const svcCreds = createGithubLink({ keyring, env })
+  try {
+    await assert.rejects(() => svcCreds.gitCredentials(), /not linked/, 'gitCredentials refuses when unlinked')
+    writeState({ linked: true, login: 'octo-creds', scopes: ['repo'] }, env)
+    await keyring.setSecret('octo-creds', 'tok-123')
+    const creds = await svcCreds.gitCredentials()
+    ok(creds && creds.login === 'octo-creds' && creds.token === 'tok-123', 'gitCredentials returns { login, token } for the linked account')
+    await keyring.deleteSecret('octo-creds')
+    writeState({ linked: true, login: 'octo-creds', scopes: ['repo'] }, env)
+    await assert.rejects(() => svcCreds.gitCredentials(), /token unavailable/, 'gitCredentials refuses when the keyring lost the token')
+  } finally {
+    clearState(env)
+  }
+  passed++
+  console.log('  ✓ gitCredentials face verified (linked / unlinked / token-lost)')
+}
+
 console.log('\ngithub-link selftest: ' + passed + ' checks passed')
 process.exit(0)

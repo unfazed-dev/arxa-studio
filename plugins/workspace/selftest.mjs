@@ -235,6 +235,19 @@ try {
     assert.equal(org.manifest.formatStamp, stampFor(TEMPLATE_VERSION))
   })
 
+  check('D73: the project template carries a .gitignore — noise + secrets only, never managed containers', () => {
+    const project = getTemplate(2).project
+    const ignoreEntry = project.files.find((f) => f.path === '.gitignore')
+    assert.ok(ignoreEntry, 'v2 project template writes a .gitignore')
+    const body = ignoreEntry.content({ displayName: 'X' })
+    assert.match(body, /\.env\b/, 'secrets ignored')
+    assert.match(body, /node_modules\//, 'dependency dirs ignored')
+    assert.doesNotMatch(body, /(^|\/)build\//, 'build/ is a MANAGED CONTAINER — never ignored')
+    // end-to-end: scaffoldProject really writes it on disk
+    const p = scaffoldProject(org.path, 'Ignore Probe')
+    assert.equal(fs.readFileSync(path.join(p.path, '.gitignore'), 'utf8'), body)
+  })
+
   // A dedicated org for the migration story, with its own git repo.
   const migOrg = scaffoldOrgInRoot(workspaceRoot, 'Migration Org')
   initOrgRepo(migOrg.path)

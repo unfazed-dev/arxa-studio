@@ -524,12 +524,14 @@
 			const [menuOpen, setMenuOpen] = (0, react.useState)(false);
 			const items = isOrg ? [
 				{ id: "open", label: orgT("menu.org.open"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) },
+				{ id: "publish", label: orgT("menu.org.publish"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) },
 				{ id: "close", label: orgT("menu.org.close"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}), danger: true },
 				{ id: "trash", label: orgT("menu.trash"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}) }
 			] : [];
 			const onSelect = (id) => {
 				setMenuOpen(false);
 				if (id === "open") orgStore.mutate("org.open", { orgId: d.orgId }).catch(() => {});
+				else if (id === "publish") orgStore.mutate("github.publish", { orgId: d.orgId }).catch(() => {});
 				else if (id === "close") orgStore.mutate("org.close", {}).catch(() => {});
 				else if (id === "trash") orgStore.toggleTrash();
 			};
@@ -1039,6 +1041,7 @@
 			"menu.org.open": "Open organisation",
 			"menu.org.close": "Close organisation",
 			"menu.org.newProject": "New project",
+			"menu.org.publish": "Publish to GitHub",
 		};
 		const zhOver = {
 			"section.workspaces": "组织",
@@ -1109,5 +1112,6 @@
 			"menu.org.open": "打开组织",
 			"menu.org.close": "关闭组织",
 			"menu.org.newProject": "新建项目",
+			"menu.org.publish": "发布到 GitHub",
 		};
 		//#endregion

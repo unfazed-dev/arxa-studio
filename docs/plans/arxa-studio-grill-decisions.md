@@ -745,6 +745,43 @@ and research/github-auth-desktop-report.md (official-docs current).
   registry rekey; worktrees revive from parked branches. Supersedes
   D41's slug-stability clause. Display-name-only remains available when
   a remote you don't own makes moving unsafe.
+- **D73 — GitHub publish: BOTH orgs and projects, pushed.** The GitHub
+  unit is the repo at BOTH levels: the org folder publishes as one
+  private repo (`<slug>`), each project as its own nested private repo
+  (org `.gitignore` already excludes `projects/` — no overlap; D37
+  whitelist governs what an org repo contains). Publish = linked? →
+  repo exists? (origin reuse counts) → create → origin → push the
+  PRIMARY branch (`main`→`master`; session branches `arxa/session/*`
+  are local working state and NEVER publish) → manifest annotation
+  (repoOwner/repoName/repoUrl/githubStatus). The push token rides the
+  push command line ONLY — never persisted, never in `.git/config`.
+  Any GitHub-shaped failure is a loud manifest annotation, never a
+  throw — the local repo is the source of truth (CLAUDE.md local-first).
+  Root cause this fixes (measured 2026-08-30): the sidebar built the
+  lifecycle WITHOUT github faces, so the throw-proof stub answered
+  `github-unavailable` for every publish while the account WAS linked
+  (TOPO project-001 manifest carried it). Projects also scaffold a
+  `.gitignore` (noise + secrets only; `build/` is a managed container
+  and never ignored).
+- **D74 — Hybrid heal.** Existing orgs/projects created before D73 heal
+  on org OPEN: a detached, bounded waiter (condition-polled hasHead,
+  240×250 ms) publishes once HEAD lands — never blocks the open, never
+  blocks create (same discipline as the detached initial snapshot).
+  PLUS a manual control: the org menu's "Publish to GitHub" row routes
+  `github.publish` → the open-org handle's `publishGithub()`, which
+  awaits the in-flight heal (never races it) and is idempotent
+  (`skipped: 'published'` when the manifest already carries repoUrl).
+- **D75 — Composer git card (DESIGN BRIEF, not built).** A collapsible,
+  dsh-goals-style card over the text composer in EVERY arxa session,
+  worktree-aware (resolves the org repo vs project repo it serves).
+  STAGED AUTONOMY: auto = status/diff refresh, LLM commit-message
+  drafts, publish/heal, PR-description drafts; one-click confirm
+  (pre-filled, no typing) = commit, push, PR create, merge; NEVER auto
+  = approve, merge to protected branches, force-push/recover-
+  destructive ops, conflict-resolution choices. v1 = core loop + PR
+  (status, LLM commit, push, publish/heal, PR create). v2 = review /
+  auto-review / approve, CI status, conflict flows, recover. VS Code
+  git-parity is the north star; manual triggers always available.
 
 Build riders (user, this session): keep using the stock DSH workspace UI
 via the splice pattern (gen-workspace.mjs — depend-don't-fork); compose
