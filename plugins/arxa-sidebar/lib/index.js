@@ -284,7 +284,7 @@ export function apply(ctx, opts = {}) {
       // (GitHub repos deleted) from the Trash row.
       orgTrash: (l.listOrgTrash ? l.listOrgTrash() : []).map((e) => ({
         entryId: e.entryId,
-        name: (e.origin?.slug ?? e.entryId),
+        name: e.name || e.entryId,
       })),
       selectedProject: selSlug,
     }
