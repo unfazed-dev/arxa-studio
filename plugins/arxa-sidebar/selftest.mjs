@@ -316,8 +316,8 @@ check('project create: modal localized (en + zh)',
   client.includes('"project.create": "Create project"') && client.includes('"project.create": "创建项目"'))
 
 // ---- D80: row menus, the rename ride, the Trash row ----
-check('menus: both row kinds carry the kebab (the org-only gate is gone)',
-  client.includes('(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {') && !client.includes('isOrg && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu'))
+check('menus: ONLY org + project rows carry the kebab (docks/containers never)',
+  client.includes('const showMenu = isOrg || d.kind === "project";') && client.includes('showMenu && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {') && !client.includes('isOrg && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu'))
 check('menus: org Rename + project Rename/Trash items',
   client.includes('"menu.org.rename"') && client.includes('"menu.project.rename"') && client.includes('"menu.project.trash"') && !client.includes('id: "trash", label: orgT("menu.trash")'))
 check('rename: the modal drives org.rename and project.rename',

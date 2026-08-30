@@ -3238,6 +3238,9 @@ window.__ModuleLoader__.load({
 			// D80: BOTH row kinds carry a menu. The org menu gains Rename (and
 			// loses Trash — the always-visible Trash row replaces it); the project
 			// menu is Rename + Trash (local-only, restorable).
+			// D80 scope fix: ONLY org + project rows carry the menu — fixed docks
+			// (Meetings/Account/…) and containers are infrastructure, never renamable.
+			const showMenu = isOrg || d.kind === "project";
 			const items = isOrg ? [
 				{ id: "rename", label: orgT("menu.org.rename") },
 				{ id: "open", label: orgT("menu.org.open"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) },
@@ -3311,7 +3314,7 @@ window.__ModuleLoader__.load({
 								},
 								children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconPlusOutline16, {})
 							}),
-							(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {
+							showMenu && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {
 							open: menuOpen,
 							onClose: () => {
 								setMenuOpen(false);
