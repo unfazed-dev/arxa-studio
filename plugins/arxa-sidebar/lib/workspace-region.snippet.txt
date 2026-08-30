@@ -425,6 +425,12 @@
 		// True on container pseudo groups (org / dock / project): the stock
 		// folder row is suppressed there — the OrgContainerRow IS the row.
 		const ARXA_IS_CONTAINER_GROUP = (workspaceId) => ((orgStore.get().emit ?? {})[workspaceId] ?? []).length > 0;
+		/** D83: the Trash surface rides the GROUPED org tree's tail (gen
+		 * splice 6z) — directly under the last org row, ALWAYS, instead of
+		 * the sidebar's very bottom where the stock sessions region pushed
+		 * it hundreds of px below the orgs once an org is open. The flat
+		 * "In one list" stock mode has no org rows — no trash there. */
+		const ARXA_TRASH_AFTER_ORGS = () => orgT ? (0, react_jsx_runtime.jsx)(TrashSection, { t: orgT, key: "arxa-trash" }) : null;
 		const ARXA_SELECT_WS = (workspaceId) => {
 			const { orgId, ws } = wsParts(workspaceId);
 			if (ws !== "") orgStore.selectRow({ orgId, rowId: ws });
@@ -697,8 +703,12 @@
 				children: [
 					(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.slot, style: { opacity: 0.75 }, children: glyph }),
 					(0, react_jsx_runtime.jsx)("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, flex: "1 1 auto" }, title: e.entryId, children: e.name }),
-					entryAction(t("trash.restore"), _deepseek_ai_dsh_client_ui_primitives.IconRefreshOutline16, onRestore),
-					entryAction(t("trash.deleteForever"), _deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, onPurge, true)
+					// D83: the two icon buttons get a real 4px gap — they rendered
+					// edge-to-edge (sessionRow carries no gap for bare children).
+					(0, react_jsx_runtime.jsx)("span", { style: { display: "flex", gap: 4, flex: "none", alignItems: "center" }, children: [
+						entryAction(t("trash.restore"), _deepseek_ai_dsh_client_ui_primitives.IconRefreshOutline16, onRestore),
+						entryAction(t("trash.deleteForever"), _deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, onPurge, true)
+					] })
 				]
 			}, e.entryId);
 			return (0, react_jsx_runtime.jsxs)("div", {
@@ -1334,8 +1344,9 @@
 			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, {
 				children: [
 					!creating && (0, react_jsx_runtime.jsx)(WelcomeGate, { t: props.t }),
+					// D83: TrashSection no longer mounts here — ARXA_TRASH_AFTER_ORGS
+					// renders it inside the org tree, right under the last org row.
 					(0, react_jsx_runtime.jsx)(WorkspaceBrowser, patched),
-				(0, react_jsx_runtime.jsx)(TrashSection, { t: props.t }),
 					(0, react_jsx_runtime.jsx)(OrgCreateModal, { t: props.t, createWorkspace: props.createWorkspace, open: creating, onClose: () => setCreating(false) }),
 					(0, react_jsx_runtime.jsx)(OrgPublishModal, { t: props.t, target: publishing, onClose: () => setPublishing(null) }),
 					(0, react_jsx_runtime.jsx)(OrgProjectModal, { t: props.t, target: creatingProject, onClose: () => setCreatingProject(null) }),

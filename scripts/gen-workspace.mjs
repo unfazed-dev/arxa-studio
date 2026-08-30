@@ -144,6 +144,26 @@ const MENU_ANCHOR = 'actions !== void 0 && (0, react_jsx_runtime.jsx)(_deepseek_
 if (!out.includes(MENU_ANCHOR) || out.indexOf(MENU_ANCHOR) !== out.lastIndexOf(MENU_ANCHOR)) throw new Error('menu anchor missing/dup — stock shape moved?')
 out = out.replace(MENU_ANCHOR, 'false && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {')
 
+// 6z. (D83) the trash surface rides the GROUPED tree's tail: injected as
+//      the last child of the treeBody (after the org-groups list, before
+//      the fade) so it sits DIRECTLY under the last org row always —
+//      mounting it after the whole stock browser left it stranded below
+//      the sessions region once an org is open. Flat "In one list" mode
+//      has no org rows — no trash there.
+const TREE_TAIL = [
+	T(7) + '}, group.key);',
+	T(6) + '})]',
+	T(5) + '}),',
+	T(5) + '(0, react_jsx_runtime.jsx)("span", { className: WorkspaceBrowser_module_css_default.fade })',
+].join('\n')
+if (!out.includes(TREE_TAIL) || out.indexOf(TREE_TAIL) !== out.lastIndexOf(TREE_TAIL)) throw new Error('tree tail anchor missing/dup — stock shape moved?')
+out = out.replace(TREE_TAIL, [
+	T(7) + '}, group.key);',
+	T(6) + '}), ARXA_TRASH_AFTER_ORGS()]',
+	T(5) + '}),',
+	T(5) + '(0, react_jsx_runtime.jsx)("span", { className: WorkspaceBrowser_module_css_default.fade })',
+].join('\n'))
+
 // 6e. (default-collapsed, 2026-08-30): v2 auto-expanded every workspace
 //     row WITH sessions on mount. Removed — all folders start collapsed
 //     and open only where the user opens them; a pre-expanded session

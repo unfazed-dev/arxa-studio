@@ -356,5 +356,10 @@ check('trash: auto-opens while anything is trashed; manual toggle wins',
   client.includes('const [manual, setManual] = (0, react.useState)(null);') && client.includes('const open = manual === null ? total > 0 : manual;'))
 check('trash: org glyph shared between tree row and trash group header (single def)',
   client.includes('function OrgGlyph({ size })') && client.split('function OrgGlyph({ size })').length === 2 && client.includes('groupLabel((0, react_jsx_runtime.jsx)(OrgGlyph, { size: 12 }), t("trash.orgSection"))'))
+// ---- D83: trash lives under the last org row; icons keep their spacing ----
+check('trash: rides the grouped tree tail via ARXA_TRASH_AFTER_ORGS (no bottom mount)',
+  client.includes('const ARXA_TRASH_AFTER_ORGS = () => orgT ? (0, react_jsx_runtime.jsx)(TrashSection, { t: orgT, key: "arxa-trash" }) : null;') && client.includes('}), ARXA_TRASH_AFTER_ORGS()]') && !client.includes('TrashSection, { t: props.t }'))
+check('trash: restore/delete icon buttons are gapped (flex span, 4px)',
+  client.includes('style: { display: "flex", gap: 4, flex: "none", alignItems: "center" }, children: [') && client.includes('IconRefreshOutline16, onRestore),') && client.includes('IconTrashOutline16, onPurge, true)'))
 console.log(failures === 0 ? '\narxa-sidebar selftest: ALL GREEN' : `\narxa-sidebar selftest: ${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)
