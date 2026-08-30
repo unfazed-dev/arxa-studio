@@ -620,7 +620,7 @@
 							anchor: (0, react_jsx_runtime.jsx)("button", {
 								type: "button",
 								className: Rows_module_css_default.iconButton,
-								"aria-label": orgT("actions.workspace.aria", { name: d.label }),
+								"aria-label": isOrg ? orgT("actions.workspace.aria", { name: d.label }) : orgT("actions.project.aria", { name: d.label }),
 								onClick: (e) => {
 									e.stopPropagation();
 									setMenuOpen((v) => !v);
@@ -1269,7 +1269,7 @@
 			"rename.done": "Renamed",
 			"rename.close": "Close",
 			"rename.orgNote": "The organisation folder and its GitHub repo are renamed together.",
-			"rename.projectNote": "The project folder and its GitHub repo are renamed together."
+			"rename.projectNote": "The project folder and its GitHub repo are renamed together.",
 			"trash.section": "Trash",
 			"trash.restore": "Restore",
 			"trash.restoreAll": "Restore all",
@@ -1280,6 +1280,7 @@
 			"field.workspaceName": "Organisation name",
 			"conflict.named": "An organisation named “{name}” already exists.",
 			"actions.workspace.aria": "Organisation actions for {name}",
+			"actions.project.aria": "Project actions for {name}",
 			"groupBy.workspace": "Project",
 			"orderBy.manual": "As created",
 			"orderBy.updated": "Newest first",
@@ -1382,7 +1383,7 @@
 			"rename.done": "已重命名",
 			"rename.close": "关闭",
 			"rename.orgNote": "组织文件夹与其 GitHub 仓库将一并重命名。",
-			"rename.projectNote": "项目文件夹与其 GitHub 仓库将一并重命名。"
+			"rename.projectNote": "项目文件夹与其 GitHub 仓库将一并重命名。",
 			"trash.section": "回收站",
 			"trash.restore": "恢复",
 			"trash.restoreAll": "全部恢复",
@@ -1393,6 +1394,7 @@
 			"field.workspaceName": "组织名称",
 			"conflict.named": "已存在名为“{name}”的组织。",
 			"actions.workspace.aria": "{name} 的组织操作",
+			"actions.project.aria": "{name} 的项目操作",
 			"groupBy.workspace": "按项目",
 			"orderBy.manual": "按创建顺序",
 			"orderBy.updated": "最新在前",
