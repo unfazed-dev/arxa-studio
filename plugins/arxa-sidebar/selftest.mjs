@@ -370,5 +370,12 @@ check('trash: entries are stock project rows at the depth-1 margin (18px, 14px t
   client.includes('style: { marginLeft: 18, marginTop: 2, cursor: "default" }') && client.includes('className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, title: e.entryId'))
 check('trash: group labels are glyph-free 10px captions (no uppercase TRASHED wording anywhere)',
   client.includes('fontSize: 10, lineHeight: "16px", letterSpacing: "0.06em"') && client.includes('groupLabel(t("trash.orgSection"))') && !client.includes('groupLabel((0, react_jsx_runtime.jsx)(') && !client.includes('Trashed'))
+// ---- D85: the 403 delete_repo dead-end upgrades itself ----
+check('purge: the scope-stale 403 offers re-link & retry in the modal (device flow inline)',
+  client.includes('errMsg.includes("re-link GitHub") && !relinking') && client.includes('onClick: relink') && client.includes('const relink = () => {') && client.includes('ORG_POST("github.link").then(() => {'))
+check('purge: the re-link surfaces the one-time code and AUTO-retries the same purge',
+  client.includes('ORG_POST("github.device").then((r) => {') && client.includes('if (d && d.userCode) setDevCode(d);') && client.includes('children: devCode.userCode') && client.includes('setRelinking(false); setDevCode(null);\n\t\t\t\t\tsubmit();'))
+check('purge: re-link strings localized (en + zh)',
+  client.includes('"purge.relink": "Re-link GitHub & retry"') && client.includes('"purge.relink": "重新关联 GitHub 并重试"') && client.includes('"purge.relinkHint"'))
 console.log(failures === 0 ? '\narxa-sidebar selftest: ALL GREEN' : `\narxa-sidebar selftest: ${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)

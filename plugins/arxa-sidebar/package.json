@@ -1,6 +1,6 @@
 {
   "name": "arxa-sidebar",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "private": true,
   "description": "arxa's own sidebar: the stock shell (brand, fold, New-session CTA) plus the ORGANISATIONS rows world — the stock workspace section transformed to list orgs, projects, sessions and trash from the file-org-shell lifecycle. Replaces @deepseek-ai/dsh-client-ui-sidebar and the sidebar.workspaces registrant; the dsh packages stay byte-identical as reference.",
   "type": "module",

@@ -1227,7 +1227,16 @@
 			const [phase, setPhase] = (0, react.useState)("confirm");
 			const [errMsg, setErrMsg] = (0, react.useState)(null);
 			const [done, setDone] = (0, react.useState)(false);
-			(0, react.useEffect)(() => { setPhase("confirm"); setErrMsg(null); setDone(false); }, [target]);
+			// D85: a 403 delete_repo refusal upgrades IN place — the device flow
+			// runs from the modal (code shows inline) and the purge auto-retries
+			// the moment the re-link lands. Root cause: OAuth refresh tokens can
+			// NEVER add scopes; a link created before SCOPES gained delete_repo
+			// stays scope-stale until the user re-authorizes (github-link.json
+			// 2026-08-30: scopes [read:user, repo] from 05:24, delete_repo landed
+			// later that day).
+			const [relinking, setRelinking] = (0, react.useState)(false);
+			const [devCode, setDevCode] = (0, react.useState)(null);
+			(0, react.useEffect)(() => { setPhase("confirm"); setErrMsg(null); setDone(false); setRelinking(false); setDevCode(null); }, [target]);
 			if (!target) return null;
 			const dismiss = () => { if (phase !== "busy") onClose(); };
 			const submit = () => {
@@ -1239,6 +1248,29 @@
 				}, (e) => {
 					const msg = e instanceof Error ? e.message : String(e);
 					setErrMsg(msg); setPhase("confirm");
+				});
+			};
+			// D85: run the device flow from the error itself. github.device
+			// surfaces the one-time code the moment GitHub issues it (the
+			// Settings sign-in polls the same act); when github.link resolves
+			// the stored token carries delete_repo and the SAME purge reruns.
+			const relink = () => {
+				if (relinking) return;
+				setRelinking(true); setErrMsg(null);
+				const poll = setInterval(() => {
+					ORG_POST("github.device").then((r) => {
+						const d = r.result;
+						if (d && d.userCode) setDevCode(d);
+					}, () => {});
+				}, 700);
+				ORG_POST("github.link").then(() => {
+					clearInterval(poll);
+					setRelinking(false); setDevCode(null);
+					submit();
+				}, (e) => {
+					clearInterval(poll);
+					setRelinking(false); setDevCode(null);
+					setErrMsg(e instanceof Error ? e.message : String(e));
 				});
 			};
 			const footer = (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
@@ -1255,7 +1287,16 @@
 					phase !== "done" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, marginBottom: 8 }, children: target.name }),
 						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginBottom: 8 }, children: target.scope === "org" ? t("purge.orgWarn") : t("purge.projectWarn") }),
-						errMsg && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, color: "var(--dsw-alias-text-critical, #e5534b)", marginTop: 10 }, children: errMsg })
+						errMsg && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, color: "var(--dsw-alias-text-critical, #e5534b)", marginTop: 10 }, children: errMsg }),
+						// D85: the scope-stale 403 carries "re-link GitHub" verbatim — offer
+						// the upgrade HERE instead of dead-ending: button first, then the
+						// one-time code + URL once the flow starts, auto-retry on success.
+						errMsg && errMsg.includes("re-link GitHub") && !relinking && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "outline", onClick: relink, style: { marginTop: 10 }, children: t("purge.relink") }),
+						relinking && (0, react_jsx_runtime.jsxs)("div", { style: { marginTop: 10, padding: "10px 12px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 8, fontSize: 12 }, children: [
+							(0, react_jsx_runtime.jsx)("div", { style: { opacity: 0.75, marginBottom: 6 }, children: t("purge.relinkHint") }),
+							(0, react_jsx_runtime.jsx)("div", { children: devCode ? devCode.verificationUri : "https://github.com/login/device" }),
+							devCode && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 16, fontWeight: 600, letterSpacing: "0.08em", marginTop: 4 }, children: devCode.userCode })
+						] }),
 					] }),
 					phase === "done" && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, fontWeight: 600 }, children: t("purge.done") })
 				] })
@@ -1409,6 +1450,9 @@
 			"purge.confirm": "Delete forever",
 			"purge.busy": "Deleting — removing the GitHub repos and the trashed folder…",
 			"purge.done": "Deleted forever",
+			// D85: the in-modal delete_repo upgrade path (device flow + auto-retry).
+			"purge.relink": "Re-link GitHub & retry",
+			"purge.relinkHint": "One-time permission upgrade: the saved GitHub link predates the delete permission. Enter this code at the URL below to authorize — the delete retries automatically."
 			"purge.close": "Close",
 			"groupBy.workspace": "Project",
 			"orderBy.manual": "As created",
@@ -1535,6 +1579,8 @@
 			"purge.confirm": "永久删除",
 			"purge.busy": "正在删除——正在移除 GitHub 仓库与废纸篓文件夹…",
 			"purge.done": "已永久删除",
+			"purge.relink": "重新关联 GitHub 并重试",
+			"purge.relinkHint": "一次性权限升级：已保存的 GitHub 关联早于删除权限。在下方网址输入该代码完成授权——删除会自动重试。"
 			"purge.close": "关闭",
 			"groupBy.workspace": "按项目",
 			"orderBy.manual": "按创建顺序",
