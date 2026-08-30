@@ -19,6 +19,15 @@
 //          web UI and the phone can never double-answer: whoever answers
 //          first claims the wait; the loser gets not-pending.
 //
+// B2 phase-1b also splices the phone's cairn sync rail through here (the
+// SAME pairing tunnel): `/__cairn` (prefix, HTTP) and `/__cairn/sync`
+// (upgrade) proxy prefix-stripped to the desktop's cairn-server sidecar
+// (CAIRN_BIND, default 127.0.0.1:8190) — headers and bodies verbatim, the
+// upgrade spliced raw after the mirror's 101. Loopback exposure only: the
+// sidecar binds 127.0.0.1 and this route exists solely inside the engine's
+// already-authenticated tunnel. Mirror down does not mean engine down: both
+// legs fail honestly (502 / socket destroy) and never throw.
+//
 // Boundaries (deliberate, do not relax):
 // - Derived state ONLY. Nothing persists: a restart re-derives the list from
 //   the mux replay; a question/resolved frame deletes its record. raised_at
@@ -33,6 +42,10 @@
 // - The record's status field ships 'pending' only: decided approvals DELETE
 //   (the projection is the live list, not history). The field exists for the
 //   future cairn table (D61) where history matters.
+
+import fs from 'node:fs'
+import http from 'node:http'
+import path from 'node:path'
 
 export const name = 'arxa-approvals'
 export const inject = ['webServer', 'apiProxy']
@@ -181,6 +194,182 @@ export function loadDoorbell(importBare = (s) => import(s), importRelative = (s)
   return doorbellProbe
 }
 
+// ---- cairn sync proxy (B2 phase-1b) -------------------------------------
+//
+// The phone's cairn client dials ws://127.0.0.1:<proxyPort>/__cairn/sync on
+// the transport's loopback proxy; this plugin splices that through to the
+// desktop's cairn-server sidecar. Plain HTTP under /__cairn proxies the same
+// way (healthz probes, push-tokens). Prefix-strip is the only rewrite:
+// /__cairn/sync -> /sync - headers (the phone's Authorization bearer for
+// CAIRN_SYNC_AUTH=bearer, ADR-0010 addendum) and bodies pass verbatim, and
+// after the mirror's 101 the upgrade is RAW bytes both ways (we never parse
+// cairn wire frames).
+
+/** The sidecar bind the proxy splices to. `ARXA_CAIRN_MIRROR_BIND` wins -
+ *  the same env-override discipline as the doorbell's ARXA_PUSHD_URL. */
+export function cairnMirrorBind(env = process.env) {
+  const raw = typeof env.ARXA_CAIRN_MIRROR_BIND === 'string' ? env.ARXA_CAIRN_MIRROR_BIND.trim() : ''
+  return raw || '127.0.0.1:8190'
+}
+
+/** /__cairn/<rest> -> /<rest>; the bare prefix maps to '/'. Query strings
+ *  survive (rawUrl is the request target). The webserver only dispatches
+ *  the registered prefix here, so nothing else can arrive. */
+export function stripCairnPrefix(rawUrl) {
+  const rest = String(rawUrl ?? '/').slice('/__cairn'.length)
+  return rest.startsWith('/') ? rest : '/' + rest
+}
+
+/** host:port -> [host, port] (loopback binds only; portless means 80). */
+function splitBind(bind) {
+  const at = bind.lastIndexOf(':')
+  return at === -1 ? [bind, '80'] : [bind.slice(0, at), bind.slice(at + 1)]
+}
+
+/** Relay a mirror response head as raw wire bytes (the 101-upgrade splice
+ *  and the plain non-101 relay render the same way). */
+function responseHead(statusCode, statusMessage, headers) {
+  const lines = ['HTTP/1.1 ' + statusCode + ' ' + (statusMessage ?? '')]
+  for (const [name, value] of Object.entries(headers ?? {})) {
+    for (const v of Array.isArray(value) ? value : [value]) lines.push(name + ': ' + v)
+  }
+  return lines.join('\r\n') + '\r\n\r\n'
+}
+
+/** One HTTP request through to the mirror. Streams both directions so
+ *  request and response bodies are never buffered; a dead mirror is an
+ *  honest 502 (headers already sent -> destroy), never a throw. */
+function proxyHttpRequest(bind, req, res, httpImpl) {
+  const [host, port] = splitBind(bind)
+  const upstream = httpImpl.request({
+    host,
+    port: Number(port),
+    method: req.method,
+    path: stripCairnPrefix(req.url ?? '/'),
+    headers: req.headers,
+  }, (mirror) => {
+    res.writeHead(mirror.statusCode ?? 502, mirror.headers)
+    mirror.pipe(res)
+  })
+  upstream.on('error', () => {
+    if (res.headersSent) {
+      res.destroy()
+      return
+    }
+    res.writeHead(502, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+    res.end(JSON.stringify({ error: 'cairn-sidecar-unreachable' }))
+  })
+  req.pipe(upstream)
+}
+
+/** The /sync WebSocket splice: negotiate with the mirror, relay its 101 head
+ *  verbatim, then pipe both sockets raw. A non-101 answer (401 wrong bearer,
+ *  404) is relayed as a plain response so the client sees the mirror's
+ *  honest status; a dead mirror just destroys the socket. */
+function spliceCairnUpgrade(bind, req, socket, head, httpImpl) {
+  const [host, port] = splitBind(bind)
+  const upstream = httpImpl.request({
+    host,
+    port: Number(port),
+    path: stripCairnPrefix(req.url ?? '/'),
+    headers: req.headers,
+  })
+  upstream.on('upgrade', (mirrorRes, mirrorSocket, mirrorHead) => {
+    socket.write(responseHead(mirrorRes.statusCode, mirrorRes.statusMessage, mirrorRes.headers))
+    if (mirrorHead?.length) socket.write(mirrorHead)
+    mirrorSocket.pipe(socket)
+    socket.pipe(mirrorSocket)
+    const die = () => {
+      mirrorSocket.destroy()
+      socket.destroy()
+    }
+    mirrorSocket.on('error', die)
+    socket.on('error', die)
+    mirrorSocket.on('close', die)
+    socket.on('close', die)
+  })
+  upstream.on('response', (mirrorRes) => {
+    const chunks = []
+    mirrorRes.on('data', (c) => chunks.push(c))
+    mirrorRes.on('end', () => {
+      socket.end(
+        responseHead(mirrorRes.statusCode, mirrorRes.statusMessage, mirrorRes.headers) +
+          Buffer.concat(chunks),
+      )
+    })
+  })
+  upstream.on('error', () => socket.destroy())
+  upstream.end()
+}
+
+/** Register both legs. The upgrade leg rides webServer.registerUpgrade -
+ *  exact-path, one protocol owner per path (the webserver destroys sockets
+ *  for upgrade paths nothing claims). The optional call keeps older fakes
+ *  honest; the real webServer always carries it. */
+export function applyCairnProxy(ctx, deps = {}) {
+  const httpImpl = deps.httpImpl ?? http
+  const bind = cairnMirrorBind(deps.env ?? process.env)
+  ctx.webServer.register({
+    name: 'arxa-approvals-cairn-proxy',
+    path: '/__cairn',
+    kind: 'prefix',
+    handler: (req, res) => proxyHttpRequest(bind, req, res, httpImpl),
+  })
+  ctx.webServer.registerUpgrade?.({
+    path: '/__cairn/sync',
+    handler: (req, socket, head) => spliceCairnUpgrade(bind, req, socket, head, httpImpl),
+  })
+
+  // Bootstrap bearer for the paired phone: the sync session it opens
+  // through the proxy must present the mirror's CAIRN_SYNC_BEARER_TOKEN
+  // (ADR-0010 addendum) so the session is AUTHENTICATED and its push-token
+  // registration sticks. The tunnel is the auth boundary — everything else
+  // it exposes (these approvals routes included) already rides the same
+  // trust — so handing the paired phone the secret changes nothing about
+  // who can read what; it only gives the sync session an identity.
+  ctx.webServer.register({
+    name: 'arxa-approvals-cairn-sync-bootstrap',
+    path: '/__arxa/cairn-sync',
+    kind: 'exact',
+    handler: async (req, res) => {
+      const token = deps.cairnSyncToken
+        ? await deps.cairnSyncToken()
+        : await cairnSyncToken(deps.env ?? process.env)
+      if (!token) {
+        res.writeHead(404, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+        res.end(JSON.stringify({ error: 'cairn-sync-not-configured' }))
+        return
+      }
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+      res.end(JSON.stringify({ token }))
+    },
+  })
+}
+
+/** The sync bearer a paired phone may bootstrap with (B2 phase-1b).
+ *  `ARXA_CAIRN_SYNC_TOKEN` wins (dev rigs); otherwise the desktop sidecar
+ *  keystore's CAIRN_SYNC_BEARER_TOKEN (cairn-server.env, same app-local-
+ *  data dir as pushd.env, read through the doorbell library's keystore
+ *  helpers). Null = not configured → the route 404s and the phone boots
+ *  localOnly (honest degradation, never a boot failure). */
+export async function cairnSyncToken(env = process.env, readFile = fs.readFileSync, loadLib = loadDoorbell) {
+  const override = typeof env.ARXA_CAIRN_SYNC_TOKEN === 'string' ? env.ARXA_CAIRN_SYNC_TOKEN.trim() : ''
+  if (override) return override
+  let lib
+  try {
+    lib = await loadLib()
+  } catch {
+    return null
+  }
+  if (typeof lib?.appDataDir !== 'function' || typeof lib?.parseEnvFile !== 'function') return null
+  try {
+    const keystore = lib.parseEnvFile(readFile(path.join(lib.appDataDir(env), 'cairn-server.env'), 'utf8'))
+    const token = typeof keystore.CAIRN_SYNC_BEARER_TOKEN === 'string' ? keystore.CAIRN_SYNC_BEARER_TOKEN.trim() : ''
+    return token || null
+  } catch {
+    return null
+  }
+}
 /** TEST SEAM (gate: literal env ARXA_APPROVALS_TEST_SEAM=true — the
  * ARXA_DOORBELL_PUSH convention). Raises a REAL user-questions ask through
  * the real provider against a LIVE (idle is fine) agent, so the simulator
@@ -361,4 +550,8 @@ export function apply(ctx, deps = {}) {
       })
     },
   })
+
+  // The cairn sync rail rides the same tunnel (B2 phase-1b) - always on;
+  // a missing sidecar is the handlers' honest 502, never a boot failure.
+  applyCairnProxy(ctx, deps)
 }
