@@ -2943,7 +2943,19 @@ window.__ModuleLoader__.load({
 		 * Degraded read (tree null): the org still lists its own row. */
 		const wsLabel = (p) => {
 			const parts = p.split("/");
-			if (parts[0] === "projects" && parts.length === 3) return orgT("tree.pc." + parts[2]);
+			if (parts[0] === "projects" && parts.length === 3) {
+				const c = parts[2];
+				// D78: containers carry 2-digit stage prefixes (00-moodboard…).
+				// Prefer an exact dictionary hit, then the STEM's entry (reuse
+				// tree.pc.design for 02-design — zh keeps 设计), and only then
+				// fall back to a TitleCased stem — never the raw key.
+				const hit = orgT("tree.pc." + c);
+				if (hit && hit !== "tree.pc." + c) return hit;
+				const stem = c.replace(/^\d{2}-/, "");
+				const stemHit = orgT("tree.pc." + stem);
+				if (stemHit && stemHit !== "tree.pc." + stem) return stemHit;
+				return stem.charAt(0).toUpperCase() + stem.slice(1);
+			}
 			return orgT("tree.ws." + p);
 		};
 		const orgItems = (s) => {
@@ -3286,7 +3298,10 @@ window.__ModuleLoader__.load({
 								title: orgT("menu.org.newProject"),
 								onClick: (e) => {
 									e.stopPropagation();
-									orgStore.mutate("project.create", { orgId: d.orgId }).catch(() => {});
+									// D78: named creation through a modal (like create-org) —
+									// no pregenerated names; the route still auto-names when
+									// a caller omits the name.
+									window.dispatchEvent(new CustomEvent("arxa-create-project", { detail: { orgId: d.orgId } }));
 								},
 								children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconPlusOutline16, {})
 							}),
@@ -3689,6 +3704,75 @@ window.__ModuleLoader__.load({
 				] })
 			});
 		}
+		/** D78 create-project modal: the Projects dock + used to fire a
+		 * nameless mutate — the project got a pregenerated counter name and
+		 * the user never chose anything. Same conversation shape as the
+		 * create-org modal: name REQUIRED, no path picker (a project lives
+		 * inside its org), busy while the scaffold + first publish run,
+		 * errors surfaced verbatim (linked-required, publish-failed…).
+		 * The server still auto-names when a caller omits the name; the UI
+		 * never does. ORG_POST, not mutate — the created slug feeds the
+		 * success state and mutate throws the body away. */
+		function OrgProjectModal({ t, target, onClose }) {
+			const [name, setName] = (0, react.useState)("");
+			const [phase, setPhase] = (0, react.useState)("input");
+			const [errMsg, setErrMsg] = (0, react.useState)(null);
+			const [created, setCreated] = (0, react.useState)(null);
+			const nameRef = (0, react.useRef)(null);
+			(0, react.useEffect)(() => {
+				setName(""); setPhase("input"); setErrMsg(null); setCreated(null);
+				if (target && nameRef.current) window.setTimeout(() => { try { nameRef.current.focus(); } catch {} }, 50);
+			}, [target]);
+			if (!target) return null;
+			const dismiss = () => { if (phase !== "busy") onClose(); };
+			const submit = () => {
+				const n = name.trim();
+				if (n === "" || phase === "busy") return;
+				setPhase("busy"); setErrMsg(null);
+				ORG_POST("project.create", { orgId: target.orgId, name: n }).then((b) => {
+					const res = b && b.result;
+					setCreated(res || {});
+					setPhase("done");
+					orgStore.refresh();
+				}, (e) => {
+					const msg = e instanceof Error ? e.message : String(e);
+					setErrMsg(msg === "linked-required" ? t("project.errNotLinked") : msg);
+					setPhase("input");
+				});
+			};
+			const field = { width: "100%", boxSizing: "border-box", fontSize: 13, padding: "6px 8px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 6, background: "transparent", color: "inherit" };
+			const footer = (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+				(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "outline", onClick: dismiss, children: phase === "done" ? t("project.close") : t("publish.cancel") }),
+				phase !== "done" && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "primary", disabled: name.trim() === "" || phase === "busy", onClick: submit, children: phase === "busy" ? t("project.creating") : t("project.create") })
+			] });
+			return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Modal, {
+				open: true,
+				onClose: dismiss,
+				closeLabel: t("publish.cancel"),
+				title: t("project.title"),
+				footer,
+				children: (0, react_jsx_runtime.jsxs)("div", { children: [
+					phase !== "done" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.55, marginBottom: 4 }, children: t("project.nameLabel") }),
+						(0, react_jsx_runtime.jsx)("input", {
+							ref: nameRef,
+							value: name,
+							placeholder: t("project.namePlaceholder"),
+							onChange: (e) => setName(e.target.value),
+							onKeyDown: (e) => { if (e.key === "Enter") submit(); },
+							style: field
+						}),
+						phase === "busy" && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginTop: 10 }, children: t("project.busy") }),
+						errMsg && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, color: "var(--dsw-alias-text-critical, #e5534b)", marginTop: 10 }, children: errMsg })
+					] }),
+					phase === "done" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, fontWeight: 600, marginBottom: 8 }, children: t("project.done") }),
+						created && created.slug && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75 }, children: created.slug }),
+						created && created.manifest && created.manifest.repoUrl && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginTop: 6 }, children: t("project.doneRepo") })
+					] })
+				] })
+			});
+		}
 		/** Welcome gate (D69): with no organisation in recents the app IS a
 		 * blank page with one clickable card — covering any stray dsh-home
 		 * sessions the stock boot may restore. Creating the first org (or
@@ -3734,19 +3818,27 @@ window.__ModuleLoader__.load({
 			// the spliced + flow) — see OrgCreateModal for why it must not emit.
 			const [creating, setCreating] = (0, react.useState)(false);
 			/** D77: the publish conversation rides the same pattern — the menu
-			 * row dispatches, this boundary holds { orgId, orgName } | null. */
+			 * row dispatches, this boundary holds { orgId, orgName } | null.
+			 * D78: the same for named project creation (the Projects dock +). */
 			const [publishing, setPublishing] = (0, react.useState)(null);
+			const [creatingProject, setCreatingProject] = (0, react.useState)(null);
 			(0, react.useEffect)(() => {
 				const open = () => setCreating(true);
 				const onPublish = (e) => {
 					const d = (e && e.detail) || {};
 					if (d && d.orgId) setPublishing({ orgId: String(d.orgId), orgName: String(d.orgName || d.orgId) });
 				};
+				const onCreateProject = (e) => {
+					const d = (e && e.detail) || {};
+					if (d && d.orgId) setCreatingProject({ orgId: String(d.orgId) });
+				};
 				window.addEventListener("arxa-create-org", open);
 				window.addEventListener("arxa-publish-org", onPublish);
+				window.addEventListener("arxa-create-project", onCreateProject);
 				return () => {
 					window.removeEventListener("arxa-create-org", open);
 					window.removeEventListener("arxa-publish-org", onPublish);
+					window.removeEventListener("arxa-create-project", onCreateProject);
 				};
 			}, []);
 			// CTA gate lives here now (always mounted) — see useSessionCtaGate.
@@ -3758,7 +3850,8 @@ window.__ModuleLoader__.load({
 					(0, react_jsx_runtime.jsx)(WorkspaceBrowser, patched),
 				(0, react_jsx_runtime.jsx)(TrashSection, { t: props.t }),
 					(0, react_jsx_runtime.jsx)(OrgCreateModal, { t: props.t, createWorkspace: props.createWorkspace, open: creating, onClose: () => setCreating(false) }),
-					(0, react_jsx_runtime.jsx)(OrgPublishModal, { t: props.t, target: publishing, onClose: () => setPublishing(null) })
+					(0, react_jsx_runtime.jsx)(OrgPublishModal, { t: props.t, target: publishing, onClose: () => setPublishing(null) }),
+					(0, react_jsx_runtime.jsx)(OrgProjectModal, { t: props.t, target: creatingProject, onClose: () => setCreatingProject(null) })
 				]
 			});
 		}
@@ -3852,6 +3945,16 @@ window.__ModuleLoader__.load({
 			"publish.errNotLinked": "GitHub isn\u2019t linked. Create an organisation and sign in with GitHub first, then publish again.",
 			"publish.errUnavailable": "The GitHub link is unavailable right now — try again in a moment.",
 			"publish.errPending": "The first git snapshot of this organisation is still running — publishing unlocks the moment it completes.",
+			"project.title": "New project",
+			"project.nameLabel": "Project name",
+			"project.namePlaceholder": "e.g. Aurora Website",
+			"project.create": "Create project",
+			"project.creating": "Creating\u2026",
+			"project.busy": "Creating the project, scaffolding its stages and publishing it\u2026",
+			"project.done": "Project created",
+			"project.doneRepo": "Private GitHub repo created and history pushed.",
+			"project.close": "Close",
+			"project.errNotLinked": "GitHub isn\u2019t linked. Create an organisation and sign in with GitHub first, then try again.",
 		};
 		const zhOver = {
 			"section.workspaces": "组织",
@@ -3938,6 +4041,16 @@ window.__ModuleLoader__.load({
 			"publish.errNotLinked": "GitHub 未连接。请先创建组织并使用 GitHub 登录，然后再发布。",
 			"publish.errUnavailable": "GitHub 连接暂时不可用 — 请稍后重试。",
 			"publish.errPending": "该组织的首次 git 快照仍在进行中 — 完成后即可发布。",
+			"project.title": "新建项目",
+			"project.nameLabel": "项目名称",
+			"project.namePlaceholder": "例如 Aurora Website",
+			"project.create": "创建项目",
+			"project.creating": "创建中…",
+			"project.busy": "正在创建项目、搭建阶段目录并发布…",
+			"project.done": "项目已创建",
+			"project.doneRepo": "已创建私有 GitHub 仓库并推送历史。",
+			"project.close": "关闭",
+			"project.errNotLinked": "GitHub 未连接。请先创建组织并使用 GitHub 登录，然后重试。",
 		};
 		//#endregion
 		//#region lib/types/client/index.js

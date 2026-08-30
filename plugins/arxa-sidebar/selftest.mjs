@@ -298,5 +298,18 @@ check('publish: modal runs the phase machine over the publish result',
 check('publish: modal localized (en + zh)',
   client.includes('"publish.confirmCta": "Publish"') && client.includes('"publish.confirmCta": "发布"'))
 
+// ---- D78 riders: stage-label stems + named project creation ----
+// The v3 container names (00-moodboard…) had no tree.pc.* dictionary keys,
+// so the raw key leaked into the tree ("tree.pc.00-moodboard"). The label
+// falls back to the stem's entry, then a TitleCased stem — never the key.
+check('labels: stage containers never leak the raw tree.pc key (stem fallback)',
+  client.includes('const stem = c.replace(/^\\d{2}-/, "")') && client.includes('if (stemHit && stemHit !== "tree.pc." + stem) return stemHit;'))
+check('project create: the dock + opens a NAME modal (no pregenerated names in the UI)',
+  client.includes('"arxa-create-project"') && client.includes('function OrgProjectModal') && !client.includes('orgStore.mutate("project.create"'))
+check('project create: modal sends the typed name through project.create',
+  client.includes('ORG_POST("project.create", { orgId: target.orgId, name: n })'))
+check('project create: modal localized (en + zh)',
+  client.includes('"project.create": "Create project"') && client.includes('"project.create": "创建项目"'))
+
 console.log(failures === 0 ? '\narxa-sidebar selftest: ALL GREEN' : `\narxa-sidebar selftest: ${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)
