@@ -89,11 +89,11 @@ try {
       .sort()
     assert.deepEqual(dirs, [...CATEGORIES].sort(), 'extra top-level folders present')
   })
-  check('v2 scaffold creates fixed dock containers + project containers with targets (grilled 2026-08-30)', () => {
-    for (const w of getTemplate(2).fixedWorkspaces) {
+  check('scaffold creates fixed dock containers + project containers with targets (grilled 2026-08-30; D78 reads current template)', () => {
+    for (const w of getTemplate(TEMPLATE_VERSION).fixedWorkspaces) {
       assert.ok(fs.statSync(path.join(org.path, w)).isDirectory(), `missing ${w}`)
     }
-    for (const c of getTemplate(2).projectContainers) {
+    for (const c of getTemplate(TEMPLATE_VERSION).projectContainers) {
       assert.ok(fs.statSync(path.join(project.path, c)).isDirectory(), `missing project container ${c}`)
       assert.ok(fs.statSync(path.join(project.path, c, 'website')).isDirectory(), `missing ${c}/website`)
       assert.ok(fs.statSync(path.join(project.path, c, 'application')).isDirectory(), `missing ${c}/application`)
@@ -220,19 +220,30 @@ try {
 
   // ===== Phase 5 — template, stamp, migrations (D21/D44) =====
 
-  check('template v2 is the docks/containers tree; scaffold stamps the org with it (D44; grilled 2026-08-30)', () => {
-    assert.equal(TEMPLATE_VERSION, 2)
+  check('template v3 is the docks/containers tree; scaffold stamps the org with it (D44; D78 stage order)', () => {
+    assert.equal(TEMPLATE_VERSION, 3)
     assert.deepEqual(
-      [...getTemplate(2).org.dirs].sort(),
-      [...CATEGORIES, ...getTemplate(2).fixedWorkspaces.filter((w) => w.includes('/'))].sort(),
+      [...getTemplate(3).org.dirs].sort(),
+      [...CATEGORIES, ...getTemplate(3).fixedWorkspaces.filter((w) => w.includes('/'))].sort(),
     )
-    assert.equal(getTemplate(2).fixedWorkspaces.length, 10, 'notes + nine fixed dock containers')
-    assert.equal(getTemplate(2).projectContainers.length, 10, 'ten project containers')
-    assert.equal(getTemplate(2).projectTargets.join('+'), 'website+application')
+    assert.equal(getTemplate(3).fixedWorkspaces.length, 10, 'notes + nine fixed dock containers')
+    assert.equal(getTemplate(3).projectContainers.length, 10, 'ten project containers')
+    assert.equal(getTemplate(3).projectTargets.join('+'), 'website+application')
     assert.equal(stampFor(2), 'arxa-tree/2')
     assert.equal(parseStamp('arxa-tree/7'), 7)
-    assert.equal(readOrgStampVersion(org.path), 2)
+    assert.equal(readOrgStampVersion(org.path), 3)
     assert.equal(org.manifest.formatStamp, stampFor(TEMPLATE_VERSION))
+    // D78: containers carry a 2-digit prefix in arxa's own pipeline order;
+    // notes is free-form (D42), not a stage, and stays unnumbered, last.
+    assert.deepEqual(
+      [...getTemplate(3).projectContainers],
+      ['00-moodboard', '01-intake', '02-design', '03-architecture', '04-diagrams', '05-scaffold', '06-build', '07-config', '08-deploy', 'notes'],
+    )
+    // D78: every scaffolded empty dir carries a .gitkeep so git (and
+    // GitHub) can track the folder.
+    assert.ok(fs.existsSync(path.join(org.path, 'notes', '.gitkeep')), 'org dock .gitkeep')
+    assert.ok(fs.existsSync(path.join(org.path, 'meetings', 'scheduler', '.gitkeep')), 'dock container .gitkeep')
+    assert.ok(fs.existsSync(path.join(project.path, '02-design', 'website', '.gitkeep')), 'project stage/target .gitkeep')
   })
 
   check('D73: the project template carries a .gitignore — noise + secrets only, never managed containers', () => {
@@ -387,7 +398,7 @@ try {
       const out = []
       const walk = (dir, rel) => {
         for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
-          if (ent.name === '.git' || ent.name === '.gitignore') continue // repo artifacts, not template tree
+          if (ent.name === '.git' || ent.name === '.gitignore' || ent.name === '.gitkeep') continue // repo artifacts, not template tree
           const r = rel ? `${rel}/${ent.name}` : ent.name
           out.push(ent.isDirectory() ? `${r}/` : r)
           if (ent.isDirectory()) walk(path.join(dir, ent.name), r)
@@ -397,6 +408,37 @@ try {
       return out.sort()
     }
     assert.deepEqual(tree(fresh.path), tree(migrated.path))
+  })
+
+  check('D78 migration v2→v3: project stage dirs renamed to numbered order, .gitkeep lands, project repo commits', () => {
+    const v2org = scaffoldOrgInRoot(workspaceRoot, 'D78 Migrate')
+    // A realistic v2 project: old container names, its OWN nested repo (the
+    // org repo cannot carry a nested repo's tree), blank stage dirs.
+    const proj = path.join(v2org.path, 'projects', 'project-001')
+    for (const c of getTemplate(2).projectContainers) {
+      fs.mkdirSync(path.join(proj, c, 'website'), { recursive: true })
+      fs.mkdirSync(path.join(proj, c, 'application'), { recursive: true })
+    }
+    fs.writeFileSync(path.join(proj, 'project.json'), JSON.stringify({ id: 'p1', name: 'P1', createdAt: 'now', formatStamp: 'arxa-tree/2' }))
+    // Real-world order: the project repo exists FIRST; the org repo then
+    // records it as a nested repo (gitlink) and the tree is clean.
+    runGit(['init'], { cwd: proj })
+    runGit(['add', '-A'], { cwd: proj })
+    runGit(['commit', '-m', 'stage: scaffold project'], { cwd: proj })
+    initOrgRepo(v2org.path)
+    writeOrgStampVersion(v2org.path, 2)
+    runGit(['add', '-A'], { cwd: v2org.path })
+    runGit(['commit', '-m', 'test: stamp at v2'], { cwd: v2org.path }) // migrations demand a clean tree
+    const opened = openOrg(v2org.path, { appVersion: TEMPLATE_VERSION, migrations: MIGRATIONS })
+    assert.equal(readOrgStampVersion(v2org.path), 3, 'org restamped at v3')
+    assert.ok(fs.existsSync(path.join(proj, '02-design')), 'design → 02-design')
+    assert.ok(!fs.existsSync(path.join(proj, 'design')), 'old design dir gone')
+    assert.ok(fs.existsSync(path.join(proj, '00-moodboard', 'website')), 'targets rode along in the rename')
+    assert.ok(fs.existsSync(path.join(proj, '08-deploy', 'application', '.gitkeep')), '.gitkeep in the emptied target dir')
+    assert.ok(fs.existsSync(path.join(v2org.path, 'notes', '.gitkeep')), 'org-level empties gitkeep’d too')
+    const log = runGit(['log', '--format=%s'], { cwd: proj })
+    assert.match(log, /migrate: stage folders to template v3/, 'the project REPO carries the migration commit (pushable)')
+    assert.ok(opened.migrated.some((m) => m.from === 2 && m.to === 3), 'openOrg ran the shipped 2→3 step')
   })
 
   check('git absent: stamp + refusal still work; migration fails with git-unavailable reason', () => {

@@ -213,7 +213,22 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     } catch {
       return { ok: false, reason: 'manifest-unreadable' }
     }
-    if (manifest.repoUrl) return { ok: true, skipped: 'published', slug, repoUrl: manifest.repoUrl }
+    if (manifest.repoUrl) {
+      // D78: skip the CREATE, never the SYNC — migration commits (template
+      // v3 renames, .gitkeep) must reach the remote on the next heal or
+      // manual publish without a full re-publish. Push is idempotent
+      // (up-to-date is a clean no-op); failures annotate loud, never throw.
+      try {
+        const creds = await githubBridge.gitCredentials()
+        if (creds && creds.ok) {
+          pushRepo(repoPath, pushUrlFor(manifest.repoUrl, creds), env)
+        }
+      } catch (err) {
+        annotate({ githubStatus: 'publish-failed: sync push failed: ' + String(err?.message ?? err) })
+        return { ok: false, reason: 'push-failed', slug, repoUrl: manifest.repoUrl }
+      }
+      return { ok: true, skipped: 'published', slug, repoUrl: manifest.repoUrl }
+    }
     const st = await githubBridge.status()
     if (!st.ok || !st.linked) {
       annotate({ githubStatus: st.ok ? 'not-linked' : (st.reason ?? 'github-unavailable') })
@@ -503,8 +518,10 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
          * local project always exists either way (CLAUDE.md local-first).
          */
         async newProject(displayName) {
-          // Auto-name (grilled 2026-08-30): project-001, project-002… when
-          // the caller leaves the name blank — per-dock counter, no ids.
+          // Auto-name (D78, grilled 2026-08-30): 01-project, 02-project… —
+          // 2-digit prefix FIRST, matching the stage-folder convention. The
+          // counter reads BOTH schemes (old project-NNN pre-D78 orgs keep
+          // counting from their highest number) — per-dock counter, no ids.
           let name = typeof displayName === 'string' ? displayName.trim() : ''
           if (name === '') {
             const slugs = [...scanWorkspace(resolved).projects.values()]
@@ -512,10 +529,12 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
               .map((p) => p.slug)
             let max = 0
             for (const s of slugs) {
-              const m = /^project-(\d+)$/.exec(s)
-              if (m) max = Math.max(max, Number(m[1]))
+              const mNew = /^(\d+)-project$/.exec(s)
+              const mOld = /^project-(\d+)$/.exec(s)
+              if (mNew) max = Math.max(max, Number(mNew[1]))
+              else if (mOld) max = Math.max(max, Number(mOld[1]))
             }
-            name = 'project-' + String(max + 1).padStart(3, '0')
+            name = String(max + 1).padStart(2, '0') + '-project'
           }
           const created = scaffoldProject(resolved, name)
           try {

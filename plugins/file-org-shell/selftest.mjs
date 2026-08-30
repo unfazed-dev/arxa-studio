@@ -454,6 +454,18 @@ try {
     ok(lm.githubStatus === 'github-unavailable', 'unavailable github: loud githubStatus manifest annotation')
     ok(!('repoUrl' in lm), 'no repo fields faked')
 
+    // (b2) D78: blank auto-name is 01-project (2-digit prefix first, matching
+    // the stage-folder convention); the scaffold drops .gitkeep so empty
+    // stage folders are tracked by git and reach GitHub.
+    const auto1 = await svcNoGh.current.newProject()
+    ok(path.basename(auto1.path) === '01-project', 'D78: blank auto-name is 01-project (2-digit prefix first)')
+    const auto2 = await svcNoGh.current.newProject()
+    ok(path.basename(auto2.path) === '02-project', 'D78: second blank auto-name is 02-project (per-dock counter)')
+    ok(
+      fs.existsSync(path.join(auto1.path, '01-intake', 'website', '.gitkeep')),
+      'D78: empty stage folders carry .gitkeep (git/GitHub can track them)',
+    )
+
     // (c) linked faces that THROW: publish failure is a loud annotation, never a throw.
     const svcBoom = createOrgLifecycle({
       workspaceRoot: root,

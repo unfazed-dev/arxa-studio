@@ -40,6 +40,48 @@ export class MigrationError extends Error {
  * `apply(orgPath)` performs the tree transform. Day one: empty (D44 —
  * stamp-only until a real v1→v2 exists).
  */
+/** D78: every directory with nothing in it gets a .gitkeep — git (and
+ * GitHub) cannot track empty dirs, so without this the scaffolded tree
+ * silently never reaches the remote. .git itself is skipped, as is the
+ * account dock (D37: excluded from version control entirely). */
+function gitkeepEmptyDirs(root) {
+  const walk = (dir) => {
+    let entries
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    const visible = entries.filter((e) => e.name !== '.git' && e.name !== '.gitkeep')
+    if (visible.length === 0) {
+      const rel = path.relative(root, dir)
+      if (rel === 'account' || rel.startsWith('account/')) return
+      try {
+        fs.writeFileSync(path.join(dir, '.gitkeep'), '')
+      } catch { /* best effort */ }
+      return
+    }
+    for (const e of visible) {
+      if (e.isDirectory()) walk(path.join(dir, e.name))
+    }
+  }
+  walk(root)
+}
+
+/** Commit the rename inside a project's OWN repo (projects are nested git
+ * repos — the org repo's migration commits cannot carry their trees).
+ * Best-effort: a repo that cannot commit still gets the tree change, and
+ * the publish/push path annotates anything loud. */
+function commitProjectRepoMigration(projectPath) {
+  if (!fs.existsSync(path.join(projectPath, '.git'))) return
+  try {
+    const status = runGit(['status', '--porcelain'], { cwd: projectPath })
+    if (String(status ?? '').trim() === '') return
+    runGit(['add', '-A'], { cwd: projectPath })
+    runGit(['commit', '-m', 'migrate: stage folders to template v3 (stage order, 2-digit prefixes) + .gitkeep'], { cwd: projectPath })
+  } catch { /* best effort — the tree change stands regardless */ }
+}
+
 export const MIGRATIONS = Object.freeze([
   Object.freeze({
     from: 1,
@@ -63,6 +105,56 @@ export const MIGRATIONS = Object.freeze([
           }
         }
       }
+    },
+  }),
+  Object.freeze({
+    from: 2,
+    to: 3,
+    description: 'stage-ordered project containers (00-moodboard…08-deploy, notes free-form last) + .gitkeep in every empty dir so the whole tree reaches GitHub',
+    apply(orgPath) {
+      const template = getTemplate(3)
+      // Org level stays additive (same rule as 1→2): create missing dirs,
+      // never touch existing content.
+      for (const dir of template.org.dirs) {
+        fs.mkdirSync(path.join(orgPath, dir), { recursive: true })
+      }
+      // Per project: RENAME the stage dirs to the numbered names FIRST (old
+      // content rides along), then mkdir any template dir still missing.
+      // Renames — not add-only — because the whole point of v3 is the order
+      // (grilled 2026-08-30); nothing in the app keys container names.
+      const projectsDir = path.join(orgPath, 'projects')
+      const renames = [
+        ['moodboard', '00-moodboard'],
+        ['intake', '01-intake'],
+        ['design', '02-design'],
+        ['architecture', '03-architecture'],
+        ['diagrams', '04-diagrams'],
+        ['scaffold', '05-scaffold'],
+        ['build', '06-build'],
+        ['config', '07-config'],
+        ['deploy', '08-deploy'],
+      ]
+      if (fs.existsSync(projectsDir)) {
+        for (const entry of fs.readdirSync(projectsDir, { withFileTypes: true })) {
+          if (!entry.isDirectory()) continue
+          const project = path.join(projectsDir, entry.name)
+          for (const [from, to] of renames) {
+            const a = path.join(project, from)
+            const b = path.join(project, to)
+            if (fs.existsSync(a) && !fs.existsSync(b)) fs.renameSync(a, b)
+          }
+          for (const dir of template.project.dirs) {
+            fs.mkdirSync(path.join(project, dir), { recursive: true })
+          }
+          // .gitkeep BEFORE the project commit — the emptiness markers are
+          // exactly what the commit is supposed to carry.
+          gitkeepEmptyDirs(project)
+          commitProjectRepoMigration(project)
+        }
+      }
+      // The org repo's migration post-commit picks the org tree up; project
+      // repos were committed above; .gitkeep lands everywhere still empty.
+      gitkeepEmptyDirs(orgPath)
     },
   }),
 ])

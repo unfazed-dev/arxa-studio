@@ -200,8 +200,8 @@ const rcTree2 = s.orgs.find((o) => o.open).tree
 check('rows-c: project served with its 10 fixed containers',
   rcTree2.projects.length === 1 && rcTree2.projects[0].containers.length === 10,
   JSON.stringify(rcTree2.projects))
-r = await act('workspace.new-session', { orgId: rc.id, workspace: 'projects/rocket/design' })
-check('rows-c: project-container session ok (slug-scoped + auto-name)', r.ok === true && r.result?.project === 'rocket' && r.result?.workspace === 'projects/rocket/design' && r.result?.name === 'design-001', JSON.stringify(r))
+r = await act('workspace.new-session', { orgId: rc.id, workspace: 'projects/rocket/02-design' })
+check('rows-c: project-container session ok (slug-scoped + auto-name)', r.ok === true && r.result?.project === 'rocket' && r.result?.workspace === 'projects/rocket/02-design' && r.result?.name === '02-design-001', JSON.stringify(r))
 s = await state()
 const rcSessions = s.orgs.find((o) => o.open).sessions
 check('rows-c: both sessions registered under their workspaces with real timestamps',

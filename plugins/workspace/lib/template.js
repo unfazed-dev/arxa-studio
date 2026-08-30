@@ -7,7 +7,7 @@
 // manifests (D41/Q3), and thin AGENTS.md context files (D43).
 
 /** The template version this build of the app scaffolds and expects. */
-export const TEMPLATE_VERSION = 2
+export const TEMPLATE_VERSION = 3
 
 /** Stamp string prefix; full stamps look like `arxa-tree/1` (D21/D44). */
 export const STAMP_PREFIX = 'arxa-tree/'
@@ -108,6 +108,17 @@ const PROJECT_CONTAINERS_V2 = Object.freeze([
   'design', 'config', 'deploy', 'diagrams', 'intake',
   'architecture', 'notes', 'build', 'moodboard', 'scaffold',
 ])
+/** v3 (D78, grilled 2026-08-30): the same ten containers, renamed to carry a
+ * 2-digit prefix in arxa's own pipeline order (docs/research/pipeline-map.md
+ * §1 + arxa-orchestrator): moodboard is stage 0 (optional, before intake),
+ * intake 1, design 2 (architecture = its structure output, diagrams its
+ * visuals), scaffold 3, build 4, config = deploy prep, deploy 9. notes is
+ * NOT a stage (D42 free-form) and stays unnumbered, last. Empty containers
+ * ship a .gitkeep (scaffold.js) so the whole tree reaches GitHub. */
+const PROJECT_CONTAINERS_V3 = Object.freeze([
+  '00-moodboard', '01-intake', '02-design', '03-architecture', '04-diagrams',
+  '05-scaffold', '06-build', '07-config', '08-deploy', 'notes',
+])
 const PROJECT_TARGETS_V2 = Object.freeze(['website', 'application'])
 
 function orgDirsV2() {
@@ -122,6 +133,15 @@ function orgDirsV2() {
 function projectDirsV2() {
   const dirs = []
   for (const c of PROJECT_CONTAINERS_V2) {
+    dirs.push(c)
+    for (const t of PROJECT_TARGETS_V2) dirs.push(`${c}/${t}`)
+  }
+  return dirs
+}
+
+function projectDirsV3() {
+  const dirs = []
+  for (const c of PROJECT_CONTAINERS_V3) {
     dirs.push(c)
     for (const t of PROJECT_TARGETS_V2) dirs.push(`${c}/${t}`)
   }
@@ -176,6 +196,30 @@ export const TEMPLATES = Object.freeze({
         { path: 'AGENTS.md', content: (ctx) => projectAgentsStub(ctx.displayName) },
         // D73: nested project repos publish to GitHub — scaffold carries an
         // ignore from day one (git init alone was the old behaviour).
+        { path: '.gitignore', content: () => PROJECT_GITIGNORE },
+      ]),
+    }),
+  }),
+  3: Object.freeze({
+    version: 3,
+    docks: DOCKS_V2,
+    projectContainers: PROJECT_CONTAINERS_V3,
+    projectTargets: PROJECT_TARGETS_V2,
+    fixedWorkspaces: Object.freeze(
+      orgDirsV2().filter((d) => {
+        if (d === 'projects') return false
+        const dock = DOCKS_V2.find((k) => k.slug === d)
+        return !dock || (dock.containers ?? []).length === 0
+      }),
+    ),
+    org: Object.freeze({
+      dirs: Object.freeze(orgDirsV2()),
+      files: Object.freeze([{ path: 'AGENTS.md', content: (ctx) => orgAgentsStub(ctx.displayName) }]),
+    }),
+    project: Object.freeze({
+      dirs: Object.freeze(projectDirsV3()),
+      files: Object.freeze([
+        { path: 'AGENTS.md', content: (ctx) => projectAgentsStub(ctx.displayName) },
         { path: '.gitignore', content: () => PROJECT_GITIGNORE },
       ]),
     }),

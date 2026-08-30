@@ -35,11 +35,37 @@ function existingSlugs(dir) {
 /** Execute one template tree spec ({ dirs, files }) at targetPath. */
 function executeTemplateTree(spec, targetPath, ctx) {
   fs.mkdirSync(targetPath, { recursive: true })
+  // Every dir the template names — including parents of nested entries
+  // ('meetings/scheduler' also creates 'meetings').
+  const created = new Set([targetPath])
   for (const dir of spec.dirs) {
     fs.mkdirSync(path.join(targetPath, dir), { recursive: true })
+    const abs = path.join(targetPath, dir)
+    created.add(abs)
+    const parts = dir.split('/')
+    for (let i = 1; i < parts.length; i++) created.add(path.join(targetPath, ...parts.slice(0, i)))
   }
   for (const file of spec.files) {
     fs.writeFileSync(path.join(targetPath, file.path), file.content(ctx))
+    const abs = path.dirname(path.join(targetPath, file.path))
+    created.add(abs)
+    const rel = path.relative(targetPath, abs)
+    if (rel && rel !== '.') {
+      const parts = rel.split('/')
+      for (let i = 1; i < parts.length; i++) created.add(path.join(targetPath, ...parts.slice(0, i)))
+    }
+  }
+  // D78: git (and therefore GitHub) cannot track an empty directory — a
+  // scaffolded folder that ships no file would silently never reach the
+  // remote. Drop a .gitkeep into every created dir that ended up empty —
+  // EXCEPT the account dock, which D37 excludes from version control
+  // entirely (billing mirrors and secrets never enter git history).
+  for (const dir of created) {
+    const rel = path.relative(targetPath, dir)
+    if (rel === 'account' || rel.startsWith('account/')) continue
+    try {
+      if (fs.readdirSync(dir).length === 0) fs.writeFileSync(path.join(dir, '.gitkeep'), '')
+    } catch { /* best effort — the tree is still correct without it */ }
   }
 }
 
