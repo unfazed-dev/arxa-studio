@@ -1562,19 +1562,6 @@ window.__ModuleLoader__.load({
 			const workspaceDropCommitted = (0, react.useRef)(false);
 			const previousOrderBy = (0, react.useRef)(orderBy);
 			useNativeDragAcceptance(drag !== null || workspaceDrag !== null);
-			const arxaAutoExpanded = (0, react.useRef)(false);
-			(0, react.useEffect)(() => {
-				// arxa v2: workspace rows WITH sessions start expanded — one shot
-				// per mount; the user's own collapses are tracked in
-				// groupExpansion and always win.
-				if (arxaAutoExpanded.current) return;
-				const withSessions = workspaces.filter((w) => w.sessionIds.length > 0);
-				if (withSessions.length === 0) return;
-				arxaAutoExpanded.current = true;
-				for (const w of withSessions) {
-					if (!Object.hasOwn(groupExpansion, w.workspaceId)) setGroupExpanded(w.workspaceId, true);
-				}
-			}, [workspaces, groupExpansion, setGroupExpanded]);
 			const currentGroup = current === void 0 ? void 0 : workspaces.find((w) => w.sessionIds.includes(current))?.workspaceId ?? "";
 			(0, react.useEffect)(() => {
 				if (current === void 0 || currentGroup === void 0 || Object.hasOwn(groupExpansion, currentGroup)) return;
@@ -2740,7 +2727,7 @@ window.__ModuleLoader__.load({
 			// set by resume + session.open; server truth is which org is open, not
 			// which session is focused — dsh owns focus, we mirror the last open.
 			let currentSessionId = null;
-			let state = { orgs: [], trash: [], trashCount: 0, root: false, selectedProject: null, trashView: { rows: [], open: true }, selectedRowId: null, collapsed: {}, emit: {}, currentSessionId: null, loading: true, __sig: "", workspacesView: { items: [], phase: "ready", archivedSessionIds: [] }, sessionsView: { byId: {}, ids: [], current: void 0 } };
+			let state = { orgs: [], trash: [], trashCount: 0, root: false, selectedProject: null, trashView: { rows: [], open: true }, selectedRowId: null, expanded: {}, emit: {}, currentSessionId: null, loading: true, __sig: "", workspacesView: { items: [], phase: "ready", archivedSessionIds: [] }, sessionsView: { byId: {}, ids: [], current: void 0 } };
 			const subs = new Set();
 			let timer = 0;
 			/** Resume (D71 UX): on first sight of an org with sessions, open the
@@ -2774,10 +2761,10 @@ window.__ModuleLoader__.load({
 					const sig = JSON.stringify([next.orgs, next.trash, next.trashCount, next.root, next.selectedProject]);
 					if (sig !== state.__sig) {
 						// Client-side faces survive every server replacement (the trash
-						// toggle, the row selection and the container collapse are not
+						// toggle, the row selection and the container expansion are not
 						// server data — a bare spread would leave selectedRowId
 						// undefined where the contract says null).
-						state = { ...next, loading: false, __sig: sig, trashOpen: state.trashOpen, selectedRowId: state.selectedRowId ?? null, collapsed: state.collapsed ?? {}, currentSessionId: currentSessionId ?? state.currentSessionId ?? null };
+						state = { ...next, loading: false, __sig: sig, trashOpen: state.trashOpen, selectedRowId: state.selectedRowId ?? null, expanded: state.expanded ?? {}, currentSessionId: currentSessionId ?? state.currentSessionId ?? null };
 						state.trashView = { rows: state.trash ?? [], open: state.trashOpen ?? true };
 						// Derived faces computed ONCE per state replacement: stock hosts
 						// serve stable array identities, and per-render rebuilds would
@@ -2841,16 +2828,18 @@ window.__ModuleLoader__.load({
 					state = { ...state, selectedRowId: sel };
 					emit();
 				},
-				/** Client-side container collapse (grilled 2026-08-30): key =
-				* orgId (the org row) or orgId + "|" + container path (dock /
-				* project). Toggling re-derives the emit map instantly — no server
-				* round trip; hidden leaves keep their group identity (display
-				* gating, never identity churn). */
-				toggleCollapse(key) {
-					const c = { ...(state.collapsed ?? {}) };
-					if (c[key]) delete c[key];
-					else c[key] = true;
-					state = { ...state, collapsed: c };
+				/** Client-side container expansion (default-collapsed, 2026-08-30):
+				* key = orgId (the org row) or orgId + "|" + container path (dock /
+				* project). EVERY container starts collapsed — the tree lands as
+				* org rows only and opens exactly where the user opens it. Toggling
+				* re-derives the emit map instantly — no server round trip; hidden
+				* leaves keep their group identity (display gating, never identity
+				* churn). */
+				toggleExpand(key) {
+					const x = { ...(state.expanded ?? {}) };
+					if (x[key]) delete x[key];
+					else x[key] = true;
+					state = { ...state, expanded: x };
 					state.emit = buildEmit(state);
 					emit();
 				}
@@ -2962,14 +2951,18 @@ window.__ModuleLoader__.load({
 			if (i < 0) return { orgId: s, ws: "" };
 			return { orgId: s.slice(0, i), ws: s.slice(i + 1) };
 		};
-		/** A leaf hides when its org or any ancestor container is collapsed. */
+		/** A leaf hides unless EVERY ancestor container is expanded —
+		 * default-collapsed (2026-08-30): a fresh load shows org rows only;
+		 * the tree opens exactly where the user opens it. Container pseudo
+		 * groups walk the same prefixes (the org pseudo has ws "" and never
+		 * hides). */
 		const leafHidden = (workspaceId) => {
 			const { orgId, ws } = wsParts(workspaceId);
 			if (ws === "") return false;
-			const c = orgStore.get().collapsed ?? {};
-			if (c[orgId]) return true;
+			const x = orgStore.get().expanded ?? {};
+			if (!x[orgId]) return true;
 			const parts = ws.split("/");
-			for (let i = 1; i < parts.length; i++) if (c[orgId + "|" + parts.slice(0, i).join("/")]) return true;
+			for (let i = 1; i < parts.length; i++) if (!x[orgId + "|" + parts.slice(0, i).join("/")]) return true;
 			return false;
 		};
 		/** Stock-tree render hooks (gen splices call these by name). */
@@ -3089,9 +3082,9 @@ window.__ModuleLoader__.load({
 		 * (open/closed by expansion) — the exact folder icon the docks
 		 * always had; the org row gets the organisation glyph. */
 		function OrgContainerRow({ d, offset }) {
-			const collapsed = useOrg((s) => s.collapsed ?? {});
+			const expandedMap = useOrg((s) => s.expanded ?? {});
 			const isOrg = d.kind === "org";
-			const open = !collapsed[d.key];
+			const open = !!expandedMap[d.key];
 			const [menuOpen, setMenuOpen] = (0, react.useState)(false);
 			const items = isOrg ? [
 				{ id: "open", label: orgT("menu.org.open"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) },
@@ -3108,7 +3101,7 @@ window.__ModuleLoader__.load({
 				className: clsx(Rows_module_css_default.projectRow, menuOpen && Rows_module_css_default.menuOpen),
 				role: "treeitem",
 				"aria-expanded": open,
-				onClick: () => orgStore.toggleCollapse(d.key),
+				onClick: () => orgStore.toggleExpand(d.key),
 				style: { marginLeft: (offset ?? 4 + d.depth * 14) + "px", cursor: "pointer", borderRadius: 6, marginTop: isOrg ? 4 : 0, fontWeight: isOrg ? 600 : void 0 },
 				children: [
 					(0, react_jsx_runtime.jsx)("span", {

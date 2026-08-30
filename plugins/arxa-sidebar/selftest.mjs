@@ -76,10 +76,12 @@ check('rows-c: container rows (org/dock/project) own pseudo groups — a row sur
   client.includes('function OrgContainerRow({ d, offset })') && client.includes('...ARXA_CONTAINER_ROWS(group.workspaceId)') && client.includes('offset: 4 + d.depth * 14 - host')
   && client.includes('...(ARXA_IS_CONTAINER_GROUP(group.workspaceId) ? [] : [(0, react_jsx_runtime.jsx)(ProjectRowItem, {')
   && client.includes('push(null, o.name)') && !client.includes('pendingRows') && !client.includes('WorkspaceRowsSection'))
+check('rows-c: every container starts COLLAPSED (2026-08-30) — expansion is opt-in per row; no mount-time auto-expand',
+  client.includes('if (!x[orgId]) return true;') && client.includes('const open = !!expandedMap[d.key];') && !client.includes('arxaAutoExpanded'))
 check('rows-c: collapse hides descendants only — the org pseudo group never hides, leaves keep stable identity',
   client.includes('if (ws === "") return false;') && client.includes('ARXA_WS_HIDDEN(group.workspaceId)') && client.includes('emit[o.id] = [{ kind: "org"'))
 check('rows-c: leaves are full stock workspace rows — indent by depth; collapse hides via display (identity never churns)',
-  client.includes('ARXA_WS_INDENT(group.workspaceId)') && client.includes('ARXA_WS_HIDDEN(group.workspaceId)') && client.includes('toggleCollapse(key)'))
+  client.includes('ARXA_WS_INDENT(group.workspaceId)') && client.includes('ARXA_WS_HIDDEN(group.workspaceId)') && client.includes('toggleExpand(key)'))
 check('rows-c: leaf click selects the workspace (composite id parse) — the ONLY startSession path',
   client.includes('ARXA_SELECT_WS(row.workspaceId)') && client.includes('workspace.new-session') && client.includes('const i = s.indexOf("|")'))
 check('rows-c: real session timestamps (the 56y bug fed ordinals as ages from 1970)',

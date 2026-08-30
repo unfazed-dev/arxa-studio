@@ -144,27 +144,11 @@ const MENU_ANCHOR = 'actions !== void 0 && (0, react_jsx_runtime.jsx)(_deepseek_
 if (!out.includes(MENU_ANCHOR) || out.indexOf(MENU_ANCHOR) !== out.lastIndexOf(MENU_ANCHOR)) throw new Error('menu anchor missing/dup — stock shape moved?')
 out = out.replace(MENU_ANCHOR, 'false && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {')
 
-// 6e. v2 (grilled 2026-08-30): workspace rows WITH sessions start
-//     expanded — one shot per mount, AFTER the stock current-group
-//     effect; the user's own collapses are tracked in groupExpansion
-//     and always win.
-const DRAG_HOOK = 'useNativeDragAcceptance(drag !== null || workspaceDrag !== null);'
-if (!out.includes(DRAG_HOOK) || out.indexOf(DRAG_HOOK) !== out.lastIndexOf(DRAG_HOOK)) throw new Error('drag hook anchor missing/dup — stock shape moved?')
-out = out.replace(DRAG_HOOK, DRAG_HOOK + '\n' + [
-  T(3) + 'const arxaAutoExpanded = (0, react.useRef)(false);',
-  T(3) + '(0, react.useEffect)(() => {',
-  T(4) + '// arxa v2: workspace rows WITH sessions start expanded — one shot',
-  T(4) + '// per mount; the user\'s own collapses are tracked in',
-  T(4) + '// groupExpansion and always win.',
-  T(4) + 'if (arxaAutoExpanded.current) return;',
-  T(4) + 'const withSessions = workspaces.filter((w) => w.sessionIds.length > 0);',
-  T(4) + 'if (withSessions.length === 0) return;',
-  T(4) + 'arxaAutoExpanded.current = true;',
-  T(4) + 'for (const w of withSessions) {',
-  T(5) + 'if (!Object.hasOwn(groupExpansion, w.workspaceId)) setGroupExpanded(w.workspaceId, true);',
-  T(4) + '}',
-  T(3) + '}, [workspaces, groupExpansion, setGroupExpanded]);',
-].join('\n'))
+// 6e. (default-collapsed, 2026-08-30): v2 auto-expanded every workspace
+//     row WITH sessions on mount. Removed — all folders start collapsed
+//     and open only where the user opens them; a pre-expanded session
+//     group would ambush the drill-down (open a dock and sessions pop
+//     open unbidden). Stock groupExpansion is untouched.
 
 
 // 7. (menu routing) — gone with the hidden ellipsis menu (see 6d).
