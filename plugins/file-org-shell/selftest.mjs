@@ -681,16 +681,19 @@ try {
       return p
     }
     const deletedRepos = []
+    const createdRepos = []
     let refuseDeletes = false
+    let goneDeletes = false
     try {
       const svcT = createOrgLifecycle({
         workspaceRoot: tRoot,
         env,
         github: {
           status: async () => ({ linked: true, login: 'octocat' }),
-          createPrivateRepo: async (name) => ({ name, full_name: 'octocat/' + name, private: true, html_url: bareFor(name), owner: { login: 'octocat' } }),
+          createPrivateRepo: async (name) => { if (!createdRepos.includes(name)) createdRepos.push(name); return { name, full_name: 'octocat/' + name, private: true, html_url: bareFor(name), owner: { login: 'octocat' } } },
           deleteRepo: async (owner, name) => {
             if (refuseDeletes) throw new Error('github-link: repo deletion refused (403) — re-link')
+            if (goneDeletes) throw new Error('github-link: repo not found (404) — it may already be gone')
             deletedRepos.push(owner + '/' + name)
             return { deleted: true }
           },
@@ -714,6 +717,17 @@ try {
       const res = await svcT.purgeOrgTrash(trashed.entryId)
       ok(res.deletedRepos.includes('octocat/Trash-Me') && res.deletedRepos.includes('octocat/Inner'), 'D81: purge deletes the org repo AND each published project repo')
       ok(!fs.existsSync(trashed.entryPath), 'D81: purge hard-deletes the trashed folder')
+      // D82: 404 (repo already gone) completes the purge instead of keeping the entry
+      const orgG = svcT.createOrg('Gone Case')
+      await svcT.openOrg(orgG.path)
+      await svcT.current.newProject('Innermost') // fresh name: reusing 'Inner' would collide with the round-1 bare repo and skip the publish
+      svcT.closeOrg()
+      const tG = svcT.trashOrg(orgG.path)
+      goneDeletes = true
+      const resG = await svcT.purgeOrgTrash(tG.entryId)
+      ok(resG.deletedRepos.includes('octocat/Gone-Case') && resG.deletedRepos.includes('octocat/Innermost'), 'D82: 404 already-gone counts every repo as handled')
+      ok(!fs.existsSync(tG.entryPath), 'D82: already-gone purge still hard-deletes the folder')
+      goneDeletes = false
       // restore path: trash another org and restore it back
       const org2 = svcT.createOrg('Restore Me')
       const t2e = svcT.trashOrg(org2.path)

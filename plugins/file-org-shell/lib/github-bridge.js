@@ -85,7 +85,13 @@ export function createGithubBridge(faces = {}) {
       await f.deleteRepo(owner, name)
       return { ok: true }
     } catch (err) {
-      return { ok: false, reason: 'delete-failed', error: String(err?.message ?? err) }
+      const msg = String(err?.message ?? err)
+      // D82: 404 = the repo is ALREADY GONE — the purge's goal state
+      // already holds, so it counts as done (alreadyGone lets callers
+      // report it honestly). Only real failures (403, 5xx, network) keep
+      // the trash entry.
+      if (msg.includes('404') || msg.includes('already be gone')) return { ok: true, alreadyGone: true }
+      return { ok: false, reason: 'delete-failed', error: msg }
     }
   }
 
