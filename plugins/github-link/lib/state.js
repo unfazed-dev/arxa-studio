@@ -24,7 +24,8 @@ export function statePath(env = process.env) {
   return path.join(arxaHome(env), STATE_FILE)
 }
 
-/** Read the link state, or null when unlinked / unreadable. */
+/** Read the link state, or null when unlinked / unreadable.
+  * accessExpiresAt (D76) is non-secret — it drives the refresh clock. */
 export function readState(env = process.env) {
   try {
     const raw = fs.readFileSync(statePath(env), 'utf8')
@@ -35,6 +36,7 @@ export function readState(env = process.env) {
       login: typeof parsed.login === 'string' ? parsed.login : null,
       scopes: Array.isArray(parsed.scopes) ? parsed.scopes : [],
       linkedAt: typeof parsed.linkedAt === 'string' ? parsed.linkedAt : null,
+      accessExpiresAt: typeof parsed.accessExpiresAt === 'string' ? parsed.accessExpiresAt : null,
     }
   } catch {
     return null

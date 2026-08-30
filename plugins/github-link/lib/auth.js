@@ -74,7 +74,14 @@ export const SHIPPED_CLIENT_ID = 'Iv23licJCFFRwp664uwa'
 
 // ---- token exchange (shared by both flows) ------------------------------------
 
-/** POST {tokenBase}/login/oauth/access_token, JSON in and out. */
+/**
+ * POST {tokenBase}/login/oauth/access_token, JSON in and out.
+ * GitHub OAuth-app tokens (ghu_) EXPIRE — the response carries
+ * refresh_token + expires_in + refresh_token_expires_in, and a caller that
+ * drops them ships a link that dies within hours (measured 2026-08-30: the
+ * linked 401s the day after linking). They are surfaced to the caller and
+ * MUST be persisted (refresh token → keyring) by the link flow.
+ */
 export async function tokenRequest({ tokenBase = defaultTokenBase(), fetch = globalThis.fetch, payload }) {
   const res = await fetch(new URL('/login/oauth/access_token', tokenBase), {
     method: 'POST',
@@ -87,7 +94,27 @@ export async function tokenRequest({ tokenBase = defaultTokenBase(), fetch = glo
   return {
     accessToken: body.access_token,
     scopes: String(body.scope ?? '').split(/[\s,]+/).filter(Boolean),
+    refreshToken: body.refresh_token ?? null,
+    expiresInSeconds: Number.isFinite(Number(body.expires_in)) ? Number(body.expires_in) : null,
   }
+}
+
+/**
+ * Exchange a refresh token for a fresh access token (D76). The refresh
+ * token MAY be rotated by GitHub — the caller must persist the NEW
+ * refresh_token whenever the response carries one.
+ */
+export async function refreshAccessToken({ clientId, refreshToken, tokenBase = defaultTokenBase(), fetch = globalThis.fetch } = {}) {
+  if (!refreshToken) throw new Error('github-link: no refresh token stored — link again')
+  return tokenRequest({
+    tokenBase,
+    fetch,
+    payload: {
+      client_id: clientId,
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+    },
+  })
 }
 
 function exchangeCode({ clientId, code, verifier, redirectUri, tokenBase, fetch }) {
@@ -230,6 +257,8 @@ export async function linkViaDevice({
       return {
         accessToken: body.access_token,
         scopes: String(body.scope ?? '').split(/[\s,]+/).filter(Boolean),
+        refreshToken: body.refresh_token ?? null,
+        expiresInSeconds: Number.isFinite(Number(body.expires_in)) ? Number(body.expires_in) : null,
         userCode: init.user_code,
         verificationUri: init.verification_uri,
       }

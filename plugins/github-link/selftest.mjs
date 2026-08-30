@@ -53,11 +53,17 @@ const mock = http.createServer((req, res) => {
     const json = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)) }
 
     if (req.method === 'POST' && req.url === '/login/oauth/access_token') {
+      // D76 refresh grant — rotated refresh token + fresh expiry.
+      if (body.grant_type === 'refresh_token') {
+        if (body.refresh_token !== 'dev-refresh') return json(400, { error: 'bad_refresh_token' })
+        state.expectBearer = 'dev-token-2'
+        return json(200, { access_token: 'dev-token-2', scope: 'repo,read:user', refresh_token: 'dev-refresh-2', expires_in: 28800 })
+      }
       // Device-flow poll.
       if (body.grant_type === 'urn:ietf:params:oauth:grant-type:device_code') {
         if (body.device_code !== state.deviceCode) return json(400, { error: 'bad_verification_code' })
         if (state.devicePolls++ === 0) return json(200, { error: 'authorization_pending' })
-        return json(200, { access_token: 'dev-token', scope: 'repo,read:user' })
+        return json(200, { access_token: 'dev-token', scope: 'repo,read:user', refresh_token: 'dev-refresh', expires_in: 28800 })
       }
       // Authorization-code exchange — the mock ENFORCES the PKCE round-trip.
       if (!state.expectedChallenge) return json(400, { error: 'no_authorize_observed' })
@@ -255,6 +261,32 @@ try {
   await svc.unlink()
   ok(true, 'unlink is idempotent')
   passed++
+// ---- D76: refresh-token machinery -------------------------------------------
+{
+  const { writeState, readState, clearState } = await import('./lib/index.js')
+  const svcD76 = createGithubLink({ fetch: mockFetch, tokenBase: mockBase, apiBase: mockBase, env })
+  try {
+    // Expired link with a stored refresh token: gitCredentials self-refreshes.
+    writeState({ linked: true, login: 'octo-d76', scopes: ['repo'], accessExpiresAt: new Date(Date.now() - 1000).toISOString() }, env)
+    await keyring.setSecret('octo-d76', 'stale-token')
+    await keyring.setSecret('octo-d76#refresh', 'dev-refresh')
+    const cred = await svcD76.gitCredentials()
+    ok(cred.token === 'dev-token-2', 'D76: expired access token self-refreshes through the stored refresh grant')
+    ok(await keyring.getSecret('octo-d76') === 'dev-token-2', 'D76: fresh access token persisted in the keyring')
+    ok(await keyring.getSecret('octo-d76#refresh') === 'dev-refresh-2', 'D76: rotated refresh token persisted')
+    ok(Date.parse(readState(env).accessExpiresAt) > Date.now(), 'D76: expiry clock advanced after refresh')
+    // Live (non-expired) link: no network, current token served as-is.
+    writeState({ linked: true, login: 'octo-d76', scopes: ['repo'], accessExpiresAt: new Date(Date.now() + 3600_000).toISOString() }, env)
+    const live = await svcD76.gitCredentials()
+    ok(live.token === 'dev-token-2', 'D76: non-expired link serves the stored token without refreshing')
+  } finally {
+    await keyring.deleteSecret('octo-d76').catch(() => {})
+    await keyring.deleteSecret('octo-d76#refresh').catch(() => {})
+    clearState(env)
+  }
+  passed++
+  console.log('  ✓ D76 refresh machinery verified (expired refresh, rotation, live serve)')
+}
 } finally {
   await new Promise((r) => mock.close(r))
 }
@@ -271,7 +303,7 @@ try {
     ok(creds && creds.login === 'octo-creds' && creds.token === 'tok-123', 'gitCredentials returns { login, token } for the linked account')
     await keyring.deleteSecret('octo-creds')
     writeState({ linked: true, login: 'octo-creds', scopes: ['repo'] }, env)
-    await assert.rejects(() => svcCreds.gitCredentials(), /token unavailable/, 'gitCredentials refuses when the keyring lost the token')
+    await assert.rejects(() => svcCreds.gitCredentials(), /no refresh token stored|token unavailable/, 'gitCredentials refuses when the keyring lost the token')
   } finally {
     clearState(env)
   }
@@ -279,5 +311,4 @@ try {
   console.log('  ✓ gitCredentials face verified (linked / unlinked / token-lost)')
 }
 
-console.log('\ngithub-link selftest: ' + passed + ' checks passed')
-process.exit(0)
+

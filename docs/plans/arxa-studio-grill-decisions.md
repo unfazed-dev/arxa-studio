@@ -771,6 +771,18 @@ and research/github-auth-desktop-report.md (official-docs current).
   `github.publish` → the open-org handle's `publishGithub()`, which
   awaits the in-flight heal (never races it) and is idempotent
   (`skipped: 'published'` when the manifest already carries repoUrl).
+- **D76 — Refresh tokens or the link dies in hours (found live 2026-08-30).**
+  GitHub OAuth-app tokens (ghu_) EXPIRE (~8 h); the device flow returns
+  refresh_token + expires_in and the original link threw both away —
+  measured: the linked account 401'd the day after linking, so every
+  publish failed even after D73's wiring. Now: link persists the refresh
+  token in the KEYRING (`<login>#refresh` — a secret, never the state
+  file) and the expiry clock in the state file; getToken() refreshes
+  through `grant_type=refresh_token` when inside the 60 s window, persists
+  ROTATED refresh tokens, and a 401 forces one refresh+retry (clocks lie).
+  Legacy links without a stored refresh token get a loud
+  sign-in-again instruction. One human re-link is unavoidable (the old
+  refresh token is gone) — after it, tokens renew themselves forever.
 - **D75 — Composer git card (DESIGN BRIEF, not built).** A collapsible,
   dsh-goals-style card over the text composer in EVERY arxa session,
   worktree-aware (resolves the org repo vs project repo it serves).

@@ -202,7 +202,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       let repoUrl = getOrigin(repoPath, env)
       if (!repoUrl) {
         const made = await githubBridge.createPrivateRepo(slug)
-        if (!made.ok) throw new Error(made.reason ?? 'github-unavailable')
+        if (!made.ok) throw new Error(made.error ? made.reason + ' (' + made.error + ')' : (made.reason ?? 'github-unavailable'))
         setOrigin(repoPath, made.repo.repoUrl, env)
         repoUrl = made.repo.repoUrl
       }

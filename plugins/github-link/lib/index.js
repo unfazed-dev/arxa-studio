@@ -9,7 +9,7 @@
  * keyring; no cloud database anywhere (CLAUDE.md boundary, D16).
  */
 
-import { getClientId, defaultApiBase, defaultTokenBase, linkViaBrowser, linkViaDevice, createPrivateRepoApi, SCOPES, SHIPPED_CLIENT_ID, defaultOpen } from './auth.js'
+import { getClientId, defaultApiBase, defaultTokenBase, linkViaBrowser, linkViaDevice, createPrivateRepoApi, refreshAccessToken, SCOPES, SHIPPED_CLIENT_ID, defaultOpen } from './auth.js'
 import { createKeyring } from './keyring.js'
 import { readState, writeState, clearState } from './state.js'
 
@@ -98,11 +98,22 @@ export function createGithubLink({
 
     const login = await whoAmI(result.accessToken)
     await ring.setSecret(login, result.accessToken)
+    // D76: GitHub OAuth-app tokens (ghu_) EXPIRE — persist the refresh
+    // token (a SECRET: keyring, never the state file) and the expiry so
+    // the token machinery can self-refresh. The refresh token MAY be
+    // rotated by GitHub; the state file only carries the non-secret
+    // expiry clock.
+    let accessExpiresAt = null
+    if (result.refreshToken) {
+      await ring.setSecret(login + REFRESH_SUFFIX, result.refreshToken)
+      if (result.expiresInSeconds) accessExpiresAt = new Date(Date.now() + result.expiresInSeconds * 1000).toISOString()
+    }
     const state = {
       linked: true,
       login,
       scopes: result.scopes.length ? result.scopes : [...SCOPES],
       linkedAt: new Date().toISOString(),
+      accessExpiresAt,
     }
     writeState(state, env)
     lastDeviceCode = null
@@ -115,7 +126,10 @@ export function createGithubLink({
    */
   async function unlink() {
     const state = readState(env)
-    if (state?.login) await ring.deleteSecret(state.login)
+    if (state?.login) {
+      await ring.deleteSecret(state.login)
+      await ring.deleteSecret(state.login + REFRESH_SUFFIX).catch(() => {}) // legacy links have none
+    }
     clearState(env)
     return { unlinked: true, hadLogin: state?.login ?? null }
   }
@@ -133,13 +147,55 @@ export function createGithubLink({
     return { ...state, tokenAvailable }
   }
 
+  // ---- D76 token machinery: expiry clock + self-refresh -------------------
+  const REFRESH_SUFFIX = '#refresh'
+  /** Refresh-window: renew 60 s before the recorded expiry (clock skew).
+    * A missing/implausible clock counts as expired — always safe to renew. */
+  function accessExpired(state) {
+    const t = state?.accessExpiresAt ? Date.parse(state.accessExpiresAt) : 0
+    return !(t > Date.now() + 60_000)
+  }
+  /**
+   * A live access token for API calls and pushes, refreshing through the
+   * stored refresh token when the clock says expired. Refresh tokens MAY
+   * rotate — a fresh refresh_token is written straight back to the
+   * keyring; the state file only ever carries the non-secret expiry.
+   */
+  async function getToken(force = false) {
+    const state = readState(env)
+    if (!state?.linked) throw new Error('github-link: not linked (link before publishing)')
+    const current = await ring.getSecret(state.login).catch(() => null)
+    if (!force && current && !accessExpired(state)) return current
+    const storedRefresh = await ring.getSecret(state.login + REFRESH_SUFFIX).catch(() => null)
+    if (!storedRefresh) {
+      // Legacy link (pre-D76): no refresh token was stored. The access
+      // token MIGHT still be alive — hand it over and let a 401 send the
+      // user to re-link; there is nothing to refresh from.
+      if (!force && current) return current
+      throw new Error('github-link: token expired and no refresh token stored — sign in again (D76)')
+    }
+    const clientId = getClientId(env) ?? SHIPPED_CLIENT_ID
+    const fresh = await refreshAccessToken({ clientId, refreshToken: storedRefresh, fetch, tokenBase })
+    await ring.setSecret(state.login, fresh.accessToken)
+    if (fresh.refreshToken) await ring.setSecret(state.login + REFRESH_SUFFIX, fresh.refreshToken)
+    const accessExpiresAt = fresh.expiresInSeconds
+      ? new Date(Date.now() + fresh.expiresInSeconds * 1000).toISOString()
+      : null
+    writeState({ ...state, accessExpiresAt }, env)
+    return fresh.accessToken
+  }
+
   /** Create a PRIVATE repo under the linked account (implemented, unwired). */
   async function createPrivateRepo(name) {
-    const state = readState(env)
-    if (!state?.linked) throw new Error('github-link: not linked (D69: create org requires a linked GitHub account)')
-    const accessToken = await ring.getSecret(state.login)
-    if (!accessToken) throw new Error('github-link: token unavailable for ' + state.login + ' — link again')
-    return createPrivateRepoApi({ name, accessToken, fetch, apiBase })
+    const accessToken = await getToken()
+    try {
+      return await createPrivateRepoApi({ name, accessToken, fetch, apiBase })
+    } catch (err) {
+      // A revoked/rotated token can 401 while the recorded clock still says
+      // alive — force one refresh + one retry before giving up (D76).
+      if (!/\(401\)/.test(String(err?.message ?? err))) throw err
+      return createPrivateRepoApi({ name, accessToken: await getToken(true), fetch, apiBase })
+    }
   }
 
   /**
@@ -151,8 +207,7 @@ export function createGithubLink({
   async function gitCredentials() {
     const state = readState(env)
     if (!state?.linked) throw new Error('github-link: not linked (push needs a linked GitHub account)')
-    const accessToken = await ring.getSecret(state.login)
-    if (!accessToken) throw new Error('github-link: token unavailable for ' + state.login + ' — link again')
+    const accessToken = await getToken()
     return { login: state.login, token: accessToken }
   }
 
