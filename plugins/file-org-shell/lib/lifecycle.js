@@ -1082,10 +1082,28 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
 
   /** Move the org itself into its parent trash (D81). Local-only:
    * GitHub repos are untouched — the trash is restorable by contract.
-   * Closes the open handle first (single open-handle contract). */
-  function trashOrg(orgPath) {
+   * Closes the open handle first (single open-handle contract).
+   * D89: the trash entry is the purge contract's ONLY manifest snapshot,
+   * so an in-flight open-time publish MUST land before the folder freezes
+   * (the D88 orphan: create→trash inside a second froze a bare org.json
+   * while the detached heal had already created the GitHub repo — the
+   * later purge found no repos and deleted nothing). Bounded grace: a
+   * broken snapshot must never hang the trash verb. */
+  async function trashOrg(orgPath) {
     const resolved = path.resolve(orgPath)
     if (!fs.existsSync(orgManifestPath(resolved))) throw new Error('unknown-org: ' + resolved)
+    const bounded = (p, ms) => Promise.race([p, new Promise((r) => setTimeout(r, ms))])
+    if (current && current.path === resolved && current.githubHeal) {
+      try { await bounded(current.githubHeal, 10000) } catch { /* throw-proof */ }
+    } else {
+      // Cold mid-publish org (created seconds ago, already switched away):
+      // complete the freeze best-effort so this window can't orphan either.
+      let pending = null
+      try { pending = readManifest(resolved) } catch { /* treated as bare */ }
+      if (!pending?.repoUrl && hasHead(resolved, env)) {
+        try { await bounded(publishOrgAndProjects(resolved, path.basename(resolved)), 15000) } catch { /* throw-proof */ }
+      }
+    }
     if (current && current.path === resolved) closeOrg()
     const scope = path.dirname(resolved)
     const entry = softDelete(scope, resolved, { env })

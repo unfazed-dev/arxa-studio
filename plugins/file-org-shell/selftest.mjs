@@ -705,7 +705,7 @@ try {
       await svcT.current.newProject('Inner')
       svcT.closeOrg()
       // trash the ORG itself through the real API (writes the index)
-      const trashed = svcT.trashOrg(orgT.path)
+      const trashed = await svcT.trashOrg(orgT.path)
       ok(svcT.listOrgTrash().some((e) => e.entryId === trashed.entryId && e.name === 'Trash-Me'), 'D81: trashed org listed in the org-trash index')
 
       // purge refusal when GitHub deletes are refused (403 posture)
@@ -722,15 +722,26 @@ try {
       await svcT.openOrg(orgG.path)
       await svcT.current.newProject('Innermost') // fresh name: reusing 'Inner' would collide with the round-1 bare repo and skip the publish
       svcT.closeOrg()
-      const tG = svcT.trashOrg(orgG.path)
+      const tG = await svcT.trashOrg(orgG.path)
       goneDeletes = true
       const resG = await svcT.purgeOrgTrash(tG.entryId)
       ok(resG.deletedRepos.includes('octocat/Gone-Case') && resG.deletedRepos.includes('octocat/Innermost'), 'D82: 404 already-gone counts every repo as handled')
       ok(!fs.existsSync(tG.entryPath), 'D82: already-gone purge still hard-deletes the folder')
       goneDeletes = false
+      // D89: the freeze race — create→trash INSIDE the publish window must
+      // still freeze an annotated manifest (the D88 orphan: the detached
+      // heal had created the GitHub repo but org.json froze bare, so the
+      // purge contract saw nothing to delete and the repo lived on).
+      const orgR = svcT.createOrg('Race Case')
+      await svcT.openOrg(orgR.path)
+      const tR = await svcT.trashOrg(orgR.path)
+      const rm = JSON.parse(fs.readFileSync(path.join(tR.entryPath, 'Race-Case', 'org.json'), 'utf8'))
+      ok(rm.repoUrl && rm.repoOwner, 'D89: instant trash still freezes the published manifest (repoUrl in the trash entry)')
+      const resR = await svcT.purgeOrgTrash(tR.entryId)
+      ok(resR.deletedRepos.includes('octocat/Race-Case'), 'D89: the raced org purge deletes its GitHub repo')
       // restore path: trash another org and restore it back
       const org2 = svcT.createOrg('Restore Me')
-      const t2e = svcT.trashOrg(org2.path)
+      const t2e = await svcT.trashOrg(org2.path)
       const res2 = svcT.restoreOrg(t2e.entryId)
       ok(fs.existsSync(res2.restoredPath) && path.basename(res2.restoredPath) === 'Restore-Me', 'D81: restore puts the trashed org back at its origin')
       if (svcT.current) svcT.closeOrg()
