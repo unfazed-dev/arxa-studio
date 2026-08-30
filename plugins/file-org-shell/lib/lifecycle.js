@@ -194,6 +194,71 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     }
     return { ...orgRes, projects: projectResults }
   }
+  /**
+   * D90 disconnect core: strip the GitHub link from ONE repo (org root or
+   * project). deleteRepo first when removeRepos (loud refusal keeps the
+   * link intact — same all-or-nothing posture as purge); then the origin
+   * remote is removed, the manifest stripped, and localOnly set so the
+   * D74 heal never re-publishes. Connect (publishRepoOnce) clears it.
+   */
+  async function disconnectOne(repoPath, slug, kind, removeRepos) {
+    const manifestFile = kind === 'org' ? orgManifestPath(repoPath) : projectManifestPath(repoPath)
+    const m = (() => { try { return readManifest(manifestFile) } catch { return null } })()
+    if (!m || !m.repoUrl) return { ok: true, skipped: 'not-connected', slug }
+    const full = m.repoOwner + '/' + (m.repoName || slug)
+    if (removeRepos) {
+      const made = await githubBridge.deleteRepo(m.repoOwner, m.repoName || slug)
+      if (!made.ok) throw new Error('disconnect incomplete: GitHub deletion failed for ' + full + ' (' + (made.error || made.reason) + ') — the org stays connected')
+    }
+    try {
+      delete m.repoUrl
+      delete m.repoOwner
+      delete m.repoName
+      delete m.repoPrivate
+      delete m.githubStatus
+      delete m.githubPublishedAt
+      m.localOnly = true
+      writeManifest(manifestFile, m)
+      try { runGit(['add', path.basename(manifestFile)], { cwd: repoPath, allowFail: true }); runGit(['commit', '-m', 'disconnect: remove GitHub link state', '--', path.basename(manifestFile)], { cwd: repoPath, allowFail: true }) } catch { /* best-effort */ }
+    } catch { /* strip best-effort — remote removal still proceeds */ }
+    try { runGit(['remote', 'remove', 'origin'], { cwd: repoPath, allowFail: true }) } catch { /* best-effort */ }
+    return { ok: true, slug, repo: full, removed: !!removeRepos }
+  }
+  /** D90: disconnect the ORG repo AND every published project under it. */
+  async function disconnectGithub(orgPath, { removeRepos = false } = {}) {
+    const resolved = path.resolve(orgPath)
+    const out = [await disconnectOne(resolved, path.basename(resolved), 'org', removeRepos)]
+    try {
+      const orgId = readManifest(orgManifestPath(resolved)).id
+      for (const p of [...scanWorkspace(resolved).projects.values()].filter((x) => x.orgId === orgId && x.path !== resolved)) {
+        out.push(await disconnectOne(p.path, p.slug, 'project', removeRepos))
+      }
+    } catch { /* org manifest unreadable — org repo only */ }
+    return { ok: true, results: out, removedRepos: out.filter((r2) => r2.removed).map((r2) => r2.repo) }
+  }
+  /** D90: disconnect ONE project's repo. */
+  async function disconnectProjectGithub(orgPath, projectSlug, { removeRepos = false } = {}) {
+    const orgResolved = path.resolve(orgPath)
+    let target = null
+    try {
+      const orgId = readManifest(orgManifestPath(orgResolved)).id
+      target = [...scanWorkspace(orgResolved).projects.values()].find((x) => x.orgId === orgId && x.slug === projectSlug && x.path !== orgResolved)
+    } catch { /* unreadable org manifest */ }
+    if (!target) throw new Error('no-project: ' + projectSlug)
+    return disconnectOne(target.path, projectSlug, 'project', removeRepos)
+  }
+  /** D90: connect ONE project (manual publish, project-scoped). */
+  async function connectProject(orgPath, projectSlug) {
+    const orgResolved = path.resolve(orgPath)
+    let target = null
+    try {
+      const orgId = readManifest(orgManifestPath(orgResolved)).id
+      target = [...scanWorkspace(orgResolved).projects.values()].find((x) => x.orgId === orgId && x.slug === projectSlug && x.path !== orgResolved)
+    } catch { /* unreadable org manifest */ }
+    if (!target) throw new Error('no-project: ' + projectSlug)
+    return publishRepoOnce(target.path, projectSlug, 'project')
+  }
+
 
   /**
    * Idempotent publish of ONE repo (org root or nested project). Skips
@@ -294,6 +359,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
         repoPrivate: true,
         githubStatus: 'published',
         githubPublishedAt: new Date().toISOString(),
+        localOnly: false, // D90: connecting clears the local-only answer
       })
       return { ok: true, slug, repoUrl }
     } catch (err) {
@@ -470,6 +536,9 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       // handle so a manual publish can await it instead of racing it.
       const githubHeal = (async () => {
         try {
+          // D90: a local-only / disconnected org NEVER auto-publishes — the
+          // flag is the user's explicit "keep this org off GitHub" answer.
+          try { if (readManifest(orgManifestPath(resolved)).localOnly) return { ok: false, reason: 'local-only' } } catch { /* unreadable — heal on */ }
           for (let tries = 0; !hasHead(resolved, env) && tries < 240; tries++) {
             await new Promise((resolveTick) => setTimeout(resolveTick, 250))
           }
@@ -551,10 +620,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           // token purge. The entry lives in THIS org's local trash.
           const entry = listTrash(resolved).find((e) => e.entryId === entryId)
           if (!entry) throw new Error('no-trash-entry: ' + entryId)
-          const st = await githubBridge.status()
-          if (!st.ok || !st.linked) {
-            throw new Error('linked-required: purging ' + entryId + ' must delete its GitHub repo, and GitHub is not linked — nothing was deleted')
-          }
+          // D90: the link is required only when there IS a repo to delete.
           let repo = null
           if (entry.origin && entry.origin.slug) {
             try {
@@ -1100,7 +1166,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       // complete the freeze best-effort so this window can't orphan either.
       let pending = null
       try { pending = readManifest(resolved) } catch { /* treated as bare */ }
-      if (!pending?.repoUrl && hasHead(resolved, env)) {
+      if (!pending?.repoUrl && !pending?.localOnly && hasHead(resolved, env)) {
         try { await bounded(publishOrgAndProjects(resolved, path.basename(resolved)), 15000) } catch { /* throw-proof */ }
       }
     }
@@ -1146,9 +1212,13 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     if (!rec) throw new Error('no-trash-entry: ' + entryId)
     const entryPath = path.join(rec.scope, '.arxa', 'trash', entryId)
     const repos = orgTrashEntryRepos(entryPath)
-    const st = await githubBridge.status()
-    if (!st.ok || !st.linked) {
-      throw new Error('linked-required: purging ' + entryId + ' must delete its GitHub repos, and GitHub is not linked — nothing was deleted')
+    // D90: the link is required only when there ARE repos to delete — a
+    // local-only org purges without GitHub entirely.
+    if (repos.length > 0) {
+      const st = await githubBridge.status()
+      if (!st.ok || !st.linked) {
+        throw new Error('linked-required: purging ' + entryId + ' must delete its GitHub repos, and GitHub is not linked — nothing was deleted')
+      }
     }
     const deleted = []
     const failed = []
@@ -1200,6 +1270,8 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       .filter((p) => p.orgId === org.id)
       .map(({ id, name, slug, path: projectPath }) => ({
         id, name, slug, path: projectPath,
+        // D90: per-project GitHub connection state for menus + markers.
+        connected: (() => { try { return !!readManifest(projectManifestPath(projectPath)).repoUrl } catch { return false } })(),
         containers: [...template.projectContainers],
       }))
     let sessionsByWorkspace = null
@@ -1228,6 +1300,10 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     renameOrg,
     renameProject,
     trashOrg,
+    // D90: GitHub connect/disconnect surface (org + project scope).
+    disconnectGithub,
+    disconnectProjectGithub,
+    connectProject,
     listOrgTrash,
     restoreOrg,
     purgeOrgTrash,

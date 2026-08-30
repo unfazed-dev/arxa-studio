@@ -251,6 +251,8 @@ export function apply(ctx, opts = {}) {
       // the rows client disables the New Session CTA while true.
       snapshotPending: cur?.path === path ? !!cur.snapshotPending?.() : false,
       createdAt: manifest?.createdAt ?? null,
+      // D90: connected = the org repo is published (repoUrl in the manifest).
+      connected: !!manifest?.repoUrl,
       sessions: await orgSessions(l, { path }),
       // v2 tree face: docks/containers/projects for this org. Read-only;
       // failures degrade to null (the client renders the org row only).
@@ -464,7 +466,10 @@ export function apply(ctx, opts = {}) {
             const nm = typeof arg?.name === 'string' && arg.name.trim() !== '' ? arg.name.trim() : ''
             if (requested === '') return json(res, { ok: false, error: 'org path required', action })
             if (nm === '') return json(res, { ok: false, error: 'org name required', action })
-            const g = await getGithub().catch(() => null)
+            // D90: link defaults ON; the modal toggle sends link:false to
+            // create the org local-only (no gate, no heal, localOnly flag).
+            const link = arg?.link !== false
+            const g = link ? await getGithub().catch(() => null) : null
             if (g) {
               const st = await g.status().catch(() => ({ linked: false }))
               if (!st.linked) return json(res, { ok: false, error: 'linked-required', action })
@@ -506,6 +511,7 @@ export function apply(ctx, opts = {}) {
             // org IS its own root (D69) — the cached lifecycle still points
             // at the previous root. Graceful teardown first (reverse order,
             // shell lock released), then a fresh lifecycle opens the new org.
+            if (!link) { try { const { annotateOrgManifest: ann } = await import(new URL('../../file-org-shell/lib/github-bridge.js', import.meta.url).href); ann(created.path, { localOnly: true }) } catch { /* best-effort flag */ } }
             if (lifecycle?.current) { try { await lifecycle.closeOrg() } catch {} }
             lifecycle = null
             const l2 = await getLifecycle()
@@ -543,13 +549,18 @@ export function apply(ctx, opts = {}) {
               // itself is unavailable (import failure) — a loud condition
               // surfaced by github.status, never a silent pass.
               const g = await getGithub().catch(() => null)
-              if (g) {
+              if (g && arg?.link !== false) {
                 const st = await g.status().catch(() => ({ linked: false }))
                 if (!st.linked) throw new Error('linked-required')
               }
               const created = l.createOrg(typeof arg?.name === 'string' && arg.name.trim() !== '' ? arg.name : 'Untitled Organisation')
+              if (arg?.link === false) { try { const { annotateOrgManifest: ann } = await import(new URL('../../file-org-shell/lib/github-bridge.js', import.meta.url).href); ann(created.path, { localOnly: true }) } catch { /* best-effort flag */ } }
               await ensureOpen(created.path) // switch, not open — single handle
             },
+            // D90: per-org / per-project GitHub connect + disconnect.
+            'org.disconnect': async () => l.disconnectGithub(orgByRef(arg?.orgId).path, { removeRepos: arg?.removeRepos === true }),
+            'project.connect': async () => l.connectProject(orgByRef(arg?.orgId).path, String(arg?.projectSlug ?? '')),
+            'project.disconnect': async () => l.disconnectProjectGithub(orgByRef(arg?.orgId).path, String(arg?.projectSlug ?? ''), { removeRepos: arg?.removeRepos === true }),
             'org.open': () => ensureOpen(arg?.orgId ?? arg),
             'org.close': () => l.closeOrg(),
             'org.rename': () => l.renameOrg(orgByRef(arg?.orgId).path, arg?.name),
