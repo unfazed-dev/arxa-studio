@@ -339,7 +339,7 @@ check('purge: the modal drives orgtrash.purge and projecttrash.purge',
 check('purge: the trash row dispatches the confirmation event',
   client.includes('"arxa-purge-trash"') && client.includes('window.addEventListener("arxa-purge-trash", onPurge)'))
 check('trash: org group + delete-forever + project group (localized en + zh)',
-  client.includes('"trash.orgSection": "Trashed organisations"') && client.includes('"trash.orgSection": "已删除的组织"') && client.includes('"trash.deleteForever": "Delete forever"') && client.includes('"trash.deleteForever": "永久删除"'))
+  client.includes('"trash.orgSection": "Organisations"') && client.includes('"trash.orgSection": "组织"') && client.includes('"trash.projectSection": "Projects"') && client.includes('"trash.projectSection": "项目"') && client.includes('"trash.deleteForever": "Delete forever"') && client.includes('"trash.deleteForever": "永久删除"'))
 check('routes: org trash/restore/purge wired to the service faces',
   hostSrc().includes("'org.trash'") && hostSrc().includes('l.trashOrg(orgByRef(arg?.orgId).path)') && hostSrc().includes("'orgtrash.restore'") && hostSrc().includes('l.restoreOrg(arg?.entryId)') && hostSrc().includes('l.purgeOrgTrash(arg.entryId)') && hostSrc().includes('cur.purgeTrash(arg.entryId)'))
 
@@ -354,12 +354,21 @@ check('trash: entries use rowActions icon buttons under Tooltips (restore=refres
   client.includes('.Tooltip, {') && client.includes('IconRefreshOutline16, onRestore') && client.includes('IconTrashOutline16, onPurge, true') && client.includes('className: Rows_module_css_default.iconButton'))
 check('trash: auto-opens while anything is trashed; manual toggle wins',
   client.includes('const [manual, setManual] = (0, react.useState)(null);') && client.includes('const open = manual === null ? total > 0 : manual;'))
-check('trash: org glyph shared between tree row and trash group header (single def)',
-  client.includes('function OrgGlyph({ size })') && client.split('function OrgGlyph({ size })').length === 2 && client.includes('groupLabel((0, react_jsx_runtime.jsx)(OrgGlyph, { size: 12 }), t("trash.orgSection"))'))
+check('trash: org glyph shared between tree row and trash org entries (single def)',
+  client.includes('function OrgGlyph({ size })') && client.split('function OrgGlyph({ size })').length === 2 && client.includes('entryRow(e, (0, react_jsx_runtime.jsx)(OrgGlyph, {}), () => restoreOrg'))
 // ---- D83: trash lives under the last org row; icons keep their spacing ----
 check('trash: rides the grouped tree tail via ARXA_TRASH_AFTER_ORGS (no bottom mount)',
   client.includes('const ARXA_TRASH_AFTER_ORGS = () => orgT ? (0, react_jsx_runtime.jsx)(TrashSection, { t: orgT, key: "arxa-trash" }) : null;') && client.includes('}), ARXA_TRASH_AFTER_ORGS()]') && !client.includes('TrashSection, { t: props.t }'))
 check('trash: restore/delete icon buttons are gapped (flex span, 4px)',
   client.includes('style: { display: "flex", gap: 4, flex: "none", alignItems: "center" }, children: [') && client.includes('IconRefreshOutline16, onRestore),') && client.includes('IconTrashOutline16, onPurge, true)'))
+// ---- D84: the trash reads exactly like the tree above it ----
+check('trash: header row IS an org row (projectRow class, treeitem, 600 weight, no kebab)',
+  client.includes('style: { marginLeft: 4, marginTop: 4, borderRadius: 6, cursor: "pointer", fontWeight: 600 }') && client.includes('"aria-expanded": open,') && client.includes('className: Rows_module_css_default.title, children: t("trash.section")') && !client.includes('borderRadius: 8, padding: "0 6px"'))
+check('trash: header count is the plain org-row count (11px, no pill)',
+  client.split('fontSize: 11, opacity: 0.55, flex: "none", marginRight: 4').length === 3)
+check('trash: entries are stock project rows at the depth-1 margin (18px, 14px title class)',
+  client.includes('style: { marginLeft: 18, marginTop: 2, cursor: "default" }') && client.includes('className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, title: e.entryId'))
+check('trash: group labels are glyph-free 10px captions (no uppercase TRASHED wording anywhere)',
+  client.includes('fontSize: 10, lineHeight: "16px", letterSpacing: "0.06em"') && client.includes('groupLabel(t("trash.orgSection"))') && !client.includes('groupLabel((0, react_jsx_runtime.jsx)(') && !client.includes('Trashed'))
 console.log(failures === 0 ? '\narxa-sidebar selftest: ALL GREEN' : `\narxa-sidebar selftest: ${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)
