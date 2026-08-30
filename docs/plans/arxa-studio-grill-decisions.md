@@ -799,3 +799,12 @@ Build riders (user, this session): keep using the stock DSH workspace UI
 via the splice pattern (gen-workspace.mjs — depend-don't-fork); compose
 and validate plugin surfaces in Creator mode (Cordis preset) per the
 integration plan's UI-harmony rule.
+## D77 — Publish feedback modal + create-at placement (the PLATO incident, 2026-08-30)
+
+User created an org named PLATO; nothing appeared on GitHub and nothing was shown. Root-cause chain, each link fixed:
+
+1. **Placement trap**: the create modal collects a NAME and a LOCATION, but org.create-at scaffolded AT the picked folder and ignored the name (D69 in-place). Picking a volume root made the ROOT the org: git init + snapshot over the whole disk, scaffold commit choked on the size, stale index.lock, zero commits forever. Fixed: the picked folder becomes the org only when its basename already slugifies to the org name; otherwise the org is a NEW subfolder named for the org inside the picked location (scaffoldOrg(target, nm)). D69 survives whenever the folder already carries the org’s name.
+2. **Silence**: the menu’s publish row was mutate().catch(() => {}) — a refused publish (no HEAD, not linked) was invisible. Fixed: the row dispatches arxa-publish-org; OrgPublishModal runs confirm / busy / done / error over the real publish result (ORG_POST, not mutate — mutate discards the body), localised en + zh.
+3. **Stale profile serving** (packaging lesson): dsh profile materialization rewrites the payload file: paths each boot, but pnpm never re-copies a plugin whose version string is unchanged — payload updates were silently NOT served. Lesson: bump the plugin version on every shipped plugin change (all five bumped to 0.1.1 with D77).
+
+Verified live: PLATO created at /Volumes/business_ssd/plato (subfolder), auto-published by the heal to unfazed-dev/plato (private), modal confirm + already-published success captured by lens.
