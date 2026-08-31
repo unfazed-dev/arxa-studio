@@ -945,7 +945,12 @@
 				onClick: () => openFile(relPath),
 				style: { ...childStyle(d), cursor: "pointer", borderRadius: 6 },
 				children: [
-					(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder) }),
+					// Fixed-width spacer, NOT the classed empty slot: the slot's
+					// width is flex-derived and WKWebView collapsed it on the
+					// focused row — the first file read ~20px outdented vs its
+					// siblings (user screenshot 2026-09-01). A hard 24px box
+					// aligns every sibling's text in every engine.
+					(0, react_jsx_runtime.jsx)("span", { style: { flex: "none", width: 24, flexBasis: 24 } }),
 					(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, style: { opacity: 0.92 }, children: name }) })
 				]
 			}, "f:" + relPath);

@@ -290,6 +290,21 @@ repString("\"data-details-collapsed\": cols.details === 0 || void 0,",
   log.push("8 sheet + viewerCol css map keys")
 }
 
+// 9. T4 v2 org-lane gate (2026-09-01, found live): the viewer column gated
+// ONLY on detailsSession (a current NON-BLANK session) — a sidebar file click
+// is an ORG-lane open with no session semantics at all, so with a blank or no
+// session the layout flag flipped, the gate refused, and the user saw an
+// empty dark strip. The column now renders when the session gate OR the
+// explicit layout flag (openViewer → panels.viewer > 0) is live.
+// Order matters: the DragHandle anchor CONTAINS the viewerCol anchor as a
+// prefix — the specific one must run first or repString counts 2 matches.
+repString("!narrow && detailsSession !== void 0 && cols.viewer > 0 && (0, react_jsx_runtime.jsx)(DragHandle, {",
+  "!narrow && (detailsSession !== void 0 || panels.viewer > 0) && cols.viewer > 0 && (0, react_jsx_runtime.jsx)(DragHandle, {", "9a viewer handle gate");
+repString("narrow && detailsSession !== void 0 && panels.viewer > 0",
+  "narrow && (detailsSession !== void 0 || panels.viewer > 0) && panels.viewer > 0", "9b sheet gate");
+repString("!narrow && detailsSession !== void 0 && cols.viewer > 0",
+  "!narrow && (detailsSession !== void 0 || panels.viewer > 0) && cols.viewer > 0", "9c viewerCol gate");
+
 mkdirSync(dirname(outPath), { recursive: true })
 if (process.argv.includes("--check")) {
   let cur = null

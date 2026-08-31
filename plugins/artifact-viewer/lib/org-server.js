@@ -55,12 +55,17 @@ export function createOrgServer({ orgRoot, orgSlug, verify = null }) {
   const server = http.createServer(async (req, res) => {
     try {
       const addr = server.address()
+      // Case-INSENSITIVE host match (2026-09-01, found live): browsers
+      // lowercase the Host header per the URL spec, so a case-preserved slug
+      // (D79: org-RESTO) arrived as org-resto and every browser file fetch
+      // 403'd while curl (case preserved) succeeded. Slugs keep their case
+      // everywhere else — only this host comparison normalizes.
       const allowedHosts = new Set([
-        'org-' + orgSlug + '.localhost:' + addr.port,
+        ('org-' + orgSlug + '.localhost:' + addr.port).toLowerCase(),
         '127.0.0.1:' + addr.port,
         'localhost:' + addr.port,
       ])
-      if (!allowedHosts.has(String(req.headers.host || ''))) {
+      if (!allowedHosts.has(String(req.headers.host || '').toLowerCase())) {
         return reject(res, 403, 'host not allowed')
       }
       if (req.method !== 'GET' && req.method !== 'HEAD') {

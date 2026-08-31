@@ -85,6 +85,20 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   assert.match(t5client, /CustomEvent\('arxa-av-open', \{ detail: sessionId \? \{ sessionId, relPath: path \}/, 'chip click dispatches the arxa-av-open bridge')
   assert.match(t5client, /path === '\.'\) return/, 'stock show-in-folder affordance stays stock')
   assert.match(t5client, /if \(ok\) return/, 'wt lane wins; org lane is the fallback on a miss')
+  // Org-lane calls pass relPath as an ARGUMENT (2026-09-01, found live):
+  // openArtifact read the draft STATE right after setDraft — the closure
+  // still saw '' on first open, the lane bailed silently, and the docked
+  // column stayed empty (D93 had already reserved the grid cell).
+  assert.match(t5client, /const openArtifact = async \(relPathArg\) => \{/, 'openArtifact takes the relPath argument')
+  assert.match(t5client, /String\(relPathArg \?\? draft \?\? ''\)/, 'draft stays the fallback for form submits')
+  // Cold-open race: the detail re-dispatch used to fire synchronously before
+  // the panel's listener existed — first-ever open lost the payload and the
+  // column stayed empty. The bridge now parks the payload; the panel consumes
+  // it on mount; the deferred dispatch skips if already consumed.
+  assert.match(t5client, /__ARXA_AV_PENDING__ = detail/, 'bridge parks the payload for a cold open')
+  assert.match(t5client, /const parked = window\.__ARXA_AV_PENDING__/, 'panel consumes the parked payload on mount')
+  assert.match(t5client, /if \(window\.__ARXA_AV_PENDING__ !== detail\) return/, 'dispatch attempts stop once the payload is consumed')
+  assert.match(t5client, /for \(const delay of \[0, 120, 400, 1000, 2000\]\)/, 'retry ladder bridges the column mount')
   // wt lane accepts an absolute chip path that lives INSIDE the worktree,
   // and still refuses escapes (D91 re-base, escape checks intact)
   assert.match(wt, /path\.isAbsolute\(relPath\)/, 'absolute chip paths are re-based onto the worktree root')
@@ -143,6 +157,13 @@ assert.equal(r1.headers['content-type'], 'text/markdown; charset=utf-8')
 assert.equal(r1.headers['access-control-allow-origin'], '*', 'CORS: studio page reads org-origin responses')
 assert.equal(r1.body, '# hello\n')
 assert.equal(r1.headers['cache-control'], 'no-store')
+// Host match is case-INSENSITIVE (2026-09-01, found live): browsers send the
+// Host header lowercased per the URL spec — a case-preserved slug (D79,
+// org-RESTO) must still resolve, else every browser file fetch 403'd.
+const r1b = await req(port, '/notes/a.md', { host: 'org-TEST.localhost:' + port })
+assert.equal(r1b.status, 200, 'lowercased Host header still matches the org server')
+const r1c = await req(port, '/notes/a.md', { host: 'evil-TEST.localhost:' + port })
+assert.equal(r1c.status, 403, 'a different org host is still rejected')
 
 assert.equal((await req(port, '/img.png', { host: H })).headers['content-type'], 'image/png')
 assert.equal((await req(port, '/app.js', { host: H })).status, 200)

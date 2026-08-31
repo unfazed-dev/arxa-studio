@@ -265,11 +265,11 @@ window.__ModuleLoader__.load({
 						})
 					}),
 					(0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)(CenterColumn, { children: renderSlot("conversation", {}) }), (0, react_jsx_runtime.jsx)(DetailsColumn, { children: renderSlot("details", {}) })] }),
-					!narrow && detailsSession !== void 0 && cols.viewer > 0 && (0, react_jsx_runtime.jsx)("div", {
+					!narrow && (detailsSession !== void 0 || panels.viewer > 0) && cols.viewer > 0 && (0, react_jsx_runtime.jsx)("div", {
 						className: AppFrame_module_css_default.viewerCol,
 						children: renderSlot("viewer", { close: actions.closeViewer, maximize: requestViewerMax, width: cols.viewer })
 					}),
-					narrow && detailsSession !== void 0 && panels.viewer > 0 && (0, react_jsx_runtime.jsxs)("div", {
+					narrow && (detailsSession !== void 0 || panels.viewer > 0) && panels.viewer > 0 && (0, react_jsx_runtime.jsxs)("div", {
 						className: AppFrame_module_css_default.sheetLayer,
 						children: [(0, react_jsx_runtime.jsx)("div", {
 							className: AppFrame_module_css_default.sheetHead,
@@ -298,7 +298,7 @@ window.__ModuleLoader__.load({
 						onDrag: onDetailsDrag,
 						onEnd: onDragEnd
 					}),
-					!narrow && detailsSession !== void 0 && cols.viewer > 0 && (0, react_jsx_runtime.jsx)(DragHandle, {
+					!narrow && (detailsSession !== void 0 || panels.viewer > 0) && cols.viewer > 0 && (0, react_jsx_runtime.jsx)(DragHandle, {
 						side: "viewer",
 						left: viewport - cols.viewer,
 						onStart: onViewerStart,

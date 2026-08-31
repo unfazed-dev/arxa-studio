@@ -260,6 +260,8 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         const onOpen = (ev) => {
           try {
+            // A handler actually ran — stop the bridge's pending retries.
+            try { window.__ARXA_AV_PENDING__ = null } catch { /* best-effort */ }
             const d = ev.detail || {}
             if (d.sessionId && d.relPath) {
               // D91: worktree lane FIRST; on a miss (file only exists in the
@@ -278,6 +280,13 @@ window.__ModuleLoader__.load({
         // D93: the module-level apply() bridge opens the column, then
         // forwards the payload here (the panel is mounted by then).
         window.addEventListener('arxa-av-open-detail', onOpen)
+        // Cold-open handoff: a first-ever open dispatches the detail BEFORE
+        // this effect attaches (the column is still mounting). The bridge
+        // parks it on __ARXA_AV_PENDING__; consume + clear it here.
+        try {
+          const parked = window.__ARXA_AV_PENDING__
+          if (parked && (parked.relPath || parked.sessionId)) { window.__ARXA_AV_PENDING__ = null; onOpen({ detail: parked }) }
+        } catch { /* stash best-effort */ }
         return () => window.removeEventListener('arxa-av-open-detail', onOpen)
       }, [])
       // D93 session switch while open: the column follows the new session —
@@ -351,8 +360,13 @@ window.__ModuleLoader__.load({
         }, 400)
       }
 
-      const openArtifact = async () => {
-        const relPath = draft.trim().replace(/^\/+/, '')
+      // relPathArg FIRST (2026-09-01, found live): onOpen setDraft()s then
+      // calls this synchronously — the closure still saw the OLD draft ('' on
+      // first open), so the org lane silently bailed and the docked column
+      // stayed EMPTY (the D93 bridge had already reserved the grid cell).
+      // Form submits (line ~483) still land on the draft fallback.
+      const openArtifact = async (relPathArg) => {
+        const relPath = String(relPathArg ?? draft ?? '').trim().replace(/^\/+/, '')
         if (!relPath) return
         setEditing(false); setDirty(false); setSession(null); setSaveNote(''); setSavePhase('idle'); mtimeRef.current = null; setPreviewHtml(''); setShowDiff(false); setMainText(''); setChip(null); setTimeline([]); setShowTimeline(false)
         setOpen(true)
@@ -600,7 +614,25 @@ window.__ModuleLoader__.load({
       // then forwards the payload to the mounted panel on a detail event.
       window.addEventListener('arxa-av-open', (ev) => {
         try { if (ctx.layout && typeof ctx.layout.openViewer === 'function') ctx.layout.openViewer() } catch { /* face not wired yet */ }
-        try { window.dispatchEvent(new CustomEvent('arxa-av-open-detail', { detail: (ev && ev.detail) || {} })) } catch { /* bad payload ignored */ }
+        // COLD-OPEN RACE (2026-09-01, found live): the detail re-dispatch used
+        // to be synchronous — the panel mounts INSIDE the column, so its
+        // arxa-av-open-detail listener does not exist until React commits the
+        // freshly-opened column, and a first-ever open lost the payload
+        // entirely (column reserved, forever empty). Park the payload; the
+        // deferred re-dispatch normally lands after the mount, and a late
+        // mount consumes the parked copy itself — no timing assumptions.
+        const detail = (ev && ev.detail) || {}
+        try { window.__ARXA_AV_PENDING__ = detail } catch { /* stash best-effort */ }
+        // Condition-based retry (not a timing guess): each attempt dispatches
+        // ONLY while the payload is still parked. The panel clears it when its
+        // handler actually runs (listener attach or mount-consume), so exactly
+        // one attempt lands no matter how the commit interleaves.
+        for (const delay of [0, 120, 400, 1000, 2000]) {
+          setTimeout(() => {
+            try { if (window.__ARXA_AV_PENDING__ !== detail) return } catch { return }
+            try { window.dispatchEvent(new CustomEvent('arxa-av-open-detail', { detail })) } catch { /* bad payload ignored */ }
+          }, delay)
+        }
       })
       // Diagnostic levers (2026-08-31): the dsh sessions service as seen
       // from a peer plugin ctx — lets the console test open() end-to-end
