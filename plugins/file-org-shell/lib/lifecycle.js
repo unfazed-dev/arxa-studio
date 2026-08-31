@@ -189,6 +189,12 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     const projectResults = []
     if (orgId) {
       for (const p of [...scanWorkspace(orgPath).projects.values()].filter((x) => x.orgId === orgId)) {
+        // D91: a project marked local-only (born into a local-only org, or
+        // manually disconnected) stays local until project.connect — the
+        // org-level publish and the D74 heal must not resurrect it.
+        let pLocal = false
+        try { pLocal = Boolean(readManifest(projectManifestPath(p.path)).localOnly) } catch { /* unreadable — inherit */ }
+        if (pLocal) { projectResults.push({ slug: p.slug, ok: true, skipped: 'local-only' }); continue }
         projectResults.push({ slug: p.slug, ...(await publishRepoOnce(p.path, p.slug, 'project')) })
       }
     }
@@ -684,9 +690,26 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           const created = scaffoldProject(resolved, name)
           try {
             initProjectRepo(created.path, env) // idempotent repo attach
-            // D73: the whole publish half (linked? → create → origin →
-            // push --all → manifest annotation) is shared with the org path.
-            await publishRepoOnce(created.path, created.slug, 'project')
+            // D91 inheritance: a LOCAL-ONLY org creates LOCAL-ONLY projects
+            // — no repo, no push; project.connect links it manually when
+            // wanted. A connected org inherits the D73 behavior: publish on
+            // create. The manifest commit mirrors publishRepoOnce (D78: an
+            // uncommitted annotation dirties the tree and the next open's
+            // clean-tree gate refuses the org).
+            let orgLocalOnly = false
+            try { orgLocalOnly = Boolean(readManifest(orgManifestPath(resolved)).localOnly) } catch { /* unreadable — inherit the connected default */ }
+            if (orgLocalOnly) {
+              const manifestName = path.basename(projectManifestPath(created.path))
+              annotateProjectManifest(created.path, { localOnly: true })
+              try {
+                runGit(['add', manifestName], { cwd: created.path, allowFail: true })
+                runGit(['commit', '-m', 'local-only: born into a local-only organisation', '--', manifestName], { cwd: created.path, allowFail: true })
+              } catch { /* best-effort — annotation still stands in the worktree */ }
+            } else {
+              // D73: the whole publish half (linked? → create → origin →
+              // push --all → manifest annotation) is shared with the org path.
+              await publishRepoOnce(created.path, created.slug, 'project')
+            }
             try {
               created.manifest = readManifest(projectManifestPath(created.path))
             } catch { /* annotation read-back is presentation */ }

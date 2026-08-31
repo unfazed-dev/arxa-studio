@@ -3318,11 +3318,11 @@ window.__ModuleLoader__.load({
 						className: Rows_module_css_default.projectText,
 						children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: d.label })
 					}),
-					// D90: subtle local-only marker — dimmed GitHub mark when the
-					// row has NO repo behind it (connected rides org + project rows).
-					(isOrg || d.kind === "project") && d.connected === false ? (0, react_jsx_runtime.jsx)("span", {
-						title: orgT("rows.localOnly"),
-						style: { display: "inline-flex", alignItems: "center", marginLeft: 6, opacity: 0.4, flex: "none" },
+					// D91: connected marker — GitHub mark ONLY on rows with a repo
+					// behind them (org + project rows). Local-only rows carry NO mark.
+					(isOrg || d.kind === "project") && d.connected === true ? (0, react_jsx_runtime.jsx)("span", {
+						title: orgT("rows.ghSynced"),
+						style: { display: "inline-flex", alignItems: "center", marginLeft: 6, opacity: 0.55, flex: "none" },
 						children: ghMark16
 					}) : null,
 					d.count > 0 ? (0, react_jsx_runtime.jsx)("span", {
@@ -4275,7 +4275,7 @@ window.__ModuleLoader__.load({
 			"disconnect.done": "Disconnected from GitHub",
 			"disconnect.doneKept": "Disconnected — repositories kept on GitHub.",
 			"disconnect.doneRemoved": "Disconnected — removed from GitHub: {repos}",
-			"rows.localOnly": "On this device only — connect from this menu",
+			"rows.ghSynced": "Synced with GitHub",
 			"org.create.ghToggle": "Publish to GitHub",
 			"org.create.ghOnHint": "A private GitHub repository is created and kept in sync.",
 			"org.create.ghOffHint": "This organisation stays on this device only. Connect it later from its menu.",
@@ -4425,7 +4425,7 @@ window.__ModuleLoader__.load({
 			"disconnect.done": "已从 GitHub 断开",
 			"disconnect.doneKept": "已断开 — 仓库保留在 GitHub。",
 			"disconnect.doneRemoved": "已断开 — 已从 GitHub 移除：{repos}",
-			"rows.localOnly": "仅保存在本机 — 可从此菜单连接",
+			"rows.ghSynced": "已同步到 GitHub",
 			"org.create.ghToggle": "发布到 GitHub",
 			"org.create.ghOnHint": "将创建私有 GitHub 仓库并保持同步。",
 			"org.create.ghOffHint": "该组织仅保存在本机。之后可从其菜单连接 GitHub。",

@@ -802,6 +802,23 @@ try {
       await svc.openOrg(org.path)
       const heal2 = await svc.current.githubHeal
       ok(heal2?.ok === false && heal2.reason === 'local-only', 'D90: the heal refuses a local-only org (reason local-only)')
+      // ---- D91: local-only org ⇒ local-only projects; never resurrected ----
+      const born = await svc.current.newProject('Born Local')
+      ok(!createdRepos.includes('Born Local'), 'D91: a project born into a local-only org creates NO GitHub repo')
+      const bm = JSON.parse(fs.readFileSync(path.join(born.path, 'project.json'), 'utf8'))
+      ok(bm.localOnly === true && !bm.repoUrl, 'D91: the project manifest is annotated localOnly (no repoUrl)')
+      // reconnect the ORG via manual publish: the org itself republishes, but
+      // the local-only projects must NOT be resurrected by the retrofit
+      const rep = await svc.current.publishGithub()
+      ok(rep?.ok === true, 'D91: org-level publish after local-only still publishes the org')
+      const skipBorn = rep.projects.find((x) => x.slug === born.slug)
+      const skipSub = rep.projects.find((x) => x.slug === 'Sub')
+      ok(skipBorn?.ok === true && skipBorn.skipped === 'local-only', 'D91: org publish SKIPS the born-local project (skipped local-only)')
+      ok(skipSub?.ok === true && skipSub.skipped === 'local-only', 'D91: org publish SKIPS the manually-disconnected project too')
+      ok(!createdRepos.includes('Born Local'), 'D91: no repo was ever created for the local-only project')
+      // manual project.connect still links it on demand
+      const linkBorn = await svc.connectProject(org.path, born.slug)
+      ok(linkBorn?.ok === true && createdRepos.includes(born.slug), 'D91: project.connect publishes the local-only project on demand')
       svc.closeOrg()
     } finally {
       fs.rmSync(dRoot, { recursive: true, force: true })

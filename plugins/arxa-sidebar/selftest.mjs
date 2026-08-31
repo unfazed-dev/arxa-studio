@@ -398,8 +398,8 @@ check('purge: D88 typed gate + retry localized (en + zh)',
 // ---- D90: link/unlink GitHub per org + project; local-only creation ----
 check('menus: D90 connect/disconnect replaces publish — state-dependent per org + project',
   client.includes('d.connected === false ? { id: "connect", label: orgT("menu.org.connect"), icon: ghMark16 } : { id: "disconnect", label: orgT("menu.org.disconnect"), icon: ghMark16 }') && client.includes('d.connected === false ? { id: "connect", label: orgT("menu.project.connect"), icon: ghMark16 }') && client.includes('"arxa-disconnect-github"') && !client.includes('menu.org.publish'))
-check('rows: D90 local-only marker + connected flags ride org and project rows',
-  client.includes('connected: !!o.connected') && client.includes('connected: !!p.connected') && client.includes('rows.localOnly'))
+check('rows: D91 connected marker (GitHub mark on CONNECTED rows only) + connected flags ride org and project rows',
+  client.includes('connected: !!o.connected') && client.includes('connected: !!p.connected') && client.includes('d.connected === true ?') && client.includes('rows.ghSynced') && !client.includes('rows.localOnly'))
 check('create: D90 publish toggle default ON; link rides org.create-at; NO sign-in wall',
   client.includes('const [ghPublish, setGhPublish] = (0, react.useState)(true);') && client.includes('link: publishOn') && client.includes('role: "switch"') && client.includes('disabled: !ghAvailable || busy') && !client.includes('const showSignin = ghLinked === false;'))
 check('disconnect: D90 keep/remove radios + typed repo gate (Remove arms only on exact slug)',

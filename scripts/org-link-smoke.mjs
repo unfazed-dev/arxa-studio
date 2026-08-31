@@ -82,6 +82,39 @@ if ((await ghRepo(NAME)) !== null) fail('repo still on GitHub after REMOVE disco
 if (!rm.result.removedRepos || !rm.result.removedRepos.includes('unfazed-dev/' + NAME)) fail('removedRepos missing entry: ' + JSON.stringify(rm.result).slice(0, 200))
 console.log('5. disconnect remove: repo deleted, removedRepos reported OK')
 
+// 5b. D91: a project born into the now-LOCAL-ONLY org creates NO repo.
+const proj = await post('project.create', { orgId: org.id, name: 'Born Smoke' })
+if (!proj.ok) fail('project.create in local-only org failed: ' + JSON.stringify(proj).slice(0, 300))
+const pSlug = (proj.result && proj.result.slug) || 'Born-Smoke'
+await new Promise((r) => setTimeout(r, 1200))
+if ((await ghRepo(pSlug)) !== null) fail('D91: project born into local-only org PUBLISHED a repo (' + pSlug + ')')
+const pManifest = (proj.result && proj.result.path ? proj.result.path : '/tmp/arxa-d90-smoke/' + NAME + '/projects/' + pSlug) + '/project.json'
+const pm = JSON.parse(readFileSync(pManifest, 'utf8'))
+if (pm.localOnly !== true || pm.repoUrl) fail('D91: born-local project manifest wrong: ' + JSON.stringify({ localOnly: pm.localOnly, repoUrl: pm.repoUrl }))
+console.log('5b. D91 born-local project: no repo, manifest localOnly OK')
+
+// 5c. D91: connect the org again — the retrofit must NOT resurrect the project.
+const rep2 = await post('github.publish', { orgId: org.id })
+if (!rep2.ok || !rep2.result || rep2.result.ok !== true) fail('D91: org reconnect failed: ' + JSON.stringify(rep2).slice(0, 300))
+await new Promise((r) => setTimeout(r, 1200))
+if ((await ghRepo(pSlug)) !== null) fail('D91: org reconnect resurrected the local-only project (' + pSlug + ')')
+const skip = (rep2.result.projects || []).find((x) => x.slug === pSlug)
+if (!skip || skip.skipped !== 'local-only') fail('D91: reconnect projects result missing local-only skip: ' + JSON.stringify(rep2.result.projects))
+console.log('5c. D91 org reconnect: born-local project skipped OK')
+
+// 5d. D91: project.connect links it on demand, then remove both repos so
+// the purge below stays honest.
+const pc = await post('project.connect', { orgId: org.id, projectSlug: pSlug })
+if (!pc.ok || !pc.result || pc.result.ok !== true) fail('D91: project.connect failed: ' + JSON.stringify(pc).slice(0, 300))
+if ((await ghRepo(pSlug)) !== pSlug) fail('D91: project repo missing after project.connect')
+const rmP = await post('project.disconnect', { orgId: org.id, projectSlug: pSlug, removeRepos: true })
+if (!rmP.ok || !rmP.result || rmP.result.ok !== true) fail('D91: project disconnect failed: ' + JSON.stringify(rmP).slice(0, 300))
+if ((await ghRepo(pSlug)) !== null) fail('D91: project repo still on GitHub after disconnect-remove')
+const rmO = await post('org.disconnect', { orgId: org.id, removeRepos: true })
+if (!rmO.ok || !rmO.result || rmO.result.ok !== true) fail('D91: org re-disconnect failed: ' + JSON.stringify(rmO).slice(0, 300))
+if ((await ghRepo(NAME)) !== null) fail('D91: org repo still on GitHub after re-disconnect')
+console.log('5d. D91 project.connect + disconnect-remove: on-demand link OK')
+
 // 6. purge the local-only org — no GitHub requirement, local folder gone.
 const trashed = await post('org.trash', { orgId: org.id })
 if (!trashed.ok) fail('trash failed: ' + JSON.stringify(trashed).slice(0, 200))
