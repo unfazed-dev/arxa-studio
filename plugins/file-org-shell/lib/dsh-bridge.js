@@ -25,15 +25,17 @@ export function createDshBridge(faces = {}) {
   const f = faces && typeof faces === 'object' ? faces : {}
 
   /** Spawn a dsh session with cwd = the session worktree. → {ok,id}|{ok:false,reason} */
-  async function spawn({ cwd, name } = {}) {
+  async function spawn({ cwd, name, id } = {}) {
     if (typeof f.spawn !== 'function') return { ok: false, reason: 'dsh-unavailable' }
     try {
-      const out = await f.spawn({ cwd, name })
+      const out = await f.spawn({ cwd, name, id })
       return out && typeof out.id === 'string' && out.id !== ''
         ? { ok: true, id: out.id }
         : { ok: false, reason: 'dsh-unavailable' }
     } catch (err) {
-      return { ok: false, reason: 'dsh-unavailable', error: String(err?.message ?? err) }
+      const detail = String(err?.message ?? err)
+      console.error('[file-org-shell] dsh spawn degraded:', detail)
+      return { ok: false, reason: 'dsh-unavailable', error: detail }
     }
   }
 

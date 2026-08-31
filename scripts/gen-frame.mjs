@@ -230,6 +230,39 @@ repString("\"data-details-collapsed\": cols.details === 0 || void 0,",
   log.push("6 viewer seat")
 }
 
+// 7. LayoutController face: viewer passthroughs — the cross-plugin
+// ctx.layout face must carry the D93 viewer actions so entry points
+// (deliverable cards, sidebar files, the details-header toggle) can
+// open the column from OUTSIDE the frame module (grill D93).
+{
+  const a = "closeDetails() {"
+  const i = s.indexOf(a)
+  if (i < 0 || s.indexOf(a, i + 1) >= 0) dies("7: face closeDetails anchor not unique")
+  const close = s.indexOf("}", i)
+  const ls = s.lastIndexOf(LF, i) + 1
+  let k = ls; while (s[k] === TAB) k++
+  const K = s.slice(ls, k), I = K + TAB
+  const next = [
+    "closeDetails() {",
+    I + "this.#require().closeDetails();",
+    K + "}",
+    K + "/** Open the viewer column (D93 artifacts dock; no-op when open). */",
+    K + "openViewer() {",
+    I + "this.#require().openViewer();",
+    K + "}",
+    K + "/** Close the viewer column. */",
+    K + "closeViewer() {",
+    I + "this.#require().closeViewer();",
+    K + "}",
+    K + "/** Set the viewer column width (px, clamped). */",
+    K + "setViewer(px) {",
+    I + "this.#require().setViewer(px);",
+    K + "}"
+  ].join(LF)
+  s = s.slice(0, i) + next + s.slice(close + 1)
+  log.push("7 layout face viewer")
+}
+
 mkdirSync(dirname(outPath), { recursive: true })
 if (process.argv.includes("--check")) {
   let cur = null

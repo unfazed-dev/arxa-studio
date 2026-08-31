@@ -394,6 +394,18 @@ window.__ModuleLoader__.load({
 			closeDetails() {
 				this.#require().closeDetails();
 			}
+			/** Open the viewer column (D93 artifacts dock; no-op when open). */
+			openViewer() {
+				this.#require().openViewer();
+			}
+			/** Close the viewer column. */
+			closeViewer() {
+				this.#require().closeViewer();
+			}
+			/** Set the viewer column width (px, clamped). */
+			setViewer(px) {
+				this.#require().setViewer(px);
+			}
 			#require() {
 				if (this.#panels === void 0) throw new Error("layout: panel actions not wired (root entry not mounted)");
 				return this.#panels;

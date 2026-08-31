@@ -265,8 +265,10 @@ window.__ModuleLoader__.load({
             else if (d.relPath) { setDraft(d.relPath); void (openArtifactRef.current && openArtifactRef.current(d.relPath)) }
           } catch { /* bad payload ignored */ }
         }
-        window.addEventListener('arxa-av-open', onOpen)
-        return () => window.removeEventListener('arxa-av-open', onOpen)
+        // D93: the module-level apply() bridge opens the column, then
+        // forwards the payload here (the panel is mounted by then).
+        window.addEventListener('arxa-av-open-detail', onOpen)
+        return () => window.removeEventListener('arxa-av-open-detail', onOpen)
       }, [])
       // D93 session switch while open: the column follows the new session —
       // the artifact resets to the empty state; changes list re-binds.
@@ -555,10 +557,31 @@ window.__ModuleLoader__.load({
     let hostCtx = null
     function apply(ctx) {
       hostCtx = ctx
+      // D93 open bridge: the panel mounts INSIDE the viewer column, so it
+      // cannot hear 'arxa-av-open' while the column is 0px wide. This
+      // module-level listener opens the column first (the ctx.layout face),
+      // then forwards the payload to the mounted panel on a detail event.
+      window.addEventListener('arxa-av-open', (ev) => {
+        try { if (ctx.layout && typeof ctx.layout.openViewer === 'function') ctx.layout.openViewer() } catch { /* face not wired yet */ }
+        try { window.dispatchEvent(new CustomEvent('arxa-av-open-detail', { detail: (ev && ev.detail) || {} })) } catch { /* bad payload ignored */ }
+      })
+      // Diagnostic levers (2026-08-31): the dsh sessions service as seen
+      // from a peer plugin ctx — lets the console test open() end-to-end
+      // while the sidebar resume path is under diagnosis.
+      try {
+        const sessions = ctx.get('sessions')
+        window.__ARXA_SESSIONS__ = sessions || null
+        try { window.__ARXA_WORKSPACES__ = ctx.get('workspaces') || null } catch { window.__ARXA_WORKSPACES__ = null }
+        window.__ARXA_AV_DEBUG__ = {
+          hasLayout: !!ctx.layout,
+          layoutKeys: ctx.layout ? Object.keys(ctx.layout) : null,
+          sessionsOpen: !!(sessions && typeof sessions.open === 'function'),
+        }
+      } catch (e) { window.__ARXA_AV_DEBUG__ = { err: String(e && e.message || e) } }
       ctx.slots.inject('viewer', () =>
         ctx.slots.register({ name: 'viewer', id: 'arxa-artifact-viewer' }, ArtifactPanel))
     }
-    const inject = ['slots', 'connection']
+    const inject = ['slots', 'connection', 'layout', 'sessions']
     exports.apply = apply
     exports.inject = inject
     return module.exports

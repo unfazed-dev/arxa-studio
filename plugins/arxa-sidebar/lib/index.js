@@ -35,7 +35,7 @@ export const name = 'arxa-sidebar'
 // sessions / workspaceRegistry / sessionTitle — dsh's in-process cordis
 // services (dsh-session / dsh-workspace / dsh-session-title): the Phase D
 // bridge faces (sessions.create cwd contract, archivedSessionIds, titles).
-export const inject = ['webServer', 'sessions', 'workspaceRegistry', 'sessionTitle']
+export const inject = ['webServer', 'sessions', 'workspaceRegistry', 'sessionTitle', 'agents']
 
 /** Import-probe the Phase A plugin in both deployment shapes. A failure is
   * LOGGED: a silent null here made both routes serve the stub while the UI
