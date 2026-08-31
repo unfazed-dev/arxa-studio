@@ -23,6 +23,7 @@ const { default: z } = await fromDsh('@deepseek-ai/schemastery', 'lib/index.mjs'
 import { createOrgServer } from './org-server.js'
 import { startOrgFollow, readOpenOrg } from './follow.js'
 import { createWriteApi, createMainVersionRoute } from './write-api.js'
+import { createOrgWatcher, createEventsRoute } from './watcher.js'
 import { TOKEN_TTL_CEILING_SECONDS, issueToken, loadOrCreateSecret, readVerifyFor } from './tokens.js'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -142,10 +143,11 @@ export function stopFollow() {
   return f ? f.stop() : Promise.resolve()
 }
 
-function ensureFollow(secret) {
+function ensureFollow(secret, onServing) {
   if (follow) return follow
   follow = startOrgFollow({
     env: process.env,
+    onServing,
     createServer: (opts) => createOrgServer({
       ...opts,
       verify: readVerifyFor({ secret, orgPath: opts.orgRoot }),
@@ -169,7 +171,8 @@ export function apply(ctx, config) {
   // the engine cold (theme-accent D84 lesson). Log loud, never crash.
   try {
     const secret = loadOrCreateSecret(process.env)
-    const started = ensureFollow(secret)
+    const watcher = createOrgWatcher({ intervalMs: 250 })
+    const started = ensureFollow(secret, (orgPath) => watcher.setRoot(orgPath))
     const routes = createTokenRoutes({
       env: process.env, secret, getSettings: currentSettings,
       getOrigin: () => started.current()?.origin ?? null,
@@ -195,6 +198,11 @@ export function apply(ctx, config) {
     ctx.webServer?.register?.({
       path: '/__arxa/artifacts/main-version',
       handler: (req, res) => { void mainVersion.handle(req, res) },
+    })
+    const events = createEventsRoute({ watcher })
+    ctx.webServer?.register?.({
+      path: '/__arxa/artifacts/events',
+      handler: (req, res) => { void events.handle(req, res) },
     })
   } catch (err) {
     console.error('[arxa-artifact-viewer] startup failed: ' + (err && err.message))

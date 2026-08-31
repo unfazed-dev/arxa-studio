@@ -41,7 +41,7 @@ export function readOpenOrg(env = process.env) {
  * createServer is injectable for tests ({ orgRoot, orgSlug } -> { origin, close() }).
  * Returns { stop(), current() }; never throws into the poll loop.
  */
-export function startOrgFollow({ env = process.env, intervalMs = 2000, createServer, log = () => {} }) {
+export function startOrgFollow({ env = process.env, intervalMs = 2000, createServer, log = () => {}, onServing = null }) {
   let serving = null // { orgPath, handle }
   let switching = false
   let stopped = false
@@ -68,6 +68,7 @@ export function startOrgFollow({ env = process.env, intervalMs = 2000, createSer
       log('reconcile failed: ' + (err && err.message))
     } finally {
       switching = false
+      if (onServing) { try { onServing(serving ? serving.orgPath : null) } catch {} }
     }
   }
 

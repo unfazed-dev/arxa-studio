@@ -435,3 +435,42 @@ assert.equal(v2body.chip.state, 'Approved', 'project repo owns its chip')
 assert.equal((await callVersion('seed.md', null)).statusCode, 403, 'no token -> 403')
 assert.equal((await callVersion('../x', issueToken({ secret, scope: 'read', relPath: '../x', orgPath: orgRepo, ttlSeconds: 30 }))).statusCode, 403, 'escape -> 403')
 console.log('arxa-artifact-viewer selftest: GREEN (version chip + timeline route)');
+
+// ---- Task 11: watcher coalescing + SSE push (D86) --------------------------
+import { createOrgWatcher, createEventsRoute } from './lib/watcher.js'
+const wroot = fs.mkdtempSync(path2.join(os.tmpdir(), 'arxa-av-watch-'))
+const w11 = createOrgWatcher({ intervalMs: 60 })
+const events = []
+const off = w11.onChange((rel, mtime) => events.push({ rel, mtime }))
+w11.setRoot(wroot)
+fs.writeFileSync(path2.join(wroot, 'a.md'), 'one\n')
+fs.writeFileSync(path2.join(wroot, 'a.md'), 'two\n')
+fs.writeFileSync(path2.join(wroot, 'a.md'), 'three\n')
+await sleep(400)
+assert.equal(events.length, 1, 'rapid writes coalesce to one event, got ' + events.length)
+assert.equal(events[0].rel, 'a.md')
+fs.mkdirSync(path2.join(wroot, '.arxa'), { recursive: true })
+fs.writeFileSync(path2.join(wroot, '.arxa', 'x.db'), 'state')
+await sleep(200)
+assert.equal(events.length, 1, '.arxa runtime state never pushes')
+
+// SSE route over a real connection
+const sse = createEventsRoute({ watcher: w11 })
+const sseSrv = http.createServer((rq, rs) => { void sse.handle(rq, rs) })
+await new Promise((r2) => sseSrv.listen(0, '127.0.0.1', r2))
+const ssePort = sseSrv.address().port
+const sseChunks = []
+const httpReq = http.get({ host: '127.0.0.1', port: ssePort, path: '/' }, (rs) => {
+  rs.on('data', (c) => sseChunks.push(c.toString()))
+})
+await sleep(120)
+assert.ok(sseChunks.join('').startsWith('retry: 2000'), 'SSE retry frame sent')
+fs.writeFileSync(path2.join(wroot, 'b.md'), 'pushed\n')
+await sleep(400)
+const sseText = sseChunks.join('')
+assert.ok(sseText.includes('"relPath":"b.md"'), 'external change pushed over SSE')
+httpReq.destroy()
+sseSrv.close()
+off()
+w11.stop()
+console.log('arxa-artifact-viewer selftest: GREEN (watcher + SSE)');

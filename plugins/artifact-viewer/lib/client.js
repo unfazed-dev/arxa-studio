@@ -227,6 +227,7 @@ window.__ModuleLoader__.load({
       const maxBytesRef = React.useRef(5 * 1024 * 1024)
       React.useEffect(() => { dirtyRef.current = dirty }, [dirty])
       // D82 cap arrives from the host settings namespace when available.
+      const externalRef = React.useRef(null)
       React.useEffect(() => {
         let live = true
         ;(async () => {
@@ -239,6 +240,37 @@ window.__ModuleLoader__.load({
         })()
         return () => { live = false }
       }, [])
+      // D86: external-change push. Clean buffer auto-reloads ('a preview that
+       // lies — reload it on the way IN'); dirty buffer raises the conflict
+       // prompt instead. Conflict color rides the save-note line; the dirty
+       // dot rides the session badge.
+      React.useEffect(() => {
+        if (!open || !state.relPath) return
+        const es = new EventSource('/__arxa/artifacts/events')
+        es.onmessage = (m) => {
+          try {
+            const ev = JSON.parse(m.data)
+            if (!ev || ev.relPath !== state.relPath) return
+            if (dirtyRef.current) {
+              externalRef.current = ev.mtimeMs
+              setSavePhase('conflict')
+              setSaveNote('changed externally while you edited')
+            } else {
+              void (async () => {
+                try {
+                  const { token, origin } = await fetchToken(state.relPath)
+                  const r = await fetch(origin + '/' + encodeURI(state.relPath) + '?avt=' + encodeURIComponent(token))
+                  if (!r.ok) return
+                  const text = await r.text()
+                  mtimeRef.current = ev.mtimeMs
+                  setState((s) => ({ ...s, text }))
+                } catch { /* transient */ }
+              })()
+            }
+          } catch {}
+        }
+        return () => es.close()
+      }, [open, state.relPath])
       const refreshPreview = () => {
         if (previewTimer.current) clearTimeout(previewTimer.current)
         previewTimer.current = setTimeout(() => {
@@ -300,7 +332,7 @@ window.__ModuleLoader__.load({
         }
       }
 
-      const save = async () => {
+      const save = async (force = false) => {
         if (!session || !state.relPath || !docRef.current) return
         setSavePhase('saving'); setSaveNote('')
         try {
@@ -312,7 +344,7 @@ window.__ModuleLoader__.load({
               worktreeId: session.id,
               relPath: state.relPath,
               content: docRef.current.state.doc.toString(),
-              ...(mtimeRef.current != null ? { expectedMtimeMs: mtimeRef.current } : {}),
+              ...(!force && mtimeRef.current != null ? { expectedMtimeMs: mtimeRef.current } : {}),
             }),
           })
           const body = await res.json().catch(() => ({}))
