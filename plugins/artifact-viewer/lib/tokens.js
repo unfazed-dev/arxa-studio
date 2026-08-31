@@ -4,8 +4,14 @@
 // D81 ceiling no matter what settings say.
 import crypto from 'node:crypto'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
-import { arxaHome } from '../../workspace/lib/root.js'
+
+// Inline (pnpm virtual-store copies break cross-package relative imports in
+// installed profiles — measured 2026-08-31, same as follow.js).
+function arxaHome(env = process.env) {
+  return env.ARXA_HOME || path.join(os.homedir(), '.arxa')
+}
 
 export const TOKEN_TTL_CEILING_SECONDS = 120
 
