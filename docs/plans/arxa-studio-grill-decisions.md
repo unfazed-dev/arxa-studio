@@ -808,3 +808,109 @@ User created an org named PLATO; nothing appeared on GitHub and nothing was show
 3. **Stale profile serving** (packaging lesson): dsh profile materialization rewrites the payload file: paths each boot, but pnpm never re-copies a plugin whose version string is unchanged — payload updates were silently NOT served. Lesson: bump the plugin version on every shipped plugin change (all five bumped to 0.1.1 with D77).
 
 Verified live: PLATO created at /Volumes/business_ssd/plato (subfolder), auto-published by the heal to unfazed-dev/plato (private), modal confirm + already-published success captured by lens.
+
+## Artifact viewer → editor grill (2026-08-30) — D78–
+
+Grounded in: docs/plans/artifact-viewer-editor-brief.md,
+docs/research/artifact-viewer-media-research.md,
+docs/research/editor-viewer-to-editor.md. D7 stays the viewing
+architecture; this grill settles the editor extension it never covered.
+
+- **D78 — Editable scope v1: text family only.** The viewer-editor edits
+  code/text/md/json/yaml; html/mdx editable as source only; all media
+  (pdf/video/audio/images/office) stays view-only in v1. Matches VS Code's
+  own view/edit split and keeps D7's direct-render lane the edit lane.
+- **D79 — Editor engine: CodeMirror 6.** MIT, ~50–200 kB tree-shaken, no
+  workers required, best system-webview behavior under D30. Diff view via
+  @codemirror/merge; LSP deliberately absent in v1. Monaco revisitable only
+  if TS IntelliSense / built-in diff becomes a hard requirement.
+- **D80 — Saves land in the session worktree, transparently.** Toggling edit
+  ensures the current workspace's session worktree (auto-created when none is
+  open); saves write the worktree, D18 WIP auto-commits capture them, the
+  stage-boundary gate merges per D38. Viewing always reads main/the real
+  tree — never a worktree. No quick-edit-to-main mode exists.
+- **D81 — Write path: read-only org origin + engine write API.** The per-org
+  file server serves GET only, forever — rendered content can never write.
+  Editor saves POST the trusted studio origin's engine API carrying a
+  short-lived WRITE token scoped to one session worktree; the engine
+  re-validates path containment (inside the worktree root) server-side
+  before writing and the D18 WIP commit. Read tokens (D7) and write tokens
+  are separate classes with separate lifetimes.
+- **D82 — Text edit UX: md source|preview split; hard guards.** Markdown
+  gets a source|preview split reusing D7's direct md renderer. The editor
+  refuses binary and oversized files (configurable cap, default ~5 MB) into
+  read-only view. html/mdx preview = D7's view mode, no split pane.
+- **D83 — Undo: CM6 history + D18 checkpoints, nothing new.** CodeMirror's
+  undo history is D19 level 1 (per-surface Cmd+Z, session-local). D18's WIP
+  auto-commits are D19 level 2 — checkpoint restore via the existing rewind
+  machinery. No custom undo stack, no manual snapshot affordance.
+- **D84 — Diff: one engine, two surfaces.** @codemirror/merge is the only
+  diff implementation: editor worktree-vs-main per-file diffs, and gen-ui's
+  Diff card upgraded onto it when real file diffs land in conversation. The
+  line-by-line card is retired once the upgrade ships.
+- **D85 — Editor header: D44 version chip + session badge.** The chip opens
+  the D20 timeline (never SHAs/stamps); a session badge names the session
+  whose worktree receives saves, so 'edits are not on main' is always
+  visible.
+- **D86 — External changes: native watch → push, live color indicators.**
+  The file-org-shell watchers push change events. Clean buffer auto-reloads
+  (design-panel doctrine); dirty buffer prompts with a @codemirror/merge
+  view (keep mine / take theirs / diff). Live color state throughout:
+  colored gutter marks for unsaved lines, dirty dot on modified tabs, and a
+  distinct conflict color for externally-modified-under-dirty-buffer files.
+- **D87 — v1 = full text-family editor; done = live-demo gate.** v1 ships
+  D78–D86 whole — no slim cut, no v1.1 split. Acceptance per the D68
+  precedent: selftests green, lens visual gate at the 390/744/1280 ladder,
+  and the owner demonstrates the live loop: open → edit → save → WIP
+  commit → stage-gate merge visible in the D20 timeline; a real agent edit
+  triggers the conflict prompt; an expired write token is rejected; the org
+  origin is proven GET-only.
+
+## Open (viewer-editor)
+
+- ~~Write `docs/plans/artifact-viewer-implementation.md` from D7 +
+  D78–D87~~ — WRITTEN 2026-08-30 (12 tasks, acceptance gate per D87).
+  Build pending — nothing is built yet.
+- **D88 — Docked viewer column: clone details' mechanics, not its seat.**
+  The artifact viewer becomes a fourth AppFrame column (sidebar | center |
+  details | viewer), shipped as a generated, drift-gated patch of
+  ui-layout (`scripts/gen-frame.mjs`, the gen-sidebar.mjs pattern) — never
+  by registering into the `details` seat (single slot: we would shadow the
+  stock DetailsPanel + its tool seat) and never as a `shell.overlay` float
+  (the full-inset pointer-events:auto overlay that blocked all UI is
+  retired). Session-bound presence mirrors details: renders only while a
+  non-blank session is current, closes on session switch. Org-bound scope:
+  the column opens anything in the org tree; editing stays D80 (session
+  worktree + D18 WIP commit) with the D85 badge.
+- **D89 — Worktree read lane.** Produced files live in session worktrees
+  (`.arxa/worktrees/<id>`), not on main; the viewer reads them through a
+  dedicated studio-origin route `GET /__arxa/artifacts/wt` with a read
+  token bound to worktreeId (mirroring the D81 write binding). The org
+  origin (D7) is unchanged — no `.arxa` exposure changes; worktree files
+  are served by token, not by accident.
+- **D90 — Org file tree lives in the arxa sidebar.** The sidebar's tree
+  gains the real filesystem layer: all folders/files of the open org, lazy
+  per-directory (`GET /__arxa/artifacts/tree?dir=…`, served by the
+  artifact-viewer plugin; excludes `.arxa/`, `.git/`, dotfiles;
+  `account/` viewable). Click a file → opens the viewer column (org lane).
+  Sidebar navigates; the column views/edits — one authority per concern.
+- **D91 — Artifact cards = stock deliverables.** The per-turn produced-file
+  chips (dsh-client-ui-deliverables `turnTail`, sourced from tool
+  locations, not prose) plus composer file-mentions are THE artifact cards;
+  clicking one opens the viewer column on that file (worktree lane first,
+  org fallback). gen-ui stays a rich-surface system and is untouched.
+  Never auto-open: cards light up, the column opens only on click.
+- **D92 — Narrow = full-frame sheet at dsh's own breakpoint.** Below
+  AppFrame's narrow flag (< 1024 px) the viewer renders as a full-frame
+  sheet (back arrow returns to chat); same panel component, one container
+  branch. ≥ 1024 px it is the draggable column. Width preference is ignored
+  while narrow, remembered across the boundary.
+- **D93 — Geometry persistence + entry points.** The generated layout store
+  gains `viewer` + set/open/close actions (one authority for frame
+  geometry; clamp min 320 px). ⤢ maximize = viewport − sidebar − details(if
+  open) − 640 px center floor, details yields first if the floor cannot
+  hold; maximized is ephemeral, width persists. Entry points: deliverables
+  card, sidebar file, column path input, and an "Artifacts" toggle beside
+  "Session log". Session switch while open: the column follows the new
+  session (artifact resets to empty state, session-changes list rebinds).
+

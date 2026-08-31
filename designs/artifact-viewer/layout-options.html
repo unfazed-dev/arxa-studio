@@ -1,0 +1,55 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Artifact viewer — layout options</title><style>
+*{box-sizing:border-box}body{margin:0;padding:24px;background:#101418;color:#d7dde3;font:13px/1.45 -apple-system,'Segoe UI',sans-serif}
+h1{font-size:18px;margin:0 0 4px}p.sub{margin:0 0 20px;color:#8b959f}
+.row{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:26px}
+.opt{background:#161b21;border:1px solid #2a323b;border-radius:10px;padding:12px;width:460px}
+.opt h2{font-size:13px;margin:0 0 2px}.opt .verdict{font-size:11px;margin:0 0 10px;color:#8b959f}
+.good{color:#7dc47f}.bad{color:#e07b7b}.meb{color:#e0b45e}
+.frame{display:flex;height:270px;border:1px solid #2a323b;border-radius:8px;overflow:hidden;position:relative;background:#0c0f13}
+.col{display:flex;flex-direction:column;min-width:0}
+.lab{font-size:10px;text-align:center;padding:3px 0;color:#93a0ac;border-bottom:1px dashed #2a323b;flex:none;white-space:nowrap;overflow:hidden}
+.sb{width:64px;flex:none;background:#1a2027}.sb .r{height:8px;margin:6px 6px 0;border-radius:4px;background:#242c35}
+.ctr{flex:1;background:#11151a;padding:6px;display:flex;flex-direction:column;gap:5px}
+.msg{height:16px;border-radius:5px;background:#1c232b;width:90%}.msg.s{width:70%;align-self:flex-end;background:#1f2a37}
+.card{border:1px solid #3b82f6;border-radius:6px;padding:4px 6px;font-size:10px;color:#7fb0f7;background:#16202e}
+.comp{margin-top:auto;height:22px;border:1px solid #2a323b;border-radius:6px;display:flex;align-items:center;padding:0 6px;font-size:10px;color:#77828d}
+.det{width:90px;flex:none;background:#141920}.vw{width:130px;flex:none;background:#151d24;display:flex;flex-direction:column}
+.vh{display:flex;gap:4px;align-items:center;padding:4px 5px;border-bottom:1px solid #2a323b;font-size:10px;color:#c3ccd4;flex:none}
+.tab{border:1px solid #2a323b;border-radius:4px;padding:1px 5px}.tab.on{background:#24303c}
+.mx{margin-left:auto;border:1px solid #2a323b;border-radius:4px;padding:0 4px;color:#e0b45e}
+.vb{flex:1;margin:5px;display:flex;gap:5px}.ln{flex:1;background:#1c242d;border-radius:4px}.ln.p{flex:1.2}
+.hdl{width:6px;flex:none;cursor:col-resize;background:repeating-linear-gradient(90deg,#2f3944 0 2px,transparent 2px 5px);position:relative}
+.hdl::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:4px;height:26px;border-radius:3px;background:#3d4a58}
+.ovl{position:absolute;inset:0;z-index:20;border:2px solid #e07b7b;background:rgba(224,123,123,.08)}
+.ovl .tag{position:absolute;top:6px;left:8px;font-size:10px;color:#e07b7b;font-weight:600}
+.blk{position:absolute;inset:0;cursor:not-allowed}
+.note{font-size:11px;color:#8b959f;margin:8px 2px 0}
+.legend{font-size:11px;color:#8b959f;margin-top:2px}.legend b{color:#c3ccd4}
+</style></head><body>
+<h1>Artifact viewer → docked column: four candidate layouts</h1>
+<p class="sub">Every box is drawn to the same dsh AppFrame anatomy: <span class="legend"><b>sidebar</b> (the arxa sidebar you know) · <b>center</b> (conversation) · <b>details</b> (stock session pane) · <b>viewer</b> (the artifact viewer-editor) · <b>handle</b> (⟷ col-resize)</span></p>
+
+<div class="row">
+<div class="opt"><h2>0 · TODAY (broken)</h2><p class="verdict bad">✗ viewer is a floating overlay spanning the WHOLE frame — pointer-events:auto blocks every click, even collapsed</p>
+<div class="frame"><div class="col sb"><div class="lab">arxa sidebar<br>(org · project · session)</div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div></div><div class="col ctr"><div class="lab">center — conversation</div><div class="msg"></div><div class="msg s"></div><div class="msg"></div><div class="card">▸ demo.md — artifact card (click = open viewer)</div><div class="msg s"></div><div class="comp">composer — keep chatting while viewer is open</div></div><div class="ovl"><div class="tag">shell.overlay — full-inset layer (z 20)</div><div class="blk"></div></div></div></div>
+
+<div class="opt" style="outline:2px solid #7dc47f"><h2>A · PROPOSED — far right</h2><p class="verdict good">✓ grid: sidebar | center | details | viewer — stable right edge, drag steals from center only, can grow to max available</p>
+<div class="frame"><div class="col sb"><div class="lab">arxa sidebar<br>(org · project · session)</div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div></div><div class="col ctr"><div class="lab">center — conversation</div><div class="msg"></div><div class="msg s"></div><div class="msg"></div><div class="card">▸ demo.md — artifact card (click = open viewer)</div><div class="msg s"></div><div class="comp">composer — keep chatting while viewer is open</div></div><div class="col det"><div class="lab">details<br>(stock dsh · only when a session is current)</div></div><div class="hdl" title="drag handle"></div><div class="col vw"><div class="vh"><span class="tab on">preview</span><span class="tab">code</span><span class="mx" title="maximize">⤢</span></div><div class="vb"><div class="ln p"></div><div class="ln"></div></div></div></div><p class="note">Handle at the viewer's left edge; maximize ⤢ snaps to max width (center floor 640&nbsp;px kept). Collapsed = width 0, reopen from the sidebar entry.</p></div>
+</div>
+
+<div class="row">
+<div class="opt"><h2>B · beside chat, before details</h2><p class="verdict meb">~ Claude's adjacency — but every details open/close reshuffles the viewer; drag math + persisted width get messy</p>
+<div class="frame"><div class="col sb"><div class="lab">arxa sidebar<br>(org · project · session)</div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div></div><div class="col ctr"><div class="lab">center — conversation</div><div class="msg"></div><div class="msg s"></div><div class="msg"></div><div class="card">▸ demo.md — artifact card (click = open viewer)</div><div class="msg s"></div><div class="comp">composer — keep chatting while viewer is open</div></div><div class="hdl" title="drag handle"></div><div class="col vw"><div class="vh"><span class="tab on">preview</span><span class="tab">code</span><span class="mx" title="maximize">⤢</span></div><div class="vb"><div class="ln p"></div><div class="ln"></div></div></div><div class="col det"><div class="lab">details<br>(stock dsh · only when a session is current)</div></div></div></div>
+
+<div class="opt"><h2>C · reuse the details column</h2><p class="verdict bad">✗ no new column, but stock-dsh-owned, session-bound, clamped 300–520 px — contradicts "draggable to max"</p>
+<div class="frame"><div class="col sb"><div class="lab">arxa sidebar<br>(org · project · session)</div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div></div><div class="col ctr"><div class="lab">center — conversation</div><div class="msg"></div><div class="msg s"></div><div class="msg"></div><div class="card">▸ demo.md — artifact card (click = open viewer)</div><div class="msg s"></div><div class="comp">composer — keep chatting while viewer is open</div></div><div class="col det" style="width:130px"><div class="lab">details slot ≡ viewer (clamped)</div></div></div></div>
+</div>
+
+<div class="row">
+<div class="opt"><h2>A-max · maximize state</h2><p class="verdict good">⤢ one click: viewer takes all width it can — center keeps its 640 px floor, details yields to 0 when needed</p>
+<div class="frame"><div class="col sb"><div class="lab">arxa sidebar<br>(org · project · session)</div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div></div><div class="col ctr" style="flex:none;width:150px"><div class="lab">center (640 floor)</div><div class="msg"></div><div class="comp">composer</div></div><div class="hdl" title="drag handle"></div><div class="col vw" style="width:250px"><div class="vh"><span class="tab on">preview</span><span class="tab">code</span><span class="mx" title="maximize">⤢</span></div><div class="vb"><div class="ln p"></div><div class="ln"></div></div></div></div></div>
+
+<div class="opt"><h2>A-narrow · ≤744 px ladder</h2><p class="verdict good">mobile parity with Claude: viewer becomes a full-frame sheet; ✕ returns to chat</p>
+<div class="frame"><div class="col vw" style="width:100%"><div class="vh"><span>←</span><span class="tab on">preview</span><span class="tab">code</span></div><div class="vb"><div class="ln p"></div></div></div></div></div>
+</div>
+</body></html>
