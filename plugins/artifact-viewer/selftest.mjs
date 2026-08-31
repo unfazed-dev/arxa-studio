@@ -323,8 +323,8 @@ fs.writeFileSync(path2.join(gitHome, 'organisation.json'), JSON.stringify({ orgs
 writeLock(orgRepo, { pid: process.pid, orgPath: orgRepo })
 assert.equal(readOpenOrg(gitEnvHome) && readOpenOrg(gitEnvHome).orgPath, orgRepo, 'git org reads as open')
 
-assert.equal(resolveWorktree({ env: gitEnvHome, orgPath: orgRepo, worktreeId: 'sess1' }).worktreePath, worktreeOf('sess1'))
-assert.equal(resolveWorktree({ env: gitEnvHome, orgPath: orgRepo, worktreeId: 'nope' }), null)
+assert.equal((await resolveWorktree({ env: gitEnvHome, orgPath: orgRepo, worktreeId: 'sess1' })).worktreePath, worktreeOf('sess1'))
+assert.equal(await resolveWorktree({ env: gitEnvHome, orgPath: orgRepo, worktreeId: 'nope' }), null)
 
 const writeApi = createWriteApi({ env: gitEnvHome, secret, getSettings: () => ({ maxEditBytes: 1024 }) })
 function callWrite(payload, headers = {}) {

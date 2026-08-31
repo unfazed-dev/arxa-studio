@@ -16,15 +16,26 @@ import { execFileSync } from 'node:child_process'
 import { verifyToken } from './tokens.js'
 import { resolveInside } from './org-server.js'
 import { readOpenOrg } from './follow.js'
-import { listSessions, SESSIONS_DIR } from '../../git-workspace/lib/sessions.js'
-import { versionChip, readVersions } from '../../git-workspace/lib/versions.js'
-import { wipCommit } from '../../git-workspace/lib/commits.js'
+// git-workspace via the house dual probe: bare name resolves through the
+// flat copies in installed profiles; relative resolves in the repo checkout
+// (selftests). Same discipline as approvals' importShell.
+let gwCache = null
+async function gw() {
+  if (gwCache) return gwCache
+  try { gwCache = await import('git-workspace') } catch {
+    gwCache = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+  }
+  return gwCache
+}
 
 const RESERVED = ['.arxa/', '.git/', 'account/']
 
 /** Resolve a worktreeId against the open org: the org repo itself plus every
  * project repo under projects/* (D37 nested repos). Loud null when unknown. */
-export function resolveWorktree({ env = process.env, orgPath, worktreeId }) {
+export async function resolveWorktree({ env = process.env, orgPath, worktreeId }) {
+  const gwMod = await gw()
+  const listSessions = gwMod.listSessions
+  const SESSIONS_DIR = gwMod.SESSIONS_DIR
   const candidates = [orgPath]
   try {
     for (const name of fs.readdirSync(path.join(orgPath, 'projects'))) {
@@ -130,7 +141,11 @@ export function createVersionRoute({ env = process.env, secret }) {
         }
         let chip = null
         let timeline = []
-        try { chip = versionChip(repoPath); timeline = readVersions(repoPath) } catch { /* unminted repo -> hidden chip */ }
+        try {
+          const gwMod = await gw()
+          chip = gwMod.versionChip(repoPath)
+          timeline = gwMod.readVersions(repoPath)
+        } catch { /* unminted repo -> hidden chip */ }
         return json2(200, { chip, timeline })
       } catch {
         return json2(500, { error: 'internal error' })
@@ -157,7 +172,7 @@ export function createWriteApi({ env = process.env, secret, getSettings = () => 
       // one is enforcement — a 40 MB paste never reaches the worktree.
       const cap = Number((getSettings() || {}).maxEditBytes) || 5 * 1024 * 1024
       if (body.content.length > cap) return json(res, 413, { error: 'content over the ' + cap + ' byte edit cap (D82)' })
-      const found = resolveWorktree({ env, orgPath: open.orgPath, worktreeId: body.worktreeId })
+      const found = await resolveWorktree({ env, orgPath: open.orgPath, worktreeId: body.worktreeId })
       if (!found) return json(res, 404, { error: 'unknown session worktree for this org' })
       const rel = body.relPath.replace(/^\/+/, '')
       for (const r of RESERVED) {
@@ -177,7 +192,8 @@ export function createWriteApi({ env = process.env, secret, getSettings = () => 
       let committed = false
       let warning = null
       try {
-        wipCommit(found.worktreePath, { message: 'editor save ' + rel, env })
+        const gwMod = await gw()
+        gwMod.wipCommit(found.worktreePath, { message: 'editor save ' + rel, env })
         committed = true
       } catch (err) {
         warning = 'write landed but WIP commit failed: ' + String((err && err.message) || err)

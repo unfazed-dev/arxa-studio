@@ -9,8 +9,15 @@
 // reentrant, released on close). An org counts as open iff its lock exists
 // AND the holder pid is alive (shell-lock staleness rule mirrors this).
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
-import { arxaHome } from '../../workspace/lib/root.js'
+
+// Inline (was a relative import of workspace/lib/root.js): pnpm's virtual
+// store copies file: deps, so cross-package RELATIVE imports break at boot
+// in installed profiles (measured 2026-08-31). arxaHome is one line.
+function arxaHome(env = process.env) {
+  return env.ARXA_HOME || path.join(os.homedir(), '.arxa')
+}
 
 function pidAlive(pid) {
   try { process.kill(pid, 0); return true } catch (err) { return err.code === 'EPERM' }
