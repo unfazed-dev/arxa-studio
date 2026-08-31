@@ -746,7 +746,15 @@ export function apply(ctx, deps = {}) {
         if (receipt?.accepted !== true) {
           // not-pending (someone answered first) or bad-response (engine
           // re-validation refused the batch) — both are conflicts, not bugs.
-          return json(res, 409, { ok: false, error: receipt?.reason ?? 'respond-refused', action })
+          const reason = String(receipt?.reason ?? 'respond-refused')
+          // Self-heal (smoke-test finding, 2026-08-31): a not-pending verdict
+          // means the ENGINE no longer has this question live — if our map
+          // still does, the question/resolved frame was missed (observed
+          // across an engine rotation). Drop the zombie record so the list
+          // and the phone never show an unanswerable card; bad-response keeps
+          // the record (the batch shape was wrong, a retry can fix it).
+          if (reason === 'not-pending') pending.delete(record.id)
+          return json(res, 409, { ok: false, error: reason, action })
         }
         // First claimant won: drop immediately so the list never shows a
         // decided approval while the question/resolved frame is in flight.
