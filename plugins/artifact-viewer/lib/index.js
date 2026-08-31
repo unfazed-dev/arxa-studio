@@ -21,12 +21,15 @@ const { installSettingsSection, settingsNamespace } =
   await fromDsh('@deepseek-ai/dsh-settings', 'lib/index.js')
 const { default: z } = await fromDsh('@deepseek-ai/schemastery', 'lib/index.mjs')
 import { createOrgServer } from './org-server.js'
-import { startOrgFollow } from './follow.js'
+import { startOrgFollow, readOpenOrg } from './follow.js'
+import { TOKEN_TTL_CEILING_SECONDS, issueToken, loadOrCreateSecret, readVerifyFor } from './tokens.js'
+import fs from 'node:fs'
+import path from 'node:path'
+
+export { TOKEN_TTL_CEILING_SECONDS }
+export const inject = ['webServer']
 
 export const name = 'arxa-artifact-viewer'
-
-// D81 invariant: artifact URL tokens live at most 120 s, whatever settings say.
-export const TOKEN_TTL_CEILING_SECONDS = 120
 
 export function defaultSettings() {
   return { maxEditBytes: 5_000_000, tokenTtlSeconds: 120 }
@@ -40,6 +43,61 @@ export const SCHEMA = z.object({
     'Artifact URL token lifetime in seconds; never above 120 (D7/D81)'),
 })
 
+function readBody(req) {
+  return new Promise((resolve) => {
+    let data = ''
+    req.on('data', (c) => { data += c })
+    req.on('end', () => resolve(data))
+    req.on('error', () => resolve(''))
+  })
+}
+
+/**
+ * Token issue route (POST /__arxa/artifacts/token) on the TRUSTED studio
+ * origin. Read tokens require the org to be OPEN and the relPath to sit
+ * inside it (checked here, server-side); write tokens are worktree-scoped
+ * and their target validation happens again at write time (D81).
+ * Factory shape keeps this testable without an engine.
+ */
+export function createTokenRoutes({ env = process.env, secret, getSettings }) {
+  function json(res, status, body) {
+    res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+    res.end(JSON.stringify(body))
+  }
+  async function handle(req, res) {
+    try {
+      if (req.method !== 'POST') return json(res, 405, { error: 'POST only' })
+      let body = {}
+      try { body = JSON.parse((await readBody(req)) || '{}') } catch { return json(res, 400, { error: 'bad json' }) }
+      const ttl = (getSettings() || {}).tokenTtlSeconds || 120
+      if (body.scope === 'write') {
+        if (typeof body.worktreeId !== 'string' || body.worktreeId === '') {
+          return json(res, 400, { error: 'worktreeId required for write tokens' })
+        }
+        const token = issueToken({ secret, scope: 'write', worktreeId: body.worktreeId, ttlSeconds: ttl })
+        return json(res, 200, { token })
+      }
+      // read (default)
+      const open = readOpenOrg(env)
+      if (!open || body.orgPath !== open.orgPath) return json(res, 403, { error: 'org not open' })
+      if (typeof body.relPath !== 'string' || body.relPath === '') return json(res, 400, { error: 'relPath required' })
+      try {
+        const rootReal = fs.realpathSync(path.resolve(open.orgPath))
+        const abs = path.resolve(rootReal, path.normalize(body.relPath))
+        if (abs !== rootReal && !abs.startsWith(rootReal + path.sep)) return json(res, 403, { error: 'outside the org root' })
+        if (!fs.statSync(abs).isFile()) return json(res, 404, { error: 'not a file' })
+      } catch (err) {
+        return json(res, err.code === 'ENOENT' ? 404 : 403, { error: 'unresolvable path' })
+      }
+      const token = issueToken({ secret, scope: 'read', relPath: body.relPath, orgPath: open.orgPath, ttlSeconds: ttl })
+      return json(res, 200, { token })
+    } catch (err) {
+      return json(res, 500, { error: 'internal error' })
+    }
+  }
+  return { handle }
+}
+
 let current = defaultSettings()
 export function currentSettings() { return { ...current } }
 
@@ -52,11 +110,14 @@ export function stopFollow() {
   return f ? f.stop() : Promise.resolve()
 }
 
-function ensureFollow() {
+function ensureFollow(secret) {
   if (follow) return follow
   follow = startOrgFollow({
     env: process.env,
-    createServer: (opts) => createOrgServer(opts),
+    createServer: (opts) => createOrgServer({
+      ...opts,
+      verify: readVerifyFor({ secret, orgPath: opts.orgRoot }),
+    }),
     log: (m) => console.log('[arxa-artifact-viewer] ' + m),
   })
   return follow
@@ -74,7 +135,15 @@ export function apply(ctx, config) {
   })
   // Boot must survive a follow failure — a plugin throwing at apply() kills
   // the engine cold (theme-accent D84 lesson). Log loud, never crash.
-  try { ensureFollow() } catch (err) {
-    console.error('[arxa-artifact-viewer] follow startup failed: ' + (err && err.message))
+  try {
+    const secret = loadOrCreateSecret(process.env)
+    ensureFollow(secret)
+    const routes = createTokenRoutes({ env: process.env, secret, getSettings: currentSettings })
+    ctx.webServer?.register?.({
+      path: '/__arxa/artifacts/token',
+      handler: (req, res) => { void routes.handle(req, res) },
+    })
+  } catch (err) {
+    console.error('[arxa-artifact-viewer] startup failed: ' + (err && err.message))
   }
 }

@@ -186,3 +186,88 @@ await f.stop()
 assert.deepEqual(closed, [orgA, orgB], 'stop() closes the serving org')
 
 console.log('arxa-artifact-viewer selftest: GREEN (server + follow)');
+
+// ---- Task 3: token classes, secret, verify glue, issue route ---------------
+import { issueToken, verifyToken, loadOrCreateSecret, readVerifyFor } from './lib/tokens.js'
+import { createTokenRoutes } from './lib/index.js'
+
+// identity guard (theme-accent D84 lesson: undeclared inject kills cold boots)
+assert.deepEqual(mod.inject, ['webServer'], 'declares inject: ["webServer"]')
+
+// tokens: round-trip + bindings
+const secret = 'unit-test-secret'
+const tk = issueToken({ secret, scope: 'read', relPath: 'notes/a.md', orgPath: org, ttlSeconds: 30 })
+assert.equal(verifyToken(tk, { secret, scope: 'read', relPath: 'notes/a.md', orgPath: org }).ok, true)
+assert.equal(verifyToken(tk, { secret, scope: 'read', relPath: 'app.js', orgPath: org }).ok, false, 'wrong rel rejected')
+assert.equal(verifyToken(tk, { secret, scope: 'write', worktreeId: 'w1' }).ok, false, 'wrong scope rejected')
+assert.equal(verifyToken(tk, { secret, scope: 'read', relPath: 'notes/a.md', orgPath: '/somewhere/else' }).ok, false, 'wrong org rejected')
+assert.equal(verifyToken(tk, { secret: 'other', scope: 'read', relPath: 'notes/a.md', orgPath: org }).ok, false, 'wrong secret rejected')
+assert.equal(verifyToken(tk.slice(0, -2) + 'xx', { secret, scope: 'read', relPath: 'notes/a.md', orgPath: org }).ok, false, 'tampered rejected')
+const past = issueToken({ secret, scope: 'read', relPath: 'x', ttlSeconds: 5, now: () => 1000 })
+assert.equal(verifyToken(past, { secret, scope: 'read', relPath: 'x', now: () => 2000 }).reason, 'expired', 'expired rejected')
+const clamped = issueToken({ secret, scope: 'read', relPath: 'x', ttlSeconds: 9999, now: () => 1000 })
+const body = JSON.parse(Buffer.from(clamped.split('.')[0], 'base64url').toString('utf8'))
+assert.ok(body.exp - body.iat <= 120, 'ttl clamped to the D81 ceiling')
+const wtk = issueToken({ secret, scope: 'write', worktreeId: 'sess-1', ttlSeconds: 30 })
+assert.equal(verifyToken(wtk, { secret, scope: 'write', worktreeId: 'sess-1' }).ok, true)
+assert.equal(verifyToken(wtk, { secret, scope: 'write', worktreeId: 'sess-2' }).ok, false, 'write token bound to worktree')
+
+// secret file: created 0600, idempotent
+const envHome = { ...process.env, ARXA_HOME: fs.mkdtempSync(path2.join(os.tmpdir(), 'arxa-av-keys-')) }
+const s1 = loadOrCreateSecret(envHome)
+const s2 = loadOrCreateSecret(envHome)
+assert.equal(s1, s2, 'secret idempotent')
+assert.equal(fs.statSync(path2.join(envHome.ARXA_HOME, 'keys', 'artifact-viewer-secret')).mode & 0o777, 0o600, 'secret is 0600')
+
+// verify glue against a live server
+const vorg = fs.mkdtempSync(path2.join(os.tmpdir(), 'arxa-av-vorg-'))
+fs.writeFileSync(path2.join(vorg, 'a.md'), 'hello')
+const vsrv = await createOrgServer({ orgRoot: vorg, orgSlug: 'vtest', verify: readVerifyFor({ secret, orgPath: vorg }) })
+const VH = 'org-vtest.localhost:' + vsrv.port
+const goodT = issueToken({ secret, scope: 'read', relPath: 'a.md', orgPath: vorg, ttlSeconds: 30 })
+assert.equal((await req(vsrv.port, '/a.md', { host: VH })).status, 403, 'no token -> 403')
+assert.equal((await req(vsrv.port, '/a.md?avt=' + goodT, { host: VH })).status, 200, 'valid token -> 200')
+const otherT = issueToken({ secret, scope: 'read', relPath: 'b.md', orgPath: vorg, ttlSeconds: 30 })
+assert.equal((await req(vsrv.port, '/a.md?avt=' + otherT, { host: VH })).status, 403, 'token for another file -> 403')
+const otherOrgT = issueToken({ secret, scope: 'read', relPath: 'a.md', orgPath: '/elsewhere', ttlSeconds: 30 })
+assert.equal((await req(vsrv.port, '/a.md?avt=' + otherOrgT, { host: VH })).status, 403, 'token for another org -> 403')
+await vsrv.close()
+
+// issue route over a fake ctx
+const routeHome = fs.mkdtempSync(path2.join(os.tmpdir(), 'arxa-av-route-'))
+const routeOrg = fs.mkdtempSync(path2.join(os.tmpdir(), 'arxa-av-rorg-'))
+const routeEnv = { ...process.env, ARXA_HOME: routeHome }
+fs.writeFileSync(path2.join(routeHome, 'organisation.json'), JSON.stringify({ orgs: [routeOrg] }))
+fs.mkdirSync(path2.join(routeOrg, '.arxa', 'locks'), { recursive: true })
+fs.writeFileSync(path2.join(routeOrg, '.arxa', 'locks', path2.basename(routeOrg) + '.lock'),
+  JSON.stringify({ pid: process.pid, orgPath: routeOrg }))
+fs.writeFileSync(path2.join(routeOrg, 'doc.md'), 'route')
+
+const routeSecret = 'route-secret'
+const routes = createTokenRoutes({ env: routeEnv, secret: routeSecret, getSettings: () => ({ tokenTtlSeconds: 120 }) })
+function callRoute(payload) {
+  return new Promise((resolve, rejectP) => {
+    const res = { statusCode: 0, headers: null, body: '',
+      writeHead(s, h) { this.statusCode = s; this.headers = h },
+      end(b) { this.body = b || '' } }
+    const rq = { method: 'POST',
+      on(ev, fn) {
+        if (ev === 'data') queueMicrotask(() => fn(Buffer.from(JSON.stringify(payload))))
+        if (ev === 'end') queueMicrotask(() => fn())
+      } }
+    routes.handle(rq, res).then(() => resolve(res), rejectP)
+  })
+}
+const ok = await callRoute({ orgPath: routeOrg, relPath: 'doc.md' })
+assert.equal(ok.statusCode, 200, 'open org + contained rel -> 200')
+const issued = JSON.parse(ok.body).token
+assert.equal(verifyToken(issued, { secret: routeSecret, scope: 'read', relPath: 'doc.md', orgPath: routeOrg }).ok, true)
+assert.equal((await callRoute({ orgPath: routeOrg, relPath: '../x' })).statusCode, 403, 'escape -> 403')
+assert.equal((await callRoute({ orgPath: '/not/open', relPath: 'doc.md' })).statusCode, 403, 'unopened org -> 403')
+assert.equal((await callRoute({ orgPath: routeOrg, relPath: 'nope.md' })).statusCode, 404, 'missing file -> 404')
+assert.equal((await callRoute({ scope: 'write' })).statusCode, 400, 'write without worktreeId -> 400')
+const w = await callRoute({ scope: 'write', worktreeId: 'sess-9' })
+assert.equal(w.statusCode, 200, 'write token issued')
+assert.equal(verifyToken(JSON.parse(w.body).token, { secret: routeSecret, scope: 'write', worktreeId: 'sess-9' }).ok, true)
+
+console.log('arxa-artifact-viewer selftest: GREEN (tokens + route)');
