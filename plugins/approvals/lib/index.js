@@ -446,8 +446,26 @@ export function mirrorOutBody(record) {
   return { events: [{ table: 'approvals', op: 'upsert', row: { ...record, org_id: 'local' } }] }
 }
 
-/** One mirror-out POST. Returns {ok, status?|error?}; NEVER throws. */
-export async function postMirrorOut(cfg, record, adminToken, fetchImpl = fetch) {
+/** The /ingest body for one terminal task (B3: 'everything the session
+ *  tools trigger' — task completions ride the phone rail too, as their own
+ *  table so the phone can project them independently of approvals). */
+export function mirrorOutTaskBody(sessionId, finished, nowMs = Date.now()) {
+  const failed = finished.outcome !== 'completed'
+  return { events: [{ table: 'tasks', op: 'upsert', row: {
+    id: String(finished.id),
+    session_id: String(sessionId ?? ''),
+    kind: 'task',
+    summary: String(finished.label ?? finished.id),
+    status: failed ? 'failed' : 'completed',
+    raised_at: Number(finished.startedAt ?? 0),
+    finished_at: Number(finished.finishedAt ?? nowMs),
+    org_id: 'local',
+  } }] }
+}
+
+/** One mirror-out POST with a ready /ingest body. Returns {ok, status?|error?};
+ *  NEVER throws — timeouts and refusals are return values. */
+export async function postMirrorOut(cfg, body, adminToken, fetchImpl = fetch) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 2000)
   try {
@@ -457,7 +475,7 @@ export async function postMirrorOut(cfg, record, adminToken, fetchImpl = fetch) 
         authorization: 'Bearer ' + adminToken,
         'content-type': 'application/json',
       },
-      body: JSON.stringify(mirrorOutBody(record)),
+      body: JSON.stringify(body),
       signal: controller.signal,
     })
     if (!res.ok) return { ok: false, status: res.status }
@@ -577,17 +595,34 @@ export function apply(ctx, deps = {}) {
     }
     void (async () => {
       try {
-        const cfg = await mirrorOutConfig(deps.env ?? process.env)
+        const cfg = await mirrorOutConfig(deps.env ?? process.env, fs.readFileSync, deps.loadLib ?? loadDoorbell)
         if (!cfg.enabled) return
-        const adminToken = await mirrorAdminToken(deps.env ?? process.env)
+        const adminToken = await mirrorAdminToken(deps.env ?? process.env, fs.readFileSync, deps.loadLib ?? loadDoorbell)
         if (!adminToken) {
           console.error('[arxa-approvals] mirror-out gated on but no admin bearer (cairn-server.env)')
           return
         }
-        const result = await postMirrorOut(cfg, record, adminToken)
+        const result = await postMirrorOut(cfg, mirrorOutBody(record), adminToken)
         if (!result.ok) {
           console.error('[arxa-approvals] mirror-out failed:', result.status ?? result.error)
         }
+      } catch { /* never throws into the engine */ }
+    })()
+  }
+
+  const mirrorOutTask = (finished, frame) => {
+    if (typeof deps.mirrorOutTask === 'function') {
+      try { deps.mirrorOutTask(finished, frame) } catch { /* never throws into the engine */ }
+      return
+    }
+    void (async () => {
+      try {
+        const cfg = await mirrorOutConfig(deps.env ?? process.env, fs.readFileSync, deps.loadLib ?? loadDoorbell)
+        if (!cfg.enabled) return
+        const adminToken = await mirrorAdminToken(deps.env ?? process.env, fs.readFileSync, deps.loadLib ?? loadDoorbell)
+        if (!adminToken) return
+        const sessionId = String(frame?.payload?.sessionId ?? '')
+        await postMirrorOut(cfg, mirrorOutTaskBody(sessionId, finished), adminToken)
       } catch { /* never throws into the engine */ }
     })()
   }
@@ -605,7 +640,10 @@ export function apply(ctx, deps = {}) {
           ringDoorbell(fresh)
           mirrorOut(fresh)
         }
-        for (const finished of foldJobsFrame(announcedJobs, frame)) ringTaskDoorbell(finished)
+        for (const finished of foldJobsFrame(announcedJobs, frame)) {
+          ringTaskDoorbell(finished)
+          mirrorOutTask(finished, frame)
+        }
       }
     } catch (ended) {
       if (!ac.signal.aborted) {

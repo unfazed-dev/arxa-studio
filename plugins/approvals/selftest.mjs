@@ -476,7 +476,8 @@ const JOB = (id, status) => ({ id, kind: 'bash', label: 'job', status, startedAt
   await new Promise((resolve) => setTimeout(resolve, 20))
   assert.deepEqual(mirrorOutSeen.map((x) => x.id), ['rpc-8'], 'fold reaches the writer once')
 
-  // Gate-off case: NO mirrorOut seam — the real path must never reach fetch.
+  // Gate-off case: NO mirrorOut seam and a rejecting keystore loader — the
+  // real path must never reach fetch (and never touch the real keystore).
   let fetchCalls = 0
   const origFetch = globalThis.fetch
   globalThis.fetch = (...args) => { fetchCalls += 1; return origFetch(...args) }
@@ -485,7 +486,7 @@ const JOB = (id, status) => ({ id, kind: 'bash', label: 'job', status, startedAt
     webServer: { register: (route) => routes5.set(route.path, route.handler) },
     effect: () => () => {},
   }
-  apply(quietCtx, { doorbell: () => {}, taskDoorbell: () => {} })
+  apply(quietCtx, { doorbell: () => {}, taskDoorbell: () => {}, loadLib: async () => { throw new Error("no keystore in tests") } })
   await new Promise((resolve) => setTimeout(resolve, 20))
   globalThis.fetch = origFetch
   assert.equal(fetchCalls, 0, 'gate off → the writer is never invoked')
