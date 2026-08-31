@@ -14,7 +14,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
 
-const MIME = {
+export const MIME = {
   '.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
@@ -135,7 +135,7 @@ function reject(res, status, message) {
 }
 
 /** Single byte-range only; null when absent/malformed/unsatisfiable-simple. */
-function parseRange(header, size) {
+export function parseRange(header, size) {
   if (!header) return null
   const m = /^bytes=(\d*)-(\d*)$/.exec(String(header))
   if (!m || (m[1] === '' && m[2] === '')) return null

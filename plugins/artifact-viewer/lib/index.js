@@ -23,6 +23,7 @@ const { default: z } = await fromDsh('@deepseek-ai/schemastery', 'lib/index.mjs'
 import { createOrgServer } from './org-server.js'
 import { startOrgFollow, readOpenOrg } from './follow.js'
 import { createWriteApi, createMainVersionRoute, createVersionRoute } from './write-api.js'
+import { createWorktreeRoute, createTreeRoute, createSessionChangesRoute, resolveWorktreeFile } from './wt-api.js'
 import { createOrgWatcher, createEventsRoute } from './watcher.js'
 import { TOKEN_TTL_CEILING_SECONDS, issueToken, loadOrCreateSecret, readVerifyFor } from './tokens.js'
 import fs from 'node:fs'
@@ -78,6 +79,31 @@ export function createTokenRoutes({ env = process.env, secret, getSettings, getO
           return json(res, 400, { error: 'worktreeId required for write tokens' })
         }
         const token = issueToken({ secret, scope: 'write', worktreeId: body.worktreeId, ttlSeconds: ttl })
+        return json(res, 200, { token })
+      }
+      if (body.scope === 'wt-read' || body.scope === 'changes-read') {
+        // D89 worktree read classes — validated here, validated again at the lane.
+        if (typeof body.worktreeId !== 'string' || body.worktreeId === '') {
+          return json(res, 400, { error: 'worktreeId required' })
+        }
+        if (body.scope === 'wt-read') {
+          if (typeof body.relPath !== 'string' || body.relPath === '') return json(res, 400, { error: 'relPath required' })
+          try {
+            const open0 = readOpenOrg(env)
+            await resolveWorktreeFile({ env, orgPath: open0 ? open0.orgPath : null, worktreeId: body.worktreeId, relPath: body.relPath })
+          } catch (err) {
+            const map = { BAD: 400, ESCAPE: 403, NO_SESSION: 404, NOT_FILE: 404 }
+            return json(res, map[err.code] || 404, { error: 'unresolvable worktree file' })
+          }
+        }
+        const token = issueToken({ secret, scope: body.scope, worktreeId: body.worktreeId, relPath: body.scope === 'wt-read' ? body.relPath : null, ttlSeconds: ttl })
+        return json(res, 200, { token })
+      }
+      if (body.scope === 'tree-read') {
+        // D90 directory listing class — bound to the open org only.
+        const open0 = readOpenOrg(env)
+        if (!open0) return json(res, 403, { error: 'no org open' })
+        const token = issueToken({ secret, scope: 'tree-read', orgPath: open0.orgPath, ttlSeconds: ttl })
         return json(res, 200, { token })
       }
       // read (default) — orgPath OPTIONAL: the open org is authoritative,
@@ -208,6 +234,22 @@ export function apply(ctx, config) {
     ctx.webServer?.register?.({
       path: '/__arxa/artifacts/events',
       handler: (req, res) => { void events.handle(req, res) },
+    })
+    // D89 worktree read lane + D90 tree listing + session changes:
+    const wtRoute = createWorktreeRoute({ env: process.env, secret })
+    ctx.webServer?.register?.({
+      path: '/__arxa/artifacts/wt',
+      handler: (req, res) => { void wtRoute.handle(req, res) },
+    })
+    const treeRoute = createTreeRoute({ env: process.env, secret })
+    ctx.webServer?.register?.({
+      path: '/__arxa/artifacts/tree',
+      handler: (req, res) => { void treeRoute.handle(req, res) },
+    })
+    const changesRoute = createSessionChangesRoute({ env: process.env, secret })
+    ctx.webServer?.register?.({
+      path: '/__arxa/artifacts/session-changes',
+      handler: (req, res) => { void changesRoute.handle(req, res) },
     })
   } catch (err) {
     console.error('[arxa-artifact-viewer] startup failed: ' + (err && err.message))
