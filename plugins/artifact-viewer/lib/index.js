@@ -22,7 +22,7 @@ const { installSettingsSection, settingsNamespace } =
 const { default: z } = await fromDsh('@deepseek-ai/schemastery', 'lib/index.mjs')
 import { createOrgServer } from './org-server.js'
 import { startOrgFollow, readOpenOrg } from './follow.js'
-import { createWriteApi, createMainVersionRoute } from './write-api.js'
+import { createWriteApi, createMainVersionRoute, createVersionRoute } from './write-api.js'
 import { createOrgWatcher, createEventsRoute } from './watcher.js'
 import { TOKEN_TTL_CEILING_SECONDS, issueToken, loadOrCreateSecret, readVerifyFor } from './tokens.js'
 import fs from 'node:fs'
@@ -198,6 +198,11 @@ export function apply(ctx, config) {
     ctx.webServer?.register?.({
       path: '/__arxa/artifacts/main-version',
       handler: (req, res) => { void mainVersion.handle(req, res) },
+    })
+    const versionRoute = createVersionRoute({ env: process.env, secret })
+    ctx.webServer?.register?.({
+      path: '/__arxa/artifacts/version',
+      handler: (req, res) => { void versionRoute.handle(req, res) },
     })
     const events = createEventsRoute({ watcher })
     ctx.webServer?.register?.({
