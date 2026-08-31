@@ -222,8 +222,14 @@ window.__ModuleLoader__.load({
 						children: (0, react_jsx_runtime.jsxs)("button", {
 							type: "button",
 							className: SidebarRoot_module_css_default.newSession,
-								disabled: orgTick > -1 && window.__ARXA_SIDEBAR__?.orgOpen === false,
-								title: window.__ARXA_SIDEBAR__?.orgOpen === false ? "Open an organisation first" : void 0,
+								// Declarative CTA gate (2026-09-01): the levers are the single
+								// source of truth. The render-time value previously only
+								// tracked orgOpen while an imperative gate fought it with
+								// b.disabled writes — the button rendered ENABLED with no
+								// selection and every click no-oped. `!== true` (not
+								// `=== false`) keeps the CTA dark until the levers exist.
+								disabled: window.__ARXA_SIDEBAR__?.ctaReady !== true,
+								title: window.__ARXA_SIDEBAR__?.ctaTitle ?? void 0,
 							"aria-label": t("session.new.label"),
 							onClick: () => {
 								startSession();
@@ -295,15 +301,24 @@ window.__ModuleLoader__.load({
 			}), "ui-sidebar: dictionaries");
 			const injectProps = () => ({
 				startSession: () => {
-					// Organisations world (v2, grilled 2026-08-30): the shell CTA
-					// creates a session in the SELECTED workspace row — org-level
-					// creation is gone. No selection → no-op (the button is
-					// disabled — see the button splice below).
-					const sel = window.__ARXA_SIDEBAR__ && window.__ARXA_SIDEBAR__.selectedWorkspace ? window.__ARXA_SIDEBAR__.selectedWorkspace() : null;
-					if (sel) fetch("/__arxa/sidebar/action", {
+					// Organisations world (v2, grilled 2026-08-30; loop closed
+					// 2026-09-01): the shell CTA creates a session in the SELECTED
+					// workspace row and OPENS it — server create, then the org
+					// lever (openCreated) carries session.open + conversation
+					// focus, the same flow a tree-row open uses. The first cut
+					// fired-and-forgot the POST: the session landed but nothing
+					// surfaced for ~5s (next poll), reading as a dead button.
+					// No selection → no-op (the button is disabled — see the
+					// button splice below).
+					const w = window.__ARXA_SIDEBAR__;
+					const sel = w && w.selectedWorkspace ? w.selectedWorkspace() : null;
+					if (!sel) return;
+					fetch("/__arxa/sidebar/action", {
 						method: "POST",
 						headers: { "content-type": "application/json" },
 						body: JSON.stringify({ action: "workspace.new-session", arg: { orgId: sel.orgId, workspace: sel.rowId } })
+					}).then((r) => r.json()).then((b) => {
+						if (b && b.ok && b.result && b.result.id && typeof w.openCreated === "function") w.openCreated(sel.orgId, b.result.id);
 					}).catch(() => {});
 				},
 				toggleSidebar: () => {
@@ -2916,6 +2931,38 @@ window.__ModuleLoader__.load({
 			selectedWorkspace() {
 				return orgStore.get().selectedRowId ?? null;
 			},
+			/** CTA bridge (2026-09-01): the shell New Session button reads these
+			* at RENDER — single source of truth. The first cut (D70/D71) gated
+			* the button imperatively from OrgBrowser (querySelectorAll +
+			* b.disabled writes); every SidebarRoot re-render reset disabled to
+			* its render value, so the CTA sat ENABLED while every click
+			* no-oped (orgTick fires on every store emit — the race was
+			* constant). ctaReady/ctaTitle recompute per render (orgTick
+			* re-renders the shell on every store emit); openCreated closes the
+			* loop: server create → session.open → conversation focus, the
+			* same flow a tree-row open uses. */
+			get ctaReady() {
+				const s = orgStore.get();
+				const sel = s.selectedRowId;
+				if (!sel) return false;
+				const o = (s.orgs || []).find((y) => y.id === sel.orgId);
+				return !(o && o.open && o.snapshotPending === true);
+			},
+			get ctaTitle() {
+				// orgT (the captured NS locale seat), NOT the enOver/zhOver
+				// literals — those close over a LATER region scope and read as
+				// undefined from the levers (found live 2026-09-01: the getter
+				// threw 'reading selectFirst' and crashed the whole sidebar
+				// slot). orgT resolves through the registered dicts instead.
+				const s = orgStore.get();
+				const sel = s.selectedRowId;
+				if (!sel) return orgT("newSession.selectFirst");
+				const o = (s.orgs || []).find((y) => y.id === sel.orgId);
+				return o && o.open && o.snapshotPending === true ? orgT("newSession.snapshotPending") : void 0;
+			},
+			openCreated(orgId, sessionId) {
+				orgStore.mutate("session.open", { orgId, sessionId }).then(() => arxaOpenConversation(sessionId)).catch(() => {});
+			},
 			/** Diagnostic (2026-08-30): is the client sessions service bound?
 			 * Drives conversation focus (resume like dsh + row open). */
 			get clientSessionsReady() {
@@ -3059,13 +3106,23 @@ window.__ModuleLoader__.load({
 		 * A BOUND blank session keeps its composer: typing there is a
 		 * legitimate first message into an org worktree. */
 		/** Composer git card (Part B S4, D75 — grilled 2026-08-31). A collapsible
-		 * card mounted (via portal) directly ABOVE the composer bar, bound to the
+		 * card mounted as an input-dock entry directly ABOVE the composer bar,
+		 * bound to the
 		 * CURRENT org session's seat: status cluster (Q10), conventional-subject
 		 * commit field (Q7 — the SESSION model drafts: "Ask session" prefills the
 		 * composer with the evidence + the rule, per Q6 the engine never drafts),
 		 * tiered CTAs (Commit = local boundary + gate, Q2; Push = session branch
 		 * for PR purpose only, D73 relaxed; Open PR = dedupe-first, squash-merge
-		 * repo side, Q8). Hidden entirely when no session is focused. */
+		 * repo side, Q8). Hidden entirely when no session is focused.
+		 *
+		 * MOUNT FIX (2026-09-01, found live): the first cut portaled out of
+		 * ArxaHeroGuide — its conditional useMemo threw React #310 (hook-order
+		 * violation) and crashed the whole conversation.hero.workspace slot,
+		 * so the card NEVER rendered; and the hero slot unmounts once a
+		 * session goes active anyway. The card now lives in the framework's
+		 * conversation.input.dock — the ordered strip rendered directly above
+		 * the composer bar in every session-bound phase (todo=0, goal=10,
+		 * this=20 → nearest the bar). Landing keeps its clean empty state. */
 		function ArxaGitCard({ t, stack }) {
 			const [open, setOpen] = react.useState(false);
 			const [data, setData] = react.useState(null);
@@ -3127,36 +3184,26 @@ window.__ModuleLoader__.load({
 				] }) : null
 			] });
 		}
+		function ArxaGitCardDock(props) {
+			const t = props && props.t ? props.t : function (k) { return k; };
+			return (0, react_jsx_runtime.jsx)(ArxaGitCard, { t, stack: document });
+		}
 		function ArxaHeroGuide({ t }) {
 			const ref = (0, react.useRef)(null);
-			const [cardHost, setCardHost] = (0, react.useState)(null);
-			const [composerStack, setComposerStack] = (0, react.useState)(null);
 			(0, react.useEffect)(() => {
 				const stack = ref.current ? ref.current.parentElement?.parentElement?.parentElement : null;
 				if (!stack) return;
-				setComposerStack(stack);
-				// S4: the git card's portal host sits directly ABOVE the composer
-				// bar (harmonious with the artifact-viewer's right column — it owns
-				// the column, this owns the strip above the input).
-				const host = document.createElement("div");
-				host.dataset.arxaCardHost = "";
-				const bar = stack.querySelector("[data-slot='conversation.composer.bar']");
-				if (bar) stack.insertBefore(host, bar); else stack.appendChild(host);
-				setCardHost(host);
 				const s = arxaClientSessions;
 				const snap = s && s.list && typeof s.list.getSnapshot === "function" ? s.list.getSnapshot() : null;
 				const unbound = !snap || snap.current === void 0 || snap.current === null;
 				if (unbound) stack.setAttribute("data-arxa-empty", "");
 				else stack.removeAttribute("data-arxa-empty");
-				return () => { stack.removeAttribute("data-arxa-empty"); if (host.parentNode) host.parentNode.removeChild(host); setCardHost(null); };
+				return () => stack.removeAttribute("data-arxa-empty");
 			});
 			return (0, react_jsx_runtime.jsxs)("div", {
 				ref,
 				"data-arxa-hero-guide": "",
-				children: [
-					t("hero.guide"),
-					cardHost && composerStack ? (function (P) { return P ? P((0, react_jsx_runtime.jsx)(ArxaGitCard, { t, stack: composerStack }), cardHost) : null })((0, react.useMemo)(function () { try { return require("react-dom").createPortal } catch (e) { return null } }, [])) : null
-				]
+				children: [t("hero.guide")]
 			});
 		}
 		// Empty-state CSS (2026-08-30): inside a marked stack the text
@@ -3166,7 +3213,6 @@ window.__ModuleLoader__.load({
 			const tag = document.createElement("style");
 			tag.dataset.pluginCss = "arxa-sidebar-empty-state";
 			tag.textContent = "[data-arxa-hero-guide]{font-size:12.5px;opacity:.72;line-height:1.55;max-width:470px}"
-				+ "[data-arxa-card-host]{flex:none}"
 				+ "[data-arxa-git-card]{border:1px solid color-mix(in oklab,currentColor 14%,transparent);border-radius:10px;margin:0 12px 6px;font-size:12px;background:color-mix(in oklab,currentColor 4%,transparent)}"
 				+ "[data-arxa-card-head]{display:flex;gap:6px;align-items:center;width:100%;padding:6px 10px;background:none;border:none;color:inherit;font:inherit;cursor:pointer;opacity:.85}"
 				+ "[data-arxa-card-head]:hover{opacity:1}"
@@ -3301,38 +3347,11 @@ window.__ModuleLoader__.load({
 		const orgUseSessions = (sel) => useOrg((s) => sel(s.sessionsView));
 		const orgUseDirectoryFlow = (sel) => sel(orgNoFlow.getSnapshot());
 		const orgUseHostDescription = (sel) => sel(orgHostDescription);
-		/** CTA gate (D70/D71; moved 2026-08-30 out of the dissolved rows
-		 * section): the shell New Session button needs an org-scoped row
-		 * selection whose org has landed its initial git snapshot. Stock
-		 * disabled + tooltip on the CTA class. */
-		function useSessionCtaGate(t) {
-			const sel = useOrg((s) => s.selectedRowId);
-			// Initial-snapshot state (2025-08 create-org hang), for the SELECTED
-			// org: server truth (hasHead), polled via the 5s refresh.
-			const snapPending = useOrg((s) => {
-				const x = s.selectedRowId;
-				if (!x) return false;
-				const o = (s.orgs || []).find((y) => y.id === x.orgId);
-				return !!(o && o.open && o.snapshotPending === true);
-			});
-			(0, react.useEffect)(() => {
-				const apply = () => {
-					for (const b of document.querySelectorAll(".aXa_sb_newSession")) {
-						b.disabled = !sel || snapPending;
-						b.title = snapPending ? t("newSession.snapshotPending") : (sel ? "" : t("newSession.selectFirst"));
-					}
-				};
-				apply();
-				const id = window.setTimeout(apply, 60);
-				return () => {
-					window.clearTimeout(id);
-					for (const b of document.querySelectorAll(".aXa_sb_newSession")) {
-						b.disabled = false;
-						b.title = "";
-					}
-				};
-			}, [sel, snapPending, t]);
-		}
+		/** CTA gate (D70/D71) is DECLARATIVE now (2026-09-01): the shell
+		 * button reads window.__ARXA_SIDEBAR__.ctaReady/ctaTitle at render —
+		 * see the lever comments at createOrgStore. The imperative DOM gate
+		 * that lived here lost the re-render race (constant orgTick churn
+		 * reset b.disabled) and left the CTA enabled but dead. */
 		/** Container row (v2, grilled 2026-08-30): org, dock, or project —
 		 * NEVER hosts sessions (no +). Org rows carry the org actions menu
 		 * (open / close / trash); docks and projects are fixed containers:
@@ -3583,14 +3602,27 @@ window.__ModuleLoader__.load({
 			(0, react.useEffect)(() => { setEntries({}); setExpanded({}); setOpen(false); }, [orgKey]);
 			const loadDir = (0, react.useCallback)(async (dir) => {
 				setEntries((s) => ({ ...s, [dir]: { status: "loading", dirs: [], files: [] } }));
-				try {
+				// One fresh token per attempt; a 403 retries ONCE with a newly
+				// minted token (2026-09-01): a mint-to-use race (org handle
+				// swapping under a resize/remount) verified bad exactly once
+				// live — the retry turns that class into a self-heal instead
+				// of a dead error row. Two strikes still surfaces the error.
+				const mint = async () => {
 					const tokRes = await fetch("/__arxa/artifacts/token", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "tree-read" }) });
 					const tokBody = await tokRes.json().catch(() => ({}));
 					if (!tokRes.ok) throw new Error(tokBody.error || ("token " + tokRes.status));
-					const res = await fetch("/__arxa/artifacts/tree?dir=" + encodeURIComponent(dir || "") + "&avt=" + encodeURIComponent(tokBody.token || ""));
+					return tokBody.token || "";
+				};
+				const list = async (token) => {
+					const res = await fetch("/__arxa/artifacts/tree?dir=" + encodeURIComponent(dir || "") + "&avt=" + encodeURIComponent(token));
 					const body = await res.json().catch(() => ({}));
-					if (!res.ok) throw new Error(body.error || ("tree " + res.status));
-					setEntries((s) => ({ ...s, [dir]: { status: "ready", dirs: body.dirs || [], files: body.files || [] } }));
+					return { ok: res.ok, status: res.status, body };
+				};
+				try {
+					let out = await list(await mint());
+					if (!out.ok && out.status === 403) out = await list(await mint());
+					if (!out.ok) throw new Error(out.body.error || ("tree " + out.status));
+					setEntries((s) => ({ ...s, [dir]: { status: "ready", dirs: out.body.dirs || [], files: out.body.files || [] } }));
 				} catch (e) {
 					setEntries((s) => ({ ...s, [dir]: { status: "error", dirs: [], files: [], error: String((e && e.message) || e) } }));
 				}
@@ -4416,8 +4448,6 @@ window.__ModuleLoader__.load({
 				window.removeEventListener("arxa-disconnect-github", onDisconnect);
 				};
 			}, []);
-			// CTA gate lives here now (always mounted) — see useSessionCtaGate.
-			useSessionCtaGate(props.t);
 			orgT = props.t; // stock-scope render sites read the locale through this
 			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, {
 				children: [
@@ -4897,6 +4927,18 @@ window.__ModuleLoader__.load({
 				name: "conversation.hero.workspace",
 				locale: NS
 			}, ArxaHeroGuide));
+			// Git card mount (Part B S4 fix, 2026-09-01): the input dock is the
+			// framework strip rendered directly above the composer bar in every
+			// session-bound phase. The hero-portal first cut crashed the hero slot
+			// (React #310, conditional useMemo) and would unmount with the hero
+			// anyway once a session went active. todo=0, goal=10, card=20 → the
+			// card sits nearest the bar; landing (no session zone) stays clean.
+			ctx.slots.inject("conversation.input.dock", () => ctx.slots.register({
+				name: "conversation.input.dock",
+				id: "arxa-git-card",
+				order: 20,
+				locale: NS
+			}, ArxaGitCardDock));
 		}
 		exports.apply = apply;
 		exports.inject = inject;

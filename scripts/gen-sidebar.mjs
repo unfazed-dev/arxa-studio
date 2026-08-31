@@ -52,15 +52,24 @@ const ssStart = out.indexOf(SS_ANCHOR)
 const ssEnd = out.indexOf('},', ssStart) + 2
 out = out.slice(0, ssStart) + [
   'startSession: () => {',
-  '					// Organisations world (v2, grilled 2026-08-30): the shell CTA',
-  '					// creates a session in the SELECTED workspace row — org-level',
-  '					// creation is gone. No selection → no-op (the button is',
-  '					// disabled — see the button splice below).',
-  '					const sel = window.__ARXA_SIDEBAR__ && window.__ARXA_SIDEBAR__.selectedWorkspace ? window.__ARXA_SIDEBAR__.selectedWorkspace() : null;',
-  '					if (sel) fetch("/__arxa/sidebar/action", {',
+  '					// Organisations world (v2, grilled 2026-08-30; loop closed',
+  '					// 2026-09-01): the shell CTA creates a session in the SELECTED',
+  '					// workspace row and OPENS it — server create, then the org',
+  '					// lever (openCreated) carries session.open + conversation',
+  '					// focus, the same flow a tree-row open uses. The first cut',
+  '					// fired-and-forgot the POST: the session landed but nothing',
+  '					// surfaced for ~5s (next poll), reading as a dead button.',
+  '					// No selection → no-op (the button is disabled — see the',
+  '					// button splice below).',
+  '					const w = window.__ARXA_SIDEBAR__;',
+  '					const sel = w && w.selectedWorkspace ? w.selectedWorkspace() : null;',
+  '					if (!sel) return;',
+  '					fetch("/__arxa/sidebar/action", {',
   '						method: "POST",',
   '						headers: { "content-type": "application/json" },',
   '						body: JSON.stringify({ action: "workspace.new-session", arg: { orgId: sel.orgId, workspace: sel.rowId } })',
+  '					}).then((r) => r.json()).then((b) => {',
+  '						if (b && b.ok && b.result && b.result.id && typeof w.openCreated === "function") w.openCreated(sel.orgId, b.result.id);',
   '					}).catch(() => {});',
   '				},',
 ].join('\n') + out.slice(ssEnd)
@@ -82,8 +91,14 @@ const NS_BUTTON_ANCHOR = 'className: SidebarRoot_module_css_default.newSession,'
 if (!out.includes(NS_BUTTON_ANCHOR)) throw new Error('shell new-session button anchor missing — stock shape moved?')
 out = out.replace(NS_BUTTON_ANCHOR, [
   NS_BUTTON_ANCHOR,
-  '								disabled: orgTick > -1 && window.__ARXA_SIDEBAR__?.orgOpen === false,',
-  '								title: window.__ARXA_SIDEBAR__?.orgOpen === false ? "Open an organisation first" : void 0,',
+  '								// Declarative CTA gate (2026-09-01): the levers are the single',
+  '								// source of truth. The render-time value previously only',
+  '								// tracked orgOpen while an imperative gate fought it with',
+  '								// b.disabled writes — the button rendered ENABLED with no',
+  '								// selection and every click no-oped. `!== true` (not',
+  '								// `=== false`) keeps the CTA dark until the levers exist.',
+  '								disabled: window.__ARXA_SIDEBAR__?.ctaReady !== true,',
+  '								title: window.__ARXA_SIDEBAR__?.ctaTitle ?? void 0,',
 ].join('\n'))
 
 // 6. provenance header

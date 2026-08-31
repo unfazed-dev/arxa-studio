@@ -91,6 +91,10 @@ check('rows-c: leaves are full stock workspace rows — indent by depth; collaps
   client.includes('ARXA_WS_INDENT(group.workspaceId)') && client.includes('ARXA_WS_HIDDEN(group.workspaceId)') && client.includes('toggleExpand(key)'))
 check('rows-c: leaf click selects the workspace (composite id parse) — the ONLY startSession path',
   client.includes('ARXA_SELECT_WS(row.workspaceId)') && client.includes('workspace.new-session') && client.includes('const i = s.indexOf("|")'))
+check('rows-c: shell CTA closes the loop (2026-09-01) — create then openCreated (session.open + conversation focus), never fire-and-forget',
+  client.includes('w.openCreated(sel.orgId, b.result.id)') && client.includes('get ctaReady()') && client.includes('openCreated(orgId, sessionId)'))
+check('rows-c: CTA gate is DECLARATIVE — levers read at render; the imperative DOM gate is gone (it lost the re-render race)',
+  client.includes('window.__ARXA_SIDEBAR__?.ctaReady !== true') && client.includes('window.__ARXA_SIDEBAR__?.ctaTitle ?? void 0') && !client.includes('useSessionCtaGate'))
 check('rows-c: real session timestamps (the 56y bug fed ordinals as ages from 1970)',
   client.includes('x.updatedAt ?? x.createdAt ?? Date.now()') && !client.includes('updatedAt: order++'))
 check('rows-c: rename rides the registry — one rename, every surface',
@@ -113,7 +117,8 @@ check('rows-c: workspace.new-session takes a workspace path (loud on unknown); s
 // defers the snapshot (detached worker), the rows client gates the New
 // Session CTA on the org's snapshotPending, and the message is human.
 check('rows-snap: New Session CTA gates on the org-scoped selection + selected org snapshot state (both locales)',
-  client.includes('b.disabled = !sel || snapPending')
+  client.includes('return !(o && o.open && o.snapshotPending === true);')
+  && client.includes('orgT("newSession.snapshotPending")')
   && client.includes('"newSession.snapshotPending": "Preparing git snapshot — sessions unlock when it lands"')
   && client.includes('"newSession.snapshotPending": "正在准备 git 快照 — 完成后即可开始会话"'))
 check('rows-snap: server snapshot exposes snapshotPending (open org)', hostSrc().includes('snapshotPending: cur?.path === path'))
@@ -125,7 +130,7 @@ check('card: draft returns evidence only — the engine never drafts (Q6)', host
 check('card: PR title validated (becomes the squash subject, Q7/Q8)', hostSrc().includes('title-not-conventional'))
 check('card: PR create dedupes before opening (file-pr rule 1)', hostSrc().includes('prListForHead') && hostSrc().includes('existing: true'))
 check('card: session-branch push is PR-purpose only (D73 relaxation)', hostSrc().includes('card.push serves session seats'))
-check('card: S4 surface — portal above the composer bar, session-bound (en+zh)', client.includes('data-arxa-git-card') && client.includes("[data-slot='conversation.composer.bar']") && client.includes('ArxaGitCard') && client.includes('"card.subjectPlaceholder": "commit subject') && client.includes('"card.subjectPlaceholder": "提交主题'))
+check('card: S4 surface — input-dock entry above the composer bar, session-bound (en+zh)', client.includes('data-arxa-git-card') && client.includes('ArxaGitCardDock') && client.includes('"conversation.input.dock"') && client.includes('order: 20') && client.includes('"card.subjectPlaceholder": "commit subject') && client.includes('"card.subjectPlaceholder": "提交主题') && !client.includes('createPortal'))
 check('card: S4 states — local-only badge + frame chip + collapsible head', client.includes('card.localOnly') && client.includes('card.frame') && client.includes('data-arxa-card-head') && client.includes('data-arxa-card-caret'))
 check('card: S4 Q6 — ask-the-session prefills the composer, never an engine LLM', client.includes('card.askDraft') && client.includes('Draft a conventional commit subject'))
 check('create: D92 live preview + collision contract localized (en + zh), snapshot radio deleted',
