@@ -351,6 +351,10 @@ assert.equal((await req(vport, '/codemirror.js', { method: 'POST' })).status, 40
 const vt = await req(vport, '/%2e%2e/index.js')
 assert.ok(vt.status === 404 || vt.status === 403, 'vendor traversal refused, got ' + vt.status)
 await new Promise((r2) => vhttp.close(r2))
+// Markdown lane contract: the view reads window.ArxaMD, so the client must
+// actually kick the vendored markdown.js load (else the placeholder hangs).
+const clientSrc = fs.readFileSync(path2.join(here, 'lib', 'client.js'), 'utf8')
+assert.ok(clientSrc.includes("ensureVendor('markdown.js', 'ArxaMD')"), 'client loads the vendored markdown bundle (window.ArxaMD)')
 console.log('arxa-artifact-viewer selftest: GREEN (vendor bundles + route)');
 
 // ---- Task 6: engine write API over a REAL git session worktree ------------

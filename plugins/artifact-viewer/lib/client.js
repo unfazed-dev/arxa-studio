@@ -236,6 +236,7 @@ window.__ModuleLoader__.load({
       const [chip, setChip] = React.useState(null)
       const [timeline, setTimeline] = React.useState([])
       const [showTimeline, setShowTimeline] = React.useState(false)
+      const [mdReady, setMdReady] = React.useState(false)
       const maxBytesRef = React.useRef(5 * 1024 * 1024)
       React.useEffect(() => { dirtyRef.current = dirty }, [dirty])
       // D82 cap arrives from the host settings namespace when available.
@@ -255,6 +256,17 @@ window.__ModuleLoader__.load({
         } catch { setChanges([]) }
       }, [])
       React.useEffect(() => { void refreshChanges() }, [refreshChanges])
+      // Markdown lane: load the vendored markdown-it+DOMPurify bundle on
+      // demand — the view reads window.ArxaMD, and without this kick the
+      // placeholder ('markdown bundle loading…') would show forever.
+      React.useEffect(() => {
+        const ln = state.kind ? state.kind.lane : null
+        if (mdReady || ln !== 'markdown' || state.phase !== 'ready') return
+        if (window.ArxaMD) { setMdReady(true); return }
+        let live = true
+        ensureVendor('markdown.js', 'ArxaMD').then(() => { if (live) setMdReady(true) }).catch(() => { /* placeholder copy stays */ })
+        return () => { live = false }
+      }, [mdReady, state.kind, state.phase])
       // D91 card bridge + D90 sidebar-file bridge: window event
       // 'arxa-av-open' { relPath } (org lane) | { sessionId, relPath } (wt lane).
       React.useEffect(() => {
