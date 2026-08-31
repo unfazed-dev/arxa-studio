@@ -170,6 +170,20 @@ try {
     assert.equal(rootFilePath(env), path.join(fakeHome, 'organisation.json'), 'file renamed from workspace.json')
     assert.ok(fs.existsSync(rootFilePath(env)), 'organisation.json written')
   })
+  check('loadWorkspaceRoot walks past DEAD pointers (D92c: one deleted folder must not blank the orgs)', () => {
+    const deadA = path.join(tmp, 'org-dead-a')
+    const liveB = path.join(tmp, 'org-live-b')
+    fs.mkdirSync(liveB, { recursive: true })
+    // deadA is never created — a Finder-deleted recent
+    fs.writeFileSync(rootFilePath(env), JSON.stringify({ orgs: [deadA, liveB, '/definitely/not/there'] }, null, 2))
+    assert.equal(loadWorkspaceRoot(env), path.resolve(liveB), 'first VALID recent wins when recents[0] is dead')
+    // all-dead → null (the honest no-workspace state), never a throw
+    fs.writeFileSync(rootFilePath(env), JSON.stringify({ orgs: [deadA] }, null, 2))
+    assert.equal(loadWorkspaceRoot(env), null, 'all-dead recents answer null')
+    // restore the EXACT pre-check recents (touchRecent would keep the
+    // dead pointers — move-to-front dedupes by path, it never prunes)
+    fs.writeFileSync(rootFilePath(env), JSON.stringify({ orgs: [workspaceRoot] }, null, 2))
+  })
   check('recents are most-recent-first, deduped by move-to-front', () => {
     const a = path.join(tmp, 'org-a')
     const b = path.join(tmp, 'org-b')

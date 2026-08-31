@@ -164,9 +164,21 @@ export function removeRecent(candidate, env = process.env) {
  * recents are empty. Saves route through touchRecent.
  */
 export function loadWorkspaceRoot(env = process.env) {
-  const orgs = readRecents(env)
-  if (orgs.length === 0) return null
-  return validateWorkspaceRoot(orgs[0], env)
+  // D92c: recents[0] can be a DEAD pointer — the folder deleted in Finder
+  // after use (seen live 2026-08-31: one dead recent blanked the whole
+  // sidebar while healthy orgs sat further down the list, because this
+  // face threw and the caller degraded to the no-workspace stub). Walk
+  // the recents and answer the first VALID root; dead entries stay on
+  // disk — listOrgs skips them silently (a recent is a pointer, not a
+  // promise).
+  for (const candidate of readRecents(env)) {
+    try {
+      return validateWorkspaceRoot(candidate, env)
+    } catch {
+      /* dead or forbidden pointer — try the next recent */
+    }
+  }
+  return null
 }
 
 /** Back-compat face: record the picked folder as most-recent. */
