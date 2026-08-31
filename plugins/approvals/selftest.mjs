@@ -433,11 +433,13 @@ const JOB = (id, status) => ({ id, kind: 'bash', label: 'job', status, startedAt
 //    ingest body shape (org_id tenant tag), and the fold→writer wiring —
 //    exactly one POST body per folded record, gated off by default.
 {
-  assert.deepEqual(mirrorOutConfig({}), { enabled: false, ingestUrl: 'http://127.0.0.1:8190/ingest' },
+  const noLib = async () => { throw new Error("no keystore in tests") }
+  assert.deepEqual(await mirrorOutConfig({}, undefined, noLib),
+      { enabled: false, ingestUrl: 'http://127.0.0.1:8190/ingest' },
       'gate is OFF unless the literal env speaks')
-  assert.equal(mirrorOutConfig({ ARXA_MIRROR_OUT: 'true' }).enabled, true)
+  assert.equal((await mirrorOutConfig({ ARXA_MIRROR_OUT: 'true' }, undefined, noLib)).enabled, true)
   assert.equal(
-    mirrorOutConfig({ ARXA_MIRROR_OUT: 'true', ARXA_CAIRN_MIRROR_BIND: '127.0.0.1:9999' }).ingestUrl,
+    (await mirrorOutConfig({ ARXA_MIRROR_OUT: 'true', ARXA_CAIRN_MIRROR_BIND: '127.0.0.1:9999' }, undefined, noLib)).ingestUrl,
     'http://127.0.0.1:9999/ingest',
     'bind override flows into the ingest URL',
   )

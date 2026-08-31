@@ -396,10 +396,22 @@ export async function cairnSyncToken(env = process.env, readFile = fs.readFileSy
 // doorbell: a failed POST is a counted debug log, never a throw — sync
 // correctness rides the durable LSN checkpoint, not this hint.
 
-/** The mirror-out runtime config. Enabled only by the literal env gate;
- *  the ingest base rides the SAME bind as the proxy (ARXA_CAIRN_MIRROR_BIND). */
-export function mirrorOutConfig(env = process.env) {
-  const enabled = typeof env.ARXA_MIRROR_OUT === 'string' && env.ARXA_MIRROR_OUT.trim() === 'true'
+/** The mirror-out runtime config. Enabled by the literal env gate OR the
+ *  sidecar keystore's ARXA_MIRROR_OUT=true — the keystore copy is how the
+ *  posture survives desktop restarts the operator didn't hand-launch.
+ *  The ingest base rides the SAME bind as the proxy (ARXA_CAIRN_MIRROR_BIND). */
+export async function mirrorOutConfig(env = process.env, readFile = fs.readFileSync, loadLib = loadDoorbell) {
+  const envFlag = typeof env.ARXA_MIRROR_OUT === 'string' && env.ARXA_MIRROR_OUT.trim() === 'true'
+  let enabled = envFlag
+  if (!enabled) {
+    try {
+      const lib = await loadLib()
+      if (typeof lib?.appDataDir === 'function' && typeof lib?.parseEnvFile === 'function') {
+        const keystore = lib.parseEnvFile(readFile(path.join(lib.appDataDir(env), 'cairn-server.env'), 'utf8'))
+        enabled = typeof keystore.ARXA_MIRROR_OUT === 'string' && keystore.ARXA_MIRROR_OUT.trim() === 'true'
+      }
+    } catch { /* unreadable keystore stays gate-off */ }
+  }
   return { enabled, ingestUrl: 'http://' + cairnMirrorBind(env) + '/ingest' }
 }
 
@@ -565,7 +577,7 @@ export function apply(ctx, deps = {}) {
     }
     void (async () => {
       try {
-        const cfg = mirrorOutConfig(deps.env ?? process.env)
+        const cfg = await mirrorOutConfig(deps.env ?? process.env)
         if (!cfg.enabled) return
         const adminToken = await mirrorAdminToken(deps.env ?? process.env)
         if (!adminToken) {
