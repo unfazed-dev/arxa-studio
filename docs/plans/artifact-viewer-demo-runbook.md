@@ -1,71 +1,73 @@
-# Artifact viewer-editor — D87 acceptance runbook
+# Artifact viewer docked column — D88–D93 acceptance runbook
 
-Everything mechanical is green (CI 15/15). What remains is the D68/D87
-precedent: the OWNER demonstrates the live loop. One precondition is
-owner-owned:
+Supersedes the D87 overlay-panel runbook. The viewer is a docked,
+session-bound column (D88) with org-wide reach (D90), card routing (D91),
+and a narrow-viewport sheet (D92).
 
-> **Precondition — restart the studio.** The running engine (PID on :7891)
-> predates the plugin; plugins materialize at boot. Restart when the
-> parallel D90 session reaches a safe point, then walk this page top to
-> bottom. Nothing else is needed — no DB, no keys, no flags.
+## 0. Preconditions
 
-## 0. Standing evidence (already green, re-run to confirm)
+- [ ] `node scripts/ci.mjs` → ALL GREEN (includes the sidebar selftest
+      with T4 file-section checks and the artifact-viewer selftest with
+      T5 card-routing checks).
+- [ ] Boot: `ARXA_PORT=7897 node bin/arxa-studio.mjs` (Node 24). Boot log
+      shows the profile materialized and
+      `[arxa-artifact-viewer] org server serving <org>`.
+- [ ] Open http://arxa.studio.localhost:7897 — one client per engine
+      (a second tab shows the "Already open" shield).
 
-- [ ] `node scripts/ci.mjs` → 15 suites, ALL GREEN (artifact-viewer
-      selftests cover: per-org server containment + GET-only, token
-      bindings/expiry, write API over a REAL git session worktree,
-      main-version diffs, version chip, watcher coalescing + SSE).
+## 1. Session + docked column (D88/D93)
 
-## 1. Boot + panel presence
+- [ ] Sidebar: open the org, expand categories to a workspace row; the
+      newest session auto-opens (resume) or click a session row.
+- [ ] The viewer column opens only while a non-blank session is current:
+      send one message first (blank flips on accepted send).
+- [ ] Dispatch or click an entry point (card, sidebar file row, path
+      input) → the column docks at 360px with the panel header
+      (⤢ maximize, ✕ close) and the details seat is untouched.
+- [ ] Drag the left handle: width follows, stops at the 320px clamp.
+- [ ] Reload → reopen → the dragged width is kept (localStorage
+      write-through in the generated layout store).
+- [ ] ⤢ maximize → viewer = viewport − sidebar − 640 center floor
+      (1600 viewport → 680). Maximized is ephemeral.
 
-- [ ] Restart arxa studio. Boot log shows the profile materialized with
-      `arxa-artifact-viewer` among the by-name plugins (no boot errors).
-- [ ] Open http://arxa.studio.localhost:7891 — the right dock shows the
-      "artifact viewer" toggle; expanding shows the path input.
+## 2. Sidebar Files section (D90/T4)
 
-## 2. View lanes (lens visual gate — capture at 390 / 744 / 1280)
+- [ ] Under the org tree, expand **Files** → the org root lists lazily;
+      each directory expands on click (dot-entries and .arxa/ never
+      listed).
+- [ ] Click a file row → the docked column opens that file (org lane).
 
-- [ ] With an org open: open a `.md` artifact → rendered markdown, zero
-      console errors. Capture.
-- [ ] Open a `.js`/`.ts` file → CodeMirror 6 read-only view. Capture.
-- [ ] Open a `.png` → image; an `.mp3`/`.mp4` → native player. Capture.
-- [ ] Open an `.html` file → sandboxed iframe (allow-scripts only) on
-      `org-<slug>.localhost`; open a `.pdf` → pdf.js canvas with pager.
-      Capture.
+## 3. Deliverables cards (D91/T5)
 
-## 3. The live loop (D87 core)
+- [ ] After an agent turn that wrote files, the turn-tail chips appear.
+- [ ] Click a chip → the viewer opens on the worktree lane (the chip's
+      absolute path is re-based onto the session worktree); org lane is
+      the fallback on a miss. The stock "show in folder" affordance is
+      untouched. Chips never auto-open the column.
 
-- [ ] Press **edit** → session badge appears (D80 transparent ensure; a
-      session was created silently if none was open — visible in the
-      sidebar under the org's notes workspace).
-- [ ] Change text → **save** → note reads "saved · wip committed to …".
-      In a terminal: `git -C <org>/.arxa/worktrees/<id> log --oneline`
-      shows the `wip:` commit. MAIN IS UNCHANGED.
-- [ ] Stage/gate merge: run the session's stage boundary (or the composer
-      git card) → green merge → the version chip/timeline reflects it.
+## 4. Sheet mode (D92)
 
-## 4. Conflict prompt (agent edits the open file)
+- [ ] Below 1024px viewport (744/390 rungs) the viewer presents as a
+      full-frame sheet with a "← artifacts" back button; same panel
+      component. Evidence: sheet-744.png / sheet-390.png.
 
-- [ ] While the file sits dirty in the editor, have the agent (or any
-      process) rewrite the same file in the worktree → within ~2 s the
-      editor shows the red conflict note with **keep mine** / **take
-      theirs**. Press **take theirs** → editor shows the external text.
-- [ ] Re-dirty and let another external change land → **keep mine** →
-      save succeeds (deliberate last-writer-wins), WIP commit again.
+## 5. Session switch while open (D93)
 
-## 5. Security proofs
+- [ ] With the column open, switch sessions → the column follows the new
+      session and the artifact resets to the empty state; the
+      session-changes list rebinds.
 
-- [ ] Expired/absent token: `curl -s -o /dev/null -w '%{http_code}' \
-      "http://org-<slug>.localhost:<port>/notes/a.md"` → 403.
-- [ ] Org origin is read-only: `curl -X POST -o /dev/null -w '%{http_code}' \
-      "http://org-<slug>.localhost:<port>/notes/a.md"` → 405.
-- [ ] Traversal: `curl ".../<port>/%2e%2e/<something>"` → 403/404, never
-      file contents.
-- [ ] Expired write token → engine write API answers 401.
+## 6. Evidence
 
-## 6. Sign-off
+- [ ] Lens captures archived under
+      `designs/artifact-viewer/evidence/lens/`: conversation-agent-live-1280.png
+      (live agent + docked column), sheet-744.png, sheet-390.png,
+      session-open-1280.png, and T6-GATES.md (gate table).
 
-- [ ] Lens captures archived under `designs/artifact-viewer/evidence/`.
-- [ ] Tick the Task 12 boxes in
-      `docs/plans/artifact-viewer-implementation.md`, note the demo date
-      next to D87 in `arxa-studio-grill-decisions.md`.
+## Known follow-ups
+
+- Org-lane artifact fetch inside the sheet returned 403 once mid-session
+  (token TTL vs. resize timing) — a fresh open refetches; watch it.
+- React #310 console error appears on some loads — investigate.
+- Session rows spawned before the unique-id fix keep stale dsh bindings —
+  archive those rows.

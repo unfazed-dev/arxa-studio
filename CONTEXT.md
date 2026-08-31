@@ -25,6 +25,16 @@ vocabulary only.
   Collisions get numeric suffixes. Renames move the folder and the
   remote as one git-tracked operation (D72 supersedes D41's
   slug-stability clause).
+- **Viewer column** — the docked, session-bound fourth AppFrame column
+  (D88/D93): opens only while a non-blank session is current, follows the
+  session on switch, clamps at 320px, and its dragged width persists.
+  Below 1024px viewport it presents as a full-frame sheet (D92).
+- **Files section** — the org file tree rows in the sidebar (D90): lazy
+  per-directory listing via the artifacts tree route; a file row opens
+  the viewer column through the `arxa-av-open` bridge.
+- **Produced-file chip** — a stock deliverables chip for a file the agent
+  wrote (D91): clicking opens the viewer column, worktree lane first,
+  org lane as fallback. Never auto-opens.
 - **Manifest** — the folder-local file (`org.json` / `project.json`)
   holding display name and stable id. Renames touch the manifest, not
   the slug. (Q3)
@@ -122,3 +132,6 @@ vocabulary only.
   needs them: engine-side caller (`notifyApprovalRequested`) → desktop
   pushd `POST /v1/send` → paired phone. Text-only, best-effort, never a
   data path. (doorbell decision 2026-08-29; D65–D66)
+- **Artifact viewer** — the per-org surface that renders every artifact
+  type (view lane) and edits the text family (edit lane). Viewing reads
+  main; editing happens in a session. (D7, D78–D87)

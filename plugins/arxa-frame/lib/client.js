@@ -79,7 +79,12 @@ window.__ModuleLoader__.load({
 			"frame": "aXa_fr_frame",
 			"handle": "aXa_fr_handle",
 			"overlayLayer": "aXa_fr_overlayLayer",
-			"sidebarCol": "aXa_fr_sidebarCol"
+			"sidebarCol": "aXa_fr_sidebarCol",
+			"viewerCol": "aXa_fr_viewerCol",
+			"sheetLayer": "aXa_fr_sheetLayer",
+			"sheetHead": "aXa_fr_sheetHead",
+			"sheetBody": "aXa_fr_sheetBody",
+			"sheetBack": "aXa_fr_sheetBack"
 		};
 		//#endregion
 		//#region lib/types/client/AppFrame.js

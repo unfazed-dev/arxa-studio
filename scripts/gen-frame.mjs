@@ -269,6 +269,27 @@ repString("\"data-details-collapsed\": cols.details === 0 || void 0,",
   log.push("7 layout face viewer")
 }
 
+// 8. T6/D92 fix: the sheet + viewerCol class keys were missing from the
+// AppFrame css map — the CSS rules existed (2b) but className lookups
+// returned undefined, so the narrow sheet rendered classless (invisible,
+// zero-size) and the docked viewer column lost its border. Register the
+// keys alongside the stock ones.
+{
+  const a = '"sidebarCol": "aXa_fr_sidebarCol"' + LF + T(2) + "};"
+  if (!s.includes(a) || s.indexOf(a) !== s.lastIndexOf(a)) dies("8: AppFrame css map tail anchor not unique")
+  const next = [
+    '"sidebarCol": "aXa_fr_sidebarCol",',
+    T(3) + '"viewerCol": "aXa_fr_viewerCol",',
+    T(3) + '"sheetLayer": "aXa_fr_sheetLayer",',
+    T(3) + '"sheetHead": "aXa_fr_sheetHead",',
+    T(3) + '"sheetBody": "aXa_fr_sheetBody",',
+    T(3) + '"sheetBack": "aXa_fr_sheetBack"',
+    T(2) + "};"
+  ].join(LF)
+  s = s.replace(a, next)
+  log.push("8 sheet + viewerCol css map keys")
+}
+
 mkdirSync(dirname(outPath), { recursive: true })
 if (process.argv.includes("--check")) {
   let cur = null
