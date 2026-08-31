@@ -328,7 +328,8 @@ export function sessionStageBoundary(repoPath, id, { message, env = process.env 
   }
   const baseRef = `${SESSION_BASE_PREFIX}${id}`
   const squash = stageBoundarySquash(session.worktree, {
-    message: message || `${session.name} checkpoint`,
+    message: message || `chore(session): ${session.name} checkpoint`,
+    trailer: `Arxa-Stage: session ${id}`,
     env,
     baseRef,
   })
@@ -343,7 +344,7 @@ export function sessionStageBoundary(repoPath, id, { message, env = process.env 
   const ff = runGit(['merge', '--ff-only', session.branch], { cwd: repoPath, env, allowFail: true })
   if (ff === null) {
     const merged = runGit(
-      ['merge', '--no-ff', '-m', `stage: merge ${session.name}`, session.branch],
+      ['merge', '--no-ff', '-m', `chore(session): merge ${session.name} into main`, '-m', `Arxa-Stage: session ${id}`, session.branch],
       { cwd: repoPath, env, identity: STAGE_IDENTITY, allowFail: true },
     )
     if (merged === null) {

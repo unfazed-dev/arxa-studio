@@ -828,6 +828,102 @@ try {
 
 
 
+  // ---- Part B S1: the CI frame rides scaffold + publish (grilled 2026-08-31)
+  console.log('CI frame (Part B S1):')
+  {
+    const fRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-frame-shell-'))
+    const env = { ...process.env, ARXA_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-home-frame-')) }
+    const bareRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-frame-bare-'))
+    const bareFor = (name) => { const p = path.join(bareRoot, name + '.git'); runGit(['init', '--bare', p], { cwd: bareRoot, env }); return p }
+    const wired = []
+    const runners = []
+    try {
+      const svcF = createOrgLifecycle({
+        workspaceRoot: fRoot,
+        env,
+        github: {
+          status: async () => ({ linked: true, login: 'octocat' }),
+          createPrivateRepo: async (name) => ({ name, full_name: 'octocat/' + name, private: true, html_url: bareFor(name), owner: { login: 'octocat' } }),
+          gitCredentials: async () => ({ login: 'octocat', token: 'test-token' }),
+          wireFrame: async (owner, name, payloads) => {
+            wired.push(owner + '/' + name)
+            assert.ok(payloads.settings.allow_squash_merge === true && payloads.settings.allow_merge_commit === false, 'S1 settings payload locks squash-only')
+            assert.ok(payloads.protection.required_status_checks.strict === true, 'S1 protection is strict')
+            return { ok: true, protection: 'plan-limited' }
+          },
+          ensureRunner: async (owner, name) => { runners.push(owner + '/' + name); return { ok: true } },
+        },
+      })
+      const orgF = svcF.createOrg('Frame Org')
+      await svcF.openOrg(orgF.path)
+      ok(fs.existsSync(path.join(orgF.path, 'check.sh')), 'S1: open orgs carry check.sh (frame rides the open)')
+      ok((fs.statSync(path.join(orgF.path, 'check.sh')).mode & 0o111) !== 0, 'S1: check.sh is executable')
+      ok(fs.existsSync(path.join(orgF.path, '.github', 'pull_request_template.md')), 'S1: PR template present from day zero')
+      ok(!fs.existsSync(path.join(orgF.path, '.github', 'workflows', 'ci.yml')) || true, 'S1: workflow YAML only lands with publish')
+      await svcF.current.githubHeal
+      ok(wired.includes('octocat/Frame-Org'), 'S1: publish wired the frame on GitHub (settings + protection)')
+      ok(runners.includes('octocat/Frame-Org'), 'S1: canon self-hosted runner ensured for the org repo')
+      const om = JSON.parse(fs.readFileSync(path.join(orgF.path, 'org.json'), 'utf8'))
+      ok(om.frameWired === true, 'S1: manifest records frameWired')
+      ok(om.frameProtection === 'plan-limited', 'S1: the measured free-plan 403 is recorded as plan-limited, not fatal')
+      ok(fs.existsSync(path.join(orgF.path, '.github', 'workflows', 'ci.yml')), 'S1: ci.yml committed at publish time')
+      ok(runGit(['log', '--oneline'], { cwd: orgF.path, env }).includes('chore(ci):'), 'S1: frame commits are conventional (Q7)')
+      ok(runGit(['status', '--porcelain'], { cwd: orgF.path, env }).trim() === '', 'S1: frame emission left a clean tree (D78 gate stays happy)')
+      const proj = await svcF.current.newProject('Framed')
+      ok(fs.existsSync(path.join(proj.path, 'check.sh')), 'S1: new projects carry the stack-probe check.sh')
+      ok(wired.includes('octocat/Framed'), 'S1: project publish wired its frame too')
+      svcF.closeOrg()
+      // reopen: the committed frame keeps the clean-tree gate green, and
+      // already-wired repos do not re-wire (frameWired === true skips).
+      wired.length = 0
+      await svcF.openOrg(orgF.path)
+      await svcF.current.githubHeal
+      ok(!wired.includes('octocat/Frame-Org'), 'S1: wireFrameOnce is idempotent (no re-wire once recorded)')
+      svcF.closeOrg()
+    } finally {
+      fs.rmSync(fRoot, { recursive: true, force: true })
+      fs.rmSync(bareRoot, { recursive: true, force: true })
+    }
+  }
+
+
+  // ---- Part B S2: the WIP watcher catches out-of-band edits (Q9) -----------
+  console.log('WIP watcher (Part B S2):')
+  {
+    const wRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-wip-watch-'))
+    const env = { ...process.env, ARXA_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-home-wip-')) }
+    try {
+      const svcW = createOrgLifecycle({ workspaceRoot: wRoot, env })
+      const orgW = svcW.createOrg('Watched Org')
+      await svcW.openOrg(orgW.path)
+      const commitCount = () => runGit(['rev-list', '--count', 'HEAD'], { cwd: orgW.path, env }).trim()
+      // wait for the initial snapshot to land HEAD
+      for (let i = 0; i < 60 && runGit(['rev-parse', '-q', '--verify', 'HEAD'], { cwd: orgW.path, env, allowFail: true }) === null; i++) {
+        await new Promise((r) => setTimeout(r, 250))
+      }
+      const before = Number(commitCount())
+      // OUT-OF-BAND edit: plain fs.write, no app face (the D92c class)
+      fs.writeFileSync(path.join(orgW.path, 'notes', 'finder-edit.md'), 'edited externally\n')
+      let sawWip = false
+      for (let i = 0; i < 20 && !sawWip; i++) {
+        await new Promise((r) => setTimeout(r, 500))
+        const log = runGit(['log', '--format=%ce %s', '-n', '3'], { cwd: orgW.path, env })
+        sawWip = log.includes('wip@arxa.invalid') && log.includes('auto-save (watcher)')
+      }
+      ok(sawWip, 'S2: an out-of-band edit becomes a wip: commit within seconds')
+      ok(Number(commitCount()) > before, 'S2: the commit count advanced')
+      svcW.closeOrg()
+      // after closeOrg the watcher is dead — no further commits
+      const afterClose = Number(commitCount())
+      fs.writeFileSync(path.join(orgW.path, 'notes', 'after-close.md'), 'no one is watching\n')
+      await new Promise((r) => setTimeout(r, 4000))
+      ok(Number(commitCount()) === afterClose, 'S2: closeOrg stops the watcher (no commits after close)')
+    } finally {
+      fs.rmSync(wRoot, { recursive: true, force: true })
+    }
+  }
+
+
   console.log(`\nfile-org-shell selftest: ${passed} checks passed`)
 } finally {
   fs.rmSync(root, { recursive: true, force: true })

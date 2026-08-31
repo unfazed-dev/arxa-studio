@@ -126,6 +126,77 @@ if (!rmO.ok || !rmO.result || rmO.result.ok !== true) fail('D91: org re-disconne
 if ((await ghRepo(NAME)) !== null) fail('D91: org repo still on GitHub after re-disconnect')
 console.log('5d. D91 project.connect + disconnect-remove: on-demand link OK')
 
+
+// 5e. Part B S5: the composer git card loop end-to-end (live GitHub):
+// republish -> session -> out-of-band edit (watcher) -> status ->
+// subject law -> boundary commit -> branch push -> PR (dedupe) -> squash merge.
+const rep = await post('github.publish', { orgId: org.id })
+if (!rep.ok || !rep.result || rep.result.ok !== true) fail('S5: republish failed: ' + JSON.stringify(rep).slice(0, 300))
+const ns = await post('workspace.new-session', { orgId: org.id, workspace: 'notes', name: 'Card smoke' })
+if (!ns.ok || !ns.result || !ns.result.id) fail('S5: new-session failed: ' + JSON.stringify(ns).slice(0, 300))
+const sid = ns.result.id
+const orgRow = await orgOf(org.slug)
+if (!orgRow || !orgRow.path) fail('S5: org row without path')
+{
+  const fs = await import('node:fs')
+  const p = await import('node:path')
+  fs.writeFileSync(p.join(orgRow.path, 'notes', 'card-smoke.md'), 'written out of band\n')
+}
+await new Promise((r) => setTimeout(r, 6000)) // S2 watcher: out-of-band edit -> wip commit
+const st1 = await post('card.status', { sessionId: sid })
+if (!st1.ok || !st1.result || !String(st1.result.seat.branch).startsWith('arxa/session/')) fail('S5: card.status seat wrong: ' + JSON.stringify(st1).slice(0, 300))
+if (!(st1.result.wipRun >= 1)) fail('S5: watcher did not land a wip commit before status (wipRun=' + st1.result.wipRun + ')')
+const badC = await post('card.commit', { sessionId: sid, subject: 'nope not conventional' })
+if (badC.ok !== false || !String(badC.error || '').includes('subject-not-conventional')) fail('S5: non-conventional subject was not refused: ' + JSON.stringify(badC).slice(0, 200))
+const evd = await post('card.commit.draft', { sessionId: sid })
+if (!evd.ok || !evd.result || !String(evd.result.rule || '').includes('<type>')) fail('S5: draft evidence missing the rule: ' + JSON.stringify(evd).slice(0, 200))
+const cm = await post('card.commit', { sessionId: sid, subject: 'docs(notes): card smoke note added' })
+if (!cm.ok || !cm.result || cm.result.merged !== true) fail('S5: card.commit boundary failed: ' + JSON.stringify(cm).slice(0, 300))
+const pu = await post('card.push', { sessionId: sid })
+if (!pu.ok || !pu.result || pu.result.ok !== true) fail('S5: card.push failed: ' + JSON.stringify(pu).slice(0, 300))
+const prArgs = { sessionId: sid, title: 'docs(notes): card smoke note added', problem: 'no smoke note', fix: 'added one via the card', model: 'smoke' }
+const pr = await post('card.pr.create', prArgs)
+if (!pr.ok || !pr.result || !pr.result.pr || !pr.result.pr.url) fail('S5: card.pr.create failed: ' + JSON.stringify(pr).slice(0, 300))
+const prDup = await post('card.pr.create', prArgs)
+if (!prDup.ok || !prDup.result || prDup.result.existing !== true) fail('S5: PR dedupe failed (second create must return existing): ' + JSON.stringify(prDup).slice(0, 300))
+const pst = await post('card.pr.status', { sessionId: sid })
+if (!pst.ok || !pst.result || !pst.result.pr || !pst.result.checks) fail('S5: card.pr.status failed: ' + JSON.stringify(pst).slice(0, 300))
+// Q8: squash-merge on GitHub once the frame checks are green (a plan/
+// scope gap leaves checks 'none' — merge directly, protection is
+// plan-limited there anyway).
+if (pst.result.checks.state !== 'none') {
+  const deadline = Date.now() + 150000
+  let green = pst.result.checks.state === 'green'
+  while (!green && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 5000))
+    const again = await post('card.pr.status', { sessionId: sid })
+    green = again.ok && again.result && again.result.checks && again.result.checks.state === 'green'
+  }
+  if (!green) fail('S5: frame checks did not go green before merge')
+}
+{
+  const { execFileSync } = await import('node:child_process')
+  try {
+    execFileSync('gh', ['pr', 'merge', String(pr.result.pr.number), '--squash', '--repo', 'unfazed-dev/' + NAME], { encoding: 'utf8', stdio: 'pipe' })
+  } catch (e) {
+    fail('S5: gh pr merge --squash failed: ' + String(e.message).slice(0, 200))
+  }
+}
+// cleanup the smoke runner instance (svc + dir; the shared tarball cache stays)
+{
+  const { execFileSync } = await import('node:child_process')
+  const fs = await import('node:fs')
+  const os = await import('node:os')
+  const p = await import('node:path')
+  const rdir = p.join(os.homedir(), '.arxa', 'runners', 'unfazed-dev__' + NAME)
+  try { execFileSync('./svc.sh', ['uninstall'], { cwd: rdir, stdio: 'pipe' }) } catch { /* not installed */ }
+  fs.rmSync(rdir, { recursive: true, force: true })
+}
+const rmB = await post('org.disconnect', { orgId: org.id, removeRepos: true })
+if (!rmB.ok || !rmB.result || rmB.result.ok !== true) fail('S5: post-card disconnect failed: ' + JSON.stringify(rmB).slice(0, 300))
+if ((await ghRepo(NAME)) !== null) fail('S5: org repo still on GitHub after the card loop')
+console.log('5e. Part B card loop: status/subject-law/commit/push/PR+dedupe/squash-merge OK')
+
 // 6. purge the local-only org — no GitHub requirement, local folder gone.
 const trashed = await post('org.trash', { orgId: org.id })
 if (!trashed.ok) fail('trash failed: ' + JSON.stringify(trashed).slice(0, 200))

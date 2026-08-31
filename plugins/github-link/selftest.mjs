@@ -57,13 +57,13 @@ const mock = http.createServer((req, res) => {
       if (body.grant_type === 'refresh_token') {
         if (body.refresh_token !== 'dev-refresh') return json(400, { error: 'bad_refresh_token' })
         state.expectBearer = 'dev-token-2'
-        return json(200, { access_token: 'dev-token-2', scope: 'repo,read:user,delete_repo', refresh_token: 'dev-refresh-2', expires_in: 28800 })
+        return json(200, { access_token: 'dev-token-2', scope: 'repo,read:user,delete_repo,workflow', refresh_token: 'dev-refresh-2', expires_in: 28800 })
       }
       // Device-flow poll.
       if (body.grant_type === 'urn:ietf:params:oauth:grant-type:device_code') {
         if (body.device_code !== state.deviceCode) return json(400, { error: 'bad_verification_code' })
         if (state.devicePolls++ === 0) return json(200, { error: 'authorization_pending' })
-        return json(200, { access_token: 'dev-token', scope: 'repo,read:user,delete_repo', refresh_token: 'dev-refresh', expires_in: 28800 })
+        return json(200, { access_token: 'dev-token', scope: 'repo,read:user,delete_repo,workflow', refresh_token: 'dev-refresh', expires_in: 28800 })
       }
       // Authorization-code exchange — the mock ENFORCES the PKCE round-trip.
       if (!state.expectedChallenge) return json(400, { error: 'no_authorize_observed' })
@@ -71,7 +71,7 @@ const mock = http.createServer((req, res) => {
         return json(400, { error: 'pkce_mismatch' })
       }
       if (body.code !== state.expectedCode) return json(400, { error: 'bad_code' })
-      return json(200, { access_token: 'browser-token', scope: 'repo read:user delete_repo' })
+      return json(200, { access_token: 'browser-token', scope: 'repo read:user delete_repo workflow' })
     }
     if (req.method === 'POST' && req.url === '/login/device/code') {
       state.deviceCode = 'dc-' + Math.random().toString(36).slice(2)
@@ -148,11 +148,11 @@ try {
   const linkState = await svcB.link()
 
   ok(linkState.login === 'octocat', 'link() resolves state with the linked login')
-  assert.deepEqual(linkState.scopes, ['repo', 'read:user', 'delete_repo'])
+  assert.deepEqual(linkState.scopes, ['repo', 'read:user', 'delete_repo', 'workflow'])
   passed++
   console.log('  ✓ scopes repo + read:user + delete_repo recorded (D81: trash purge deletes repos)')
   ok(capturedAuthorizeUrl.searchParams.get('code_challenge_method') === 'S256', 'authorize URL asks for S256')
-  ok(capturedAuthorizeUrl.searchParams.get('scope') === 'repo read:user delete_repo', 'authorize URL carries the scopes incl. delete_repo (D81 trash purge)')
+  ok(capturedAuthorizeUrl.searchParams.get('scope') === 'repo read:user delete_repo workflow', 'authorize URL carries the scopes incl. delete_repo + workflow')
   ok(/^http:\/\/127\.0\.0\.1:\d+\/callback$/.test(capturedAuthorizeUrl.searchParams.get('redirect_uri')), 'redirect_uri is a 127.0.0.1 loopback on an ephemeral port')
   ok(capturedAuthorizeUrl.searchParams.get('client_id') === CLIENT_ID, 'authorize URL carries the configured client id')
   ok(JSON.parse(fs.readFileSync(path.join(arxaHome, 'github-link.json'), 'utf8')).linked === true, 'link state persisted locally under ~/.arxa (github-link.json)')
@@ -191,7 +191,7 @@ try {
   ok(state.userCode === 'ABCD-1234', 'device flow surfaces the user code')
   ok(device.accessToken === 'dev-token', 'device poll completes: authorization_pending → access_token')
   ok(state.devicePolls >= 2, 'device poll honoured authorization_pending before succeeding')
-  assert.deepEqual(device.scopes, ['repo', 'read:user', 'delete_repo'])
+  assert.deepEqual(device.scopes, ['repo', 'read:user', 'delete_repo', 'workflow'])
   passed++
   console.log('  ✓ device flow returns the minimal scopes')
   const devState = writeState({ linked: true, login: 'octocat', scopes: device.scopes, linkedAt: new Date().toISOString() }, env)
@@ -312,3 +312,75 @@ try {
 }
 
 
+
+// ---- Part B S1: frame API + runner (grilled 2026-08-31) ---------------------
+{
+  const { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, ensureRunner, runnerExists } = await import('./lib/index.js')
+  const calls = []
+  const mockFetch = async (url, opts = {}) => {
+    calls.push(String(url) + ' ' + (opts.method ?? 'GET'))
+    const u = String(url)
+    if (u.includes('/repos/planframed/') && u.includes('/branches/main/protection')) {
+      return { ok: false, status: 403, json: async () => ({ message: 'Upgrade to GitHub Pro or make this repository public to enable this feature.' }) }
+    }
+    if (u.includes('/branches/main/protection')) {
+      return { ok: true, status: 200, json: async () => ({}) }
+    }
+    if (u.includes('/repos/octocat/framed') && opts.method === 'PATCH') {
+      const body = JSON.parse(opts.body)
+      assert.equal(body.allow_squash_merge, true)
+      assert.equal(body.allow_merge_commit, false)
+      return { ok: true, status: 200, json: async () => ({}) }
+    }
+    if (u.includes('/actions/runners/registration-token')) {
+      return { ok: true, status: 201, json: async () => ({ token: 'reg-tok-1' }) }
+    }
+    if (u.includes('/repos/actions/runner/releases/latest')) {
+      return { ok: true, status: 200, json: async () => ({ tag_name: 'v9.9.9', assets: [{ name: 'actions-runner-osx-x64-9.9.9.tar.gz', browser_download_url: 'x64' }, { name: 'actions-runner-osx-arm64-9.9.9.tar.gz', browser_download_url: 'arm64-url' }] }) }
+    }
+    return { ok: false, status: 404, json: async () => ({ message: 'no route: ' + u }) }
+  }
+  const base = { accessToken: 't', fetch: mockFetch, apiBase: 'https://api.github.com' }
+
+  await settingsApi({ owner: 'octocat', name: 'framed', payload: { allow_squash_merge: true, allow_merge_commit: false, allow_rebase_merge: false }, ...base })
+  ok(calls.some((c) => c.startsWith('https://api.github.com/repos/octocat/framed PATCH')), 'frame: settingsApi PATCHes the repo')
+  const protOk = await protectionApi({ owner: 'octocat', name: 'framed', payload: { required_status_checks: { strict: true } }, ...base })
+  ok(protOk.planLimited === false, 'frame: protection PUT succeeds clean')
+  const protPlan = await protectionApi({ owner: 'planframed', name: 'x', payload: {}, ...base })
+  ok(protPlan.planLimited === true, 'frame: the free-plan 403 classifies as plan-limited (S0 V1)')
+  const tok = await registrationTokenApi({ owner: 'octocat', name: 'framed', ...base })
+  ok(tok === 'reg-tok-1', 'frame: runner registration token served')
+  const asset = await latestRunnerTarballApi({ ...base })
+  ok(asset.url === 'arm64-url' && asset.version === 'v9.9.9', 'frame: latestRunnerTarball picks the osx-arm64 asset')
+
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-runner-home-'))
+  try {
+    const ran = []
+    const fakeRun = async (file, args, opts = {}) => {
+      ran.push([file, ...args].join(' '))
+      if (file === './config.sh') {
+        assert.ok(args.includes('macOS,ARM64,arxa'), 'canon labels on config.sh')
+        assert.ok(args.join(' ').includes('https://github.com/octocat/framed'), 'repo URL on config.sh')
+        // the REAL config.sh writes the .runner marker — mirror it
+        fs.writeFileSync(path.join(opts.cwd, '.runner'), '{}\n')
+      }
+      return ''
+    }
+    const cacheDir = path.join(home, '.arxa', 'runners', 'runner-cache')
+    fs.mkdirSync(cacheDir, { recursive: true })
+    fs.writeFileSync(path.join(cacheDir, 'config.sh'), '#!/bin/sh\n')
+    fs.writeFileSync(path.join(cacheDir, 'svc.sh'), '#!/bin/sh\n')
+    fs.writeFileSync(path.join(cacheDir, 'VERSION'), 'v9.9.9\n')
+    const opts = { owner: 'octocat', name: 'framed', home, run: fakeRun, fetch: mockFetch, registrationToken: async () => 'rt', latestRunnerTarball: async () => ({ url: 'u', version: 'v9.9.9' }) }
+    const r1 = await ensureRunner(opts)
+    ok(r1.ok === true && !r1.existing, 'frame: ensureRunner registers a runner (config.sh + svc.sh run)')
+    ok(ran.some((c) => c.startsWith('./config.sh')), 'frame: config.sh ran unattended')
+    ok(runnerExists('octocat', 'framed', home), 'frame: runnerExists sees the instance')
+    const r2 = await ensureRunner(opts)
+    ok(r2.ok === true && r2.existing === true, 'frame: ensureRunner is idempotent')
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+  passed++
+  console.log('  ✓ frame API + runner verified (settings / plan-limited protection / reg-token / arm64 asset / idempotent runner)')
+}

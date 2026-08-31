@@ -119,6 +119,15 @@ check('rows-snap: New Session CTA gates on the org-scoped selection + selected o
 check('rows-snap: server snapshot exposes snapshotPending (open org)', hostSrc().includes('snapshotPending: cur?.path === path'))
 check('rows-snap: create-at defers the initial snapshot (arxa-files-only history, fixed D92)', hostSrc().includes('deferSnapshot: true, includeExisting: false'))
 check('rows-snap: host answers folder-info (a count only) for the create-time question', hostSrc().includes("'arxa-sidebar-folder-info'") && hostSrc().includes('entryCount'))
+check('card: engine exposes the six card actions (S3)', ['card.status', 'card.commit.draft', 'card.commit', 'card.push', 'card.pr.create', 'card.pr.status'].every((a) => hostSrc().includes("'" + a + "'")))
+check('card: commit validates the conventional-subject law (Q7)', hostSrc().includes('subject-not-conventional') && hostSrc().includes('SUBJECT_RE.test(subject)'))
+check('card: draft returns evidence only — the engine never drafts (Q6)', hostSrc().includes('card.commit.draft') && hostSrc().includes('EVIDENCE ONLY'))
+check('card: PR title validated (becomes the squash subject, Q7/Q8)', hostSrc().includes('title-not-conventional'))
+check('card: PR create dedupes before opening (file-pr rule 1)', hostSrc().includes('prListForHead') && hostSrc().includes('existing: true'))
+check('card: session-branch push is PR-purpose only (D73 relaxation)', hostSrc().includes('card.push serves session seats'))
+check('card: S4 surface — portal above the composer bar, session-bound (en+zh)', client.includes('data-arxa-git-card') && client.includes("[data-slot='conversation.composer.bar']") && client.includes('ArxaGitCard') && client.includes('"card.subjectPlaceholder": "commit subject') && client.includes('"card.subjectPlaceholder": "提交主题'))
+check('card: S4 states — local-only badge + frame chip + collapsible head', client.includes('card.localOnly') && client.includes('card.frame') && client.includes('data-arxa-card-head') && client.includes('data-arxa-card-caret'))
+check('card: S4 Q6 — ask-the-session prefills the composer, never an engine LLM', client.includes('card.askDraft') && client.includes('Draft a conventional commit subject'))
 check('create: D92 live preview + collision contract localized (en + zh), snapshot radio deleted',
   client.includes('"org.create.preview": "Creates at"') && client.includes('"org.create.preview": "将创建于"') && client.includes('"org.create.exists.nonempty": "That folder already exists and isn\'t empty — change the name or the location."') && client.includes('"org.create.exists.nonempty": "该文件夹已存在且不为空 — 请更改名称或位置。"') && client.includes('"org.create.exists.open": "Open it instead"') && client.includes('"org.create.exists.open": "改为打开它"') && !client.includes('org.create.existing') && !client.includes('includeExisting') && client.includes('folder-info'))
 check('create: D92 engine target is ALWAYS root + slug(name); heuristic + includeExisting param deleted',

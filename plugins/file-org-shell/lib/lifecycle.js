@@ -81,6 +81,11 @@ import {
   archiveSession as archiveSessionBranch,
   sessionStageBoundary,
   rekeySessionsProject,
+  writeFrameFiles,
+  settingsPayload,
+  protectionPayload,
+  wipCommit,
+  createWipWatcher,
 } from '../../git-workspace/lib/index.js'
 import { runGit } from '../../git-workspace/lib/index.js'
 import { arxaHome } from '../../workspace/lib/root.js'
@@ -225,7 +230,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       delete m.githubPublishedAt
       m.localOnly = true
       writeManifest(manifestFile, m)
-      try { runGit(['add', path.basename(manifestFile)], { cwd: repoPath, allowFail: true }); runGit(['commit', '-m', 'disconnect: remove GitHub link state', '--', path.basename(manifestFile)], { cwd: repoPath, allowFail: true }) } catch { /* best-effort */ }
+      try { runGit(['add', path.basename(manifestFile)], { cwd: repoPath, allowFail: true }); runGit(['commit', '-m', 'chore(github): remove the GitHub link state', '--', path.basename(manifestFile)], { cwd: repoPath, allowFail: true }) } catch { /* best-effort */ }
     } catch { /* strip best-effort — remote removal still proceeds */ }
     // D90: only a REMOVE deletes the GitHub side, so only then does the
     // origin remote die. KEEP leaves origin pointing at the live repo —
@@ -279,6 +284,65 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
    *
    * @param {'org' | 'project'} kind
    */
+  /** Part B S1 — wire the CI frame once a repo is published: ci.yml +
+   *  PR template committed and pushed, squash-only repo settings, branch
+   *  protection (the measured free-plan 403 recorded as plan-limited,
+   *  S0 V1 — the card enforces gates client-side regardless, Q2), and a
+   *  canon self-hosted runner on this machine (Q5). Best-effort end to
+   *  end: a published repo without the frame still works; wireFrameOnce
+   *  retries on the next publish/heal while frameWired !== true. */
+  async function wireFrameOnce(repoPath, kind) {
+    try {
+      const manifestFile = kind === 'org' ? orgManifestPath(repoPath) : projectManifestPath(repoPath)
+      const m = readManifest(manifestFile)
+      if (!m.repoUrl || !m.repoOwner || !m.repoName) return { skipped: 'not-published' }
+      if (m.frameWired === true) return { skipped: 'wired' }
+      const wrote = writeFrameFiles(repoPath, kind, { includeCiYml: true })
+      if (wrote.written.length) {
+        runGit(['add', 'check.sh', '.github'], { cwd: repoPath, allowFail: true })
+        runGit(['commit', '-m', 'chore(ci): wire the arxa frame (checks, workflow, PR template)'], { cwd: repoPath, allowFail: true })
+        const pushCreds = await githubBridge.gitCredentials()
+        if (pushCreds.ok) pushRepo(repoPath, pushUrlFor(m.repoUrl, pushCreds), env)
+      }
+      const wired = await githubBridge.wireFrame(m.repoOwner, m.repoName, { settings: settingsPayload(), protection: protectionPayload() })
+      const fields = {}
+      if (wired.ok) {
+        fields.frameWired = true
+        fields.frameProtection = wired.protection
+        const runner = await githubBridge.ensureRunner(m.repoOwner, m.repoName)
+        fields.frameRunner = runner.ok ? 'ok' : String(runner.reason ?? 'failed')
+      } else {
+        fields.frameWired = 'failed: ' + String(wired.error ?? wired.reason ?? 'unknown')
+      }
+      try {
+        if (kind === 'org') annotateOrgManifest(repoPath, fields)
+        else annotateProjectManifest(repoPath, fields)
+        const file = path.basename(manifestFile)
+        runGit(['add', file], { cwd: repoPath, allowFail: true })
+        runGit(['commit', '-m', 'chore(github): record frame state', '--', file], { cwd: repoPath, allowFail: true })
+        if (fields.frameWired === true) {
+          const c2 = await githubBridge.gitCredentials()
+          if (c2.ok) pushRepo(repoPath, pushUrlFor(m.repoUrl, c2), env)
+        }
+      } catch { /* annotation best-effort */ }
+      return { ok: wired.ok === true, protection: wired.protection ?? null }
+    } catch (err) {
+      if (process.env.ARXA_FRAME_DEBUG) console.error('[wireFrameOnce]', repoPath, String(err?.stack ?? err).slice(0, 600))
+      // Record the failure on the manifest (githubStatus, not frameWired) so
+      // the next publish/heal retries and the UI can say why — the common
+      // cause is a pre-workflow-scope link needing ONE re-link (S1 live).
+      try {
+        const fields = { frameWired: 'failed: ' + String(err?.message ?? err).slice(0, 160) }
+        if (kind === 'org') annotateOrgManifest(repoPath, fields)
+        else annotateProjectManifest(repoPath, fields)
+        const mf = kind === 'org' ? orgManifestPath(repoPath) : projectManifestPath(repoPath)
+        runGit(['add', path.basename(mf)], { cwd: repoPath, allowFail: true })
+        runGit(['commit', '-m', 'chore(github): record frame retry state', '--', path.basename(mf)], { cwd: repoPath, allowFail: true })
+      } catch { /* best-effort */ }
+      return { ok: false, reason: 'frame-wire-failed: ' + String(err?.message ?? err) }
+    }
+  }
+
   async function publishRepoOnce(repoPath, slug, kind) {
     const manifestFile = kind === 'org' ? orgManifestPath(repoPath) : projectManifestPath(repoPath)
     // D78: an annotation left uncommitted dirties the repo, and the NEXT
@@ -289,7 +353,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       const file = path.basename(manifestFile)
       try {
         runGit(['add', file], { cwd: repoPath, allowFail: true })
-        runGit(['commit', '-m', 'publish: record GitHub link state', '--', file], { cwd: repoPath, allowFail: true })
+        runGit(['commit', '-m', 'chore(github): record link state', '--', file], { cwd: repoPath, allowFail: true })
       } catch { /* best effort — annotation still stands in the worktree */ }
     }
     const annotate = (fields) => {
@@ -334,6 +398,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
               manifest.repoRenamePending = undefined
               try { setOrigin(repoPath, made.repo.repoUrl, env) } catch { /* best-effort */ }
               pushRepo(repoPath, pushUrlFor(made.repo.repoUrl, creds), env)
+              await wireFrameOnce(repoPath, kind)
               return { ok: true, skipped: 'published', slug, repoUrl: made.repo.repoUrl }
             }
             annotate({ githubStatus: 'publish-failed: repo rename failed: ' + String(made.error ?? made.reason ?? 'unknown') + ' — pending flag kept' })
@@ -344,6 +409,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
         annotate({ githubStatus: 'publish-failed: sync push failed: ' + String(err?.message ?? err) })
         return { ok: false, reason: 'push-failed', slug, repoUrl: manifest.repoUrl }
       }
+      await wireFrameOnce(repoPath, kind)
       return { ok: true, skipped: 'published', slug, repoUrl: manifest.repoUrl }
     }
     const st = await githubBridge.status()
@@ -371,6 +437,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
         githubPublishedAt: new Date().toISOString(),
         localOnly: false, // D90: connecting clears the local-only answer
       })
+      await wireFrameOnce(repoPath, kind)
       return { ok: true, slug, repoUrl }
     } catch (err) {
       annotate({ githubStatus: 'publish-failed: ' + String(err?.message ?? err) })
@@ -506,11 +573,67 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       ensureAccountExcluded(resolved, env) // belt-and-braces /account/ (D37)
       const snapshotPending = repo.deferred === true || !hasHead(resolved, env)
       if (snapshotPending && !snapshotWorkerLive(resolved, env)) spawnSnapshotOrgRepo(resolved, env)
+      // Part B S1: the frame rides the FIRST open — new orgs (create-at
+      // opens immediately after scaffold) and legacy orgs alike get their
+      // green-by-absence check.sh + PR template. Only-if-absent (never
+      // clobbers user edits); local-only orgs simply carry the local half.
+      // The files are COMMITTED immediately when HEAD exists — an untracked
+      // check.sh would trip the next open's clean-tree gate (D78 lesson).
+      // Before HEAD they ride the initial snapshot instead.
+      try {
+        const frOpen = writeFrameFiles(resolved, 'org')
+        if (frOpen.written.length && hasHead(resolved, env)) {
+          runGit(['add', 'check.sh', '.github'], { cwd: resolved, allowFail: true })
+          runGit(['commit', '-m', 'chore(ci): add the arxa frame (day-zero checks)'], { cwd: resolved, allowFail: true })
+        }
+      } catch { /* frame is best-effort */ }
 
       // 5. session lifecycle ready — registry readable, archived derivable.
       step = 'sessions'
       const sessions = listSessions(resolved, env)
       const archived = archivedSessionIds(resolved, env)
+
+      // 5b. WIP watcher (Part B S2, Q9) + frame emission (S1): a debounced
+      // net over the primary worktree + every OPEN session worktree,
+      // catching out-of-band edits (Finder, the user's editor — the D92c
+      // class). Owned by this handle; closeOrg stops it; session faces
+      // reconfigure the path set. Booted ONLY once HEAD exists — a
+      // deferred (create-time) open must stay instant (the 2025-08 hang
+      // contract); the heal boots the net the moment HEAD lands.
+      const openWorktrees = () =>
+        listSessions(resolved, env)
+          .filter((s) => s.state === 'open' && s.worktree)
+          .map((s) => s.worktree)
+      let wipWatcher = null
+      const startWipNet = () => {
+        if (wipWatcher) return
+        try {
+          wipWatcher = createWipWatcher({
+            paths: [resolved, ...openWorktrees()],
+            debounceMs: 3000,
+            onQuiet: (p) => {
+              // Unborn HEAD means the detached INITIAL SNAPSHOT owns the
+              // first commit — the watcher never commits into an unborn
+              // repo (it would add -A the bulk).
+              try { if (!hasHead(p, env)) return; wipCommit(p, { message: 'auto-save (watcher)', env }) } catch { /* never kill the net */ }
+            },
+          })
+          undo.push(() => wipWatcher.stop())
+        } catch { /* the event pokes remain without the watcher */ }
+        // Frame emission rides the same gate: files + immediate commit so
+        // the clean-tree gate stays happy (D78). Never clobbers user files.
+        try {
+          const frOpen = writeFrameFiles(resolved, 'org')
+          if (frOpen.written.length && hasHead(resolved, env)) {
+            runGit(['add', 'check.sh', '.github'], { cwd: resolved, allowFail: true })
+            runGit(['commit', '-m', 'chore(ci): add the arxa frame (day-zero checks)'], { cwd: resolved, allowFail: true })
+          }
+        } catch { /* frame is best-effort */ }
+      }
+      const syncWipWatchPaths = () => {
+        try { wipWatcher?.setPaths([resolved, ...openWorktrees()]) } catch { /* advisory */ }
+      }
+      if (!snapshotPending) startWipNet()
 
       // 6. optional rails — attach ONLY if configured; absence is normal.
       step = 'account-mirror'
@@ -553,6 +676,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
             await new Promise((resolveTick) => setTimeout(resolveTick, 250))
           }
           if (!hasHead(resolved, env)) return { ok: false, reason: 'initial-snapshot-pending' }
+          startWipNet() // deferred opens boot the WIP net + frame here
           return await publishOrgAndProjects(resolved, slug)
         } catch {
           /* publish is throw-proof by contract — this is belt-and-braces */
@@ -690,6 +814,16 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           const created = scaffoldProject(resolved, name)
           try {
             initProjectRepo(created.path, env) // idempotent repo attach
+            // Part B S1: every new project repo carries the frame from its
+            // first commit (stack-probe check.sh + PR template; ci.yml waits
+            // for publish — wireFrameOnce adds it with the remote).
+            try {
+              writeFrameFiles(created.path, 'project')
+              if (hasHead(created.path, env)) {
+                runGit(['add', 'check.sh', '.github'], { cwd: created.path, allowFail: true })
+                runGit(['commit', '-m', 'chore(ci): add the arxa frame (day-zero checks)'], { cwd: created.path, allowFail: true })
+              }
+            } catch { /* best-effort */ }
             // D91 inheritance: a LOCAL-ONLY org creates LOCAL-ONLY projects
             // — no repo, no push; project.connect links it manually when
             // wanted. A connected org inherits the D73 behavior: publish on
@@ -702,8 +836,8 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
               const manifestName = path.basename(projectManifestPath(created.path))
               annotateProjectManifest(created.path, { localOnly: true })
               try {
-                runGit(['add', manifestName], { cwd: created.path, allowFail: true })
-                runGit(['commit', '-m', 'local-only: born into a local-only organisation', '--', manifestName], { cwd: created.path, allowFail: true })
+                runGit(['add', manifestName, 'check.sh', '.github'], { cwd: created.path, allowFail: true })
+                runGit(['commit', '-m', 'chore(project): born into a local-only organisation', '--', manifestName], { cwd: created.path, allowFail: true })
               } catch { /* best-effort — annotation still stands in the worktree */ }
             } else {
               // D73: the whole publish half (linked? → create → origin →
@@ -758,8 +892,9 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           // with cwd = the worktree path (dsh sessions.create cwd contract)
           // and store its id on the registry row. Unavailable dsh degrades to
           // registry-only with a loud annotation — never a hard failure.
-          const spawned = await dshBridge.spawn({ cwd: session.worktree, name: session.name })
+          const spawned = await dshBridge.spawn({ cwd: session.worktree, name: session.name, id: session.id })
           dshLive = await dshBridge.list()
+          syncWipWatchPaths() // session set changed — re-watch
           return annotateSession(
             resolved,
             session.id,
@@ -797,6 +932,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
             if (spawned.ok) await annotateSession(resolved, id, { dshSessionId: spawned.id, dshStatus: null }, env)
           }
           dshLive = await dshBridge.list()
+          syncWipWatchPaths() // session set changed — re-watch
           return out
         },
         async archiveSession(id) {
@@ -813,6 +949,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           // dsh-side. Best-effort.
           if (row?.dshSessionId) await dshBridge.archive([row.dshSessionId])
           dshLive = await dshBridge.list()
+          syncWipWatchPaths() // session set changed — re-watch
           return out
         },
         mergeSession(id, message) {
@@ -1001,7 +1138,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           annotateOrgManifest(newPath, fields)
           try {
             runGit(['add', 'org.json'], { cwd: newPath, env, allowFail: true })
-            runGit(['commit', '-m', 'rename: ' + oldSlug + ' to ' + newSlug, '--', 'org.json'], { cwd: newPath, env, allowFail: true })
+            runGit(['commit', '-m', 'chore(org): rename ' + oldSlug + ' to ' + newSlug, '--', 'org.json'], { cwd: newPath, env, allowFail: true })
           } catch { /* best-effort — the annotation lesson (D78) */ }
         }
       }
@@ -1127,7 +1264,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       // dirty project repos would fail the next open's clean-tree gate.
       try {
         runGit(['add', 'project.json'], { cwd: newPath, env, allowFail: true })
-        runGit(['commit', '-m', 'rename: ' + oldSlug + ' to ' + newSlug, '--', 'project.json'], { cwd: newPath, env, allowFail: true })
+        runGit(['commit', '-m', 'chore(project): rename ' + oldSlug + ' to ' + newSlug, '--', 'project.json'], { cwd: newPath, env, allowFail: true })
       } catch { /* best-effort — the manifest edit still stands */ }
 
       let rekeyed = 0

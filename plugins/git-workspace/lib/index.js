@@ -18,6 +18,8 @@
 export const name = 'arxa-git-workspace'
 
 export { GitUnavailableError, probeGit, resetProbe, ensureGit, gitBin } from './probe.js'
+export { FRAME_JOB, SUBJECT_TYPES, SUBJECT_RE, orgCheckSh, projectCheckSh, ciYml, prTemplate, protectionPayload, settingsPayload, writeFrameFiles } from './frame.js'
+export { createWipWatcher } from './watch.js'
 export { runGit, STAGE_IDENTITY, WIP_IDENTITY } from './run.js'
 export { ORG_GITIGNORE, orgIgnoreFor, isRepo, hasHead, initOrgRepo, initProjectRepo, getOrigin, setOrigin, pushRepo, readSnapshotMarker, snapshotOrgRepo, snapshotWorkerLive, spawnSnapshotOrgRepo } from './repos.js'
 export {
@@ -72,7 +74,8 @@ import { mintVersion, versionChip } from './versions.js'
 export function mintAtStageBoundary(repoPath, { message, name, state, env = process.env } = {}) {
   const entry = mintVersion(repoPath, { name, state })
   const result = stageBoundarySquash(repoPath, {
-    message: message || `${entry.name} (${entry.version})`,
+    message: message || `chore(version): mint ${entry.name} (${entry.version})`,
+    trailer: `Arxa-Stage: version ${entry.version}`,
     env,
   })
   return { ...result, chip: versionChip(repoPath) }

@@ -112,7 +112,81 @@ export function apply(ctx, opts = {}) {
       const sessions = ctx.sessions
       if (!sessions || typeof sessions.create !== 'function') return {}
       const faces = {
-        spawn: ({ cwd }) => ({ id: sessions.create(undefined, { meta: { cwd } }).id }),
+        // D93 root-cause fix (2026-08-31): a dsh session whose cwd matches no
+        // workspace is born into the engine's GLOBAL archivedSessionIds — and
+        // WorkspaceRuntime.project() clears every selection of an archived
+        // session, so arxa rows could never hold an open conversation. Spawn
+        // now resolves-or-creates a workspace AT the session worktree (dsh's
+        // attachSession validates cwd === workspace.path) so every arxa
+        // session is a workspace resident from birth. Best-effort: residency
+        // failure degrades to the old behaviour, never blocks the spawn.
+        spawn: async ({ cwd, name, id: arxaId }) => {
+          // Root-cause fixes (2026-08-31):
+          // 1. UNIQUE ID — an omitted id makes the store mint a scope-local
+          //    "session-<n>"; those collide across scopes in the merged list,
+          //    so open(dshSessionId) could bind to a foreign stub. Derive a
+          //    unique, traceable id from the arxa session id instead.
+          // 2. LIVE AGENT — a bare sessions.create() yields a session with NO
+          //    agent, and the api layer (models/selectModel/prompt) resolves
+          //    sessions through agentFor() → fencedLiveAgent/agents.resume,
+          //    which refuses a live-but-agentless session ("cannot prepare
+          //    session while it is live"). Going through ctx.agents.create()
+          //    uses the engine's real factory so the session is born WITH its
+          //    agent loop — prompting works from the first message.
+          const wanted = typeof arxaId === 'string' && arxaId.trim() !== '' ? `arxa-${arxaId}` : undefined
+          const agents = ctx.agents
+          if (agents && typeof agents.create === 'function') {
+            try {
+              let setup
+              try {
+                const presets = typeof ctx.get === 'function' ? ctx.get('agentPresets') : undefined
+                if (presets && typeof presets.resolve === 'function' && typeof presets.mount === 'function') {
+                  setup = async (agentCtx) => {
+                    const resolved = await presets.resolve(undefined)
+                    await presets.mount(agentCtx, resolved.id)
+                  }
+                }
+              } catch { /* no preset roster — the host default composition stands */ }
+              const handle = await agents.create({
+                ...(wanted === undefined ? {} : { sessionId: wanted }),
+                meta: { cwd },
+                ...(setup === undefined ? {} : { setup })
+              })
+              const id = (handle && handle.session && handle.session.id) || (handle && handle.id) || wanted
+              try {
+                const registry = ctx.workspaceRegistry
+                if (registry && typeof registry.resolveByPath === 'function') {
+                  const { realpath } = await import('node:fs/promises')
+                  const canonical = await realpath(cwd)
+                  let ws = await registry.resolveByPath(canonical)
+                  if (!ws && typeof registry.createCanonical === 'function') ws = await registry.createCanonical(canonical, name)
+                  if (ws && typeof ws.attachSession === 'function') await ws.attachSession(id)
+                }
+              } catch { /* residency is best-effort — never blocks the spawn */ }
+              return { id }
+            } catch { /* factory unavailable/refused — degrade to a bare session */ }
+          }
+          let id
+          try {
+            id = sessions.create(wanted, { meta: { cwd } }).id
+          } catch (e) {
+            // Idempotent re-spawn (crash between create and annotate): reuse
+            // the session we already made for this arxa id.
+            if (!(wanted && typeof sessions.get === 'function' && sessions.get(wanted))) throw e
+            id = wanted
+          }
+          try {
+            const registry = ctx.workspaceRegistry
+            if (registry && typeof registry.resolveByPath === 'function') {
+              const { realpath } = await import('node:fs/promises')
+              const canonical = await realpath(cwd)
+              let ws = await registry.resolveByPath(canonical)
+              if (!ws && typeof registry.createCanonical === 'function') ws = await registry.createCanonical(canonical, name)
+              if (ws && typeof ws.attachSession === 'function') await ws.attachSession(id)
+            }
+          } catch { /* residency is best-effort — never blocks the spawn */ }
+          return { id }
+        },
         list: async () => {
           const title = ctx.sessionTitle
           const rows = sessions.list().map(async (s) => {
@@ -632,6 +706,139 @@ export function apply(ctx, opts = {}) {
             'github.publish': async () => {
               const cur = arg?.orgId ? await ensureOpen(arg.orgId) : handle()
               return cur.publishGithub()
+            },
+            // ---- Part B S3: composer git card engine actions (Q1/Q2/Q6/
+            // Q7/Q10 — docs/plans/git-card-part-b-grill.md). The card is
+            // SEAT-AWARE: a sessionId resolves the session worktree + its
+            // branch; without one it serves the org primary worktree. The
+            // engine NEVER drafts messages (Q6): card.commit.draft returns
+            // evidence only — the session model writes the subject.
+            'card.status': async () => {
+              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+              const cur = handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              let repoPath = cur.path
+              let branch = 'main'
+              let sessionRow = null
+              if (sid) {
+                sessionRow = gw.listSessions(cur.path).find((s) => s.id === sid) ?? null
+                if (!sessionRow) throw new Error('session-not-found: ' + sid)
+                repoPath = sessionRow.worktree
+                branch = sessionRow.branch
+              }
+              const porcelain = gw.runGit(['status', '--porcelain'], { cwd: repoPath, allowFail: true }) ?? ''
+              let staged = 0; let unstaged = 0; let untracked = 0
+              for (const line of porcelain.split('\n')) {
+                if (!line) continue
+                const x = line[0]; const y = line[1]
+                if (line.startsWith('??')) untracked++
+                else { if (x !== ' ' && x !== '?') staged++; if (y !== ' ' && y !== '?') unstaged++ }
+              }
+              let aheadBehind = null
+              if (gw.runGit(['rev-parse', '-q', '--verify', 'origin/main'], { cwd: cur.path, allowFail: true }) !== null) {
+                const c = gw.runGit(['rev-list', '--left-right', '--count', 'origin/main...HEAD'], { cwd: repoPath, allowFail: true })
+                if (c) { const [behind, ahead] = c.split(/\s+/).map(Number); aheadBehind = { ahead, behind } }
+              }
+              let manifest = {}
+              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch { /* unreadable — plain status */ }
+              return {
+                seat: { kind: sid ? 'session' : 'org', sessionId: sid, branch },
+                dirty: { staged, unstaged, untracked },
+                aheadBehind,
+                wipRun: gw.wipRun(repoPath).length,
+                chip: gw.versionChip(repoPath),
+                linked: Boolean(manifest.repoUrl),
+                localOnly: Boolean(manifest.localOnly),
+                frame: { wired: manifest.frameWired === true ? 'ok' : (manifest.frameWired ?? null), protection: manifest.frameProtection ?? null, runner: manifest.frameRunner ?? null },
+              }
+            },
+            /** Q6: EVIDENCE ONLY — the session model drafts the subject. */
+            'card.commit.draft': async () => {
+              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+              const cur = handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              const repoPath = sid
+                ? (gw.listSessions(cur.path).find((s) => s.id === sid) ?? {}).worktree ?? cur.path
+                : cur.path
+              return {
+                uncommittedStat: gw.runGit(['diff', '--stat'], { cwd: repoPath, allowFail: true }) ?? '',
+                wipSubjects: gw.wipRun(repoPath).map((c) => c.subject),
+                recentStageSubjects: gw.stageLog(repoPath).slice(0, 5).map((c) => c.subject),
+                rule: '<type>(<scope>): <what is now true, in words a human would use> — types: ' + gw.SUBJECT_TYPES.join(' '),
+              }
+            },
+            'card.commit': async () => {
+              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+              const cur = handle()
+              const subject = String(arg?.subject ?? '').split('\n')[0].trim()
+              if (!gw.SUBJECT_RE.test(subject)) throw new Error('subject-not-conventional: use <type>(<scope>): <what is now true> — got: ' + subject)
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (sid) {
+                // Session seat: squash + gate + merge to main (Q2 local half).
+                return gw.sessionStageBoundary(cur.path, sid, { message: subject })
+              }
+              // Org seat: squash on main + the same gate, parked=false only on green.
+              const sq = gw.stageBoundarySquash(cur.path, { message: subject, trailer: 'Arxa-Stage: org' })
+              const gate = gw.runGate(cur.path)
+              return { ...sq, gate, merged: gate.green, parked: !gate.green }
+            },
+            /** Push the session branch for PR purposes ONLY (the D73
+             * relaxation, Q2): main pushes ride boundaries/heal. */
+            'card.push': async () => {
+              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+              const cur = handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (!sid) throw new Error('card.push serves session seats — the org primary rides its boundaries')
+              const s = gw.listSessions(cur.path).find((x) => x.id === sid)
+              if (!s) throw new Error('session-not-found: ' + sid)
+              const g = await getGithub().catch(() => null)
+              if (!g) throw new Error('github-unavailable')
+              const creds = await g.gitCredentials()
+              const origin = gw.getOrigin(cur.path)
+              if (!origin) throw new Error('no-origin — connect this org to GitHub first')
+              const url = origin.replace('https://', 'https://' + encodeURIComponent(creds.login) + ':' + creds.token + '@')
+              const out = gw.runGit(['push', '-u', url, s.branch], { cwd: cur.path, allowFail: true })
+              return out !== null ? { ok: true, branch: s.branch } : { ok: false, reason: 'push-failed' }
+            },
+            'card.pr.create': async () => {
+              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+              const g = await getGithub().catch(() => null)
+              if (!g) throw new Error('github-unavailable')
+              const cur = handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (!sid) throw new Error('card.pr.create serves session seats')
+              const s = gw.listSessions(cur.path).find((x) => x.id === sid)
+              if (!s) throw new Error('session-not-found: ' + sid)
+              let manifest = {}
+              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
+              if (!manifest.repoOwner || !manifest.repoName) throw new Error('org-not-published')
+              const title = String(arg?.title ?? '').trim()
+              if (!gw.SUBJECT_RE.test(title)) throw new Error('title-not-conventional: the PR title becomes the squash-merge subject (Q7/Q8)')
+              const attribution = '— written by ' + String(arg?.model ?? 'the session model') + ' in arxa studio'
+              const body = [String(arg?.problem ?? ''), String(arg?.fix ?? ''), attribution].filter((x) => x !== '').join('\n\n')
+              // file-pr rule 1: dedupe — update, never duplicate.
+              const existing = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
+              if (Array.isArray(existing) && existing.length > 0) return { ok: true, existing: true, pr: { number: existing[0].number, url: existing[0].html_url } }
+              const pr = await g.prCreate(manifest.repoOwner, manifest.repoName, { title, body, head: s.branch, base: 'main' })
+              return { ok: true, pr: { number: pr.number, url: pr.html_url } }
+            },
+            'card.pr.status': async () => {
+              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+              const g = await getGithub().catch(() => null)
+              if (!g) throw new Error('github-unavailable')
+              const cur = handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (!sid) throw new Error('card.pr.status serves session seats')
+              const s = gw.listSessions(cur.path).find((x) => x.id === sid)
+              if (!s) throw new Error('session-not-found: ' + sid)
+              let manifest = {}
+              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
+              if (!manifest.repoOwner || !manifest.repoName) throw new Error('org-not-published')
+              const prs = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
+              if (!Array.isArray(prs) || prs.length === 0) return { ok: true, pr: null }
+              const pr = prs[0]
+              const checks = await g.prChecks(manifest.repoOwner, manifest.repoName, pr.head?.sha ?? s.branch).catch(() => ({ state: 'unknown', asleep: false, runs: [] }))
+              return { ok: true, pr: { number: pr.number, url: pr.html_url, state: pr.state }, checks }
             },
             // 'org.new-session' is GONE (grilled 2026-08-30): org rows
             // never host sessions — the legacy + path that reached this

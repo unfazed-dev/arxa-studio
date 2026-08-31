@@ -26,7 +26,7 @@ import { spawn } from 'node:child_process'
 
 import { statePath } from './state.js'
 
-export const SCOPES = ['repo', 'read:user', 'delete_repo']
+export const SCOPES = ['repo', 'read:user', 'delete_repo', 'workflow']
 
 export function defaultTokenBase() { return 'https://github.com' }
 export function defaultApiBase() { return 'https://api.github.com' }

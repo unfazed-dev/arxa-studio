@@ -3058,22 +3058,105 @@ window.__ModuleLoader__.load({
 		 * user asked for a blank page with guidance, not an inert input.
 		 * A BOUND blank session keeps its composer: typing there is a
 		 * legitimate first message into an org worktree. */
+		/** Composer git card (Part B S4, D75 — grilled 2026-08-31). A collapsible
+		 * card mounted (via portal) directly ABOVE the composer bar, bound to the
+		 * CURRENT org session's seat: status cluster (Q10), conventional-subject
+		 * commit field (Q7 — the SESSION model drafts: "Ask session" prefills the
+		 * composer with the evidence + the rule, per Q6 the engine never drafts),
+		 * tiered CTAs (Commit = local boundary + gate, Q2; Push = session branch
+		 * for PR purpose only, D73 relaxed; Open PR = dedupe-first, squash-merge
+		 * repo side, Q8). Hidden entirely when no session is focused. */
+		function ArxaGitCard({ t, stack }) {
+			const [open, setOpen] = react.useState(false);
+			const [data, setData] = react.useState(null);
+			const [subject, setSubject] = react.useState("");
+			const [prMode, setPrMode] = react.useState(false);
+			const [prProblem, setPrProblem] = react.useState("");
+			const [prFix, setPrFix] = react.useState("");
+			const [busy, setBusy] = react.useState(null);
+			const [err, setErr] = react.useState(null);
+			const sid = orgStore.get().currentSessionId;
+			const refresh = react.useCallback(() => {
+				if (!sid) { setData(null); return Promise.resolve(); }
+				return ORG_POST("card.status", { sessionId: sid }).then((r) => setData(r.result), () => {});
+			}, [sid]);
+			react.useEffect(() => { setSubject(""); setErr(null); refresh(); }, [refresh]);
+			react.useEffect(() => {
+				const id = window.setInterval(() => { if (!busy) refresh(); }, 30000);
+				return () => window.clearInterval(id);
+			}, [refresh, busy]);
+			if (!sid) return null;
+			const run = (label, fn) => { setBusy(label); setErr(null); Promise.resolve().then(fn).then(() => refresh()).then(() => setBusy(null), (e) => { setErr(String(e && e.message || e)); setBusy(null); }); };
+			const askDraft = () => {
+				ORG_POST("card.commit.draft", { sessionId: sid }).then((r) => {
+					const ta = stack.querySelector("[data-slot='conversation.composer.bar'] textarea");
+					if (!ta) { setErr("composer not found"); return; }
+					const ev = (type) => { const e = new Event(type, { bubbles: true }); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(ta, "Draft a conventional commit subject for the current changes. " + r.result.rule + " Evidence — stat: " + (r.result.uncommittedStat || "(committed via WIP)") + " Recent stage subjects: " + r.result.recentStageSubjects.join(" | ")); ta.dispatchEvent(ev("input")); };
+					ta.focus();
+					window.__arxaCardDraftRule = r.result.rule;
+				}, (e) => setErr(String(e && e.message || e)));
+			};
+			const chip = (k, v) => v == null ? null : (0, react_jsx_runtime.jsx)("span", { "data-arxa-card-chip": k, children: t("card." + k) + " " + v });
+			const d = data || {};
+			return (0, react_jsx_runtime.jsxs)("div", { "data-arxa-git-card": "", "data-open": open ? "" : null, children: [
+				(0, react_jsx_runtime.jsxs)("button", { type: "button", "data-arxa-card-head": "", onClick: () => setOpen(!open), children: [
+					"Git", " · ", (d.seat && d.seat.branch) || "…", d.chip ? " · " + (d.chip.label || "") : "",
+					(0, react_jsx_runtime.jsx)("span", { "data-arxa-card-caret": "", children: open ? "▾" : "▸" })
+				] }),
+				open ? (0, react_jsx_runtime.jsxs)("div", { "data-arxa-card-body": "", children: [
+					(0, react_jsx_runtime.jsxs)("div", { "data-arxa-card-status": "", children: [
+						chip("dirty", d.dirty ? (d.dirty.staged + "+" + d.dirty.unstaged + "?" + d.dirty.untracked) : "0"),
+						chip("ahead", d.aheadBehind ? d.aheadBehind.ahead : null),
+						chip("behind", d.aheadBehind ? d.aheadBehind.behind : null),
+						chip("wip", d.wipRun != null ? d.wipRun : null),
+						d.localOnly ? chip("localOnly", "") : null,
+						d.frame && d.frame.protection ? chip("frame", d.frame.protection) : null
+					] }),
+					(0, react_jsx_runtime.jsx)("input", { "data-arxa-card-subject": "", placeholder: t("card.subjectPlaceholder"), value: subject, onChange: (e) => setSubject(e.target.value) }),
+					(0, react_jsx_runtime.jsx)("button", { type: "button", onClick: askDraft, children: t("card.askDraft") }),
+					prMode ? (0, react_jsx_runtime.jsxs)("div", { "data-arxa-card-pr": "", children: [
+						(0, react_jsx_runtime.jsx)("input", { "data-arxa-card-pr-problem": "", placeholder: t("card.prProblem"), value: prProblem, onChange: (e) => setPrProblem(e.target.value) }),
+						(0, react_jsx_runtime.jsx)("input", { "data-arxa-card-pr-fix": "", placeholder: t("card.prFix"), value: prFix, onChange: (e) => setPrFix(e.target.value) })
+					] }) : null,
+					(0, react_jsx_runtime.jsxs)("div", { "data-arxa-card-actions": "", children: [
+						(0, react_jsx_runtime.jsx)("button", { type: "button", disabled: busy != null || subject.trim() === "", onClick: () => run("commit", () => ORG_POST("card.commit", { sessionId: sid, subject }).then(() => setPrMode(false))), children: busy === "commit" ? t("card.busy") : t("card.commit") }),
+						(0, react_jsx_runtime.jsx)("button", { type: "button", disabled: busy != null, onClick: () => run("push", () => ORG_POST("card.push", { sessionId: sid })), children: busy === "push" ? t("card.busy") : t("card.push") }),
+						(0, react_jsx_runtime.jsx)("button", { type: "button", disabled: busy != null || subject.trim() === "", onClick: () => (prMode ? run("pr", () => ORG_POST("card.pr.create", { sessionId: sid, title: subject, problem: prProblem, fix: prFix }).then((r) => { if (r.result && r.result.pr && r.result.pr.url) window.__arxaLastPrUrl = r.result.pr.url; })) : setPrMode(true)), children: busy === "pr" ? t("card.busy") : (prMode ? t("card.prOpen") : t("card.pr")) })
+					] }),
+					err ? (0, react_jsx_runtime.jsx)("div", { "data-arxa-card-err": "", children: err }) : null
+				] }) : null
+			] });
+		}
 		function ArxaHeroGuide({ t }) {
 			const ref = (0, react.useRef)(null);
+			const [cardHost, setCardHost] = (0, react.useState)(null);
+			const [composerStack, setComposerStack] = (0, react.useState)(null);
 			(0, react.useEffect)(() => {
 				const stack = ref.current ? ref.current.parentElement?.parentElement?.parentElement : null;
 				if (!stack) return;
+				setComposerStack(stack);
+				// S4: the git card's portal host sits directly ABOVE the composer
+				// bar (harmonious with the artifact-viewer's right column — it owns
+				// the column, this owns the strip above the input).
+				const host = document.createElement("div");
+				host.dataset.arxaCardHost = "";
+				const bar = stack.querySelector("[data-slot='conversation.composer.bar']");
+				if (bar) stack.insertBefore(host, bar); else stack.appendChild(host);
+				setCardHost(host);
 				const s = arxaClientSessions;
 				const snap = s && s.list && typeof s.list.getSnapshot === "function" ? s.list.getSnapshot() : null;
 				const unbound = !snap || snap.current === void 0 || snap.current === null;
 				if (unbound) stack.setAttribute("data-arxa-empty", "");
 				else stack.removeAttribute("data-arxa-empty");
-				return () => { stack.removeAttribute("data-arxa-empty"); };
+				return () => { stack.removeAttribute("data-arxa-empty"); if (host.parentNode) host.parentNode.removeChild(host); setCardHost(null); };
 			});
-			return (0, react_jsx_runtime.jsx)("div", {
+			return (0, react_jsx_runtime.jsxs)("div", {
 				ref,
 				"data-arxa-hero-guide": "",
-				children: t("hero.guide")
+				children: [
+					t("hero.guide"),
+					cardHost && composerStack ? (function (P) { return P ? P((0, react_jsx_runtime.jsx)(ArxaGitCard, { t, stack: composerStack }), cardHost) : null })((0, react.useMemo)(function () { try { return require("react-dom").createPortal } catch (e) { return null } }, [])) : null
+				]
 			});
 		}
 		// Empty-state CSS (2026-08-30): inside a marked stack the text
@@ -3083,6 +3166,20 @@ window.__ModuleLoader__.load({
 			const tag = document.createElement("style");
 			tag.dataset.pluginCss = "arxa-sidebar-empty-state";
 			tag.textContent = "[data-arxa-hero-guide]{font-size:12.5px;opacity:.72;line-height:1.55;max-width:470px}"
+				+ "[data-arxa-card-host]{flex:none}"
+				+ "[data-arxa-git-card]{border:1px solid color-mix(in oklab,currentColor 14%,transparent);border-radius:10px;margin:0 12px 6px;font-size:12px;background:color-mix(in oklab,currentColor 4%,transparent)}"
+				+ "[data-arxa-card-head]{display:flex;gap:6px;align-items:center;width:100%;padding:6px 10px;background:none;border:none;color:inherit;font:inherit;cursor:pointer;opacity:.85}"
+				+ "[data-arxa-card-head]:hover{opacity:1}"
+				+ "[data-arxa-card-caret]{margin-left:auto}"
+				+ "[data-arxa-card-body]{padding:4px 10px 10px;display:flex;flex-direction:column;gap:6px}"
+				+ "[data-arxa-git-card]:not([data-open]) [data-arxa-card-body]{display:none}"
+				+ "[data-arxa-card-status]{display:flex;flex-wrap:wrap;gap:4px 10px;opacity:.8}"
+				+ "[data-arxa-card-subject],[data-arxa-card-pr] input{width:100%;padding:5px 8px;border-radius:7px;border:1px solid color-mix(in oklab,currentColor 18%,transparent);background:transparent;color:inherit;font:inherit}"
+				+ "[data-arxa-card-pr]{display:flex;flex-direction:column;gap:4px}"
+				+ "[data-arxa-card-actions]{display:flex;gap:6px}"
+				+ "[data-arxa-card-actions] button{padding:4px 10px;border-radius:7px;border:1px solid color-mix(in oklab,currentColor 22%,transparent);background:transparent;color:inherit;font:inherit;cursor:pointer}"
+				+ "[data-arxa-card-actions] button:disabled{opacity:.45;cursor:default}"
+				+ "[data-arxa-card-err]{color:#e5484d;font-size:11.5px}"
 				+ "[data-arxa-empty] [data-slot='conversation.composer.bar']{display:none!important}"
 				+ "[data-arxa-empty] .wSkVaW_heroWorkspaceRow>button{display:none!important}"
 				+ "[data-arxa-empty] [data-slot='conversation.hero.agentPreset']{display:none!important}"
@@ -4294,6 +4391,21 @@ window.__ModuleLoader__.load({
 			"disconnect.doneKept": "Disconnected — repositories kept on GitHub.",
 			"disconnect.doneRemoved": "Disconnected — removed from GitHub: {repos}",
 			"rows.ghSynced": "Synced with GitHub",
+			"card.dirty": "changes",
+			"card.ahead": "↑",
+			"card.behind": "↓",
+			"card.wip": "wip",
+			"card.localOnly": "local-only",
+			"card.frame": "frame",
+			"card.subjectPlaceholder": "commit subject — <type>(<scope>): what is now true",
+			"card.askDraft": "Ask the session to draft",
+			"card.commit": "Commit",
+			"card.push": "Push branch",
+			"card.pr": "Open PR…",
+			"card.prOpen": "Create the PR",
+			"card.prProblem": "Problem (the user words)",
+			"card.prFix": "How it was fixed",
+			"card.busy": "Working…",
 			"org.create.ghToggle": "Publish to GitHub",
 			"org.create.ghOnHint": "A private GitHub repository is created and kept in sync.",
 			"org.create.ghOffHint": "This organisation stays on this device only. Connect it later from its menu.",
@@ -4444,6 +4556,21 @@ window.__ModuleLoader__.load({
 			"disconnect.doneKept": "已断开 — 仓库保留在 GitHub。",
 			"disconnect.doneRemoved": "已断开 — 已从 GitHub 移除：{repos}",
 			"rows.ghSynced": "已同步到 GitHub",
+			"card.dirty": "变更",
+			"card.ahead": "↑",
+			"card.behind": "↓",
+			"card.wip": "草稿",
+			"card.localOnly": "仅本地",
+			"card.frame": "框架",
+			"card.subjectPlaceholder": "提交主题 — <type>(<scope>): 现在为真的事实",
+			"card.askDraft": "让会话起草",
+			"card.commit": "提交",
+			"card.push": "推送分支",
+			"card.pr": "发起 PR…",
+			"card.prOpen": "创建 PR",
+			"card.prProblem": "问题（用户的原话）",
+			"card.prFix": "如何修复的",
+			"card.busy": "处理中…",
 			"org.create.ghToggle": "发布到 GitHub",
 			"org.create.ghOnHint": "将创建私有 GitHub 仓库并保持同步。",
 			"org.create.ghOffHint": "该组织仅保存在本机。之后可从其菜单连接 GitHub。",

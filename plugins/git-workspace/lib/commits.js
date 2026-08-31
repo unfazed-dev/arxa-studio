@@ -96,7 +96,7 @@ export function wipRun(repoPath, env = process.env, baseRef = STAGE_BASE_REF) {
  *        `baseRef` (phase 4): per-session boundary ref — see stageBase.
  * @returns {{ squashed: boolean, sha: string|null }}
  */
-export function stageBoundarySquash(repoPath, { message, env = process.env, baseRef = STAGE_BASE_REF }) {
+export function stageBoundarySquash(repoPath, { message, trailer, env = process.env, baseRef = STAGE_BASE_REF }) {
   if (!message) throw new TypeError('stageBoundarySquash requires a message')
   // Final WIP auto-commit so the squash is built from committed state.
   // If this throws (index.lock, etc.) the squash aborts with it.
@@ -107,12 +107,14 @@ export function stageBoundarySquash(repoPath, { message, env = process.env, base
   if (base === tip) return { squashed: false, sha: null } // nothing since last boundary
 
   const branchRef = currentBranchRef(repoPath, env)
-  const subject = `${STAGE_PREFIX} ${message}`
+  // Q7 (2026-08-31): the stage subject is the caller's message VERBATIM —
+  // conventional everywhere history looks; the old `stage:` prefix is
+  // dead. Provenance rides a git TRAILER (Arxa-Stage: <origin>) —
+  // machine-parseable, invisible in subjects.
+  const treeArgs = ['commit-tree', `${tip}^{tree}`, '-p', base, '-m', message]
+  if (trailer) treeArgs.push('-m', trailer)
   // Hook-free, index-free clean commit: same tree as HEAD, parent = base.
-  const stageSha = runGit(
-    ['commit-tree', `${tip}^{tree}`, '-p', base, '-m', subject],
-    { cwd: repoPath, env, identity: STAGE_IDENTITY },
-  )
+  const stageSha = runGit(treeArgs, { cwd: repoPath, env, identity: STAGE_IDENTITY })
   // Atomic move of the branch: fails if someone advanced it under us.
   runGit(['update-ref', branchRef, stageSha, tip], { cwd: repoPath, env })
   runGit(['update-ref', baseRef, stageSha], { cwd: repoPath, env })

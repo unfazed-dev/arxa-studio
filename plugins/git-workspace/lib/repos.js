@@ -120,7 +120,7 @@ function snapshotWorkerEnv(orgPath, env) {
  * healing, and callers with no event loop to protect. */
 export function snapshotOrgRepo(orgPath, env = process.env) {
   runGit(['add', '-A'], { cwd: orgPath, env })
-  runGit(['commit', '-m', 'stage: scaffold organisation'], { cwd: orgPath, env })
+  runGit(['commit', '-m', 'chore(org): scaffold the organisation tree'], { cwd: orgPath, env })
   runGit(['update-ref', 'refs/arxa/stage-base', 'HEAD'], { cwd: orgPath, env })
 }
 
@@ -278,7 +278,7 @@ export function initProjectRepo(projectPath, env = process.env) {
   if (isRepo(projectPath, env)) return { path: projectPath, initialised: false }
   initRepo(projectPath, env)
   runGit(['add', '-A'], { cwd: projectPath, env })
-  runGit(['commit', '-m', 'stage: scaffold project'], { cwd: projectPath, env })
+  runGit(['commit', '-m', 'chore(project): scaffold the project tree'], { cwd: projectPath, env })
   runGit(['update-ref', 'refs/arxa/stage-base', 'HEAD'], { cwd: projectPath, env })
   return { path: projectPath, initialised: true }
 }

@@ -10,10 +10,14 @@
  */
 
 import { getClientId, defaultApiBase, defaultTokenBase, linkViaBrowser, linkViaDevice, createPrivateRepoApi, renameRepoApi, repoNameAvailableApi, deleteRepoApi, refreshAccessToken, SCOPES, SHIPPED_CLIENT_ID, defaultOpen } from './auth.js'
+import { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prChecksApi } from './frame.js'
+import { ensureRunner } from './runner.js'
 import { createKeyring } from './keyring.js'
 import { readState, writeState, clearState } from './state.js'
 
 export { SCOPES, createPkcePair, pkceChallenge, getClientId, loadClientId, linkViaBrowser, linkViaDevice, createPrivateRepoApi, renameRepoApi, repoNameAvailableApi } from './auth.js'
+export { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prChecksApi } from './frame.js'
+export { ensureRunner, runnerExists } from './runner.js'
 export { createKeyring, KEYCHAIN_SERVICE, SECURITY_PATH } from './keyring.js'
 export { readState, writeState, clearState, statePath, arxaHome } from './state.js'
 
@@ -144,7 +148,12 @@ export function createGithubLink({
     } catch {
       tokenAvailable = false
     }
-    return { ...state, tokenAvailable }
+    // S1 (2026-08-31): a link that predates the workflow scope cannot push
+    // ci.yml (GitHub refuses OAuth workflow-file pushes without it) — the
+    // frame wiring records the failure and retries; the fix is ONE re-link,
+    // the same unavoidable class as D76's refresh-token migration.
+    const missingScopes = SCOPES.filter((s) => !(state.scopes ?? []).includes(s))
+    return { ...state, tokenAvailable, missingScopes }
   }
 
   // ---- D76 token machinery: expiry clock + self-refresh -------------------
@@ -246,6 +255,60 @@ export function createGithubLink({
     return { login: state.login, token: accessToken }
   }
 
+  /** Wire the CI frame on a published repo (Part B S1): squash-only repo
+   *  settings + branch protection (strict, frame-check required). The
+   *  measured free-plan 403 (S0 V1) is NOT an error — returned as
+   *  protection:'plan-limited'; the card enforces gates client-side
+   *  regardless (Q2). Payloads come from git-workspace/lib/frame.js. */
+  async function wireFrame(owner, name, payloads) {
+    const run = (token) => (async () => {
+      await settingsApi({ owner, name, payload: payloads.settings, accessToken: token, fetch, apiBase })
+      const prot = await protectionApi({ owner, name, payload: payloads.protection, accessToken: token, fetch, apiBase })
+      return { ok: true, protection: prot.planLimited ? 'plan-limited' : 'ok' }
+    })()
+    try {
+      return await run(await getToken())
+    } catch (err) {
+      if (!String(err?.message ?? err).includes('(401)')) throw err
+      return run(await getToken(true))
+    }
+  }
+
+  /** Ensure a self-hosted runner (canon labels) exists on THIS machine for
+   *  owner/name — one instance per repo under ~/.arxa/runners/, user
+   *  LaunchAgent, idempotent (Q5). Never throws: { ok:false, reason }. */
+  async function ensureRunnerFace(owner, name) {
+    return ensureRunner({
+      owner,
+      name,
+      registrationToken: async () => registrationTokenApi({ owner, name, accessToken: await getToken(), fetch, apiBase }),
+      latestRunnerTarball: async () => latestRunnerTarballApi({ accessToken: await getToken(), fetch, apiBase }),
+    })
+  }
+
+  /** PR faces (Part B Q1/Q7/Q8): create (dedupe first), checks with
+   *  runner-asleep classification, squash merge. 401 → one refresh retry. */
+  async function withRefresh(fn) {
+    try {
+      return await fn(await getToken())
+    } catch (err) {
+      if (!String(err?.message ?? err).includes('(401)')) throw err
+      return fn(await getToken(true))
+    }
+  }
+  function prCreate(owner, name, { title, body, head, base }) {
+    return withRefresh((t) => prCreateApi({ owner, name, title, body, head, base, accessToken: t, fetch, apiBase }))
+  }
+  function prListForHead(owner, name, head) {
+    return withRefresh((t) => prListForHeadApi({ owner, name, head, accessToken: t, fetch, apiBase }))
+  }
+  function prSquashMerge(owner, name, number) {
+    return withRefresh((t) => prSquashMergeApi({ owner, name, number, accessToken: t, fetch, apiBase }))
+  }
+  function prChecks(owner, name, ref) {
+    return withRefresh((t) => prChecksApi({ owner, name, ref, accessToken: t, fetch, apiBase }))
+  }
+
   /** Latest device-flow code for the UI (null until a link() starts one). */
   function deviceCode() {
     return lastDeviceCode
@@ -261,6 +324,12 @@ export function createGithubLink({
     repoNameTaken,
     deleteRepo,
     gitCredentials,
+    wireFrame,
+    ensureRunner: ensureRunnerFace,
+    prCreate,
+    prListForHead,
+    prSquashMerge,
+    prChecks,
     deviceCode,
   }
 }

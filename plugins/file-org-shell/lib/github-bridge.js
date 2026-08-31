@@ -95,6 +95,52 @@ export function createGithubBridge(faces = {}) {
     }
   }
 
+  /** Wire the CI frame (Part B S1): squash-only settings + branch
+    * protection on a published repo. protection:'plan-limited' is the
+    * measured free-plan state (S0 V1) — recorded, never fatal. */
+  async function wireFrame(owner, name, payloads) {
+    if (typeof f.wireFrame !== 'function') return { ok: false, reason: 'github-unavailable' }
+    try {
+      return await f.wireFrame(owner, name, payloads)
+    } catch (err) {
+      return { ok: false, reason: 'frame-wire-failed', error: String(err?.message ?? err) }
+    }
+  }
+
+  /** Ensure a canon self-hosted runner exists on this machine for the
+    * repo (Q5). Never throws. */
+  async function ensureRunner(owner, name) {
+    if (typeof f.ensureRunner !== 'function') return { ok: false, reason: 'github-unavailable' }
+    try {
+      return await f.ensureRunner(owner, name)
+    } catch (err) {
+      return { ok: false, reason: 'runner-failed', error: String(err?.message ?? err) }
+    }
+  }
+
+  /** PR faces (Part B): create / list-for-head / squash merge / checks.
+     * Same throw-proof shape; checks classify queued as runner-asleep. */
+  async function prCreate(owner, name, fields) {
+    if (typeof f.prCreate !== 'function') return { ok: false, reason: 'github-unavailable' }
+    try { return { ok: true, pr: await f.prCreate(owner, name, fields) } }
+    catch (err) { return { ok: false, reason: 'pr-create-failed', error: String(err?.message ?? err) } }
+  }
+  async function prListForHead(owner, name, head) {
+    if (typeof f.prListForHead !== 'function') return { ok: false, reason: 'github-unavailable' }
+    try { return { ok: true, prs: await f.prListForHead(owner, name, head) } }
+    catch (err) { return { ok: false, reason: 'pr-list-failed', error: String(err?.message ?? err) } }
+  }
+  async function prSquashMerge(owner, name, number) {
+    if (typeof f.prSquashMerge !== 'function') return { ok: false, reason: 'github-unavailable' }
+    try { return { ok: true, merged: await f.prSquashMerge(owner, name, number) } }
+    catch (err) { return { ok: false, reason: 'pr-merge-failed', error: String(err?.message ?? err) } }
+  }
+  async function prChecks(owner, name, ref) {
+    if (typeof f.prChecks !== 'function') return { ok: false, reason: 'github-unavailable' }
+    try { return { ok: true, checks: await f.prChecks(owner, name, ref) } }
+    catch (err) { return { ok: false, reason: 'pr-checks-failed', error: String(err?.message ?? err) } }
+  }
+
   /** → { ok:true, login, token } | { ok:false, reason } — throw-proof
     * (D73): the push half needs HTTPS credentials; an unavailable face
     * degrades exactly like the others. The token is handed ONLY to the
@@ -112,7 +158,7 @@ export function createGithubBridge(faces = {}) {
     }
   }
 
-  return { status, createPrivateRepo, renameRepo, repoNameTaken, deleteRepo, gitCredentials }
+  return { status, createPrivateRepo, renameRepo, repoNameTaken, deleteRepo, wireFrame, ensureRunner, prCreate, prListForHead, prSquashMerge, prChecks, gitCredentials }
 }
 
 /**

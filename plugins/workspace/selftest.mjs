@@ -442,7 +442,7 @@ try {
     // records it as a nested repo (gitlink) and the tree is clean.
     runGit(['init'], { cwd: proj })
     runGit(['add', '-A'], { cwd: proj })
-    runGit(['commit', '-m', 'stage: scaffold project'], { cwd: proj })
+    runGit(['commit', '-m', 'chore(project): scaffold the project tree'], { cwd: proj })
     initOrgRepo(v2org.path)
     writeOrgStampVersion(v2org.path, 2)
     runGit(['add', '-A'], { cwd: v2org.path })
