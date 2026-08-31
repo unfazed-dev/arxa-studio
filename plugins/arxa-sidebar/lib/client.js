@@ -1775,6 +1775,7 @@ window.__ModuleLoader__.load({
 										open: () => { orgStore.mutate("org.open", { orgId: group.workspaceId }).catch(() => {}); }
 										}
 									})]),
+									ARXA_LEAF_FILES(group),
 									(expandedSessionGroups.includes(group.key) ? group.sessions : group.sessions.slice(0, COLLAPSED_SESSION_LIMIT)).map((node) => {
 										const sameGroupDrag = drag !== null && drag.accountKey === group.key;
 										return (0, react_jsx_runtime.jsx)(SessionNodeItem, {
@@ -1834,7 +1835,7 @@ window.__ModuleLoader__.load({
 									})
 								]
 							}, group.key);
-						}), ARXA_FILES_AFTER_ORGS(), ARXA_TRASH_AFTER_ORGS()]
+						}), ARXA_TRASH_AFTER_ORGS()]
 					}),
 					(0, react_jsx_runtime.jsx)("span", { className: WorkspaceBrowser_module_css_default.fade })
 				]
@@ -3275,16 +3276,27 @@ window.__ModuleLoader__.load({
 		// True on container pseudo groups (org / dock / project): the stock
 		// folder row is suppressed there — the OrgContainerRow IS the row.
 		const ARXA_IS_CONTAINER_GROUP = (workspaceId) => ((orgStore.get().emit ?? {})[workspaceId] ?? []).length > 0;
+		/** T4 v2: a leaf worktree's files render INSIDE its group, under the
+		 * row, only while the group is expanded — "full" mode (the worktree
+		 * is real content: subdirs expand in place). Container groups render
+		 * their listing on the OrgContainerRow itself instead. */
+		const ARXA_LEAF_FILES = (group) => {
+			if (!group || group.expanded !== true || group.workspaceId === void 0) return null;
+			if (ARXA_IS_CONTAINER_GROUP(group.workspaceId)) return null;
+			const { ws } = wsParts(group.workspaceId);
+			if (ws === "") return null;
+			return (0, react_jsx_runtime.jsx)(ArxaDirRows, { dir: ws, depth: ws.split("/").length, mode: "full" }, "arxa-files");
+		};
 		/** D83: the Trash surface rides the GROUPED org tree's tail (gen
 		 * splice 6z) — directly under the last org row, ALWAYS, instead of
 		 * the sidebar's very bottom where the stock sessions region pushed
 		 * it hundreds of px below the orgs once an org is open. The flat
 		 * "In one list" stock mode has no org rows — no trash there. */
 		const ARXA_TRASH_AFTER_ORGS = () => orgT ? (0, react_jsx_runtime.jsx)(TrashSection, { t: orgT, key: "arxa-trash" }) : null;
-		/** D90/T4: the org Files section rides the tree tail the same way —
-		 * under the org rows, lazy per-directory, files open the docked viewer
-		 * column through the arxa-av-open bridge (org lane). */
-		const ARXA_FILES_AFTER_ORGS = () => orgT ? (0, react_jsx_runtime.jsx)(ArxaFilesSection, { t: orgT, key: "arxa-files" }) : null;
+		/** T4 v2: the separate tail Files section is GONE (user direction —
+		 * files belong inside the tree under the owning row). ArxaDirRows +
+		 * ARXA_LEAF_FILES render inline instead; the tree-read route and the
+		 * arxa-av-open bridge are unchanged. */
 		const ARXA_SELECT_WS = (workspaceId) => {
 			const { orgId, ws } = wsParts(workspaceId);
 			if (ws !== "") orgStore.selectRow({ orgId, rowId: ws });
@@ -3419,11 +3431,22 @@ window.__ModuleLoader__.load({
 				else if (id === "trash" && isOrg) orgStore.mutate("org.trash", { orgId: d.orgId }).catch(() => {});
 				else if (id === "trash") orgStore.mutate("project.trash", { orgId: d.orgId, projectSlug: d.slug }).catch(() => {});
 			};
-			return (0, react_jsx_runtime.jsxs)("div", {
+			// T4 v2: the row's own directory content rides UNDER the row when
+			// expanded — files belong where they live, not in a tail section.
+			// files-only mode: this level's subdirectories already exist as
+			// tree containers (docks / project leaves), so listing them again
+			// would duplicate the tree.
+			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsxs)("div", {
 				className: clsx(Rows_module_css_default.projectRow, menuOpen && Rows_module_css_default.menuOpen),
 				role: "treeitem",
 				"aria-expanded": open,
-				onClick: () => orgStore.toggleExpand(d.key),
+				onClick: () => {
+					orgStore.toggleExpand(d.key);
+					// T4 v2: expanding an org row OPENS the org (single handle) —
+					// the inline file listings ride the open-org tree-read lane;
+					// a collapsed-row browse would 403 with no handle at all.
+					if (isOrg && !open) orgStore.mutate("org.open", { orgId: d.orgId }).catch(() => {});
+				},
 				style: { marginLeft: (offset ?? 4 + d.depth * 14) + "px", cursor: "pointer", borderRadius: 6, marginTop: isOrg ? 4 : 0, fontWeight: isOrg ? 600 : void 0 },
 				children: [
 					(0, react_jsx_runtime.jsx)("span", {
@@ -3488,7 +3511,9 @@ window.__ModuleLoader__.load({
 						})]
 					})
 				]
-			}, d.key);
+				}, d.key),
+				open ? (0, react_jsx_runtime.jsx)(ArxaDirRows, { dir: d.kind === "org" ? "" : d.kind === "dock" ? d.slug : "projects/" + d.slug, depth: d.depth + 1, mode: "files-only" }, "arxa-dir:" + d.key) : null
+			] }, d.key);
 		}
 		function TrashSection({ t }) {
 			// D80/D81/D82: the trash is a PERMANENT, discoverable row. Two groups:
@@ -3587,26 +3612,25 @@ window.__ModuleLoader__.load({
 				]
 			});
 		}
-		/** D90/T4 — org Files section: lazy per-directory listing through
-		 * GET /__arxa/artifacts/tree?dir=… (dot-entries are excluded
-		 * server-side; .arxa/ is reserved). A FILE row opens the docked viewer
-		 * column via the arxa-av-open window-event bridge (org lane — relPath
-		 * resolves against the open org origin). Never auto-opens; only
-		 * renders while an organisation is open. */
-		function ArxaFilesSection({ t }) {
-			const openOrg = useOrg((s) => (s.orgs || []).find((o) => o.open) || null);
-			const [open, setOpen] = (0, react.useState)(false);
-			const [entries, setEntries] = (0, react.useState)({});
-			const [expanded, setExpanded] = (0, react.useState)({});
-			const orgKey = openOrg ? ((openOrg.manifest && openOrg.manifest.id) || openOrg.id || "") : "";
-			(0, react.useEffect)(() => { setEntries({}); setExpanded({}); setOpen(false); }, [orgKey]);
-			const loadDir = (0, react.useCallback)(async (dir) => {
-				setEntries((s) => ({ ...s, [dir]: { status: "loading", dirs: [], files: [] } }));
+		/** D90/T4 v2 (2026-09-01, user direction): org files live INSIDE the
+		 * tree — under the row that owns the directory — never in a separate
+		 * tail section. ArxaDirRows lazily lists ONE directory of the open
+		 * org (tree-read token per attempt, one 403 retry) and recurses for
+		 * subdirectories. Modes:
+		 *   - "files-only" under rows whose subdirectories ALREADY exist as
+		 *     tree containers (org root → docks + projects, dock → its
+		 *     leaves, project → its leaf containers): files land in place,
+		 *     nothing is listed twice;
+		 *   - "full" inside leaf worktrees, where the tree is real content —
+		 *     subdirectories expand in place, file rows open the docked
+		 *     viewer column through the arxa-av-open bridge. */
+		function ArxaDirRows({ dir, depth, mode }) {
+			const [entry, setEntry] = (0, react.useState)(null);
+			const [openDirs, setOpenDirs] = (0, react.useState)({});
+			const load = (0, react.useCallback)(async (theDir) => {
+				setEntry({ status: "loading", dirs: [], files: [] });
 				// One fresh token per attempt; a 403 retries ONCE with a newly
-				// minted token (2026-09-01): a mint-to-use race (org handle
-				// swapping under a resize/remount) verified bad exactly once
-				// live — the retry turns that class into a self-heal instead
-				// of a dead error row. Two strikes still surfaces the error.
+				// minted token (mint-to-use race seen once live 2026-08-31).
 				const mint = async () => {
 					const tokRes = await fetch("/__arxa/artifacts/token", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "tree-read" }) });
 					const tokBody = await tokRes.json().catch(() => ({}));
@@ -3614,7 +3638,7 @@ window.__ModuleLoader__.load({
 					return tokBody.token || "";
 				};
 				const list = async (token) => {
-					const res = await fetch("/__arxa/artifacts/tree?dir=" + encodeURIComponent(dir || "") + "&avt=" + encodeURIComponent(token));
+					const res = await fetch("/__arxa/artifacts/tree?dir=" + encodeURIComponent(theDir || "") + "&avt=" + encodeURIComponent(token));
 					const body = await res.json().catch(() => ({}));
 					return { ok: res.ok, status: res.status, body };
 				};
@@ -3622,79 +3646,49 @@ window.__ModuleLoader__.load({
 					let out = await list(await mint());
 					if (!out.ok && out.status === 403) out = await list(await mint());
 					if (!out.ok) throw new Error(out.body.error || ("tree " + out.status));
-					setEntries((s) => ({ ...s, [dir]: { status: "ready", dirs: out.body.dirs || [], files: out.body.files || [] } }));
+					setEntry({ status: "ready", dirs: out.body.dirs || [], files: out.body.files || [] });
 				} catch (e) {
-					setEntries((s) => ({ ...s, [dir]: { status: "error", dirs: [], files: [], error: String((e && e.message) || e) } }));
+					setEntry({ status: "error", dirs: [], files: [], error: String((e && e.message) || e) });
 				}
 			}, []);
-			const toggleDir = (dir) => {
-				setExpanded((s) => ({ ...s, [dir]: !s[dir] }));
-				if (!expanded[dir]) {
-					const have = entries[dir];
-					if (!have || have.status === "error") void loadDir(dir);
-				}
-			};
+			(0, react.useEffect)(() => { void load(dir); }, [dir, load]);
+			if (!entry) return null;
+			const childStyle = (d) => ({ marginLeft: (6 + d * 14) + "px" });
 			const openFile = (relPath) => {
 				try { window.dispatchEvent(new CustomEvent("arxa-av-open", { detail: { relPath } })); } catch { /* no bridge — ignore */ }
 			};
-			const childStyle = (depth) => ({ marginLeft: (6 + depth * 14) + "px" });
-			const statusRow = (depth, text) => (0, react_jsx_runtime.jsx)("div", { style: { ...childStyle(depth), fontSize: 12, opacity: 0.6, padding: "2px 8px" }, children: text });
-			const dirRow = (dir, name, depth) => {
-				const isOpen = !!expanded[dir];
-				const entry = entries[dir];
-				return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-					(0, react_jsx_runtime.jsxs)("div", {
-						className: Rows_module_css_default.projectRow,
-						role: "treeitem",
-						"aria-expanded": isOpen,
-						onClick: () => toggleDir(dir),
-						style: { ...childStyle(depth), fontWeight: 500, cursor: "pointer", borderRadius: 6 },
-						children: [
-							(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.chevron), children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTriangleRightFill14, { className: clsx(Rows_module_css_default.arrow, isOpen && Rows_module_css_default.arrowOpen) }) }),
-							(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder), children: isOpen ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {}) }),
-							(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: name }) })
-						]
-					}),
-					isOpen && (!entry || entry.status === "loading") ? statusRow(depth + 1, "…") : null,
-					isOpen && entry && entry.status === "error" ? statusRow(depth + 1, entry.error) : null,
-					isOpen && entry && entry.status === "ready" ? [
-						...entry.dirs.map((d) => dirRow(dir ? dir + "/" + d : d, d, depth + 1)),
-						...entry.files.map((f) => fileRow(dir ? dir + "/" + f : f, f, depth + 1))
-					] : null
-				] }, "d:" + dir);
-			};
-			const fileRow = (relPath, name, depth) => (0, react_jsx_runtime.jsxs)("div", {
+			const statusRow = (d, text) => (0, react_jsx_runtime.jsx)("div", { style: { ...childStyle(d), fontSize: 12, opacity: 0.6, padding: "2px 8px" }, children: text });
+			const fileRow = (relPath, name, d) => (0, react_jsx_runtime.jsxs)("div", {
 				className: Rows_module_css_default.projectRow,
 				role: "treeitem",
 				onClick: () => openFile(relPath),
-				style: { ...childStyle(depth), cursor: "pointer", borderRadius: 6 },
+				style: { ...childStyle(d), cursor: "pointer", borderRadius: 6 },
 				children: [
 					(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder) }),
 					(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, style: { opacity: 0.92 }, children: name }) })
 				]
 			}, "f:" + relPath);
-			if (!openOrg) return null;
-			const root = entries[""];
-			return (0, react_jsx_runtime.jsxs)("div", { style: { marginTop: 6 }, children: [
+			const dirRow = (sub, d) => (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 				(0, react_jsx_runtime.jsxs)("div", {
 					className: Rows_module_css_default.projectRow,
 					role: "treeitem",
-					"aria-expanded": open,
-					onClick: () => { const next = !open; setOpen(next); if (next && !(entries[""] && entries[""].status === "ready")) void loadDir(""); },
-					style: { fontWeight: 600, cursor: "pointer", borderRadius: 6, marginBottom: 2 },
+					"aria-expanded": !!openDirs[sub],
+					onClick: () => setOpenDirs((s) => ({ ...s, [sub]: !s[sub] })),
+					style: { ...childStyle(d), fontWeight: 500, cursor: "pointer", borderRadius: 6 },
 					children: [
-						(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.chevron), children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTriangleRightFill14, { className: clsx(Rows_module_css_default.arrow, open && Rows_module_css_default.arrowOpen) }) }),
-						(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder), children: open ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {}) }),
-						(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: t ? t("files.section") : "Files" }) })
+						(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.chevron), children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTriangleRightFill14, { className: clsx(Rows_module_css_default.arrow, openDirs[sub] && Rows_module_css_default.arrowOpen) }) }),
+						(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder), children: openDirs[sub] ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {}) }),
+						(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: sub }) })
 					]
 				}),
-				open && (!root || root.status === "loading") ? statusRow(0, "…") : null,
-				open && root && root.status === "error" ? statusRow(0, root.error) : null,
-				open && root && root.status === "ready" && root.dirs.length === 0 && root.files.length === 0 ? statusRow(0, t ? t("files.empty") : "No files") : null,
-				open && root && root.status === "ready" ? [
-					...root.dirs.map((d) => dirRow(d, d, 0)),
-					...root.files.map((f) => fileRow(f, f, 0))
-				] : null
+				openDirs[sub] ? (0, react_jsx_runtime.jsx)(ArxaDirRows, { dir: dir ? dir + "/" + sub : sub, depth: depth + 1, mode }, "arxa-dir:" + (dir ? dir + "/" + sub : sub)) : null
+			] }, "d:" + sub);
+			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+				entry.status === "loading" ? statusRow(depth, "…") : null,
+				entry.status === "error" ? statusRow(depth, /no org open/i.test(entry.error || "") ? orgT("files.openHint") : entry.error) : null,
+				entry.status === "ready" && entry.dirs.length === 0 && entry.files.length === 0 ? statusRow(depth, orgT("files.empty")) : null,
+				entry.status === "ready" ? entry.files.map((f) => fileRow(dir ? dir + "/" + f : f, f, depth)) : null,
+				entry.status === "ready" && mode === "full" && depth < 5 ? entry.dirs.map((sub) => dirRow(sub, depth)) : null
 			] });
 		}
 				/** Create-organisation modal (Q3, webview-safe): replaces window.prompt,
@@ -4567,6 +4561,7 @@ window.__ModuleLoader__.load({
 			"github.signin.failed": "GitHub sign-in did not complete — try again.",
 			"github.signin.required": "Link your GitHub account first.",
 			"newSession.selectFirst": "Select a workspace to start a session",
+			"files.openHint": "Open this organisation to browse its files",
 			"newSession.snapshotPending": "Preparing git snapshot — sessions unlock when it lands",
 			"welcome.title": "Welcome to arxa studio",
 			"welcome.desc": "Create your first organisation to start — arxa studio manages everything through git.",
@@ -4730,6 +4725,7 @@ window.__ModuleLoader__.load({
 			"github.signin.failed": "GitHub 登录未完成 — 请重试。",
 			"github.signin.required": "请先关联你的 GitHub 账号。",
 			"newSession.selectFirst": "先选择一个工作区再开始会话",
+			"files.openHint": "打开该组织即可浏览其文件",
 			"newSession.snapshotPending": "正在准备 git 快照 — 完成后即可开始会话",
 			"welcome.title": "欢迎使用 arxa studio",
 			"welcome.desc": "创建你的第一个组织即可开始 — arxa studio 通过 git 管理一切。",

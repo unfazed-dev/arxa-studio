@@ -386,16 +386,18 @@ check('trash: org glyph shared between tree row and trash org entries (single de
   client.includes('function OrgGlyph({ size })') && client.split('function OrgGlyph({ size })').length === 2 && client.includes('entryRow(e, (0, react_jsx_runtime.jsx)(OrgGlyph, {}), () => restoreOrg'))
 // ---- D83: trash lives under the last org row; icons keep their spacing ----
 check('trash: rides the grouped tree tail via ARXA_TRASH_AFTER_ORGS (no bottom mount)',
-  client.includes('const ARXA_TRASH_AFTER_ORGS = () => orgT ? (0, react_jsx_runtime.jsx)(TrashSection, { t: orgT, key: "arxa-trash" }) : null;') && client.includes('}), ARXA_FILES_AFTER_ORGS(), ARXA_TRASH_AFTER_ORGS()]') && !client.includes('TrashSection, { t: props.t }'))
-// ---- T4/D90: the org Files section rides the same tree tail; lazy tree route; arxa-av-open bridge ----
-check('files: rides the grouped tree tail via ARXA_FILES_AFTER_ORGS (above trash)',
-  client.includes('const ARXA_FILES_AFTER_ORGS = () => orgT ? (0, react_jsx_runtime.jsx)(ArxaFilesSection, { t: orgT, key: "arxa-files" }) : null;') && client.indexOf('ARXA_FILES_AFTER_ORGS()') < client.indexOf('ARXA_TRASH_AFTER_ORGS()'))
-check('files: lazy per-dir listing through the tree route with a tree-read token',
-  client.includes('"/__arxa/artifacts/tree?dir="') && client.includes('scope: "tree-read"'))
-check('files: a file row opens the docked viewer column via the arxa-av-open bridge (org lane)',
-  client.includes('window.dispatchEvent(new CustomEvent("arxa-av-open", { detail: { relPath } }))'))
-check('files: section resets when the open org changes and hides with no org',
-  client.includes('setEntries({}); setExpanded({}); setOpen(false); }, [orgKey]') && client.includes('if (!openOrg) return null;'))
+  client.includes('const ARXA_TRASH_AFTER_ORGS = () => orgT ? (0, react_jsx_runtime.jsx)(TrashSection, { t: orgT, key: "arxa-trash" }) : null;') && client.includes('}), ARXA_TRASH_AFTER_ORGS()]') && !client.includes('TrashSection, { t: props.t }'))
+// ---- T4 v2 (2026-09-01, user direction): files live INSIDE the tree under the owning row ----
+check('files: NO separate tail section — ArxaFilesSection/ARXA_FILES_AFTER_ORGS are gone',
+  !client.includes('ARXA_FILES_AFTER_ORGS') && !client.includes('ArxaFilesSection'))
+check('files: ArxaDirRows mounts inline on container rows (files-only — their dirs are already tree containers)',
+  client.includes('function ArxaDirRows') && client.includes('mode: "files-only"') && client.includes('d.kind === "dock" ? d.slug : "projects/" + d.slug'))
+check('files: leaf worktrees list their content in place (ARXA_LEAF_FILES, full mode, dirs expandable)',
+  client.includes('ARXA_LEAF_FILES(group),') && client.includes('mode: "full"') && client.includes('if (ARXA_IS_CONTAINER_GROUP(group.workspaceId)) return null;'))
+check('files: lazy tree route + one fresh-token 403 retry + arxa-av-open bridge unchanged',
+  client.includes('"/__arxa/artifacts/tree?dir="') && client.includes('scope: "tree-read"') && client.includes('window.dispatchEvent(new CustomEvent("arxa-av-open", { detail: { relPath } }))'))
+check('files: expanding an org row opens the org (tree-read rides the open handle) + human hint when it is not open',
+  client.includes('if (isOrg && !open) orgStore.mutate("org.open", { orgId: d.orgId }).catch(() => {});') && client.includes('/no org open/i.test(entry.error || "")') && client.includes('"files.openHint": "Open this organisation to browse its files"') && client.includes('"files.openHint": "打开该组织即可浏览其文件"'))
 check('trash: restore/delete icon buttons are gapped (flex span, 12px user-tuned)',
   client.includes('style: { display: "flex", gap: 12, flex: "none", alignItems: "center" }, children: [') && client.includes('IconRefreshOutline16, onRestore),') && client.includes('IconTrashOutline16, onPurge, true)'))
 // ---- D84: the trash reads exactly like the tree above it ----

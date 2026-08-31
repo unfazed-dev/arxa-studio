@@ -12,9 +12,10 @@
 //      directory-picker flow opens the in-bundle create-organisation modal
 //      (Q3) — window.prompt is unusable in the Tauri WKWebView
 //   4. the org-row menu gains Trash on the open org row (Q6)
-//   4b. T4 (D90): ARXA_FILES_AFTER_ORGS rides the same tree tail — the org
-//       Files section (workspace-region snippet) lists the open org lazily
-//       per directory and opens the viewer column via arxa-av-open.
+//   4b. T4 v2 (2026-09-01, user direction): files live INSIDE the tree —
+//       ARXA_LEAF_FILES mounts the region's ArxaDirRows under each leaf
+//       row (full listing) and OrgContainerRow carries its own files-only
+//       listing; the separate tail section is gone.
 // rc-bump policy: a dsh bump is an explicit re-transform — update
 // DSH_VERSION here and in gen-sidebar.mjs, refresh anchors/snippets if the
 // stock shape moved, run this script, then the lens gate before committing.
@@ -129,6 +130,7 @@ const GROUP_ITEM_END = [
 if (!out.includes(GROUP_ITEM_END) || out.indexOf(GROUP_ITEM_END) !== out.lastIndexOf(GROUP_ITEM_END)) throw new Error('group item end anchor missing/dup — stock shape moved?')
 out = out.replace(GROUP_ITEM_END, [
   T(9) + '})]),',
+  T(9) + 'ARXA_LEAF_FILES(group),',
   T(9) + '(expandedSessionGroups.includes(group.key) ? group.sessions : group.sessions.slice(0, COLLAPSED_SESSION_LIMIT)).map((node) => {',
 ].join('\n'))
 
@@ -162,7 +164,7 @@ const TREE_TAIL = [
 if (!out.includes(TREE_TAIL) || out.indexOf(TREE_TAIL) !== out.lastIndexOf(TREE_TAIL)) throw new Error('tree tail anchor missing/dup — stock shape moved?')
 out = out.replace(TREE_TAIL, [
 	T(7) + '}, group.key);',
-	T(6) + '}), ARXA_FILES_AFTER_ORGS(), ARXA_TRASH_AFTER_ORGS()]',
+	T(6) + '}), ARXA_TRASH_AFTER_ORGS()]',
 	T(5) + '}),',
 	T(5) + '(0, react_jsx_runtime.jsx)("span", { className: WorkspaceBrowser_module_css_default.fade })',
 ].join('\n'))
