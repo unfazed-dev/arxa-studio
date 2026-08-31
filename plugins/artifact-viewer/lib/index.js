@@ -20,6 +20,8 @@ async function fromDsh(pkg, sub) {
 const { installSettingsSection, settingsNamespace } =
   await fromDsh('@deepseek-ai/dsh-settings', 'lib/index.js')
 const { default: z } = await fromDsh('@deepseek-ai/schemastery', 'lib/index.mjs')
+import { createOrgServer } from './org-server.js'
+import { startOrgFollow } from './follow.js'
 
 export const name = 'arxa-artifact-viewer'
 
@@ -41,6 +43,25 @@ export const SCHEMA = z.object({
 let current = defaultSettings()
 export function currentSettings() { return { ...current } }
 
+// D7: exactly one per-org server, spawned on org mount, killed on org switch.
+// verify: null until Task 3 plugs the read-token class — deny-default posture.
+let follow = null
+export function stopFollow() {
+  const f = follow
+  follow = null
+  return f ? f.stop() : Promise.resolve()
+}
+
+function ensureFollow() {
+  if (follow) return follow
+  follow = startOrgFollow({
+    env: process.env,
+    createServer: (opts) => createOrgServer(opts),
+    log: (m) => console.log('[arxa-artifact-viewer] ' + m),
+  })
+  return follow
+}
+
 export function apply(ctx, config) {
   const entry = { ...defaultSettings(), ...(config ?? {}) }
   if (entry.tokenTtlSeconds > TOKEN_TTL_CEILING_SECONDS) {
@@ -51,4 +72,9 @@ export function apply(ctx, config) {
     setSource: () => { /* host half reads currentSettings(); browser half reads settings.describe */ },
     onChange: (next) => { if (next && typeof next === 'object') current = { ...current, ...next } },
   })
+  // Boot must survive a follow failure — a plugin throwing at apply() kills
+  // the engine cold (theme-accent D84 lesson). Log loud, never crash.
+  try { ensureFollow() } catch (err) {
+    console.error('[arxa-artifact-viewer] follow startup failed: ' + (err && err.message))
+  }
 }
