@@ -532,6 +532,10 @@
 		 * it hundreds of px below the orgs once an org is open. The flat
 		 * "In one list" stock mode has no org rows — no trash there. */
 		const ARXA_TRASH_AFTER_ORGS = () => orgT ? (0, react_jsx_runtime.jsx)(TrashSection, { t: orgT, key: "arxa-trash" }) : null;
+		/** D90/T4: the org Files section rides the tree tail the same way —
+		 * under the org rows, lazy per-directory, files open the docked viewer
+		 * column through the arxa-av-open bridge (org lane). */
+		const ARXA_FILES_AFTER_ORGS = () => orgT ? (0, react_jsx_runtime.jsx)(ArxaFilesSection, { t: orgT, key: "arxa-files" }) : null;
 		const ARXA_SELECT_WS = (workspaceId) => {
 			const { orgId, ws } = wsParts(workspaceId);
 			if (ws !== "") orgStore.selectRow({ orgId, rowId: ws });
@@ -861,7 +865,104 @@
 				]
 			});
 		}
-		/** Create-organisation modal (Q3, webview-safe): replaces window.prompt,
+		/** D90/T4 — org Files section: lazy per-directory listing through
+		 * GET /__arxa/artifacts/tree?dir=… (dot-entries are excluded
+		 * server-side; .arxa/ is reserved). A FILE row opens the docked viewer
+		 * column via the arxa-av-open window-event bridge (org lane — relPath
+		 * resolves against the open org origin). Never auto-opens; only
+		 * renders while an organisation is open. */
+		function ArxaFilesSection({ t }) {
+			const openOrg = useOrg((s) => (s.orgs || []).find((o) => o.open) || null);
+			const [open, setOpen] = (0, react.useState)(false);
+			const [entries, setEntries] = (0, react.useState)({});
+			const [expanded, setExpanded] = (0, react.useState)({});
+			const orgKey = openOrg ? ((openOrg.manifest && openOrg.manifest.id) || openOrg.id || "") : "";
+			(0, react.useEffect)(() => { setEntries({}); setExpanded({}); setOpen(false); }, [orgKey]);
+			const loadDir = (0, react.useCallback)(async (dir) => {
+				setEntries((s) => ({ ...s, [dir]: { status: "loading", dirs: [], files: [] } }));
+				try {
+					const tokRes = await fetch("/__arxa/artifacts/token", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "tree-read" }) });
+					const tokBody = await tokRes.json().catch(() => ({}));
+					if (!tokRes.ok) throw new Error(tokBody.error || ("token " + tokRes.status));
+					const res = await fetch("/__arxa/artifacts/tree?dir=" + encodeURIComponent(dir || "") + "&avt=" + encodeURIComponent(tokBody.token || ""));
+					const body = await res.json().catch(() => ({}));
+					if (!res.ok) throw new Error(body.error || ("tree " + res.status));
+					setEntries((s) => ({ ...s, [dir]: { status: "ready", dirs: body.dirs || [], files: body.files || [] } }));
+				} catch (e) {
+					setEntries((s) => ({ ...s, [dir]: { status: "error", dirs: [], files: [], error: String((e && e.message) || e) } }));
+				}
+			}, []);
+			const toggleDir = (dir) => {
+				setExpanded((s) => ({ ...s, [dir]: !s[dir] }));
+				if (!expanded[dir]) {
+					const have = entries[dir];
+					if (!have || have.status === "error") void loadDir(dir);
+				}
+			};
+			const openFile = (relPath) => {
+				try { window.dispatchEvent(new CustomEvent("arxa-av-open", { detail: { relPath } })); } catch { /* no bridge — ignore */ }
+			};
+			const childStyle = (depth) => ({ marginLeft: (6 + depth * 14) + "px" });
+			const statusRow = (depth, text) => (0, react_jsx_runtime.jsx)("div", { style: { ...childStyle(depth), fontSize: 12, opacity: 0.6, padding: "2px 8px" }, children: text });
+			const dirRow = (dir, name, depth) => {
+				const isOpen = !!expanded[dir];
+				const entry = entries[dir];
+				return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+					(0, react_jsx_runtime.jsxs)("div", {
+						className: Rows_module_css_default.projectRow,
+						role: "treeitem",
+						"aria-expanded": isOpen,
+						onClick: () => toggleDir(dir),
+						style: { ...childStyle(depth), fontWeight: 500, cursor: "pointer", borderRadius: 6 },
+						children: [
+							(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.chevron), children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTriangleRightFill14, { className: clsx(Rows_module_css_default.arrow, isOpen && Rows_module_css_default.arrowOpen) }) }),
+							(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder), children: isOpen ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {}) }),
+							(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: name }) })
+						]
+					}),
+					isOpen && (!entry || entry.status === "loading") ? statusRow(depth + 1, "…") : null,
+					isOpen && entry && entry.status === "error" ? statusRow(depth + 1, entry.error) : null,
+					isOpen && entry && entry.status === "ready" ? [
+						...entry.dirs.map((d) => dirRow(dir ? dir + "/" + d : d, d, depth + 1)),
+						...entry.files.map((f) => fileRow(dir ? dir + "/" + f : f, f, depth + 1))
+					] : null
+				] }, "d:" + dir);
+			};
+			const fileRow = (relPath, name, depth) => (0, react_jsx_runtime.jsxs)("div", {
+				className: Rows_module_css_default.projectRow,
+				role: "treeitem",
+				onClick: () => openFile(relPath),
+				style: { ...childStyle(depth), cursor: "pointer", borderRadius: 6 },
+				children: [
+					(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder) }),
+					(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, style: { opacity: 0.92 }, children: name }) })
+				]
+			}, "f:" + relPath);
+			if (!openOrg) return null;
+			const root = entries[""];
+			return (0, react_jsx_runtime.jsxs)("div", { style: { marginTop: 6 }, children: [
+				(0, react_jsx_runtime.jsxs)("div", {
+					className: Rows_module_css_default.projectRow,
+					role: "treeitem",
+					"aria-expanded": open,
+					onClick: () => { const next = !open; setOpen(next); if (next && !(entries[""] && entries[""].status === "ready")) void loadDir(""); },
+					style: { fontWeight: 600, cursor: "pointer", borderRadius: 6, marginBottom: 2 },
+					children: [
+						(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.chevron), children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTriangleRightFill14, { className: clsx(Rows_module_css_default.arrow, open && Rows_module_css_default.arrowOpen) }) }),
+						(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder), children: open ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {}) }),
+						(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: t ? t("files.section") : "Files" }) })
+					]
+				}),
+				open && (!root || root.status === "loading") ? statusRow(0, "…") : null,
+				open && root && root.status === "error" ? statusRow(0, root.error) : null,
+				open && root && root.status === "ready" && root.dirs.length === 0 && root.files.length === 0 ? statusRow(0, t ? t("files.empty") : "No files") : null,
+				open && root && root.status === "ready" ? [
+					...root.dirs.map((d) => dirRow(d, d, 0)),
+					...root.files.map((f) => fileRow(f, f, 0))
+				] : null
+			] });
+		}
+				/** Create-organisation modal (Q3, webview-safe): replaces window.prompt,
 		* which WKWebView (the Tauri shell) does not implement — prompt returned
 		* null there and org creation silently no-oped. Also owns the D36 first
 		* run: with no workspace root chosen yet, the modal collects the root
@@ -1633,6 +1734,8 @@
 		/** Locale relabels: same menu shapes, honest org vocabulary (Q3–Q5). */
 		const enOver = {
 			"section.workspaces": "Organisations",
+			"files.section": "Files",
+			"files.empty": "No files",
 			"workspace.add": "New organisation…",
 			"menu.addWorkspace": "New organisation…",
 			"menu.trash": "Trash",
@@ -1799,6 +1902,8 @@
 		};
 		const zhOver = {
 			"section.workspaces": "组织",
+			"files.section": "文件",
+			"files.empty": "没有文件",
 			"workspace.add": "新建组织…",
 			"menu.addWorkspace": "新建组织…",
 			"menu.trash": "回收站",

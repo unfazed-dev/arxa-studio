@@ -357,9 +357,14 @@ window.__ModuleLoader__.load({
 					},
 					setViewer: (d, px) => {
 						d.viewer = clampWidth(px, 320, 100000);
+						try { localStorage.setItem('arxa.frame.viewer', String(d.viewer)); } catch { }
 					},
 					openViewer: (d) => {
-						if (d.viewer === 0) d.viewer = 420;
+						if (d.viewer === 0) {
+												let w = 420;
+												try { const saved = Number(localStorage.getItem('arxa.frame.viewer')); if (saved >= 320) w = saved; } catch { }
+												d.viewer = w;
+						}
 					},
 					closeViewer: (d) => {
 						d.viewer = 0;

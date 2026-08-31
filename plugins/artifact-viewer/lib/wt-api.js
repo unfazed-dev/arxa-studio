@@ -49,15 +49,28 @@ function runGit(cwd, args) {
   })
 }
 
-/** Resolve one file inside a session worktree; throws {code} on any miss. */
+/** Resolve one file inside a session worktree; throws {code} on any miss.
+ * D91: produced-file chips carry the ABSOLUTE path the agent wrote; an
+ * absolute relPath is accepted only when it lives inside THIS worktree —
+ * it is then re-based onto the root, so the escape checks stay in force. */
 export async function resolveWorktreeFile({ env, orgPath, worktreeId, relPath }) {
   if (typeof worktreeId !== 'string' || worktreeId === '' || /[/\\]/.test(worktreeId)) {
     throw Object.assign(new Error('bad session'), { code: 'BAD' })
   }
+  if (typeof relPath !== 'string' || relPath === '') throw Object.assign(new Error('bad path'), { code: 'BAD' })
   const found = await resolveWorktree({ env, orgPath, worktreeId })
   if (!found) throw Object.assign(new Error('no worktree'), { code: 'NO_SESSION' })
   const rootReal = fs.realpathSync(found.worktree)
-  const abs = inside(rootReal, relPath)
+  let effRel = relPath
+  if (path.isAbsolute(relPath)) {
+    let absGiven
+    try { absGiven = fs.realpathSync(path.resolve(relPath)) } catch { throw Object.assign(new Error('not a file'), { code: 'NOT_FILE' }) }
+    if (absGiven !== rootReal && !absGiven.startsWith(rootReal + path.sep)) {
+      throw Object.assign(new Error('escape'), { code: 'ESCAPE' })
+    }
+    effRel = path.relative(rootReal, absGiven) || '.'
+  }
+  const abs = inside(rootReal, effRel)
   const st = fs.statSync(abs)
   if (!st.isFile()) throw Object.assign(new Error('not a file'), { code: 'NOT_FILE' })
   const real = fs.realpathSync(abs)

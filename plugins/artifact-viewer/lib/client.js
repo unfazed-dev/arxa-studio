@@ -261,7 +261,17 @@ window.__ModuleLoader__.load({
         const onOpen = (ev) => {
           try {
             const d = ev.detail || {}
-            if (d.sessionId && d.relPath) { void openWorktreeRef.current && openWorktreeRef.current(d.sessionId, d.relPath) }
+            if (d.sessionId && d.relPath) {
+              // D91: worktree lane FIRST; on a miss (file only exists in the
+              // org, or the worktree moved) fall back to the org lane.
+              const wt = openWorktreeRef.current
+              if (wt) {
+                void Promise.resolve(wt(d.sessionId, d.relPath)).then((ok) => {
+                  if (ok) return
+                  setDraft(d.relPath); void (openArtifactRef.current && openArtifactRef.current(d.relPath))
+                })
+              } else { setDraft(d.relPath); void (openArtifactRef.current && openArtifactRef.current(d.relPath)) }
+            }
             else if (d.relPath) { setDraft(d.relPath); void (openArtifactRef.current && openArtifactRef.current(d.relPath)) }
           } catch { /* bad payload ignored */ }
         }
@@ -410,11 +420,14 @@ window.__ModuleLoader__.load({
               readOnly = true; guardNote = 'binary file — view only (D82)'
             }
             setState({ phase: 'ready', kind, relPath, url, text, readOnly, guardNote, wt: sessionId })
+            return true
           } else {
             setState({ phase: 'ready', kind, relPath, url, wt: sessionId })
+            return true
           }
         } catch (e) {
           setState({ phase: 'error', relPath, note: String(e && e.message || e) })
+          return false
         }
       }
       openWorktreeRef.current = openWorktree
@@ -557,6 +570,30 @@ window.__ModuleLoader__.load({
     let hostCtx = null
     function apply(ctx) {
       hostCtx = ctx
+      // D91 card routing: produced-file chips open the docked viewer column.
+      // Capture-phase interception keeps the stock deliverables chips (and
+      // gen-ui) untouched; the chip's title attribute carries the full path
+      // the agent wrote, and the worktree lane re-bases it onto the session
+      // worktree (org lane as fallback inside the panel). The stock
+      // "show in folder" affordance (".") is left alone. Never auto-opens:
+      // nothing here fires without a user click.
+      if (typeof document !== 'undefined' && !window.__ARXA_AV_CHIP_INTERCEPT__) {
+        window.__ARXA_AV_CHIP_INTERCEPT__ = true
+        document.addEventListener('click', (e) => {
+          try {
+            const target = e.target
+            const btn = target && target.closest ? target.closest('[data-produced-files-row] button[title]') : null
+            if (!btn) return
+            const path = btn.getAttribute('title')
+            if (!path || path === '.') return
+            e.preventDefault()
+            e.stopPropagation()
+            const snap = window.__ARXA_SESSIONS__ && window.__ARXA_SESSIONS__.list ? window.__ARXA_SESSIONS__.list.getSnapshot() : null
+            const sessionId = snap ? snap.current : undefined
+            window.dispatchEvent(new CustomEvent('arxa-av-open', { detail: sessionId ? { sessionId, relPath: path } : { relPath: path } }))
+          } catch { /* interception is best-effort — stock opener still applies */ }
+        }, true)
+      }
       // D93 open bridge: the panel mounts INSIDE the viewer column, so it
       // cannot hear 'arxa-av-open' while the column is 0px wide. This
       // module-level listener opens the column first (the ctx.layout face),

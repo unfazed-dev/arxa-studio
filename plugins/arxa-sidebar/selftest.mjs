@@ -381,7 +381,16 @@ check('trash: org glyph shared between tree row and trash org entries (single de
   client.includes('function OrgGlyph({ size })') && client.split('function OrgGlyph({ size })').length === 2 && client.includes('entryRow(e, (0, react_jsx_runtime.jsx)(OrgGlyph, {}), () => restoreOrg'))
 // ---- D83: trash lives under the last org row; icons keep their spacing ----
 check('trash: rides the grouped tree tail via ARXA_TRASH_AFTER_ORGS (no bottom mount)',
-  client.includes('const ARXA_TRASH_AFTER_ORGS = () => orgT ? (0, react_jsx_runtime.jsx)(TrashSection, { t: orgT, key: "arxa-trash" }) : null;') && client.includes('}), ARXA_TRASH_AFTER_ORGS()]') && !client.includes('TrashSection, { t: props.t }'))
+  client.includes('const ARXA_TRASH_AFTER_ORGS = () => orgT ? (0, react_jsx_runtime.jsx)(TrashSection, { t: orgT, key: "arxa-trash" }) : null;') && client.includes('}), ARXA_FILES_AFTER_ORGS(), ARXA_TRASH_AFTER_ORGS()]') && !client.includes('TrashSection, { t: props.t }'))
+// ---- T4/D90: the org Files section rides the same tree tail; lazy tree route; arxa-av-open bridge ----
+check('files: rides the grouped tree tail via ARXA_FILES_AFTER_ORGS (above trash)',
+  client.includes('const ARXA_FILES_AFTER_ORGS = () => orgT ? (0, react_jsx_runtime.jsx)(ArxaFilesSection, { t: orgT, key: "arxa-files" }) : null;') && client.indexOf('ARXA_FILES_AFTER_ORGS()') < client.indexOf('ARXA_TRASH_AFTER_ORGS()'))
+check('files: lazy per-dir listing through the tree route with a tree-read token',
+  client.includes('"/__arxa/artifacts/tree?dir="') && client.includes('scope: "tree-read"'))
+check('files: a file row opens the docked viewer column via the arxa-av-open bridge (org lane)',
+  client.includes('window.dispatchEvent(new CustomEvent("arxa-av-open", { detail: { relPath } }))'))
+check('files: section resets when the open org changes and hides with no org',
+  client.includes('setEntries({}); setExpanded({}); setOpen(false); }, [orgKey]') && client.includes('if (!openOrg) return null;'))
 check('trash: restore/delete icon buttons are gapped (flex span, 12px user-tuned)',
   client.includes('style: { display: "flex", gap: 12, flex: "none", alignItems: "center" }, children: [') && client.includes('IconRefreshOutline16, onRestore),') && client.includes('IconTrashOutline16, onPurge, true)'))
 // ---- D84: the trash reads exactly like the tree above it ----

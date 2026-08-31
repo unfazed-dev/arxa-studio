@@ -78,6 +78,17 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   for (const p of ['/__arxa/artifacts/wt', '/__arxa/artifacts/tree', '/__arxa/artifacts/session-changes']) {
     assert.ok(idx.includes("'" + p + "'"), 'route registered: ' + p)
   }
+  // T5/D91 card routing: chips open the docked column, wt lane first, org fallback
+  const t5client = fs.readFileSync(join(here, 'lib', 'client.js'), 'utf8')
+  assert.match(t5client, /__ARXA_AV_CHIP_INTERCEPT__/, 'chip interception installed once')
+  assert.match(t5client, /\[data-produced-files-row\] button\[title\]/, 'interceptor targets stock produced-file chips only')
+  assert.match(t5client, /CustomEvent\('arxa-av-open', \{ detail: sessionId \? \{ sessionId, relPath: path \}/, 'chip click dispatches the arxa-av-open bridge')
+  assert.match(t5client, /path === '\.'\) return/, 'stock show-in-folder affordance stays stock')
+  assert.match(t5client, /if \(ok\) return/, 'wt lane wins; org lane is the fallback on a miss')
+  // wt lane accepts an absolute chip path that lives INSIDE the worktree,
+  // and still refuses escapes (D91 re-base, escape checks intact)
+  assert.match(wt, /path\.isAbsolute\(relPath\)/, 'absolute chip paths are re-based onto the worktree root')
+  assert.match(wt, /'escape'\), \{ code: 'ESCAPE' \}\)\n/, 'escape check retained after the re-base')
 }
 
 console.log('arxa-artifact-viewer selftest: GREEN')

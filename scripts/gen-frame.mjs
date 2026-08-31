@@ -11,7 +11,8 @@
 // Deltas (grill D88-D93, 2026-08-31):
 //   1. module id: @deepseek-ai/dsh-client-ui-layout -> arxa-frame
 //   2. css prefix pI_x6G_ -> aXa_fr_ + viewer column/handle/sheet rules
-//   3. store: + viewer key + setViewer/openViewer/closeViewer (min 320)
+//   3. store: + viewer key + setViewer/openViewer/closeViewer (min 320);
+//       dragged width persists through localStorage (D93 'width persists')
 //   4. computeColumns: 4th column viewer; center 640 floor; details yields first
 //   5. AppFrame: viewerCol + drag handle + maximize + narrow full-frame sheet
 //   6. child seat "viewer" (single, session-maybe)
@@ -85,9 +86,14 @@ repString("sidebar: 280," + LF + T(5) + "details: 0,",
     K + "},",
     K + "setViewer: (d, px) => {",
     I + "d.viewer = clampWidth(px, 320, 100000);",
+    I + "try { localStorage.setItem('arxa.frame.viewer', String(d.viewer)); } catch { }",
     K + "},",
     K + "openViewer: (d) => {",
-    I + "if (d.viewer === 0) d.viewer = 420;",
+    I + "if (d.viewer === 0) {",
+    I + I + "let w = 420;",
+    I + I + "try { const saved = Number(localStorage.getItem('arxa.frame.viewer')); if (saved >= 320) w = saved; } catch { }",
+    I + I + "d.viewer = w;",
+    I + "}",
     K + "},",
     K + "closeViewer: (d) => {",
     I + "d.viewer = 0;",
