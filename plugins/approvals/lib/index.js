@@ -266,7 +266,7 @@ function proxyHttpRequest(bind, req, res, httpImpl) {
  *  verbatim, then pipe both sockets raw. A non-101 answer (401 wrong bearer,
  *  404) is relayed as a plain response so the client sees the mirror's
  *  honest status; a dead mirror just destroys the socket. */
-function spliceCairnUpgrade(bind, req, socket, head, httpImpl) {
+function spliceCairnUpgrade(bind, req, socket, head, httpImpl, wsStats = null) {
   const [host, port] = splitBind(bind)
   const upstream = httpImpl.request({
     host,
@@ -275,6 +275,7 @@ function spliceCairnUpgrade(bind, req, socket, head, httpImpl) {
     headers: req.headers,
   })
   upstream.on('upgrade', (mirrorRes, mirrorSocket, mirrorHead) => {
+    if (wsStats) wsStats.ok += 1
     socket.write(responseHead(mirrorRes.statusCode, mirrorRes.statusMessage, mirrorRes.headers))
     if (mirrorHead?.length) socket.write(mirrorHead)
     mirrorSocket.pipe(socket)
@@ -289,6 +290,7 @@ function spliceCairnUpgrade(bind, req, socket, head, httpImpl) {
     socket.on('close', die)
   })
   upstream.on('response', (mirrorRes) => {
+    if (wsStats) wsStats.refused += 1
     const chunks = []
     mirrorRes.on('data', (c) => chunks.push(c))
     mirrorRes.on('end', () => {
@@ -298,7 +300,10 @@ function spliceCairnUpgrade(bind, req, socket, head, httpImpl) {
       )
     })
   })
-  upstream.on('error', () => socket.destroy())
+  upstream.on('error', () => {
+    if (wsStats) wsStats.failed += 1
+    socket.destroy()
+  })
   upstream.end()
 }
 
@@ -317,12 +322,19 @@ export function applyCairnProxy(ctx, deps = {}) {
   })
   ctx.webServer.registerUpgrade?.({
     path: '/__cairn/sync',
-    handler: (req, socket, head) => spliceCairnUpgrade(bind, req, socket, head, httpImpl),
+    handler: (req, socket, head) => {
+      if (wsStats) wsStats.attempts += 1
+      spliceCairnUpgrade(bind, req, socket, head, httpImpl)
+    },
   })
 
   // Boot observability: the phone's sync-decision hinges on whether this
   // bootstrap was ever reached. Two counters, exposed for the rig.
   const bootStats = { hits: 0, ok: 0, lastHitAt: null }
+  // WS splice diagnostics: attempts (phone reached the upgrade), ok (mirror
+  // answered 101 and the splice is live), refused (mirror answered non-101),
+  // failed (mirror unreachable). Exposed via /__arxa/cairn-sync/_stats.
+  const wsStats = { attempts: 0, ok: 0, refused: 0, failed: 0 }
 
   // Bootstrap bearer for the paired phone: the sync session it opens
   // through the proxy must present the mirror's CAIRN_SYNC_BEARER_TOKEN
@@ -357,7 +369,7 @@ export function applyCairnProxy(ctx, deps = {}) {
     kind: 'exact',
     handler: async (req, res) => {
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
-      res.end(JSON.stringify({ ...bootStats }))
+      res.end(JSON.stringify({ ...bootStats, ws: { ...wsStats } }))
     },
   })
 }
