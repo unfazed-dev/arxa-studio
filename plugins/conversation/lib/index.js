@@ -97,8 +97,10 @@ export function flattenSidebar(snapshot) {
 export function apply(ctx, deps = {}) {
   const api = deps.apiProxy ?? ctx.apiProxy
   const httpImpl = deps.httpImpl ?? ((url, opts) => fetch(url, opts))
+  // The dsh child receives its port via --port argv, not env — ARXA_PORT is
+  // rarely set; the launcher's default (7891) is the honest fallback.
   const sidebarUrl = deps.sidebarUrl
-    ?? 'http://127.0.0.1:' + (deps.env ?? process.env).ARXA_PORT
+    ?? 'http://127.0.0.1:' + ((deps.env ?? process.env).ARXA_PORT ?? '7891')
     + '/__arxa/sidebar/state'
 
   const json = (res, status, body) => {
@@ -127,7 +129,9 @@ export function apply(ctx, deps = {}) {
   // ---- per-session transcript + send
   ctx.webServer.register({
     name: 'arxa-conversation-session',
-    path: '/__arxa/conversations/',
+    // NO trailing slash: the webserver's prefix match appends its own
+    // '/' — a trailing-slash registration can never match (empty 404).
+    path: '/__arxa/conversations',
     kind: 'prefix',
     handler: async (req, res) => {
       const url = new URL(req.url, 'http://engine.local')

@@ -64,9 +64,11 @@ const PLUGIN = { kind: 'plugin', plugin: 'x', form: 'notice', summary: 'ctx' }
 
 // ---- 3. route harness
 const makeCtx = ({ api, fetchImpl, sidebarUrl }) => {
+  // Two tables, mirroring the real webserver: exact and prefixes are
+  // separate Maps — a path may exist in both (list + per-session here).
   const routes = new Map()
   const ctx = {
-    webServer: { register: (r) => routes.set(r.path, r.handler) },
+    webServer: { register: (r) => routes.set(r.kind + ':' + r.path, r.handler) },
     apiProxy: api,
   }
   apply(ctx, { apiProxy: api, httpImpl: fetchImpl, sidebarUrl })
@@ -98,7 +100,7 @@ const RPC_ERR = (code, message) => ({ rpcId: 'r1', result: { ok: false, error: {
     api: { sessions: { history: async (req) => { assert.deepEqual(req.payload, { sessionId: 's-1', maxMessages: 50 }); return RPC_OK({ events: history }) } } },
   })
   const res = fakeRes()
-  await routes.get('/__arxa/conversations/')(fakeReq('GET', '/__arxa/conversations/s-1/messages?limit=50'), res)
+  await routes.get('prefix:/__arxa/conversations')(fakeReq('GET', '/__arxa/conversations/s-1/messages?limit=50'), res)
   assert.equal(res.status, 200)
   assert.equal(res.body.sessionId, 's-1')
   assert.deepEqual(res.body.messages.map((m) => m.text), ['q', 'a'])
@@ -111,18 +113,18 @@ const RPC_ERR = (code, message) => ({ rpcId: 'r1', result: { ok: false, error: {
     api: { sessions: { history: async () => RPC_ERR('session-not-found', 'gone') } },
   })
   const res = fakeRes()
-  await routes.get('/__arxa/conversations/')(fakeReq('GET', '/__arxa/conversations/s-x/messages'), res)
+  await routes.get('prefix:/__arxa/conversations')(fakeReq('GET', '/__arxa/conversations/s-x/messages'), res)
   assert.equal(res.status, 404)
   assert.equal(res.body.error, 'no-such-session')
   const routes2 = makeCtx({
     api: { sessions: { history: async () => { throw new Error('transport down') } } },
   })
   const res2 = fakeRes()
-  await routes2.get('/__arxa/conversations/')(fakeReq('GET', '/__arxa/conversations/s-x/messages'), res2)
+  await routes2.get('prefix:/__arxa/conversations')(fakeReq('GET', '/__arxa/conversations/s-x/messages'), res2)
   assert.equal(res2.status, 502)
   assert.equal(res2.body.error, 'history-failed')
   const res3 = fakeRes()
-  await routes.get('/__arxa/conversations/')(fakeReq('GET', '/__arxa/conversations/s-x/other'), res3)
+  await routes.get('prefix:/__arxa/conversations')(fakeReq('GET', '/__arxa/conversations/s-x/other'), res3)
   assert.equal(res3.status, 404)
   ok('GET transcript: 404 no-such-session / 502 history-failed / unknown route')
 }
@@ -138,7 +140,7 @@ const RPC_ERR = (code, message) => ({ rpcId: 'r1', result: { ok: false, error: {
       },
     },
   })
-  const handler = routes.get('/__arxa/conversations/')
+  const handler = routes.get('prefix:/__arxa/conversations')
   const res = fakeRes()
   await handler(fakeReq('POST', '/__arxa/conversations/s-1/messages', JSON.stringify({ text: '  do the thing  ' })), res)
   assert.equal(res.status, 200)
@@ -166,19 +168,19 @@ const RPC_ERR = (code, message) => ({ rpcId: 'r1', result: { ok: false, error: {
   const mk = (promptImpl) => makeCtx({ api: { sessions: { prompt: promptImpl, history: async () => RPC_OK({ events: [] }) } } })
   const notFound = mk(async () => RPC_ERR('session-not-found', 'gone'))
   const r1 = fakeRes()
-  await notFound.get('/__arxa/conversations/')(
+  await notFound.get('prefix:/__arxa/conversations')(
     fakeReq('POST', '/__arxa/conversations/s-x/messages', JSON.stringify({ text: 'hi' })), r1)
   assert.equal(r1.status, 404); assert.equal(r1.body.error, 'no-such-session')
 
   const busy = mk(async () => RPC_ERR('agent-busy', 'busy'))
   const r2 = fakeRes()
-  await busy.get('/__arxa/conversations/')(
+  await busy.get('prefix:/__arxa/conversations')(
     fakeReq('POST', '/__arxa/conversations/s-x/messages', JSON.stringify({ text: 'hi' })), r2)
   assert.equal(r2.status, 409); assert.equal(r2.body.error, 'no-live-agent')
 
   const threw = mk(async () => { throw new Error('socket blew') })
   const r3 = fakeRes()
-  await threw.get('/__arxa/conversations/')(
+  await threw.get('prefix:/__arxa/conversations')(
     fakeReq('POST', '/__arxa/conversations/s-x/messages', JSON.stringify({ text: 'hi' })), r3)
   assert.equal(r3.status, 502); assert.equal(r3.body.error, 'prompt-failed')
   ok('POST send: 404 / 409 no-live-agent / 502 prompt-failed')
@@ -193,7 +195,7 @@ const RPC_ERR = (code, message) => ({ rpcId: 'r1', result: { ok: false, error: {
     sidebarUrl: 'http://127.0.0.1:1/__arxa/sidebar/state',
   })
   const res = fakeRes()
-  await routes.get('/__arxa/conversations')(fakeReq('GET', '/__arxa/conversations'), res)
+  await routes.get('exact:/__arxa/conversations')(fakeReq('GET', '/__arxa/conversations'), res)
   assert.equal(res.status, 200)
   assert.equal(res.body.sessions[0].id, 's-9')
   assert.equal(res.body.sessions[0].org, 'T')
@@ -204,7 +206,7 @@ const RPC_ERR = (code, message) => ({ rpcId: 'r1', result: { ok: false, error: {
     sidebarUrl: 'http://127.0.0.1:1/__arxa/sidebar/state',
   })
   const res2 = fakeRes()
-  await down.get('/__arxa/conversations')(fakeReq('GET', '/__arxa/conversations'), res2)
+  await down.get('exact:/__arxa/conversations')(fakeReq('GET', '/__arxa/conversations'), res2)
   assert.equal(res2.status, 502)
   assert.equal(res2.body.error, 'sidebar-unavailable')
   ok('GET conversations: flattened snapshot + honest 502 when sidebar down')
