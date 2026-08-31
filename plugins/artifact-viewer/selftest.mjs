@@ -295,3 +295,79 @@ const vt = await req(vport, '/%2e%2e/index.js')
 assert.ok(vt.status === 404 || vt.status === 403, 'vendor traversal refused, got ' + vt.status)
 await new Promise((r2) => vhttp.close(r2))
 console.log('arxa-artifact-viewer selftest: GREEN (vendor bundles + route)');
+
+// ---- Task 6: engine write API over a REAL git session worktree ------------
+import { createWriteApi, resolveWorktree } from './lib/write-api.js'
+import { execFileSync } from 'node:child_process'
+
+const gitEnv = { ...process.env,
+  GIT_AUTHOR_NAME: 'test', GIT_AUTHOR_EMAIL: 'test@arxa.invalid',
+  GIT_COMMITTER_NAME: 'test', GIT_COMMITTER_EMAIL: 'test@arxa.invalid' }
+const orgRepo = fs.mkdtempSync(path2.join(os.tmpdir(), 'arxa-av-git-'))
+const g = (args, cwd) => execFileSync('git', args, { cwd, env: gitEnv })
+g(['init', '-b', 'main'], orgRepo)
+fs.writeFileSync(path2.join(orgRepo, 'seed.md'), 'seed\n')
+g(['add', '.'], orgRepo)
+g(['commit', '-m', 'init'], orgRepo)
+
+const sessions = await import(new URL('../git-workspace/lib/sessions.js', import.meta.url).href)
+const created = sessions.openSession(orgRepo, { id: 'sess1', name: 'T1', env: gitEnv })
+const worktreeOf = (id) => path2.join(orgRepo, '.arxa', 'worktrees', id)
+assert.ok(fs.existsSync(worktreeOf('sess1')), 'session worktree exists after openSession')
+
+const wtEnv = { ...process.env, ARXA_HOME: home } // home from Task 2 with orgA? use a fresh route-style open org:
+// open-org truth for the write api: point orgA at the git org repo
+const gitHome = fs.mkdtempSync(path2.join(os.tmpdir(), 'arxa-av-ghome-'))
+const gitEnvHome = { ...process.env, ARXA_HOME: gitHome }
+fs.writeFileSync(path2.join(gitHome, 'organisation.json'), JSON.stringify({ orgs: [orgRepo] }))
+writeLock(orgRepo, { pid: process.pid, orgPath: orgRepo })
+assert.equal(readOpenOrg(gitEnvHome) && readOpenOrg(gitEnvHome).orgPath, orgRepo, 'git org reads as open')
+
+assert.equal(resolveWorktree({ env: gitEnvHome, orgPath: orgRepo, worktreeId: 'sess1' }).worktreePath, worktreeOf('sess1'))
+assert.equal(resolveWorktree({ env: gitEnvHome, orgPath: orgRepo, worktreeId: 'nope' }), null)
+
+const writeApi = createWriteApi({ env: gitEnvHome, secret })
+function callWrite(payload, headers = {}) {
+  return new Promise((resolve, rejectP) => {
+    const res = { statusCode: 0, headers: null, body: '',
+      writeHead(s, h) { this.statusCode = s; this.headers = h || null },
+      end(b) { this.body = b || ''; resolve(this) } }
+    const rq = { method: 'POST', headers: { 'content-type': 'application/json', ...headers },
+      on(ev, fn) {
+        if (ev === 'data') queueMicrotask(() => fn(Buffer.from(JSON.stringify(payload))))
+        if (ev === 'end') queueMicrotask(() => fn())
+      } }
+    writeApi.handle(rq, res).then(() => resolve(res), rejectP)
+  })
+}
+const wtok = issueToken({ secret, scope: 'write', worktreeId: 'sess1', ttlSeconds: 30 })
+const WH = { 'x-arxa-write-token': wtok }
+
+const w1 = await callWrite({ worktreeId: 'sess1', relPath: 'notes/a.md', content: 'written by the editor\n' }, WH)
+assert.equal(w1.statusCode, 200, 'happy write -> 200, got ' + w1.statusCode + ' ' + w1.body)
+const w1body = JSON.parse(w1.body)
+assert.equal(w1body.committed, true, 'WIP commit ran')
+const saved = path2.join(worktreeOf('sess1'), 'notes', 'a.md')
+assert.equal(fs.readFileSync(saved, 'utf8'), 'written by the editor\n')
+const log = g(['log', '--oneline'], worktreeOf('sess1')).toString()
+assert.match(log, /wip:/, 'WIP commit visible in worktree log')
+
+const w2 = await callWrite({ worktreeId: 'sess1', relPath: '../escape.md', content: 'x' }, WH)
+assert.equal(w2.statusCode, 403, 'worktree escape -> 403')
+const w3 = await callWrite({ worktreeId: 'sess1', relPath: 'account/secret.txt', content: 'x' }, WH)
+assert.equal(w3.statusCode, 403, 'account/ reserved -> 403 (D28/D37)')
+const w4 = await callWrite({ worktreeId: 'sess1', relPath: '.arxa/x', content: 'x' }, WH)
+assert.equal(w4.statusCode, 403, '.arxa/ reserved -> 403')
+const expiredW = issueToken({ secret, scope: 'write', worktreeId: 'sess1', ttlSeconds: 5, now: () => 1000 })
+const w5 = await callWrite({ worktreeId: 'sess1', relPath: 'notes/a.md', content: 'x' }, { 'x-arxa-write-token': expiredW })
+assert.equal(w5.statusCode, 401, 'expired write token -> 401')
+const w6 = await callWrite({ worktreeId: 'nope', relPath: 'x.md', content: 'x' }, { 'x-arxa-write-token': issueToken({ secret, scope: 'write', worktreeId: 'nope', ttlSeconds: 30 }) })
+assert.equal(w6.statusCode, 404, 'unknown session -> 404')
+const first = JSON.parse(w1.body)
+const w7 = await callWrite({ worktreeId: 'sess1', relPath: 'notes/a.md', content: 'conflict', expectedMtimeMs: first.mtimeMs + 99999 }, WH)
+assert.equal(w7.statusCode, 409, 'stale expectedMtimeMs -> 409 (external change wins)')
+const w8 = await callWrite({ worktreeId: 'sess1', relPath: 'notes/a.md', content: 'second save\n', expectedMtimeMs: first.mtimeMs }, WH)
+assert.equal(w8.statusCode, 200, 'matching mtime -> 200')
+assert.equal(fs.readFileSync(saved, 'utf8'), 'second save\n')
+
+console.log('arxa-artifact-viewer selftest: GREEN (write api over real git worktree)');

@@ -22,6 +22,7 @@ const { installSettingsSection, settingsNamespace } =
 const { default: z } = await fromDsh('@deepseek-ai/schemastery', 'lib/index.mjs')
 import { createOrgServer } from './org-server.js'
 import { startOrgFollow, readOpenOrg } from './follow.js'
+import { createWriteApi } from './write-api.js'
 import { TOKEN_TTL_CEILING_SECONDS, issueToken, loadOrCreateSecret, readVerifyFor } from './tokens.js'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -184,6 +185,11 @@ export function apply(ctx, config) {
     ctx.webServer?.register?.({
       path: '/__arxa/artifacts/vendor',
       handler: (req, res) => { void vendorRoutes.handle(req, res) },
+    })
+    const writeApi = createWriteApi({ env: process.env, secret })
+    ctx.webServer?.register?.({
+      path: '/__arxa/artifacts/write',
+      handler: (req, res) => { void writeApi.handle(req, res) },
     })
   } catch (err) {
     console.error('[arxa-artifact-viewer] startup failed: ' + (err && err.message))
