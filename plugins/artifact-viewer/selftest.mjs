@@ -399,3 +399,39 @@ assert.equal((await callMain('seed.md', wrongRel)).statusCode, 403, 'relPath-bou
 const esc = await callMain('../outside.md', issueToken({ secret, scope: 'read', relPath: '../outside.md', orgPath: orgRepo, ttlSeconds: 30 }))
 assert.equal(esc.statusCode, 403, 'escape -> 403')
 console.log('arxa-artifact-viewer selftest: GREEN (main-version diff route)');
+
+// ---- Task 10: version chip + timeline route (D20/D44) ----------------------
+import { createVersionRoute } from './lib/write-api.js'
+import { mintVersion } from '../git-workspace/lib/versions.js'
+
+const vr2 = createVersionRoute({ env: gitEnvHome, secret })
+function callVersion(relPath, token) {
+  return new Promise((resolve, rejectP) => {
+    const res = { statusCode: 0, headers: null, body: '',
+      writeHead(s, h) { this.statusCode = s; this.headers = h || null },
+      end(b) { this.body = b || ''; resolve(this) } }
+    const rq = { method: 'GET', url: '/?relPath=' + encodeURIComponent(relPath) + '&avt=' + encodeURIComponent(token || '') }
+    vr2.handle(rq, res).then(() => resolve(res), rejectP)
+  })
+}
+// unminted org repo -> hidden chip, empty timeline (never an error)
+const v0 = await callVersion('seed.md', issueToken({ secret, scope: 'read', relPath: 'seed.md', orgPath: orgRepo, ttlSeconds: 30 }))
+assert.equal(v0.statusCode, 200)
+assert.equal(JSON.parse(v0.body).chip, null)
+mintVersion(orgRepo, { name: 'first cut' })
+const v1 = await callVersion('seed.md', issueToken({ secret, scope: 'read', relPath: 'seed.md', orgPath: orgRepo, ttlSeconds: 30 }))
+const v1body = JSON.parse(v1.body)
+assert.equal(v1body.chip.version, 'v1', 'chip shows v1')
+assert.equal(v1body.chip.state, 'Draft', 'chip state Draft')
+assert.ok(!/^[0-9a-f]{7,}$/i.test(v1body.chip.label), 'chip label carries no SHA (D44)')
+assert.equal(v1body.timeline.length, 1, 'timeline carries the mint')
+// project repo resolution: projects/p1/** -> that repo's versions
+const proj = path2.join(orgRepo, 'projects', 'p1')
+fs.mkdirSync(proj, { recursive: true })
+mintVersion(proj, { name: 'proj cut', state: 'Approved' })
+const v2 = await callVersion('projects/p1/x.md', issueToken({ secret, scope: 'read', relPath: 'projects/p1/x.md', orgPath: orgRepo, ttlSeconds: 30 }))
+const v2body = JSON.parse(v2.body)
+assert.equal(v2body.chip.state, 'Approved', 'project repo owns its chip')
+assert.equal((await callVersion('seed.md', null)).statusCode, 403, 'no token -> 403')
+assert.equal((await callVersion('../x', issueToken({ secret, scope: 'read', relPath: '../x', orgPath: orgRepo, ttlSeconds: 30 }))).statusCode, 403, 'escape -> 403')
+console.log('arxa-artifact-viewer selftest: GREEN (version chip + timeline route)');

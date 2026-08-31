@@ -221,6 +221,9 @@ window.__ModuleLoader__.load({
       const [previewHtml, setPreviewHtml] = React.useState('')
       const [showDiff, setShowDiff] = React.useState(false)
       const [mainText, setMainText] = React.useState('')
+      const [chip, setChip] = React.useState(null)
+      const [timeline, setTimeline] = React.useState([])
+      const [showTimeline, setShowTimeline] = React.useState(false)
       const maxBytesRef = React.useRef(5 * 1024 * 1024)
       React.useEffect(() => { dirtyRef.current = dirty }, [dirty])
       // D82 cap arrives from the host settings namespace when available.
@@ -248,12 +251,20 @@ window.__ModuleLoader__.load({
       const openArtifact = async () => {
         const relPath = draft.trim().replace(/^\/+/, '')
         if (!relPath) return
-        setEditing(false); setDirty(false); setSession(null); setSaveNote(''); setSavePhase('idle'); mtimeRef.current = null; setPreviewHtml(''); setShowDiff(false); setMainText('')
+        setEditing(false); setDirty(false); setSession(null); setSaveNote(''); setSavePhase('idle'); mtimeRef.current = null; setPreviewHtml(''); setShowDiff(false); setMainText(''); setChip(null); setTimeline([]); setShowTimeline(false)
         setState({ phase: 'loading', relPath })
         try {
           const { token, origin } = await fetchToken(relPath)
           const url = origin + '/' + encodeURI(relPath) + '?avt=' + encodeURIComponent(token)
           const kind = kindFor(relPath)
+          void (async () => {
+            try {
+              const t = await fetchToken(relPath)
+              const r = await fetch('/__arxa/artifacts/version?relPath=' + encodeURIComponent(relPath) + '&avt=' + encodeURIComponent(t.token))
+              const body = await r.json().catch(() => ({}))
+              if (r.ok) { setChip(body.chip || null); setTimeline(body.timeline || []) }
+            } catch { /* chip stays hidden — never blocks the artifact */ }
+          })()
           if (kind.lane === 'markdown' || kind.lane === 'code' || kind.lane === 'text') {
             const r = await fetch(url)
             if (!r.ok) throw new Error('fetch ' + r.status)
@@ -337,6 +348,13 @@ window.__ModuleLoader__.load({
           state.phase === 'ready' && h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, overflow: 'hidden', flex: 1 } },
             h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } },
               h('span', { style: { fontSize: 11, opacity: 0.7 } }, state.relPath + ' · ' + lane + (state.readOnly ? ' · ' + state.guardNote : '')),
+              chip && h('button', {
+                onClick: () => setShowTimeline((v) => !v), title: chip.name || chip.label,
+                style: { fontSize: 11, padding: '2px 8px', borderRadius: 10, border: '1px solid #555', background: 'transparent', color: 'inherit', cursor: 'pointer' },
+              }, chip.label),
+              showTimeline && h('span', { style: { fontSize: 11, opacity: 0.85, border: '1px solid #555', borderRadius: 4, padding: '2px 8px' } },
+                (timeline || []).length === 0 ? 'no versions minted'
+                  : (timeline || []).map((v) => v.version + ' · ' + v.state).join('  |  '))),
               EDITABLE_LANES.has(lane) && !editing && !state.readOnly && h('button', {
                 onClick: () => { void startEditing() },
                 style: { marginLeft: 'auto', padding: '3px 10px', cursor: 'pointer', borderRadius: 4, border: '1px solid #555', background: 'transparent', color: 'inherit', fontSize: 12 },
@@ -388,7 +406,7 @@ window.__ModuleLoader__.load({
               src: state.url, sandbox: 'allow-scripts', title: state.relPath,
               style: { width: '100%', height: '60vh', border: '1px solid #333', background: '#fff' },
             }),
-            lane === 'pdf' && h(PdfView, { url: state.url })))
+            lane === 'pdf' && h(PdfView, { url: state.url }))
 
       return h('div', { style: { display: 'flex', flexDirection: 'column', height: '100%' } },
         h('div', { style: { display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: open ? '1px solid #333' : 'none' } },
