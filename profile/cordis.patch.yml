@@ -234,3 +234,32 @@
 - insert:
   - id: arxa-artifact-viewer
     name: arxa-artifact-viewer
+
+# 16. The arxa locale world (docs/plans/dsh-plugin-ui-conformance.md, Phase
+#     0, grilled 2026-09-02): arxa studio ships English/Polish/French — the
+#     stock zh/en locale row is DISABLED and arxa-locale takes the "locale"
+#     service with an identical face (LocaleRuntime + lookup chain kept
+#     whole; stock plugins injecting dsh-client-locale work unchanged, with
+#     untranslated surfaces falling back to en). The host half re-registers
+#     the "locale" settings namespace with the en/pl/fr preference schema.
+#     Same revert shape as 11a: delete this row pair to return the stock
+#     locale (package untouched, byte-identical — plugins/locale/selftest.mjs
+#     hashes it). A persisted "zh" preference fails validation once and the
+#     client falls back to the browser-derived locale (acceptable one-time).
+- id: locale
+  disabled: true
+- insert:
+  - id: arxa-locale
+    name: arxa-locale
+
+# 17. Conversation rail engine half (mobile code_shell, 2026-09-xx): serves
+#     the paired phone the Claude-Code-style session surface over the
+#     pairing tunnel — GET /__arxa/conversations (flattened sidebar state),
+#     GET /__arxa/conversations/<id>/messages (on-demand fold of the durable
+#     session log via apiProxy.sessions.history; human turns only), POST
+#     .../messages (plain user turn via apiProxy.sessions.prompt, queue or
+#     steer). Derived-only: nothing persists here, the JSONL log is the
+#     source of truth. Host-only plugin, absolute path — same shape as row 14.
+- insert:
+  - id: arxa-conversation
+    name: /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/conversation/lib/index.js
