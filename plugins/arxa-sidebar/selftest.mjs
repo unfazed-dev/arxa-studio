@@ -373,8 +373,8 @@ check('trash: org glyph shared between tree row and trash org entries (single de
 // ---- D83: trash lives under the last org row; icons keep their spacing ----
 check('trash: rides the grouped tree tail via ARXA_TRASH_AFTER_ORGS (no bottom mount)',
   client.includes('const ARXA_TRASH_AFTER_ORGS = () => orgT ? (0, react_jsx_runtime.jsx)(TrashSection, { t: orgT, key: "arxa-trash" }) : null;') && client.includes('}), ARXA_TRASH_AFTER_ORGS()]') && !client.includes('TrashSection, { t: props.t }'))
-check('trash: restore/delete icon buttons are gapped (flex span, 4px)',
-  client.includes('style: { display: "flex", gap: 4, flex: "none", alignItems: "center" }, children: [') && client.includes('IconRefreshOutline16, onRestore),') && client.includes('IconTrashOutline16, onPurge, true)'))
+check('trash: restore/delete icon buttons are gapped (flex span, 8px rhythm)',
+  client.includes('style: { display: "flex", gap: 8, flex: "none", alignItems: "center" }, children: [') && client.includes('IconRefreshOutline16, onRestore),') && client.includes('IconTrashOutline16, onPurge, true)'))
 // ---- D84: the trash reads exactly like the tree above it ----
 check('trash: header row IS an org row (projectRow class, treeitem, 600 weight, no kebab)',
   client.includes('style: { marginLeft: 4, marginTop: 4, borderRadius: 6, cursor: "pointer", fontWeight: 600 }') && client.includes('"aria-expanded": open,') && client.includes('className: Rows_module_css_default.title, children: t("trash.section")') && !client.includes('borderRadius: 8, padding: "0 6px"'))

@@ -725,9 +725,12 @@
 				children: [
 					(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.slot, children: glyph }),
 					(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, title: e.entryId, children: e.name }) }),
-					// D83: the two icon buttons get a real 4px gap — they rendered
-					// edge-to-edge (row CSS carries no gap for bare children).
-					(0, react_jsx_runtime.jsx)("span", { style: { display: "flex", gap: 4, flex: "none", alignItems: "center" }, children: [
+					// D83: the two icon buttons get a real gap — they rendered
+					// edge-to-edge (row CSS carries no gap for bare children). D92:
+					// 8px, the standard icon-button rhythm — 4px read as touching
+					// (iconButton is a bare 16×16, padding 0, so the gap IS the
+					// glyph-to-glyph distance).
+					(0, react_jsx_runtime.jsx)("span", { style: { display: "flex", gap: 8, flex: "none", alignItems: "center" }, children: [
 						entryAction(t("trash.restore"), _deepseek_ai_dsh_client_ui_primitives.IconRefreshOutline16, onRestore),
 						entryAction(t("trash.deleteForever"), _deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, onPurge, true)
 					] })
