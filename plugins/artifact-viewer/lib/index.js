@@ -25,6 +25,7 @@ import { startOrgFollow, readOpenOrg } from './follow.js'
 import { TOKEN_TTL_CEILING_SECONDS, issueToken, loadOrCreateSecret, readVerifyFor } from './tokens.js'
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 export { TOKEN_TTL_CEILING_SECONDS }
 export const inject = ['webServer']
@@ -59,7 +60,7 @@ function readBody(req) {
  * and their target validation happens again at write time (D81).
  * Factory shape keeps this testable without an engine.
  */
-export function createTokenRoutes({ env = process.env, secret, getSettings }) {
+export function createTokenRoutes({ env = process.env, secret, getSettings, getOrigin = () => null }) {
   function json(res, status, body) {
     res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' })
     res.end(JSON.stringify(body))
@@ -77,9 +78,11 @@ export function createTokenRoutes({ env = process.env, secret, getSettings }) {
         const token = issueToken({ secret, scope: 'write', worktreeId: body.worktreeId, ttlSeconds: ttl })
         return json(res, 200, { token })
       }
-      // read (default)
+      // read (default) — orgPath OPTIONAL: the open org is authoritative,
+      // a client-declared orgPath must MATCH it (no org-path probing).
       const open = readOpenOrg(env)
-      if (!open || body.orgPath !== open.orgPath) return json(res, 403, { error: 'org not open' })
+      if (!open) return json(res, 403, { error: 'no org open' })
+      if (body.orgPath != null && body.orgPath !== open.orgPath) return json(res, 403, { error: 'org not open' })
       if (typeof body.relPath !== 'string' || body.relPath === '') return json(res, 400, { error: 'relPath required' })
       try {
         const rootReal = fs.realpathSync(path.resolve(open.orgPath))
@@ -90,12 +93,40 @@ export function createTokenRoutes({ env = process.env, secret, getSettings }) {
         return json(res, err.code === 'ENOENT' ? 404 : 403, { error: 'unresolvable path' })
       }
       const token = issueToken({ secret, scope: 'read', relPath: body.relPath, orgPath: open.orgPath, ttlSeconds: ttl })
-      return json(res, 200, { token })
+      const origin = getOrigin()
+      if (!origin) return json(res, 503, { error: 'org server not up yet — retry' })
+      return json(res, 200, { token, origin })
     } catch (err) {
       return json(res, 500, { error: 'internal error' })
     }
   }
   return { handle }
+}
+
+/** Serves the vendored IIFE bundles from lib/vendor/ on the studio origin.
+ *  GET/HEAD only; basename-pinned (no subpaths, no traversal). */
+export function createVendorRoutes({ vendorDir }) {
+  return {
+    async handle(req, res) {
+      try {
+        if (req.method !== 'GET' && req.method !== 'HEAD') {
+          res.writeHead(405, { 'content-type': 'text/plain' })
+          return res.end('GET only')
+        }
+        const name = path.basename(decodeURIComponent(new URL(req.url, 'http://x').pathname))
+        const file = path.join(vendorDir, name)
+        if (!file.startsWith(vendorDir + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
+          res.writeHead(404, { 'content-type': 'text/plain' })
+          return res.end('not found')
+        }
+        res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' })
+        if (req.method === 'HEAD') return res.end()
+        fs.createReadStream(file).pipe(res)
+      } catch {
+        try { res.writeHead(500, { 'content-type': 'text/plain' }); res.end('internal error') } catch {}
+      }
+    },
+  }
 }
 
 let current = defaultSettings()
@@ -137,11 +168,22 @@ export function apply(ctx, config) {
   // the engine cold (theme-accent D84 lesson). Log loud, never crash.
   try {
     const secret = loadOrCreateSecret(process.env)
-    ensureFollow(secret)
-    const routes = createTokenRoutes({ env: process.env, secret, getSettings: currentSettings })
+    const started = ensureFollow(secret)
+    const routes = createTokenRoutes({
+      env: process.env, secret, getSettings: currentSettings,
+      getOrigin: () => started.current()?.origin ?? null,
+    })
     ctx.webServer?.register?.({
       path: '/__arxa/artifacts/token',
       handler: (req, res) => { void routes.handle(req, res) },
+    })
+    // Vendored browser bundles (committed build products — lib/vendor.js):
+    // served on the TRUSTED studio origin so the client can <script> them in.
+    const vendorDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor')
+    const vendorRoutes = createVendorRoutes({ vendorDir })
+    ctx.webServer?.register?.({
+      path: '/__arxa/artifacts/vendor',
+      handler: (req, res) => { void vendorRoutes.handle(req, res) },
     })
   } catch (err) {
     console.error('[arxa-artifact-viewer] startup failed: ' + (err && err.message))
