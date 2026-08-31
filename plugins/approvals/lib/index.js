@@ -427,6 +427,26 @@ export async function mirrorOutConfig(env = process.env, readFile = fs.readFileS
   return { enabled, ingestUrl: 'http://' + cairnMirrorBind(env) + '/ingest' }
 }
 
+/** TEST SEAM gate with the same keystore fallback as [mirrorOutConfig]: the
+ * engine child spawns with a clean env, so a literal ARXA_APPROVALS_TEST_SEAM
+ * in process.env never survives desktop-driven engine restarts — the sidecar
+ * keystore's copy (cairn-server.env, an operator-preserved line) is how the
+ * seam stays available across them. Never enabled unless explicitly opted in
+ * through one of those two literals. */
+export async function testSeamEnabled(env = process.env, readFile = fs.readFileSync, loadLib = loadDoorbell) {
+  if (typeof env.ARXA_APPROVALS_TEST_SEAM === 'string' && env.ARXA_APPROVALS_TEST_SEAM.trim() === 'true') {
+    return true
+  }
+  try {
+    const lib = await loadLib()
+    if (typeof lib?.appDataDir === 'function' && typeof lib?.parseEnvFile === 'function') {
+      const keystore = lib.parseEnvFile(readFile(path.join(lib.appDataDir(env), 'cairn-server.env'), 'utf8'))
+      return typeof keystore.ARXA_APPROVALS_TEST_SEAM === 'string' && keystore.ARXA_APPROVALS_TEST_SEAM.trim() === 'true'
+    }
+  } catch { /* unreadable keystore stays gate-off */ }
+  return false
+}
+
 /** The admin bearer for /ingest (ADR-0042): ARXA_MIRROR_ADMIN_TOKEN wins;
  *  else the sidecar keystore's CAIRN_ADMIN_TOKEN (cairn-server.env, the
  *  same file the bootstrap route reads). Null = not configured → skip.
@@ -683,8 +703,16 @@ export function apply(ctx, deps = {}) {
     },
   })
 
+  const seamDeps = { userQuestionsAsk: deps.userQuestionsAsk ?? defaultUserQuestionsAsk }
   if (process.env.ARXA_APPROVALS_TEST_SEAM === 'true') {
-    applyTestSeam(ctx, { userQuestionsAsk: deps.userQuestionsAsk ?? defaultUserQuestionsAsk })
+    applyTestSeam(ctx, seamDeps)
+  } else {
+    // Keystore fallback (see testSeamEnabled): the engine child's env is
+    // clean, so the operator's keystore line is the durable opt-in. Route
+    // registration stays boot-early async — off unless explicitly enabled.
+    void testSeamEnabled().then((on) => {
+      if (on) applyTestSeam(ctx, seamDeps)
+    })
   }
 
   ctx.webServer.register({
