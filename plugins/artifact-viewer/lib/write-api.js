@@ -54,7 +54,7 @@ function readBody(req) {
   })
 }
 
-export function createWriteApi({ env = process.env, secret }) {
+export function createWriteApi({ env = process.env, secret, getSettings = () => ({}) }) {
   async function handle(req, res) {
     try {
       if (req.method !== 'POST') return json(res, 405, { error: 'POST only' })
@@ -68,6 +68,10 @@ export function createWriteApi({ env = process.env, secret }) {
       if (typeof body.worktreeId !== 'string' || body.worktreeId === '') return json(res, 400, { error: 'worktreeId required' })
       if (typeof body.relPath !== 'string' || body.relPath === '') return json(res, 400, { error: 'relPath required' })
       if (typeof body.content !== 'string') return json(res, 400, { error: 'content required' })
+      // D82 server-side twin of the editor cap: the client guard is UX, this
+      // one is enforcement — a 40 MB paste never reaches the worktree.
+      const cap = Number((getSettings() || {}).maxEditBytes) || 5 * 1024 * 1024
+      if (body.content.length > cap) return json(res, 413, { error: 'content over the ' + cap + ' byte edit cap (D82)' })
       const found = resolveWorktree({ env, orgPath: open.orgPath, worktreeId: body.worktreeId })
       if (!found) return json(res, 404, { error: 'unknown session worktree for this org' })
       const rel = body.relPath.replace(/^\/+/, '')

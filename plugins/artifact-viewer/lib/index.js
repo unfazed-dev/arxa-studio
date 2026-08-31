@@ -186,7 +186,7 @@ export function apply(ctx, config) {
       path: '/__arxa/artifacts/vendor',
       handler: (req, res) => { void vendorRoutes.handle(req, res) },
     })
-    const writeApi = createWriteApi({ env: process.env, secret })
+    const writeApi = createWriteApi({ env: process.env, secret, getSettings: currentSettings })
     ctx.webServer?.register?.({
       path: '/__arxa/artifacts/write',
       handler: (req, res) => { void writeApi.handle(req, res) },

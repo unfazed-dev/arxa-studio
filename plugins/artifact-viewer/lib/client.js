@@ -190,12 +190,36 @@ window.__ModuleLoader__.load({
       const docRef = React.useRef(null)
       const mtimeRef = React.useRef(null)
       const dirtyRef = React.useRef(false)
+      const previewTimer = React.useRef(null)
+      const [previewHtml, setPreviewHtml] = React.useState('')
+      const maxBytesRef = React.useRef(5 * 1024 * 1024)
       React.useEffect(() => { dirtyRef.current = dirty }, [dirty])
+      // D82 cap arrives from the host settings namespace when available.
+      React.useEffect(() => {
+        let live = true
+        ;(async () => {
+          try {
+            const conn = hostCtx && hostCtx.connection
+            const { result } = await conn.api.settings.describe({})
+            const row = result.ok && result.value.namespaces.find((n) => n.ns === 'arxa-artifact-viewer')
+            if (live && row && row.value && Number(row.value.maxEditBytes) > 0) maxBytesRef.current = Number(row.value.maxEditBytes)
+          } catch { /* default cap stands */ }
+        })()
+        return () => { live = false }
+      }, [])
+      const refreshPreview = () => {
+        if (previewTimer.current) clearTimeout(previewTimer.current)
+        previewTimer.current = setTimeout(() => {
+          try {
+            if (docRef.current && window.ArxaMD) setPreviewHtml(window.ArxaMD.render(docRef.current.state.doc.toString()))
+          } catch { /* preview is best-effort */ }
+        }, 400)
+      }
 
       const openArtifact = async () => {
         const relPath = draft.trim().replace(/^\/+/, '')
         if (!relPath) return
-        setEditing(false); setDirty(false); setSession(null); setSaveNote(''); setSavePhase('idle'); mtimeRef.current = null
+        setEditing(false); setDirty(false); setSession(null); setSaveNote(''); setSavePhase('idle'); mtimeRef.current = null; setPreviewHtml('')
         setState({ phase: 'loading', relPath })
         try {
           const { token, origin } = await fetchToken(relPath)
@@ -204,7 +228,16 @@ window.__ModuleLoader__.load({
           if (kind.lane === 'markdown' || kind.lane === 'code' || kind.lane === 'text') {
             const r = await fetch(url)
             if (!r.ok) throw new Error('fetch ' + r.status)
-            setState({ phase: 'ready', kind, relPath, url, text: await r.text() })
+            const len = Number(r.headers.get('content-length') || '0')
+            const cap = maxBytesRef.current
+            let readOnly = false
+            let guardNote = ''
+            if (len > cap) { readOnly = true; guardNote = 'file is ' + Math.round(len / 1048576 * 10) / 10 + ' MB — over the ' + Math.round(cap / 1048576 * 10) / 10 + ' MB edit cap; read-only (D82)' }
+            const text = await r.text()
+            if (!readOnly && text.slice(0, 8192).includes('\u0000')) {
+              readOnly = true; guardNote = 'binary file — view only (D82)'
+            }
+            setState({ phase: 'ready', kind, relPath, url, text, readOnly, guardNote })
           } else if (kind.lane === 'unknown') {
             setState({ phase: 'ready', kind, relPath, url, note: 'no renderer for this type' })
           } else {
@@ -217,6 +250,7 @@ window.__ModuleLoader__.load({
 
       const startEditing = async () => {
         setSaveNote(''); setSavePhase('idle')
+        if (state.readOnly) { setSavePhase('error'); setSaveNote(state.guardNote || 'read-only'); return }
         try {
           const s = await ensureSession()
           setSession(s)
@@ -273,8 +307,8 @@ window.__ModuleLoader__.load({
           state.phase === 'error' && h('div', { style: { fontSize: 12, color: '#c66' } }, state.note),
           state.phase === 'ready' && h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, overflow: 'hidden', flex: 1 } },
             h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } },
-              h('span', { style: { fontSize: 11, opacity: 0.7 } }, state.relPath + ' · ' + lane),
-              EDITABLE_LANES.has(lane) && !editing && h('button', {
+              h('span', { style: { fontSize: 11, opacity: 0.7 } }, state.relPath + ' · ' + lane + (state.readOnly ? ' · ' + state.guardNote : '')),
+              EDITABLE_LANES.has(lane) && !editing && !state.readOnly && h('button', {
                 onClick: () => { void startEditing() },
                 style: { marginLeft: 'auto', padding: '3px 10px', cursor: 'pointer', borderRadius: 4, border: '1px solid #555', background: 'transparent', color: 'inherit', fontSize: 12 },
               }, 'edit'),
@@ -289,11 +323,16 @@ window.__ModuleLoader__.load({
               }, savePhase === 'saving' ? 'saving…' : 'save'),
               editing && h('span', { style: { fontSize: 11, opacity: 0.8, color: savePhase === 'error' || savePhase === 'conflict' ? '#c66' : 'inherit' } },
                 saveNote || (dirty ? 'unsaved changes' : ''))),
-            lane === 'markdown' && h('div', { className: 'arxa-av-md', style: { overflow: 'auto', flex: 1 },
-              dangerouslySetInnerHTML: editing
-                ? undefined
-                : { __html: window.ArxaMD ? window.ArxaMD.render(state.text) : '<em>markdown bundle loading…</em>' } },
-              editing ? null : undefined),
+            lane === 'markdown' && !editing && h('div', { className: 'arxa-av-md', style: { overflow: 'auto', flex: 1 },
+              dangerouslySetInnerHTML: { __html: window.ArxaMD ? window.ArxaMD.render(state.text) : '<em>markdown bundle loading…</em>' } }),
+            lane === 'markdown' && editing && h('div', { style: { display: 'flex', gap: 8, flex: 1, overflow: 'hidden' } },
+              h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' } },
+                h('div', { style: { fontSize: 11, opacity: 0.7, padding: '2px 0' } }, 'source'),
+                h(CodeView, { relPath: state.relPath, text: state.text, editable: true, docRef, onDirty: () => { setDirty(true); refreshPreview() } })),
+              h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' } },
+                h('div', { style: { fontSize: 11, opacity: 0.7, padding: '2px 0' } }, 'preview'),
+                h('div', { className: 'arxa-av-md', style: { overflow: 'auto', flex: 1, border: '1px solid #333', borderRadius: 4, padding: 8 },
+                  dangerouslySetInnerHTML: { __html: previewHtml || '<em>preview…</em>' } }))),
             (lane === 'code' || lane === 'text') && h(CodeView, { relPath: state.relPath, text: state.text, editable: editing, docRef, onDirty: () => setDirty(true) }),
             lane === 'image' && h('img', { src: state.url, alt: state.relPath, style: { maxWidth: '100%' } }),
             lane === 'audio' && h('audio', { src: state.url, controls: true, style: { width: '100%' } }),

@@ -326,7 +326,7 @@ assert.equal(readOpenOrg(gitEnvHome) && readOpenOrg(gitEnvHome).orgPath, orgRepo
 assert.equal(resolveWorktree({ env: gitEnvHome, orgPath: orgRepo, worktreeId: 'sess1' }).worktreePath, worktreeOf('sess1'))
 assert.equal(resolveWorktree({ env: gitEnvHome, orgPath: orgRepo, worktreeId: 'nope' }), null)
 
-const writeApi = createWriteApi({ env: gitEnvHome, secret })
+const writeApi = createWriteApi({ env: gitEnvHome, secret, getSettings: () => ({ maxEditBytes: 1024 }) })
 function callWrite(payload, headers = {}) {
   return new Promise((resolve, rejectP) => {
     const res = { statusCode: 0, headers: null, body: '',
@@ -369,5 +369,7 @@ assert.equal(w7.statusCode, 409, 'stale expectedMtimeMs -> 409 (external change 
 const w8 = await callWrite({ worktreeId: 'sess1', relPath: 'notes/a.md', content: 'second save\n', expectedMtimeMs: first.mtimeMs }, WH)
 assert.equal(w8.statusCode, 200, 'matching mtime -> 200')
 assert.equal(fs.readFileSync(saved, 'utf8'), 'second save\n')
+const w9 = await callWrite({ worktreeId: 'sess1', relPath: 'big.md', content: 'x'.repeat(2000) }, WH)
+assert.equal(w9.statusCode, 413, 'over-cap content -> 413 (D82 server-side twin)')
 
 console.log('arxa-artifact-viewer selftest: GREEN (write api over real git worktree)');
