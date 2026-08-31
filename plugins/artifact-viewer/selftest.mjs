@@ -56,6 +56,30 @@ assert.match(launcher, /BY_NAME_PLUGINS = \[[^\]]*'arxa-artifact-viewer'/,
 assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   'packed mode copies the plugin directory')
 
+// D88-D93: the generated arxa-frame module must match its generator (drift
+// gate) and the client must never register into shell.overlay again.
+{
+  const gen = execFileSync(process.execPath, [join(root, 'scripts', 'gen-frame.mjs'), '--check'], { cwd: root })
+  assert.match(String(gen), /--check OK/, 'arxa-frame drift gate: generated client matches gen-frame.mjs')
+  const clientSrc = fs.readFileSync(join(here, 'lib', 'client.js'), 'utf8')
+  assert.doesNotMatch(clientSrc, /inject\('shell\.overlay'/, 'viewer never floats over the frame again (D88)')
+  assert.match(clientSrc, /inject\('viewer'/, 'viewer registers into the docked viewer seat')
+  const frameSrc = fs.readFileSync(join(root, 'plugins', 'arxa-frame', 'lib', 'client.js'), 'utf8')
+  assert.match(frameSrc, /renderSlot\("viewer"/, 'frame renders the viewer seat')
+  assert.match(frameSrc, /session-maybe/, 'viewer seat is session-scoped (D88 presence)')
+}
+// D89/D90 lanes exist server-side
+{
+  const wt = fs.readFileSync(join(here, 'lib', 'wt-api.js'), 'utf8')
+  assert.match(wt, /scope: 'wt-read'/, 'worktree read lane token class (D89)')
+  assert.match(wt, /scope: 'tree-read'/, 'tree listing token class (D90)')
+  assert.match(wt, /scope: 'changes-read'/, 'session changes token class')
+  const idx = fs.readFileSync(join(here, 'lib', 'index.js'), 'utf8')
+  for (const p of ['/__arxa/artifacts/wt', '/__arxa/artifacts/tree', '/__arxa/artifacts/session-changes']) {
+    assert.ok(idx.includes("'" + p + "'"), 'route registered: ' + p)
+  }
+}
+
 console.log('arxa-artifact-viewer selftest: GREEN')
 
 // ---- Task 2: per-org GET-only server --------------------------------------

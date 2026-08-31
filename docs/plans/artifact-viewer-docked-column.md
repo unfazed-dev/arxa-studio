@@ -46,20 +46,20 @@ conversation deliverable cards and the arxa sidebar file tree.
   (iii) hybrid (copy provides store+controller under the SAME service
   contract; stock row disabled only if requires allow). Write the verdict
   into scripts/gen-frame.mjs's header before generating anything.
-- **T1 — scripts/gen-frame.mjs**: transform stock ui-layout client with
+- **T1 — DONE 2026-08-31 (13 deltas, drift gate in selftest).** **T1 — scripts/gen-frame.mjs**: transform stock ui-layout client with
   deltas: `viewer` store key + set/open/close/toggle actions (clamp
   min 320), viewer column in computeColumns + grid, DragHandle clone,
   session-bound presence (detailsSession source), narrow→sheet branch,
   maximize helper, module id/tag. Drift gate in artifact-viewer selftest.
-- **T2 — plugins/artifact-viewer/lib/client.js rebuild**: drop
+- **T2 — DONE 2026-08-31 (viewer-seat column, wt lane, changes list, av-open bridge, 4s rebind).** **T2 — plugins/artifact-viewer/lib/client.js rebuild**: drop
   shell.overlay registration (guard in selftest); column citizen UI
   (header: tabs preview/code, ⤢, ✕; path input; session-changes list;
   D85 badge); sheet branch at narrow; session-switch rebind; consume wt
   lane for worktree files.
-- **T3 — tokens.js + routes**: worktree-bound read token kind;
+- **T3 — DONE 2026-08-31 (wt/tree/session-changes routes + token classes).** **T3 — tokens.js + routes**: worktree-bound read token kind;
   `/__arxa/artifacts/wt` (escape-proof, worktree-scoped, Range-aware);
   `/__arxa/artifacts/tree?dir=…` (lazy listing, exclusions, bounded).
-- **T4 — arxa-sidebar files section**: Files rows under the open org from
+- **T4 — PENDING (anchor: workspace-section half at arxa-sidebar client.js line ~344; slot name sidebar.workspaces).** **T4 — arxa-sidebar files section**: Files rows under the open org from
   the tree route (lazy per-expand); click → open viewer column via the
   existing window-event bridge pattern (`arxa-av-open`).
 - **T5 — Deliverables card routing**: produced-file chips + file-mentions
