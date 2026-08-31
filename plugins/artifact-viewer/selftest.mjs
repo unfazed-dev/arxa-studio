@@ -105,6 +105,7 @@ const H = 'org-test.localhost:' + port
 const r1 = await req(port, '/notes/a.md', { host: H })
 assert.equal(r1.status, 200)
 assert.equal(r1.headers['content-type'], 'text/markdown; charset=utf-8')
+assert.equal(r1.headers['access-control-allow-origin'], '*', 'CORS: studio page reads org-origin responses')
 assert.equal(r1.body, '# hello\n')
 assert.equal(r1.headers['cache-control'], 'no-store')
 

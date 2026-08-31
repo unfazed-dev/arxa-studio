@@ -90,7 +90,7 @@ export function createOrgServer({ orgRoot, orgSlug, verify = null }) {
         return reject(res, 403, 'outside the org root')
       }
       const type = MIME[path.extname(abs).toLowerCase()] || 'application/octet-stream'
-      const base = { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }
+      const base = { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'access-control-allow-origin': '*' }
       const range = parseRange(req.headers.range, st.size)
       if (range) {
         res.writeHead(206, {
@@ -128,7 +128,9 @@ export function createOrgServer({ orgRoot, orgSlug, verify = null }) {
 
 function reject(res, status, message) {
   if (res.headersSent) return res.destroy()
-  res.writeHead(status, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' })
+  // ACAO *: the token IS the auth (D7) — the studio page must be able to
+  // read cross-origin responses from the org origin.
+  res.writeHead(status, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*' })
   res.end(status + ' ' + message)
 }
 
