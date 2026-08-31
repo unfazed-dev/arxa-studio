@@ -751,6 +751,65 @@ try {
     }
   }
 
+  // ---- D90: per-org / per-project GitHub connect + disconnect -----------
+  console.log('github connect/disconnect (D90):')
+  {
+    const dRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-d90t-'))
+    const env = { ...process.env, ARXA_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-home-d90t-')) }
+    const bareRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-d90t-bare-'))
+    const bareFor = (name) => { const p = path.join(bareRoot, name + '.git'); runGit(['init', '--bare', p], { cwd: bareRoot, env }); return p }
+    const createdRepos = []
+    const deletedRepos = []
+    try {
+      const svc = createOrgLifecycle({
+        workspaceRoot: dRoot, env,
+        github: {
+          status: async () => ({ linked: true, login: 'octocat' }),
+          createPrivateRepo: async (name) => { if (!createdRepos.includes(name)) createdRepos.push(name); return { name, full_name: 'octocat/' + name, private: true, html_url: bareFor(name), owner: 'octocat', repoUrl: bareFor(name) } },
+          deleteRepo: async (owner, name) => { deletedRepos.push(owner + '/' + name); return { deleted: true } },
+          repoNameTaken: async (owner, name) => createdRepos.includes(name) && !deletedRepos.includes(owner + '/' + name),
+          gitCredentials: async () => ({ login: 'octocat', token: 'test-token' }),
+        },
+      })
+      const org = svc.createOrg('D90 Case')
+      await svc.openOrg(org.path)
+      await svc.current.githubHeal
+      const proj = await svc.current.newProject('Sub')
+      // connect the project (manual, project-scoped)
+      const conn = await svc.connectProject(org.path, 'Sub')
+      ok(conn?.ok === true && conn.repoUrl === bareFor('Sub'), 'D90: connectProject publishes one project repo')
+      // disconnect KEEP: manifest stripped, localOnly set, repo alive
+      const keep = await svc.disconnectProjectGithub(org.path, 'Sub', { removeRepos: false })
+      ok(keep?.ok === true && keep.removed === false, 'D90: project disconnect-keep strips the link without deleting')
+      const pm = JSON.parse(fs.readFileSync(path.join(proj.path, 'project.json'), 'utf8'))
+      ok(!pm.repoUrl && pm.localOnly === true, 'D90: project manifest stripped + localOnly after disconnect')
+      ok(!deletedRepos.includes('octocat/Sub'), 'D90: keep never deletes the GitHub repo')
+      // reconnect ADOPTS the kept repo (no 422 create)
+      const reconn = await svc.connectProject(org.path, 'Sub')
+      ok(reconn?.ok === true && reconn.repoUrl === bareFor('Sub'), 'D90: reconnect after keep ADOPTS the existing repo')
+      ok(createdRepos.filter((n) => n === 'Sub').length === 1, 'D90: adoption never calls createPrivateRepo again')
+      // disconnect REMOVE: repo deleted
+      const rm = await svc.disconnectProjectGithub(org.path, 'Sub', { removeRepos: true })
+      ok(rm?.ok === true && rm.removed === true, 'D90: project disconnect-remove deletes the repo')
+      ok(deletedRepos.includes('octocat/Sub'), 'D90: the delete carried owner/name')
+      // org-scope disconnect removes the org repo in one sweep
+      const sweep = await svc.disconnectGithub(org.path, { removeRepos: true })
+      ok(sweep?.ok === true && sweep.removedRepos.includes('octocat/D90-Case'), 'D90: org disconnect sweeps the org repo away')
+      const om = JSON.parse(fs.readFileSync(path.join(org.path, 'org.json'), 'utf8'))
+      ok(!om.repoUrl && om.localOnly === true, 'D90: org manifest stripped + localOnly after org disconnect')
+      // local-only org NEVER auto-publishes on reopen
+      svc.closeOrg()
+      await svc.openOrg(org.path)
+      const heal2 = await svc.current.githubHeal
+      ok(heal2?.ok === false && heal2.reason === 'local-only', 'D90: the heal refuses a local-only org (reason local-only)')
+      svc.closeOrg()
+    } finally {
+      fs.rmSync(dRoot, { recursive: true, force: true })
+      fs.rmSync(bareRoot, { recursive: true, force: true })
+    }
+  }
+
+
 
   console.log(`\nfile-org-shell selftest: ${passed} checks passed`)
 } finally {

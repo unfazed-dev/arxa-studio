@@ -3161,12 +3161,12 @@ window.__ModuleLoader__.load({
 					for (const [k, v] of Object.entries(counts)) if (k === prefix || k.startsWith(prefix + "/")) n += v;
 					return n;
 				};
-				emit[o.id] = [{ kind: "org", orgId: o.id, key: o.id, depth: 0, label: o.name, open: o.open, count: total }];
+				emit[o.id] = [{ kind: "org", orgId: o.id, key: o.id, depth: 0, label: o.name, slug: o.slug, open: o.open, count: total, connected: !!o.connected }];
 				if (!tree || !Array.isArray(tree.docks)) continue;
 				for (const d of tree.docks) {
 					if (d.workspace) continue;
 					emit[o.id + "|" + d.slug] = [{ kind: "dock", orgId: o.id, key: o.id + "|" + d.slug, depth: 1, label: orgT("tree.dock." + d.slug), slug: d.slug, count: d.slug === "projects" ? countUnder("projects") : countUnder(d.slug), ...(d.slug === "projects" ? { plus: "project" } : {}) }];
-					if (d.slug === "projects") for (const p of tree.projects || []) emit[o.id + "|projects/" + p.slug] = [{ kind: "project", orgId: o.id, key: o.id + "|projects/" + p.slug, depth: 2, label: p.name, slug: p.slug, count: countUnder("projects/" + p.slug) }];
+					if (d.slug === "projects") for (const p of tree.projects || []) emit[o.id + "|projects/" + p.slug] = [{ kind: "project", orgId: o.id, key: o.id + "|projects/" + p.slug, depth: 2, label: p.name, slug: p.slug, count: countUnder("projects/" + p.slug), connected: !!p.connected }];
 				}
 			}
 			return emit;
@@ -3279,17 +3279,21 @@ window.__ModuleLoader__.load({
 			const items = isOrg ? [
 				{ id: "rename", label: orgT("menu.org.rename"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconEditOutline16, {}) },
 				{ id: "open", label: orgT("menu.org.open"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) },
-				{ id: "publish", label: orgT("menu.org.publish"), icon: ghMark16 },
+				d.connected === false ? { id: "connect", label: orgT("menu.org.connect"), icon: ghMark16 } : { id: "disconnect", label: orgT("menu.org.disconnect"), icon: ghMark16 },
 				{ type: "separator", id: "sep-org-trash" },
 				{ id: "trash", label: orgT("menu.org.trash"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}), danger: true }
 			] : [
 				{ id: "rename", label: orgT("menu.project.rename"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconEditOutline16, {}) },
+				d.connected === false ? { id: "connect", label: orgT("menu.project.connect"), icon: ghMark16 } : { id: "disconnect", label: orgT("menu.project.disconnect"), icon: ghMark16 },
 				{ id: "trash", label: orgT("menu.project.trash"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}), danger: true }
 			];
 			const onSelect = (id) => {
 				setMenuOpen(false);
 				if (id === "open") orgStore.mutate("org.open", { orgId: d.orgId }).catch(() => {});
-				else if (id === "publish") window.dispatchEvent(new CustomEvent("arxa-publish-org", { detail: { orgId: d.orgId, orgName: d.label || d.orgId } }));
+				else if (id === "connect" && isOrg) window.dispatchEvent(new CustomEvent("arxa-publish-org", { detail: { orgId: d.orgId, orgName: d.label || d.orgId } }));
+			else if (id === "connect") window.dispatchEvent(new CustomEvent("arxa-publish-org", { detail: { orgId: d.orgId, projectSlug: d.slug, orgName: d.label || d.orgId, projectName: d.label || d.slug } }));
+			else if (id === "disconnect" && isOrg) window.dispatchEvent(new CustomEvent("arxa-disconnect-github", { detail: { kind: "org", orgId: d.orgId, name: d.label || d.orgId, slug: d.slug || "" } }));
+			else if (id === "disconnect") window.dispatchEvent(new CustomEvent("arxa-disconnect-github", { detail: { kind: "project", orgId: d.orgId, projectSlug: d.slug, name: d.label || d.slug, slug: d.slug } }));
 				else if (id === "rename" && isOrg) window.dispatchEvent(new CustomEvent("arxa-rename-org", { detail: { orgId: d.orgId, orgName: d.label || "" } }));
 				else if (id === "rename") window.dispatchEvent(new CustomEvent("arxa-rename-project", { detail: { orgId: d.orgId, projectSlug: d.slug, projectName: d.label || "" } }));
 				else if (id === "trash" && isOrg) orgStore.mutate("org.trash", { orgId: d.orgId }).catch(() => {});
@@ -3314,6 +3318,13 @@ window.__ModuleLoader__.load({
 						className: Rows_module_css_default.projectText,
 						children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: d.label })
 					}),
+					// D90: subtle local-only marker — dimmed GitHub mark when the
+					// row has NO repo behind it (connected rides org + project rows).
+					(isOrg || d.kind === "project") && d.connected === false ? (0, react_jsx_runtime.jsx)("span", {
+						title: orgT("rows.localOnly"),
+						style: { display: "inline-flex", alignItems: "center", marginLeft: 6, opacity: 0.4, flex: "none" },
+						children: ghMark16
+					}) : null,
 					d.count > 0 ? (0, react_jsx_runtime.jsx)("span", {
 						style: { fontSize: 11, opacity: 0.55, flex: "none", marginRight: 4 },
 						children: String(d.count)
@@ -3476,8 +3487,11 @@ window.__ModuleLoader__.load({
 			const [busy, setBusy] = (0, react.useState)(false);
 			const [error, setError] = (0, react.useState)(null);
 			const [ghLinked, setGhLinked] = (0, react.useState)(null);
-			const [devCode, setDevCode] = (0, react.useState)(null);
-			const [copied, setCopied] = (0, react.useState)(false);
+			/** D90: Publish-to-GitHub toggle — ON by default (grilled): OFF
+			 * creates the org LOCAL-ONLY (no repo, no heal). Unlinked accounts
+			 * get the toggle disabled + a hint pointing at the org menu —
+			 * local-only creation is always allowed, never a sign-in wall. */
+			const [ghPublish, setGhPublish] = (0, react.useState)(true);
 			/** Create-time history question (2025-08): when the picked folder
 			 * already holds content, does org history track it? Default = arxa's
 			 * files only (non-intrusive, VS Code-parity); opting in versions the
@@ -3496,7 +3510,7 @@ window.__ModuleLoader__.load({
 					setBusy(false);
 					setError(null);
 					setGhLinked(null);
-					setDevCode(null);
+					setGhPublish(true);
 					setSnapChoice(false);
 					setFolderHasFiles(false);
 					checkGh();
@@ -3516,34 +3530,9 @@ window.__ModuleLoader__.load({
 				return () => window.clearTimeout(id);
 			}, [location, busy]);
 			if (!open) return null;
-			const showSignin = ghLinked === false;
-			const signin = () => {
-				setBusy(true);
-				setError(null);
-				setDevCode(null);
-				/** Device flow: the server surfaces the one-time code via the
-				 * github.device act as soon as GitHub issues it; poll until then. */
-				const poll = setInterval(() => {
-					ORG_POST("github.device").then((r) => {
-						const d = r.result;
-						if (d && d.userCode) setDevCode(d);
-					}, () => {});
-				}, 700);
-				ORG_POST("github.link").then(() => ORG_POST("github.status")).then((r) => {
-					clearInterval(poll);
-					setBusy(false);
-					setDevCode(null);
-					const linked = !!(r.result && r.result.linked);
-					setGhLinked(linked);
-					if (!linked) setError(t("github.signin.failed"));
-				}, (e) => {
-					clearInterval(poll);
-					setBusy(false);
-					setDevCode(null);
-					setError(e instanceof Error ? e.message : String(e));
-				});
-			};
-			const canSubmit = name.trim() !== "" && !busy && !showSignin && location.trim() !== "";
+			const ghAvailable = ghLinked !== false;
+			const publishOn = ghAvailable && ghPublish;
+			const canSubmit = name.trim() !== "" && !busy && location.trim() !== "";
 			const dismiss = () => {
 				if (!busy) onClose();
 			};
@@ -3557,7 +3546,7 @@ window.__ModuleLoader__.load({
 				// the moment the create lands. A bare POST left the stale empty
 				// list up for the 5s poll — the gate lingered, and any tap on
 				// the welcome card re-opened this modal (create-again loop).
-				const ready = orgStore.mutate("org.create-at", { name: orgName, path: location.trim(), includeExisting: snapChoice });
+				const ready = orgStore.mutate("org.create-at", { name: orgName, path: location.trim(), includeExisting: snapChoice, link: publishOn });
 				ready.then(() => {
 					onClose();
 				}, (e) => {
@@ -3611,7 +3600,7 @@ window.__ModuleLoader__.load({
 						onClick: dismiss,
 						children: t("cancel")
 					}),
-					!showSignin && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {
+					(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {
 						variant: "primary",
 						disabled: !canSubmit,
 						onClick: submit,
@@ -3619,54 +3608,8 @@ window.__ModuleLoader__.load({
 					})
 				] }),
 				children: (0, react_jsx_runtime.jsxs)("div", { children: [
-					showSignin && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginBottom: 12 }, children: t("github.signin.desc") }),
-						(0, react_jsx_runtime.jsx)("div", { style: { display: "flex", justifyContent: "flex-end" }, children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {
-							variant: "primary",
-							disabled: busy,
-							onClick: signin,
-							children: (0, react_jsx_runtime.jsxs)("span", { style: { display: "inline-flex", alignItems: "center", gap: 8 }, children: [
-								(0, react_jsx_runtime.jsx)("svg", { width: 16, height: 16, viewBox: "0 0 16 16", fill: "currentColor", "aria-hidden": "true", children: (0, react_jsx_runtime.jsx)("path", { d: GH_MARK }) }),
-								busy ? t("github.signin.busy") : t("github.signin.button")
-							] })
-						}) }),
-						busy && devCode && (0, react_jsx_runtime.jsxs)("div", { style: { marginTop: 12, fontSize: 12 }, children: [
-							(0, react_jsx_runtime.jsx)("div", { style: { opacity: 0.75 }, children: t("github.signin.codeHint") }),
-							(0, react_jsx_runtime.jsxs)("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 4 }, children: [
-								(0, react_jsx_runtime.jsx)("span", { style: { fontSize: 22, fontWeight: 700, letterSpacing: 2 }, children: devCode.userCode }),
-								(0, react_jsx_runtime.jsx)("button", {
-									title: t("github.signin.copy"),
-									onClick: () => {
-										const done = () => { setCopied(true); setTimeout(() => setCopied(false), 1500); };
-										if (navigator.clipboard && navigator.clipboard.writeText) {
-											navigator.clipboard.writeText(devCode.userCode).then(done, () => {});
-										} else {
-											const ta = document.createElement("textarea");
-											ta.value = devCode.userCode;
-											document.body.appendChild(ta);
-											ta.select();
-											document.execCommand("copy");
-											document.body.removeChild(ta);
-											done();
-										}
-									},
-									style: { border: "1px solid var(--dsw-alias-border-l2)", background: "transparent", color: "inherit", borderRadius: 6, padding: "4px 8px", fontSize: 11, cursor: "pointer" },
-									children: copied ? t("github.signin.copied") : t("github.signin.copy")
-								})
-							] }),
-							(0, react_jsx_runtime.jsx)("div", { style: { marginTop: 6 }, children: (0, react_jsx_runtime.jsx)("a", {
-								href: devCode.verificationUri,
-								onClick: (e) => {
-									e.preventDefault();
-									fetch("/__arxa/sidebar/open-external", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: devCode.verificationUri }) });
-								},
-								style: { color: "var(--dsw-alias-text-link, #6ea8fe)", cursor: "pointer" },
-								children: t("github.signin.openLink")
-							}) })
-						] })
-					] }),
-					!showSignin && (0, react_jsx_runtime.jsx)("div", { style: label, children: t("field.workspaceName") }),
-					!showSignin && (0, react_jsx_runtime.jsx)("input", {
+					(0, react_jsx_runtime.jsx)("div", { style: label, children: t("field.workspaceName") }),
+					(0, react_jsx_runtime.jsx)("input", {
 						ref: nameRef,
 						value: name,
 						placeholder: t("field.workspaceName"),
@@ -3676,7 +3619,7 @@ window.__ModuleLoader__.load({
 						},
 						style: field
 					}),
-					!showSignin && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+					(0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 						(0, react_jsx_runtime.jsx)("div", { style: label, children: t("org.create.location") }),
 						(0, react_jsx_runtime.jsx)("input", {
 							value: location,
@@ -3700,7 +3643,22 @@ window.__ModuleLoader__.load({
 								(0, react_jsx_runtime.jsx)("input", { type: "radio", name: "arxa-org-existing", checked: snapChoice, onChange: () => setSnapChoice(true) }),
 								t("org.create.existing.all")
 							] })
-						] })
+						] }),
+						// D90: the Publish-to-GitHub switch — pill + knob, ARIA switch role.
+						(0, react_jsx_runtime.jsx)("div", { style: { marginTop: 12, padding: "8px 10px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 6 }, children: (0, react_jsx_runtime.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 8, fontSize: 12 }, children: [
+							(0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								role: "switch",
+								"aria-checked": publishOn ? "true" : "false",
+								"aria-label": t("org.create.ghToggle"),
+								disabled: !ghAvailable || busy,
+								onClick: () => setGhPublish((v) => !v),
+								style: { width: 28, height: 16, borderRadius: 999, border: "1px solid var(--dsw-alias-border-l2)", background: publishOn ? "var(--dsw-alias-text-link, #6ea8fe)" : "transparent", position: "relative", flex: "none", cursor: ghAvailable ? "pointer" : "default", padding: 0, opacity: ghAvailable ? 1 : 0.5, transition: "background 120ms" },
+								children: (0, react_jsx_runtime.jsx)("span", { style: { position: "absolute", top: 1, left: publishOn ? 13 : 1, width: 12, height: 12, borderRadius: "50%", background: publishOn ? "#fff" : "var(--dsw-alias-text-secondary)", transition: "left 120ms" } })
+							}),
+							(0, react_jsx_runtime.jsx)("span", { children: t("org.create.ghToggle") })
+							] }) }),
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.55, marginTop: 6 }, children: ghAvailable ? t(publishOn ? "org.create.ghOnHint" : "org.create.ghOffHint") : t("org.create.ghUnavailableHint") }),
 					] }),
 					error !== null && (0, react_jsx_runtime.jsx)("div", {
 						role: "alert",
@@ -3737,7 +3695,7 @@ window.__ModuleLoader__.load({
 			};
 			const confirm = () => {
 				setPhase("busy"); setErrMsg(null);
-				ORG_POST("github.publish", { orgId: target.orgId }).then((b) => {
+				ORG_POST(target.projectSlug ? "project.connect" : "github.publish", target.projectSlug ? { orgId: target.orgId, projectSlug: target.projectSlug } : { orgId: target.orgId }).then((b) => {
 					const res = b && b.result;
 					if (res && res.ok) { setResult(res); setPhase("done"); orgStore.refresh(); }
 					else { setErrMsg(reasonText(res && res.reason)); setPhase("error"); }
@@ -3763,12 +3721,12 @@ window.__ModuleLoader__.load({
 				open: true,
 				onClose: dismiss,
 				closeLabel: t("publish.cancel"),
-				title: t("publish.title"),
+				title: t(target.projectSlug ? "publish.projectTitle" : "publish.title"),
 				footer,
 				children: (0, react_jsx_runtime.jsxs)("div", { children: [
 					phase === "confirm" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 14, fontWeight: 600, marginBottom: 8 }, children: target.orgName }),
-						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75 }, children: t("publish.confirmDesc") })
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 14, fontWeight: 600, marginBottom: 8 }, children: target.projectSlug ? (target.projectName || target.projectSlug) : target.orgName }),
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75 }, children: t(target.projectSlug ? "publish.projectConfirmDesc" : "publish.confirmDesc") })
 					] }),
 					phase === "busy" && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75 }, children: t("publish.busy") }),
 					phase === "done" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
@@ -4075,7 +4033,108 @@ window.__ModuleLoader__.load({
 				})
 			});
 		}
-		function OrgBrowser(props) {
+		/** D90: the Disconnect GitHub conversation — per org (covering every
+	 * project repo under it) or per single project. Grilled shape: Keep on
+	 * GitHub is the DEFAULT; "remove too" arms only after the exact repo
+	 * slug is retyped (D88-style typed gate); busy locks the modal; a
+	 * scope-stale 403 offers the in-modal re-link + auto-retry (D85). */
+	function OrgDisconnectModal({ t, target, onClose }) {
+		const [phase, setPhase] = (0, react.useState)("confirm");
+		const [errMsg, setErrMsg] = (0, react.useState)(null);
+		const [removeRepos, setRemoveRepos] = (0, react.useState)(false);
+		const [typed, setTyped] = (0, react.useState)("");
+		const [summary, setSummary] = (0, react.useState)(null);
+		const [relinking, setRelinking] = (0, react.useState)(false);
+		const [devCode, setDevCode] = (0, react.useState)(null);
+		(0, react.useEffect)(() => { setPhase("confirm"); setErrMsg(null); setRemoveRepos(false); setTyped(""); setRelinking(false); setDevCode(null); setSummary(null); }, [target]);
+		if (!target) return null;
+		const dismiss = () => { if (phase !== "busy") onClose(); };
+		const matches = typed === target.slug;
+		const submit = () => {
+			if (phase === "busy" || (removeRepos && !matches)) return;
+			setPhase("busy"); setErrMsg(null);
+			ORG_POST(target.kind === "project" ? "project.disconnect" : "org.disconnect", target.kind === "project" ? { orgId: target.orgId, projectSlug: target.projectSlug, removeRepos } : { orgId: target.orgId, removeRepos }).then((r) => {
+				const res = r && r.result;
+				const removed = res && Array.isArray(res.removedRepos) ? res.removedRepos : res && res.removed && res.repo ? [res.repo] : [];
+				setSummary(removed.length > 0 ? t("disconnect.doneRemoved").replace("{repos}", removed.join(", ")) : t("disconnect.doneKept"));
+				setPhase("done");
+				orgStore.refresh();
+				setTimeout(onClose, 1100);
+			}, (e) => {
+				setErrMsg(e instanceof Error ? e.message : String(e)); setPhase("confirm");
+			});
+		};
+		const relink = () => {
+			if (relinking) return;
+			setRelinking(true); setErrMsg(null);
+			const poll = setInterval(() => {
+				ORG_POST("github.device").then((r) => {
+					const d = r.result;
+					if (d && d.userCode) setDevCode(d);
+				}, () => {});
+			}, 700);
+			ORG_POST("github.link").then(() => {
+				clearInterval(poll);
+				setRelinking(false); setDevCode(null);
+				submit();
+			}, (e) => {
+				clearInterval(poll);
+				setRelinking(false); setDevCode(null);
+				setErrMsg(e instanceof Error ? e.message : String(e));
+			});
+		};
+		const footer = (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+			(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "outline", disabled: phase === "busy", onClick: dismiss, children: phase === "done" ? t("purge.close") : t("publish.cancel") }),
+			phase !== "done" && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "primary", disabled: phase === "busy" || (removeRepos && !matches), onClick: submit, children: phase === "busy" ? t("disconnect.busy") : t("disconnect.cta") })
+		] });
+		return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Modal, {
+			open: true,
+			onClose: dismiss,
+			closeLabel: t("publish.cancel"),
+			title: t("disconnect.title"),
+			footer,
+			children: (0, react_jsx_runtime.jsxs)("div", { children: [
+				phase !== "done" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+					(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, marginBottom: 8 }, children: target.name }),
+					(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginBottom: 8 }, children: target.kind === "project" ? t("disconnect.projectWarn") : t("disconnect.orgWarn") }),
+					(0, react_jsx_runtime.jsxs)("label", { style: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }, children: [
+						(0, react_jsx_runtime.jsx)("input", { type: "radio", name: "arxa-disconnect-mode", checked: !removeRepos, onChange: () => { setRemoveRepos(false); setTyped(""); }, disabled: phase === "busy" }),
+						t("disconnect.keep")
+					] }),
+					(0, react_jsx_runtime.jsxs)("label", { style: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer", marginTop: 4 }, children: [
+						(0, react_jsx_runtime.jsx)("input", { type: "radio", name: "arxa-disconnect-mode", checked: removeRepos, onChange: () => setRemoveRepos(true), disabled: phase === "busy" }),
+						t("disconnect.remove")
+					] }),
+					removeRepos && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.55, margin: "10px 0 4px" }, children: t("disconnect.typeRepo").replace("{name}", target.slug) }),
+						(0, react_jsx_runtime.jsx)("input", {
+							value: typed,
+							onChange: (e) => setTyped(e.target.value),
+							onKeyDown: (e) => { if (e.key === "Enter" && matches) submit(); },
+							placeholder: target.slug,
+							disabled: phase === "busy",
+							autoComplete: "off",
+							spellCheck: false,
+							style: { width: "100%", boxSizing: "border-box", fontSize: 13, padding: "6px 8px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 6, background: "transparent", color: "inherit", fontFamily: "inherit" }
+						})
+					] }),
+					errMsg && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, color: "var(--dsw-alias-text-critical, #e5534b)", marginTop: 10 }, children: errMsg }),
+					errMsg && errMsg.includes("re-link GitHub") && !relinking && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "outline", onClick: relink, style: { marginTop: 10 }, children: t("purge.relink") }),
+					errMsg && !errMsg.includes("re-link GitHub") && !relinking && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "outline", onClick: submit, style: { marginTop: 10 }, children: t("purge.retry") }),
+					relinking && (0, react_jsx_runtime.jsxs)("div", { style: { marginTop: 10, padding: "10px 12px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 8, fontSize: 12 }, children: [
+						(0, react_jsx_runtime.jsx)("div", { style: { opacity: 0.75, marginBottom: 6 }, children: t("purge.relinkHint") }),
+						(0, react_jsx_runtime.jsx)("div", { children: devCode ? devCode.verificationUri : "https://github.com/login/device" }),
+						devCode && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 16, fontWeight: 600, letterSpacing: "0.08em", marginTop: 4 }, children: devCode.userCode })
+					] })
+				] }),
+				phase === "done" && (0, react_jsx_runtime.jsxs)("div", { children: [
+					(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, fontWeight: 600 }, children: t("disconnect.done") }),
+					summary && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginTop: 6 }, children: summary })
+				] })
+			] })
+		});
+	}
+	function OrgBrowser(props) {
 			// Data hooks are pinned HERE, at the component boundary: the slot
 			// renderer merges its STANDARD runtime hooks (useSessions/useWorkspaces)
 			// over inject props, so declaring them in the inject face loses. Passing
@@ -4093,11 +4152,20 @@ window.__ModuleLoader__.load({
 			const [renaming, setRenaming] = (0, react.useState)(null);
 			// D81: the purge conversation — { scope, entryId, name } | null.
 			const [purging, setPurging] = (0, react.useState)(null);
+			// D90: the disconnect conversation — { kind, orgId, projectSlug?, name, slug } | null.
+			const [disconnecting, setDisconnecting] = (0, react.useState)(null);
 			(0, react.useEffect)(() => {
 				const open = () => setCreating(true);
 				const onPublish = (e) => {
 					const d = (e && e.detail) || {};
-					if (d && d.orgId) setPublishing({ orgId: String(d.orgId), orgName: String(d.orgName || d.orgId) });
+					// D90: project rows dispatch the same event with a projectSlug —
+					// the publish modal then runs project.connect, scoped to one repo.
+					if (d && d.orgId && d.projectSlug) setPublishing({ orgId: String(d.orgId), projectSlug: String(d.projectSlug), orgName: String(d.orgName || d.orgId), projectName: String(d.projectName || d.projectSlug) });
+					else if (d && d.orgId) setPublishing({ orgId: String(d.orgId), orgName: String(d.orgName || d.orgId) });
+				};
+				const onDisconnect = (e) => {
+					const d = (e && e.detail) || {};
+					if (d && d.orgId && d.slug) setDisconnecting({ kind: d.kind === "project" ? "project" : "org", orgId: String(d.orgId), projectSlug: d.projectSlug ? String(d.projectSlug) : void 0, name: String(d.name || d.orgId), slug: String(d.slug) });
 				};
 				const onCreateProject = (e) => {
 					const d = (e && e.detail) || {};
@@ -4121,6 +4189,7 @@ window.__ModuleLoader__.load({
 					if (d && d.entryId) setPurging({ scope: String(d.scope || "project"), entryId: String(d.entryId), name: String(d.name || d.entryId) });
 				};
 				window.addEventListener("arxa-purge-trash", onPurge);
+			window.addEventListener("arxa-disconnect-github", onDisconnect);
 				return () => {
 					window.removeEventListener("arxa-create-org", open);
 					window.removeEventListener("arxa-publish-org", onPublish);
@@ -4128,6 +4197,7 @@ window.__ModuleLoader__.load({
 				window.removeEventListener("arxa-rename-org", onRenameOrg);
 				window.removeEventListener("arxa-rename-project", onRenameProject);
 				window.removeEventListener("arxa-purge-trash", onPurge);
+				window.removeEventListener("arxa-disconnect-github", onDisconnect);
 				};
 			}, []);
 			// CTA gate lives here now (always mounted) — see useSessionCtaGate.
@@ -4143,7 +4213,8 @@ window.__ModuleLoader__.load({
 					(0, react_jsx_runtime.jsx)(OrgPublishModal, { t: props.t, target: publishing, onClose: () => setPublishing(null) }),
 					(0, react_jsx_runtime.jsx)(OrgProjectModal, { t: props.t, target: creatingProject, onClose: () => setCreatingProject(null) }),
 				(0, react_jsx_runtime.jsx)(OrgRenameModal, { t: props.t, target: renaming, onClose: () => setRenaming(null) }),
-				(0, react_jsx_runtime.jsx)(OrgPurgeModal, { t: props.t, target: purging, onClose: () => setPurging(null) })
+				(0, react_jsx_runtime.jsx)(OrgPurgeModal, { t: props.t, target: purging, onClose: () => setPurging(null) }),
+			(0, react_jsx_runtime.jsx)(OrgDisconnectModal, { t: props.t, target: disconnecting, onClose: () => setDisconnecting(null) })
 				]
 			});
 		}
@@ -4193,6 +4264,22 @@ window.__ModuleLoader__.load({
 			"purge.relinkHint": "One-time permission upgrade: the saved GitHub link predates the delete permission. Enter this code at the URL below to authorize — the delete retries automatically.",
 			"purge.typeName": "Type {name} exactly to confirm.",
 			"purge.retry": "Try again",
+			"disconnect.title": "Disconnect from GitHub",
+			"disconnect.orgWarn": "Unlinks this organisation and every project repository under it. Your files stay on this device.",
+			"disconnect.projectWarn": "Unlinks this project's repository. Your files stay on this device.",
+			"disconnect.keep": "Keep the repositories on GitHub",
+			"disconnect.remove": "Also remove them from GitHub",
+			"disconnect.typeRepo": "Type {name} to confirm removal.",
+			"disconnect.cta": "Disconnect",
+			"disconnect.busy": "Disconnecting…",
+			"disconnect.done": "Disconnected from GitHub",
+			"disconnect.doneKept": "Disconnected — repositories kept on GitHub.",
+			"disconnect.doneRemoved": "Disconnected — removed from GitHub: {repos}",
+			"rows.localOnly": "On this device only — connect from this menu",
+			"org.create.ghToggle": "Publish to GitHub",
+			"org.create.ghOnHint": "A private GitHub repository is created and kept in sync.",
+			"org.create.ghOffHint": "This organisation stays on this device only. Connect it later from its menu.",
+			"org.create.ghUnavailableHint": "GitHub isn't linked — the organisation will be created on this device only. Connect it later from its menu.",
 			"purge.close": "Close",
 			"groupBy.workspace": "Project",
 			"orderBy.manual": "As created",
@@ -4251,9 +4338,14 @@ window.__ModuleLoader__.load({
 			"tree.pc.scaffold": "Scaffold",
 			"menu.org.open": "Open organisation",
 			"menu.org.newProject": "New project",
-			"menu.org.publish": "Publish to GitHub",
+			"menu.org.connect": "Connect to GitHub",
+			"menu.org.disconnect": "Disconnect GitHub…",
+			"menu.project.connect": "Connect to GitHub",
+			"menu.project.disconnect": "Disconnect GitHub…",
 			"publish.title": "Publish to GitHub",
 			"publish.confirmDesc": "Creates one private GitHub repo for this organisation and one per project, then pushes the full commit history. Session branches stay local.",
+			"publish.projectTitle": "Connect project to GitHub",
+			"publish.projectConfirmDesc": "Creates a private GitHub repository for this project and pushes its full history.",
 			"publish.confirmCta": "Publish",
 			"publish.busyCta": "Publishing…",
 			"publish.busy": "Publishing… first publish can take a moment while history is pushed.",
@@ -4322,6 +4414,22 @@ window.__ModuleLoader__.load({
 			"purge.relinkHint": "一次性权限升级：已保存的 GitHub 关联早于删除权限。在下方网址输入该代码完成授权——删除会自动重试。",
 			"purge.typeName": "输入 {name} 以确认。",
 			"purge.retry": "重试",
+			"disconnect.title": "断开 GitHub",
+			"disconnect.orgWarn": "将解除该组织及其下所有项目仓库与 GitHub 的链接。文件保留在本机。",
+			"disconnect.projectWarn": "将解除该项目仓库与 GitHub 的链接。文件保留在本机。",
+			"disconnect.keep": "保留 GitHub 上的仓库",
+			"disconnect.remove": "同时从 GitHub 移除",
+			"disconnect.typeRepo": "输入 {name} 以确认移除。",
+			"disconnect.cta": "断开",
+			"disconnect.busy": "断开中…",
+			"disconnect.done": "已从 GitHub 断开",
+			"disconnect.doneKept": "已断开 — 仓库保留在 GitHub。",
+			"disconnect.doneRemoved": "已断开 — 已从 GitHub 移除：{repos}",
+			"rows.localOnly": "仅保存在本机 — 可从此菜单连接",
+			"org.create.ghToggle": "发布到 GitHub",
+			"org.create.ghOnHint": "将创建私有 GitHub 仓库并保持同步。",
+			"org.create.ghOffHint": "该组织仅保存在本机。之后可从其菜单连接 GitHub。",
+			"org.create.ghUnavailableHint": "GitHub 未关联 — 组织将仅创建于本机。之后可从其菜单连接。",
 			"purge.close": "关闭",
 			"groupBy.workspace": "按项目",
 			"orderBy.manual": "按创建顺序",
@@ -4376,9 +4484,14 @@ window.__ModuleLoader__.load({
 			"tree.pc.scaffold": "脚手架",
 			"menu.org.open": "打开组织",
 			"menu.org.newProject": "新建项目",
-			"menu.org.publish": "发布到 GitHub",
+			"menu.org.connect": "连接到 GitHub",
+			"menu.org.disconnect": "断开 GitHub…",
+			"menu.project.connect": "连接到 GitHub",
+			"menu.project.disconnect": "断开 GitHub…",
 			"publish.title": "发布到 GitHub",
 			"publish.confirmDesc": "为该组织及其每个项目各创建一个私有 GitHub 仓库，并推送完整提交历史。会话分支保留在本地。",
+			"publish.projectTitle": "连接项目到 GitHub",
+			"publish.projectConfirmDesc": "为该项目创建私有 GitHub 仓库并推送完整历史。",
 			"publish.confirmCta": "发布",
 			"publish.busyCta": "发布中…",
 			"publish.busy": "正在发布…首次推送历史可能需要一些时间。",

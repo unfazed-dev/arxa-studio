@@ -511,7 +511,10 @@ export function apply(ctx, opts = {}) {
             // org IS its own root (D69) — the cached lifecycle still points
             // at the previous root. Graceful teardown first (reverse order,
             // shell lock released), then a fresh lifecycle opens the new org.
-            if (!link) { try { const { annotateOrgManifest: ann } = await import(new URL('../../file-org-shell/lib/github-bridge.js', import.meta.url).href); ann(created.path, { localOnly: true }) } catch { /* best-effort flag */ } }
+            // D90 packed-mode lesson: the naive '../../file-org-shell' URL
+            // does NOT exist under the profile's node_modules — annotate via
+            // importShell's dual resolution (bare 'arxa-file-org-shell' first).
+            if (!link) { try { shell ??= await importShell().catch(() => null); if (typeof shell?.annotateOrgManifest === 'function') shell.annotateOrgManifest(created.path, { localOnly: true }) } catch { /* best-effort flag */ } }
             if (lifecycle?.current) { try { await lifecycle.closeOrg() } catch {} }
             lifecycle = null
             const l2 = await getLifecycle()
@@ -554,7 +557,7 @@ export function apply(ctx, opts = {}) {
                 if (!st.linked) throw new Error('linked-required')
               }
               const created = l.createOrg(typeof arg?.name === 'string' && arg.name.trim() !== '' ? arg.name : 'Untitled Organisation')
-              if (arg?.link === false) { try { const { annotateOrgManifest: ann } = await import(new URL('../../file-org-shell/lib/github-bridge.js', import.meta.url).href); ann(created.path, { localOnly: true }) } catch { /* best-effort flag */ } }
+              if (arg?.link === false) { try { shell ??= await importShell().catch(() => null); if (typeof shell?.annotateOrgManifest === 'function') shell.annotateOrgManifest(created.path, { localOnly: true }) } catch { /* best-effort flag */ } }
               await ensureOpen(created.path) // switch, not open — single handle
             },
             // D90: per-org / per-project GitHub connect + disconnect.

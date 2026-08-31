@@ -221,7 +221,11 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       writeManifest(manifestFile, m)
       try { runGit(['add', path.basename(manifestFile)], { cwd: repoPath, allowFail: true }); runGit(['commit', '-m', 'disconnect: remove GitHub link state', '--', path.basename(manifestFile)], { cwd: repoPath, allowFail: true }) } catch { /* best-effort */ }
     } catch { /* strip best-effort — remote removal still proceeds */ }
-    try { runGit(['remote', 'remove', 'origin'], { cwd: repoPath, allowFail: true }) } catch { /* best-effort */ }
+    // D90: only a REMOVE deletes the GitHub side, so only then does the
+    // origin remote die. KEEP leaves origin pointing at the live repo —
+    // reconnect then flows through the existing-origin publish path (no
+    // create, no 422, push is idempotent over our own history).
+    if (removeRepos) { try { runGit(['remote', 'remove', 'origin'], { cwd: repoPath, allowFail: true }) } catch { /* best-effort */ } }
     return { ok: true, slug, repo: full, removed: !!removeRepos }
   }
   /** D90: disconnect the ORG repo AND every published project under it. */

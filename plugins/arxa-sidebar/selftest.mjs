@@ -63,9 +63,9 @@ check('rows: stock Workspaces label superseded in overrides only', !client.inclu
 check('rows: add flow opens the create-organisation modal (Q3, webview-safe)',
   client.includes('new Event("arxa-create-org")') && client.includes('function OrgCreateModal(') && client.includes('window.addEventListener("arxa-create-org", open)'))
 check('create-modal: sign-in CTA carries the GitHub brand mark', client.includes('viewBox: "0 0 16 16"') && client.includes('d: GH_MARK'))
-check('create-modal: sign-in step right-aligns the CTA and shows NO premature disabled submit in the footer', client.includes('justifyContent: "flex-end"') && client.includes('!showSignin && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {'))
+check('create-modal: D90 sign-in wall is GONE — submit always present, GitHub rides the switch', !client.includes('!showSignin && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {') && !client.includes('showSignin') && client.includes('const canSubmit = name.trim() !== "" && !busy && location.trim() !== "";'))
 check('create-modal: device-flow code surfaces in the sign-in step (github.device poll + big code)', client.includes('"github.device"') && client.includes('github.signin.codeHint') && client.includes('devCode.userCode'))
-check('create-modal: device code row has a copy button and a clickable open-link via the allowlisted host route', client.includes('"github.signin.copy"') && client.includes('"github.signin.openLink"') && client.includes('open-external') && client.includes('navigator.clipboard'))
+check('create-modal: D90 device-flow copy/open-link moved to the relink paths (purge + disconnect modals)', client.includes('open-external') && client.includes('https://github.com/login/device') && client.includes('devCode.userCode'))
 check('rows: window.prompt is gone (Tauri WKWebView never implements it)', !client.includes('window.prompt('))
 check('rows: location field opens the OS folder locator (Tauri dialog when injected, host osascript locator otherwise)',
   client.includes('window.__TAURI__.dialog') && client.includes('directory: true') && client.includes('pick-folder'))
@@ -286,10 +286,10 @@ check('github: import failure degrades to the loud stub, never a crash',
   hostSrc().includes('await getGithub().catch(() => undefined)'))
 check('github: manual publish action routes to the open-org handle (D74 hybrid heal)',
   hostSrc().includes("'github.publish'") && hostSrc().includes('cur.publishGithub()'))
-check('github: org menu carries the Publish row (en + zh)',
-  client.includes('"github.publish"') && client.includes('menu.org.publish'))
-check('github: publish label localized',
-  client.includes('"menu.org.publish": "Publish to GitHub"') && client.includes('"menu.org.publish": "发布到 GitHub"'))
+check('github: org menu carries the connect verb (github.publish action survives)',
+  client.includes('"github.publish"') && client.includes('{ id: "connect", label: orgT("menu.org.connect")'))
+check('github: connect label localized (en + zh)',
+  client.includes('"menu.org.connect": "Connect to GitHub"') && client.includes('"menu.org.connect": "连接到 GitHub"'))
 
 // ---- D77 (the PLATO incident): publish silence + placement trap ----
 // The menu's publish row used to fire-and-forget (mutate().catch(() => {})):
@@ -305,7 +305,7 @@ check('create-at: an org name with no slug fails loud before any disk write',
 check('publish: the menu row dispatches the modal event (no swallowed mutate)',
   client.includes('"arxa-publish-org"') && !client.includes('orgStore.mutate("github.publish"'))
 check('publish: modal runs the phase machine over the publish result',
-  client.includes('function OrgPublishModal') && client.includes('ORG_POST("github.publish"') && client.includes('initial-snapshot-pending'))
+  client.includes('function OrgPublishModal') && client.includes('target.projectSlug ? "project.connect" : "github.publish"') && client.includes('initial-snapshot-pending'))
 check('publish: modal localized (en + zh)',
   client.includes('"publish.confirmCta": "Publish"') && client.includes('"publish.confirmCta": "发布"'))
 
@@ -395,5 +395,37 @@ check('purge: D88 busy LOCK (Close dead while deleting) + retry + auto-close + s
   client.includes('variant: "outline", disabled: phase === "busy", onClick: dismiss') && client.includes('t("purge.retry")') && client.includes('setTimeout(onClose, 1100)') && client.includes('res.deletedRepos.join(", ")'))
 check('purge: D88 typed gate + retry localized (en + zh)',
   client.includes('"purge.typeName": "Type {name} exactly to confirm."') && client.includes('"purge.typeName": "输入 {name} 以确认。"') && client.includes('"purge.retry": "Try again"') && client.includes('"purge.retry": "重试"'))
+// ---- D90: link/unlink GitHub per org + project; local-only creation ----
+check('menus: D90 connect/disconnect replaces publish — state-dependent per org + project',
+  client.includes('d.connected === false ? { id: "connect", label: orgT("menu.org.connect"), icon: ghMark16 } : { id: "disconnect", label: orgT("menu.org.disconnect"), icon: ghMark16 }') && client.includes('d.connected === false ? { id: "connect", label: orgT("menu.project.connect"), icon: ghMark16 }') && client.includes('"arxa-disconnect-github"') && !client.includes('menu.org.publish'))
+check('rows: D90 local-only marker + connected flags ride org and project rows',
+  client.includes('connected: !!o.connected') && client.includes('connected: !!p.connected') && client.includes('rows.localOnly'))
+check('create: D90 publish toggle default ON; link rides org.create-at; NO sign-in wall',
+  client.includes('const [ghPublish, setGhPublish] = (0, react.useState)(true);') && client.includes('link: publishOn') && client.includes('role: "switch"') && client.includes('disabled: !ghAvailable || busy') && !client.includes('const showSignin = ghLinked === false;'))
+check('disconnect: D90 keep/remove radios + typed repo gate (Remove arms only on exact slug)',
+  client.includes('name: "arxa-disconnect-mode"') && client.includes('const matches = typed === target.slug;') && client.includes('disabled: phase === "busy" || (removeRepos && !matches)'))
+check('disconnect: D90 org action covers project repos, project scoped; 403 relink; auto-close',
+  client.includes('"org.disconnect"') && client.includes('"project.disconnect"') && client.includes('projectSlug: target.projectSlug, removeRepos }') && client.includes('errMsg.includes("re-link GitHub") && !relinking') && client.includes('setTimeout(onClose, 1100)'))
+check('publish: D90 project connect rides the same modal (projectSlug scope)',
+  client.includes('target.projectSlug ? "project.connect" : "github.publish"') && client.includes('"publish.projectTitle"'))
+check('i18n: D90 connect/disconnect + create toggle localized (en + zh)',
+  client.includes('"menu.org.connect": "Connect to GitHub"') && client.includes('"menu.org.disconnect": "Disconnect GitHub…"') && client.includes('"disconnect.typeRepo": "Type {name} to confirm removal."') && client.includes('"disconnect.typeRepo": "输入 {name} 以确认移除。"') && client.includes('"org.create.ghOffHint": "This organisation stays on this device only. Connect it later from its menu."') && client.includes('"org.create.ghOffHint": "该组织仅保存在本机。之后可从其菜单连接 GitHub。"'))
+check('create: D90 fragment children EVALUATE to 6 elements (guards the ASI call-chain swallow)', (() => {
+  const lines = client.split('\n');
+  let idx = -1;
+  for (let i = 0; i < lines.length; i++) if (lines[i].includes('react_jsx_runtime.Fragment, { children: [') && lines[i + 1] && lines[i + 1].includes('org.create.location')) { idx = i; break; }
+  if (idx < 0) return false;
+  const region = lines.slice(idx).join('\n');
+  const from = region.indexOf('children: [') + 'children: '.length;
+  let depth = 0, end = -1;
+  for (let pos = from; pos < region.length; pos++) { const c = region[pos]; if (c === '[') depth++; else if (c === ']') { depth--; if (depth === 0) { end = pos; break; } } }
+  try {
+    const el = () => ({ ok: true });
+    const noop = () => {};
+    const fn = new Function('react_jsx_runtime', 't', 'folderHasFiles', 'publishOn', 'ghAvailable', 'busy', 'snapChoice', 'field', 'label', 'location', 'nameRef', 'setName', 'setLocation', 'setSnapChoice', 'setGhPublish', 'submit', 'browseLocation', 'return [' + region.slice(from + 1, end) + ']');
+    const arr = fn({ jsx: el, jsxs: el, Fragment: {} }, (k) => k, false, true, true, false, false, {}, {}, '', null, noop, noop, noop, noop, noop, noop, noop);
+    return arr.length === 6 && arr[4] && arr[4].ok === true;
+  } catch { return false; }
+})())
 console.log(failures === 0 ? '\narxa-sidebar selftest: ALL GREEN' : `\narxa-sidebar selftest: ${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)

@@ -28,7 +28,7 @@ export { listTrash, restoreFromTrash } from '../../workspace/lib/index.js'
 export { createDshBridge, joinDshLive } from './dsh-bridge.js'
 // GitHub bridge (W3b, D69 publish half): injectable status/createPrivateRepo
 // faces with a default unavailable stub — publish never blocks local work.
-export { createGithubBridge, annotateProjectManifest } from './github-bridge.js'
+export { createGithubBridge, annotateProjectManifest, annotateOrgManifest } from './github-bridge.js'
 export { annotateSession } from '../../git-workspace/lib/sessions.js'
 export { SHELL_LOCK_DIR, shellLockPath, acquireShellLock } from './shell-lock.js'
 export { OrgOpenError, OrgAlreadyOpenError, OrgNotOpenError, ShellLockError } from './errors.js'
