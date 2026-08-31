@@ -1,0 +1,56 @@
+{
+  "url": "http://127.0.0.1:7899/",
+  "rungs": [
+    {
+      "name": "compact",
+      "width": 390,
+      "height": 844,
+      "consoleErrors": 0,
+      "overflow": false,
+      "settled": true,
+      "settleMs": 1908,
+      "clean": true,
+      "png": "designs/artifact-viewer/evidence/lens/compact_390.png",
+      "uniformPct": "40.7",
+      "uniformColor": [
+        236,
+        248,
+        252
+      ]
+    },
+    {
+      "name": "medium",
+      "width": 744,
+      "height": 1133,
+      "consoleErrors": 1,
+      "overflow": false,
+      "settled": true,
+      "settleMs": 1970,
+      "clean": false,
+      "png": "designs/artifact-viewer/evidence/lens/medium_744.png",
+      "uniformPct": "99.4",
+      "uniformColor": [
+        16,
+        16,
+        20
+      ]
+    },
+    {
+      "name": "expanded",
+      "width": 1280,
+      "height": 832,
+      "consoleErrors": 1,
+      "overflow": false,
+      "settled": true,
+      "settleMs": 1969,
+      "clean": false,
+      "png": "designs/artifact-viewer/evidence/lens/expanded_1280.png",
+      "uniformPct": "99.5",
+      "uniformColor": [
+        16,
+        16,
+        20
+      ]
+    }
+  ]
+}
