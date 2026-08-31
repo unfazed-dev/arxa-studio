@@ -1,6 +1,7 @@
-// Browser half of arxa-artifact-viewer (D7 + D78-D87). Same hand-written
-// __ModuleLoader__ factory shape as design-panel. Registers a right-docked
-// panel into shell.overlay (additive slot; details is occupied).
+// Browser half of arxa-artifact-viewer (D7 + D78-D87 + D88-D93). Registers
+// the panel into the AppFrame's docked "viewer" seat (arxa-frame generated
+// column: session-bound presence, drag handle, maximize, narrow sheet).
+// NEVER shell.overlay again — the full-inset overlay blocked all UI (fixed).
 //
 // Lanes: markdown (vendored markdown-it+DOMPurify), code/text via vendored
 // CodeMirror 6 — READ-ONLY until the D80 edit toggle, then EDITABLE with
@@ -61,6 +62,16 @@ window.__ModuleLoader__.load({
         document.head.appendChild(s)
       })
       return loadedVendors[name]
+    }
+
+    async function fetchTokenRaw(payload) {
+      const res = await fetch(TOKEN_ROUTE, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.error || ('token route ' + res.status))
+      return body
     }
 
     async function fetchToken(relPath, writeFor) {
@@ -205,7 +216,8 @@ window.__ModuleLoader__.load({
       return h('div', { ref, style: { border: '1px solid #333', borderRadius: 4, overflow: 'auto', maxHeight: '70vh' } })
     }
 
-    function ArtifactPanel() {
+    function ArtifactPanel(props) {
+      const frameProps = props || {}
       const [open, setOpen] = React.useState(false)
       const [draft, setDraft] = React.useState('')
       const [state, setState] = React.useState({ phase: 'idle' })
@@ -228,6 +240,53 @@ window.__ModuleLoader__.load({
       React.useEffect(() => { dirtyRef.current = dirty }, [dirty])
       // D82 cap arrives from the host settings namespace when available.
       const externalRef = React.useRef(null)
+      const openArtifactRef = React.useRef(null)
+      // D90/D91: session-changes list (idle state) + wt lane + bridges.
+      const [changes, setChanges] = React.useState([])
+      const wtRef = React.useRef(null) // { sessionId } when the open artifact came from the worktree lane
+      const openWorktreeRef = React.useRef(null)
+      const refreshChanges = React.useCallback(async () => {
+        try {
+          const s = await ensureSession()
+          const { token } = await fetchTokenRaw({ scope: 'changes-read', worktreeId: s.id })
+          const r = await fetch('/__arxa/artifacts/session-changes?session=' + encodeURIComponent(s.id) + '&avt=' + encodeURIComponent(token))
+          const body = await r.json().catch(() => ({}))
+          if (r.ok) setChanges(body.files || [])
+        } catch { setChanges([]) }
+      }, [])
+      React.useEffect(() => { void refreshChanges() }, [refreshChanges])
+      // D91 card bridge + D90 sidebar-file bridge: window event
+      // 'arxa-av-open' { relPath } (org lane) | { sessionId, relPath } (wt lane).
+      React.useEffect(() => {
+        const onOpen = (ev) => {
+          try {
+            const d = ev.detail || {}
+            if (d.sessionId && d.relPath) { void openWorktreeRef.current && openWorktreeRef.current(d.sessionId, d.relPath) }
+            else if (d.relPath) { setDraft(d.relPath); void (openArtifactRef.current && openArtifactRef.current(d.relPath)) }
+          } catch { /* bad payload ignored */ }
+        }
+        window.addEventListener('arxa-av-open', onOpen)
+        return () => window.removeEventListener('arxa-av-open', onOpen)
+      }, [])
+      // D93 session switch while open: the column follows the new session —
+      // the artifact resets to the empty state; changes list re-binds.
+      const seenSessionRef = React.useRef(null)
+      React.useEffect(() => {
+        const rebind = async () => {
+          try {
+            const s = await ensureSession()
+            if (seenSessionRef.current && seenSessionRef.current !== s.id) {
+              setOpen(false); setState({ phase: 'idle' }); setSession(null); setEditing(false)
+              setDirty(false); wtRef.current = null; setChip(null); setTimeline([]); setShowDiff(false)
+              void refreshChanges()
+            }
+            seenSessionRef.current = s.id
+          } catch { /* no org open — nothing to follow */ }
+        }
+        const t = setInterval(() => { void rebind() }, 4000)
+        void rebind()
+        return () => clearInterval(t)
+      }, [refreshChanges])
       React.useEffect(() => {
         let live = true
         ;(async () => {
@@ -284,6 +343,8 @@ window.__ModuleLoader__.load({
         const relPath = draft.trim().replace(/^\/+/, '')
         if (!relPath) return
         setEditing(false); setDirty(false); setSession(null); setSaveNote(''); setSavePhase('idle'); mtimeRef.current = null; setPreviewHtml(''); setShowDiff(false); setMainText(''); setChip(null); setTimeline([]); setShowTimeline(false)
+        setOpen(true)
+        wtRef.current = null
         setState({ phase: 'loading', relPath })
         try {
           const { token, origin } = await fetchToken(relPath)
@@ -319,6 +380,43 @@ window.__ModuleLoader__.load({
           setState({ phase: 'error', relPath, note: String(e && e.message || e) })
         }
       }
+
+      // D89 worktree lane: produced files open from the session worktree with
+      // the session PREBOUND — edit is immediately available (no ensure dance).
+      const openWorktree = async (sessionId, relPath) => {
+        if (!sessionId || !relPath) return
+        setEditing(false); setDirty(false); setSaveNote(''); setSavePhase('idle'); mtimeRef.current = null; setPreviewHtml(''); setShowDiff(false); setMainText(''); setChip(null); setTimeline([]); setShowTimeline(false)
+        setDraft(relPath)
+        setOpen(true)
+        setState({ phase: 'loading', relPath })
+        wtRef.current = { sessionId }
+        try {
+          setSession({ id: sessionId, name: sessionId })
+          const { token } = await fetchTokenRaw({ scope: 'wt-read', worktreeId: sessionId, relPath })
+          const url = '/__arxa/artifacts/wt?session=' + encodeURIComponent(sessionId) + '&path=' + encodeURIComponent(relPath) + '&avt=' + encodeURIComponent(token)
+          const kind = kindFor(relPath)
+          if (kind.lane === 'markdown' || kind.lane === 'code' || kind.lane === 'text') {
+            const r = await fetch(url)
+            if (!r.ok) throw new Error('fetch ' + r.status)
+            const len = Number(r.headers.get('content-length') || '0')
+            const cap = maxBytesRef.current
+            let readOnly = false
+            let guardNote = ''
+            if (len > cap) { readOnly = true; guardNote = 'file is over the edit cap; read-only (D82)' }
+            const text = await r.text()
+            if (!readOnly && text.slice(0, 8192).includes('\u0000')) {
+              readOnly = true; guardNote = 'binary file — view only (D82)'
+            }
+            setState({ phase: 'ready', kind, relPath, url, text, readOnly, guardNote, wt: sessionId })
+          } else {
+            setState({ phase: 'ready', kind, relPath, url, wt: sessionId })
+          }
+        } catch (e) {
+          setState({ phase: 'error', relPath, note: String(e && e.message || e) })
+        }
+      }
+      openWorktreeRef.current = openWorktree
+      openArtifactRef.current = openArtifact
 
       const startEditing = async () => {
         setSaveNote(''); setSavePhase('idle')
@@ -441,19 +539,24 @@ window.__ModuleLoader__.load({
             lane === 'pdf' && h(PdfView, { url: state.url }))
 
       return h('div', { style: { display: 'flex', flexDirection: 'column', height: '100%' } },
-        h('div', { style: { display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: open ? '1px solid #333' : 'none' } },
-          h('button', {
-            onClick: () => setOpen((o) => !o),
-            style: { padding: '4px 10px', cursor: 'pointer', borderRadius: 4, border: '1px solid #555', background: 'transparent', color: 'inherit' },
-          }, (open ? '▾ ' : '▸ ') + 'artifact viewer')),
-        open ? body : null)
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderBottom: '1px solid #333' } },
+          h('span', { style: { fontWeight: 600, fontSize: 13 } }, 'artifact viewer'),
+          frameProps.maximize && h('button', {
+            onClick: () => frameProps.maximize(), title: 'maximize — take the max available width (D93)',
+            style: { padding: '2px 8px', cursor: 'pointer', borderRadius: 4, border: '1px solid #555', background: 'transparent', color: 'inherit', fontSize: 12 },
+          }, '\u29e2'),
+          frameProps.close && !frameProps.sheet && h('button', {
+            onClick: () => frameProps.close(), title: 'close the viewer column',
+            style: { marginLeft: 'auto', padding: '2px 8px', cursor: 'pointer', borderRadius: 4, border: '1px solid #555', background: 'transparent', color: 'inherit', fontSize: 12 },
+          }, '\u2715')),
+        body)
     }
 
     let hostCtx = null
     function apply(ctx) {
       hostCtx = ctx
-      ctx.slots.inject('shell.overlay', () =>
-        ctx.slots.register({ name: 'shell.overlay', id: 'arxa-artifact-viewer', order: 110 }, ArtifactPanel))
+      ctx.slots.inject('viewer', () =>
+        ctx.slots.register({ name: 'viewer', id: 'arxa-artifact-viewer' }, ArtifactPanel))
     }
     const inject = ['slots', 'connection']
     exports.apply = apply
