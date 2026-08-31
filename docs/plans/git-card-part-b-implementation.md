@@ -174,13 +174,28 @@ verified live in the shipped app end-to-end.
   subjects + `Arxa-Stage:` trailers (selftest asserts trailer present,
   subject conventional); the six `card.*` actions pinned in the sidebar
   selftest; PR faces (create/list/merge/checks with runner-asleep) live.
-- **S4 (2026-08-31):** ArxaGitCard portal-mounted above the composer bar
-  (`data-arxa-card-host` insertBefore the composer slot), session-bound,
-  collapsible, i18n en+zh; "Ask the session to draft" prefills the
-  composer with the evidence + rule (Q6: the engine never drafts).
-  Creator-mode iteration in the running app remains the follow-up once
-  the artifact-viewer column turf settles — the card's logic, actions and
-  i18n are placement-agnostic.
+- **S4 (2026-08-31):** ArxaGitCard session-bound, collapsible, i18n
+  en+zh; "Ask the session to draft" prefills the composer with the
+  evidence + rule (Q6: the engine never drafts).
+- **S4 MOUNT FIX (2026-09-01, found live by the user — "no cards"):** the
+  first cut portaled out of ArxaHeroGuide; its conditional useMemo threw
+  **React #310** (hook-order violation) and crashed the whole
+  `conversation.hero.workspace` slot — the card NEVER rendered (this was
+  also the mystery "React #310 on some loads" in the artifact-viewer
+  runbook). Second defect in the same family found while verifying:
+  `ctaTitle` read the flat dotted-key dict as nested
+  (`enOver.newSession.selectFirst`) — a boot-race crash of the sidebar
+  slot. Both fixed; the card now mounts as an ordered entry in the
+  framework's **`conversation.input.dock`** (todo=0, goal=10, card=20 —
+  nearest the bar), so it renders in EVERY session-bound phase instead of
+  hero-only. Landing (no session) stays clean by design. Lens-verified on
+  the shipped build (payload 453aba9f1019): collapsed head
+  `Git · arxa/session/… ▸` above the composer, expansion sticks, chips
+  `changes 0+0?0 · wip 5 · frame plan-limited`, subject law placeholder,
+  Commit / Push branch / Open PR buttons — **zero console errors**
+  (`designs/git-card/evidence/lens/`: card-collapsed-1512.png,
+  card-expanded-1512.png; lens states verb: 95k-pixel click diff,
+  certified).
 - **S5 (2026-08-31):** org-link-smoke extended with the full card loop
   (5e): publish → session → out-of-band edit → watcher wip → status →
   subject law refusal → boundary commit → session-branch push → PR +
