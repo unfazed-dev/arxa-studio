@@ -370,7 +370,11 @@ export function apply(ctx, opts = {}) {
             entryCount = fs.readdirSync(expanded).length
             exists = true
           } catch { exists = false }
-          return json(res, { ok: true, path: expanded, exists, entryCount })
+          // D92: is the resolved target already an arxa organisation? Powers
+          // the create modal's "already lives here — open it instead" branch.
+          let isOrg = false
+          try { isOrg = fs.existsSync(path.join(expanded, 'org.json')) } catch { isOrg = false }
+          return json(res, { ok: true, path: expanded, exists, entryCount, isOrg })
         } catch (e) {
           json(res, { ok: false, error: String(e?.message ?? e) })
         }
@@ -478,21 +482,26 @@ export function apply(ctx, opts = {}) {
               import('node:path'), import('node:os'), import('node:fs'),
             ])
             const expanded = requested.startsWith('~') ? path.join(os.homedir(), requested.slice(1)) : path.resolve(requested)
-            // D77 placement lesson (the PLATO incident): the modal collects a
-            // NAME and a LOCATION; scaffolding in place ignored the name, so
-            // picking a volume root ("create PLATO here") made the ROOT the
-            // org — git init + snapshot over the whole disk, publish silently
-            // refused (no HEAD). The picked folder becomes the org only when
-            // it already carries the org's name (D69 intent: the user named
-            // the folder); otherwise the org is a NEW subfolder named for the
-            // org inside the picked location.
+            // D92 create contract (grilled 2026-08-31): the location is
+            // ALWAYS the parent root; the org folder is ALWAYS root +
+            // slug(name). The D69/D77 "picked folder becomes the org when its
+            // name happens to match" heuristic is DELETED — its two invisible
+            // branches silently nested orgs inside mismatched folders or
+            // hijacked whole matching folders. The modal previews the target
+            // live; this is the server-side mirror (never trust the client).
+            // A non-empty target is a hard refusal: never merge, never
+            // version foreign files unasked (the PLATO lesson, kept).
             const { slugify } = await import(new URL('../../workspace/lib/slug.js', import.meta.url).href)
             const nameSlug = slugify(nm)
-            const pickedSlug = slugify(path.basename(expanded))
             if (nameSlug === '' || nameSlug === 'untitled') {
               return json(res, { ok: false, error: 'org name has no slug: ' + nm, action })
             }
-            const target = pickedSlug === nameSlug ? expanded : path.join(expanded, nameSlug)
+            const target = path.join(expanded, nameSlug)
+            try {
+              if (fs.readdirSync(target).length > 0) {
+                return json(res, { ok: false, error: 'folder-exists: ' + target + ' already exists and is not empty', action })
+              }
+            } catch { /* absent — the normal case; the scaffold below creates it */ }
             // Typed paths may not exist yet — create, then let the D36 rules
             // validate (same precedent as the workspace.root verb).
             fs.mkdirSync(target, { recursive: true })
@@ -518,7 +527,17 @@ export function apply(ctx, opts = {}) {
             if (lifecycle?.current) { try { await lifecycle.closeOrg() } catch {} }
             lifecycle = null
             const l2 = await getLifecycle()
-            if (l2) await l2.openOrg(created.path, { deferSnapshot: true, includeExisting: arg?.includeExisting !== false }) // snapshot runs detached; includeExisting = the create-time history question
+            // includeExisting stays false — parity with the old modal default
+            // (arxa-files-only history; a fresh scaffold holds nothing else).
+            if (l2) await l2.openOrg(created.path, { deferSnapshot: true, includeExisting: false })
+            // D92: sticky create root — the modal reopens at the last-used
+            // parent (VS Code / GitHub Desktop last-clone-dir pattern).
+            try {
+              const arxaDir = path.join(os.homedir(), '.arxa')
+              fs.mkdirSync(arxaDir, { recursive: true })
+              fs.writeFileSync(path.join(arxaDir, 'create-root.json'), JSON.stringify({ root: requested }, null, 2))
+            } catch { /* best-effort — the default root stands */ }
+            // snapshot runs detached; includeExisting is fixed false (above)
             return json(res, { ok: true, action, result: { path: created.path, slug: created.slug ?? path.basename(created.path) } })
           }
           const l = await getLifecycle()
@@ -545,6 +564,22 @@ export function apply(ctx, opts = {}) {
           }
 
           const table = {
+            /** D92: the create modal's defaults — the sticky last-used parent
+              * root (create-root.json, written on every successful
+              * org.create-at) plus the host homedir, so the client can
+              * expand `~` itself and preview the absolute target per
+              * keystroke. Read-only, nothing leaves the machine. */
+            'create.defaults': async () => {
+              const [{ default: path }, { default: os }, { default: fs }] = await Promise.all([
+                import('node:path'), import('node:os'), import('node:fs'),
+              ])
+              let root = null
+              try {
+                root = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.arxa', 'create-root.json'), 'utf8')).root ?? null
+              } catch { /* first run — the ~/Arxa default stands */ }
+              if (typeof root !== 'string' || root.trim() === '') root = null
+              return { root, home: os.homedir() }
+            },
             /** Create + open: a freshly scaffolded org is the place you are about to work. */
             'org.create': async () => {
               // D69 gate half: no org is created without a linked GitHub
@@ -564,7 +599,28 @@ export function apply(ctx, opts = {}) {
             'org.disconnect': async () => l.disconnectGithub(orgByRef(arg?.orgId).path, { removeRepos: arg?.removeRepos === true }),
             'project.connect': async () => l.connectProject(orgByRef(arg?.orgId).path, String(arg?.projectSlug ?? '')),
             'project.disconnect': async () => l.disconnectProjectGithub(orgByRef(arg?.orgId).path, String(arg?.projectSlug ?? ''), { removeRepos: arg?.removeRepos === true }),
-            'org.open': () => ensureOpen(arg?.orgId ?? arg),
+            'org.open': async () => {
+              const ref = arg?.orgId ?? arg
+              try {
+                return ensureOpen(ref)
+              } catch (e) {
+                // D92: open-by-path when the org exists on disk but fell out
+                // of recents — the create modal's "already lives here — open
+                // it instead" branch lands here with a bare path.
+                if (typeof ref !== 'string' || !ref.startsWith('/')) throw e
+                const [{ default: fs }] = await Promise.all([import('node:fs')])
+                let isOrgFolder = false
+                try { isOrgFolder = fs.existsSync(ref + '/org.json') } catch { isOrgFolder = false }
+                if (!isOrgFolder) throw e
+                shell ??= await importShell().catch(() => null)
+                if (typeof shell?.touchRecent === 'function') { try { shell.touchRecent(ref) } catch {} }
+                if (lifecycle?.current) { try { await lifecycle.closeOrg() } catch {} }
+                lifecycle = null
+                const l3 = await getLifecycle()
+                if (!l3) throw new Error('no-workspace')
+                return l3.openOrg(ref)
+              }
+            },
             'org.close': () => l.closeOrg(),
             'org.rename': () => l.renameOrg(orgByRef(arg?.orgId).path, arg?.name),
             /** D74 manual publish (the org menu affordance): idempotent —

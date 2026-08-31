@@ -794,8 +794,12 @@
 			 * files only (non-intrusive, VS Code-parity); opting in versions the
 			 * whole folder. The folder-info route answers has-content? — a count
 			 * only, nothing else leaves the machine. */
-			const [snapChoice, setSnapChoice] = (0, react.useState)(false);
-			const [folderHasFiles, setFolderHasFiles] = (0, react.useState)(false);
+			/** D92: live collision state for the RESOLVED target (parent root
+			 * + slug(name)) — { path, exists, entryCount, isOrg } from the
+			 * debounced folder-info route; null while name/location are blank. */
+			const [folderInfo, setFolderInfo] = (0, react.useState)(null);
+			/** Host homedir (create.defaults) so the preview expands `~` itself. */
+			const [homeDir, setHomeDir] = (0, react.useState)(null);
 			const nameRef = (0, react.useRef)(null);
 			const checkGh = () => {
 				ORG_POST("github.status").then((r) => setGhLinked(!!(r.result && r.result.linked)), () => setGhLinked(null));
@@ -808,28 +812,47 @@
 					setError(null);
 					setGhLinked(null);
 					setGhPublish(true);
-					setSnapChoice(false);
-					setFolderHasFiles(false);
+					setFolderInfo(null);
 					checkGh();
+					// D92: sticky last-used parent root + the homedir for ~ expansion.
+					ORG_POST("create.defaults").then((r) => {
+						if (r && r.ok && typeof r.result?.root === "string" && r.result.root.trim() !== "") setLocation(r.result.root);
+						if (r && r.ok && typeof r.result?.home === "string") setHomeDir(r.result.home);
+					}, () => {});
 					if (nameRef.current !== null) nameRef.current.focus();
 				}
 			}, [open]);
-			/** Ask the host whether the typed/picked folder already holds
-			 * content — debounced per keystroke, a count-only round trip. */
+			/** Mirror of the engine slug (workspace/lib/slug.js, D79): case
+			 * preserved, apostrophes vanish, non-alphanumerics kebab, edges
+			 * trimmed; the engine refuses names that slug to nothing. */
+			const slugFor = (raw) => raw.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/['\u2019]/g, "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+			const expandLoc = (raw) => {
+				const loc = raw.trim();
+				if (homeDir && loc === "~") return homeDir;
+				if (homeDir && loc.startsWith("~/")) return homeDir + loc.slice(1);
+				return loc;
+			};
+			/** D92: the preview — the true destination, absolute, per keystroke. */
+			const previewPath = location.trim() === "" ? "" : expandLoc(location) + "/" + (name.trim() === "" ? "\u2026" : slugFor(name));
+			/** Ask the host whether the RESOLVED target (root + slug) already
+			 * holds content — debounced per keystroke, a count-only round trip. */
 			(0, react.useEffect)(() => {
 				const loc = location.trim();
-				if (!loc || busy) return;
+				const nm = name.trim();
+				const expanded = expandLoc(loc);
+				if (!loc || !nm || busy || expanded.startsWith("~")) return;
 				const id = window.setTimeout(() => {
-					fetch("/__arxa/sidebar/folder-info", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: loc }) }).then((r) => r.json()).then((b) => {
-						setFolderHasFiles(!!(b && b.ok && b.exists && b.entryCount > 0));
+					fetch("/__arxa/sidebar/folder-info", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: expanded + "/" + slugFor(nm) }) }).then((r) => r.json()).then((b) => {
+						setFolderInfo(b && b.ok ? b : null);
 					}, () => {});
 				}, 250);
 				return () => window.clearTimeout(id);
-			}, [location, busy]);
+			}, [location, name, busy, homeDir]);
 			if (!open) return null;
 			const ghAvailable = ghLinked !== false;
 			const publishOn = ghAvailable && ghPublish;
-			const canSubmit = name.trim() !== "" && !busy && location.trim() !== "";
+			const blocked = !!(folderInfo && folderInfo.exists && folderInfo.entryCount > 0);
+			const canSubmit = name.trim() !== "" && !busy && location.trim() !== "" && !blocked;
 			const dismiss = () => {
 				if (!busy) onClose();
 			};
@@ -843,7 +866,7 @@
 				// the moment the create lands. A bare POST left the stale empty
 				// list up for the 5s poll — the gate lingered, and any tap on
 				// the welcome card re-opened this modal (create-again loop).
-				const ready = orgStore.mutate("org.create-at", { name: orgName, path: location.trim(), includeExisting: snapChoice, link: publishOn });
+				const ready = orgStore.mutate("org.create-at", { name: orgName, path: location.trim(), link: publishOn });
 				ready.then(() => {
 					onClose();
 				}, (e) => {
@@ -929,18 +952,11 @@
 							},
 							style: field
 						}),
-						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.55, marginTop: 6 }, children: t("org.create.locationHint") }),
-						folderHasFiles && (0, react_jsx_runtime.jsxs)("div", { style: { marginTop: 10, padding: "8px 10px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 6 }, children: [
-							(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.7, marginBottom: 6 }, children: t("org.create.existing.title") }),
-							(0, react_jsx_runtime.jsxs)("label", { style: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }, children: [
-								(0, react_jsx_runtime.jsx)("input", { type: "radio", name: "arxa-org-existing", checked: !snapChoice, onChange: () => setSnapChoice(false) }),
-								t("org.create.existing.only")
-							] }),
-							(0, react_jsx_runtime.jsxs)("label", { style: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer", marginTop: 4 }, children: [
-								(0, react_jsx_runtime.jsx)("input", { type: "radio", name: "arxa-org-existing", checked: snapChoice, onChange: () => setSnapChoice(true) }),
-								t("org.create.existing.all")
-							] })
-						] }),
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.65, marginTop: 6, wordBreak: "break-all" }, children: t("org.create.preview") + ": " + (previewPath || "\u2026") }),
+						folderInfo && folderInfo.exists && folderInfo.entryCount > 0 && (folderInfo.isOrg ? (0, react_jsx_runtime.jsxs)("div", { style: { marginTop: 10, padding: "8px 10px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 6, fontSize: 12 }, children: [
+							(0, react_jsx_runtime.jsx)("div", { children: t("org.create.exists.org").replace("{name}", name.trim()) }),
+							(0, react_jsx_runtime.jsx)("button", { type: "button", disabled: busy, onClick: () => { if (!busy) { onClose(); orgStore.mutate("org.open", folderInfo.path).catch(() => {}); } }, style: { marginTop: 6, fontSize: 12, cursor: "pointer" }, children: t("org.create.exists.open") })
+						] }) : (0, react_jsx_runtime.jsx)("div", { role: "alert", style: { marginTop: 10, fontSize: 12, color: "var(--dsw-alias-status-danger, #e5484d)" }, children: t("org.create.exists.nonempty") })),
 						// D90: the Publish-to-GitHub switch — pill + knob, ARIA switch role.
 						(0, react_jsx_runtime.jsx)("div", { style: { marginTop: 12, padding: "8px 10px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 6 }, children: (0, react_jsx_runtime.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 8, fontSize: 12 }, children: [
 							(0, react_jsx_runtime.jsx)("button", {
@@ -1587,10 +1603,10 @@
 			"org.create.title": "New organisation",
 			"org.create.submit": "Create organisation",
 			"org.create.location": "Location",
-			"org.create.locationHint": "The folder that becomes your organisation — click to browse, or type a path.",
-			"org.create.existing.title": "This folder already has content — track it in org history?",
-			"org.create.existing.only": "arxa's files only (recommended) — your existing files stay untouched and untracked",
-			"org.create.existing.all": "Track existing files too (slower first snapshot, full rewind history)",
+			"org.create.preview": "Creates at",
+			"org.create.exists.nonempty": "That folder already exists and isn't empty — change the name or the location.",
+			"org.create.exists.org": "{name} already lives here.",
+			"org.create.exists.open": "Open it instead",
 			"github.signin.desc": "arxa studio manages everything through git. Link your GitHub account to create an organisation — your projects publish as private repos under it.",
 			"github.signin.button": "Sign in with GitHub",
 			"github.signin.codeHint": "Enter this one-time code at github.com/login/device — your browser should have opened there",
@@ -1737,10 +1753,10 @@
 			"org.create.title": "新建组织",
 			"org.create.submit": "创建组织",
 			"org.create.location": "位置",
-			"org.create.locationHint": "该文件夹将成为你的组织 — 点击浏览，或直接输入路径。",
-			"org.create.existing.title": "此文件夹已有内容 — 是否纳入组织历史？",
-			"org.create.existing.only": "仅 arxa 文件（推荐）— 现有文件保持原样、不被跟踪",
-			"org.create.existing.all": "同时跟踪现有文件（首次快照较慢，完整回溯历史）",
+			"org.create.preview": "将创建于",
+			"org.create.exists.nonempty": "该文件夹已存在且不为空 — 请更改名称或位置。",
+			"org.create.exists.org": "{name} 已在这里。",
+			"org.create.exists.open": "改为打开它",
 			"github.signin.desc": "arxa studio 通过 git 管理一切。创建组织前请先关联你的 GitHub 账号 — 项目会以私有仓库的形式发布到该账号下。",
 			"github.signin.button": "使用 GitHub 登录",
 			"github.signin.busy": "正在等待 GitHub…",

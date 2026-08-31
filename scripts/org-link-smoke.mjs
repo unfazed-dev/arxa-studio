@@ -52,6 +52,17 @@ let org = await orgOf(NAME)
 if (!org || org.connected !== false) fail('state connected must be false after local-only create: ' + JSON.stringify(org))
 console.log('1. local-only create: no repo, connected:false OK')
 
+// 1b. D92 contract: same name at the same root is REFUSED (folder-exists),
+// the sticky create root points at the last-used parent, and folder-info
+// reports the org manifest.
+const dupe = await post('org.create-at', { name: NAME, path: '/tmp/arxa-d90-smoke', link: false })
+if (dupe.ok || !String(dupe.error || '').startsWith('folder-exists:')) fail('D92: duplicate create-at must refuse with folder-exists: ' + JSON.stringify(dupe).slice(0, 200))
+const defaults = await post('create.defaults', {})
+if (!defaults.ok || defaults.result?.root !== '/tmp/arxa-d90-smoke') fail('D92: sticky create root wrong: ' + JSON.stringify(defaults).slice(0, 200))
+const fi = await fetch(BASE + '/__arxa/sidebar/folder-info', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: '/tmp/arxa-d90-smoke/' + NAME }) }).then((r) => r.json())
+if (!fi.ok || fi.exists !== true || fi.entryCount < 1 || fi.isOrg !== true) fail('D92: folder-info must report the org target: ' + JSON.stringify(fi).slice(0, 200))
+console.log('1b. D92 folder-exists refusal + sticky root + folder-info isOrg OK')
+
 // 2. connect — repo exists.
 const pub = await post('github.publish', { orgId: org.id })
 if (!pub.ok || !pub.result || pub.result.ok !== true) fail('connect failed: ' + JSON.stringify(pub).slice(0, 300))

@@ -63,7 +63,7 @@ check('rows: stock Workspaces label superseded in overrides only', !client.inclu
 check('rows: add flow opens the create-organisation modal (Q3, webview-safe)',
   client.includes('new Event("arxa-create-org")') && client.includes('function OrgCreateModal(') && client.includes('window.addEventListener("arxa-create-org", open)'))
 check('create-modal: sign-in CTA carries the GitHub brand mark', client.includes('viewBox: "0 0 16 16"') && client.includes('d: GH_MARK'))
-check('create-modal: D90 sign-in wall is GONE — submit always present, GitHub rides the switch', !client.includes('!showSignin && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {') && !client.includes('showSignin') && client.includes('const canSubmit = name.trim() !== "" && !busy && location.trim() !== "";'))
+check('create-modal: D90 sign-in wall is GONE — submit always present, GitHub rides the switch', !client.includes('!showSignin && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {') && !client.includes('showSignin') && client.includes('const canSubmit = name.trim() !== "" && !busy && location.trim() !== "" && !blocked;'))
 check('create-modal: device-flow code surfaces in the sign-in step (github.device poll + big code)', client.includes('"github.device"') && client.includes('github.signin.codeHint') && client.includes('devCode.userCode'))
 check('create-modal: D90 device-flow copy/open-link moved to the relink paths (purge + disconnect modals)', client.includes('open-external') && client.includes('https://github.com/login/device') && client.includes('devCode.userCode'))
 check('rows: window.prompt is gone (Tauri WKWebView never implements it)', !client.includes('window.prompt('))
@@ -117,9 +117,14 @@ check('rows-snap: New Session CTA gates on the org-scoped selection + selected o
   && client.includes('"newSession.snapshotPending": "Preparing git snapshot — sessions unlock when it lands"')
   && client.includes('"newSession.snapshotPending": "正在准备 git 快照 — 完成后即可开始会话"'))
 check('rows-snap: server snapshot exposes snapshotPending (open org)', hostSrc().includes('snapshotPending: cur?.path === path'))
-check('rows-snap: create-at defers the initial snapshot and honors the includeExisting choice', hostSrc().includes('deferSnapshot: true, includeExisting: arg?.includeExisting !== false'))
+check('rows-snap: create-at defers the initial snapshot (arxa-files-only history, fixed D92)', hostSrc().includes('deferSnapshot: true, includeExisting: false'))
 check('rows-snap: host answers folder-info (a count only) for the create-time question', hostSrc().includes("'arxa-sidebar-folder-info'") && hostSrc().includes('entryCount'))
-check('rows-snap: modal asks the history question when the folder has content (both locales)', client.includes('"org.create.existing.title"') && client.includes('folder-info') && client.includes('includeExisting: snapChoice') && client.includes('"org.create.existing.only": "arxa\'s files only (recommended) — your existing files stay untouched and untracked"') && client.includes('"org.create.existing.only": "仅 arxa 文件（推荐）— 现有文件保持原样、不被跟踪"'))
+check('create: D92 live preview + collision contract localized (en + zh), snapshot radio deleted',
+  client.includes('"org.create.preview": "Creates at"') && client.includes('"org.create.preview": "将创建于"') && client.includes('"org.create.exists.nonempty": "That folder already exists and isn\'t empty — change the name or the location."') && client.includes('"org.create.exists.nonempty": "该文件夹已存在且不为空 — 请更改名称或位置。"') && client.includes('"org.create.exists.open": "Open it instead"') && client.includes('"org.create.exists.open": "改为打开它"') && !client.includes('org.create.existing') && !client.includes('includeExisting') && client.includes('folder-info'))
+check('create: D92 engine target is ALWAYS root + slug(name); heuristic + includeExisting param deleted',
+  hostSrc().includes('const target = path.join(expanded, nameSlug)') && !hostSrc().includes('pickedSlug') && hostSrc().includes("'folder-exists: '") && !hostSrc().includes('arg?.includeExisting'))
+check('create: D92 sticky root + defaults action + open-by-path fallback',
+  hostSrc().includes('create-root.json') && hostSrc().includes("'create.defaults'") && hostSrc().includes("fs.existsSync(ref + '/org.json')") && client.includes('ORG_POST("create.defaults")'))
 check('rows-snap: create submit refreshes through the store (gate lifts at once, no create-again loop)', client.includes('orgStore.mutate("org.create-at"') && !client.includes('ORG_POST("org.create-at"'))
 check('welcome: blank-page gate with card when no org (D69 UX)', client.includes('function WelcomeGate(') && client.includes('"welcome.title": "Welcome to arxa studio"') && client.includes('"welcome.title": "欢迎使用 arxa studio"') && client.includes('!creating && (0, react_jsx_runtime.jsx)(WelcomeGate'))
 check('welcome: TWO buttons - arxa studio (create) + arxa business (disabled, later)', client.includes('t("welcome.studio")') && client.includes('t("welcome.business")') && client.includes('"welcome.businessSoon"') && !client.includes('t("welcome.cta")'))
@@ -296,8 +301,8 @@ check('github: connect label localized (en + zh)',
 // a refused publish (no HEAD, not linked) looked like NOTHING happened, and
 // the create modal's location semantics made a volume ROOT the org (git init
 // over the whole disk). Pin the redirect and the modal phase machine.
-check('create-at: org scaffolds into picked/<org-name> unless the folder already carries the name (D77)',
-  hostSrc().includes('const target = pickedSlug === nameSlug ? expanded : path.join(expanded, nameSlug)'))
+check('create-at: D92 target is ALWAYS picked-root/<slug(name)> — heuristic deleted',
+  hostSrc().includes('const target = path.join(expanded, nameSlug)') && !hostSrc().includes('pickedSlug'))
 check('create-at: the redirect reuses the real slugify (no drift from D41 slugs)',
   hostSrc().includes("import(new URL('../../workspace/lib/slug.js', import.meta.url).href)"))
 check('create-at: an org name with no slug fails loud before any disk write',
@@ -422,8 +427,8 @@ check('create: D90 fragment children EVALUATE to 6 elements (guards the ASI call
   try {
     const el = () => ({ ok: true });
     const noop = () => {};
-    const fn = new Function('react_jsx_runtime', 't', 'folderHasFiles', 'publishOn', 'ghAvailable', 'busy', 'snapChoice', 'field', 'label', 'location', 'nameRef', 'setName', 'setLocation', 'setSnapChoice', 'setGhPublish', 'submit', 'browseLocation', 'return [' + region.slice(from + 1, end) + ']');
-    const arr = fn({ jsx: el, jsxs: el, Fragment: {} }, (k) => k, false, true, true, false, false, {}, {}, '', null, noop, noop, noop, noop, noop, noop, noop);
+    const fn = new Function('react_jsx_runtime', 't', 'label', 'location', 'browseLocation', 'field', 'submit', 'folderInfo', 'publishOn', 'ghAvailable', 'busy', 'name', 'orgStore', 'onClose', 'previewPath', 'setGhPublish', 'return [' + region.slice(from + 1, end) + ']');
+    const arr = fn({ jsx: el, jsxs: el, Fragment: {} }, (k) => k, {}, '', noop, {}, noop, null, true, true, false, '', { mutate: () => ({ catch: noop }) }, noop, '/root/slug', noop);
     return arr.length === 6 && arr[4] && arr[4].ok === true;
   } catch { return false; }
 })())
