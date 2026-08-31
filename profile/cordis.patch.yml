@@ -210,3 +210,12 @@
 - insert:
   - id: arxa-approvals
     name: /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/approvals/lib/index.js
+
+# 15. Artifact viewer-editor (D7 + D78-D87, 2026-08-30): the per-org,
+#     origin-separated artifact viewer with the text-family editor (CM6 in
+#     session worktrees, engine write API, live external-change state).
+#     By PACKAGE NAME — browser half discovered through package.json
+#     dsh.client, same as the design panel.
+- insert:
+  - id: arxa-artifact-viewer
+    name: arxa-artifact-viewer
