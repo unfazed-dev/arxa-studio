@@ -1,17 +1,20 @@
 // Browser half of arxa-artifact-viewer (D7 + D78-D87). Same hand-written
-// __ModuleLoader__ factory shape as design-panel (verified against
-// dsh-client-runtime's loader contract). Registers a right-docked panel into
-// shell.overlay (additive slot; details is occupied by the conversation
-// DetailsPanel).
+// __ModuleLoader__ factory shape as design-panel. Registers a right-docked
+// panel into shell.overlay (additive slot; details is occupied).
 //
-// Task 4 lanes — direct render: markdown via the vendored markdown-it +
-// DOMPurify bundle, code/text via the vendored CodeMirror 6 (read-only until
-// the Task 7 editor lane), images via <img>, audio/video via native
-// elements. Lanes B (sandboxed iframe for html/mdx, pdf.js) land in Task 5;
-// the editor in Task 7. All artifact fetches go through the per-org server
-// with a short-lived per-file READ token from POST /__arxa/artifacts/token
-// (D7/D81) — the token route tells us the org origin; the client never
-// guesses it.
+// Lanes: markdown (vendored markdown-it+DOMPurify), code/text via vendored
+// CodeMirror 6 — READ-ONLY until the D80 edit toggle, then EDITABLE with
+// saves through POST /__arxa/artifacts/write (write token + session
+// worktree + D18 WIP commit). html/mdx render in a sandboxed iframe
+// (allow-scripts only, opaque origin) on the per-org origin; pdf via the
+// vendored pdf.js worker. Images + audio/video native.
+//
+// D80 transparent ensure: toggling edit resolves a session worktree WITHOUT
+// ceremony — an open session of the open org (most recently updated) is
+// reused; when none exists, one is created through the sidebar's
+// workspace.new-session action in the 'notes' dock (sessions are born in a
+// WORKSPACE per org-model v2 — org-level sessions are gone). The session
+// badge keeps 'edits are not on main' visible (D85).
 window.__ModuleLoader__.load({
   id: 'arxa-artifact-viewer',
   factory: (require) => {
@@ -22,11 +25,12 @@ window.__ModuleLoader__.load({
     const h = React.createElement
 
     const TOKEN_ROUTE = '/__arxa/artifacts/token'
+    const WRITE_ROUTE = '/__arxa/artifacts/write'
+    const STATE_ROUTE = '/__arxa/sidebar/state'
+    const ACTION_ROUTE = '/__arxa/sidebar/action'
     const VENDOR = (n) => '/__arxa/artifacts/vendor/' + n
+    const EDITABLE_LANES = new Set(['markdown', 'code', 'text'])
 
-    const TEXTY = new Set(['.md', '.mdx', '.txt', '.json', '.yaml', '.yml', '.html', '.htm', '.xml',
-      '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.css', '.scss', '.py', '.rb', '.go', '.rs',
-      '.sh', '.bash', '.zsh', '.sql', '.toml', '.ini', '.cfg', '.env', '.gitignore', '.jsonc'])
     const CODE = new Set(['.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.css', '.scss',
       '.py', '.rb', '.go', '.rs', '.sh', '.bash', '.zsh', '.sql', '.toml', '.ini', '.env', '.json', '.jsonc', '.yaml', '.yml'])
     const IMAGE = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.svg', '.ico', '.bmp'])
@@ -42,8 +46,7 @@ window.__ModuleLoader__.load({
       if (ext === '.html' || ext === '.htm' || ext === '.mdx') return { lane: 'iframe', ext }
       if (ext === '.pdf') return { lane: 'pdf', ext }
       if (CODE.has(ext)) return { lane: 'code', ext, lang: ext.replace('.', '') }
-      if (TEXTY.has(ext)) return { lane: 'text', ext }
-      return { lane: 'unknown', ext }
+      return { lane: 'text', ext }
     }
 
     const loadedVendors = {}
@@ -60,32 +63,66 @@ window.__ModuleLoader__.load({
       return loadedVendors[name]
     }
 
-    /** Ask the engine for a per-file read token; returns { token, origin }. */
-    async function fetchToken(relPath) {
+    async function fetchToken(relPath, writeFor) {
+      const payload = writeFor
+        ? { scope: 'write', worktreeId: writeFor }
+        : { relPath }
       const res = await fetch(TOKEN_ROUTE, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ relPath }),
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
       })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(body.error || ('token route ' + res.status))
       return body
     }
 
-    function CodeView({ relPath, text }) {
+    /** D80 transparent ensure: an open session of the open org — the most
+     * recently updated open row — else a fresh session in the 'notes' dock
+     * via the sidebar action. Throws loud when no org is open. */
+    async function ensureSession() {
+      const res = await fetch(STATE_ROUTE)
+      const state = await res.json().catch(() => ({}))
+      const orgs = state.orgs || []
+      const open = orgs.find((o) => o.open) || orgs[0]
+      if (!open) throw new Error('no org open — open an organisation first')
+      const rows = (open.sessions || []).filter((s) => s.state === 'open')
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+      if (rows.length > 0) return rows[0]
+      const mk = await fetch(ACTION_ROUTE, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'workspace.new-session', arg: { workspace: 'notes' } }),
+      })
+      const mkBody = await mk.json().catch(() => ({}))
+      if (!mkBody.ok) throw new Error('session create failed: ' + (mkBody.error || mk.status))
+      const after = await (await fetch(STATE_ROUTE)).json().catch(() => ({}))
+      const fresh = ((after.orgs || []).find((o) => o.open || o === open) || open).sessions || []
+      const freshOpen = fresh.filter((s) => s.state === 'open')
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+      if (freshOpen.length === 0) throw new Error('session created but registry row not visible')
+      return freshOpen[0]
+    }
+
+    function CodeView({ relPath, text, editable, docRef, onDirty }) {
       const ref = React.useRef(null)
       React.useEffect(() => {
         let dead = false
         let view = null
         ensureVendor('codemirror.js', 'ArxaCM').then((CM) => {
           if (dead || !ref.current) return
-          const lang = ({ md: 'markdown', markdown: 'markdown', js: 'javascript', mjs: 'javascript', cjs: 'javascript', ts: 'javascript', tsx: 'javascript', jsx: 'javascript', json: 'json', css: 'css', scss: 'css', html: 'html', htm: 'html', yaml: 'yaml', yml: 'yaml' })[(relPath.match(/\.[a-z0-9]+$/i) || [''])[0].toLowerCase().replace('.', '')]
-          const extensions = [...CM.basicSetup, CM.EditorView.editable.of(false)]
+          const ext = (relPath.match(/\.[a-z0-9]+$/i) || [''])[0].toLowerCase().replace('.', '')
+          const lang = ({ md: 'markdown', markdown: 'markdown', js: 'javascript', mjs: 'javascript', cjs: 'javascript', ts: 'javascript', tsx: 'javascript', jsx: 'javascript', json: 'json', css: 'css', scss: 'css', html: 'html', htm: 'html', yaml: 'yaml', yml: 'yaml' })[ext]
+          const extensions = [
+            ...CM.basicSetup,
+            CM.EditorView.editable.of(!!editable),
+            CM.EditorState.readOnly.of(!editable),
+            CM.EditorView.updateListener.of((u) => { if (u.docChanged && onDirty) onDirty() }),
+          ]
           if (lang && CM.langs[lang]) extensions.push(CM.langs[lang]())
           view = new CM.EditorView({ state: CM.EditorState.create({ doc: text, extensions }), parent: ref.current })
+          if (docRef) docRef.current = view
         }).catch((e) => { if (ref.current) ref.current.textContent = String(e) })
         return () => { dead = true; if (view) view.destroy() }
-      }, [relPath, text])
+      }, [relPath, text, editable])
       return h('div', { ref, style: { border: '1px solid #333', borderRadius: 4, overflow: 'auto', maxHeight: '70vh' } })
     }
 
@@ -144,24 +181,31 @@ window.__ModuleLoader__.load({
     function ArtifactPanel() {
       const [open, setOpen] = React.useState(false)
       const [draft, setDraft] = React.useState('')
-      const [state, setState] = React.useState({ phase: 'idle' }) // { phase, kind?, relPath?, url?, text? , note? }
+      const [state, setState] = React.useState({ phase: 'idle' })
+      const [session, setSession] = React.useState(null)   // D85 session badge
+      const [editing, setEditing] = React.useState(false)  // D80 toggle
+      const [dirty, setDirty] = React.useState(false)
+      const [saveNote, setSaveNote] = React.useState('')
+      const [savePhase, setSavePhase] = React.useState('idle') // idle|saving|saved|error|conflict
+      const docRef = React.useRef(null)
+      const mtimeRef = React.useRef(null)
+      const dirtyRef = React.useRef(false)
+      React.useEffect(() => { dirtyRef.current = dirty }, [dirty])
 
       const openArtifact = async () => {
         const relPath = draft.trim().replace(/^\/+/, '')
         if (!relPath) return
+        setEditing(false); setDirty(false); setSession(null); setSaveNote(''); setSavePhase('idle'); mtimeRef.current = null
         setState({ phase: 'loading', relPath })
         try {
           const { token, origin } = await fetchToken(relPath)
-          const url = origin + '/' + encodeURI(relPath).replace(/%23/g, '%2523') + '?avt=' + encodeURIComponent(token)
+          const url = origin + '/' + encodeURI(relPath) + '?avt=' + encodeURIComponent(token)
           const kind = kindFor(relPath)
           if (kind.lane === 'markdown' || kind.lane === 'code' || kind.lane === 'text') {
             const r = await fetch(url)
             if (!r.ok) throw new Error('fetch ' + r.status)
-            const text = await r.text()
-            setState({ phase: 'ready', kind, relPath, url, text })
+            setState({ phase: 'ready', kind, relPath, url, text: await r.text() })
           } else if (kind.lane === 'unknown') {
-            const r = await fetch(url, { method: 'HEAD' })
-            if (!r.ok && r.status !== 404) throw new Error('fetch ' + r.status)
             setState({ phase: 'ready', kind, relPath, url, note: 'no renderer for this type' })
           } else {
             setState({ phase: 'ready', kind, relPath, url })
@@ -171,6 +215,49 @@ window.__ModuleLoader__.load({
         }
       }
 
+      const startEditing = async () => {
+        setSaveNote(''); setSavePhase('idle')
+        try {
+          const s = await ensureSession()
+          setSession(s)
+          setEditing(true)
+        } catch (e) {
+          setSavePhase('error'); setSaveNote(String(e && e.message || e))
+        }
+      }
+
+      const save = async () => {
+        if (!session || !state.relPath || !docRef.current) return
+        setSavePhase('saving'); setSaveNote('')
+        try {
+          const { token } = await fetchToken(null, session.id)
+          const res = await fetch(WRITE_ROUTE, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-arxa-write-token': token },
+            body: JSON.stringify({
+              worktreeId: session.id,
+              relPath: state.relPath,
+              content: docRef.current.state.doc.toString(),
+              ...(mtimeRef.current != null ? { expectedMtimeMs: mtimeRef.current } : {}),
+            }),
+          })
+          const body = await res.json().catch(() => ({}))
+          if (res.status === 409) {
+            setSavePhase('conflict'); setSaveNote('file changed externally — reload to pick up their version')
+            if (body.mtimeMs) mtimeRef.current = body.mtimeMs
+            return
+          }
+          if (!res.ok) throw new Error(body.error || ('write ' + res.status))
+          mtimeRef.current = body.mtimeMs
+          setDirty(false)
+          setSavePhase('saved')
+          setSaveNote(body.committed ? 'saved · wip committed to ' + session.name : 'saved (WIP commit pending: ' + (body.warning || 'why?') + ')')
+        } catch (e) {
+          setSavePhase('error'); setSaveNote(String(e && e.message || e))
+        }
+      }
+
+      const lane = state.kind ? state.kind.lane : null
       const body = !open ? null
         : h('div', { style: { display: 'flex', flexDirection: 'column', height: '100%', padding: '10px 12px', gap: 8 } },
           h('div', { style: { fontWeight: 600 } }, 'artifact viewer'),
@@ -185,20 +272,38 @@ window.__ModuleLoader__.load({
           state.phase === 'loading' && h('div', { style: { fontSize: 12, opacity: 0.7 } }, 'loading ' + state.relPath + '…'),
           state.phase === 'error' && h('div', { style: { fontSize: 12, color: '#c66' } }, state.note),
           state.phase === 'ready' && h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, overflow: 'hidden', flex: 1 } },
-            h('div', { style: { fontSize: 11, opacity: 0.7 } }, state.relPath + ' · ' + state.kind.lane),
-            state.kind.lane === 'markdown' && h('div', { className: 'arxa-av-md', style: { overflow: 'auto' },
-              dangerouslySetInnerHTML: { __html: window.ArxaMD ? window.ArxaMD.render(state.text) : '<em>markdown bundle loading…</em>' } }),
-            (state.kind.lane === 'code' || state.kind.lane === 'text') && h(CodeView, { relPath: state.relPath, text: state.text }),
-            state.kind.lane === 'image' && h('img', { src: state.url, alt: state.relPath, style: { maxWidth: '100%' } }),
-            state.kind.lane === 'audio' && h('audio', { src: state.url, controls: true, style: { width: '100%' } }),
-            state.kind.lane === 'video' && h('video', { src: state.url, controls: true, style: { width: '100%' } }),
-            state.kind.lane === 'unknown' && h('div', { style: { fontSize: 12, opacity: 0.7 } }, state.note || 'no renderer'),
-            state.kind.lane === 'iframe' && h('iframe', {
+            h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } },
+              h('span', { style: { fontSize: 11, opacity: 0.7 } }, state.relPath + ' · ' + lane),
+              EDITABLE_LANES.has(lane) && !editing && h('button', {
+                onClick: () => { void startEditing() },
+                style: { marginLeft: 'auto', padding: '3px 10px', cursor: 'pointer', borderRadius: 4, border: '1px solid #555', background: 'transparent', color: 'inherit', fontSize: 12 },
+              }, 'edit'),
+              editing && h('span', {
+                'data-arxa-session-badge': session ? session.name : 'ensuring…',
+                style: { fontSize: 11, padding: '2px 8px', borderRadius: 10, border: '1px solid #555', opacity: 0.85 },
+              }, 'session: ' + (session ? session.name : 'ensuring…')),
+              editing && h('button', {
+                onClick: () => { void save() },
+                disabled: !dirty || savePhase === 'saving',
+                style: { padding: '3px 10px', cursor: dirty ? 'pointer' : 'default', borderRadius: 4, border: '1px solid #555', background: dirty ? '#2d4a2d' : 'transparent', color: 'inherit', fontSize: 12 },
+              }, savePhase === 'saving' ? 'saving…' : 'save'),
+              editing && h('span', { style: { fontSize: 11, opacity: 0.8, color: savePhase === 'error' || savePhase === 'conflict' ? '#c66' : 'inherit' } },
+                saveNote || (dirty ? 'unsaved changes' : ''))),
+            lane === 'markdown' && h('div', { className: 'arxa-av-md', style: { overflow: 'auto', flex: 1 },
+              dangerouslySetInnerHTML: editing
+                ? undefined
+                : { __html: window.ArxaMD ? window.ArxaMD.render(state.text) : '<em>markdown bundle loading…</em>' } },
+              editing ? null : undefined),
+            (lane === 'code' || lane === 'text') && h(CodeView, { relPath: state.relPath, text: state.text, editable: editing, docRef, onDirty: () => setDirty(true) }),
+            lane === 'image' && h('img', { src: state.url, alt: state.relPath, style: { maxWidth: '100%' } }),
+            lane === 'audio' && h('audio', { src: state.url, controls: true, style: { width: '100%' } }),
+            lane === 'video' && h('video', { src: state.url, controls: true, style: { width: '100%' } }),
+            lane === 'unknown' && h('div', { style: { fontSize: 12, opacity: 0.7 } }, state.note || 'no renderer'),
+            lane === 'iframe' && h('iframe', {
               src: state.url, sandbox: 'allow-scripts', title: state.relPath,
               style: { width: '100%', height: '60vh', border: '1px solid #333', background: '#fff' },
             }),
-            state.kind.lane === 'pdf' && h(PdfView, { url: state.url }),
-          ))
+            lane === 'pdf' && h(PdfView, { url: state.url })))
 
       return h('div', { style: { display: 'flex', flexDirection: 'column', height: '100%' } },
         h('div', { style: { display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: open ? '1px solid #333' : 'none' } },
