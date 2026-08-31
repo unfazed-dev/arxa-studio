@@ -373,3 +373,29 @@ const w9 = await callWrite({ worktreeId: 'sess1', relPath: 'big.md', content: 'x
 assert.equal(w9.statusCode, 413, 'over-cap content -> 413 (D82 server-side twin)')
 
 console.log('arxa-artifact-viewer selftest: GREEN (write api over real git worktree)');
+
+// ---- Task 9: main-version route (D84 worktree-vs-main) ---------------------
+import { createMainVersionRoute } from './lib/write-api.js'
+const mv = createMainVersionRoute({ env: gitEnvHome, secret })
+function callMain(relPath, token) {
+  return new Promise((resolve, rejectP) => {
+    const res = { statusCode: 0, headers: null, body: '',
+      writeHead(s, h) { this.statusCode = s; this.headers = h || null },
+      end(b) { this.body = b || ''; resolve(this) } }
+    const rq = { method: 'GET', url: '/?relPath=' + encodeURIComponent(relPath) + '&avt=' + encodeURIComponent(token || '') }
+    mv.handle(rq, res).then(() => resolve(res), rejectP)
+  })
+}
+const readT = issueToken({ secret, scope: 'read', relPath: 'seed.md', orgPath: orgRepo, ttlSeconds: 30 })
+const m1 = await callMain('seed.md', readT)
+assert.equal(m1.statusCode, 200, 'main-version 200')
+assert.equal(JSON.parse(m1.body).content, 'seed\n', 'main blob content')
+const m2 = await callMain('notes/a.md', issueToken({ secret, scope: 'read', relPath: 'notes/a.md', orgPath: orgRepo, ttlSeconds: 30 }))
+assert.equal(m2.statusCode, 200, 'file absent on main still 200')
+assert.equal(JSON.parse(m2.body).content, '', 'new-file diff gets empty base')
+assert.equal((await callMain('seed.md', null)).statusCode, 403, 'no token -> 403')
+const wrongRel = issueToken({ secret, scope: 'read', relPath: 'other.md', orgPath: orgRepo, ttlSeconds: 30 })
+assert.equal((await callMain('seed.md', wrongRel)).statusCode, 403, 'relPath-bound token enforced')
+const esc = await callMain('../outside.md', issueToken({ secret, scope: 'read', relPath: '../outside.md', orgPath: orgRepo, ttlSeconds: 30 }))
+assert.equal(esc.statusCode, 403, 'escape -> 403')
+console.log('arxa-artifact-viewer selftest: GREEN (main-version diff route)');

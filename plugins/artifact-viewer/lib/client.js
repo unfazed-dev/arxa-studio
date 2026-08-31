@@ -178,6 +178,33 @@ window.__ModuleLoader__.load({
         h('canvas', { ref: canvasRef, style: { border: '1px solid #333', background: '#fff', display: 'block', margin: '0 auto' } }))
     }
 
+    /** D84: worktree-vs-main on @codemirror/merge — the ONE diff engine
+     *  shared with gen-ui's card. Read-only: the merge view shows changes
+     *  and chunk controls without letting the diff surface edit. */
+    function DiffView({ original, text }) {
+      const ref = React.useRef(null)
+      React.useEffect(() => {
+        let dead = false
+        let view = null
+        ensureVendor('codemirror.js', 'ArxaCM').then((CM) => {
+          if (dead || !ref.current) return
+          view = new CM.EditorView({
+            state: CM.EditorState.create({
+              doc: text,
+              extensions: [
+                ...CM.basicSetup,
+                CM.EditorView.editable.of(false),
+                CM.unifiedMergeView({ original, highlightChanges: true }),
+              ],
+            }),
+            parent: ref.current,
+          })
+        }).catch((e) => { if (ref.current) ref.current.textContent = String(e) })
+        return () => { dead = true; if (view) view.destroy() }
+      }, [original, text])
+      return h('div', { ref, style: { border: '1px solid #333', borderRadius: 4, overflow: 'auto', maxHeight: '70vh' } })
+    }
+
     function ArtifactPanel() {
       const [open, setOpen] = React.useState(false)
       const [draft, setDraft] = React.useState('')
@@ -192,6 +219,8 @@ window.__ModuleLoader__.load({
       const dirtyRef = React.useRef(false)
       const previewTimer = React.useRef(null)
       const [previewHtml, setPreviewHtml] = React.useState('')
+      const [showDiff, setShowDiff] = React.useState(false)
+      const [mainText, setMainText] = React.useState('')
       const maxBytesRef = React.useRef(5 * 1024 * 1024)
       React.useEffect(() => { dirtyRef.current = dirty }, [dirty])
       // D82 cap arrives from the host settings namespace when available.
@@ -219,7 +248,7 @@ window.__ModuleLoader__.load({
       const openArtifact = async () => {
         const relPath = draft.trim().replace(/^\/+/, '')
         if (!relPath) return
-        setEditing(false); setDirty(false); setSession(null); setSaveNote(''); setSavePhase('idle'); mtimeRef.current = null; setPreviewHtml('')
+        setEditing(false); setDirty(false); setSession(null); setSaveNote(''); setSavePhase('idle'); mtimeRef.current = null; setPreviewHtml(''); setShowDiff(false); setMainText('')
         setState({ phase: 'loading', relPath })
         try {
           const { token, origin } = await fetchToken(relPath)
@@ -312,6 +341,22 @@ window.__ModuleLoader__.load({
                 onClick: () => { void startEditing() },
                 style: { marginLeft: 'auto', padding: '3px 10px', cursor: 'pointer', borderRadius: 4, border: '1px solid #555', background: 'transparent', color: 'inherit', fontSize: 12 },
               }, 'edit'),
+              EDITABLE_LANES.has(lane) && h('button', {
+                onClick: () => {
+                  if (showDiff) { setShowDiff(false); return }
+                  void (async () => {
+                    try {
+                      const { token } = await fetchToken(state.relPath)
+                      const r = await fetch('/__arxa/artifacts/main-version?relPath=' + encodeURIComponent(state.relPath) + '&avt=' + encodeURIComponent(token))
+                      const body = await r.json().catch(() => ({}))
+                      if (!r.ok) throw new Error(body.error || ('main-version ' + r.status))
+                      setMainText(body.content || '')
+                      setShowDiff(true)
+                    } catch (e) { setSavePhase('error'); setSaveNote(String(e && e.message || e)) }
+                  })()
+                },
+                style: { padding: '3px 10px', cursor: 'pointer', borderRadius: 4, border: '1px solid #555', background: 'transparent', color: 'inherit', fontSize: 12 },
+              }, showDiff ? 'editing view' : 'diff vs main'),
               editing && h('span', {
                 'data-arxa-session-badge': session ? session.name : 'ensuring…',
                 style: { fontSize: 11, padding: '2px 8px', borderRadius: 10, border: '1px solid #555', opacity: 0.85 },
@@ -333,7 +378,8 @@ window.__ModuleLoader__.load({
                 h('div', { style: { fontSize: 11, opacity: 0.7, padding: '2px 0' } }, 'preview'),
                 h('div', { className: 'arxa-av-md', style: { overflow: 'auto', flex: 1, border: '1px solid #333', borderRadius: 4, padding: 8 },
                   dangerouslySetInnerHTML: { __html: previewHtml || '<em>preview…</em>' } }))),
-            (lane === 'code' || lane === 'text') && h(CodeView, { relPath: state.relPath, text: state.text, editable: editing, docRef, onDirty: () => setDirty(true) }),
+            showDiff && EDITABLE_LANES.has(lane) && h(DiffView, { original: mainText, text: (docRef.current && editing) ? docRef.current.state.doc.toString() : state.text }),
+            !showDiff && (lane === 'code' || lane === 'text') && h(CodeView, { relPath: state.relPath, text: state.text, editable: editing, docRef, onDirty: () => setDirty(true) }),
             lane === 'image' && h('img', { src: state.url, alt: state.relPath, style: { maxWidth: '100%' } }),
             lane === 'audio' && h('audio', { src: state.url, controls: true, style: { width: '100%' } }),
             lane === 'video' && h('video', { src: state.url, controls: true, style: { width: '100%' } }),

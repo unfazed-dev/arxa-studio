@@ -12,6 +12,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { verifyToken } from './tokens.js'
 import { resolveInside } from './org-server.js'
 import { readOpenOrg } from './follow.js'
@@ -52,6 +53,49 @@ function readBody(req) {
     req.on('end', () => resolve(data))
     req.on('error', () => resolve(''))
   })
+}
+
+/** GET /__arxa/artifacts/main-version?relPath=&avt= — main's blob of the
+ *  OPEN org repo file, read-token gated (same per-file token class as the
+ *  viewer), containment-checked, for D84 worktree-vs-main diffs. Empty
+ *  content when the file does not exist on main (new-file diffs). */
+export function createMainVersionRoute({ env = process.env, secret }) {
+  return {
+    async handle(req, res) {
+      const json2 = (status, body) => {
+        res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+        res.end(JSON.stringify(body))
+      }
+      try {
+        if (req.method !== 'GET') return json2(405, { error: 'GET only' })
+        const url = new URL(req.url, 'http://x')
+        const relPath = (url.searchParams.get('relPath') || '').replace(/^\/+/, '')
+        const token = url.searchParams.get('avt') || ''
+        const open = readOpenOrg(env)
+        if (!open) return json2(403, { error: 'no org open' })
+        const verdict = verifyToken(token, { secret, scope: 'read', relPath, orgPath: open.orgPath })
+        if (!verdict.ok) return json2(403, { error: 'read token ' + verdict.reason })
+        let rootReal
+        try { rootReal = fs.realpathSync(path.resolve(open.orgPath)) } catch { return json2(403, { error: 'org unreadable' }) }
+        try { resolveInside(rootReal, relPath) } catch { return json2(403, { error: 'outside the org root' }) }
+        for (const branch of ['main', 'master']) {
+          try {
+            const content = execFileSync('git', ['show', branch + ':' + relPath], {
+              cwd: rootReal, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
+            })
+            return json2(200, { branch, content })
+          } catch (err) {
+            if (!err || !String(err.stderr || err.message).includes('does not exist') &&
+                !String(err.stderr || err.message).includes('path') &&
+                err.status !== 128) continue
+          }
+        }
+        return json2(200, { branch: null, content: '' })
+      } catch {
+        return json2(500, { error: 'internal error' })
+      }
+    },
+  }
 }
 
 export function createWriteApi({ env = process.env, secret, getSettings = () => ({}) }) {

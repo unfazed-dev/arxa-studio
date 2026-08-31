@@ -47,9 +47,10 @@ const CM_ENTRY = [
   "import { yaml } from '@codemirror/lang-yaml'",
   "import { keymap } from '@codemirror/view'",
   "import { indentWithTab } from '@codemirror/commands'",
+  "import { unifiedMergeView } from '@codemirror/merge'",
   'window.ArxaCM = {',
   '  basicSetup: [basicSetup, keymap.of([indentWithTab])],',
-  '  EditorView, EditorState,',
+  '  EditorView, EditorState, unifiedMergeView,',
   '  langs: { markdown, javascript, css, html, json, yaml },',
   '}',
 ].join('\n')
