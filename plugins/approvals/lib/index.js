@@ -324,7 +324,7 @@ export function applyCairnProxy(ctx, deps = {}) {
     path: '/__cairn/sync',
     handler: (req, socket, head) => {
       if (wsStats) wsStats.attempts += 1
-      spliceCairnUpgrade(bind, req, socket, head, httpImpl)
+      spliceCairnUpgrade(bind, req, socket, head, httpImpl, wsStats)
     },
   })
 
