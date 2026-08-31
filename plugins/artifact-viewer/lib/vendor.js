@@ -18,15 +18,21 @@ const VERSIONS = {
   '@codemirror/lang-markdown': '6.5.2', '@codemirror/lang-javascript': '6.2.5',
   '@codemirror/lang-css': '6.3.1', '@codemirror/lang-html': '6.4.12',
   '@codemirror/lang-json': '6.0.2', '@codemirror/lang-yaml': '6.1.3',
-  'markdown-it': '15.0.1', dompurify: '3.4.14',
+  'markdown-it': '15.0.1', dompurify: '3.4.14', 'pdfjs-dist': '6.3.289',
 }
 
-import esbuild from 'esbuild'
+import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 
 const here = dirname(fileURLToPath(import.meta.url))
+// Sources resolve from the ISOLATED build dir (lib/vendor-build) — see
+// vendor-build/package.json for why (root --no-save installs are not
+// cumulative and get wiped by the next root npm install).
+const buildDir = join(here, 'vendor-build')
+const require2 = createRequire(join(buildDir, 'package.json'))
+const esbuild = require2('esbuild')
 const outDir = join(here, 'vendor')
 fs.mkdirSync(outDir, { recursive: true })
 
@@ -48,6 +54,19 @@ const CM_ENTRY = [
   '}',
 ].join('\n')
 
+const PDF_ENTRY = [
+  "import * as pdfjsLib from 'pdfjs-dist'",
+  "pdfjsLib.GlobalWorkerOptions.workerSrc = '/__arxa/artifacts/vendor/pdf.worker.js'",
+  'window.ArxaPDF = {',
+  '  // Hardened for untrusted documents: no eval path (PDF.js hardening).',
+  '  getDocument: (opts) => pdfjsLib.getDocument({ isEvalSupported: false, ...opts }),',
+  '}',
+].join('\n')
+
+const PDF_WORKER_ENTRY = [
+  "import 'pdfjs-dist/build/pdf.worker.mjs'",
+].join('\n')
+
 const MD_ENTRY = [
   "import MarkdownIt from 'markdown-it'",
   "import DOMPurify from 'dompurify'",
@@ -66,10 +85,14 @@ const banner = (name) => '/* arxa-artifact-viewer vendored bundle — GENERATED 
 for (const [name, entry, globalName] of [
   ['codemirror', CM_ENTRY, 'ArxaCM'],
   ['markdown', MD_ENTRY, 'ArxaMD'],
+  ['pdf', PDF_ENTRY, 'ArxaPDF'],
+  ['pdf.worker', PDF_WORKER_ENTRY, null],
 ]) {
   const out = join(outDir, name + '.js')
   await esbuild.build({
-    stdin: { contents: entry, resolveDir: process.cwd(), sourcefile: name + '-entry.js' },
+    absWorkingDir: buildDir,
+    nodePaths: [join(buildDir, 'node_modules')],
+    stdin: { contents: entry, resolveDir: buildDir, sourcefile: name + '-entry.js' },
     bundle: true, minify: true, format: 'iife', target: ['es2020'],
     outfile: out, banner: { js: banner(name) }, logLevel: 'silent',
   })

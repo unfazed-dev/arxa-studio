@@ -275,7 +275,7 @@ console.log('arxa-artifact-viewer selftest: GREEN (tokens + route)');
 // ---- Task 4: vendored bundles exist + vendor route serves them ------------
 import { createVendorRoutes } from './lib/index.js'
 const vendorDir = path2.join(here, 'lib', 'vendor')
-for (const f of ['codemirror.js', 'markdown.js']) {
+for (const f of ['codemirror.js', 'markdown.js', 'pdf.js', 'pdf.worker.js']) {
   assert.ok(fs.existsSync(path2.join(vendorDir, f)), 'vendored bundle present: ' + f)
   const bytes = fs.readFileSync(path2.join(vendorDir, f))
   assert.ok(bytes.length > 50_000, f + ' is a real bundle (' + bytes.length + ' bytes)')

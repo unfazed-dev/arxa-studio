@@ -89,6 +89,58 @@ window.__ModuleLoader__.load({
       return h('div', { ref, style: { border: '1px solid #333', borderRadius: 4, overflow: 'auto', maxHeight: '70vh' } })
     }
 
+    function PdfView({ url }) {
+      const wrapRef = React.useRef(null)
+      const canvasRef = React.useRef(null)
+      const docRef = React.useRef(null)
+      const [pages, setPages] = React.useState(0)
+      const [page, setPage] = React.useState(1)
+      const [note, setNote] = React.useState('')
+      React.useEffect(() => {
+        let dead = false
+        ;(async () => {
+          try {
+            const P = await ensureVendor('pdf.js', 'ArxaPDF')
+            const buf = await (await fetch(url)).arrayBuffer()
+            if (dead) return
+            const doc = await P.getDocument({ data: buf }).promise
+            docRef.current = doc
+            setPages(doc.numPages)
+            setPage(1)
+          } catch (e) { if (!dead) setNote(String((e && e.message) || e)) }
+        })()
+        return () => { dead = true }
+      }, [url])
+      React.useEffect(() => {
+        let dead = false
+        ;(async () => {
+          try {
+            const doc = docRef.current
+            const canvas = canvasRef.current
+            if (!doc || !canvas) return
+            const pg = await doc.getPage(page)
+            if (dead) return
+            const base = pg.getViewport({ scale: 1 })
+            const scale = Math.max(0.2, Math.min(3, ((wrapRef.current ? wrapRef.current.clientWidth : 600) - 4) / base.width))
+            const viewport = pg.getViewport({ scale })
+            canvas.width = Math.floor(viewport.width)
+            canvas.height = Math.floor(viewport.height)
+            await pg.render({ canvasContext: canvas.getContext('2d'), viewport }).promise
+          } catch (e) { if (!dead) setNote(String((e && e.message) || e)) }
+        })()
+        return () => { dead = true }
+      }, [url, page, pages])
+      return h('div', { ref: wrapRef, style: { overflow: 'auto', flex: 1 } },
+        note ? h('div', { style: { fontSize: 12, color: '#c66' } }, note) : null,
+        h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', padding: '4px 0' } },
+          h('button', { onClick: () => setPage((p) => Math.max(1, p - 1)), disabled: page <= 1,
+            style: { cursor: 'pointer', borderRadius: 4, border: '1px solid #555', background: 'transparent', color: 'inherit' } }, '‹ prev'),
+          h('span', { style: { fontSize: 12, opacity: 0.8 } }, 'page ' + page + ' / ' + (pages || '…')),
+          h('button', { onClick: () => setPage((p) => Math.min(pages || 1, p + 1)), disabled: !pages || page >= pages,
+            style: { cursor: 'pointer', borderRadius: 4, border: '1px solid #555', background: 'transparent', color: 'inherit' } }, 'next ›')),
+        h('canvas', { ref: canvasRef, style: { border: '1px solid #333', background: '#fff', display: 'block', margin: '0 auto' } }))
+    }
+
     function ArtifactPanel() {
       const [open, setOpen] = React.useState(false)
       const [draft, setDraft] = React.useState('')
@@ -141,7 +193,11 @@ window.__ModuleLoader__.load({
             state.kind.lane === 'audio' && h('audio', { src: state.url, controls: true, style: { width: '100%' } }),
             state.kind.lane === 'video' && h('video', { src: state.url, controls: true, style: { width: '100%' } }),
             state.kind.lane === 'unknown' && h('div', { style: { fontSize: 12, opacity: 0.7 } }, state.note || 'no renderer'),
-            (state.kind.lane === 'iframe' || state.kind.lane === 'pdf') && h('div', { style: { fontSize: 12, opacity: 0.7 } }, 'sandboxed-frame lane lands with Task 5'),
+            state.kind.lane === 'iframe' && h('iframe', {
+              src: state.url, sandbox: 'allow-scripts', title: state.relPath,
+              style: { width: '100%', height: '60vh', border: '1px solid #333', background: '#fff' },
+            }),
+            state.kind.lane === 'pdf' && h(PdfView, { url: state.url }),
           ))
 
       return h('div', { style: { display: 'flex', flexDirection: 'column', height: '100%' } },
