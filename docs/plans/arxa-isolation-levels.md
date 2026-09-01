@@ -1033,3 +1033,35 @@ Two details for whoever builds it:
   `[sandbox: …]` marker with a hint. **Do not rely on it here:** the Flutter write
   happens on every invocation, so escalation would prompt constantly. It is the wrong
   mechanism for a predictable, known-good path.
+
+---
+
+## 18. Decisions
+
+### S1 — Ship an arxa `SandboxProvider`, then flip the preset. Do not flip first.
+
+The live exposure (`danger-full-access`, §3) is closed by a preset change, but §17
+measured that the change breaks `dart` and `flutter`. So the order is fixed:
+
+1. Write a small arxa `SandboxProvider` extending the writable roots with the
+   **runtime-resolved** Flutter/FVM SDK cache. Never hardcode the path — FVM versions
+   move and end users have their own layout.
+2. Swap it in at the single cordis profile row arxa already overrides
+   (`dsh-base/cordis.patch.yml:169-170`). The override mechanism is proven; only the
+   payload is new.
+3. Set `permission.defaultPreset: workspace-write` in `~/.arxa/dsh/settings.yaml`.
+
+**Rejected — flip now, fix Dart after.** It closes the hole hours earlier at the cost
+of breaking the `application/` target, and the failure surfaces as an opaque
+permission error rather than a clear message.
+
+**Rejected — wait for the whole tier programme.** The exposure is the mechanism that
+would contain the highest-ranked threat (§11: an agent doing something destructive, or
+touching another client's code). It should not wait on the container work, which §16
+shows may never be built.
+
+**Verification for this change, from §17's measurements:** `git`, `node`, `npm` and
+the full `init → write → add → commit` session workflow already pass under the
+unmodified profile, so they are the regression baseline. The provider is correct when
+`dart --version` and `flutter --version` also pass **and** a write to a sibling
+project is still denied.
