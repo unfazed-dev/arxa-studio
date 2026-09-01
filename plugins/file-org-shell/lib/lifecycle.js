@@ -73,6 +73,10 @@ import {
   spawnSnapshotOrgRepo,
   snapshotWorkerLive,
   listSessions,
+  // D98: the org registry is no longer the whole picture — project sessions
+  // live in their own repo's registry. `allSessions` is the aggregate view.
+  parkedSessions as allSessions,
+  resolveSessionRepo,
   archivedSessionIds,
   openSession,
   annotateSession,
@@ -690,7 +694,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
 
       // 5. session lifecycle ready — registry readable, archived derivable.
       step = 'sessions'
-      const sessions = listSessions(resolved, env)
+      const sessions = allSessions(resolved, env) // D98: org + every project registry
       const archived = archivedSessionIds(resolved, env)
 
       // 5b. WIP watcher (Part B S2, Q9) + frame emission (S1): a debounced
@@ -701,7 +705,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       // deferred (create-time) open must stay instant (the 2025-08 hang
       // contract); the heal boots the net the moment HEAD lands.
       const openWorktrees = () =>
-        listSessions(resolved, env)
+        allSessions(resolved, env) // D98: project session worktrees need the WIP net too
           .filter((s) => s.state === 'open' && s.worktree)
           .map((s) => s.worktree)
       let wipWatcher = null
@@ -831,7 +835,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           // sessions, null for org-level. Legacy registry entries predate
           // the field and read as null — no migration needed.
           return joinDshLive(
-            listSessions(resolved, env)
+            allSessions(resolved, env) // D98: org + project registries
               .filter((s) => s.state !== 'open')
               .map((s) => ({ id: s.id, name: s.name, state: s.state, parkedReason: s.parkedReason, project: s.project ?? null, dshSessionId: s.dshSessionId ?? null })),
             dshLive,
@@ -844,7 +848,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           // Named around the static open-time `sessions` snapshot above,
           // which stays for diagnostics.
           return joinDshLive(
-            listSessions(resolved, env)
+            allSessions(resolved, env) // D98: org + project registries
               .filter((s) => s.state !== 'archived')
               .map((s) => ({ id: s.id, name: s.name, state: s.state, parkedReason: s.parkedReason, project: s.project ?? null, dshSessionId: s.dshSessionId ?? null })),
             dshLive,
@@ -960,10 +964,11 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           return created
         },
         async newSession(name, workspace) {
-          // Sessions branch from HEAD; until the initial snapshot lands
-          // there is nothing to branch from. Loud, human, and the rows
-          // client normally prevents reaching this at all (CTA disabled).
-          if (!hasHead(resolved, env)) throw new Error('initial-snapshot-pending: the first git snapshot of this organisation is still running — sessions unlock the moment it completes')
+          // Sessions branch from HEAD; until the initial snapshot lands there
+          // is nothing to branch from. That guard now lives in routing
+          // (`resolveSessionRepo`, below) so it checks the repo the session
+          // ACTUALLY lands in — a fresh project can lack HEAD while the org
+          // has one. Same message, so the rows client keeps recognising it.
           // Workspace-born sessions (grilled 2026-08-30): a session lives
           // in a WORKSPACE row — a fixed dock container ('notes',
           // 'meetings/scheduler', …) or a project container
@@ -987,12 +992,21 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           } else if (!template.fixedWorkspaces.includes(ws)) {
             throw new Error('unknown-workspace: ' + ws)
           }
+          // D98/D99: the workspace row decides WHICH repo owns this session.
+          // A project workspace attaches branch + worktree to the project
+          // repo so project history actually receives the work (B2). Routing
+          // refuses loudly — account/, unknown docks, and a target without
+          // HEAD — and never silently falls back to the org repo.
+          const route = resolveSessionRepo(resolved, ws, { env })
+          const repoPath = route.repoPath
           // Auto-name (grilled 2026-08-30): singular(folder)+counter, no
           // ids — the branch/worktree keep the session id as stable key.
+          // The counter reads the OWNING repo's registry: two projects each
+          // get their own design-001 rather than colliding through the org.
           const title = typeof name === 'string' && name.trim() !== ''
             ? name.trim()
-            : nextSessionName(listSessions(resolved, env), ws)
-          const session = openSession(resolved, { name: title, project: projectSlug, workspace: ws, env })
+            : nextSessionName(listSessions(repoPath, env), ws)
+          const session = openSession(repoPath, { name: title, project: projectSlug, workspace: ws, env })
           // Phase D (D71): AFTER branch+worktree exist, spawn the dsh session
           // with cwd = the worktree path (dsh sessions.create cwd contract)
           // and store its id on the registry row. Unavailable dsh degrades to
@@ -1001,7 +1015,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           dshLive = await dshBridge.list()
           syncWipWatchPaths() // session set changed — re-watch
           return annotateSession(
-            resolved,
+            repoPath,
             session.id,
             spawned.ok
               ? { dshSessionId: spawned.id, dshStatus: null }
@@ -1015,7 +1029,9 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
         async renameSession(id, name) {
           const title = typeof name === 'string' ? name.trim() : ''
           if (title === '') throw new Error('name-required: a session name cannot be empty')
-          if (listSessions(resolved, env).every((s) => s.id !== id)) throw new Error('unknown-session: ' + id)
+          // D98: the id may live in a project registry — look across all of
+          // them, and let annotateSession's own preamble find the owner.
+          if (allSessions(resolved, env).every((s) => s.id !== id)) throw new Error('unknown-session: ' + id)
           return annotateSession(resolved, id, { name: title }, env)
         },
         async resumeSession(id) {
@@ -1023,7 +1039,10 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           // there is nothing to branch from. Loud, human, and the rows
           // client normally prevents reaching this at all (CTA disabled).
           if (!hasHead(resolved, env)) throw new Error('initial-snapshot-pending: the first git snapshot of this organisation is still running — sessions unlock the moment it completes')
-          const row = listSessions(resolved, env).find((s) => s.id === id)
+          // D98: a project session's row lives in the project registry.
+          // reviveSession's own preamble routes the git work; this lookup
+          // only needs the dsh annotation, so read the aggregate.
+          const row = allSessions(resolved, env).find((s) => s.id === id)
           const out = reviveSession(resolved, id, env)
           // Re-attach the dsh conversation (focus/open by dshSessionId) when
           // the row carries one. Rows born while dsh was unavailable (or
@@ -1047,7 +1066,9 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           if (!hasHead(resolved, env)) throw new Error('initial-snapshot-pending: the first git snapshot of this organisation is still running — sessions unlock the moment it completes')
           // D39/D40 archive: flag out of active views, WIP-commit, prune the
           // worktree, keep the branch. The rows face then holds it back.
-          const row = listSessions(resolved, env).find((s) => s.id === id)
+          // D98: aggregate lookup — a project session's row is not in the org
+          // registry, and an undefined row here silently skipped dsh archive.
+          const row = allSessions(resolved, env).find((s) => s.id === id)
           const out = archiveSessionBranch(resolved, id, env)
           // Feed dsh's archivedSessionIds set (D39 contract): the archived
           // session vanishes from dsh active views; its transcript persists
@@ -1545,7 +1566,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       }))
     let sessionsByWorkspace = null
     try {
-      const rows = listSessions(resolved, env)
+      const rows = allSessions(resolved, env) // D98: counts include project sessions
       sessionsByWorkspace = {}
       for (const s of rows) {
         if (s.state === 'archived') continue // D39: archived never surfaces
