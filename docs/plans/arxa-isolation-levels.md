@@ -1144,3 +1144,82 @@ self-contained and mounts alone — and the container design becomes straightfor
 **Ordering, now firm: CI/CD Phase 1 (D98/D99) is a hard prerequisite for A4/A5.**
 Build the container tiers on top of corrected routing, never before it — otherwise
 every project container is empty.
+
+---
+
+## 20. CORRECTION to §9 — cross-project READ isolation is only half-achievable in-process
+
+§9 recorded "cross-project read isolation — measured working". **That is true for
+subprocesses only.** Two independent limits, both verified:
+
+### Limit 1 — Seatbelt confines a launched process and its children, nothing else
+
+Per `sandbox(7)`, `sandbox-exec` confines a **freshly-launched** process tree. arxa's
+agent runs **in-process** inside a long-lived engine that was never itself launched
+under a profile. So extending `seatbeltProfileArgs()` protects **subprocesses the
+engine spawns** — `git`, shells, CLI tools — and does **not** fence the engine's own
+`fs`/`require()` reads.
+
+### Limit 2 — `SandboxedFileSystem` has no read path at all
+
+Read from source: it overrides exactly two methods —
+
+```
+:130  writeText -> super.writeText(await this.checkedTarget(...))
+:144  editText  -> super.editText(await this.checkedTarget(...))
+```
+
+and `checkedTarget` only ever raises `cannot write` (`:161`, `:168`). **There is no
+`readText`/`readFile` override.** The in-process file tools' reads are unfenced in
+every mode, including `workspace-write`.
+
+### The resulting picture
+
+| Read path | Seatbelt read-deny | `dsh-fs-sandbox` |
+|---|---|---|
+| subprocess (`cat`, `grep`, a shell, a test runner) | ✅ blocked | n/a |
+| **the agent's own file-read tool (in-process)** | ❌ **not covered** — engine not launched under a profile | ❌ **not covered** — no read override exists |
+
+**So A2 as scoped in §16 is half a control.** An agent told to read
+`../other-client/secrets.env` via its file tool still succeeds. Blocking `cat` while
+leaving the Read tool open is not cross-project read isolation, and the plan must not
+claim it is.
+
+### Three ways to close it, and what they cost
+
+1. **Ship an arxa FileSystem provider** with a read check mirroring `checkedTarget`,
+   swapped at the same seam as the S1 SandboxProvider. Cheapest real fix, same
+   mechanism already chosen, and it composes with the Seatbelt work.
+2. **Relaunch the whole engine under a Seatbelt profile.** Closes both limits at once,
+   but the writable/readable roots would then be fixed for the engine's whole
+   lifetime, across every session — architecturally much bigger, and it fights the
+   per-session model.
+3. **Containers (A4/A5).** The boundary is the container, so *both* limits vanish —
+   in-process reads cannot escape a mount namespace.
+
+### This strengthens S2
+
+The user chose to build the container tiers against my recommendation. **This finding
+argues in their favour.** The cheap Seatbelt rungs cannot deliver cross-project read
+isolation for the agent's own tools; containers can, structurally. Option 1 above
+should still be built — it is cheap and helps at every level — but the honest ceiling
+of the no-container path is lower than §9 implied.
+
+### Other macOS mechanisms — verified, and mostly not tiers
+
+- **`(deny network*)`** cleanly blocks outbound TCP **per-process** — better suited
+  here than `pf` or the Application Firewall, both of which are coarse (and the
+  built-in firewall is inbound-only). Same subprocess-scope caveat applies.
+- **`(deny mach-lookup)`** blocks real Keychain retrieval — verified with a clean
+  three-way test (unsandboxed succeeds → sandboxed-without-deny succeeds identically →
+  sandboxed-with-deny fails → item still retrievable afterwards). An earlier attempt
+  used an unconfirmed keychain item and was discarded as ambiguous.
+- **User accounts, APFS encrypted volumes, FileVault** are operator-level manual
+  partitions, not per-task tooling. Real session-switching and mount friction; they do
+  not help live in-process isolation.
+- **Endpoint Security** is out of reach for a free distributed app — restricted
+  entitlement, weeks-to-months Apple approval, no App Store path.
+
+**Placement:** these are **not** a tier beside containers. They are a cheap,
+always-on **floor beneath every mode**, including native execution. Fold them under
+A1–A3 rather than presenting them as an alternative to A4/A5.
