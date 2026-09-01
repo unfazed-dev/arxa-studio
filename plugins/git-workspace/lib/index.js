@@ -14,6 +14,7 @@
 //   sessions.js — D38–D40 session lifecycle: branch-per-session
 //                 worktrees, stage-boundary gate + merge, parked
 //                 branches, archive/revive (phase 4)
+//   reconcile.js — B7: worktree ↔ registry ↔ git drift report + safe repair
 
 export const name = 'arxa-git-workspace'
 
@@ -60,6 +61,11 @@ export {
   reviveSession,
   worktreeHealth,
 } from './sessions.js'
+export {
+  parseWorktreePorcelain,
+  reconcileWorktrees,
+  repairWorktrees,
+} from './reconcile.js'
 
 import { stageBoundarySquash } from './commits.js'
 import { mintVersion, versionChip } from './versions.js'
