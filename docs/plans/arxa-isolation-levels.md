@@ -2311,3 +2311,119 @@ would be worse — but it must be done with eyes open:
 3. **`needs-review` being 100% of live data** means the default is the only value the
    system has ever seen. Any code that branches on status is, today, dead in one
    direction.
+
+---
+
+## 29. arxa dial — and the correction that settles the mint trigger
+
+Two agents disagreed on whether Publish exists. **Resolved by reading the code myself.**
+
+### ⚠️ 29a. CORRECTION to §28b — `/ship/deploy` IS built and live
+
+§28b recorded, from the designer study, that Publish *"remains the last slice"* and was
+pending. **That documentation is stale.** Verified:
+
+```
+arxa_dial.dart:1354   POST /ship/deploy        <- route registered and live
+arxa_dial.dart:1346   GET  /ship/deploy/ready
+arxa_dial.dart:1334-43 POST /ship/pr, /ship/merge, /ship/close, /ship/sync
+design_ship.dart:283  Future<Map> deploy({...})
+```
+
+And `deploy()` has **real preconditions**, not a stub:
+
+```
+deployBlockers(artifactDir)  -> must be empty, else ShipRefusal
+pr.state == 'OPEN'           -> refuses: "merge or close it first"
+st['branch'] != 'main'       -> refuses: "sync to main first"
+st['dirty'] != 0             -> refuses: "dirty tree — Branch+PR the edits first"
+```
+
+### 29b. This ANSWERS the ordering question I put to the owner
+
+I asked whether work reaches the client **before or after** merge. **The code answers
+it: after.** `deploy()` refuses unless the branch is `main`, the tree is clean, and no
+PR is open. **Deploy is structurally gated behind merge.**
+
+So the sequence is: session → PR → merge to `main` → **deploy = the client sees it**.
+
+**Consequence:** minting at merge would be *close but wrong* — it would mint work that
+has landed but not yet been shown to anyone. **The mint belongs on `/ship/deploy`,
+which is the real publish-to-client event, and it exists today.** §26k's requirement is
+satisfiable now, not later.
+
+### 29c. The dial has NO version model — by locked decision
+
+`docs/plans/arxa-dial-undo-redo.md` decision 1: *"Undo never crosses a commit: before
+commit the journal owns time travel; after commit, git and the `arxa/dial-*` PR own
+history (revert is a cicd verb, not a dial verb). **The dial never rewrites git.**"*
+
+- **Draft Overlay** = ONE patch file per artifact in `~/.arxa/drafts/`, **overwritten, not versioned**.
+- **Journal** = undo/redo only, linear, wiped inside `_commitDraft()`.
+- **Ship** = plain git; branch is a timestamp `arxa/dial-${millisecondsSinceEpoch}`.
+- **Zero** version/revision/seq/supersedes columns in any dial migration; VOCABULARY has no version entry.
+
+**So the dial is not the alignment target.** Good to know before building against it.
+
+### 29d. FREEZE is the alignment target — and it is hash-based, not numbered
+
+`VOCABULARY.md:334`: *"The hash-locked approval of the design manifest: approval binds
+to the design hash, any post-approval change goes stale loudly, and the freeze approval
+is the human gate that unlocks build."*
+
+Implemented and enforced: `gate_freeze.dart` mints `design/approval.lock` against
+targets + `inputsHash`, records sha256 into `state.designHash`; `gate_coverage.dart:15`
+enforces freshness.
+
+**Identity is a CONTENT HASH, not a number. No state machine — just fresh vs loudly
+stale.** That is a genuinely different model from studio's `versions.json`, and it is
+the one that actually runs.
+
+Confirmed absent repo-wide in arxa: `versions.json`, semver, CHANGELOG machinery,
+`Draft/In review/Approved/Superseded`.
+
+### ⚠️ 29e. The naming collision is LIVE and will break the shared vocabulary
+
+| Word | arxa means | studio means |
+|---|---|---|
+| **Draft** | the author's **private unsent patch file** — not reviewable by anyone | a version state the client may see |
+| **Publish** | **deploy to Workers** | (implied) show to the client for approval |
+| **Design lock** | the **sign-in requirement** (`CONTEXT.md:128`) | — |
+| **Approval** | `approval.lock` = **hash-bound pipeline** approval ("safe to scaffold from?") | client sign-off |
+
+**Four collisions, all live.** If studio's `versions.json` keeps these words with
+different meanings, the shared vocabulary breaks the first time someone reads both
+docs. **This must be settled before either side ships**, and studio is the one that
+should move — arxa's meanings are implemented and enforced; studio's are not.
+
+### 29f. Locked constraint — "Links never churn"
+
+`VOCABULARY.md:1046`: one stable share URL per artifact, forever.
+**One URL with versioned content behind it is compatible. A URL per version
+contradicts a locked decision.** Design accordingly.
+
+### 29g. The recommended seam — cheap, and uses arxa's own primitive
+
+**`/ship/deploy` currently keeps no record of what was deployed when.** Logging each
+deploy against its `designHash` would answer *"which version did the client see on date
+X"* using arxa's existing identity primitive — **no new URL, no second state machine,
+no competing vocabulary.**
+
+This is the smallest change that satisfies §26k, and it lands on a route that already
+exists and already refuses to run unless the tree is clean and merged.
+
+### 29h. A third pipeline model — three now reported, probably not contradictory
+
+- studio: **10 stages** `00-moodboard … 08-deploy`
+- arxa `phases.dart:13-20`: **7 FSM phases** — intake, prototype, design, scaffold, review, build, deploy
+- arxa `gate_runner.dart:28` `gateOrder`: **14 gates** — intake, freeze, structure, kind_registry, scaffold, fidelity, coverage, tests, memory, advertise, review, native_deps, lens, deploy
+
+Two agents reported different arxa models. **These are most likely different axes —
+phases as lifecycle state, gates as checks that run — not a contradiction.** But it is
+unverified, and studio's ten stages map cleanly onto neither. **Resolve before any
+stage-based logic is written on either side.**
+
+### Doc-vs-code corrections found
+
+1. **Pin kanban: docs advertise 5 states, code has 3.** `triaged` / `in_progress` are accepted on the wire then collapsed to `open` in `parse()` (`arxa_dial.dart:57-72`). **Trust the code: 3.**
+2. **"Publish remains the last slice" is stale** — see §29a.
