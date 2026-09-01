@@ -89,6 +89,13 @@ const SNAPSHOT_WORKER = [
   'const marker = org + \'/.arxa/snapshot.json\'',
   'const pin = [\'-c\', \'init.defaultBranch=main\', \'-c\', \'commit.gpgsign=false\', \'-c\', \'tag.gpgsign=false\', \'-c\', \'core.hooksPath=\', \'-c\', \'core.autocrlf=false\', \'-c\', \'safe.directory=\' + org]',
   'const opt = { cwd: org, env: process.env }',
+  // Test seam, opt-in and inert unless set: the snapshot is a race by nature
+  // (it finishes when it finishes), so a test that wants to observe the
+  // PENDING state had to hope the machine was slow. On a fast disk it never
+  // was, and the assertion failed for reasons that had nothing to do with
+  // the code. A delay the test asks for explicitly makes that observable.
+  'const holdMs = Number(process.env.ARXA_SNAPSHOT_DELAY_MS || 0)',
+  'if (holdMs > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, holdMs)',
   'try {',
   '  execFileSync(git, [...pin, \'add\', \'-A\'], opt)',
   // B20: this MUST match the sync path's subject and MUST be conventional.

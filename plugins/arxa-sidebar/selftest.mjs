@@ -272,7 +272,10 @@ check('seam: arxa-file-org-shell resolves with createOrgLifecycle', typeof mod?.
     // by default and would front-load this throwaway root into the REAL
     // ~/.arxa/organisation.json on every npm test run (seen live 2025-08:
     // eight dead arxa-snap-* entries squatting the user's recents).
-    const l2 = mod.createOrgLifecycle({ workspaceRoot: root, env: { ARXA_HOME: root } })
+    // The 400 files above were an attempt to make the snapshot slow enough to
+    // observe; on a fast disk it still finished first and this block failed
+    // for no reason of its own. Ask the worker to hold instead of guessing.
+    const l2 = mod.createOrgLifecycle({ workspaceRoot: root, env: { ARXA_HOME: root, ARXA_SNAPSHOT_DELAY_MS: '4000' } })
     await l2.openOrg(orgPath, { deferSnapshot: true })
     check('rows-snap: deferred open reports snapshotPending true', l2.current.snapshotPending() === true)
     let guardMsg = ''
