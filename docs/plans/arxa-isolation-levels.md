@@ -1618,3 +1618,25 @@ Removed: sandbox `arxaclonetest`, scratch repo `/Volumes/business_ssd/_sbxtest`.
 **Deliberately retained:** the `sbx` install, a healthy daemon, the global
 `deny-all` policy (S3), and the ~2.4 GB cached image. Internal volume after teardown:
 33 GiB free / 84 % used.
+
+### S4 — One visible choice: the confinement level. Integrity is unconditional.
+
+Approved 2026-09-02. The two axes stay real internally, but the user sees one number.
+
+- **B1 + B2 ship unconditionally** — lockfile-pinned, script-free installs
+  (`npm ci --ignore-scripts`, `dart pub get --enforce-lockfile`, OSV-Scanner) and the
+  base-branch diff-policy gate. They are free, roughly 7 hours once, and carry no
+  downside for any project, so they are **not a menu item**. Every arxa project gets
+  them.
+- **The visible choice is the confinement level**, exactly as originally framed:
+  org picks a level, projects inherit; org picks none, a project may still pick one.
+- **B3's paid element** (GitHub Pro for required reviews on private repos) is offered
+  only where it is actually available, and is **never presented as a level** — a level
+  the user cannot reach without a paid upgrade would be a broken promise.
+
+This keeps the §16 two-axis model as the internal truth while avoiding the false
+pairings a bundled preset would force, and it avoids asking two questions where one
+end of the matrix is cheap and universally good.
+
+**UI consequence, carried from S3:** the card shows the *effective* confinement level
+resolved on this machine, not the configured one, whenever they differ.
