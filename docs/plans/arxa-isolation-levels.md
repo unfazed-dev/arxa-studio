@@ -369,3 +369,111 @@ scaffolded template; silently host client projects as schemas inside the ADS Sup
 project; make a shipped project depend on branching (billed to the vendor's account);
 or use this session's `mcp__supabase__*` tools — wired to the ADS instance — to
 provision anything for an end user.
+
+---
+
+## 9. Measured myself: Seatbelt already does most of L1 — including egress
+
+Tested directly with `sandbox-exec` on this machine, not researched. This reframes
+the ladder, so the evidence is recorded in full.
+
+### 9a. The current profile, read from source
+
+`dsh-sandbox-local/lib/index.js` `seatbeltProfileArgs()` emits exactly:
+
+```
+(version 1)
+(allow default)
+(deny file-write*)
+(allow file-write* (literal "/dev/null"))
+(allow file-write* (subpath "<workspaceRoot>") ...)
+```
+
+Well-formed and minimal. Note what is **absent**: no `deny file-read*`, no
+`deny network*`. That is why reads and egress are open in every mode — not a
+limitation of Seatbelt, **a limitation of this profile**.
+
+### 9b. Both missing controls work. Measured.
+
+Baseline (current profile) — the vulnerability, confirmed:
+
+```
+read sibling secret : SECRET-FROM-B          <- reads straight through
+write to sibling    : Operation not permitted <- writes already blocked
+```
+
+Candidate profile adding a scoped read-deny and re-allowing the worktree:
+
+```
+(deny file-read*  (subpath "<orgRoot>"))
+(allow file-read* (subpath "<worktree>"))
+```
+
+Result — **cross-project isolation with no container at all**:
+
+| Check | Result |
+|---|---|
+| read sibling secret | **Operation not permitted** |
+| list sibling dir | **Operation not permitted** |
+| write to sibling | **Operation not permitted** |
+| read own worktree | ok |
+| write own worktree | `WROTE-OK` |
+| `git --version` | 2.51.0 |
+| `node -e …` | ok |
+| **`git add` + `git commit`** | **`COMMIT-OK`** ← sessions still commit |
+
+Adding `(deny network*)` on top:
+
+```
+network with profile A : 200
+network with profile B : 000  BLOCKED
+```
+
+**Egress denial works in Seatbelt.** The earlier conclusion that "network is not
+expressible in the current seam" is true of the *profile as written*, not of the
+mechanism. This matters because the tier research concluded egress — not kernel
+isolation — is the real L1→L2 delta on macOS.
+
+### 9c. One real breakage found: Flutter writes into its own SDK
+
+```
+dart --version -> /Volumes/developer_ssd/dev/fvm/versions/stable/bin/
+                  internal/update_engine_version.sh: cache/engine.stamp.tmp.NNNNN:
+                  Operation not permitted
+```
+
+The `dart`/`flutter` wrapper writes to its **own SDK cache** outside the worktree.
+Not a security problem — a writable-roots omission. Any profile must add the fvm/
+Flutter SDK cache as a writable root. `git` and `node` need nothing beyond
+`/dev/null`, which dsh already grants.
+
+Worth flagging generally: **toolchains that self-update will fight a write-deny
+profile**, and Flutter is the one arxa actually ships. Find these per toolchain
+rather than assuming.
+
+### 9d. Consequence for the ladder
+
+A large fraction of L1's value is reachable **without Docker at all** — no image
+builds, no bind-mount performance question, and critically **no collision with the
+worktree/common-git-dir problem in §6**, because nothing is being mounted anywhere.
+
+This does not remove the case for containers. Seatbelt gives **no** kernel
+isolation, no reproducible toolchain, no dependency hermeticity, and dsh applies it
+**per tool call**, not to a whole process tree. But it changes what each tier is
+*for*, and it means the cheapest rung is far stronger than assumed.
+
+**Proposed re-cut, to be settled in the grill:**
+
+| Tier | Mechanism | Buys |
+|---|---|---|
+| **L0** | today: `danger-full-access` | nothing |
+| **L0.5** | preset → `workspace-write` | per-worktree **write** boundary. One line, zero code. |
+| **L1** | extend the profile: scoped read-deny + writable-roots fix | **cross-project read isolation** — measured working |
+| **L1.5** | add `(deny network*)` or an allowlist | **egress control** — measured working |
+| **L2** | hardened Docker container | reproducible toolchain, dependency hermeticity, process-tree confinement |
+| **L3** | `sbx` microVM + `--clone` | separate kernel, default-deny egress, read-only source |
+| **L4** | *pending research* | see §10 |
+
+**Caveat, stated plainly:** `sandbox-exec` is deprecated by Apple, though present and
+functional (`/usr/bin/sandbox-exec`, dated Aug 13). arxa's exposure does not change —
+dsh already depends on it — but a tier built on it inherits that risk.
