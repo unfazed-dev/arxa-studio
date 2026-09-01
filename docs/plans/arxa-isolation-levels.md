@@ -1580,3 +1580,41 @@ common-git-dir coupling, no exposure of sibling projects.
 | `--no-share-skills` opts out of a shared store | **Flag does not exist**; store is shared but **empty until `sbx skills import`** (§22b) |
 | memory default is 8 GiB | **50 % of host, max 32 GiB** — 8 GiB here only because the host is 16 GiB |
 | `--clone` protects source | **Confirmed** — read-only mount, verified by a refused write |
+
+### 24e. Teardown behaviour — two findings for arxa's Finish/Sweep design
+
+**`sbx rm` refuses to discard unpushed work, and says how to recover it.** Removing a
+sandbox holding commits that exist nowhere else prompts for confirmation and prints
+the recovery path:
+
+```
+git branch <local-name> refs/sandboxes/<sandbox>/<branch>
+Alternatively, ask the agent to push them to an upstream remote.
+ERROR: stdin is not a terminal; use --force to skip confirmation
+```
+
+Two consequences:
+1. **Non-interactive removal fails by default.** arxa automating teardown must pass
+   `--force`, and therefore **must decide the safety question itself** — exactly the
+   role D104's explicit "Finish" plays in the CI/CD plan. Reuse that decision point:
+   never `--force` a sandbox whose commits have not been fetched to the host.
+2. **`refs/sandboxes/<sandbox>/<branch>` is a durable recovery handle** on the host
+   side, independent of the ephemeral git-daemon port. Worth preferring over the
+   port-based fetch where possible, and worth surfacing in the card as "unfetched
+   work exists".
+
+**The image cache is retained after removal** — the store stayed at ~2.4 GB with zero
+sandboxes. That is desirable (the next create is fast) but means **removing sandboxes
+does not reclaim disk**. `sbx prune` handles stopped sandboxes; image reclamation is
+separate. arxa's storage accounting should not assume teardown frees space.
+
+**Policy state after removal:** the kit's 6 network allow rules disappeared with the
+sandbox, leaving `default-deny-all` and `local-policy`. So per-sandbox rules are
+correctly lifecycle-bound and do not leak across projects.
+
+### Verification environment — teardown complete
+
+Removed: sandbox `arxaclonetest`, scratch repo `/Volumes/business_ssd/_sbxtest`.
+**Deliberately retained:** the `sbx` install, a healthy daemon, the global
+`deny-all` policy (S3), and the ~2.4 GB cached image. Internal volume after teardown:
+33 GiB free / 84 % used.
