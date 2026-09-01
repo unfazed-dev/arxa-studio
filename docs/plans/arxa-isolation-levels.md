@@ -1954,3 +1954,51 @@ corresponding to anything in the agreement.
 - [AIGA — Standard Form of Agreement for Design Services (resources)](https://www.aiga.org/resources/aiga-standard-form-of-agreement-for-design-services) · [2022 update PDF](https://www.aiga.org/sites/default/files/2023-11/Standardformofagreement_2022update.pdf) · [full PDF mirror](https://davidberman.com/wp-content/uploads/AIGA-Standard-Form-of-Agreement-for-Design-Services.pdf)
 - [AIGA — Business & Freelance Resources](https://www.aiga.org/resources/business-freelance-resources) · [The State of Our Contracts](https://www.aiga.org/resources/the-state-of-our-contracts)
 - [semver.org — clause 9, prerelease](https://semver.org/) · [release-please](https://github.com/googleapis/release-please) · [changesets](https://github.com/changesets/changesets) · [semantic-release](https://github.com/semantic-release/semantic-release)
+
+### 26i. Sketch's shipping model — the closest working analogue, in detail
+
+Worth stating precisely, because it is a product that already solved this exact
+problem for non-technical viewers:
+
+- **Every save or close creates a snapshot automatically** — an "update" on a timeline,
+  showing who saved it. No user action.
+- **`File > Create Version` (⌃⌘S)** is the manual act: add an optional **description**,
+  choose whether to **star** it, save.
+- **Stars control visibility.** *"Viewers in your Workspace and Guests with view
+  permissions can only see starred versions; if there are no starred versions, they'll
+  see the latest version instead."* Editors keep seeing everything.
+- **Descriptions survive unstarring** — the annotation and the elevation are separate.
+- For Library documents, unstarred saves do **not** trigger an update; starring does.
+
+**The mapping to arxa is almost one-to-one:**
+
+| Sketch | arxa |
+|---|---|
+| autosave snapshot | D18 two-tier auto-commit (already exists) |
+| the timeline of updates | git history (already exists) |
+| `Create Version` + description | **mint** — the missing call site (B12) |
+| star → visible to Viewers | the client-facing chip |
+| no starred versions → show latest | sensible empty state, already the `null` chip case |
+
+The fallback rule is worth copying verbatim: **when nothing has been minted, show the
+latest state rather than nothing.** That is strictly better than today's hidden chip.
+
+### 26j. RECOMMENDATION — the shape all four lines of evidence agree on
+
+1. **Mint on explicit human action, with the system computing the prompt.**
+   Not per stage (burns numbers on work no client saw; ten stages × two targets), not
+   per merge (a session is a unit of work, not a deliverable). The card shows
+   *"3 stage changes since v4 — cut v5"*. This is the release-PR pattern translated,
+   and it is what names the missing call site.
+2. **One timeline per TARGET** — `website/` and `application/` — never per stage.
+   Stage position stays a **status field**, not a version.
+3. **`versions.json` remains SSOT**, with identity (`v4`) and state (`Approved`) as
+   **orthogonal fields**. Never model state as a semver prerelease.
+4. **Annotated tag written once, at `Approved`**, pointing at the post-merge commit on
+   `main` — plus `--follow-tags` on the push sites (§26e), shipped together.
+5. **The client sees only minted versions; if none exist, show the latest state.**
+
+**What this does NOT do, stated plainly:** it does not make version numbers automatic.
+That is deliberate — three independent sources (release-PR tooling, AIGA acceptance
+provisions, Sketch's star model) converge on a human deciding what counts as a version,
+with the machine doing the remembering.
