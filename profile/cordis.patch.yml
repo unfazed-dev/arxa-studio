@@ -76,6 +76,36 @@
   - id: arxa-pi-delegate
     name: /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/pi-delegate/index.mjs
 
+# 6b. The arxa sandbox provider (S1, docs/plans/arxa-isolation-levels.md §17-18).
+#     dsh-base's `sandbox` row mounts @deepseek-ai/dsh-sandbox-local, whose
+#     `workspace-write` mode grants exactly workspaceRoot + /tmp + os.tmpdir()
+#     (dsh-sandbox/lib/index.js:154-161, no extension point). §17 measured that
+#     `dart` and `flutter` FAIL under it: the toolchain writes to its own SDK
+#     cache and to ~/.dart-tool on every invocation. arxa-sandbox SUBCLASSES the
+#     stock provider and appends the runtime-resolved toolchain roots at the
+#     `runnerArgv` seam — same confinement, same fail-closed posture, same
+#     `.git` semantics, three more writable roots (none hardcoded; a machine
+#     without Flutter gets stock dsh behaviour byte for byte).
+#
+#     Same revert shape as rows 11a/11c/16: delete this row pair and the stock
+#     dsh provider is back, package untouched. Verified by
+#     plugins/sandbox/selftest.mjs (logic) and scripts/s1-sandbox-verify.mjs
+#     (the real Seatbelt kernel: dart/flutter/git/node/npm pass confined, a
+#     sibling-directory write is denied).
+#
+#     ORDER: `insert` appends to the end of the entry list, so this row is
+#     registered AFTER sandbox-policy/bash-sandbox, which inject `sandbox`.
+#     That is fine — cordis service injection is reactive, not declaration
+#     ordered (arxa-frame/arxa-locale replace ctx.layout/ctx.locale the same way).
+#
+#     Absolute path — host-only plugin, no client half to discover, and arxa
+#     declares no npm dependency on it (same shape as rows 5, 6 and 14).
+- id: sandbox
+  disabled: true
+- insert:
+  - id: arxa-sandbox
+    name: /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/sandbox/lib/index.js
+
 # 7. The design panel (H4, viewer-first): shell.overlay dock iframing a live
 #    `arxa design serve` with the viewport-rung ladder. By PACKAGE NAME —
 #    the browser half is discovered through the package.json dsh.client
