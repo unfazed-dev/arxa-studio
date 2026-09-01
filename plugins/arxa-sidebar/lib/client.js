@@ -3163,7 +3163,12 @@ window.__ModuleLoader__.load({
 				] }),
 				open ? (0, react_jsx_runtime.jsxs)("div", { "data-arxa-card-body": "", children: [
 					(0, react_jsx_runtime.jsxs)("div", { "data-arxa-card-status": "", children: [
-						chip("dirty", d.dirty ? (d.dirty.staged + "+" + d.dirty.unstaged + "?" + d.dirty.untracked) : "0"),
+						// B1: a dead worktree measured no counts, so it must not render
+						// one. "dirty 0" and "the directory is gone" are not the same
+						// thing, and the card used to show the first for the second.
+						d.health && d.health !== "ok"
+							? chip("worktree", d.health)
+							: chip("dirty", d.dirty ? (d.dirty.staged + "+" + d.dirty.unstaged + "?" + d.dirty.untracked) : "0"),
 						chip("ahead", d.aheadBehind ? d.aheadBehind.ahead : null),
 						chip("behind", d.aheadBehind ? d.aheadBehind.behind : null),
 						chip("wip", d.wipRun != null ? d.wipRun : null),
@@ -4635,6 +4640,7 @@ window.__ModuleLoader__.load({
 			"disconnect.doneRemoved": "Disconnected — removed from GitHub: {repos}",
 			"rows.ghSynced": "Synced with GitHub",
 			"card.dirty": "changes",
+			"card.worktree": "worktree",
 			"card.ahead": "↑",
 			"card.behind": "↓",
 			"card.wip": "wip",
@@ -4809,6 +4815,7 @@ window.__ModuleLoader__.load({
 			"disconnect.doneRemoved": "Odłączono — usunięto z GitHub: {repos}",
 			"rows.ghSynced": "Zsynchronizowano z GitHub",
 			"card.dirty": "zmiany",
+			"card.worktree": "drzewo robocze",
 			"card.ahead": "↑",
 			"card.behind": "↓",
 			"card.wip": "wip",
@@ -4983,6 +4990,7 @@ window.__ModuleLoader__.load({
 			"disconnect.doneRemoved": "Déconnecté — supprimés de GitHub : {repos}",
 			"rows.ghSynced": "Synchronisé avec GitHub",
 			"card.dirty": "modifications",
+			"card.worktree": "arbre de travail",
 			"card.ahead": "↑",
 			"card.behind": "↓",
 			"card.wip": "wip",

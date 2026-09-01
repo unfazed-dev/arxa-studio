@@ -30,6 +30,7 @@ import {
   listSessions, archivedSessionIds,
   getOrigin, setOrigin, rekeySessionsProject,
   pushRepo, fetchRepo, mainSyncState, ffMergeMain,
+  worktreeHealth,
 } from './lib/index.js'
 
 let passed = 0
@@ -537,6 +538,24 @@ ok('frame: org check.sh is green by absence, red on real rot (Q4)', () => {
   assert.equal(sh(), 0, 'NN-kebab accepted')
   fs.mkdirSync(path.join(d, 'projects', '1bad'))
   assert.notEqual(sh(), 0, 'non-NN stage folder goes red')
+})
+
+ok('sessions: a deleted worktree is `missing`, never silently clean (B1)', () => {
+  const d = path.join(tmp, 'b1-health')
+  fs.mkdirSync(d, { recursive: true })
+  execFileSync('git', ['init', '-q', '-b', 'main', '.'], { cwd: d })
+  fs.writeFileSync(path.join(d, 'a.txt'), 'hi\n')
+  execFileSync('git', ['add', '-A'], { cwd: d })
+  execFileSync('git', ['-c', 'user.email=a@b', '-c', 'user.name=a', 'commit', '-qm', 'feat: init'], { cwd: d })
+
+  const s = openSession(d, { name: 'probe' })
+  assert.equal(worktreeHealth(s.worktree), 'ok', 'a live worktree is ok')
+
+  fs.rmSync(s.worktree, { recursive: true, force: true })
+  assert.equal(worktreeHealth(s.worktree), 'missing',
+    'a deleted worktree must not read as clean — git returns null and `?? \'\'` used to make that "no changes"')
+  assert.equal(worktreeHealth(''), 'missing', 'an empty path is not a healthy worktree')
+  assert.equal(worktreeHealth('/nonexistent/xyz'), 'missing')
 })
 
 ok('frame: generated files carry a version stamp after the shebang', () => {

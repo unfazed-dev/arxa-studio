@@ -748,7 +748,16 @@ export function apply(ctx, opts = {}) {
                 repoPath = sessionRow.worktree
                 branch = sessionRow.branch
               }
-              const porcelain = gw.runGit(['status', '--porcelain'], { cwd: repoPath, allowFail: true }) ?? ''
+              // B1: a session worktree can be deleted out from under the
+              // registry. `status --porcelain` then returns null, and the old
+              // `?? ''` turned that into "no output" — which the counters below
+              // read as CLEAN, so the card reported a worktree that no longer
+              // exists as having nothing to commit. Ask health first, and never
+              // report counts we did not actually measure.
+              const health = gw.worktreeHealth(repoPath)
+              const porcelain = health === 'ok'
+                ? (gw.runGit(['status', '--porcelain'], { cwd: repoPath, allowFail: true }) ?? '')
+                : ''
               let staged = 0; let unstaged = 0; let untracked = 0
               for (const line of porcelain.split('\n')) {
                 if (!line) continue
@@ -757,7 +766,7 @@ export function apply(ctx, opts = {}) {
                 else { if (x !== ' ' && x !== '?') staged++; if (y !== ' ' && y !== '?') unstaged++ }
               }
               let aheadBehind = null
-              if (gw.runGit(['rev-parse', '-q', '--verify', 'origin/main'], { cwd: cur.path, allowFail: true }) !== null) {
+              if (health === 'ok' && gw.runGit(['rev-parse', '-q', '--verify', 'origin/main'], { cwd: cur.path, allowFail: true }) !== null) {
                 const c = gw.runGit(['rev-list', '--left-right', '--count', 'origin/main...HEAD'], { cwd: repoPath, allowFail: true })
                 if (c) { const [behind, ahead] = c.split(/\s+/).map(Number); aheadBehind = { ahead, behind } }
               }
@@ -765,10 +774,17 @@ export function apply(ctx, opts = {}) {
               try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch { /* unreadable — plain status */ }
               return {
                 seat: { kind: sid ? 'session' : 'org', sessionId: sid, branch },
-                dirty: { staged, unstaged, untracked },
+                // `health` is what the card must read before any count. When it
+                // is not 'ok' the counts were never measured, so they are null
+                // rather than zero — zero is a claim, and it would be a lie.
+                health,
+                dirty: health === 'ok' ? { staged, unstaged, untracked } : null,
                 aheadBehind,
-                wipRun: gw.wipRun(repoPath).length,
-                chip: gw.versionChip(repoPath),
+                // wipRun throws outright on a missing worktree, which used to
+                // reject the whole card.status call; the client swallows that
+                // and leaves stale numbers on screen.
+                wipRun: health === 'ok' ? gw.wipRun(repoPath).length : null,
+                chip: health === 'ok' ? gw.versionChip(repoPath) : null,
                 linked: Boolean(manifest.repoUrl),
                 localOnly: Boolean(manifest.localOnly),
                 frame: { wired: manifest.frameWired === true ? 'ok' : (manifest.frameWired ?? null), protection: manifest.frameProtection ?? null, runner: manifest.frameRunner ?? null },

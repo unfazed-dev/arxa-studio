@@ -59,6 +59,7 @@ export {
   holdSession,
   archiveSession,
   reviveSession,
+  worktreeHealth,
 } from './sessions.js'
 
 import { stageBoundarySquash } from './commits.js'

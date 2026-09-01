@@ -270,6 +270,27 @@ export function openSession(repoPath, { id, name, project, workspace, env = proc
  *
  * @returns {{ green: boolean, kind: 'check.sh'|'light', configured: boolean, output: string }}
  */
+/**
+ * Whether a session worktree is still usable.
+ *
+ * A worktree directory can be deleted out from under the registry — git keeps
+ * its administrative entry and flags it `prunable`. Callers that ask git for
+ * `status --porcelain` with `allowFail` get `null` back, and a `?? ''` turns
+ * that into "no output", which every counter in the codebase reads as CLEAN.
+ * That is B1: the card reported a worktree that no longer exists as having
+ * nothing to commit. Ask this first and branch on it, rather than coalescing.
+ *
+ * - `ok`         — present and git answers
+ * - `missing`    — the directory is gone
+ * - `unreadable` — present, but git cannot use it (broken gitdir link, locked)
+ */
+export function worktreeHealth(worktree, env = process.env) {
+  if (typeof worktree !== 'string' || worktree === '' || !fs.existsSync(worktree)) return 'missing'
+  return runGit(['status', '--porcelain'], { cwd: worktree, env, allowFail: true }) === null
+    ? 'unreadable'
+    : 'ok'
+}
+
 export function runGate(worktree, env = process.env) {
   const script = path.join(worktree, GATE_CHECK_SCRIPT)
   if (fs.existsSync(script)) {
