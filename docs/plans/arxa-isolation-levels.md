@@ -2002,3 +2002,82 @@ latest state rather than nothing.** That is strictly better than today's hidden 
 That is deliberate — three independent sources (release-PR tooling, AIGA acceptance
 provisions, Sketch's star model) converge on a human deciding what counts as a version,
 with the machine doing the remembering.
+
+### 26k. CORRECTION to §26j — mint at PUBLISH-TO-CLIENT, not at approval
+
+§26j said "mint on explicit human action." Correct, but the trigger was
+underspecified, and the sharpening matters.
+
+**The decisive argument is internal, not a preference: `v4 · In review` cannot render
+if the number is created at approval.** arxa's own four states —
+`Draft / In review / Approved / Superseded` — **already commit to a pre-approval
+mint**. A number must exist before it can be reviewed.
+
+SharePoint states the same rule outright: *"the author must publish a major version
+before the file can be submitted for approval."* **Approval unlocks reader visibility;
+it does not create the number.**
+
+**So: mint when the deliverable leaves the studio for the client.** Approval then flips
+a state on a number that already exists — and §26g's "tag at Approved" still holds
+unchanged, because tagging a state transition on an existing version is exactly what it
+described.
+
+**What the number means to a client — the sentence to put in the UI:**
+*"v5 is the fifth time we have shown you this deliverable."* A count of **client-facing
+rounds** — which is precisely the quantity AIGA tells designers to write into the
+proposal and price against.
+
+**A published number never returns to Draft.** Client comments on `v5` open
+**`v6 · Draft`**. AIGA §4.3 pairs objection with *cure* — new work, not an edit to the
+thing already shown.
+
+**Sequential integers confirmed.** Figma, Sketch and Adobe use no numbers at all
+(timestamps, names, stars). SharePoint's *minor* component is precisely the internal
+draft readers cannot see — arxa hides internal iteration anyway, so a `.2` would carry
+no information while leaking churn. **`v4` is right.**
+
+**Merge-time minting is right only if the merge IS the publish event.** Figma does mint
+at merge — on merge it writes one checkpoint and *"everything that happened in the
+branch will be contained in that single checkpoint."* If arxa merges *after* client
+approval, the merge is in the wrong place and the mint stays at publish. **This is a
+question about arxa's own flow, not about tooling** — see §27.
+
+### ⚠️ 26l. Two gaps in arxa's existing state model
+
+1. **`Approved` records no approver and no date.** 21 CFR 820.40(a) requires an
+   approval to carry **signature and date**. Worse, **AIGA §4.4 makes silence into
+   approval after 5 business days** — a *timer-driven* transition that a click-only UI
+   structurally cannot represent. `versions.json` entries need `approvedBy`,
+   `approvedAt`, and a way to record "deemed approved by lapse", or the state will
+   quietly disagree with the contract.
+2. **`Superseded` has no pointer to what replaced it.** W3C defines superseded as
+   *"replaced by a newer version"*, and 820.40(a) requires obsolete versions be
+   *"prevented from unintended use"* — archiving alone does not satisfy that. Add
+   `supersededBy: "v6"`.
+
+**On the state names themselves:** no single standard owns
+`Draft → In review → Approved → Superseded`, but arxa uses them correctly in meaning,
+and `Superseded` matches W3C's formal definition exactly. SharePoint's word for
+`In review` is "Pending"; arxa's is clearer for a client.
+*(Honest gap: iso.org returned 403 on every attempt, so nothing here is cited to
+ISO 9001 clause text; the equivalent duties are cited to 21 CFR 820.40, whose text is
+public.)*
+
+### 26m. Retention — arxa's structural advantage, do not throw it away
+
+**Every commercial system surveyed silently drops old versions.** SharePoint deletes
+v1.0 when the cap is hit; Adobe periodically deletes unmarked versions; Figma Starter
+shows 30 days. **Git retains everything.**
+
+**Do not add a retention cap on approved versions.** For a deliverable whose approval is
+a contractual acceptance event, permanent retention is a feature to advertise, not
+overhead to trim.
+
+### Sources
+
+- [Sketch — version history & starred versions](https://www.sketch.com/docs/designing/version-history/)
+- [Microsoft — how versioning works in lists and libraries](https://support.microsoft.com/en-us/office/how-does-versioning-work-in-a-sharepoint-list-or-library-0f6cd105-974f-44a4-aadb-43ac5bdfd247)
+- [Figma — branching and merging](https://help.figma.com/hc/en-us/articles/360063144053-Create-branches-and-merge-changes)
+- [eCFR — 21 CFR 820.40 document controls](https://www.ecfr.gov/current/title-21/chapter-I/subchapter-H/part-820/subpart-D/section-820.40)
+- [W3C — maturity levels / superseded](https://www.w3.org/policies/process/)
+- [AIGA Standard Form of Agreement (2022 update, PDF)](https://www.aiga.org/sites/default/files/2023-11/Standardformofagreement_2022update.pdf)
