@@ -461,6 +461,31 @@ ok('frame: protection + settings payloads (Q3/Q8)', () => {
   assert.deepEqual(settingsPayload(), { allow_squash_merge: true, allow_merge_commit: false, allow_rebase_merge: false })
 })
 
+ok('frame: projectCheckSh walks to every target, not just the root (B11)', () => {
+  const sh = projectCheckSh()
+  assert.ok(sh.includes('-print'), 'finds stack markers by walking')
+  assert.ok(/cd "\$d"/.test(sh), 'probes inside each target dir, not the project root')
+  for (const pruned of ['node_modules', '.dart_tool', 'Pods', 'vendor', 'build'])
+    assert.ok(sh.includes(pruned), `prunes ${pruned} so a dependency is never a target`)
+  assert.ok(sh.includes('done || exit 1'), 'a failure inside the loop subshell reds the run')
+})
+
+ok('frame: analyze is never gated on a test/ dir (B15)', () => {
+  const sh = projectCheckSh()
+  const analyze = sh.slice(sh.indexOf('"$run" analyze'))
+  const guard = sh.slice(0, sh.indexOf('"$run" analyze'))
+  assert.ok(!/\[ -d test \][^\n]*&&[^\n]*\n?[^\n]*analyze/.test(guard), 'no [ -d test ] AND before analyze')
+  assert.ok(analyze.includes('if [ -d test ]'), 'only the test run is guarded by test/')
+  assert.ok(sh.includes('pub get >/dev/null 2>&1 || fail'), 'unresolvable pubspec is a hard red')
+})
+
+ok('frame: flutter targets are driven by flutter, not dart (B16)', () => {
+  const sh = projectCheckSh()
+  assert.ok(sh.includes('sdk:[[:space:]]*flutter'), 'detects a flutter sdk dep')
+  assert.ok(sh.includes('run=flutter') && sh.includes('run=dart'), 'picks the runner per target')
+  assert.ok(!/\bdart analyze\b/.test(sh), 'never hardcodes dart for a possibly-flutter target')
+})
+
 ok('frame: writeFrameFiles writes executable check.sh + template, never clobbers', () => {
   const d = path.join(tmp, 'frame-org')
   fs.mkdirSync(d, { recursive: true })
@@ -520,7 +545,8 @@ ok('frame: project check.sh probes stacks only when present (Q4)', () => {
   writeFrameFiles(d, 'project')
   const body = fs.readFileSync(path.join(d, 'check.sh'), 'utf8')
   assert.ok(body.includes('package.json') && body.includes('pubspec.yaml') && body.includes('Cargo.toml') && body.includes('pyproject.toml'), 'stack probes present')
-  assert.ok(body.includes('command -v npm') && body.includes('command -v dart') && body.includes('command -v cargo') && body.includes('command -v python3'), 'tool-presence guards')
+  // dart/flutter is chosen per target (B16), so its guard is `command -v "$run"`.
+  assert.ok(body.includes('command -v npm') && body.includes('command -v "$run"') && body.includes('command -v cargo') && body.includes('command -v python3'), 'tool-presence guards')
   assert.ok(prTemplate().includes('## Problem') && prTemplate().includes('arxa studio'), 'PR template shape')
 })
 
