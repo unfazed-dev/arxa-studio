@@ -1746,3 +1746,75 @@ heuristic, not just fixing case by case.
 3. **Should an Approved version get a git tag after all?** D44 forbids *showing* SHAs
    to the user, which is a UI rule — it does not forbid tagging. A tag would make
    Approved states legible to anyone using git directly, and to arxa business.
+
+---
+
+## 26. Version research — scope: what gets a version number
+
+### 26a. Per TARGET, not per stage, and not one project number
+
+- **The ten stages are a pipeline, not packages.** Versioning them independently would
+  be a category error — nothing depends on `02-design` the way a package depends on a
+  library. **Stage progress is a status field ("at 04-diagrams"), not a version.**
+- **`website/` and `application/` are the real analog to independently versioned
+  packages** — separately built, separately reviewed, separately approved, and they
+  genuinely drift in maturity. This is Lerna/Nx **independent mode**.
+- **One project number is the worst option.** A single fixed version either forces
+  meaningless bumps on the slower target or goes stale — Lerna's documented fixed-mode
+  cost.
+
+**Chip becomes two labeled lines**, replacing today's bare `v4 · Approved`:
+
+```
+Website      v3 · Approved
+Application  v7 · In review
+```
+
+Research on client confusion (including PostgreSQL's own 8.1/8.2 postmortem) says the
+problem was never *more than one number* — it is **an unlabeled number with no
+changelog**. Two named, status-worded numbers read cleaner than one bare number that
+is wrong for half the project.
+
+### 26b. Answered from the tree: there is NO cross-target dependency
+
+The research flagged a risk — if early stages were *shared inputs* both targets draw
+from, that would be a cross-target dependency needing to appear on both changelogs.
+**Checked on live data: it does not apply.**
+
+```
+00-moodboard -> application website
+01-intake    -> application website
+02-design    -> application website
+(every stage is split per target; none lacks the pair)
+```
+
+Each stage is split **per target all the way down** — `00-moodboard/website` and
+`00-moodboard/application` are separate. So there are no shared inputs, no dependency
+cascade, and the Nx `updateDependents` problem does not arise. **Two independent
+timelines are structurally clean here.**
+
+### 26c. Sketch's model resolves the auto-vs-manual tension — and it fits D18 exactly
+
+Sketch separates two things arxa currently conflates:
+
+- **Autosave creates snapshots continuously**, with no user action.
+- **A human "stars" the versions that matter**, and only starred versions carry a name
+  and a description.
+- **Viewers see only starred versions** — the continuous history stays available but
+  does not clutter the client-facing record.
+
+**This maps onto arxa almost exactly.** D18's two-tier auto-commit already *is* the
+continuous snapshot layer, and git keeps every one. What is missing is the **starring**
+layer — the selective, human, client-facing act. That reframes B12: minting is not
+"when does the version number increment", it is **"which of the many snapshots we
+already have does a human elevate for the client to see"**.
+
+It also dissolves the false choice in the question I was about to ask. The answer is
+not auto *or* manual — it is **auto-snapshot everything (already true), mint
+selectively**.
+
+### Sources
+
+- [Changesets](https://github.com/changesets/changesets) · [Lerna independent/fixed mode](https://lerna.js.org/docs/features/version-and-publish) · [Nx release](https://nx.dev/features/manage-releases)
+- [Sketch — version history and starred versions](https://www.sketch.com/docs/designing/version-history/)
+- [semantic-versioning.org — hybrid versioning](https://semver.org/)
