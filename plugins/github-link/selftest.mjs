@@ -353,6 +353,56 @@ try {
   const asset = await latestRunnerTarballApi({ ...base })
   ok(asset.url === 'arm64-url' && asset.version === 'v9.9.9', 'frame: latestRunnerTarball picks the osx-arm64 asset')
 
+  // ---- D107 PR merge / state request shapes --------------------------------
+  {
+    const { prMergeApi, prStateApi } = await import('./lib/index.js')
+    const seen = []
+    const prFetch = async (url, opts = {}) => {
+      const u = String(url)
+      seen.push({ url: u, method: opts.method ?? 'GET', body: opts.body ? JSON.parse(opts.body) : null, headers: opts.headers ?? {} })
+      if (u.endsWith('/pulls/7/merge')) {
+        return { ok: true, status: 200, json: async () => ({ sha: 'mergesha1', merged: true, message: 'Pull Request successfully merged' }) }
+      }
+      if (u.endsWith('/pulls/9/merge')) {
+        return { ok: false, status: 409, json: async () => ({ message: 'Head branch was modified. Review and try the merge again.' }) }
+      }
+      if (u.endsWith('/pulls/7')) {
+        return { ok: true, status: 200, json: async () => ({ number: 7, state: 'closed', merged: true, mergeable_state: 'unknown', head: { ref: 'arxa/session/s1', sha: 'headsha1' } }) }
+      }
+      if (u.endsWith('/pulls/8')) {
+        // No `head` object at all — the flattening must not throw.
+        return { ok: true, status: 200, json: async () => ({ number: 8, state: 'open', merged: false }) }
+      }
+      return { ok: false, status: 404, json: async () => ({ message: 'no route: ' + u }) }
+    }
+    const pbase = { owner: 'octocat', name: 'framed', accessToken: 't', fetch: prFetch, apiBase: 'https://api.github.com' }
+
+    const merged = await prMergeApi({ ...pbase, number: 7, sha: 'headsha1', subject: 'feat(core): the thing' })
+    const req = seen.at(-1)
+    ok(req.method === 'PUT' && req.url === 'https://api.github.com/repos/octocat/framed/pulls/7/merge',
+      'frame: prMergeApi PUTs the documented merge endpoint')
+    ok(req.body.merge_method === 'merge', 'frame: prMergeApi sends merge_method "merge" (D107 --no-ff), never squash')
+    ok(req.body.sha === 'headsha1', 'frame: prMergeApi pins the merge to the reviewed sha')
+    ok(req.body.commit_title === 'feat(core): the thing', 'frame: prMergeApi sends the subject as commit_title')
+    ok(!('commit_message' in req.body), 'frame: prMergeApi omits commit_message when none is given')
+    ok(req.headers['X-GitHub-Api-Version'] === '2022-11-28', 'frame: prMergeApi pins the REST API version')
+    ok(merged.merged === true && merged.sha === 'mergesha1',
+      'frame: prMergeApi returns the MERGE commit sha (not the head it sent)')
+
+    await assert.rejects(() => prMergeApi({ ...pbase, number: 9, sha: 'stale' }), /head moved since review \(409\)/)
+    passed++
+    console.log('  ✓ frame: prMergeApi names the 409 head-moved refusal specifically')
+
+    const st = await prStateApi({ ...pbase, number: 7 })
+    ok(seen.at(-1).method === 'GET' && seen.at(-1).url === 'https://api.github.com/repos/octocat/framed/pulls/7',
+      'frame: prStateApi GETs the pull endpoint')
+    ok(st.merged === true && st.state === 'closed' && st.mergeable_state === 'unknown' && st.head_sha === 'headsha1' && st.number === 7,
+      'frame: prStateApi flattens head.sha to head_sha')
+    const stOpen = await prStateApi({ ...pbase, number: 8 })
+    ok(stOpen.merged === false && stOpen.state === 'open' && stOpen.head_sha === null,
+      'frame: prStateApi survives a payload with no head object')
+  }
+
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-runner-home-'))
   try {
     const ran = []

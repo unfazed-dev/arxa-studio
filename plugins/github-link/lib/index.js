@@ -10,13 +10,13 @@
  */
 
 import { getClientId, defaultApiBase, defaultTokenBase, linkViaBrowser, linkViaDevice, createPrivateRepoApi, renameRepoApi, repoNameAvailableApi, deleteRepoApi, refreshAccessToken, SCOPES, SHIPPED_CLIENT_ID, defaultOpen } from './auth.js'
-import { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prChecksApi } from './frame.js'
+import { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prStateApi, prChecksApi } from './frame.js'
 import { ensureRunner } from './runner.js'
 import { createKeyring } from './keyring.js'
 import { readState, writeState, clearState } from './state.js'
 
 export { SCOPES, createPkcePair, pkceChallenge, getClientId, loadClientId, linkViaBrowser, linkViaDevice, createPrivateRepoApi, renameRepoApi, repoNameAvailableApi } from './auth.js'
-export { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prChecksApi } from './frame.js'
+export { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prStateApi, prChecksApi } from './frame.js'
 export { ensureRunner, runnerExists } from './runner.js'
 export { createKeyring, KEYCHAIN_SERVICE, SECURITY_PATH } from './keyring.js'
 export { readState, writeState, clearState, statePath, arxaHome } from './state.js'
@@ -302,8 +302,18 @@ export function createGithubLink({
   function prListForHead(owner, name, head) {
     return withRefresh((t) => prListForHeadApi({ owner, name, head, accessToken: t, fetch, apiBase }))
   }
+  /** DEPRECATED (D107) — see frame.js. No callers; use prMerge. */
   function prSquashMerge(owner, name, number) {
     return withRefresh((t) => prSquashMergeApi({ owner, name, number, accessToken: t, fetch, apiBase }))
+  }
+  /** D107: merge-commit the collapsed session branch, pinned to the
+   *  reviewed `sha` so a moved head is refused rather than merged blind. */
+  function prMerge(owner, name, { number, sha, subject, message } = {}) {
+    return withRefresh((t) => prMergeApi({ owner, name, number, sha, subject, message, accessToken: t, fetch, apiBase }))
+  }
+  /** D107: live PR state — { merged, state, mergeable_state, head_sha }. */
+  function prState(owner, name, number) {
+    return withRefresh((t) => prStateApi({ owner, name, number, accessToken: t, fetch, apiBase }))
   }
   function prChecks(owner, name, ref) {
     return withRefresh((t) => prChecksApi({ owner, name, ref, accessToken: t, fetch, apiBase }))
@@ -329,6 +339,8 @@ export function createGithubLink({
     prCreate,
     prListForHead,
     prSquashMerge,
+    prMerge,
+    prState,
     prChecks,
     deviceCode,
   }

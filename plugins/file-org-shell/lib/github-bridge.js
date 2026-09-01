@@ -130,10 +130,24 @@ export function createGithubBridge(faces = {}) {
     try { return { ok: true, prs: await f.prListForHead(owner, name, head) } }
     catch (err) { return { ok: false, reason: 'pr-list-failed', error: String(err?.message ?? err) } }
   }
+  /** DEPRECATED (D107): squash-merge breaks main's ancestry. Unwired —
+    * `prMerge` is the face the card calls. */
   async function prSquashMerge(owner, name, number) {
     if (typeof f.prSquashMerge !== 'function') return { ok: false, reason: 'github-unavailable' }
     try { return { ok: true, merged: await f.prSquashMerge(owner, name, number) } }
     catch (err) { return { ok: false, reason: 'pr-merge-failed', error: String(err?.message ?? err) } }
+  }
+  /** D107 merge face — `sha` pins the merge to the reviewed commit; a
+    * moved head comes back as pr-merge-failed rather than merging blind. */
+  async function prMerge(owner, name, fields) {
+    if (typeof f.prMerge !== 'function') return { ok: false, reason: 'github-unavailable' }
+    try { return { ok: true, merged: await f.prMerge(owner, name, fields) } }
+    catch (err) { return { ok: false, reason: 'pr-merge-failed', error: String(err?.message ?? err) } }
+  }
+  async function prState(owner, name, number) {
+    if (typeof f.prState !== 'function') return { ok: false, reason: 'github-unavailable' }
+    try { return { ok: true, pr: await f.prState(owner, name, number) } }
+    catch (err) { return { ok: false, reason: 'pr-state-failed', error: String(err?.message ?? err) } }
   }
   async function prChecks(owner, name, ref) {
     if (typeof f.prChecks !== 'function') return { ok: false, reason: 'github-unavailable' }
@@ -158,7 +172,7 @@ export function createGithubBridge(faces = {}) {
     }
   }
 
-  return { status, createPrivateRepo, renameRepo, repoNameTaken, deleteRepo, wireFrame, ensureRunner, prCreate, prListForHead, prSquashMerge, prChecks, gitCredentials }
+  return { status, createPrivateRepo, renameRepo, repoNameTaken, deleteRepo, wireFrame, ensureRunner, prCreate, prListForHead, prSquashMerge, prMerge, prState, prChecks, gitCredentials }
 }
 
 /**

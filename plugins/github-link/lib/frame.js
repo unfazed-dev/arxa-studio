@@ -98,7 +98,93 @@ export async function prListForHeadApi({ owner, name, head, accessToken, fetch, 
   return res.json()
 }
 
-/** Squash-merge a PR (Q8; the repo is settings-locked to squash-only). */
+/**
+ * Merge a PR with a real merge commit (D107 — SUPERSEDES prSquashMergeApi).
+ *
+ * The session branch is already collapsed to ONE commit before the human
+ * reviews, so a plain merge lands clean history AND real ancestry:
+ * `branch --merged` lists it, `--is-ancestor` is true, ahead/behind counts
+ * tell the truth, and a revived session no longer re-proposes its own
+ * landed work. GitHub's own docs: the default merge option merges with
+ * `--no-ff`.
+ *
+ * Body fields per the official reference — "Merge a pull request",
+ * PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge:
+ * https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request
+ *   - `merge_method`: 'merge' | 'squash' | 'rebase' (defaults to 'merge')
+ *   - `sha`: SHA that the PR head MUST match for the merge to proceed —
+ *     GitHub answers 409 if the head moved since the human reviewed it.
+ *     This is the whole point of sending it: review and merge are pinned
+ *     to the same commit.
+ *   - `commit_title` / `commit_message`: the merge commit's message.
+ *
+ * NOTE the response `sha` is the MERGE commit, not the head we sent.
+ *
+ * @returns {{ merged: boolean, sha: string|null, message: string }}
+ */
+export async function prMergeApi({ owner, name, number, sha, subject, message, accessToken, fetch, apiBase }) {
+  const body = { merge_method: 'merge' }
+  if (sha) body.sha = sha
+  if (subject) body.commit_title = subject
+  if (message) body.commit_message = message
+  const res = await fetch(new URL('/repos/' + owner + '/' + name + '/pulls/' + number + '/merge', apiBase), {
+    method: 'PUT',
+    headers: {
+      accept: 'application/vnd.github+json',
+      authorization: 'Bearer ' + accessToken,
+      'content-type': 'application/json',
+      'user-agent': 'arxa-studio',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+    body: JSON.stringify(body),
+  })
+  // 409 is the head-moved guard firing — name it, do not swallow it as a
+  // generic failure: the caller must re-ready and re-review, not retry.
+  if (res.status === 409) throw new Error('github-link: PR merge refused — the head moved since review (409)')
+  if (!res.ok) throw new Error('github-link: PR merge failed (' + res.status + ')')
+  const out = await res.json().catch(() => ({}))
+  return { merged: out.merged === true, sha: out.sha ?? null, message: out.message ?? '' }
+}
+
+/**
+ * Read a PR's live state (D107 — Finish/Sweep and the card read this).
+ * GET /repos/{owner}/{repo}/pulls/{pull_number}
+ * https://docs.github.com/en/rest/pulls/pulls#get-a-pull-request
+ *
+ * `head.sha` is nested in the payload; it is flattened to `head_sha` here
+ * so callers never reach through a possibly-absent `head` object.
+ *
+ * @returns {{ merged: boolean, state: string|null, mergeable_state: string|null, head_sha: string|null, number: number|null }}
+ */
+export async function prStateApi({ owner, name, number, accessToken, fetch, apiBase }) {
+  const res = await fetch(new URL('/repos/' + owner + '/' + name + '/pulls/' + number, apiBase), {
+    headers: {
+      accept: 'application/vnd.github+json',
+      authorization: 'Bearer ' + accessToken,
+      'user-agent': 'arxa-studio',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  })
+  if (!res.ok) throw new Error('github-link: PR read failed (' + res.status + ')')
+  const pr = await res.json()
+  return {
+    merged: pr.merged === true,
+    state: pr.state ?? null,
+    mergeable_state: pr.mergeable_state ?? null,
+    head_sha: pr.head?.sha ?? null,
+    number: pr.number ?? null,
+  }
+}
+
+/**
+ * DEPRECATED (D107): squash-merge leaves the branch's commits out of
+ * main's ancestry, which breaks `branch --merged`, `branch -d`,
+ * `--is-ancestor`, ahead/behind counts, and makes a revived session
+ * conflict against its own landed work. Use `prMergeApi` — the branch is
+ * collapsed locally before review, so a plain merge gives clean history
+ * without losing ancestry. Kept exported only so no import breaks; it has
+ * no callers and must not gain one.
+ */
 export async function prSquashMergeApi({ owner, name, number, accessToken, fetch, apiBase }) {
   const res = await fetch(new URL('/repos/' + owner + '/' + name + '/pulls/' + number + '/merge', apiBase), {
     method: 'PUT',
