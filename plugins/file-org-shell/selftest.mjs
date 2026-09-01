@@ -443,6 +443,30 @@ try {
       'manifest annotated with repoOwner/repoName/repoPrivate/repoUrl',
     )
     ok(pm.githubStatus === 'published' && typeof pm.githubPublishedAt === 'string', 'happy path annotates githubStatus=published + timestamp')
+    // (a2) D95/D96 sync sweep (2026-09-01 grill): a local drift commit on
+    // a published project pushes in the sweep; a remote advance fast-forwards
+    // into the project tree — generated files land locally, not only on GitHub.
+    // Await the detached open-time heal FIRST so it cannot race the sweep's
+    // push (its own sync push IS the law working — but the test must own it).
+    try { if (svcGh.current?.githubHeal) await svcGh.current.githubHeal } catch { /* heal is throw-proof */ }
+    fs.writeFileSync(path.join(proj.path, 'drift.md'), 'drift')
+    runGit(['add', 'drift.md'], { cwd: proj.path, env })
+    runGit(['-c', 'user.email=t@arxa', '-c', 'user.name=t', 'commit', '-m', 'local drift'], { cwd: proj.path, env })
+    const projSweep = (s) => s.find((x) => x.kind === 'project' && x.slug === proj.slug)
+    const sweep1 = await svcGh.syncOrgRepos(orgA.path)
+    ok(projSweep(sweep1).status === 'pushed', 'D95: drift commit pushed by the sync sweep (sweep=' + JSON.stringify(sweep1.map((x) => x.status)) + ')')
+    const localMain = runGit(['rev-parse', 'main'], { cwd: proj.path, env })
+    ok(runGit(['rev-parse', 'main'], { cwd: bareFor(proj.slug), env }) === localMain, 'D95: remote main mirrors local main after the sweep')
+    const puller = path.join(bareRoot, 'puller')
+    runGit(['clone', bareFor(proj.slug), puller], { cwd: bareRoot, env })
+    fs.writeFileSync(path.join(puller, 'remote-edit.md'), 'from remote')
+    runGit(['add', 'remote-edit.md'], { cwd: puller, env })
+    runGit(['-c', 'user.email=t@arxa', '-c', 'user.name=t', 'commit', '-m', 'remote edit'], { cwd: puller, env })
+    runGit(['push', 'origin', 'main'], { cwd: puller, env })
+    const sweep2 = await svcGh.syncOrgRepos(orgA.path)
+    ok(projSweep(sweep2).status === 'pulled', 'D96: remote advance ff-pulled by the sweep')
+    ok(fs.existsSync(path.join(proj.path, 'remote-edit.md')), 'D96: pulled file materialised in the project tree')
+
     svcGh.closeOrg()
 
     // (b) no github faces at all: unavailable stub annotates, project exists.
@@ -453,6 +477,14 @@ try {
     const lm = JSON.parse(fs.readFileSync(path.join(local.path, 'project.json'), 'utf8'))
     ok(lm.githubStatus === 'github-unavailable', 'unavailable github: loud githubStatus manifest annotation')
     ok(!('repoUrl' in lm), 'no repo fields faked')
+
+    // (b3) D95/D96 statuses without GitHub faces: a PUBLISHED repo reports
+    // no-creds (loud — the silent skip is how project-001 drifted 3
+    // commits); a repo-less project reports local. Never throws.
+    const sweepNo = await svcNoGh.syncOrgRepos(orgA.path)
+    const bySlug = (s, slug) => s.find((x) => x.slug === slug)
+    ok(sweepNo[0].status === 'no-creds', 'sync: published org without creds reports no-creds, never a silent skip')
+    ok(bySlug(sweepNo, local.slug)?.status === 'local', 'sync: repo-less project reports local')
 
     // (b2) D78: blank auto-name is 01-project (2-digit prefix first, matching
     // the stage-folder convention); the scaffold drops .gitkeep so empty
@@ -924,6 +956,15 @@ try {
   }
 
 
+  // D94 (2026-09-01): the sidebar tree lists every dot-entry except the
+  // two internal state dirs — generated files (.github/, .gitignore) must
+  // be visible in the sidebar, not only on GitHub. Source-pinned here
+  // because the route lives in artifact-viewer (route test belongs there).
+  {
+    const wtApiSrc = fs.readFileSync(new URL('../artifact-viewer/lib/wt-api.js', import.meta.url), 'utf8')
+    ok(wtApiSrc.includes("if (name === '.git' || name === '.arxa') continue"), 'D94: tree route hides only .git/ and .arxa/')
+    ok(!wtApiSrc.includes("if (name.startsWith('.')) continue"), 'D94: the blanket dotfile filter is gone')
+  }
   console.log(`\nfile-org-shell selftest: ${passed} checks passed`)
 } finally {
   fs.rmSync(root, { recursive: true, force: true })

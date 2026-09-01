@@ -507,7 +507,7 @@
 				+ "[data-arxa-card-actions]{display:flex;gap:6px}"
 				+ "[data-arxa-card-actions] button{padding:4px 10px;border-radius:7px;border:1px solid color-mix(in oklab,currentColor 22%,transparent);background:transparent;color:inherit;font:inherit;cursor:pointer}"
 				+ "[data-arxa-card-actions] button:disabled{opacity:.45;cursor:default}"
-				+ "[data-arxa-card-err]{color:#e5484d;font-size:11.5px}"
+				+ "[data-arxa-card-err]{color:var(--dsw-alias-label-error);font-size:11.5px}"
 				+ "[data-arxa-empty] [data-slot='conversation.composer.bar']{display:none!important}"
 				+ "[data-arxa-empty] .wSkVaW_heroWorkspaceRow>button{display:none!important}"
 				+ "[data-arxa-empty] [data-slot='conversation.hero.agentPreset']{display:none!important}"
@@ -714,9 +714,12 @@
 			};
 			// T4 v2: the row's own directory content rides UNDER the row when
 			// expanded — files belong where they live, not in a tail section.
-			// files-only mode: this level's subdirectories already exist as
-			// tree containers (docks / project leaves), so listing them again
-			// would duplicate the tree.
+			// files-only mode: subdirectories that ALREADY exist as tree rows
+			// (the five docks at org root, fixed containers at dock rows) are
+			// suppressed via hideDirs so nothing is listed twice — every OTHER
+			// directory renders (D94, 2026-09-01: stage containers, targets,
+			// .github/ — generated files visible in the sidebar, not just on
+			// GitHub). Project rows hide nothing: their tree is real content.
 			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsxs)("div", {
 				className: clsx(Rows_module_css_default.projectRow, menuOpen && Rows_module_css_default.menuOpen),
 				role: "treeitem",
@@ -793,7 +796,7 @@
 					})
 				]
 				}, d.key),
-				open ? (0, react_jsx_runtime.jsx)(ArxaDirRows, { dir: d.kind === "org" ? "" : d.kind === "dock" ? d.slug : "projects/" + d.slug, depth: d.depth + 1, mode: "files-only" }, "arxa-dir:" + d.key) : null
+				open ? (0, react_jsx_runtime.jsx)(ArxaDirRows, { dir: d.kind === "org" ? "" : d.kind === "dock" ? d.slug : "projects/" + d.slug, depth: d.depth + 1, mode: "files-only", hideDirs: d.kind === "org" ? ARXA_ROW_HIDDEN.org : d.kind === "dock" ? (ARXA_ROW_HIDDEN.docks[d.slug] || {}) : null }, "arxa-dir:" + d.key) : null
 			] }, d.key);
 		}
 		function TrashSection({ t }) {
@@ -832,7 +835,7 @@
 					className: Rows_module_css_default.iconButton,
 					"aria-label": label,
 					onClick: (e) => { e.stopPropagation(); onClick(); },
-					style: danger ? { color: "var(--dsw-alias-text-critical, #e5534b)" } : void 0,
+					style: danger ? { color: "var(--dsw-alias-label-error)" } : void 0,
 					children: (0, react_jsx_runtime.jsx)(Icon, {})
 				})
 			});
@@ -865,7 +868,7 @@
 				]
 			}, e.entryId);
 			return (0, react_jsx_runtime.jsxs)("div", {
-				style: { borderTop: "1px solid var(--dsw-alias-border-l2, rgba(255,255,255,0.08))", marginTop: 8, padding: "0 0 8px", opacity: total === 0 ? 0.45 : 1 },
+				style: { borderTop: "1px solid var(--dsw-alias-border-l2)", marginTop: 8, padding: "0 0 8px", opacity: total === 0 ? 0.45 : 1 },
 				children: [
 					// D84: the Trash row IS an org row — same projectRow class, 34px
 					// height, 14px/600 title, hover glyph→chevron swap and the plain
@@ -899,15 +902,63 @@
 		 * org (tree-read token per attempt, one 403 retry) and recurses for
 		 * subdirectories. Modes:
 		 *   - "files-only" under rows whose subdirectories ALREADY exist as
-		 *     tree containers (org root → docks + projects, dock → its
-		 *     leaves, project → its leaf containers): files land in place,
-		 *     nothing is listed twice;
+		 *     tree rows (org root → the five docks, dock → its fixed
+		 *     containers): files land in place, hideDirs suppresses the
+		 *     duplicates, every other directory renders (D94);
 		 *   - "full" inside leaf worktrees, where the tree is real content —
 		 *     subdirectories expand in place, file rows open the docked
 		 *     viewer column through the arxa-av-open bridge. */
-		function ArxaDirRows({ dir, depth, mode }) {
+		/** 2026-09-03: Material Icon Theme glyphs for the org tree (files +
+		 * folders, full color). The curated subset bundle is served by the
+		 * artifact-viewer vendor route on this same origin; one promise per
+		 * page load dedupes every ArxaDirRows mount. Failure degrades to the
+		 * stock dsh glyphs — the tree never blocks on decoration. */
+		/** D94 (2026-09-01): directories that already exist as TREE ROWS at
+		 * their parent level, so ArxaDirRows does not list them twice. The
+		 * fixed vocabulary (D42 five docks + dock containers) is stable
+		 * template data — keying by slug is exact. Project rows hide
+		 * NOTHING: stage containers, targets and free-form folders are real
+		 * sidebar content. */
+		const ARXA_ROW_HIDDEN = {
+			org: { projects: 1, notes: 1, meetings: 1, account: 1, communications: 1 },
+			docks: {
+				meetings: { scheduler: 1, notes: 1 },
+				account: { receipts: 1, invoices: 1, subscriptions: 1, profile: 1 },
+				communications: { emails: 1, messages: 1, comments: 1 },
+				notes: {},
+			},
+		};
+		let __arxaIconsPromise = null;
+		function arxaIcons() {
+			if (typeof window !== "undefined" && window.ArxaIcons) return Promise.resolve(window.ArxaIcons);
+			if (!__arxaIconsPromise) __arxaIconsPromise = new Promise((resolve) => {
+				const done = () => resolve((typeof window !== "undefined" && window.ArxaIcons) || null);
+				// Reuse the viewer's tag when it is already fetching the same
+				// bundle — never two fetches of icons.js on one page.
+				const existing = document.querySelector('script[data-arxa-vendor="icons.js"]');
+				if (existing) {
+					existing.addEventListener("load", done, { once: true });
+					existing.addEventListener("error", () => resolve(null), { once: true });
+					return;
+				}
+				const s = document.createElement("script");
+				s.dataset.arxaVendor = "icons.js";
+				s.src = "/__arxa/artifacts/vendor/icons.js";
+				s.onload = done;
+				s.onerror = () => resolve(null);
+				document.head.appendChild(s);
+			});
+			return __arxaIconsPromise;
+		}
+		function ArxaDirRows({ dir, depth, mode, hideDirs }) {
 			const [entry, setEntry] = (0, react.useState)(null);
 			const [openDirs, setOpenDirs] = (0, react.useState)({});
+			const [matIcons, setMatIcons] = (0, react.useState)(null);
+			(0, react.useEffect)(() => {
+				let dead = false;
+				void arxaIcons().then((I) => { if (!dead) setMatIcons(I); });
+				return () => { dead = true; };
+			}, []);
 			const load = (0, react.useCallback)(async (theDir) => {
 				setEntry({ status: "loading", dirs: [], files: [] });
 				// One fresh token per attempt; a 403 retries ONCE with a newly
@@ -934,7 +985,12 @@
 			}, []);
 			(0, react.useEffect)(() => { void load(dir); }, [dir, load]);
 			if (!entry) return null;
-			const childStyle = (d) => ({ marginLeft: (6 + d * 14) + "px" });
+			// Rows compensate for the org-subtree container: the container already
+			// carries the depth-1 indent (measured live: file rowX 48 vs dock
+			// rowX 30), so the top-level listing starts at 0 and each nested
+			// dir level adds one 14px step — file text lands exactly in the
+			// dock text column (2026-09-01 alignment report).
+			const childStyle = (d) => ({ marginLeft: (Math.max(0, d - 1) * 14) + "px" });
 			const openFile = (relPath) => {
 				try { window.dispatchEvent(new CustomEvent("arxa-av-open", { detail: { relPath } })); } catch { /* no bridge — ignore */ }
 			};
@@ -945,12 +1001,14 @@
 				onClick: () => openFile(relPath),
 				style: { ...childStyle(d), cursor: "pointer", borderRadius: 6 },
 				children: [
-					// Fixed-width spacer, NOT the classed empty slot: the slot's
-					// width is flex-derived and WKWebView collapsed it on the
-					// focused row — the first file read ~20px outdented vs its
-					// siblings (user screenshot 2026-09-01). A hard 24px box
-					// aligns every sibling's text in every engine.
-					(0, react_jsx_runtime.jsx)("span", { style: { flex: "none", width: 24, flexBasis: 24 } }),
+					// The tree's icon column, made real: a HARD-width 16px slot
+					// carrying the file glyph, so file text lands exactly in the
+					// org/dock text column (tree rows: same 4+d*14 margin, one
+					// 16px slot, 6px gap). Hard box, not the classed slot — the
+					// slot's flex-derived width collapsed in WKWebView on the
+					// focused row (2026-09-01). The old blank 24px stub pushed
+					// file names ~22px past their siblings (user report).
+					(0, react_jsx_runtime.jsx)("span", { style: { flex: "none", width: 16, flexBasis: 16, height: 20, display: "inline-flex", alignItems: "center", justifyContent: "center" }, children: matIcons ? (0, react_jsx_runtime.jsx)("span", { style: { width: 16, height: 16, display: "inline-flex" }, dangerouslySetInnerHTML: { __html: matIcons.file(name) } }) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconBrowseOutline16, {}) }),
 					(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, style: { opacity: 0.92 }, children: name }) })
 				]
 			}, "f:" + relPath);
@@ -963,7 +1021,7 @@
 					style: { ...childStyle(d), fontWeight: 500, cursor: "pointer", borderRadius: 6 },
 					children: [
 						(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.chevron), children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTriangleRightFill14, { className: clsx(Rows_module_css_default.arrow, openDirs[sub] && Rows_module_css_default.arrowOpen) }) }),
-						(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder), children: openDirs[sub] ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {}) }),
+						(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder), children: matIcons ? (0, react_jsx_runtime.jsx)("span", { style: { width: 16, height: 16, display: "inline-flex" }, dangerouslySetInnerHTML: { __html: matIcons.folder(sub, !!openDirs[sub]) } }) : openDirs[sub] ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {}) }),
 						(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: sub }) })
 					]
 				}),
@@ -974,7 +1032,7 @@
 				entry.status === "error" ? statusRow(depth, /no org open/i.test(entry.error || "") ? orgT("files.openHint") : entry.error) : null,
 				entry.status === "ready" && entry.dirs.length === 0 && entry.files.length === 0 ? statusRow(depth, orgT("files.empty")) : null,
 				entry.status === "ready" ? entry.files.map((f) => fileRow(dir ? dir + "/" + f : f, f, depth)) : null,
-				entry.status === "ready" && mode === "full" && depth < 5 ? entry.dirs.map((sub) => dirRow(sub, depth)) : null
+				entry.status === "ready" && depth < 5 ? entry.dirs.filter((sub) => !(hideDirs && hideDirs[sub])).map((sub) => dirRow(sub, depth)) : null
 			] });
 		}
 				/** Create-organisation modal (Q3, webview-safe): replaces window.prompt,
@@ -993,6 +1051,13 @@
 		 * zero-dep house rule; fill follows currentColor so it themes with the
 		 * shell. Rendered inside the sign-in CTA. */
 		const GH_MARK = "M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8";
+		/** One error line for every org modal (Phase 2 dedup, conformance
+		 * plan): one role, one look, one home — the REAL
+		 * --dsw-alias-label-error token, no invented names, no hex fallbacks. */
+		function ErrorNote({ msg }) {
+			if (!msg) return null;
+			return (0, react_jsx_runtime.jsx)("div", { role: "alert", style: { marginTop: 10, fontSize: 12, color: "var(--dsw-alias-label-error)" }, children: msg });
+		}
 		function OrgCreateModal({ t, createWorkspace, open, onClose }) {
 			const [name, setName] = (0, react.useState)("");
 			const [location, setLocation] = (0, react.useState)("~/Arxa");
@@ -1171,7 +1236,7 @@
 						folderInfo && folderInfo.exists && folderInfo.entryCount > 0 && (folderInfo.isOrg ? (0, react_jsx_runtime.jsxs)("div", { style: { marginTop: 10, padding: "8px 10px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 6, fontSize: 12 }, children: [
 							(0, react_jsx_runtime.jsx)("div", { children: t("org.create.exists.org").replace("{name}", name.trim()) }),
 							(0, react_jsx_runtime.jsx)("button", { type: "button", disabled: busy, onClick: () => { if (!busy) { onClose(); orgStore.mutate("org.open", folderInfo.path).catch(() => {}); } }, style: { marginTop: 6, fontSize: 12, cursor: "pointer" }, children: t("org.create.exists.open") })
-						] }) : (0, react_jsx_runtime.jsx)("div", { role: "alert", style: { marginTop: 10, fontSize: 12, color: "var(--dsw-alias-status-danger, #e5484d)" }, children: t("org.create.exists.nonempty") })),
+						] }) : (0, react_jsx_runtime.jsx)(ErrorNote, { msg: t("org.create.exists.nonempty") })),
 						// D90: the Publish-to-GitHub switch — pill + knob, ARIA switch role.
 						(0, react_jsx_runtime.jsx)("div", { style: { marginTop: 12, padding: "8px 10px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 6 }, children: (0, react_jsx_runtime.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 8, fontSize: 12 }, children: [
 							(0, react_jsx_runtime.jsx)("button", {
@@ -1181,18 +1246,14 @@
 								"aria-label": t("org.create.ghToggle"),
 								disabled: !ghAvailable || busy,
 								onClick: () => setGhPublish((v) => !v),
-								style: { width: 28, height: 16, borderRadius: 999, border: "1px solid var(--dsw-alias-border-l2)", background: publishOn ? "var(--dsw-alias-text-link, #6ea8fe)" : "transparent", position: "relative", flex: "none", cursor: ghAvailable ? "pointer" : "default", padding: 0, opacity: ghAvailable ? 1 : 0.5, transition: "background 120ms" },
-								children: (0, react_jsx_runtime.jsx)("span", { style: { position: "absolute", top: 1, left: publishOn ? 13 : 1, width: 12, height: 12, borderRadius: "50%", background: publishOn ? "#fff" : "var(--dsw-alias-text-secondary)", transition: "left 120ms" } })
+								style: { width: 28, height: 16, borderRadius: 999, border: "1px solid var(--dsw-alias-border-l2)", background: publishOn ? "var(--dsw-alias-brand-primary)" : "transparent", position: "relative", flex: "none", cursor: ghAvailable ? "pointer" : "default", padding: 0, opacity: ghAvailable ? 1 : 0.5, transition: "background 120ms" },
+								children: (0, react_jsx_runtime.jsx)("span", { style: { position: "absolute", top: 1, left: publishOn ? 13 : 1, width: 12, height: 12, borderRadius: "50%", background: publishOn ? "var(--dsw-alias-label-primary-inverted, #fff)" : "var(--dsw-alias-label-secondary)", transition: "left 120ms" } })
 							}),
 							(0, react_jsx_runtime.jsx)("span", { children: t("org.create.ghToggle") })
 							] }) }),
 						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.55, marginTop: 6 }, children: ghAvailable ? t(publishOn ? "org.create.ghOnHint" : "org.create.ghOffHint") : t("org.create.ghUnavailableHint") }),
 					] }),
-					error !== null && (0, react_jsx_runtime.jsx)("div", {
-						role: "alert",
-						style: { marginTop: 10, fontSize: 12, color: "var(--dsw-alias-status-danger, #e5484d)" },
-						children: error
-					})
+					(0, react_jsx_runtime.jsx)(ErrorNote, { msg: error })
 				] })
 			});
 		}
@@ -1237,7 +1298,7 @@
 			};
 			const projects = (result && result.projects) || [];
 			const allSkipped = result && result.skipped === "published" && projects.every((p) => p.ok && p.skipped === "published");
-			const linkStyle = { color: "var(--dsw-alias-text-link, #6ea8fe)", cursor: "pointer" };
+			const linkStyle = { color: "var(--dsw-alias-brand-primary)", cursor: "pointer" };
 			const footer = (phase === "done" || phase === "error") ? (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 				phase === "done" && result && result.repoUrl ? (0, react_jsx_runtime.jsx)("a", { href: result.repoUrl, onClick: openExternal(result.repoUrl), style: { ...linkStyle, fontSize: 13, marginRight: "auto" }, children: t("publish.openOnGithub") }) : null,
 				(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "primary", onClick: onClose, children: t("publish.close") })
@@ -1265,11 +1326,11 @@
 						] }) : null,
 						projects.map((p, i) => (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: p.ok ? 0.85 : 1, marginTop: 4 }, children: (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 							p.slug, " — ",
-							p.ok ? (0, react_jsx_runtime.jsx)("a", { href: p.repoUrl, onClick: openExternal(p.repoUrl), style: linkStyle, children: p.repoUrl }) : (0, react_jsx_runtime.jsx)("span", { style: { color: "var(--dsw-alias-text-critical, #e5534b)" }, children: reasonText(p.reason) })
+							p.ok ? (0, react_jsx_runtime.jsx)("a", { href: p.repoUrl, onClick: openExternal(p.repoUrl), style: linkStyle, children: p.repoUrl }) : (0, react_jsx_runtime.jsx)("span", { style: { color: "var(--dsw-alias-label-error)" }, children: reasonText(p.reason) })
 						] }) }, p.slug + ":" + i))
 					] }),
 					phase === "error" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, fontWeight: 600, marginBottom: 8, color: "var(--dsw-alias-text-critical, #e5534b)" }, children: t("publish.errTitle") }),
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, fontWeight: 600, marginBottom: 8, color: "var(--dsw-alias-label-error)" }, children: t("publish.errTitle") }),
 						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.85 }, children: errMsg }),
 						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.5, marginTop: 8 }, children: target.orgName })
 					] })
@@ -1335,7 +1396,7 @@
 							style: field
 						}),
 						phase === "busy" && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginTop: 10 }, children: t("project.busy") }),
-						errMsg && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, color: "var(--dsw-alias-text-critical, #e5534b)", marginTop: 10 }, children: errMsg })
+						(0, react_jsx_runtime.jsx)(ErrorNote, { msg: errMsg })
 					] }),
 					phase === "done" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, fontWeight: 600, marginBottom: 8 }, children: t("project.done") }),
@@ -1401,7 +1462,7 @@
 						}),
 						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.55, marginTop: 8 }, children: target.kind === "org" ? t("rename.orgNote") : t("rename.projectNote") }),
 						phase === "busy" && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginTop: 10 }, children: t("rename.busy") }),
-						errMsg && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, color: "var(--dsw-alias-text-critical, #e5534b)", marginTop: 10 }, children: errMsg })
+						(0, react_jsx_runtime.jsx)(ErrorNote, { msg: errMsg })
 					] }),
 					phase === "done" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, fontWeight: 600, marginBottom: 8 }, children: t("rename.done") }),
@@ -1506,7 +1567,7 @@
 							spellCheck: false,
 							style: { width: "100%", boxSizing: "border-box", fontSize: 13, padding: "6px 8px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 6, background: "transparent", color: "inherit", fontFamily: "inherit" }
 						}),
-						errMsg && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, color: "var(--dsw-alias-text-critical, #e5534b)", marginTop: 10 }, children: errMsg }),
+						(0, react_jsx_runtime.jsx)(ErrorNote, { msg: errMsg }),
 						// D85: the scope-stale 403 carries "re-link GitHub" verbatim — offer
 						// the upgrade HERE instead of dead-ending: button first, then the
 						// one-time code + URL once the flow starts, auto-retry on success.
@@ -1529,25 +1590,29 @@
 		/** Welcome gate (D69): with no organisation in recents the app IS a
 		 * blank page with one clickable card — covering any stray dsh-home
 		 * sessions the stock boot may restore. Creating the first org (or
-		 * opening the create modal) lifts it. */
+		 * opening the create modal) lifts it. Phase 2 (conformance plan):
+		 * registered into the frame's declared shell.overlay slot instead of
+		 * fighting the shell with a hand-layered fixed z-index war — the
+		 * overlay layer owns positioning AND pointer events, so this gate is
+		 * lens-screenshot-able like every other overlay. */
 		function WelcomeGate({ t }) {
 			const count = useOrg((s) => s.orgs.length);
 			if (count > 0) return null;
 			return (0, react_jsx_runtime.jsx)("div", {
-				style: { position: "fixed", inset: 0, zIndex: 2147483000, background: "var(--dsw-alias-bg-base, #101014)", display: "flex", alignItems: "center", justifyContent: "center" },
+				style: { position: "absolute", inset: 0, background: "var(--dsw-alias-bg-base)", display: "flex", alignItems: "center", justifyContent: "center" },
 				children: (0, react_jsx_runtime.jsxs)("div", {
 					role: "button",
 					tabIndex: 0,
 					onClick: () => window.dispatchEvent(new Event("arxa-create-org")),
 					onKeyDown: (e) => { if (e.key === "Enter" || e.key === " ") window.dispatchEvent(new Event("arxa-create-org")); },
-					style: { border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 14, padding: "28px 34px", textAlign: "center", cursor: "pointer", maxWidth: 380, background: "var(--dsw-alias-bg-raised, rgba(255,255,255,0.03))" },
+					style: { border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 14, padding: "28px 34px", textAlign: "center", cursor: "pointer", maxWidth: 380, background: "var(--dsw-alias-bg-layer-1)" },
 					children: [
 						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 17, fontWeight: 600, marginBottom: 8 }, children: t("welcome.title") }),
 						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, opacity: 0.65, marginBottom: 18 }, children: t("welcome.desc") }),
 						(0, react_jsx_runtime.jsxs)("div", { style: { display: "flex", gap: 10, justifyContent: "center" }, children: [
 							(0, react_jsx_runtime.jsx)("button", {
 								onClick: () => window.dispatchEvent(new Event("arxa-create-org")),
-								style: { border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 8, padding: "8px 18px", fontSize: 13, cursor: "pointer", background: "var(--dsw-alias-bg-raised, rgba(255,255,255,0.06))", color: "inherit" },
+								style: { border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 8, padding: "8px 18px", fontSize: 13, cursor: "pointer", background: "var(--dsw-alias-bg-layer-2)", color: "var(--dsw-alias-label-primary)" },
 								children: t("welcome.studio")
 							}),
 							(0, react_jsx_runtime.jsx)("button", {
@@ -1646,7 +1711,7 @@
 							style: { width: "100%", boxSizing: "border-box", fontSize: 13, padding: "6px 8px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 6, background: "transparent", color: "inherit", fontFamily: "inherit" }
 						})
 					] }),
-					errMsg && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, color: "var(--dsw-alias-text-critical, #e5534b)", marginTop: 10 }, children: errMsg }),
+					(0, react_jsx_runtime.jsx)(ErrorNote, { msg: errMsg }),
 					errMsg && errMsg.includes("re-link GitHub") && !relinking && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "outline", onClick: relink, style: { marginTop: 10 }, children: t("purge.relink") }),
 					errMsg && !errMsg.includes("re-link GitHub") && !relinking && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "outline", onClick: submit, style: { marginTop: 10 }, children: t("purge.retry") }),
 					relinking && (0, react_jsx_runtime.jsxs)("div", { style: { marginTop: 10, padding: "10px 12px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 8, fontSize: 12 }, children: [
@@ -1731,7 +1796,9 @@
 			orgT = props.t; // stock-scope render sites read the locale through this
 			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, {
 				children: [
-					!creating && (0, react_jsx_runtime.jsx)(WelcomeGate, { t: props.t }),
+					// WelcomeGate no longer mounts here (Phase 2): it registers
+					// into the frame's shell.overlay slot in apply() — the
+					// declared overlay surface, not a hand-layered fixed div.
 					// D83: TrashSection no longer mounts here — ARXA_TRASH_AFTER_ORGS
 					// renders it inside the org tree, right under the last org row.
 					(0, react_jsx_runtime.jsx)(WorkspaceBrowser, patched),
@@ -1914,168 +1981,342 @@
 			"project.close": "Close",
 			"project.errNotLinked": "GitHub isn\u2019t linked. Create an organisation and sign in with GitHub first, then try again.",
 		};
-		const zhOver = {
-			"section.workspaces": "组织",
-			"files.section": "文件",
-			"files.empty": "没有文件",
-			"workspace.add": "新建组织…",
-			"menu.addWorkspace": "新建组织…",
-			"menu.trash": "回收站",
-			"menu.org.rename": "重命名…",
-"menu.org.trash": "移到废纸篓",
-			"menu.project.rename": "重命名…",
-			"menu.project.trash": "移到废纸篓",
-			"trash.empty": "废纸篓是空的",
-			"rename.orgTitle": "重命名组织",
-			"rename.projectTitle": "重命名项目",
-			"rename.nameLabel": "新名称",
-			"rename.cta": "重命名",
-			"rename.busy": "正在重命名——移动目录并同步 GitHub…",
-			"rename.done": "已重命名",
-			"rename.close": "关闭",
-			"rename.orgNote": "组织文件夹与其 GitHub 仓库将一并重命名。",
-			"rename.projectNote": "项目文件夹与其 GitHub 仓库将一并重命名。",
-			"trash.section": "回收站",
-			"trash.restore": "恢复",
-			"trash.restoreAll": "全部恢复",
-			"delete.workspace": "关闭组织",
-			"delete.desc": "这将关闭“{name}”。其会话仍保留在组织注册表中；不会删除任何磁盘内容。",
-			"delete.pending": "正在关闭组织…",
-			"rename.workspace.title": "重命名组织",
-			"field.workspaceName": "组织名称",
-			"conflict.named": "已存在名为“{name}”的组织。",
-			"actions.workspace.aria": "{name} 的组织操作",
-			"actions.project.aria": "{name} 的项目操作",
-			"trash.orgSection": "组织",
-			"trash.projectSection": "项目",
-			"trash.deleteForever": "永久删除",
-			"purge.orgTitle": "永久删除该组织？",
-			"purge.projectTitle": "永久删除该项目？",
-			"purge.orgWarn": "这将永久删除组织文件夹及其拥有的所有 GitHub 仓库——组织仓库与每个已发布的项目仓库。此操作无法撤销。",
-			"purge.projectWarn": "这将永久删除废纸篓中的文件夹以及该项目的 GitHub 仓库。此操作无法撤销。",
-			"purge.confirm": "永久删除",
-			"purge.busy": "正在删除——正在移除 GitHub 仓库与废纸篓文件夹…",
-			"purge.done": "已永久删除",
-			"purge.relink": "重新关联 GitHub 并重试",
-			"purge.relinkHint": "一次性权限升级：已保存的 GitHub 关联早于删除权限。在下方网址输入该代码完成授权——删除会自动重试。",
-			"purge.typeName": "输入 {name} 以确认。",
-			"purge.retry": "重试",
-			"disconnect.title": "断开 GitHub",
-			"disconnect.orgWarn": "将解除该组织及其下所有项目仓库与 GitHub 的链接。文件保留在本机。",
-			"disconnect.projectWarn": "将解除该项目仓库与 GitHub 的链接。文件保留在本机。",
-			"disconnect.keep": "保留 GitHub 上的仓库",
-			"disconnect.remove": "同时从 GitHub 移除",
-			"disconnect.typeRepo": "输入 {name} 以确认移除。",
-			"disconnect.cta": "断开",
-			"disconnect.busy": "断开中…",
-			"disconnect.done": "已从 GitHub 断开",
-			"disconnect.doneKept": "已断开 — 仓库保留在 GitHub。",
-			"disconnect.doneRemoved": "已断开 — 已从 GitHub 移除：{repos}",
-			"rows.ghSynced": "已同步到 GitHub",
-			"card.dirty": "变更",
+		const plOver = {
+			"section.workspaces": "Organizacje",
+			"files.section": "Pliki",
+			"files.empty": "Brak plików",
+			"workspace.add": "Nowa organizacja…",
+			"menu.addWorkspace": "Nowa organizacja…",
+			"menu.trash": "Kosz",
+			"menu.org.rename": "Zmień nazwę…",
+		"menu.org.trash": "Przenieś do Kosza",
+			"menu.project.rename": "Zmień nazwę…",
+			"menu.project.trash": "Przenieś do Kosza",
+			"trash.empty": "Kosz jest pusty",
+			"rename.orgTitle": "Zmień nazwę organizacji",
+			"rename.projectTitle": "Zmień nazwę projektu",
+			"rename.nameLabel": "Nowa nazwa",
+			"rename.cta": "Zmień nazwę",
+			"rename.busy": "Zmiana nazwy — przenoszenie folderu i synchronizacja z GitHub…",
+			"rename.done": "Nazwa zmieniona",
+			"rename.close": "Zamknij",
+			"rename.orgNote": "Folder organizacji i jej repo na GitHub zmieniają nazwę razem.",
+			"rename.projectNote": "Folder projektu i jego repo na GitHub zmieniają nazwę razem.",
+			"trash.section": "Kosz",
+			"trash.restore": "Przywróć",
+			"trash.restoreAll": "Przywróć wszystko",
+			"delete.workspace": "Zamknij organizację",
+			"delete.desc": "To zamyka „{name}”. Jej sesje pozostają w rejestrze organizacji; nic na dysku nie zostaje usunięte.",
+			"delete.pending": "Zamykanie organizacji…",
+			"rename.workspace.title": "Zmień nazwę organizacji",
+			"field.workspaceName": "Nazwa organizacji",
+			"conflict.named": "Organizacja o nazwie „{name}” już istnieje.",
+			"actions.workspace.aria": "Akcje organizacji dla {name}",
+			"actions.project.aria": "Akcje projektu dla {name}",
+			"trash.orgSection": "Organizacje",
+			"trash.projectSection": "Projekty",
+			"trash.deleteForever": "Usuń na zawsze",
+			"purge.orgTitle": "Usunąć organizację na zawsze?",
+			"purge.projectTitle": "Usunąć projekt na zawsze?",
+			"purge.orgWarn": "To trwale usuwa folder organizacji ORAZ każde repo GitHub, które do niej należy — repo organizacji i każde opublikowane repo projektu. Tej operacji nie można cofnąć.",
+			"purge.projectWarn": "To trwale usuwa folder z Kosza ORAZ repo projektu na GitHub. Tej operacji nie można cofnąć.",
+			"purge.confirm": "Usuń na zawsze",
+			"purge.busy": "Usuwanie repo z GitHub i folderu z Kosza…",
+			"purge.done": "Usunięto na zawsze",
+			// D85: the in-modal delete_repo upgrade path (device flow + auto-retry).
+			"purge.relink": "Połącz ponownie z GitHub i ponów",
+			"purge.relinkHint": "Jednorazowe rozszerzenie uprawnień: zapisane połączenie z GitHub powstało przed uprawnieniem do usuwania. Wpisz ten kod pod poniższym adresem URL, aby autoryzować — usuwanie ponowi się automatycznie.",
+			"purge.typeName": "Wpisz dokładnie {name}, aby potwierdzić.",
+			"purge.retry": "Spróbuj ponownie",
+			"disconnect.title": "Odłącz od GitHub",
+			"disconnect.orgWarn": "Odłącza tę organizację i każde repozytorium projektu pod nią. Twoje pliki pozostają na tym urządzeniu.",
+			"disconnect.projectWarn": "Odłącza repozytorium tego projektu. Twoje pliki pozostają na tym urządzeniu.",
+			"disconnect.keep": "Zachowaj repozytoria na GitHub",
+			"disconnect.remove": "Usuń je również z GitHub",
+			"disconnect.typeRepo": "Wpisz {name}, aby potwierdzić usunięcie.",
+			"disconnect.cta": "Odłącz",
+			"disconnect.busy": "Odłączanie…",
+			"disconnect.done": "Odłączono od GitHub",
+			"disconnect.doneKept": "Odłączono — repozytoria zachowane na GitHub.",
+			"disconnect.doneRemoved": "Odłączono — usunięto z GitHub: {repos}",
+			"rows.ghSynced": "Zsynchronizowano z GitHub",
+			"card.dirty": "zmiany",
 			"card.ahead": "↑",
 			"card.behind": "↓",
-			"card.wip": "草稿",
-			"card.localOnly": "仅本地",
-			"card.frame": "框架",
-			"card.subjectPlaceholder": "提交主题 — <type>(<scope>): 现在为真的事实",
-			"card.askDraft": "让会话起草",
-			"card.commit": "提交",
-			"card.push": "推送分支",
-			"card.pr": "发起 PR…",
-			"card.prOpen": "创建 PR",
-			"card.prProblem": "问题（用户的原话）",
-			"card.prFix": "如何修复的",
-			"card.busy": "处理中…",
-			"org.create.ghToggle": "发布到 GitHub",
-			"org.create.ghOnHint": "将创建私有 GitHub 仓库并保持同步。",
-			"org.create.ghOffHint": "该组织仅保存在本机。之后可从其菜单连接 GitHub。",
-			"org.create.ghUnavailableHint": "GitHub 未关联 — 组织将仅创建于本机。之后可从其菜单连接。",
-			"purge.close": "关闭",
-			"groupBy.workspace": "按项目",
-			"orderBy.manual": "按创建顺序",
-			"orderBy.updated": "最新在前",
-			"picker.loading": "正在加载组织…",
-			"status.idle": "打开",
-			"status.completed": "已停靠",
-			"org.create.title": "新建组织",
-			"org.create.submit": "创建组织",
-			"org.create.location": "位置",
-			"org.create.preview": "将创建于",
-			"org.create.exists.nonempty": "该文件夹已存在且不为空 — 请更改名称或位置。",
-			"org.create.exists.org": "{name} 已在这里。",
-			"org.create.exists.open": "改为打开它",
-			"github.signin.desc": "arxa studio 通过 git 管理一切。创建组织前请先关联你的 GitHub 账号 — 项目会以私有仓库的形式发布到该账号下。",
-			"github.signin.button": "使用 GitHub 登录",
-			"github.signin.busy": "正在等待 GitHub…",
-			"github.signin.failed": "GitHub 登录未完成 — 请重试。",
-			"github.signin.required": "请先关联你的 GitHub 账号。",
-			"newSession.selectFirst": "先选择一个工作区再开始会话",
-			"files.openHint": "打开该组织即可浏览其文件",
-			"newSession.snapshotPending": "正在准备 git 快照 — 完成后即可开始会话",
-			"welcome.title": "欢迎使用 arxa studio",
-			"welcome.desc": "创建你的第一个组织即可开始 — arxa studio 通过 git 管理一切。",
+			"card.wip": "wip",
+			"card.localOnly": "tylko lokalny",
+			"card.frame": "frame",
+			"card.subjectPlaceholder": "temat commitu — <type>(<scope>): co jest teraz prawdą",
+			"card.askDraft": "Poproś sesję o przygotowanie szkicu",
+			"card.commit": "Commit",
+			"card.push": "Push branch",
+			"card.pr": "Otwórz PR…",
+			"card.prOpen": "Utwórz PR",
+			"card.prProblem": "Problem (słowami użytkownika)",
+			"card.prFix": "Jak to naprawiono",
+			"card.busy": "Praca…",
+			"org.create.ghToggle": "Opublikuj na GitHub",
+			"org.create.ghOnHint": "Zostaje utworzone prywatne repozytorium GitHub i jest na bieżąco synchronizowane.",
+			"org.create.ghOffHint": "Ta organizacja pozostaje tylko na tym urządzeniu. Połącz ją później z jej menu.",
+			"org.create.ghUnavailableHint": "GitHub nie jest połączony — organizacja zostanie utworzona tylko na tym urządzeniu. Połącz ją później z jej menu.",
+			"purge.close": "Zamknij",
+			"groupBy.workspace": "Projekt",
+			"orderBy.manual": "Według kolejności utworzenia",
+			"orderBy.updated": "Najnowsze pierwsze",
+			"picker.loading": "Ładowanie organizacji…",
+			"status.idle": "Otwarta",
+			"status.completed": "Zaparkowana",
+			"org.create.title": "Nowa organizacja",
+			"org.create.submit": "Utwórz organizację",
+			"org.create.location": "Lokalizacja",
+			"org.create.preview": "Utworzy w",
+			"org.create.exists.nonempty": "Ten folder już istnieje i nie jest pusty — zmień nazwę lub lokalizację.",
+			"org.create.exists.org": "{name} już tu istnieje.",
+			"org.create.exists.open": "Otwórz ją zamiast tego",
+			"github.signin.desc": "arxa studio zarządza wszystkim przez git. Połącz swoje konto GitHub, aby utworzyć organizację — twoje projekty publikują się jako prywatne repo pod nią.",
+			"github.signin.button": "Zaloguj się przez GitHub",
+			"github.signin.codeHint": "Wpisz ten jednorazowy kod na github.com/login/device — przeglądarka powinna była się tam otworzyć",
+			"github.signin.copy": "Kopiuj",
+			"github.signin.copied": "Skopiowano ✓",
+			"github.signin.openLink": "Otwórz github.com/login/device",
+			"github.signin.busy": "Oczekiwanie na GitHub…",
+			"github.signin.failed": "Logowanie do GitHub nie powiodło się — spróbuj ponownie.",
+			"github.signin.required": "Najpierw połącz swoje konto GitHub.",
+			"newSession.selectFirst": "Wybierz obszar roboczy, aby rozpocząć sesję",
+			"files.openHint": "Otwórz tę organizację, aby przeglądać jej pliki",
+			"newSession.snapshotPending": "Przygotowywanie migawki git — sesje odblokują się, gdy będzie gotowa",
+			"welcome.title": "Witamy w arxa studio",
+			"welcome.desc": "Utwórz pierwszą organizację, aby zacząć — arxa studio zarządza wszystkim przez git.",
 			"welcome.studio": "arxa studio",
 			"welcome.business": "arxa business",
-			"welcome.businessSoon": "arxa business（代理）— 即将推出",
-			"tree.dock.projects": "项目",
-			"hero.guide": "会话从工作区开始 — 展开组织到文件夹行，悬停并按 + 新建会话。",
-			"tree.dock.notes": "笔记",
-			"tree.dock.meetings": "会议",
-			"tree.dock.account": "账户",
-			"tree.dock.communications": "通讯",
-			"tree.ws.notes": "笔记",
-			"tree.ws.meetings/scheduler": "日程",
-			"tree.ws.meetings/notes": "笔记",
-			"tree.ws.account/receipts": "收据",
-			"tree.ws.account/invoices": "发票",
-			"tree.ws.account/subscriptions": "订阅",
-			"tree.ws.account/profile": "档案",
-			"tree.ws.communications/emails": "邮件",
-			"tree.ws.communications/messages": "消息",
-			"tree.ws.communications/comments": "评论",
-			"tree.pc.design": "设计",
-			"tree.pc.config": "配置",
-			"tree.pc.deploy": "部署",
-			"tree.pc.diagrams": "图表",
-			"tree.pc.intake": "需求",
-			"tree.pc.architecture": "架构",
-			"tree.pc.notes": "笔记",
-			"tree.pc.build": "构建",
-			"tree.pc.moodboard": "情绪板",
-			"tree.pc.scaffold": "脚手架",
-			"menu.org.open": "打开组织",
-			"menu.org.newProject": "新建项目",
-			"menu.org.connect": "连接到 GitHub",
-			"menu.org.disconnect": "断开 GitHub…",
-			"menu.project.connect": "连接到 GitHub",
-			"menu.project.disconnect": "断开 GitHub…",
-			"publish.title": "发布到 GitHub",
-			"publish.confirmDesc": "为该组织及其每个项目各创建一个私有 GitHub 仓库，并推送完整提交历史。会话分支保留在本地。",
-			"publish.projectTitle": "连接项目到 GitHub",
-			"publish.projectConfirmDesc": "为该项目创建私有 GitHub 仓库并推送完整历史。",
-			"publish.confirmCta": "发布",
-			"publish.busyCta": "发布中…",
-			"publish.busy": "正在发布…首次推送历史可能需要一些时间。",
-			"publish.done": "已发布到 GitHub",
-			"publish.already": "已发布过 — 一切都是最新的",
-			"publish.openOnGithub": "在 GitHub 中打开",
-			"publish.close": "关闭",
-			"publish.cancel": "取消",
-			"publish.errTitle": "发布失败",
-			"publish.errGeneric": "发布失败 — 请重试。",
-			"publish.errNotLinked": "GitHub 未连接。请先创建组织并使用 GitHub 登录，然后再发布。",
-			"publish.errUnavailable": "GitHub 连接暂时不可用 — 请稍后重试。",
-			"publish.errPending": "该组织的首次 git 快照仍在进行中 — 完成后即可发布。",
-			"project.title": "新建项目",
-			"project.nameLabel": "项目名称",
-			"project.namePlaceholder": "例如 Aurora Website",
-			"project.create": "创建项目",
-			"project.creating": "创建中…",
-			"project.busy": "正在创建项目、搭建阶段目录并发布…",
-			"project.done": "项目已创建",
-			"project.doneRepo": "已创建私有 GitHub 仓库并推送历史。",
-			"project.close": "关闭",
-			"project.errNotLinked": "GitHub 未连接。请先创建组织并使用 GitHub 登录，然后重试。",
+			"welcome.businessSoon": "arxa business (agencja) — wkrótce",
+			"tree.dock.projects": "Projekty",
+			"hero.guide": "Sesje zaczynają się wewnątrz obszaru roboczego — otwórz organizację, rozwiń do wiersza folderu, najedź na niego i naciśnij +, aby rozpocząć sesję.",
+			"tree.dock.notes": "Notatki",
+			"tree.dock.meetings": "Spotkania",
+			"tree.dock.account": "Konto",
+			"tree.dock.communications": "Komunikacja",
+			"tree.ws.notes": "Notatki",
+			"tree.ws.meetings/scheduler": "Harmonogram",
+			"tree.ws.meetings/notes": "Notatki",
+			"tree.ws.account/receipts": "Paragony",
+			"tree.ws.account/invoices": "Faktury",
+			"tree.ws.account/subscriptions": "Subskrypcje",
+			"tree.ws.account/profile": "Profil",
+			"tree.ws.communications/emails": "E-maile",
+			"tree.ws.communications/messages": "Wiadomości",
+			"tree.ws.communications/comments": "Komentarze",
+			"tree.pc.design": "Design",
+			"tree.pc.config": "Konfiguracja",
+			"tree.pc.deploy": "Wdrożenie",
+			"tree.pc.diagrams": "Diagramy",
+			"tree.pc.intake": "Intake",
+			"tree.pc.architecture": "Architektura",
+			"tree.pc.notes": "Notatki",
+			"tree.pc.build": "Build",
+			"tree.pc.moodboard": "Moodboard",
+			"tree.pc.scaffold": "Scaffold",
+			"menu.org.open": "Otwórz organizację",
+			"menu.org.newProject": "Nowy projekt",
+			"menu.org.connect": "Połącz z GitHub",
+			"menu.org.disconnect": "Odłącz GitHub…",
+			"menu.project.connect": "Połącz z GitHub",
+			"menu.project.disconnect": "Odłącz GitHub…",
+			"publish.title": "Opublikuj na GitHub",
+			"publish.confirmDesc": "Tworzy jedno prywatne repo GitHub dla tej organizacji i po jednym na projekt, a następnie wypycha pełną historię commitów. Branche sesji pozostają lokalne.",
+			"publish.projectTitle": "Połącz projekt z GitHub",
+			"publish.projectConfirmDesc": "Tworzy prywatne repozytorium GitHub dla tego projektu i wypycha jego pełną historię.",
+			"publish.confirmCta": "Opublikuj",
+			"publish.busyCta": "Publikowanie…",
+			"publish.busy": "Publikowanie… pierwsza publikacja może chwilę potrwać, gdy historia jest wypychana.",
+			"publish.done": "Opublikowano na GitHub",
+			"publish.already": "Już opublikowano — wszystko jest aktualne",
+			"publish.openOnGithub": "Otwórz na GitHub",
+			"publish.close": "Zamknij",
+			"publish.cancel": "Anuluj",
+			"publish.errTitle": "Publikacja nie powiodła się",
+			"publish.errGeneric": "Publikacja nie powiodła się — spróbuj ponownie.",
+			"publish.errNotLinked": "GitHub nie jest połączony. Najpierw utwórz organizację i zaloguj się przez GitHub, a potem opublikuj ponownie.",
+			"publish.errUnavailable": "Połączenie z GitHub jest teraz niedostępne — spróbuj ponownie za chwilę.",
+			"publish.errPending": "Pierwsza migawka git tej organizacji wciąż trwa — publikacja odblokuje się zaraz po jej zakończeniu.",
+			"project.title": "Nowy projekt",
+			"project.nameLabel": "Nazwa projektu",
+			"project.namePlaceholder": "np. Strona Aurora",
+			"project.create": "Utwórz projekt",
+			"project.creating": "Tworzenie…",
+			"project.busy": "Tworzenie projektu, przygotowywanie jego etapów i publikowanie…",
+			"project.done": "Projekt utworzony",
+			"project.doneRepo": "Utworzono prywatne repo GitHub i wypchnięto historię.",
+			"project.close": "Zamknij",
+			"project.errNotLinked": "GitHub nie jest połączony. Najpierw utwórz organizację i zaloguj się przez GitHub, a potem spróbuj ponownie.",
+		};
+		const frOver = {
+			"section.workspaces": "Organisations",
+			"files.section": "Fichiers",
+			"files.empty": "Aucun fichier",
+			"workspace.add": "Nouvelle organisation…",
+			"menu.addWorkspace": "Nouvelle organisation…",
+			"menu.trash": "Corbeille",
+			"menu.org.rename": "Renommer…",
+		"menu.org.trash": "Déplacer vers la corbeille",
+			"menu.project.rename": "Renommer…",
+			"menu.project.trash": "Déplacer vers la corbeille",
+			"trash.empty": "La corbeille est vide",
+			"rename.orgTitle": "Renommer l’organisation",
+			"rename.projectTitle": "Renommer le projet",
+			"rename.nameLabel": "Nouveau nom",
+			"rename.cta": "Renommer",
+			"rename.busy": "Renommage — déplacement du dossier et synchronisation avec GitHub…",
+			"rename.done": "Renommé",
+			"rename.close": "Fermer",
+			"rename.orgNote": "Le dossier de l’organisation et son repo GitHub sont renommés ensemble.",
+			"rename.projectNote": "Le dossier du projet et son repo GitHub sont renommés ensemble.",
+			"trash.section": "Corbeille",
+			"trash.restore": "Restaurer",
+			"trash.restoreAll": "Tout restaurer",
+			"delete.workspace": "Fermer l’organisation",
+			"delete.desc": "Ceci ferme « {name} ». Ses sessions restent dans le registre de l’organisation ; rien n’est supprimé du disque.",
+			"delete.pending": "Fermeture de l’organisation…",
+			"rename.workspace.title": "Renommer l’organisation",
+			"field.workspaceName": "Nom de l’organisation",
+			"conflict.named": "Une organisation nommée « {name} » existe déjà.",
+			"actions.workspace.aria": "Actions de l’organisation pour {name}",
+			"actions.project.aria": "Actions du projet pour {name}",
+			"trash.orgSection": "Organisations",
+			"trash.projectSection": "Projets",
+			"trash.deleteForever": "Supprimer définitivement",
+			"purge.orgTitle": "Supprimer l’organisation définitivement ?",
+			"purge.projectTitle": "Supprimer le projet définitivement ?",
+			"purge.orgWarn": "Ceci supprime définitivement le dossier de l’organisation ET tous les repos GitHub qu’elle possède — le repo de l’organisation et chaque repo de projet publié. Cette action est irréversible.",
+			"purge.projectWarn": "Ceci supprime définitivement le dossier de la corbeille ET le repo GitHub du projet. Cette action est irréversible.",
+			"purge.confirm": "Supprimer définitivement",
+			"purge.busy": "Suppression des repos GitHub et du dossier de la corbeille…",
+			"purge.done": "Supprimé définitivement",
+			// D85: the in-modal delete_repo upgrade path (device flow + auto-retry).
+			"purge.relink": "Re-lier GitHub et réessayer",
+			"purge.relinkHint": "Mise à niveau unique des autorisations : le lien GitHub enregistré est antérieur à l’autorisation de suppression. Saisissez ce code à l’URL ci-dessous pour autoriser — la suppression réessaiera automatiquement.",
+			"purge.typeName": "Saisissez {name} exactement pour confirmer.",
+			"purge.retry": "Réessayer",
+			"disconnect.title": "Se déconnecter de GitHub",
+			"disconnect.orgWarn": "Délie cette organisation et chaque dépôt de projet sous elle. Vos fichiers restent sur cet appareil.",
+			"disconnect.projectWarn": "Délie le dépôt de ce projet. Vos fichiers restent sur cet appareil.",
+			"disconnect.keep": "Conserver les dépôts sur GitHub",
+			"disconnect.remove": "Les supprimer aussi de GitHub",
+			"disconnect.typeRepo": "Saisissez {name} pour confirmer la suppression.",
+			"disconnect.cta": "Déconnecter",
+			"disconnect.busy": "Déconnexion…",
+			"disconnect.done": "Déconnecté de GitHub",
+			"disconnect.doneKept": "Déconnecté — dépôts conservés sur GitHub.",
+			"disconnect.doneRemoved": "Déconnecté — supprimés de GitHub : {repos}",
+			"rows.ghSynced": "Synchronisé avec GitHub",
+			"card.dirty": "modifications",
+			"card.ahead": "↑",
+			"card.behind": "↓",
+			"card.wip": "wip",
+			"card.localOnly": "local uniquement",
+			"card.frame": "frame",
+			"card.subjectPlaceholder": "sujet du commit — <type>(<scope>) : ce qui est vrai maintenant",
+			"card.askDraft": "Demander à la session de rédiger",
+			"card.commit": "Commit",
+			"card.push": "Push branch",
+			"card.pr": "Ouvrir une PR…",
+			"card.prOpen": "Créer la PR",
+			"card.prProblem": "Problème (mots de l’utilisateur)",
+			"card.prFix": "Comment cela a été corrigé",
+			"card.busy": "Traitement…",
+			"org.create.ghToggle": "Publier sur GitHub",
+			"org.create.ghOnHint": "Un dépôt GitHub privé est créé et synchronisé en continu.",
+			"org.create.ghOffHint": "Cette organisation reste uniquement sur cet appareil. Connectez-la plus tard depuis son menu.",
+			"org.create.ghUnavailableHint": "GitHub n’est pas lié — l’organisation sera créée uniquement sur cet appareil. Connectez-la plus tard depuis son menu.",
+			"purge.close": "Fermer",
+			"groupBy.workspace": "Projet",
+			"orderBy.manual": "Par ordre de création",
+			"orderBy.updated": "Les plus récents d’abord",
+			"picker.loading": "Chargement des organisations…",
+			"status.idle": "Ouverte",
+			"status.completed": "En pause",
+			"org.create.title": "Nouvelle organisation",
+			"org.create.submit": "Créer l’organisation",
+			"org.create.location": "Emplacement",
+			"org.create.preview": "Sera créée dans",
+			"org.create.exists.nonempty": "Ce dossier existe déjà et n’est pas vide — changez le nom ou l’emplacement.",
+			"org.create.exists.org": "{name} est déjà ici.",
+			"org.create.exists.open": "L’ouvrir à la place",
+			"github.signin.desc": "arxa studio gère tout via git. Liez votre compte GitHub pour créer une organisation — vos projets sont publiés comme des repos privés sous elle.",
+			"github.signin.button": "Se connecter avec GitHub",
+			"github.signin.codeHint": "Saisissez ce code à usage unique sur github.com/login/device — votre navigateur a dû s’y ouvrir",
+			"github.signin.copy": "Copier",
+			"github.signin.copied": "Copié ✓",
+			"github.signin.openLink": "Ouvrir github.com/login/device",
+			"github.signin.busy": "En attente de GitHub…",
+			"github.signin.failed": "La connexion à GitHub n’a pas abouti — réessayez.",
+			"github.signin.required": "Liez d’abord votre compte GitHub.",
+			"newSession.selectFirst": "Sélectionnez un espace de travail pour démarrer une session",
+			"files.openHint": "Ouvrez cette organisation pour parcourir ses fichiers",
+			"newSession.snapshotPending": "Préparation de l’instantané git — les sessions se débloqueront quand il sera prêt",
+			"welcome.title": "Bienvenue dans arxa studio",
+			"welcome.desc": "Créez votre première organisation pour commencer — arxa studio gère tout via git.",
+			"welcome.studio": "arxa studio",
+			"welcome.business": "arxa business",
+			"welcome.businessSoon": "arxa business (agence) — bientôt disponible",
+			"tree.dock.projects": "Projets",
+			"hero.guide": "Les sessions démarrent dans un espace de travail — ouvrez une organisation, dépliez jusqu’à une ligne de dossier, survolez-la et appuyez sur + pour démarrer une session.",
+			"tree.dock.notes": "Notes",
+			"tree.dock.meetings": "Réunions",
+			"tree.dock.account": "Compte",
+			"tree.dock.communications": "Communications",
+			"tree.ws.notes": "Notes",
+			"tree.ws.meetings/scheduler": "Planificateur",
+			"tree.ws.meetings/notes": "Notes",
+			"tree.ws.account/receipts": "Reçus",
+			"tree.ws.account/invoices": "Factures",
+			"tree.ws.account/subscriptions": "Abonnements",
+			"tree.ws.account/profile": "Profil",
+			"tree.ws.communications/emails": "E-mails",
+			"tree.ws.communications/messages": "Messages",
+			"tree.ws.communications/comments": "Commentaires",
+			"tree.pc.design": "Design",
+			"tree.pc.config": "Configuration",
+			"tree.pc.deploy": "Déploiement",
+			"tree.pc.diagrams": "Diagrammes",
+			"tree.pc.intake": "Intake",
+			"tree.pc.architecture": "Architecture",
+			"tree.pc.notes": "Notes",
+			"tree.pc.build": "Build",
+			"tree.pc.moodboard": "Moodboard",
+			"tree.pc.scaffold": "Scaffold",
+			"menu.org.open": "Ouvrir l’organisation",
+			"menu.org.newProject": "Nouveau projet",
+			"menu.org.connect": "Connecter à GitHub",
+			"menu.org.disconnect": "Déconnecter GitHub…",
+			"menu.project.connect": "Connecter à GitHub",
+			"menu.project.disconnect": "Déconnecter GitHub…",
+			"publish.title": "Publier sur GitHub",
+			"publish.confirmDesc": "Crée un repo GitHub privé pour cette organisation et un par projet, puis pousse l’historique complet des commits. Les branches de session restent locales.",
+			"publish.projectTitle": "Connecter le projet à GitHub",
+			"publish.projectConfirmDesc": "Crée un dépôt GitHub privé pour ce projet et pousse tout son historique.",
+			"publish.confirmCta": "Publier",
+			"publish.busyCta": "Publication…",
+			"publish.busy": "Publication… la première publication peut prendre un moment pendant que l’historique est poussé.",
+			"publish.done": "Publié sur GitHub",
+			"publish.already": "Déjà publié — tout est à jour",
+			"publish.openOnGithub": "Ouvrir sur GitHub",
+			"publish.close": "Fermer",
+			"publish.cancel": "Annuler",
+			"publish.errTitle": "Échec de la publication",
+			"publish.errGeneric": "La publication a échoué — réessayez.",
+			"publish.errNotLinked": "GitHub n’est pas lié. Créez d’abord une organisation et connectez-vous avec GitHub, puis publiez à nouveau.",
+			"publish.errUnavailable": "Le lien GitHub est indisponible pour le moment — réessayez dans un instant.",
+			"publish.errPending": "Le premier instantané git de cette organisation est toujours en cours — la publication se débloquera dès qu’il sera terminé.",
+			"project.title": "Nouveau projet",
+			"project.nameLabel": "Nom du projet",
+			"project.namePlaceholder": "p. ex. Site Aurora",
+			"project.create": "Créer le projet",
+			"project.creating": "Création…",
+			"project.busy": "Création du projet, génération de ses étapes et publication…",
+			"project.done": "Projet créé",
+			"project.doneRepo": "Repo GitHub privé créé et historique poussé.",
+			"project.close": "Fermer",
+			"project.errNotLinked": "GitHub n’est pas lié. Créez d’abord une organisation et connectez-vous avec GitHub, puis réessayez.",
 		};
 		//#endregion

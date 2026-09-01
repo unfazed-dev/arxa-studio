@@ -31,7 +31,8 @@ vocabulary only.
   Below 1024px viewport it presents as a full-frame sheet (D92).
 - **Files section** — the org file tree rows in the sidebar (D90): lazy
   per-directory listing via the artifacts tree route; a file row opens
-  the viewer column through the `arxa-av-open` bridge.
+  the viewer column through the `arxa-av-open` bridge. Only `.git/` and
+  `.arxa/` are invisible — every other dot-entry is a row (D94).
 - **Produced-file chip** — a stock deliverables chip for a file the agent
   wrote (D91): clicking opens the viewer column, worktree lane first,
   org lane as fallback. Never auto-opens.
@@ -135,3 +136,17 @@ vocabulary only.
 - **Artifact viewer** — the per-org surface that renders every artifact
   type (view lane) and edits the text family (edit lane). Viewing reads
   main; editing happens in a session. (D7, D78–D87)
+- **Stage container** — one of the ten fixed folders inside every project,
+  carrying arxa's pipeline order with 2-digit prefixes: `00-moodboard`
+  through `08-deploy`, plus unnumbered `notes` (not a stage; D42
+  free-form). Scaffolding and migrations both materialise the full set
+  (template v3).
+- **Target** — the two fixed subfolders of every stage container:
+  `website/` and `application/`. A stage without its targets is a
+  scaffold defect; selftests pin the pair. (Template v2/v3; named law
+  2026-09-01 — docs were silent before.)
+- **Sync sweep** — the push + fast-forward pass over a published org's
+  every repo (org root + projects): local main commits push immediately
+  (D95), remote advances fast-forward (D96), divergence parks as a
+  sync-conflict note. Runs detached on open, on the throttled sidebar
+  refresh, and via the `org.sync` action.

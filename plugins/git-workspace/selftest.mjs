@@ -29,7 +29,7 @@ import {
   openSession, sessionStageBoundary, archiveSession, reviveSession,
   listSessions, archivedSessionIds,
   getOrigin, setOrigin, rekeySessionsProject,
-  pushRepo,
+  pushRepo, fetchRepo, mainSyncState, ffMergeMain,
 } from './lib/index.js'
 
 let passed = 0
@@ -558,5 +558,55 @@ ok('frame: project check.sh probes stacks only when present (Q4)', () => {
   passed++; console.log('ok ' + passed + ' - watcher: setPaths swaps the watched set')
 }
 
+
+// ---- D95/D96 sync primitives (2026-09-01 grill) ---------------------------
+{
+  const syncTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-sync-selftest-'))
+  try {
+    const senv = { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+    const git = (cwd, args) => runGit(args, { cwd, env: senv })
+    const commit = (cwd, msg) => runGit(['-c', 'user.email=t@arxa', '-c', 'user.name=t', 'commit', '-m', msg], { cwd, env: senv })
+    const work = path.join(syncTmp, 'work')
+    fs.mkdirSync(work, { recursive: true })
+    git(work, ['init', '-b', 'main'])
+    fs.writeFileSync(path.join(work, 'a.md'), 'a')
+    git(work, ['add', '.'])
+    commit(work, 'one')
+    const bare = path.join(syncTmp, 'remote.git')
+    git(syncTmp, ['clone', '--bare', work, bare])
+    pushRepo(work, bare)
+    let st = mainSyncState(work)
+    ok('sync: in-sync after push (0/0)', () => {
+      assert.equal(st.behind, 0)
+      assert.equal(st.ahead, 0)
+    })
+    const other = path.join(syncTmp, 'other')
+    git(syncTmp, ['clone', bare, other])
+    fs.writeFileSync(path.join(other, 'b.md'), 'b')
+    git(other, ['add', '.'])
+    commit(other, 'two')
+    git(other, ['push', 'origin', 'main'])
+    ok('sync: tracking ref stale before fetch', () => assert.equal(mainSyncState(work).behind, 0))
+    ok('sync: fetchRepo succeeds against local bare', () => assert.equal(fetchRepo(work, bare), true))
+    st = mainSyncState(work)
+    ok('sync: behind by one after fetch', () => assert.equal(st.behind, 1))
+    ok('sync: ffMergeMain advances main', () => assert.equal(ffMergeMain(work), true))
+    ok('sync: pulled content materialised', () => assert.equal(fs.existsSync(path.join(work, 'b.md')), true))
+    ok('sync: caught up', () => assert.equal(mainSyncState(work).behind, 0))
+    fs.writeFileSync(path.join(work, 'c.md'), 'c')
+    git(work, ['add', '.'])
+    commit(work, 'three-local')
+    fs.writeFileSync(path.join(other, 'd.md'), 'd')
+    git(other, ['add', '.'])
+    commit(other, 'three-remote')
+    git(other, ['push', 'origin', 'main'])
+    fetchRepo(work, bare)
+    st = mainSyncState(work)
+    ok('sync: divergence detected', () => assert.equal(st.diverged, true))
+    ok('sync: ffMergeMain refuses diverged history (D96: park, never merge)', () => assert.equal(ffMergeMain(work), false))
+  } finally {
+    fs.rmSync(syncTmp, { recursive: true, force: true })
+  }
+}
 
 console.log(`\nselftest: ${passed}/${passed} passed`)

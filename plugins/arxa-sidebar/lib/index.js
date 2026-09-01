@@ -301,11 +301,23 @@ export function apply(ctx, opts = {}) {
     selectedProject: null,
   })
 
+  /** D96: last detached sync kick (throttle window guard). */
+  let lastSyncKick = 0
+
   /** Snapshot for the rows client: orgs with their session rows inline. */
   const snapshot = async (selectedProject) => {
     const l = await getLifecycle()
     if (!l) return emptySnap(SEAM_LIFECYCLE_STUBBED)
     const cur = l.current
+    // D96 refresh: every state poll may kick ONE detached sync per minute
+    // for the OPEN org — the sidebar re-renders off the next poll after
+    // the pull lands. Fire-and-forget: a snapshot must never await git.
+    try {
+      if (cur && typeof l.syncOrgRepos === 'function' && Date.now() - lastSyncKick > 60_000) {
+        lastSyncKick = Date.now()
+        void l.syncOrgRepos(cur.path).catch(() => {})
+      }
+    } catch { /* advisory */ }
     /** Tree face for ONE org (v2, grilled 2026-08-30): docks with their
      * fixed containers + projects with their fixed containers +
      * per-workspace session counts. The client flattens this into
@@ -696,6 +708,16 @@ export function apply(ctx, opts = {}) {
               }
             },
             'org.close': () => l.closeOrg(),
+            /** D95/D96 manual sync door: push every local main commit and
+              * ff-pull remote advances for the org + all its project repos
+              * (divergence parks as a sync-conflict note, never merges).
+              * The open-time heal already runs the same sweep detached. */
+            'org.sync': async () => {
+              const cur = arg?.orgId ? await ensureOpen(arg.orgId) : handle()
+              // syncOrgRepos lives on the LIFECYCLE (factory return), not
+              // the open handle — the handle is presentation + publish.
+              return l.syncOrgRepos(cur.path)
+            },
             'org.rename': () => l.renameOrg(orgByRef(arg?.orgId).path, arg?.name),
             /** D74 manual publish (the org menu affordance): idempotent —
               * create the private repo when missing, push all branches,

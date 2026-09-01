@@ -86,6 +86,9 @@ import {
   protectionPayload,
   wipCommit,
   createWipWatcher,
+  fetchRepo,
+  mainSyncState,
+  ffMergeMain,
 } from '../../git-workspace/lib/index.js'
 import { runGit } from '../../git-workspace/lib/index.js'
 import { arxaHome } from '../../workspace/lib/root.js'
@@ -343,6 +346,77 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     }
   }
 
+  /**
+   * D95/D96 (2026-09-01 sync grill): make ONE repo's main match GitHub.
+   * Fetch first (never touches local main), then: diverged → park loudly,
+   * ONCE, via a committed manifest note — never auto-merge; ahead → push
+   * immediately (the silent creds-skip is exactly how project-001 drifted
+   * 3 commits); behind → fast-forward only. Throw-proof by contract.
+   * Returns a status word for the sweep summary.
+   */
+  async function syncRepoNow(repoPath, kind) {
+    try {
+      const manifestFile = kind === 'org' ? orgManifestPath(repoPath) : projectManifestPath(repoPath)
+      let manifest
+      try { manifest = readManifest(manifestFile) } catch { return 'no-manifest' }
+      if (!manifest.repoUrl) return 'local'
+      if (manifest.localOnly) return 'local'
+      const creds = await githubBridge.gitCredentials()
+      if (!creds || !creds.ok) return 'no-creds'
+      const url = pushUrlFor(manifest.repoUrl, creds)
+      if (!fetchRepo(repoPath, url, env)) return 'fetch-failed'
+      const state = mainSyncState(repoPath, env)
+      if (state.diverged) {
+        // Park ONCE (the note itself commits — D78: never leave the
+        // manifest dirty); every later sweep just reports the status.
+        const note = 'sync-conflict: local and GitHub main both moved — resolve manually'
+        try {
+          if (manifest.githubStatus !== note) {
+            if (kind === 'org') annotateOrgManifest(repoPath, { githubStatus: note })
+            else annotateProjectManifest(repoPath, { githubStatus: note })
+            const file = path.basename(manifestFile)
+            runGit(['add', file], { cwd: repoPath, allowFail: true })
+            runGit(['commit', '-m', 'chore(github): record sync conflict', '--', file], { cwd: repoPath, allowFail: true })
+          }
+        } catch { /* advisory */ }
+        return 'diverged'
+      }
+      if (state.ahead > 0) {
+        try {
+          pushRepo(repoPath, url, env)
+          return 'pushed'
+        } catch (err) {
+          return 'push-failed: ' + String(err?.message ?? err).slice(0, 120)
+        }
+      }
+      if (state.behind > 0) return ffMergeMain(repoPath, env) ? 'pulled' : 'in-sync'
+      return 'in-sync'
+    } catch (err) {
+      return 'error: ' + String(err?.message ?? err).slice(0, 120)
+    }
+  }
+
+  /**
+   * D95/D96: sweep ONE org — the org repo, then every project repo under
+   * it — through syncRepoNow. Called detached on every open (inside the
+   * D74 heal) and by the org.sync refresh door. Never throws.
+   */
+  async function syncOrgRepos(orgPath) {
+    const resolved = path.resolve(orgPath)
+    const out = [{ repo: resolved, kind: 'org', status: await syncRepoNow(resolved, 'org') }]
+    try {
+      const { orgs, projects } = scanWorkspace(resolved)
+      const org = [...orgs.values()].find((o) => o.path === resolved)
+      if (org) {
+        for (const p of projects.values()) {
+          if (p.orgId !== org.id) continue
+          out.push({ repo: p.path, kind: 'project', slug: p.slug, status: await syncRepoNow(p.path, 'project') })
+        }
+      }
+    } catch { /* scan failure — the org repo result still stands */ }
+    return out
+  }
+
   async function publishRepoOnce(repoPath, slug, kind) {
     const manifestFile = kind === 'org' ? orgManifestPath(repoPath) : projectManifestPath(repoPath)
     // D78: an annotation left uncommitted dirties the repo, and the NEXT
@@ -410,6 +484,9 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
         return { ok: false, reason: 'push-failed', slug, repoUrl: manifest.repoUrl }
       }
       await wireFrameOnce(repoPath, kind)
+      // D95: wireFrameOnce's annotate commits land AFTER the sync push
+      // above — sync once more so they reach GitHub in the same breath.
+      await syncRepoNow(repoPath, kind)
       return { ok: true, skipped: 'published', slug, repoUrl: manifest.repoUrl }
     }
     const st = await githubBridge.status()
@@ -438,6 +515,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
         localOnly: false, // D90: connecting clears the local-only answer
       })
       await wireFrameOnce(repoPath, kind)
+      await syncRepoNow(repoPath, kind) // D95: fresh publishes land wired + synced
       return { ok: true, slug, repoUrl }
     } catch (err) {
       annotate({ githubStatus: 'publish-failed: ' + String(err?.message ?? err) })
@@ -677,7 +755,12 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           }
           if (!hasHead(resolved, env)) return { ok: false, reason: 'initial-snapshot-pending' }
           startWipNet() // deferred opens boot the WIP net + frame here
-          return await publishOrgAndProjects(resolved, slug)
+          const published = await publishOrgAndProjects(resolved, slug)
+          // D95/D96: the heal's pushes run BEFORE wireFrameOnce's annotate
+          // commits — this sweep is what makes "every main commit reaches
+          // GitHub" true end-to-end on open (the project-001 lesson).
+          const synced = await syncOrgRepos(resolved)
+          return { ...published, synced }
         } catch {
           /* publish is throw-proof by contract — this is belt-and-braces */
         }
@@ -1457,6 +1540,8 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     workspaceRoot: root,
     listOrgs,
     orgTree,
+    /** D95/D96: push + ff-pull the org and every project repo (refresh door). */
+    syncOrgRepos,
     createOrg,
     openOrg,
     closeOrg,

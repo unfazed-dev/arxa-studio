@@ -913,4 +913,30 @@ architecture; this grill settles the editor extension it never covered.
   card, sidebar file, column path input, and an "Artifacts" toggle beside
   "Session log". Session switch while open: the column follows the new
   session (artifact resets to empty state, session-changes list rebinds).
+- **D94 — Sidebar tree: only `.git/` and `.arxa/` are invisible.** (Grilled
+  2026-09-01 after the sync/visibility audit.) The tree route's blanket
+  dotfile filter is retired: every dot-entry except the two internal state
+  dirs — `.github/`, `.gitignore`, `.env.example`, everything — is a real
+  sidebar row. Generated files must be visible in the sidebar exactly as
+  they are on GitHub; a filter that hides what the studio itself generates
+  (the CI frame) reads as "the file was never created". Amends D90's
+  exclusion list from "dotfiles" to ".git/, .arxa/ only".
+- **D95 — Every studio commit on main pushes to GitHub immediately.** (Same
+  grill.) The publish-time push alone let frame/link/migration annotate
+  commits pile up locally — measured live: project-001 sat 3 commits ahead
+  of its remote with no signal. Law: any commit the studio makes on a
+  published repo's main (frame wiring, link state, migrations, merges,
+  sync notes) pushes in the same breath. A published repo that CANNOT push
+  (credentials gone) reports it — never a silent skip. Session WIP
+  auto-commits are untouched (D18 two-tier: WIP stays local until the
+  stage boundary).
+- **D96 — Remote advances fast-forward on open + refresh; divergence
+  parks.** (Same grill.) The open-time heal and the snapshot-poll refresh
+  (throttled to one sweep per minute, plus the `org.sync` door) fetch and
+  fast-forward each published repo of the org — org root and every project
+  — so files that moved on GitHub land in the local tree the sidebar
+  reads. `--ff-only` always: a history where local and GitHub both moved
+  is never auto-merged — it parks as a committed `sync-conflict` manifest
+  note for the operator to resolve. Local-only orgs (TESTO-style
+  disconnects) are skipped by design.
 

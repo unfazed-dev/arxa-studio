@@ -268,6 +268,53 @@ export function setOrigin(dir, url, env = process.env) {
 }
 
 /**
+ * D96 (2026-09-01 sync grill): fetch the remote's main into the local
+ * origin/main tracking ref. The URL carries its own credentials when
+ * GitHub (token embedded by the caller, NEVER persisted — the same
+ * one-command-line doctrine as pushRepo). A bare local path (tests) or
+ * file:// URL works credentials-free. Failure is a quiet null: offline is
+ * a normal state, the caller decides what to annotate.
+ *
+ * @returns {boolean} true when the fetch command succeeded.
+ */
+export function fetchRepo(dir, url, env = process.env) {
+  if (typeof url !== 'string' || url.trim() === '') {
+    throw new TypeError('fetchRepo: url must be a non-empty string')
+  }
+  const out = runGit(['fetch', url, '+refs/heads/main:refs/remotes/origin/main'], {
+    cwd: dir,
+    env: { ...env, GIT_TERMINAL_PROMPT: '0' },
+    allowFail: true,
+  })
+  return out !== null || runGit(['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main'], { cwd: dir, env, allowFail: true }) !== null
+}
+
+/**
+ * D96: where local main sits relative to origin/main. Pure refs — no
+ * network. Counts are 0 when either side is missing (unborn repo, never
+ * fetched), so callers can treat "no origin/main" as nothing-to-pull.
+ */
+export function mainSyncState(dir, env = process.env) {
+  const remote = runGit(['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main'], { cwd: dir, env, allowFail: true })
+  if (remote === null) return { remote: false, behind: 0, ahead: 0 }
+  const behind = Number(runGit(['rev-list', '--count', 'main..origin/main'], { cwd: dir, env, allowFail: true })) || 0
+  const ahead = Number(runGit(['rev-list', '--count', 'origin/main..main'], { cwd: dir, env, allowFail: true })) || 0
+  return { remote: true, behind, ahead, diverged: behind > 0 && ahead > 0 }
+}
+
+/**
+ * D96: fast-forward local main to origin/main. ONLY ever moves main
+ * forward (--ff-only): a diverged history must never be auto-merged —
+ * the caller parks it loudly instead. Returns true when main advanced.
+ */
+export function ffMergeMain(dir, env = process.env) {
+  const before = runGit(['rev-parse', '--short', 'main'], { cwd: dir, env, allowFail: true })
+  runGit(['merge', '--ff-only', 'origin/main'], { cwd: dir, env, allowFail: true })
+  const after = runGit(['rev-parse', '--short', 'main'], { cwd: dir, env, allowFail: true })
+  return before !== null && after !== null && before !== after
+}
+
+/**
  * Turn a scaffolded project folder (scaffoldProject output) into its own
  * repo, nested inside and ignored by the org repo (D37). Initial stage
  * commit covers project.json + AGENTS.md. Idempotent.

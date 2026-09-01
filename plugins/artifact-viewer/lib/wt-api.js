@@ -6,8 +6,11 @@
 // doctrine as the D7 org lane, mirrored for worktrees. The org origin is
 // unchanged; .arxa is still never served from it.
 // D90: GET /__arxa/artifacts/tree?dir=… lists one directory of the OPEN org
-// (dot-entries excluded; account/ viewable — write-reserved, not
-// read-forbidden), token bound to the open orgPath.
+// (account/ viewable — write-reserved, not read-forbidden), token bound to
+// the open orgPath. D94 (2026-09-01): only the two internal state dirs
+// (.git/, .arxa/) stay unlisted — every other dot-entry (.github/,
+// .gitignore, …) is a real row, so studio-generated files are visible in
+// the sidebar exactly as they are on GitHub.
 // Session changes: GET /__arxa/artifacts/session-changes?session=… unions
 // the session branch diff-vs-main with dirty worktree state.
 import fs from 'node:fs'
@@ -127,7 +130,8 @@ export function createWorktreeRoute({ env = process.env, secret }) {
 /**
  * GET /__arxa/artifacts/tree?dir=<rel>&avt=<token>
  * Token class 'tree-read' bound to the open orgPath. One directory per call
- * (the sidebar lazy-loads per expand). Dot-entries are never listed.
+ * (the sidebar lazy-loads per expand). D94: only .git/ and .arxa/ are never
+ * listed; all other dot-entries are (GitHub-parity visibility).
  */
 export function createTreeRoute({ env = process.env, secret }) {
   async function handle(req, res) {
@@ -153,7 +157,11 @@ export function createTreeRoute({ env = process.env, secret }) {
       const dirs = []
       const files = []
       for (const name of names.sort()) {
-        if (name.startsWith('.')) continue
+        // D94: hide ONLY the two internal state dirs — .git/ and .arxa/.
+        // Everything else (including .github/, .gitignore, dotfiles) is a
+        // real sidebar row: generated files must be visible here, not only
+        // in the GitHub repo (the 2026-09-01 sync/visibility grill).
+        if (name === '.git' || name === '.arxa') continue
         let isDir = false
         try { isDir = fs.statSync(path.join(abs, name)).isDirectory() } catch { continue }
         ;(isDir ? dirs : files).push(name)

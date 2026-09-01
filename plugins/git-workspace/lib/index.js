@@ -21,7 +21,7 @@ export { GitUnavailableError, probeGit, resetProbe, ensureGit, gitBin } from './
 export { FRAME_JOB, SUBJECT_TYPES, SUBJECT_RE, orgCheckSh, projectCheckSh, ciYml, prTemplate, protectionPayload, settingsPayload, writeFrameFiles } from './frame.js'
 export { createWipWatcher } from './watch.js'
 export { runGit, STAGE_IDENTITY, WIP_IDENTITY } from './run.js'
-export { ORG_GITIGNORE, orgIgnoreFor, isRepo, hasHead, initOrgRepo, initProjectRepo, getOrigin, setOrigin, pushRepo, readSnapshotMarker, snapshotOrgRepo, snapshotWorkerLive, spawnSnapshotOrgRepo } from './repos.js'
+export { ORG_GITIGNORE, orgIgnoreFor, isRepo, hasHead, initOrgRepo, initProjectRepo, getOrigin, setOrigin, pushRepo, fetchRepo, mainSyncState, ffMergeMain, readSnapshotMarker, snapshotOrgRepo, snapshotWorkerLive, spawnSnapshotOrgRepo } from './repos.js'
 export {
   STAGE_BASE_REF,
   WIP_PREFIX,
