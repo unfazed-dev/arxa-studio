@@ -12,18 +12,36 @@
  *
  * Run directly over stdio:  node plugins/mcp-apps/testserver.mjs
  */
+import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const sdk = join(homedir(), '.dsh', 'profiles', 'node_modules', '@modelcontextprotocol', 'sdk', 'dist', 'esm')
-const { McpServer } = await import(pathToFileURL(join(sdk, 'server', 'mcp.js')).href)
-const { StdioServerTransport } = await import(pathToFileURL(join(sdk, 'server', 'stdio.js')).href)
-// zod ships CJS here (`main: ./index.cjs`), so require it rather than
-// guessing an ESM entry that does not exist.
-const require_ = createRequire(join(homedir(), '.dsh', 'profiles', 'node_modules', 'noop.js'))
-const { z } = require_('zod')
+const PROFILE_SDK_ESM = join(homedir(), '.dsh', 'profiles', 'node_modules',
+  '@modelcontextprotocol', 'sdk', 'dist', 'esm')
+
+// Same two-step resolution as lib/index.js's sdk() helper: arxa's own
+// install first, else the operator profile install, else throw. The profile
+// path alone dangles whenever the engine build it points at has been
+// replaced but the profile symlink has not caught up yet.
+async function sdk (...segments) {
+  try {
+    // The package's own exports map already redirects "./*" to
+    // "./dist/esm/*" — do not add a "dist/esm" prefix here, or it doubles.
+    return await import(join('@modelcontextprotocol/sdk', ...segments))
+  } catch { /* not installed here — try the operator profile */ }
+  const op = join(PROFILE_SDK_ESM, ...segments)
+  if (existsSync(op)) return import(pathToFileURL(op).href)
+  throw new Error(`arxa-mcp-apps(testserver): cannot resolve @modelcontextprotocol/sdk/dist/esm/${join(...segments)}`)
+}
+
+const { McpServer } = await sdk('server', 'mcp.js')
+const { StdioServerTransport } = await sdk('server', 'stdio.js')
+// zod ships CJS here (`main: ./index.cjs`); resolve it the standard way,
+// relative to this file, rather than reaching into the operator profile
+// (which was hitting the same dangling-symlink problem as the SDK above).
+const { z } = createRequire(import.meta.url)('zod')
 
 const UI_URI = 'ui://arxa-test/counter'
 

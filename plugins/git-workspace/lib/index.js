@@ -18,7 +18,7 @@
 export const name = 'arxa-git-workspace'
 
 export { GitUnavailableError, probeGit, resetProbe, ensureGit, gitBin } from './probe.js'
-export { FRAME_JOB, SUBJECT_TYPES, SUBJECT_RE, orgCheckSh, projectCheckSh, ciYml, prTemplate, protectionPayload, settingsPayload, writeFrameFiles } from './frame.js'
+export { FRAME_JOB, FRAME_VERSION, SUBJECT_TYPES, SUBJECT_RE, orgCheckSh, projectCheckSh, ciYml, prTemplate, protectionPayload, settingsPayload, writeFrameFiles, frameStatus, frameFileState } from './frame.js'
 export { createWipWatcher } from './watch.js'
 export { runGit, STAGE_IDENTITY, WIP_IDENTITY } from './run.js'
 export { ORG_GITIGNORE, orgIgnoreFor, isRepo, hasHead, initOrgRepo, initProjectRepo, getOrigin, setOrigin, pushRepo, fetchRepo, mainSyncState, ffMergeMain, readSnapshotMarker, snapshotOrgRepo, snapshotWorkerLive, spawnSnapshotOrgRepo } from './repos.js'

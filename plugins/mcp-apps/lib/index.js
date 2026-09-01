@@ -30,16 +30,30 @@
  * live. That narrowness IS the control, because a capability bridge is
  * invisible to CSP (plan decision 20).
  */
-import { createRequire } from 'node:module'
+import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const PROFILE_MODULES = join(homedir(), '.dsh', 'profiles', 'node_modules')
-const SDK_ESM = join(PROFILE_MODULES, '@modelcontextprotocol', 'sdk', 'dist', 'esm')
+const PROFILE_SDK_ESM = join(homedir(), '.dsh', 'profiles', 'node_modules',
+  '@modelcontextprotocol', 'sdk', 'dist', 'esm')
 
+// Same two-step resolution as plugins/pi-delegate and plugins/gen-ui: arxa's
+// own install first, else the operator install this machine already carries
+// (read-only reuse). The profile's copied node_modules is engine-managed and
+// can dangle for a window between a build being replaced and the profile
+// symlink catching up — going straight to it with no fallback (the previous
+// behavior here) meant that window silently zeroed out discovery instead of
+// falling back to arxa's own, already-installed copy.
 async function sdk (...segments) {
-  return import(pathToFileURL(join(SDK_ESM, ...segments)).href)
+  try {
+    // The package's own exports map already redirects "./*" to
+    // "./dist/esm/*" — do not add a "dist/esm" prefix here, or it doubles.
+    return await import(join('@modelcontextprotocol/sdk', ...segments))
+  } catch { /* not installed here — try the operator profile */ }
+  const op = join(PROFILE_SDK_ESM, ...segments)
+  if (existsSync(op)) return import(pathToFileURL(op).href)
+  throw new Error(`arxa-mcp-apps: cannot resolve @modelcontextprotocol/sdk/dist/esm/${join(...segments)}`)
 }
 
 export const name = 'arxa-mcp-apps'

@@ -82,6 +82,7 @@ import {
   sessionStageBoundary,
   rekeySessionsProject,
   writeFrameFiles,
+  FRAME_VERSION,
   settingsPayload,
   protectionPayload,
   wipCommit,
@@ -658,11 +659,32 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       // The files are COMMITTED immediately when HEAD exists — an untracked
       // check.sh would trip the next open's clean-tree gate (D78 lesson).
       // Before HEAD they ride the initial snapshot instead.
+      //
+      // Open is also the MIGRATION point. writeFrameFiles never clobbers, so
+      // a repo created before a generator fix would otherwise keep its old
+      // gate forever — silently, which is the worst kind. `upgrade` refreshes
+      // a stamped file only while its hash still matches what arxa wrote; a
+      // file a human edited comes back `conflicted` and is left alone.
       try {
-        const frOpen = writeFrameFiles(resolved, 'org')
-        if (frOpen.written.length && hasHead(resolved, env)) {
+        const frOpen = writeFrameFiles(resolved, 'org', { upgrade: true })
+        if ((frOpen.written.length || frOpen.upgraded.length) && hasHead(resolved, env)) {
           runGit(['add', 'check.sh', '.github'], { cwd: resolved, allowFail: true })
-          runGit(['commit', '-m', 'chore(ci): add the arxa frame (day-zero checks)'], { cwd: resolved, allowFail: true })
+          runGit(['commit', '-m', frOpen.upgraded.length
+            ? `chore(ci): refresh the arxa frame to v${FRAME_VERSION}`
+            : 'chore(ci): add the arxa frame (day-zero checks)'], { cwd: resolved, allowFail: true })
+        }
+        // Each project is its own repo with its own frame, and nothing else
+        // ever revisits it — wireFrameOnce short-circuits on frameWired — so
+        // without this sweep a project's gate is frozen at whatever version
+        // it was born with. Projects are swept on org open for that reason.
+        for (const p of scanWorkspace(resolved).projects.values()) {
+          try {
+            const fr = writeFrameFiles(p.path, 'project', { upgrade: true })
+            if (fr.upgraded.length && hasHead(p.path, env)) {
+              runGit(['add', 'check.sh', '.github'], { cwd: p.path, allowFail: true })
+              runGit(['commit', '-m', `chore(ci): refresh the arxa frame to v${FRAME_VERSION}`], { cwd: p.path, allowFail: true })
+            }
+          } catch { /* one project's frame must never fail the org open */ }
         }
       } catch { /* frame is best-effort */ }
 
