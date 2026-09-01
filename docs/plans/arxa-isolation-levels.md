@@ -1313,3 +1313,79 @@ The user runs `sbx login`. Then verify, in order: the default network posture
 (`sbx policy ls`, `sbx policy profile ls`), whether skills are shared or imported,
 and a real `--clone` sandbox against a scratch repo to confirm the source is
 read-only.
+
+---
+
+## 22. MEASURED post-login — two more research claims corrected
+
+Signed in as `unfazedhuman`. `sbx ls` now answers. Both remaining L2 questions settled
+against the real CLI.
+
+### ⚠️ 22a. `sbx` is NOT deny-by-default. There is no policy at all until you initialize one.
+
+```
+$ sbx policy ls
+ERROR: global network policy has not been initialized
+  Initialize it with: sbx policy init <allow-all|balanced|deny-all>
+
+$ sbx policy profile ls
+No policy profiles found
+```
+
+`sbx policy init --help`:
+
+> This sets the initial global network policy and **must be run before adding custom
+> allow/deny rules or starting a sandbox for the first time.** It is a one-time setup;
+> once initialized, use `sbx policy reset` to start over.
+
+| Posture | Meaning |
+|---|---|
+| `allow-all` | all outbound traffic allowed |
+| `balanced` | "typical development traffic … such as AI services and package registries" |
+| `deny-all` | all outbound blocked |
+
+**Docker's own example calls `balanced` "recommended".**
+
+**This overturns §4 and §13**, which recorded "default-deny outbound TCP, UDP/ICMP
+blocked" as `sbx`'s *default posture*. Deny-all is an **available** posture, not the
+out-of-box state — and the out-of-box state is *no policy*, with first use forcing a
+choice.
+
+**Consequences for the design:**
+1. **arxa must own this decision explicitly.** If arxa ships L2 and does not
+   initialize the policy, the user's own earlier choice governs — possibly
+   `allow-all`, silently.
+2. The §16 tier table's claim that A5 buys "host-side default-deny egress" is only
+   true **if arxa initializes `deny-all`** (or `balanced` plus deny rules).
+3. It is a **global, one-time** setting, not per-sandbox. Per-sandbox rules — including
+   those from built-in agent kits — apply *on top*. So "per-project egress policy"
+   means global posture + per-sandbox narrowing, and §21 already confirmed a local
+   deny "can only narrow, never widen".
+
+### ✅ 22b. Skills: the store IS shared, but it is empty until explicitly imported
+
+```
+Skills store: ~/Library/Application Support/com.docker.sandboxes/sandboxes/agent-skills
+No skills found. Use 'sbx skills import' to add skills.
+```
+
+`sbx skills import --help`: *"Copy skills from supported agent directories on the host
+into the **persistent store shared by sandboxes**."* Sources scanned, alphabetically,
+first-wins:
+
+```
+~/.agents/skills  ~/.claude/skills  ~/.copilot/skills  ~/.cursor/skills  ~/.factory/skills
+```
+
+**Both earlier accounts were half right.** §13 said the store is "read-write across
+sandboxes by default" and named `--no-share-skills` as the remedy; §21 inferred the
+opposite from the CLI surface. The truth:
+
+- **Shared across sandboxes — yes**, that part of §13 stands.
+- **Populated by default — no.** It is empty until someone runs `sbx skills import`.
+- **`--no-share-skills` does not exist.** The control is simply *not importing*.
+
+**Live relevance:** `~/.claude/skills` exists on this machine and holds the operator's
+own skills. An import would copy them into the shared store, at which point the §13
+cross-contamination concern becomes real. **Until then it is inert.**
+**Recommendation: do not import, and do not have arxa import on the user's behalf.**
