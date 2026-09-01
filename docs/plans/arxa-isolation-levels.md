@@ -70,44 +70,19 @@ system updates and caches — worth clearing, but it does **not** block L1 or L2
 | `agent`, `mcp`, `model` | Docker's own agent-runner surface; relevant to the agent threat model. |
 | `offload`, `buildx`, `compose` | build/run plumbing. |
 
-### 1a-quater. Open perf question — the VM is not using Apple's Virtualization framework
+### 1a-quater. RETRACTED — `UseVirtualizationFramework: False` is a performance setting, not a security one
 
-`settings-store.json` reports `UseVirtualizationFramework: False` (and
-`UseVirtualizationFrameworkRosetta: False`) on an Apple M4. This matters because
-**VirtioFS — the fast bind-mount path — requires the Apple Virtualization
-framework**. On the older sharing backend, bind mounts are markedly slower.
+An earlier note here treated this as an open security/performance question and
+suggested checking whether enabling VZ + VirtioFS was safe. **That was a misreading.**
 
-Given projects live on an external SSD and would be bind-mounted into containers,
-this is a live performance question, not a footnote. Verify what backend is actually
-in force and whether enabling VZ + VirtioFS is safe here, **before** concluding that
-the named-volume clone pattern (§2b) is required — it may be a workaround for a
-setting we can simply turn on.
+The flag selects **Docker VMM** — Docker Desktop's own hypervisor — for Docker
+Desktop's own Linux VM. It is a performance choice, and it is **orthogonal** to
+`sbx`, `apple/container`, Lima and UTM, all of which drive Apple's Virtualization
+framework directly regardless of this setting. Virtualization is not "off".
+**Do not flip it** on security grounds.
 
-### 1b. Memory
-
-Host 16 GB (Apple M4, 10 cores, macOS 26.6.2); Docker Desktop VM allocated 8.3 GB.
-Simultaneously in play at L1/L2: arxa engine (node), Tauri app, Claude Code, a dev
-container per active session, plus ~10 containers per local Supabase stack.
-**Multiple concurrent project Supabase stacks are not realistic.** Design assumption:
-one local stack at a time, started on demand, stopped at session end.
-
-### 1c. What is installed
-
-| Tool | Status |
-|---|---|
-| `docker` | present — Docker Desktop, server 29.7.2, overlayfs |
-| `colima` | present — alternative runtime, supports a custom disk location |
-| `lima` | present |
-| `supabase` | present — CLI 2.67.1 |
-| `devcontainer` | **absent** — would need installing |
-| `podman` / `orbstack` / `nerdctl` | absent |
-
-### 1d. Prior art and greenfield
-
-- `arxa` (Dart) has `deploy/remote/docker-compose.yml` — **not greenfield**.
-- `arxa-studio` (Node) has nothing container-related at all.
-- No `supabase/config.toml` anywhere under `/Volumes/business_ssd` — per-project
-  database is greenfield, nothing to migrate.
+The bind-mount performance question in §2b remains open on its own merits, but it is
+a Docker Desktop file-sharing question, not this flag.
 
 ## 2. Research findings
 
@@ -805,3 +780,75 @@ granularity matters more than the cost of running a private CA.
 path is documented-supported and CocoaPods is flagged as the weak link, but this was
 inferred from docs, not tested. **Proof-of-concept required** — it is the difference
 between the agent-free build container being real or theoretical.
+
+---
+
+## 14. L3 via full VMs — verdict: it collapses into L2, and DIY is a regression
+
+Researched against `apple/container`, Lima, Colima, UTM and Apple's Virtualization
+framework. **There is no meaningful isolation tier above L2 on this hardware.**
+
+### Why
+
+**Every candidate rides the same Virtualization.framework that `sbx` already uses.**
+A VM around a VM is not a higher boundary. For cross-project access and host damage
+the gain is **zero** — L2 is already at the hypervisor boundary.
+
+### Worse: a DIY full VM is a REGRESSION on the one axis that matters
+
+Egress is the discriminator (§13), and the DIY options are weaker on it:
+
+| Option | Egress posture |
+|---|---|
+| **`sbx`** | **default-deny all outbound TCP; UDP/ICMP blocked at the network layer; policy enforced HOST-side, outside the agent's reach** |
+| `apple/container` | every container gets a **routable vmnet IP**. Its only isolation primitive is network-to-network — "a container on one network has no connectivity to containers on other networks". No allowlist, no deny-by-default, no policy DNS. |
+| Lima / Colima / UTM | NAT with **full outbound** |
+
+To match `sbx` you would build host-side `pf` rules, a policy resolver and a
+credential proxy yourself. **In-guest firewalls do not count** — the agent has `sudo`
+and `CAP_NET_RAW` inside its own VM and can flush them.
+
+### The one genuine gain is a CI capability, not an isolation tier
+
+A **Lima Ubuntu VM as a self-hosted runner host** makes `container:` and `services:`
+jobs legal, dissolving the §5 constraint. **File this under CI, not security.**
+
+Two caveats before building on it:
+- **The runner would be ARM64**, and Virtualization.framework cannot run an Intel
+  guest on Apple silicon. Every image used in a `container:`/`services:` block needs
+  an arm64 variant or it runs emulated. **Check the actual images first.**
+- GitHub's docs list "ARM64 — Linux, macOS, Windows (currently in public preview)".
+  Whether the preview label covers ARM64 **Linux** is ambiguous. One check needed.
+
+### `apple/container` — track it as a CHEAPER L2, not a tier above
+
+Apache-2.0, v1.3.1 (2026-08-29), requires macOS 26 + Apple silicon — **this box
+qualifies**. Free commercially, no subscription tier.
+
+**Its real attraction is memory: ~1 GiB per container VM, versus `sbx`'s 8 GiB
+default on this 16 GiB machine.** Blocked today on the missing egress control.
+Revisit if Apple ships one.
+
+### ⚠️ Operational finding — `sbx` concurrency will exhaust this machine
+
+**Two `sbx` sandboxes at stock defaults claim 16 GiB — 100 % of this machine's RAM.**
+Any concurrent-session design must pass an explicit `-m`. This is a **tuning
+requirement for L2**, not an argument for L3, and it compounds §1b's one-Supabase-
+stack-at-a-time constraint.
+
+### Licences — all free for commercial use
+
+`apple/container` Apache-2.0 · Lima Apache-2.0 · Colima MIT · UTM Apache-2.0 (the
+App Store listing is identical; it funds the project) · Virtualization.framework is
+part of macOS · `sbx` free including commercial, with only org governance paid.
+
+### Recommendation
+
+**Keep L0 / L1 / L2. Do not build an L3 from VMs.** Instead **tune L2**: explicit
+`-m`, tighter per-project `sbx policy`, and `--clone` with **secrets kept outside the
+working tree** — clone mode blocks *modification*, not *inspection*. Separately,
+stand up one Lima Ubuntu VM as a CI runner host.
+
+**Rigor caveat:** `sbx` and `container` are not installed here, so the above is
+documented behaviour, not measured. No startup-time numbers are asserted because no
+vendor publishes them.
