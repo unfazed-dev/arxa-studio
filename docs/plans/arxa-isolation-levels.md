@@ -2266,3 +2266,48 @@ settled (frozen `structure.json` is the scaffolder's only input), not pending.
 **The sequencing came from the owner directly (S5) and stands on that authority** — it
 simply is not written in the arxa docs. Worth recording so nobody later looks for a
 doc that does not exist.
+
+### ⚠️ 28e. MEASURED — arxa's version record is a schema, not a working system
+
+Before recommending "align to arxa's existing model", I opened the live file
+(`arxa/designs/arxa-studio-v2/_d_meta.json`). It is **structurally present and
+behaviourally unused**:
+
+```
+top-level keys       : type, designSystems, primaryDesignSystem, ladder, assets
+assets               : 12
+total versions       : 12          <- exactly one per asset
+assets with >1 version: 0          <- the versions[] array has NEVER accumulated
+status counts        : {'needs-review': 12}   <- 100% default; no approved, no changes-requested
+asset-level keys     : []          <- all metadata lives per-version
+```
+
+**Every asset has exactly one version. No status has ever moved off the default.**
+The `--inherit-from` grouping path and the `approved` / `changes-requested` states are
+implemented and never exercised.
+
+**This is the fifth instance of the same pattern**, and it changes the plan's risk
+calculus materially:
+
+| # | Mechanism | State |
+|---|---|---|
+| B8 | runner-asleep CTA | computed, never rendered |
+| B11 | project CI gate | cannot fail |
+| B12 | studio `versions.json` | no caller; file exists nowhere on disk |
+| B13 | project `formatStamp` | written, never read |
+| **28e** | **arxa `_d_meta.json` versions** | **schema exercised once per asset, states never used** |
+
+**The correction to my own reasoning:** §28a treated arxa's model as the proven system
+to align studio to. It is not proven — it is a *second unexercised design*. Aligning
+one unwired system to another unwired system produces confidence that neither has
+earned.
+
+**What this means practically.** Alignment is still right — two competing vocabularies
+would be worse — but it must be done with eyes open:
+1. **Neither side's state machine has ever run.** The first implementation exercises
+   both for the first time, so budget for the states being wrong, not just unwired.
+2. **The `versions[]` array has never held two entries.** Grouping via `--inherit-from`
+   is untested against real data; test it before depending on it.
+3. **`needs-review` being 100% of live data** means the default is the only value the
+   system has ever seen. Any code that branches on status is, today, dead in one
+   direction.
