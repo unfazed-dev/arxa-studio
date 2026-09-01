@@ -19,30 +19,69 @@ Companion to `git-card-sessions-worktree-rewire.md` (the CI/CD plan this must no
 
 These bind harder than anything the research can recommend.
 
-### 1a. BLOCKER — the internal disk is 99% full
+### 1a. NOT a blocker — Docker's disk is already on the roomy volume (corrected)
+
+**An earlier reading of this was wrong and is retracted.** I saw a 238 G `Docker.raw`
+under `~/Library/Containers/com.docker.docker/Data/vms/0/data/` and concluded Docker
+was writing to the 99 %-full boot disk. It is not.
 
 ```
-/System/Volumes/Data   228Gi total   3.4Gi avail   99%   <- Docker's VM disk lives here
-/Volumes/developer_ssd 238Gi total    11Gi avail         <- repos
-/Volumes/business_ssd  238Gi total   184Gi avail         <- orgs + projects
+~/Library/.../Data/vms/0/data  ->  /Volumes/business_ssd/docker/DockerDesktop   (SYMLINK, since Jun 3)
 ```
 
-Docker Desktop's disk is `~/Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw`
-(sparse, 238 G max) on the internal volume. Current usage is trivial — 2 images /
-597 MB, 1 container, 1 volume, 1.02 GB build cache — so nothing has been pulled yet
-and **there is no headroom to pull anything**.
+Proof, three independent ways: both paths report the **same dev+inode**
+(`dev=16777246 ino=6908`); `dev=16777246` maps to `/Volumes/business_ssd`
+(boot disk is `16777234`); and `lsof` shows the live `com.docker` process holding
+`/Volumes/business_ssd/docker/DockerDesktop/Docker.raw`.
 
-Against 3.4 GiB free: `devcontainers/base` ~1 GB · Dart SDK ~1–2 GB ·
-Flutter + Android ~3–5 GB+ · Supabase local stack (~10 containers) several GB.
-**A single Flutter dev container alone exceeds free space.**
+**Actual headroom is ample:**
 
-**Prerequisite, user action, outside the code** — same class as the GitHub
-`workflow`-scope re-link:
-1. Relocate Docker Desktop's disk image onto `business_ssd` (184 GiB free), or
-2. use `colima` (already installed) with its VM disk there, or
-3. reclaim internal disk space.
+```
+/Volumes/business_ssd          238Gi total   184Gi free   23% used
+in-VM rootfs (docker's view)   233.7G total  218.8G free
+current usage: 3 images/597MB · 1 container · 1 volume/254MB · 1.02GB build cache
+```
 
-Nothing at L1 or L2 can be built or tested until one of these is done.
+A Flutter image, a Dart image and a Supabase stack all fit comfortably. **No
+prerequisite, no user action, nothing gated on disk.**
+
+**Separately true, and not a Docker problem:** the boot disk is at
+`3.4Gi free / 99% capacity`. That is real machine-health debt and will bite Xcode,
+system updates and caches — worth clearing, but it does **not** block L1 or L2.
+
+### 1a-bis. Docker Sandboxes — L2 has a concrete product, and it is not installed
+
+- `docker sandbox` (the old subcommand) is **deprecated and removed**; the CLI now
+  says *"Please migrate to Docker Sandboxes"*.
+- The successor ships as a separate `sbx` CLI. **`sbx` is ABSENT here**, as is
+  `cagent`. Installing it is a prerequisite for evaluating L2 — a small one.
+- **Docker Desktop is 4.88.1**, comfortably past the 4.60 threshold at which
+  sandboxes run in dedicated microVMs rather than plain containers. So the
+  L1-vs-L2 distinction has a real mechanism available on this machine.
+
+### 1a-ter. Docker plugins already present that bear on this design
+
+`docker --help` lists, among others:
+
+| Plugin | Why it matters here |
+|---|---|
+| `pass` | **Docker Pass Secrets Manager (beta)** — cross-check against the secrets research before inventing our own. |
+| `dhi` | **Docker Hardened Images** — directly relevant to what "hardened container" means at L1. |
+| `agent`, `mcp`, `model` | Docker's own agent-runner surface; relevant to the agent threat model. |
+| `offload`, `buildx`, `compose` | build/run plumbing. |
+
+### 1a-quater. Open perf question — the VM is not using Apple's Virtualization framework
+
+`settings-store.json` reports `UseVirtualizationFramework: False` (and
+`UseVirtualizationFrameworkRosetta: False`) on an Apple M4. This matters because
+**VirtioFS — the fast bind-mount path — requires the Apple Virtualization
+framework**. On the older sharing backend, bind mounts are markedly slower.
+
+Given projects live on an external SSD and would be bind-mounted into containers,
+this is a live performance question, not a footnote. Verify what backend is actually
+in force and whether enabling VZ + VirtioFS is safe here, **before** concluding that
+the named-volume clone pattern (§2b) is required — it may be a workaround for a
+setting we can simply turn on.
 
 ### 1b. Memory
 
@@ -121,7 +160,7 @@ Official guidance for large repos on macOS is the **Clone Repository in Containe
 Volume** pattern: put the source in a *named Docker volume* rather than a host bind
 mount, because bind mounts are slow through the VM boundary.
 
-But a named volume lives inside `Docker.raw`, **on the 99 %-full internal disk** —
+But a named volume lives inside `Docker.raw` — which §1a now shows is on `business_ssd`, not the boot disk —
 while the projects currently live on `business_ssd`, the volume with 184 GiB free.
 So the recommended performance pattern would move client source code from the roomy
 disk onto the full one, and does so invisibly.
