@@ -674,11 +674,31 @@
 				]
 			});
 		}
+		/**
+		 * D97: fold the org.sync sweep (org repo + every project repo) into
+		 * ONE row badge. A failure ANYWHERE wins the label — the whole point
+		 * of a manual sync door is that a refused push is SEEN, so a green
+		 * "in sync" must never paint over a "push-failed: … without workflow
+		 * scope". The engine's raw status words ride the tooltip untranslated
+		 * (diagnostic vocabulary, not UI copy).
+		 */
+		const ARXA_SYNC_BAD = /^(push-failed|error|fetch-failed|no-creds|diverged|no-manifest)/;
+		function arxaSyncSummary(rows) {
+			const list = Array.isArray(rows) ? rows : [];
+			const detail = list.map((r) => (r.slug || "org") + ": " + r.status).join("\n");
+			const bad = list.find((r) => ARXA_SYNC_BAD.test(String(r.status)));
+			if (bad) return { key: "rows.sync.failed", detail, bad: true };
+			const pushed = list.filter((r) => r.status === "pushed" || r.status === "pulled").length;
+			return { key: pushed ? "rows.sync.pushed" : "rows.sync.ok", detail: detail || "nothing to sync", bad: false };
+		}
 		function OrgContainerRow({ d, offset }) {
 			const expandedMap = useOrg((s) => s.expanded ?? {});
 			const isOrg = d.kind === "org";
 			const open = !!expandedMap[d.key];
 			const [menuOpen, setMenuOpen] = (0, react.useState)(false);
+			// D97: last sync outcome for THIS row — null (never synced this
+			// session) | { busy: true } | { key, detail, bad }.
+			const [syncState, setSyncState] = (0, react.useState)(null);
 			// D80: BOTH row kinds carry a menu; D80 scope fix: ONLY org + project
 			// rows — fixed docks (Meetings/Account/…) and containers are
 			// infrastructure, never renamable. D82: every row gets a proper
@@ -692,6 +712,10 @@
 			const items = isOrg ? [
 				{ id: "rename", label: orgT("menu.org.rename"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconEditOutline16, {}) },
 				{ id: "open", label: orgT("menu.org.open"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) },
+				// D97: org rows ONLY — org.sync sweeps the org AND every project
+				// under it, so on a project row the same item would silently do
+				// far more than its label promises.
+				{ id: "sync", label: orgT("menu.org.sync"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconRefreshOutline16, {}) },
 				d.connected === false ? { id: "connect", label: orgT("menu.org.connect"), icon: ghMark16 } : { id: "disconnect", label: orgT("menu.org.disconnect"), icon: ghMark16 },
 				{ type: "separator", id: "sep-org-trash" },
 				{ id: "trash", label: orgT("menu.org.trash"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}), danger: true }
@@ -703,6 +727,16 @@
 			const onSelect = (id) => {
 				setMenuOpen(false);
 				if (id === "open") orgStore.mutate("org.open", { orgId: d.orgId }).catch(() => {});
+				// D97: NOT orgStore.mutate — mutate() throws the result away
+				// (`.then((r) => refresh())`), and the sweep’s per-repo status IS
+				// the deliverable here. ORG_POST direct, then refresh by hand so a
+				// push that moved main repaints the rows.
+				else if (id === "sync" && isOrg) {
+					setSyncState({ busy: true });
+					ORG_POST("org.sync", { orgId: d.orgId })
+						.then((b) => { setSyncState(arxaSyncSummary(b.result)); return orgStore.refresh(); })
+						.catch((e) => setSyncState({ key: "rows.sync.failed", detail: String(e?.message ?? e), bad: true }));
+				}
 				else if (id === "connect" && isOrg) window.dispatchEvent(new CustomEvent("arxa-publish-org", { detail: { orgId: d.orgId, orgName: d.label || d.orgId } }));
 			else if (id === "connect") window.dispatchEvent(new CustomEvent("arxa-publish-org", { detail: { orgId: d.orgId, projectSlug: d.slug, orgName: d.label || d.orgId, projectName: d.label || d.slug } }));
 			else if (id === "disconnect" && isOrg) window.dispatchEvent(new CustomEvent("arxa-disconnect-github", { detail: { kind: "org", orgId: d.orgId, name: d.label || d.orgId, slug: d.slug || "" } }));
@@ -751,6 +785,16 @@
 						title: orgT("rows.ghSynced"),
 						style: { display: "inline-flex", alignItems: "center", marginLeft: 6, opacity: 0.55, flex: "none" },
 						children: ghMark16
+					}) : null,
+					// D97: the sync outcome sits beside the GitHub mark. A failure paints
+					// in the error alias and STAYS until the next sync — a manual sync door
+					// whose refusal is invisible is worse than no door. Raw per-repo status
+					// words ride the tooltip.
+					syncState ? (0, react_jsx_runtime.jsx)("span", {
+						title: syncState.detail || undefined,
+						"data-arxa-sync": syncState.busy ? "busy" : syncState.bad ? "failed" : "ok",
+						style: { fontSize: 11, flex: "none", marginLeft: 6, marginRight: 2, opacity: syncState.bad ? 1 : 0.55, color: syncState.bad ? "var(--dsw-alias-label-error)" : undefined },
+						children: orgT(syncState.busy ? "rows.sync.busy" : syncState.key)
 					}) : null,
 					d.count > 0 ? (0, react_jsx_runtime.jsx)("span", {
 						style: { fontSize: 11, opacity: 0.55, flex: "none", marginRight: 4 },
@@ -1948,6 +1992,11 @@
 			"tree.pc.moodboard": "Moodboard",
 			"tree.pc.scaffold": "Scaffold",
 			"menu.org.open": "Open organisation",
+			"menu.org.sync": "Sync with GitHub",
+			"rows.sync.busy": "Syncing…",
+			"rows.sync.ok": "In sync",
+			"rows.sync.pushed": "Synced",
+			"rows.sync.failed": "Sync failed",
 			"menu.org.newProject": "New project",
 			"menu.org.connect": "Connect to GitHub",
 			"menu.org.disconnect": "Disconnect GitHub…",
@@ -2117,6 +2166,11 @@
 			"tree.pc.moodboard": "Moodboard",
 			"tree.pc.scaffold": "Scaffold",
 			"menu.org.open": "Otwórz organizację",
+			"menu.org.sync": "Synchronizuj z GitHub",
+			"rows.sync.busy": "Synchronizowanie…",
+			"rows.sync.ok": "Zsynchronizowano",
+			"rows.sync.pushed": "Zsynchronizowano",
+			"rows.sync.failed": "Błąd synchronizacji",
 			"menu.org.newProject": "Nowy projekt",
 			"menu.org.connect": "Połącz z GitHub",
 			"menu.org.disconnect": "Odłącz GitHub…",
@@ -2286,6 +2340,11 @@
 			"tree.pc.moodboard": "Moodboard",
 			"tree.pc.scaffold": "Scaffold",
 			"menu.org.open": "Ouvrir l’organisation",
+			"menu.org.sync": "Synchroniser avec GitHub",
+			"rows.sync.busy": "Synchronisation…",
+			"rows.sync.ok": "Synchronisé",
+			"rows.sync.pushed": "Synchronisé",
+			"rows.sync.failed": "Échec de la synchronisation",
 			"menu.org.newProject": "Nouveau projet",
 			"menu.org.connect": "Connecter à GitHub",
 			"menu.org.disconnect": "Déconnecter GitHub…",

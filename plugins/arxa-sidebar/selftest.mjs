@@ -457,5 +457,27 @@ check('create: D90 fragment children EVALUATE to 6 elements (guards the ASI call
     return arr.length === 6 && arr[4] && arr[4].ok === true;
   } catch { return false; }
 })())
+// ---- D97: manual sync door — the org-row affordance for org.sync ----
+check('sync: D97 item is org-rows-ONLY and calls ORG_POST direct (mutate discards the result)',
+  client.includes('{ id: "sync", label: orgT("menu.org.sync")') &&
+  client.includes('else if (id === "sync" && isOrg)') &&
+  client.includes('ORG_POST("org.sync", { orgId: d.orgId })') &&
+  !client.includes('orgStore.mutate("org.sync"') &&
+  !client.includes('menu.project.sync'))
+check('sync: D97 a failure ANYWHERE wins the badge — no green over a refused push', (() => {
+  const m = client.match(/const ARXA_SYNC_BAD = (\/.*?\/);/)
+  if (!m) return false
+  const bad = new RegExp(m[1].slice(1, -1))
+  const sweep = [{ status: "pushed" }, { slug: "project-001", status: "push-failed: OAuth App without workflow scope" }]
+  return sweep.some((r) => bad.test(r.status)) && !bad.test("in-sync") && !bad.test("pushed") && !bad.test("local")
+})())
+check('sync: D97 badge paints the error alias and carries the raw per-repo detail',
+  client.includes('"data-arxa-sync": syncState.busy ? "busy" : syncState.bad ? "failed" : "ok"') &&
+  client.includes('var(--dsw-alias-label-error)') &&
+  client.includes('title: syncState.detail || undefined'))
+check('sync: D97 strings localized (en + pl + fr)',
+  ["Sync with GitHub", "Synchronizuj z GitHub", "Synchroniser avec GitHub",
+   "Sync failed", "Błąd synchronizacji", "Échec de la synchronisation"].every((v) => client.includes('": "' + v + '"')))
+
 console.log(failures === 0 ? '\narxa-sidebar selftest: ALL GREEN' : `\narxa-sidebar selftest: ${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)
