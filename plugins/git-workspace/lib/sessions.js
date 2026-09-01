@@ -56,6 +56,7 @@ import { ensureGit } from './probe.js'
 import { runGit, STAGE_IDENTITY } from './run.js'
 import { wipCommit, stageBoundarySquash, STAGE_BASE_REF } from './commits.js'
 import { getOrigin } from './repos.js'
+import { projectRepos } from './routing.js'
 
 export const SESSION_BRANCH_PREFIX = 'arxa/session/'
 export const SESSION_BASE_PREFIX = 'refs/arxa/session-base/'
@@ -80,9 +81,19 @@ export class SessionMergeError extends Error {
 
 // ---- registry (repo-local state, travels nowhere) --------------------------
 
+// The common dir for a given working directory never changes while that
+// directory exists, but D98 aggregation reads N+1 registries per sidebar
+// handler — one `git rev-parse` spawn each, five handlers deep. Memoise, and
+// invalidate by existence so a deleted/recreated repo recomputes.
+const commonDirCache = new Map()
+
 function gitCommonDir(repoPath, env) {
+  const hit = commonDirCache.get(repoPath)
+  if (hit && fs.existsSync(hit)) return hit
   const out = runGit(['rev-parse', '--git-common-dir'], { cwd: repoPath, env })
-  return path.resolve(repoPath, out)
+  const resolved = path.resolve(repoPath, out)
+  commonDirCache.set(repoPath, resolved)
+  return resolved
 }
 
 function registryPath(repoPath, env) {
@@ -109,6 +120,65 @@ function getSession(registry, id) {
   return s
 }
 
+// ---- repo discovery (D98) --------------------------------------------------
+//
+// Once sessions live in the repo their workspace routes to, an id alone no
+// longer says WHICH registry holds it. Every id-keyed face gains this
+// preamble: try the repo it was handed, then the project repos nested under
+// it, then give up and let the caller's own `unknown session` error stand.
+//
+// A project repo has no `projects/` subdirectory, so calling this with a
+// project path falls through after the first read — the preamble is free
+// there and correct at the org.
+
+function registryHasId(repoPath, id, env) {
+  try {
+    return readRegistry(repoPath, env).sessions.some((s) => s.id === id)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The repo whose registry holds `id`. Falls back to `repoPath` unchanged when
+ * nothing matches, so the caller raises its usual `unknown session "<id>"`.
+ */
+export function sessionRepoFor(repoPath, id, env = process.env) {
+  if (registryHasId(repoPath, id, env)) return repoPath
+  for (const { repoPath: p } of projectRepos(repoPath, env)) {
+    if (registryHasId(p, id, env)) return p
+  }
+  return repoPath
+}
+
+/**
+ * Every session across the org registry and all project registries, each row
+ * tagged with the repo it came from (D98 / project-sessions-physical.md).
+ *
+ * Rows carry `repoPath` (the owning working directory), `origin` ('org' |
+ * 'project') and `projectSlug`. Session ids are minted as
+ * `s-<base36 time>-<random>` so they stay unique across registries without
+ * coordination — aggregation never has to reconcile a collision.
+ *
+ * Registry order within a repo is preserved; org rows come first, then
+ * projects in slug order.
+ */
+export function parkedSessions(orgPath, env = process.env) {
+  const out = []
+  const take = (repoPath, origin, projectSlug) => {
+    let rows
+    try {
+      rows = readRegistry(repoPath, env).sessions
+    } catch {
+      return // not a repo, or no registry yet — nothing to aggregate
+    }
+    for (const s of rows) out.push({ ...s, repoPath, origin, projectSlug: s.project ?? projectSlug ?? null })
+  }
+  take(orgPath, 'org', null)
+  for (const { slug, repoPath } of projectRepos(orgPath, env)) take(repoPath, 'project', slug)
+  return out
+}
+
 /** All sessions for a repo (registry order). */
 export function listSessions(repoPath, env = process.env) {
   return readRegistry(repoPath, env).sessions
@@ -133,6 +203,7 @@ export function archivedSessionIds(repoPath, env = process.env) {
  * rest of the module.
  */
 export function annotateSession(repoPath, id, fields, env = process.env) {
+  repoPath = sessionRepoFor(repoPath, id, env) // D98 repo-discovery preamble
   const registry = readRegistry(repoPath, env)
   const session = getSession(registry, id)
   Object.assign(session, fields)
@@ -342,6 +413,7 @@ function parkSession(repoPath, id, reason, env) {
  * @returns {{ squashed, sha, gate, merged, parked, session }}
  */
 export function sessionStageBoundary(repoPath, id, { message, env = process.env } = {}) {
+  repoPath = sessionRepoFor(repoPath, id, env) // D98: merge into the OWNING repo's main
   const registry = readRegistry(repoPath, env)
   const session = getSession(registry, id)
   if (session.state !== 'open') {
@@ -394,7 +466,7 @@ export function sessionStageBoundary(repoPath, id, { message, env = process.env 
 
 /** User holds a session's work back from main (parks it; D40: never deleted). */
 export function holdSession(repoPath, id, env = process.env) {
-  return parkSession(repoPath, id, 'held', env)
+  return parkSession(sessionRepoFor(repoPath, id, env), id, 'held', env) // D98 preamble
 }
 
 // ---- archive / revive ------------------------------------------------------
@@ -408,6 +480,7 @@ export function holdSession(repoPath, id, env = process.env) {
  * @returns {{ id, state, branch }}
  */
 export function archiveSession(repoPath, id, env = process.env) {
+  repoPath = sessionRepoFor(repoPath, id, env) // D98 repo-discovery preamble
   const registry = readRegistry(repoPath, env)
   const session = getSession(registry, id)
   if (session.state === 'archived') return session
@@ -431,6 +504,7 @@ export function archiveSession(repoPath, id, env = process.env) {
  * @returns {{ id, state, worktree }}
  */
 export function reviveSession(repoPath, id, env = process.env) {
+  repoPath = sessionRepoFor(repoPath, id, env) // D98 repo-discovery preamble
   const registry = readRegistry(repoPath, env)
   const session = getSession(registry, id)
   if (session.state === 'open') return session

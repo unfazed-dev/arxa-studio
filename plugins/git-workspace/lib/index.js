@@ -20,6 +20,15 @@ export const name = 'arxa-git-workspace'
 export { GitUnavailableError, probeGit, resetProbe, ensureGit, gitBin } from './probe.js'
 export { FRAME_JOB, FRAME_VERSION, SUBJECT_TYPES, SUBJECT_RE, orgCheckSh, projectCheckSh, ciYml, prTemplate, protectionPayload, settingsPayload, writeFrameFiles, frameStatus, frameFileState } from './frame.js'
 export { createWipWatcher } from './watch.js'
+export {
+  DOCK_ROUTES,
+  ROUTING_REASONS,
+  INITIAL_SNAPSHOT_PENDING,
+  RoutingRefusedError,
+  routeDock,
+  resolveSessionRepo,
+  projectRepos,
+} from './routing.js'
 export { runGit, STAGE_IDENTITY, WIP_IDENTITY } from './run.js'
 export { ORG_GITIGNORE, orgIgnoreFor, isRepo, hasHead, initOrgRepo, initProjectRepo, getOrigin, setOrigin, pushRepo, fetchRepo, mainSyncState, ffMergeMain, readSnapshotMarker, snapshotOrgRepo, snapshotWorkerLive, spawnSnapshotOrgRepo } from './repos.js'
 export {
@@ -48,6 +57,8 @@ export {
   SESSION_STATES,
   SessionMergeError,
   listSessions,
+  parkedSessions,
+  sessionRepoFor,
   archivedSessionIds,
   annotateSession,
   nextSessionName,

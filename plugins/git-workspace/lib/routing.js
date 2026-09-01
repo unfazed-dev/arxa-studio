@@ -1,0 +1,177 @@
+// Session → repo routing (D98, D99).
+//
+// A session's workspace row names WHICH repo owns its branch and worktree.
+// Before this module the answer was always the org repo, so a project-scoped
+// session's commits landed in org history and the project repo never saw the
+// work — bug B2. The fix is a table, not a heuristic:
+//
+//   projects/<slug>/**               -> <org>/projects/<slug>   (project repo)
+//   notes|meetings|communications/** -> <org>                   (org repo)
+//   account/**                       -> REFUSE (D37: billing artefacts never
+//                                       enter git; account/ is gitignored on
+//                                       purpose, so it gets no repo and no
+//                                       sessions)
+//   unknown dock                     -> REFUSE
+//
+// **The silent org fallback IS B2.** There is no default branch in this table:
+// an unrecognised dock refuses loudly rather than quietly parking work in the
+// org repo where nobody looks for it. Every refusal carries a machine-readable
+// `reason` so callers can render the right human copy.
+
+import fs from 'node:fs'
+import path from 'node:path'
+
+import { isRepo, hasHead } from './repos.js'
+
+/**
+ * The routing table itself, exported so tests and future docks read the same
+ * source of truth the resolver does. `kind`:
+ *   'project' — the dock's second segment is a project slug naming a nested repo
+ *   'org'     — the dock lives directly in org history
+ *   'refuse'  — the dock exists but deliberately has no repo
+ */
+export const DOCK_ROUTES = Object.freeze([
+  Object.freeze({ dock: 'projects', kind: 'project' }),
+  Object.freeze({ dock: 'notes', kind: 'org' }),
+  Object.freeze({ dock: 'meetings', kind: 'org' }),
+  Object.freeze({ dock: 'communications', kind: 'org' }),
+  Object.freeze({ dock: 'account', kind: 'refuse', reason: 'account' }),
+])
+
+/** Refusal reasons, in the order the resolver can raise them. */
+export const ROUTING_REASONS = Object.freeze(['account', 'unknown-dock', 'no-head'])
+
+/**
+ * The no-HEAD refusal reuses lifecycle.js's session wording byte-for-byte
+ * (`lifecycle.js:966/1025/1047`). The sidebar client keys on the PREFIX only
+ * (`client.js:4048`: `indexOf("initial-snapshot-pending") === 0`), so keeping
+ * one constant string keeps every existing assertion green while `git worktree
+ * add` never gets to fail raw.
+ */
+export const INITIAL_SNAPSHOT_PENDING =
+  'initial-snapshot-pending: the first git snapshot of this organisation is still running — sessions unlock the moment it completes'
+
+/** Typed, loud routing refusal. `reason` is one of ROUTING_REASONS. */
+export class RoutingRefusedError extends Error {
+  constructor(reason, message, { workspace = null, repoPath = null } = {}) {
+    super(message)
+    this.name = 'RoutingRefusedError'
+    this.reason = reason
+    this.workspace = workspace
+    this.repoPath = repoPath
+  }
+}
+
+const SEGMENT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+/**
+ * Pure table lookup: workspace string → { kind, slug, dock }. No filesystem,
+ * no git — so the table is testable on its own.
+ *
+ * Throws RoutingRefusedError('account') / ('unknown-dock').
+ *
+ * @param {string} workspace e.g. 'notes', 'meetings/scheduler', 'projects/POLO/design'
+ */
+export function routeDock(workspace) {
+  const ws = typeof workspace === 'string' ? workspace.trim() : ''
+  if (ws === '') {
+    throw new RoutingRefusedError(
+      'unknown-dock',
+      'unknown-dock: a session is born in a workspace row (a dock container or a project container) — an empty workspace routes nowhere',
+      { workspace },
+    )
+  }
+  const parts = ws.split('/').filter(Boolean)
+  const dock = parts[0]
+  const route = DOCK_ROUTES.find((r) => r.dock === dock)
+  if (!route) {
+    throw new RoutingRefusedError(
+      'unknown-dock',
+      `unknown-dock: "${ws}" names no known dock — sessions route by table (${DOCK_ROUTES.map((r) => r.dock).join(', ')}) and never fall back to the org repo (D99)`,
+      { workspace: ws },
+    )
+  }
+  if (route.kind === 'refuse') {
+    throw new RoutingRefusedError(
+      route.reason,
+      `account: "${ws}" lives under account/, which is gitignored on purpose (D37 — billing artefacts must never enter org history). It gets no repo and no sessions.`,
+      { workspace: ws },
+    )
+  }
+  if (route.kind === 'org') return { kind: 'org', slug: null, dock }
+  // project: the second segment is the slug and is mandatory.
+  const slug = parts[1]
+  if (!slug || !SEGMENT_RE.test(slug)) {
+    throw new RoutingRefusedError(
+      'unknown-dock',
+      `unknown-dock: "${ws}" is under projects/ but names no project slug — a project session needs projects/<slug>/<container>`,
+      { workspace: ws },
+    )
+  }
+  return { kind: 'project', slug, dock }
+}
+
+/**
+ * Resolve a workspace row to the repo that owns its sessions.
+ *
+ * @param {string} orgPath   the open org's directory
+ * @param {string} workspace the workspace row key
+ * @param {object} [opts]
+ * @param {object} [opts.env]         env for git calls
+ * @param {boolean} [opts.requireHead=true]  refuse when the target has no HEAD
+ *   — `git worktree add` needs a commit to branch from, and a project created
+ *   moments ago may not have one yet. Refuse with the human reason rather than
+ *   letting worktree add fail raw.
+ * @returns {{ repoPath: string, kind: 'org'|'project', slug?: string }}
+ *   `repoPath` is a WORKING DIRECTORY (what runGit's cwd wants), not a .git path.
+ */
+export function resolveSessionRepo(orgPath, workspace, { env = process.env, requireHead = true } = {}) {
+  if (typeof orgPath !== 'string' || orgPath === '') {
+    throw new TypeError('resolveSessionRepo: orgPath must be a non-empty path string')
+  }
+  const route = routeDock(workspace)
+  if (route.kind === 'org') {
+    if (requireHead && !hasHead(orgPath, env)) {
+      throw new RoutingRefusedError('no-head', INITIAL_SNAPSHOT_PENDING, { workspace, repoPath: orgPath })
+    }
+    return { repoPath: orgPath, kind: 'org' }
+  }
+  const repoPath = path.join(orgPath, 'projects', route.slug)
+  if (!fs.existsSync(repoPath)) {
+    throw new RoutingRefusedError(
+      'unknown-dock',
+      `unknown-dock: no project "${route.slug}" in this organisation — ${repoPath} does not exist`,
+      { workspace, repoPath },
+    )
+  }
+  // A project directory that is not yet its own repo is the same human
+  // situation as a repo without HEAD: the first snapshot has not landed.
+  if (requireHead && (!isRepo(repoPath, env) || !hasHead(repoPath, env))) {
+    throw new RoutingRefusedError('no-head', INITIAL_SNAPSHOT_PENDING, { workspace, repoPath })
+  }
+  return { repoPath, kind: 'project', slug: route.slug }
+}
+
+/**
+ * Every project directory under `<orgPath>/projects/` that is its own repo,
+ * as `{ slug, repoPath }`. The scan shape follows workspace-index/lib/scan.js
+ * (`<org>/projects/<slug>/`). Missing or unreadable projects dir → [].
+ */
+export function projectRepos(orgPath, env = process.env) {
+  const dir = path.join(orgPath, 'projects')
+  let entries
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  const out = []
+  for (const e of entries) {
+    if (!e.isDirectory()) continue
+    const repoPath = path.join(dir, e.name)
+    if (!isRepo(repoPath, env)) continue
+    out.push({ slug: e.name, repoPath })
+  }
+  out.sort((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0))
+  return out
+}

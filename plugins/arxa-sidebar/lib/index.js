@@ -743,7 +743,12 @@ export function apply(ctx, opts = {}) {
               let branch = 'main'
               let sessionRow = null
               if (sid) {
-                sessionRow = gw.listSessions(cur.path).find((s) => s.id === sid) ?? null
+                // D98: a session id can live in the org registry OR any
+                // project registry. `parkedSessions` merges every repo's
+                // rows (each tagged with its owning `repoPath`); looking
+                // only at the org registry made project sessions
+                // unresolvable — "session-not-found" for work that exists.
+                sessionRow = gw.parkedSessions(cur.path).find((s) => s.id === sid) ?? null
                 if (!sessionRow) throw new Error('session-not-found: ' + sid)
                 repoPath = sessionRow.worktree
                 branch = sessionRow.branch
@@ -801,7 +806,7 @@ export function apply(ctx, opts = {}) {
               const cur = handle()
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               const repoPath = sid
-                ? (gw.listSessions(cur.path).find((s) => s.id === sid) ?? {}).worktree ?? cur.path
+                ? (gw.parkedSessions(cur.path).find((s) => s.id === sid) ?? {}).worktree ?? cur.path
                 : cur.path
               return {
                 uncommittedStat: gw.runGit(['diff', '--stat'], { cwd: repoPath, allowFail: true }) ?? '',
@@ -849,7 +854,7 @@ export function apply(ctx, opts = {}) {
               const cur = handle()
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               if (!sid) throw new Error('card.push serves session seats — the org primary rides its boundaries')
-              const s = gw.listSessions(cur.path).find((x) => x.id === sid)
+              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
               if (!s) throw new Error('session-not-found: ' + sid)
               const g = await getGithub().catch(() => null)
               if (!g) throw new Error('github-unavailable')
@@ -867,7 +872,7 @@ export function apply(ctx, opts = {}) {
               const cur = handle()
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               if (!sid) throw new Error('card.pr.create serves session seats')
-              const s = gw.listSessions(cur.path).find((x) => x.id === sid)
+              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
               if (!s) throw new Error('session-not-found: ' + sid)
               let manifest = {}
               try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
@@ -889,7 +894,7 @@ export function apply(ctx, opts = {}) {
               const cur = handle()
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               if (!sid) throw new Error('card.pr.status serves session seats')
-              const s = gw.listSessions(cur.path).find((x) => x.id === sid)
+              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
               if (!s) throw new Error('session-not-found: ' + sid)
               let manifest = {}
               try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
