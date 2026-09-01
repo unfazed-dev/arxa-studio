@@ -859,10 +859,15 @@ export function apply(ctx, opts = {}) {
               const g = await getGithub().catch(() => null)
               if (!g) throw new Error('github-unavailable')
               const creds = await g.gitCredentials()
-              const origin = gw.getOrigin(cur.path)
+              // D98: push the repo that actually HOLDS this branch. A project
+              // session's `arxa/session/<id>` exists only in the project repo,
+              // and its origin is the project's remote — pushing it from the
+              // org would push a ref that is not there, to the wrong remote.
+              const repoPath = s.repoPath ?? cur.path
+              const origin = gw.getOrigin(repoPath)
               if (!origin) throw new Error('no-origin — connect this org to GitHub first')
               const url = origin.replace('https://', 'https://' + encodeURIComponent(creds.login) + ':' + creds.token + '@')
-              const out = gw.runGit(['push', '-u', url, s.branch], { cwd: cur.path, allowFail: true })
+              const out = gw.runGit(['push', '-u', url, s.branch], { cwd: repoPath, allowFail: true })
               return out !== null ? { ok: true, branch: s.branch } : { ok: false, reason: 'push-failed' }
             },
             'card.pr.create': async () => {
@@ -874,6 +879,13 @@ export function apply(ctx, opts = {}) {
               if (!sid) throw new Error('card.pr.create serves session seats')
               const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
               if (!s) throw new Error('session-not-found: ' + sid)
+              // D98: a project session's branch and remote belong to the
+              // PROJECT repo, but the PR below is built from the ORG manifest.
+              // Before routing this seat was unreachable for project sessions
+              // (the org registry had no such id, so it threw). Keep it loud
+              // rather than silently filing an org-scoped PR for project work —
+              // choosing the right manifest is Phase 2 (D102/D107).
+              if (s.origin === 'project') throw new Error('project-session-pr-pending: PR flow for project repos lands in Phase 2')
               let manifest = {}
               try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
               if (!manifest.repoOwner || !manifest.repoName) throw new Error('org-not-published')
@@ -896,6 +908,9 @@ export function apply(ctx, opts = {}) {
               if (!sid) throw new Error('card.pr.status serves session seats')
               const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
               if (!s) throw new Error('session-not-found: ' + sid)
+              // D98: same as card.pr.create — the org manifest is the wrong
+              // source for a project session's PR. Loud, not silently wrong.
+              if (s.origin === 'project') throw new Error('project-session-pr-pending: PR flow for project repos lands in Phase 2')
               let manifest = {}
               try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
               if (!manifest.repoOwner || !manifest.repoName) throw new Error('org-not-published')
