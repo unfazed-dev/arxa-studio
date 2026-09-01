@@ -28,6 +28,12 @@ red on a commit the user never wrote and cannot amend. Nothing tested it
 because the tests exercised the sync path while production ran the detached
 one. `scripts/e2e-self-gate.mjs` now closes that whole class.
 
+| 14 | **rows-snap flake** — the pending-state test only passed on a slow disk | opt-in `ARXA_SNAPSHOT_DELAY_MS` seam; 5/5 green, was 1/6 |
+
+Verified deterministic: **3 consecutive rounds of 17/17 + e2e self-gate PASS**,
+and the frame fixture green on all four states (S1 clean, S2 broken, S3 broken
+without `test/`, S4 broken nested).
+
 Suite: **17/17 plugin selftests green.** git-workspace 52/52, file-org-shell 193/193,
 arxa-sidebar drift gate green.
 
