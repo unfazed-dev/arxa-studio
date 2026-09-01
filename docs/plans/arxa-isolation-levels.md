@@ -1223,3 +1223,93 @@ of the no-container path is lower than §9 implied.
 **Placement:** these are **not** a tier beside containers. They are a cheap,
 always-on **floor beneath every mode**, including native execution. Fold them under
 A1–A3 rather than presenting them as an alternative to A4/A5.
+
+---
+
+## 21. `sbx` INSTALLED — L2 moves from documented to measured
+
+Installed per Docker's official macOS steps (`docs.docker.com/ai/sandboxes/install/`):
+
+```
+brew trust docker/tap
+brew install docker/tap/sbx
+```
+
+**`sbx` v0.39.0** (cask), binary at `/opt/homebrew/Caskroom/sbx/0.39.0/bin/sbx`.
+Prerequisites met: macOS 26.6.2 (needs Sonoma 14+), Apple M4.
+
+### Verified on this machine
+
+```
+CLI binary        ✓ found, v0.39.0
+Daemon            ✓ healthy (after `sbx daemon start`)
+Virtualization    ✓ supported — kern.hv_support = 1
+Storage dirs      ✓ present and writable
+Authentication    ✗ NOT SIGNED IN  -> blocks everything else
+```
+
+`sbx login` is browser-interactive and **must be run by the user**. Until then
+`sbx ls`, `sbx policy ls` and `sbx policy profile ls` all return
+`401 Unauthorized`. **L2 verification is blocked on that one step.**
+
+### ✅ Confirmed from the real CLI
+
+- **`--clone` exists, and the trap is real.** Help text: *"Run the agent on a private
+  in-container clone of the host Git repository; **must be set at sandbox creation
+  time** (no-op when re-attaching to an existing clone-mode sandbox)."* §4's warning
+  stands, verbatim from the tool.
+- **`--deny-network`** exists as a creation-time, per-sandbox rule, listable and
+  removable via `sbx policy ls` / `sbx policy rm`. Notably: *"a local deny can only
+  narrow, never widen, egress."*
+- **`sbx policy`** subcommands: `allow`, `deny`, `ls`, `log`, `init`, `inspect`,
+  `check`, `profile`. Confirms `sbx policy log` (§13 rung 1) and reveals
+  `policy check` — "check whether policy allows an access request", useful for
+  testing a policy without running an agent.
+
+### ⚠️ Two corrections to the research
+
+1. **`--no-share-skills` does not exist.** There is no such flag on `sbx run`.
+   The mechanism is a top-level **`sbx skills`** command, marked *(Experimental)*,
+   with only two subcommands: **`import`** ("Import skills from supported agent
+   directories") and **`ls`**. That reads as skills being **explicitly imported**
+   rather than shared read-write by default — the opposite of what §13 recorded.
+   **The concern and its remedy are both unverified; re-check after login before
+   carrying either into the design.**
+2. **Memory default is not a flat 8 GiB.** `-m, --memory` help states:
+   *"Default: **50% of host memory, max 32 GiB**."* On this 16 GiB machine that is
+   8 GiB, so §14's arithmetic ("two sandboxes claim 100% of the machine") holds —
+   but the mechanism scales with the host, so the figure must not be quoted as a
+   constant.
+
+### Capabilities worth designing around (found while inspecting)
+
+| Command | Why it matters |
+|---|---|
+| **`sbx secret`** | "Manage stored secrets" — **cross-check against §7's Keychain + SOPS design before building anything.** May already cover part of it. |
+| **`sbx env`** | *(Experimental)* "Manage sandboxes declaratively from a `.sbxenv.yaml` file" — **the natural way for arxa to spin sandboxes per project**, rather than shelling out to `create` with flags. |
+| `sbx template`, `sbx kit` | reusable sandbox definitions |
+| `sbx mcp` | MCP server registration — relevant to §11's "local stdio MCP servers run on the host" hole |
+| `sbx cp`, `sbx exec`, `sbx ports` | host↔sandbox plumbing arxa would need |
+
+### ⚠️ Storage location — NOT relocated, unlike Docker Desktop
+
+```
+~/Library/Application Support/com.docker.sandboxes   (not a symlink)
+mount: /System/Volumes/Data    currently 540K
+```
+
+Docker Desktop's data was symlinked out to `business_ssd` (§1a). **`sbx`'s store was
+not**, so microVM images will accumulate on the **internal** disk. Decide whether to
+relocate it before creating sandboxes.
+
+**Note on the disk figures:** §1a recorded `3.4Gi free / 99%` for this volume;
+it now reads `35Gi free / 83%`. The readings are inconsistent — macOS purgeable space
+makes `df` unstable here. **Re-measure before relying on either number**; do not
+quote §1a's figure as current.
+
+### Next step to unblock
+
+The user runs `sbx login`. Then verify, in order: the default network posture
+(`sbx policy ls`, `sbx policy profile ls`), whether skills are shared or imported,
+and a real `--clone` sandbox against a scratch repo to confirm the source is
+read-only.
