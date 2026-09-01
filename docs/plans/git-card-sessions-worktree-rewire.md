@@ -906,3 +906,37 @@ demo. Wire it into `plugins/git-workspace/selftest.mjs` as part of the fix.
 - Plain `dart pub get` **does** resolve `flutter: {sdk: flutter}` here, so the
   gate's use of `dart` rather than `flutter` is not a defect on this runner.
   It would break on a runner with a standalone Dart and no Flutter SDK.
+
+### §10.1 — the fixture surfaced D110×D95 as an accident
+
+Dropping a real target into `project-001` exposed a live gap, unrelated to the
+gate:
+
+- **`project-001` has no root `.gitignore` at all.** The org repo is safe — TOPO
+  uses a `/*` allowlist (D37) and reports 0 entries — but the **project** repo is
+  a separate `.git`, and there `git add -A` stages **447 files**.
+- The only ignore rules in play arrived by luck: the copied Flutter app ships its
+  own `.gitignore` (`.dart_tool/`, `build/`). A target scaffolded by studio would
+  not necessarily bring one, and nothing at the project root supplies it.
+- No secrets were among the 447 (the `key` matches are `asset_keys_test.dart`),
+  but `pubspec.yaml` carries absolute `/Volumes/developer_ssd/...` paths that
+  would become permanent history on the first auto-commit.
+
+This is the open **D110 × D95 write-amplification** question arriving as an
+accident rather than a decision. **A scaffolded project must ship a root
+`.gitignore` before any auto-commit action is wired**, or D95's first sweep
+commits build output and machine-local paths.
+
+The copy is deliberately left untracked at
+`TOPO/projects/project-001/05-scaffold/application/ios/` so the B11/B15 fix can
+be verified against a real app. It is disposable test data. To revert its deps:
+`sed -i '' -E 's#path: /Volumes/.*/arxa/kit/#path: ../#' pubspec.yaml`
+(or restore the sibling `pubspec.yaml.orig`).
+
+### §10.2 — decide before writing the B15 fix
+
+Splitting `[ -d test ]` makes `dart analyze` run on targets where `pub get` has
+never succeeded. Unresolved imports then produce a wall of analyzer errors — a
+red for the wrong reason, which is how teams learn to ignore a gate. The S3
+fixture has resolvable deps and will **not** catch this, so the chosen semantics
+needs its own case (S5).
