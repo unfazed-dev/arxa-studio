@@ -246,3 +246,66 @@ one.
 accumulation**. Studio's `versions.json` exists nowhere on disk. **Adding two states to
 two unexercised state machines means the first implementation exercises all of it for
 the first time.** Budget for the states being wrong, not merely unwired.
+
+---
+
+## ⚠️ V1a — CORRECTION: `Kind` is already taken, and it is heavily defended
+
+**I recommended `Kind` for the `application/` vs `website/` level. That was wrong.**
+Verified after the scaffolder study surfaced `kind-resolution.registry.json`:
+
+**arxa's `kind` = a UI widget type.** From the registry's own `_comment`:
+
+> *"Q7 SSOT. Closed-vocabulary map from a DESIGNED kind (the designer's starter-partial
+> vocabulary) to the kit-native widget that realises it. VOCABULARY SOURCE:
+> `skills/arxa-designer/starter-partials/widgets/_<kind>.tsx` — the file list IS the
+> vocabulary."*
+
+**15 kinds**, a closed set: `appbar, bottom-sheet, card, chip, cta-link, dialog,
+empty-state, form-field, list-row, modal, nav-rail, panel-activity, …` plus
+`supportKinds` for non-visual primitives.
+
+**And it is enforced by a gate** — `kind_registry` sits in `gateOrder`
+(`gate_runner.dart:32`, `gate_kind_registry.dart`). This is the most strongly defended
+term encountered: a closed vocabulary, an SSOT registry file, and a gate that fails.
+
+**`Surface` is also taken** (`VOCABULARY.md`):
+> *"One screen of the app being designed — the unit everything is counted, frozen, and
+> scaffolded in."* `_Avoid_: page, route, screen`
+
+### The structural decision stands; only the NAME of the upper level changes
+
+**V1 is unaffected.** Adding a level, with `ios`/`android`/`landing` beneath, remains
+right — and the scaffolder study strengthens it: `arxa emit scaffold` already takes
+`--targets` and writes **per-surface file sets that differ per target**
+(macos = 3 files, ios/android = 4, web = 5). arxa is already per-target; studio's tree
+should match.
+
+Only the word for the `application/` ÷ `website/` level is in dispute.
+
+### Availability check — verified against `VOCABULARY.md` and `arxa/lib/*.dart`
+
+| Candidate | Status |
+|---|---|
+| `Kind` | ❌ **taken** — UI widget vocabulary, gate-enforced |
+| `Surface` | ❌ **taken** — one screen of the app |
+| `Target` | ❌ **taken** — platforms (and now correctly used for the level *below*) |
+| `Stage` | ❌ **taken** — pipeline step shown as a timeline |
+| `Artifact` | ❌ **taken** — the generated design deliverable |
+| **`Track`** | ✅ free |
+| **`Lane`** | ✅ free |
+| **`Deliverable`** | ✅ free |
+| **`Product`** | ✅ free |
+| `Medium` | ⚠️ free as a term, but `_Layer_: Design medium` is used as a glossary layer label — confusing |
+
+**Recommendation: `Track`.** Short and concrete, matching arxa's style; reads correctly
+in the tree (`02-design/application/ios`, two parallel tracks each shipping to its own
+targets); and carries no existing meaning in either product.
+
+### The lesson, recorded
+
+I proposed `Kind` because the owner used the word conversationally — without first
+checking it against arxa's glossary, which is the very failure this document exists to
+prevent. **Every proposed term must be availability-checked against
+`arxa/docs/VOCABULARY.md` AND the code before it is written down**, including terms the
+owner uses informally. Informal use is not a reservation.
