@@ -34,12 +34,18 @@ const orgRoots = () => {
   const list = Array.isArray(j) ? j : (j.organisations || j.orgs || Object.values(j))
   return list.map((o) => (typeof o === 'string' ? o : o.path)).filter((p) => p && fs.existsSync(p))
 }
+// Fails CLOSED: any inability to prove the port is free counts as "listening".
+// (2026-09-02: an earlier fail-open version let --apply run against live orgs.)
 const engineListening = () => {
   try {
     const out = execFileSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
     return out.trim().split('\n').length > 1
-  } catch { return false }
+  } catch (e) {
+    if (e && e.status === 1 && !String(e.stdout || '').trim()) return false // lsof: nothing found
+    return true
+  }
 }
+const operatorConfirmed = args.includes('--engine-stopped')
 
 const stamp = new Date().toISOString().replace(/[:.]/g, '-')
 const snapDir = path.join(process.cwd(), 'docs', 'plans', 'phase0b-snapshots')
@@ -96,8 +102,11 @@ console.log(`snapshot: ${path.relative(process.cwd(), snapFile)}`)
 console.log(`${plan.length} candidate(s): ${plan.filter((p) => !p.action.startsWith('SKIP')).length} actionable, ${blockers.length} skipped`)
 for (const p of plan) console.log(`  ${p.org.padEnd(6)} ${p.kind.padEnd(28)} ${p.id.padEnd(20)} ahead=${p.ahead} -> ${p.action}`)
 
-if (!apply) { console.log('\ndry-run — pass --apply to execute (refused while an engine is listening)'); process.exit(0) }
+if (!apply) { console.log('\ndry-run — pass --apply --engine-stopped to execute (refused while an engine is listening)'); process.exit(0) }
+if (!operatorConfirmed) { console.error('\nREFUSED: --apply also requires --engine-stopped (operator asserts no studio/engine process is running)'); process.exit(2) }
 if (engineListening()) { console.error(`\nREFUSED: an engine is listening on ${port}; stop it first (precondition 2)`); process.exit(2) }
+const openRows = plan.filter((p) => p.state === 'open' && !p.action.startsWith('SKIP'))
+if (openRows.length && !args.includes('--include-open')) { console.error(`\nREFUSED: ${openRows.length} candidate row(s) are state=open; re-run with --include-open to delete them too`); process.exit(2) }
 
 let done = 0
 for (const p of plan) {
