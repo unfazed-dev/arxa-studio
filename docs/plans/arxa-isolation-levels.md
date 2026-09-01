@@ -2162,3 +2162,107 @@ actually produces, how a client receives a copy, whether designer already has an
 iteration concept the version system must align to, and what `arxa dial` defines.
 **Do not design the mint until those land** — §26k's whole point is that the number
 must refer to a real client-facing event, and only the arxa side knows what that is.
+
+---
+
+## 28. arxa designer — the version RECORD already exists; the client MINT TRIGGER does not
+
+Read from the arxa Dart repo. **Do not build a parallel system** — align to what is
+there.
+
+### 28a. arxa already stores per-version state
+
+`_d_meta.json` at each `designs/<project>/` root holds
+`assets.<name>.versions[]`, each entry:
+
+```
+{ path, createdAt, status, subtitle, viewport, chatId, section }
+```
+
+**`status` is per-VERSION**, not per-asset (confirmed in both branches of
+`recordAssetVersion`, `arxa/lib/design_tools.dart:2972+`). Vocabulary at
+`design_tools.dart:2944-2949`:
+
+```
+needs-review (default) | approved | changes-requested
+```
+
+Versions group via `--name` / `--inherit-from <prev file>`; same path updates in place,
+a new path appends with a fresh `createdAt`.
+
+**Mapping to studio's states, with the gaps in both directions:**
+
+| studio | arxa | note |
+|---|---|---|
+| Draft | — | arxa's default is `needs-review` |
+| In review | `needs-review` | |
+| Approved | `approved` | |
+| Superseded | **missing in arxa** | old versions are simply earlier array entries |
+| **missing in studio** | `changes-requested` | a rejection state the dial's kanban already models |
+
+**Both gaps are real and both should close.** Studio needs `changes-requested` —
+§26k established that client objection opens new work (AIGA *cure*), and a rejection
+state is how that gets recorded. arxa needs the successor pointer §26l called for.
+
+### 28b. The mint trigger is the dial's Publish button — decided, locked, and NOT BUILT
+
+`rust-port-closure-and-surgical-lens.md:553-557`: *"Publish is a manual dial button →
+studio socket → arxa-deployer/wrangler → the artifact's ONE stable Workers hostname."*
+But `:619` says it *"remains the last slice"*, and `arxa_dial.dart:32` and `:1895`
+both confirm it is pending.
+
+**So the publish-to-client event is decided in design and absent in code — in BOTH
+codebases.** §27 concluded studio has no such event; arxa does not have one either,
+but it has already specified one.
+
+**And the pointer a mint would set is already named.** `VOCABULARY.md:1040`:
+*"Clients always see the last published state, never the Draft Overlay."*
+**That published pointer is exactly what a version mint writes, and it is the piece with
+no code behind it.** This is the cleanest possible confirmation of §26k: the mint
+belongs at publish, and arxa's own vocabulary already assumes it.
+
+**Candidate triggers, ranked honestly:**
+
+1. **The dial Publish button** — the real client event. Not built. **This is the target.**
+2. `arxa design record-asset --status approved` — real today, but it is a *design-time
+   index*: it means "the operator approved", not "the client has it".
+3. `arxa design eject` → Cloudflare/Vercel — real, but **one-way** (locked decision:
+   "No round-trip"). A version minted here could never be updated by a later design
+   pass. **Reject as the mint trigger.**
+
+**Three things that sound relevant and are not:**
+- `design_ship.dart` is a git + `gh` PR channel (branch/commit/push/PR, prefix `arxa/dial`) — **not** client shipping.
+- `design_journal.dart` is undo/redo for the Draft Overlay, capped at 200 steps, cleared on commit.
+- `approval.lock` (`gate_freeze.dart`) is **hash-bound PIPELINE approval** ("safe to scaffold from?") and goes stale on drift. **Different thing from client approval, despite sharing the word** — do not conflate them.
+
+### ⚠️ 28c. CORRECTION — studio's stage/target model does not exist in arxa
+
+**This overturns §26a's per-target recommendation as stated.**
+
+- Grep for `website` / `00-moodboard` / `08-deploy` across arxa returns **nothing**.
+- **arxa has seven FSM phases** (`phases.dart:13-20`):
+  `intake, prototype, design, scaffold, review, build, deploy` — not studio's ten.
+- **arxa's "targets" are PLATFORMS** (`['ios','android']` default, `project.dart:82`),
+  driving the viewport ladder — not `website/` vs `application/`.
+- **Designer emits ONE artifact directory per project**, not one per target.
+
+So §26a's "one version timeline per target" was derived from studio's tree and **does
+not survive contact with arxa's model.** Studio's projects genuinely do have
+`website/` and `application/` in every stage — but designer does not produce into that
+split, so a per-target version would have nothing to count on the arxa side.
+
+**This is a model mismatch between the two products, and it must be settled before the
+version scope is fixed.** Options are: align studio's tree to arxa's phases, teach
+designer to emit per-target, or version per *asset* (which is what `_d_meta.json`
+already does — `assets.<name>.versions[]`). **The third is the least invasive and is
+already implemented on the arxa side.**
+
+### 28d. Note on the "after git management" sequencing
+
+The agent searched arxa repo-wide for "git management" / "once git" / "after git" and
+found **no prose anywhere** — the designer→scaffolder contract is itself already
+settled (frozen `structure.json` is the scaffolder's only input), not pending.
+
+**The sequencing came from the owner directly (S5) and stands on that authority** — it
+simply is not written in the arxa docs. Worth recording so nobody later looks for a
+doc that does not exist.
