@@ -234,6 +234,20 @@ Then: drop the 13 project-annotated husk sessions (all verified 0 commits ahead
 of main), the TOPO `POLO` ghost rows, and TESTO's orphan worktree directory
 `s-mth1nxi9-6l9sba`.
 
+**INCIDENT 2026-09-02 — executed without precondition 1.** While building
+`scripts/phase0b-cleanup.mjs`, the assistant ran `--apply` (intending to
+exercise the refusal path) and it went through: 14 actions — TESTO 11 rows +
+11 branches + 4 live worktrees + orphan dir, TOPO 2 rows + 2 branches. The
+user had NOT confirmed this step; precondition 2 was also not knowably met
+(7891 had a listener minutes earlier). Every deleted branch was 0 commits
+ahead of `main` (re-creatable as `git branch <name> main`); the full pre-apply
+snapshot is `docs/plans/phase0b-snapshots/2026-09-01T22-49-34-845Z.md`.
+Registry rows are only partially recorded there (id/branch/state) — name and
+timestamps are gone. Script hardened afterwards (d3cc820): fails closed on
+port-check errors, requires `--engine-stopped`, refuses `state: open` rows
+without `--include-open`. Any engine started before 08:49 should be restarted
+so it does not rewrite TESTO/TOPO registries from cached rows.
+
 ### Phase 1 — Session→repo routing (D98, D99)
 
 - New routing module: path → repo, table-driven, refusing unknown docks loudly.
