@@ -6,6 +6,13 @@
 // tree, exactly — the five fixed categories (D42), org.json/project.json
 // manifests (D41/Q3), and thin AGENTS.md context files (D43).
 
+import { PROJECT_GITIGNORE, PROJECT_GITIGNORE_V4 } from './gitignore.js'
+
+// Re-exported for compatibility — some callers/tests import PROJECT_GITIGNORE
+// from template.js directly; the constant itself now lives in gitignore.js
+// alongside PROJECT_GITIGNORE_V4 and the D110 backfill helper.
+export { PROJECT_GITIGNORE }
+
 /** The template version this build of the app scaffolds and expects. */
 export const TEMPLATE_VERSION = 4
 
@@ -56,29 +63,13 @@ session working anywhere inside this organisation.
 `
 }
 
-/** Project .gitignore (D73): local noise and secrets ONLY — never project
- * content (the managed containers ARE content). Nested project repos are
- * published to GitHub as-is, so this list stays deliberately small and
- * extendable by the user. `build/` is a MANAGED CONTAINER (template v2)
- * and must never be ignored. */
-export const PROJECT_GITIGNORE = [
-  '# arxa studio (project scaffold): local noise and secrets only — never',
-  '# project content. Extend freely.',
-  '.DS_Store',
-  'Thumbs.db',
-  '~$*',
-  '.env',
-  '.env.*',
-  '!.env.example',
-  'node_modules/',
-  '__pycache__/',
-  '*.pyc',
-  '.venv/',
-  'dist/',
-  'out/',
-  'coverage/',
-  '',
-].join('\n')
+// Project .gitignore (D73, extended by D110): PROJECT_GITIGNORE (imported
+// above from gitignore.js) is local noise + secrets only — never project
+// content (the managed containers ARE content). `build/` is a MANAGED
+// CONTAINER (template v2) and must never be ignored. Templates v2/v3 keep
+// using it unchanged since getTemplate(2)/(3) are replayed by migrations.
+// PROJECT_GITIGNORE_V4 (also imported above) extends it with OS/editor,
+// Node-framework, and Flutter/Dart coverage for the v4 application track.
 
 function projectAgentsStub(displayName) {
   return `# ${displayName} — standing instructions
@@ -331,7 +322,10 @@ export const TEMPLATES = Object.freeze({
       projectDirs: (selection) => Object.freeze(projectDirsV4(selection)),
       files: Object.freeze([
         { path: 'AGENTS.md', content: (ctx) => projectAgentsStub(ctx.displayName) },
-        { path: '.gitignore', content: () => PROJECT_GITIGNORE },
+        // D110: v4's application track (ios/android/macos/windows/linux/web)
+        // needs Flutter/Dart + Node + OS coverage PROJECT_GITIGNORE doesn't
+        // carry — see gitignore.js. v2/v3 above stay on PROJECT_GITIGNORE.
+        { path: '.gitignore', content: () => PROJECT_GITIGNORE_V4 },
       ]),
     }),
   }),

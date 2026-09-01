@@ -296,9 +296,20 @@ try {
     assert.match(body, /\.env\b/, 'secrets ignored')
     assert.match(body, /node_modules\//, 'dependency dirs ignored')
     assert.doesNotMatch(body, /(^|\/)build\//, 'build/ is a MANAGED CONTAINER — never ignored')
-    // end-to-end: scaffoldProject really writes it on disk
+  })
+
+  check('D110: v4 (the live/default template) ships a richer .gitignore — Flutter/Dart + Node + OS, still never a bare build/', () => {
+    const v4Entry = getTemplate(4).project.files.find((f) => f.path === '.gitignore')
+    assert.ok(v4Entry, 'v4 project template writes a .gitignore')
+    const v4Body = v4Entry.content({ displayName: 'X' })
+    assert.match(v4Body, /\.env\b/, 'secrets ignored')
+    assert.match(v4Body, /node_modules\//, 'dependency dirs ignored')
+    assert.match(v4Body, /\.dart_tool\//, 'Flutter/Dart tooling ignored')
+    assert.match(v4Body, /\*\*\/ios\/build\//, 'iOS build dir ignored, scoped under ios/')
+    assert.doesNotMatch(v4Body, /(^|\n)build\//, 'no bare build/ — v2\'s managed container name must never collide')
+    // end-to-end: scaffoldProject (current/default template = v4) really writes it on disk
     const p = scaffoldProject(org.path, 'Ignore Probe')
-    assert.equal(fs.readFileSync(path.join(p.path, '.gitignore'), 'utf8'), body)
+    assert.equal(fs.readFileSync(path.join(p.path, '.gitignore'), 'utf8'), v4Body)
   })
 
   // A dedicated org for the migration story, with its own git repo.

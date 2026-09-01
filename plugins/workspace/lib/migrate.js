@@ -20,6 +20,7 @@ import {
 import fs from 'node:fs'
 import path from 'node:path'
 import { TEMPLATE_VERSION, getTemplate } from './template.js'
+import { ensureProjectGitignore } from './gitignore.js'
 import { readManifest, orgManifestPath } from './manifest.js'
 import { checkOrgStamp, readOrgStampVersion, writeOrgStampVersion } from './stamp.js'
 import { withOrgLock } from './lock.js'
@@ -201,6 +202,12 @@ export const MIGRATIONS = Object.freeze([
           for (const dir of template.project.dirs) {
             fs.mkdirSync(path.join(project, dir), { recursive: true })
           }
+          // D110: pre-v4 projects may predate the D73 .gitignore entirely
+          // (the §10.1 accident — no ignore at all, so `initProjectRepo`'s
+          // `git add -A` stages everything). Additive, forward-only: writes
+          // only when absent, never touches a project that already has one
+          // (human-modified or an older-template default alike).
+          ensureProjectGitignore(project)
           gitkeepEmptyDirs(project)
           commitProjectRepoMigration(project, 'chore(migrate): track/target vocabulary (template v4)')
         }
