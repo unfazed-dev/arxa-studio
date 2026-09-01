@@ -1389,3 +1389,71 @@ opposite from the CLI surface. The truth:
 own skills. An import would copy them into the shared store, at which point the §13
 cross-contamination concern becomes real. **Until then it is inert.**
 **Recommendation: do not import, and do not have arxa import on the user's behalf.**
+
+---
+
+## 23. SCOPE DIRECTIVE — arxa provisions all of this; the user does nothing
+
+**User instruction, 2026-09-02:** *"this process we are actually doing must be
+automatically taken care of at install and packaged by arxa for users to consume
+without users to do anything — so ensure all the work we are doing are in that in
+mind and in that direction."*
+
+**This is binding on every decision in this document.** Nothing here may land as a
+README step or a manual prerequisite. Re-read every prior section against it — several
+were written as operator instructions and must be re-expressed as things arxa does.
+
+### The provisioning checklist, as arxa must perform it
+
+| Step | Automatable by arxa? | Notes |
+|---|---|---|
+| Install `sbx` | **Yes** | `brew trust docker/tap && brew install docker/tap/sbx`, or bundle/download the release artifact. Must not assume Homebrew exists. |
+| Start the daemon | **Yes** | `sbx daemon start`; `sbx diagnose` gives a machine-checkable health report. |
+| Initialize the network policy | **Yes** | `sbx policy init deny-all` — **and arxa must do this, or the user's own earlier global choice silently governs** (§22a). One-time and global; `sbx policy reset` to change. |
+| Per-project egress rules | **Yes** | `sbx policy allow` globally + `--deny-network` per sandbox; local denies can only narrow. |
+| Create the sandbox | **Yes** | `sbx create --clone --name <n> <agent>`; `sbx env` (Experimental) does it declaratively from `.sbxenv.yaml`. |
+| Preset flip + SandboxProvider (S1) | **Yes** | ships in the app. |
+| Seatbelt profile extension (A2/A3) | **Yes** | ships in the app. |
+| Integrity items (B1/B2) | **Yes** | generated into the repo frame, like `check.sh`. |
+| **`sbx login`** | ❌ **NO** | **See below. This is the one that does not yield.** |
+
+### ⚠️ 23a. The blocker: L2 requires a Docker account and an interactive sign-in
+
+Measured this session. `sbx login` is an **OAuth device-code flow**: it prints a code
+and a `login.docker.com/activate` URL and waits for a human to confirm in a browser.
+Until it completes, **every** meaningful command returns
+`401 Unauthorized … no valid user session found`.
+
+**arxa cannot automate this away.** It requires the end user to (a) have or create a
+Docker account and (b) complete a browser confirmation. There is no headless path that
+does not amount to handling the user's Docker credentials, which arxa must not do.
+
+**Also observed: it is not reliable.** The first attempt on this machine failed with
+`oauth2: "access_denied" "Global rate limit exceeded"` — an upstream Auth0 limit,
+nothing to do with the local setup. Any arxa flow that depends on it **must treat
+sign-in failure as an expected state**, retry-able and clearly explained, never a
+crash.
+
+### 23b. Consequence — this is a real tier boundary, and it should be surfaced as one
+
+| Tier | Third-party account required? |
+|---|---|
+| A0–A3 (preset, Seatbelt read-deny, egress) | **None.** Ships entirely inside arxa. Fully automatic, zero user action. |
+| A4 (hardened Docker container) | Docker Desktop/Engine must be present; no Docker *account* needed for basic use. |
+| **A5 (`sbx` microVM)** | **A Docker account plus an interactive browser sign-in.** |
+| B1–B3 (integrity) | None, except **GitHub Pro** for required reviews on private repos (§15). |
+
+**Design consequence.** The "user does nothing" promise holds cleanly for A0–A3 and
+B1–B2 — which is most of the value, and covers the two highest-ranked threats. It
+**cannot** hold for A5. So arxa should:
+
+1. **Provision A0–A3 + B1–B2 silently at install.** No prompts, no choices, no README.
+2. **Offer A4 as automatic-if-Docker-is-present**, and detect rather than assume.
+3. **Present A5 as the one tier with a one-time sign-in**, stated honestly at the point
+   of choosing it — never discovered later as a failed session.
+4. **Never let a missing L2 sign-in break a session.** Degrade to the highest tier that
+   is actually available and say so plainly.
+
+This also re-frames the org/project inheritance question: the inherited *setting* can
+be automatic, but an inherited **A5** may still stall on a sign-in the user has not
+done. Inheritance must therefore carry a "best available" fallback, not a hard demand.
