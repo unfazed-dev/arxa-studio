@@ -477,3 +477,126 @@ isolation, no reproducible toolchain, no dependency hermeticity, and dsh applies
 **Caveat, stated plainly:** `sandbox-exec` is deprecated by Apple, though present and
 functional (`/usr/bin/sandbox-exec`, dated Aug 13). arxa's exposure does not change —
 dsh already depends on it — but a tier built on it inherits that risk.
+
+---
+
+## 10. arxa (Dart) — audited: no sandbox of any kind
+
+Exhaustive sweep of the Dart repo. No seccomp, AppArmor, Seatbelt, chroot,
+namespaces, cgroups, capability dropping, user separation, or egress control. One
+grep hit, a false positive (the string `over_cap_dropped` in an archived plan). The
+only Docker present is `deploy/remote` (headscale + Caddy VPS) and a test Postgres —
+neither is isolation.
+
+**Note a terminology trap:** "isolation" in arxa's docs means *install* isolation —
+not executing the operator's dsh binary — **not** sandboxing. Searching the docs for
+the word will mislead.
+
+### What exists and is worth preserving
+
+- **Tauri v2 capability scoping** — `desktop/src-tauri/capabilities/default.json`
+  allows exactly two sidecars; `remote-studio.json` denies shell/sidecar to remote
+  origins. Constrains the webview, not the engine.
+- **`gateway.dart`** — loopback LLM gateway with per-consumer scoped tokens; raw
+  provider keys never leave the daemon. **This is the only real capability boundary
+  in the engine, and it is the precedent to copy for everything else.**
+- **Secrets at rest are genuinely good** — macOS Keychain plus XChaCha20-Poly1305
+  sealed files, failing closed rather than writing plaintext.
+
+### Attack paths, ranked
+
+1. **Generated code runs unconfined with every secret in scope.** Two sites execute
+   agent-generated code by design: `gate_tests.dart:287` (runs generated test suites)
+   and `emit_htmx.dart:269` (runs a generated `server.js`). **Zero
+   `includeParentEnvironment` hits codebase-wide**, so every child inherits the full
+   parent environment — `~/.ssh`, `~/.aws`, other projects, every provider key.
+2. **One global credential namespace.** `vault.dart:61` hardcodes `service: 'arxa'`;
+   `credentials.dart:43-45` has no project dimension. **Project A's stage can read
+   project B's keys.** Clearest business impact for an agency on one machine.
+3. **`arxa-guard.js` defaults to allow-all** (line 39, mode `dev`), fails open on bad
+   input, and ignores everything outside the arxa checkout. The docs call it "the ONE
+   per-tool-call policy"; the code says otherwise, and its documented escape hatch is
+   already known-broken (`docs/guard-findings-2026-08-26.md` F2).
+4. **No enforced project boundary** — `project.dart` is string concatenation and
+   `$ARXA_HOME` repoints it. One enforced check exists, at `design_server.dart:1221`,
+   guarding a single HTTP handler.
+5. **Shared npx cache slot** — arxa's own docs measured 1039 symlinks from both
+   `~/.dsh` and `~/.arxa` profile trees into ONE `_npx` slot; the version pin "has
+   never once been honoured."
+
+### Where to spend the effort — and the ordering matters
+
+`process.dart`'s `ProcessRunner` seam is the right chokepoint **and already exists**,
+but **23 files bypass it**, including the generated-code sites. **Step 1 is finishing
+the seam, not adding a sandbox** — once every spawn goes through it, a
+`SandboxedProcessRunner` is a drop-in with zero caller changes.
+
+Then: `gate_runner.dart` (one dispatch = a per-gate boundary), `project.dart`'s path
+resolvers (already the natural per-project mount root), and `vault.dart`'s `service`
+field → `arxa:<project>`. **`CredentialStore` already takes a `keyPrefix` parameter
+that nothing ever populates** — the credential half is close to free.
+
+**One-line supply-chain fix found:** `design_tools.dart:1486` is a bare unpinned
+`npx esbuild`, twelve hundred lines above `_esbuildCmd()` (`:1800-1807`) which exists
+precisely to prevent that and is used correctly at both eject sites.
+
+## 11. Agent-sandboxing research — and one correction in arxa's favour
+
+### Threat ranking (solo agency, client work, one Mac)
+
+The top two involve **no attacker at all**:
+
+1. Agent runs a destructive command or writes wrong code — base rate, highest likelihood.
+2. **Cross-client contamination** — agent on Client A reads Client B's source and `.env`. No adversary needed; a contractual problem, not merely technical.
+3. Indirect prompt injection via repo, dependency or fetched page.
+4. Secret exfiltration — requires #3 to land first.
+5. Supply-chain package install script running as your user.
+6. Sandbox escape — real, but requires a targeting adversary.
+
+### What converged across Anthropic, OpenAI and Docker
+
+Deny-by-default egress through a **host-side** allowlisting proxy · capability
+boundary kept **separate** from approval policy (nobody ships an on/off switch) ·
+macOS Seatbelt as the shared substrate, with containers as the *next* rung rather
+than the first · credentials injected out-of-band so the agent never sees raw values ·
+and every vendor publishing what their isolation does **not** stop.
+
+Docker chose **microVM-per-session, not container-per-session**, explicitly because
+containers share the host kernel.
+
+### ✅ Correction — the "tool-shaped gap" does NOT apply to arxa
+
+The research flagged that Claude Code's Bash sandbox restricts only Bash and its
+children, leaving file tools, MCP servers and hooks on the host — and argued that if
+arxa's agent edits via file tools, L1 would constrain far less than it appears.
+
+**Verified false for dsh.** `dsh-fs-sandbox` ships `SandboxedFileSystem.checkedTarget()`,
+a second, in-process fence on the file tools themselves:
+
+- `danger-full-access` → returns the target unfenced (today's state)
+- `workspace-write` → the resolved path must be contained under a writable root, else `FS_SANDBOX_DENIED`
+- `read-only` → refuses outright
+
+It is also **TOCTOU-hardened**: it re-canonicalizes at check time, realpath'ing the
+deepest existing ancestor so a concurrently swapped symlink is reflected, and returns
+*that* fresh target. Good engineering.
+
+So arxa fences **both** Bash and the file tools. The gap is not tool-shaped — it is
+that both fences are switched off by one preset, and that **neither covers reads or
+egress**. That is precisely what §9 measured and can fix.
+
+### What NEITHER level stops — state this in the UI, do not oversell
+
+- Injection-authored bad code getting committed. **Review is the control; a container is the wrong tool.**
+- Agent-written `.github/workflows`, `Makefile`, `package.json` scripts.
+- **Exfiltration through an allowed domain** such as `github.com`.
+- Anything sent to the model provider.
+- Egress allowlists police **subprocesses, not the agent's own tool calls** (WebFetch, MCP, web search, model requests). Both Anthropic and OpenAI state this explicitly.
+
+### A rung where L1 beats a naive L2
+
+Claude Code hard-protects `.git/hooks`, `.git/config`, `.vscode`, `.idea`, `.zshrc`
+and `.gitconfig` **inside** the working directory, unexemptable by any allow rule.
+Docker documents that a plain workspace mount does **not** stop an agent writing a git
+hook the host later executes. **An L2 that fails to reproduce that protected list is
+a regression against L1.** Carry the list forward explicitly.
