@@ -974,3 +974,62 @@ The user's rule — org picks a level and projects inherit; org picks none and a
 may still choose — **works unchanged on both axes**, but the offer should be **two
 choices, not one**. A client under a strict NDA may want A5/B1; an internal tool may
 want A1/B2. Collapsing them into a single number would force false pairings.
+
+---
+
+## 17. MEASURED: the preset flip is not free — it breaks Dart/Flutter
+
+Tested with dsh's **exact** `workspace-write` Seatbelt profile, reconstructed from
+source, against the real toolchain on this machine.
+
+```
+(version 1) (allow default) (deny file-write*)
+(allow file-write* (literal "/dev/null"))
+(allow file-write* (subpath "<workspaceRoot>") (subpath "/tmp") (subpath "<os.tmpdir()>"))
+```
+
+| Command | Result |
+|---|---|
+| `git --version` | **OK** |
+| `node --version` | **OK** |
+| `npm --version` | **OK** |
+| `dart --version` | **FAIL** |
+| `flutter --version` | **FAIL** |
+| session workflow: `git init` → write → `add` → `commit` | **SESSION-WORKFLOW-OK** |
+
+**Cause.** Flutter's `bin/internal/update_engine_version.sh` writes
+`cache/engine.stamp.tmp.NNNNN` **inside the SDK**, at
+`/Volumes/developer_ssd/dev/fvm/versions/stable/bin/cache/` — outside every writable
+root. It runs on **every** invocation, so this is not a one-time cache warm that
+could be done before confinement.
+
+**And it is not configurable.** `writableRoots(policy)`
+(`@deepseek-ai/dsh-sandbox/lib/index.js:154`) returns exactly
+`[workspaceRoot, "/tmp", os.tmpdir()]` under `workspace-write`, and `[]` under
+`read-only`. **Hardcoded, no extension point, no settings key.**
+
+### Consequence
+
+The flip closes the live cross-project **write** hole and simultaneously **breaks the
+`application/` target — one of arxa's two shipped target types.** `website/` (node,
+npm) is unaffected. Git is unaffected, so sessions still commit.
+
+**So "one line, zero code" was wrong.** It is one line *plus* a writable-root for the
+Flutter SDK, and that requires code, because the seam does not expose one.
+
+### The fix, and it reuses an attach point already identified
+
+Ship an **arxa `SandboxProvider`** that extends the writable roots with the resolved
+Flutter/FVM SDK cache, and swap it in at the same single profile row the research
+identified for a future Docker provider (`dsh-base/cordis.patch.yml:169-170`). arxa
+already overrides bundle rows this way, so the mechanism is proven — only the payload
+is new, and it is small.
+
+Two details for whoever builds it:
+- **Resolve the SDK path at runtime**, do not hardcode. FVM versions move
+  (`fvm/versions/<channel>`), and end users will have their own layout.
+- dsh already ships an **escalation** path (`approveEscalation`, `ESCALATION_TARGETS`,
+  `escalationHintMarker`) — a denied write surfaces as a model-facing
+  `[sandbox: …]` marker with a hint. **Do not rely on it here:** the Flutter write
+  happens on every invocation, so escalation would prompt constantly. It is the wrong
+  mechanism for a predictable, known-good path.
