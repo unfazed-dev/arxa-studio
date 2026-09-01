@@ -47,3 +47,31 @@ arxa-sidebar drift gate green.
   `node scripts/gen-workspace.mjs > plugins/arxa-sidebar/lib/client.js`.
 - `mcp-apps` failed twice then passed 12/12 unchanged. Root cause never
   reproduced; the test no longer hides the reason.
+
+## Deliberately NOT done, and why
+
+**S1 — SandboxProvider + preset flip. Not started.**
+`~/.arxa/dsh/settings.yaml:38` still reads `defaultPreset: danger-full-access`,
+so the cross-client exposure is still open. The plan's own order is
+provider-first, because §17 measured that flipping the preset alone breaks
+`dart` and `flutter` (`dsh-sandbox/lib/index.js:154` hardcodes `writableRoots`
+with no extension point). The provider must be written against the **dsh base**
+profile — `dsh-base/cordis.patch.yml:169-185` — not arxa-studio's own
+`profile/cordis.patch.yml`, which carries no sandbox row.
+
+This changes the permissions of the user's live agent environment. Half-landing
+it unattended would be worse than not starting: the failure mode is an opaque
+permission error on every Flutter command. Next steps, in order:
+1. Provider extending writable roots with the **runtime-resolved** FVM/Flutter
+   SDK cache (never a hardcoded path — `which flutter` → resolve → cache dir).
+2. Swap at the cordis row arxa already overrides.
+3. `permission.defaultPreset: workspace-write`.
+4. Verify: `dart --version` and `flutter --version` pass, **and** a write to a
+   sibling project is denied. `git`/`node`/`npm` already pass — they are the
+   regression baseline.
+
+**Version minting — designed, not built.** See `arxa-studio-vocabulary-collisions.md`
+§V5. "Agreement provided" cleared arxa's participation, not the wire-format
+shape. Building it unilaterally is the `Kind` mistake again.
+
+**Container tiers (L1/L2).** Depend on session→repo routing, which is not done.

@@ -396,3 +396,59 @@ client saw" stops being true.**
 design hash, any post-approval change goes stale loudly"* — applied one level up, to
 client-facing deliverables. Aligning to Freeze (§29d) was not just vocabulary hygiene;
 it is what makes the version survive regeneration.
+
+---
+
+## V5 — Version minting: DESIGNED, deliberately NOT BUILT
+
+**Status: recommendation only. Nothing was implemented.**
+
+The instruction was "agreement provided for arxa to version minting". That
+clears arxa's *participation*. It does not answer the shape question, and the
+shape is a wire format shared by two products — `_d_meta.json` on arxa's side,
+`plugins/git-workspace/lib/versions.js` on studio's. If studio picks one shape
+and arxa picks another, the two disagree permanently and silently. That is
+exactly the failure this document exists to prevent, and the reason `Kind` had
+to be retracted after being recommended.
+
+So: the design is below, with a recommendation. It is not code.
+
+### The question
+
+One version per project, or one per target?
+
+### Recommendation — one ledger per project, with per-target release rows
+
+| | one number per project | one per target | **recommended: project ledger + target rows** |
+|---|---|---|---|
+| "what version is the client on?" | answerable | ambiguous | answerable — the project number |
+| iOS ships, web does not | number lies | correct | correct — the row moves, the ledger does not |
+| store submission needs a build number | no | yes | yes, per target row |
+| arxa's `_d_meta.json` | fits | needs restructuring | fits: `versions[]` stays, rows hang off it |
+| a target added later | renumbers everything | fine | fine — new row, ledger untouched |
+
+The project version answers "what did the client approve"; a target row answers
+"what is on the App Store". They are different questions and each needs its own
+answer. Collapsing them forces one of the two to lie.
+
+**Concretely:** `mintVersion()` keeps minting the project version at a stage
+boundary, keyed on `state.designHash` exactly as today. A target row records
+`{ track, target, projectVersion, buildNumber, shippedAt }` and is appended when
+that target actually ships. The project ledger never renumbers.
+
+**Why this survives the generation gap:** arxa's own
+`post-scaffold-iteration.md` asks this same question from the other side
+("single number or one per platform"). Because studio mints on `designHash`
+rather than on a build event, a regenerated scaffold does not mint a new project
+version — which is the property that lets the two ledgers stay in step without
+either product having to observe the other's builds.
+
+### What must be agreed before any of this is written
+
+1. Project ledger + per-target rows, versus a single number — **arxa's call to
+   confirm, not studio's to assume.**
+2. `supersededBy` on arxa's side (arxa has no `superseded` state).
+3. `changes-requested` on studio's side (studio has no such state).
+
+(2) and (3) are changes to *both* codebases and were already recorded in §V3 as
+accepted work. None of it should be built until arxa has said yes to (1).
