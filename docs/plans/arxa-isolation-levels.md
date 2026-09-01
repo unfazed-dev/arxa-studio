@@ -852,3 +852,125 @@ stand up one Lima Ubuntu VM as a CI runner host.
 **Rigor caveat:** `sbx` and `container` are not installed here, so the above is
 documented behaviour, not measured. No startup-time numbers are asserted because no
 vendor publishes them.
+
+---
+
+## 15. L3/L4 as INTEGRITY — orthogonal to confinement, not above it
+
+**The framing answer.** L0–L2 are runtime *confinement*. The threats that survive
+them live on a different axis — **what the artifact contains, and what credential the
+agent holds**. So L3/L4 is **orthogonal to L0–L2, not additive**. A user could
+sensibly run L0 confinement with L4 integrity, or the reverse. Do not present them as
+one ladder.
+
+### The top surviving threat is not the one people expect
+
+**The agent's push credential is itself an exfiltration channel.** The Nx
+`s1ngularity` malware (CVE-2025-10894) exfiltrated by **committing stolen data to a
+repo under the victim's own GitHub account** — legitimate git credentials, no
+attacker endpoint anywhere. L2's default-deny egress **must** allow `github.com` for
+the agent to open PRs, so **it permits this by construction**.
+
+Two independent agents reached this conclusion by different routes (§11's "exfiltration
+through an allowed domain like github.com"). Treat it as established.
+
+Then, in order: **the agent can edit `check.sh` and `.github/**`**; and a dependency
+compromise via a lockfile bump the agent makes, which **detonates on the self-hosted
+runner where nothing is contained**.
+
+### What is worth building — two items
+
+**1. Lockfile-pinned, script-free installs. ~2–3 hours, once.**
+`npm ci --ignore-scripts` with a committed `.npmrc` and a short *named* allowlist for
+packages that genuinely need a rebuild · `dart pub get --enforce-lockfile` ·
+OSV-Scanner over both lockfiles. **The only item here with a track record**: it blunts
+both Shai-Hulud (malicious `postinstall`) and the Nx payload on the runner.
+
+**2. A mechanical diff-policy gate the agent cannot edit. ~4–5 hours, once.**
+Forbidden paths (**CI config first**) · `gitleaks` on the diff · lockfile/manifest
+coherence.
+
+> ⚠️ **Non-negotiable detail:** CI must run the **base branch's** copy of `check.sh`
+> against the PR head. Otherwise the gate is **self-modifying and worth nothing** —
+> the agent edits the gate in the same PR the gate is supposed to judge.
+> **This directly amends B11/D113 in `git-card-sessions-worktree-rewire.md`:** fixing
+> the gate to actually test code is necessary but insufficient if the PR under test
+> supplies the gate.
+
+**3. ~30 minutes, nearly free.** A single-repo fine-grained token for the agent · **no
+publish tokens in its environment** · Dependabot alerts on (free) · required human
+review.
+
+### Explicitly NOT worth doing at solo-agency scale
+
+GitHub artifact attestations (**verified GHEC-only for private repos — unavailable
+here**) · npm provenance (we *consume* packages, we do not publish) · cosign/Sigstore ·
+chasing a SLSA level · SBOM generation · a second scanner alongside OSV-Scanner ·
+**prompt-injection guardrail products** — the ~95 %-detection problem makes them
+*actively harmful* because they substitute for review · dual-LLM / CaMeL
+architectures (real research, but they remove the generality that makes a coding
+agent useful).
+
+### The paid line item — and it confirms the other plan
+
+**Required reviews on a private repo need GitHub Pro**, verified under *both*
+mechanisms — classic protected branches and current rulesets are gated identically.
+This is the same wall the CI/CD plan hit empirically (§ "branch protection 403s on
+every private repo on this account"). **Two independent routes, same conclusion.**
+It is a personal-plan upgrade, not an enterprise one.
+
+### The uncomfortable part — say this in the UI
+
+The two recommended items **do not address prompt injection reaching committed code,
+nor subtly-wrong-but-not-malicious code** — and those are the two *highest-frequency*
+risks. **Nothing free does.** The literature (OWASP LLM01, Willison, the ETH/IBM
+design-patterns work) is consistent that injection is unsolved and that guardrails
+are a failing grade.
+
+**The only control is a human reading the diff, and it degrades with diff size.**
+
+So the highest-leverage decision in this entire document is **not a tool**:
+
+- small agent PRs
+- dependency bumps in their own PR
+- never merge a diff you did not read
+
+**This independently validates D112** (always show diff size; warn past ~400
+reviewable lines) from the CI/CD grill — arrived at from the security side rather
+than the review-throughput side.
+
+---
+
+## 16. The consolidated model — two axes, not one ladder
+
+### Axis A — confinement (how contained the agent's process is)
+
+| Tier | Mechanism | Cost | Buys |
+|---|---|---|---|
+| **A0** | today: `danger-full-access` | — | nothing |
+| **A1** | preset → `workspace-write` | **one line** | per-worktree **write** boundary (Bash *and* file tools) |
+| **A2** | + scoped read-deny in the Seatbelt profile | small | **cross-project read isolation** — measured working |
+| **A3** | + `(deny network*)` or an allowlist | small | egress control — measured working |
+| **A4** | hardened Docker container | medium | reproducible toolchain, hermetic deps, process-tree confinement |
+| **A5** | `sbx` microVM + `--clone` + `--no-share-skills` | medium | separate kernel, host-side default-deny egress, credentials never enter the VM |
+| — | *full VMs, remote vendor services* | — | **rejected**: L3-by-VM collapses into A5 and regresses on egress; vendor remote fails data residency |
+
+**Ceiling on A3–A5:** an agent must reach its model, so "air-gapped agent" means one
+allowed hostname which is itself an exfil path. **No confinement tier prevents
+exfiltration.** State this plainly rather than implying otherwise.
+
+### Axis B — integrity (what the artifact contains, what credential is held)
+
+| Tier | Mechanism | Cost |
+|---|---|---|
+| **B0** | today: none | — |
+| **B1** | `npm ci --ignore-scripts` · `dart pub get --enforce-lockfile` · OSV-Scanner | ~2–3 h |
+| **B2** | diff-policy gate run from the **base branch**: forbidden paths, gitleaks, lockfile coherence | ~4–5 h |
+| **B3** | scoped single-repo token, no publish tokens, Dependabot, required review | ~30 min (+ GitHub Pro for required review on private) |
+
+### What this means for the org/project inheritance rule
+
+The user's rule — org picks a level and projects inherit; org picks none and a project
+may still choose — **works unchanged on both axes**, but the offer should be **two
+choices, not one**. A client under a strict NDA may want A5/B1; an internal tool may
+want A1/B2. Collapsing them into a single number would force false pairings.
