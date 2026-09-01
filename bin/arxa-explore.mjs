@@ -5,7 +5,7 @@
 //   arxa-explore --base "<brief/context prompt>" \
 //     --option "glass:lean fully into liquid glass" \
 //     --option "m3e:material 3 expressive baseline" \
-//     [--cwd <project dir>] [--provider zai-wallet] [--model glm-5.3] \
+//     [--cwd <project dir>] [--provider zai-coding] [--model glm-5.3] \
 //     [--effort off|low|medium|high|max]   (default max)   [--summarize]
 //
 // Runs the base prompt once, then for each option navigates the DAG back to
@@ -29,7 +29,7 @@ process.env.PI_CODING_AGENT_DIR ||= join(homedir(), '.arxa', 'pi')
 const argv = process.argv.slice(2)
 // glm-5.3 + effort max on the wallet endpoint — verified working 2026-08-21
 // (the earlier 1302 tier-limit conclusion was stale; the operator confirmed).
-const opts = { options: [], provider: 'zai-wallet', model: 'glm-5.3', effort: 'max', cwd: process.cwd() }
+const opts = { options: [], provider: 'zai-coding', model: 'glm-5.3', effort: 'max', cwd: process.cwd() }
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i]
   if (a === '--base') opts.base = argv[++i]

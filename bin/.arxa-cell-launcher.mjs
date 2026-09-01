@@ -137,20 +137,6 @@ const fileOrgShellDir = resolve(here, '..', 'plugins', 'file-org-shell')
 // org-model-v2 W3 (D69 gate half): the github-link LIBRARY materializes by
 // name so arxa-sidebar's bare import resolves in every profile boot.
 const githubLinkDir = resolve(here, '..', 'plugins', 'github-link')
-// Artifact viewer-editor (D7 + D78-D87): by-package-name plugin with a
-// browser half — dir const feeds the profile package.json, BY_NAME_PLUGINS,
-// and the packed-mode copy list below.
-const artifactViewerDir = resolve(here, '..', 'plugins', 'artifact-viewer')
-const arxaFrameDir = resolve(here, '..', 'plugins', 'arxa-frame')
-// arxa's locale world (en/pl/fr — the stock locale row is disabled in the
-// patch; Phase 0 of docs/plans/dsh-plugin-ui-conformance.md).
-const localeDir = resolve(here, '..', 'plugins', 'locale')
-// Prism background field (step 1): the animated split-triangle square on the
-// conversation scrollport. Pure client-side CSS — see plugins/prism/lib/client.js.
-const prismDir = resolve(here, '..', 'plugins', 'prism')
-// Personalisation settings tab: the 4th settings section owning the
-// look-and-feel rows (accent/editor-font/Background retarget there).
-const personalisationDir = resolve(here, '..', 'plugins', 'personalisation')
 mkdirSync(profileDir, { recursive: true })
 writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
   name: 'dsh-profile-arxa',
@@ -166,11 +152,6 @@ writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
     'arxa-sidebar': `file:${sidebarDir}`,
     'arxa-file-org-shell': `file:${fileOrgShellDir}`,
     'arxa-github-link': `file:${githubLinkDir}`,
-    'arxa-artifact-viewer': `file:${artifactViewerDir}`,
-    'arxa-frame': `file:${arxaFrameDir}`,
-    'arxa-locale': `file:${localeDir}`,
-    'arxa-prism': `file:${prismDir}`,
-    'arxa-personalisation': `file:${personalisationDir}`,
   },
   dsh: { profile: { bundles } },
 }, null, 2) + '\n')
@@ -308,7 +289,7 @@ engineLog('dsh bin resolved: ' + dshBin)
 // The design panel, brand and gen-ui plugins resolve by package name (their
 // browser halves are discovered through package.json dsh.client, which a
 // file-path entry never reaches).
-const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa-mcp-apps', 'arxa-waiting-page', 'arxa-theme-accent', 'arxa-pairing', 'arxa-sidebar', 'arxa-artifact-viewer', 'arxa-frame', 'arxa-locale', 'arxa-prism']
+const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa-mcp-apps', 'arxa-waiting-page', 'arxa-theme-accent', 'arxa-pairing', 'arxa-sidebar']
 // ALWAYS install, never skip on presence: these are file: dependencies, and
 // pnpm copies them into .pnpm at add-time. A plain `pnpm install` sees the
 // lockfile entry unchanged and keeps the OLD copy — measured 2026-08-25: the
@@ -359,10 +340,6 @@ if (packed) {
     ['arxa-sidebar', sidebarDir],
     ['arxa-file-org-shell', fileOrgShellDir],
     ['arxa-github-link', githubLinkDir],
-    ['arxa-artifact-viewer', artifactViewerDir],
-    ['arxa-frame', arxaFrameDir],
-    ['arxa-locale', localeDir],
-    ['arxa-prism', prismDir],
     ...fiveLibs,
   ]) {
     rmSync(join(nm, name), { recursive: true, force: true })
