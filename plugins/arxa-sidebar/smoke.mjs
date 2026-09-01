@@ -25,6 +25,11 @@ shell.saveWorkspaceRoot(root)
 // Filesystem-level fixtures only: the host holds ITS lifecycle instance on
 // this root — a second lifecycle here would be a different single-handle world.
 const ws = await import(path.join(here, '..', 'workspace', 'lib', 'index.js'))
+// D98/D99: a project session routes to the PROJECT repo, so a scaffolded
+// project fixture must also be attached as a repo (what `project.create`
+// does at lifecycle.js:925) — a bare folder is refused as no-HEAD.
+// (`gw` further down is the same module; this early handle precedes line 83.)
+const gitws = await import(path.join(here, '..', 'git-workspace', 'lib', 'index.js'))
 
 const routes = {}
 const host = await import(path.join(here, 'lib', 'index.js'))
@@ -81,6 +86,7 @@ check('rename served (D72: moved folder, new slug, still open)',
 // filesystem + manifests declare; scaffoldProject stays the CLI/host verb).
 const orgPath = s.orgs[0].path
 const proj = ws.scaffoldProject(orgPath, 'rocket') // lowercase literal: smoke pins hardcode projects/rocket/… keys (D79 slugs keep case)
+if (proj?.path) gitws.initProjectRepo(proj.path)
 check('project fixture scaffolded', !!proj?.path, JSON.stringify(proj))
 
 // v2 (grilled 2026-08-30): sessions are born in a WORKSPACE row —
@@ -194,7 +200,8 @@ r = await act('workspace.new-session', { orgId: rc.id, workspace: 'notes' })
 check('rows-c: dock session ok (auto-named, workspace-scoped)', r.ok === true && r.result?.name === 'note-001' && r.result?.workspace === 'notes' && r.result?.project === null, JSON.stringify(r))
 const rcPath = rc.path
 const rcProj = ws.scaffoldProject(rcPath, 'rocket')
-check('rows-c: project fixture scaffolded', !!rcProj?.path, JSON.stringify(rcProj))
+if (rcProj?.path) gitws.initProjectRepo(rcProj.path)
+check('rows-c: project fixture scaffolded (repo-attached, D98)', !!rcProj?.path && gitws.hasHead(rcProj.path), JSON.stringify(rcProj))
 s = await state()
 const rcTree2 = s.orgs.find((o) => o.open).tree
 check('rows-c: project served with its 10 fixed containers',

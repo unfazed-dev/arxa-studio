@@ -1054,3 +1054,41 @@ the upgraded project-001 gate still reds a broken target:
 
 `selftest.mjs` 51/51 (three new: stamp placement, the upgrade/conflict/force
 ladder, and `frameStatus` reporting without writing). `file-org-shell` 193/193.
+
+### D115 — The rows face aggregates org + project registries. COMPLETES D98/D99.
+
+**What broke.** Merging D98/D99 (project sessions route to the *project* repo)
+turned `arxa-sidebar/smoke.mjs` RED — deterministic, 3 failures, also red inside
+the routing agent's own worktree (that agent ran every `selftest.*` but never
+`smoke.mjs`; CI's discovery regex does). Two distinct causes:
+
+1. **Stale fixture (test-only).** Smoke built `projects/rocket` with
+   `ws.scaffoldProject(...)` alone — a bare folder, no git. Routing correctly
+   refuses that as `no-head` (`initial-snapshot-pending`). The product path
+   never does this: `project.create` (`lifecycle.js:923-925`) always follows
+   scaffold with `initProjectRepo`. Fix: the fixture now attaches the repo the
+   same way, and asserts `hasHead` on it.
+2. **Real product gap (sidebar).** `orgSessions` (`arxa-sidebar/lib/index.js`)
+   listed `shell.listSessions(org.path)` — ONE registry. Once a project session
+   lives in `projects/<slug>/…/registry`, it vanished from the rows face. The
+   routing agent could not fix this: the sidebar was outside its allowed files.
+
+**Decision.** `git-workspace`'s `parkedSessions(orgPath)` already is the
+aggregate (org rows first, then projects in slug order, every state, rows carry
+`repoPath`/`origin`/`projectSlug`) — its name is historical. `file-org-shell`
+re-exports it as `listSessionsAcrossRepos`; the sidebar uses that and degrades
+to `listSessions` when an older shell lacks it. `listSessions` itself stays
+single-repo (the auto-name counter must read only the owning repo — D98).
+
+**Verified.** `smoke.mjs` 52/52 twice in a row; full `scripts/ci.mjs` 26/26
+GREEN (was 25 GREEN / 1 RED after the seven-agent merge).
+
+**Gap left open.** A project folder created by hand (never through
+`project.create`) has no repo and refuses sessions with the org-snapshot
+wording — and nothing ever attaches one: `initProjectRepo` is called only from
+`project.create` (`lifecycle.js:925`); `openOrg`/`migrateOrg` check
+`isRepo(orgPath)` for the *org* repo only, so re-opening the org does not fix
+it (verified by grep, not by test). A lazy `initProjectRepo` in `newSession`,
+or a project pass in `openOrg`, would close it — not done here, to keep D99's
+"never silently attach" refusal as decided. Fixture-wise, `smoke.mjs` now
+mirrors the product path so this gap is no longer masked by a test.

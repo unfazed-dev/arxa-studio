@@ -267,7 +267,12 @@ export function apply(ctx, opts = {}) {
       // Registry rows (durable worktree/branch record) joined with dsh's
       // live session list by dshSessionId (Phase D, D71). Join failures
       // degrade silently to the registry rows.
-      const rows = shell.listSessions(org.path, process.env)
+      // D98/D99: project sessions live in the PROJECT repo's registry, so the
+      // rows face aggregates org + every project registry (org first, then
+      // projects in slug order). An older shell without the aggregate lister
+      // degrades to org-only rows rather than failing the face.
+      const listAll = shell.listSessionsAcrossRepos ?? shell.listSessions
+      const rows = listAll(org.path, process.env)
         .filter((s) => s.state !== 'archived')
         .map((s) => ({
           id: s.id,
