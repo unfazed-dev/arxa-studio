@@ -1065,3 +1065,82 @@ the full `init → write → add → commit` session workflow already pass under
 unmodified profile, so they are the regression baseline. The provider is correct when
 `dart --version` and `flutter --version` also pass **and** a write to a sibling
 project is still denied.
+
+### S2 — Build the container tiers as well (user decision, 2026-09-01)
+
+My recommendation was Seatbelt tiers + integrity, deferring containers until a client
+contract demanded them. **The user chose to build the container tiers too.** Recorded
+as the decision; A4 (hardened container) and A5 (`sbx` microVM) are in scope as
+user-selectable options, alongside A1–A3 and B1–B2.
+
+Consequence: the worktree/container collision (§6) moves from "resolve before L1" to
+**blocking, on the critical path**. §19 resolves it.
+
+---
+
+## 19. CORRECTION — the worktree/container collision is not what was reported
+
+§6 recorded, from research: *"containerising one project forces mounting the whole
+parent repo — which re-exposes every sibling project and the org's `account/` dir."*
+**Measured on live data, that is wrong.**
+
+### What a session worktree actually contains
+
+`/Volumes/business_ssd/TOPO/.arxa/worktrees/s-mthl5ryn-epm2k2`:
+
+```
+.git  .gitignore  AGENTS.md  check.sh  communications  meetings  notes  org.json
+
+projects/ present? *** NO ***
+account/  present? *** NO ***
+```
+
+And the org's git objects hold neither:
+
+```
+git -C <org> ls-files projects/  -> 0
+git -C <org> ls-files account/   -> 0
+```
+
+Both are gitignored (D37), so they are **never tracked and never checked out into a
+worktree**. Mounting a session worktree plus the org's `.git` therefore exposes
+**neither sibling projects nor `account/`**. The mount is safe.
+
+### The project repo is independently mountable
+
+```
+project .git       : REAL DIR (self-contained, not a pointer file)
+project remote     : https://github.com/unfazed-dev/project-001
+project worktrees  : 1 (itself)
+```
+
+No common-git-dir coupling at all. It mounts cleanly on its own.
+
+### The real blocker is a bug we already found
+
+Every session worktree — **including project-scoped ones** — is a worktree of the
+**ORG** repo, at `<org>/.arxa/worktrees/<id>`. The project repo has exactly one
+worktree: itself.
+
+**So a project session's worktree contains no project files.** This is exactly **B2**
+from `git-card-sessions-worktree-rewire.md` ("project-scoped sessions cannot see their
+project"), now confirmed from the container direction: containerising a project
+session today would hand the agent org scaffolding and no project.
+
+### Consequence — good news for S2
+
+The container tiers are **not** blocked by an unsolvable git-plumbing problem. They
+are blocked by a defect that is already found, already understood, and already
+scheduled: **D98/D99 session→repo routing, Phase 1 of the CI/CD plan.**
+
+Once a project session is a worktree of the **project** repo, that repo is
+self-contained and mounts alone — and the container design becomes straightforward:
+
+| Session scope | Mount |
+|---|---|
+| project session | the project repo's worktree + its own `.git` — self-contained, no org access |
+| org session | the org worktree + org `.git` — contains no `projects/`, no `account/` |
+
+**Ordering, now firm: CI/CD Phase 1 (D98/D99) is a hard prerequisite for A4/A5.**
+Build the container tiers on top of corrected routing, never before it — otherwise
+every project container is empty.
