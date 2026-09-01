@@ -22,7 +22,7 @@ const { installSettingsSection, settingsNamespace } =
 const { default: z } = await fromDsh('@deepseek-ai/schemastery', 'lib/index.mjs')
 import { createOrgServer } from './org-server.js'
 import { startOrgFollow, readOpenOrg } from './follow.js'
-import { createWriteApi, createMainVersionRoute, createVersionRoute } from './write-api.js'
+import { createWriteApi, createMainVersionRoute, createVersionRoute, resolveWorktree } from './write-api.js'
 import { createWorktreeRoute, createTreeRoute, createSessionChangesRoute, resolveWorktreeFile } from './wt-api.js'
 import { createOrgWatcher, createEventsRoute } from './watcher.js'
 import { TOKEN_TTL_CEILING_SECONDS, issueToken, loadOrCreateSecret, readVerifyFor } from './tokens.js'
@@ -147,7 +147,12 @@ export function createVendorRoutes({ vendorDir }) {
           res.writeHead(404, { 'content-type': 'text/plain' })
           return res.end('not found')
         }
-        res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' })
+        const EXT_TYPES = { '.woff2': 'font/woff2', '.png': 'image/png' }
+        const ctype = EXT_TYPES[name.slice(name.lastIndexOf('.'))] || 'text/javascript; charset=utf-8'
+        res.writeHead(200, {
+          'content-type': ctype,
+          'cache-control': 'no-store',
+        })
         if (req.method === 'HEAD') return res.end()
         fs.createReadStream(file).pipe(res)
       } catch {
@@ -230,7 +235,17 @@ export function apply(ctx, config) {
       path: '/__arxa/artifacts/version',
       handler: (req, res) => { void versionRoute.handle(req, res) },
     })
-    const events = createEventsRoute({ watcher })
+    const events = createEventsRoute({
+      watcher,
+      // Phase 1: the viewer's wt lane live-reloads on agent re-writes — the
+      // worktree root resolves under the OPEN org only (unknown → org lane).
+      resolveSessionRoot: async (sessionId) => {
+        const open = readOpenOrg(process.env)
+        if (!open) return null
+        const row = await resolveWorktree({ env: process.env, orgPath: open.orgPath, worktreeId: sessionId })
+        return row ? row.worktreePath : null
+      },
+    })
     ctx.webServer?.register?.({
       path: '/__arxa/artifacts/events',
       handler: (req, res) => { void events.handle(req, res) },

@@ -54,7 +54,7 @@ export function createOrgWatcher({ intervalMs = 250 } = {}) {
   }
 }
 
-export function createEventsRoute({ watcher }) {
+export function createEventsRoute({ watcher, resolveSessionRoot }) {
   return {
     async handle(req, res) {
       if (req.method !== 'GET') { res.writeHead(405, { 'content-type': 'text/plain' }); return res.end('GET only') }
@@ -64,10 +64,31 @@ export function createEventsRoute({ watcher }) {
         'connection': 'keep-alive',
       })
       res.write('retry: 2000\n\n')
-      const off = watcher.onChange((relPath, mtimeMs) => {
+      const push = (relPath, mtimeMs) => {
         try { res.write('data: ' + JSON.stringify({ relPath, mtimeMs }) + '\n\n') } catch {}
+      }
+      // Worktree lane (Phase 1, Claude-model live reload): ?session=<id>
+      // resolves the session worktree of the OPEN org and binds a dedicated
+      // watcher for THIS connection's life — the viewer's wt lane updates in
+      // place when the agent re-writes the open artifact. Org lane otherwise.
+      let wtWatcher = null
+      let sessionId = null
+      try { sessionId = new URL(req.url, 'http://x').searchParams.get('session') } catch { sessionId = null }
+      let off = null
+      if (sessionId && resolveSessionRoot) {
+        let root = null
+        try { root = await resolveSessionRoot(sessionId) } catch { root = null }
+        if (root) {
+          wtWatcher = createOrgWatcher({ intervalMs: 250 })
+          wtWatcher.setRoot(root)
+          off = wtWatcher.onChange(push)
+        }
+      }
+      if (!off) off = watcher.onChange(push)
+      req.on('close', () => {
+        try { off() } catch {}
+        if (wtWatcher) wtWatcher.stop()
       })
-      req.on('close', () => { off() })
     },
   }
 }

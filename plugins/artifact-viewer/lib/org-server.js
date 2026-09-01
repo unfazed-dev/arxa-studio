@@ -52,7 +52,8 @@ export function resolveInside(rootReal, relPath) {
  */
 export function createOrgServer({ orgRoot, orgSlug, verify = null }) {
   const rootReal = fs.realpathSync(path.resolve(orgRoot))
-  const server = http.createServer(async (req, res) => {
+  let server // bound per listen attempt — see the dual-stack start below
+  const handler = async (req, res) => {
     try {
       const addr = server.address()
       // Case-INSENSITIVE host match (2026-09-01, found live): browsers
@@ -114,20 +115,40 @@ export function createOrgServer({ orgRoot, orgSlug, verify = null }) {
       try { reject(res, 500, 'internal error') } catch { /* socket gone */ }
       server.emit('orgServer:error', err)
     }
-  })
+  }
+  // Dual-stack loopback listen (2026-09-01, first-open "Load failed"): macOS
+  // answers every *.localhost name with ::1 FIRST (synthesized loopback), and
+  // the desktop WKWebView's FIRST cross-origin fetch to the old v4-only
+  // listener died on the refused v6 address with a raw "TypeError: Load
+  // failed" — every later fetch reused the warm pool and worked, which is
+  // exactly why "switch to another file and come back" healed it. Listening
+  // on '::' (ipv6Only defaults to false) accepts both families so the first
+  // fetch connects; v6-less hosts fall back to 127.0.0.1.
   return new Promise((resolve, rejectP) => {
-    server.once('error', rejectP)
-    server.listen(0, '127.0.0.1', () => {
-      const port = server.address().port
-      resolve({
-        port,
-        origin: 'http://org-' + orgSlug + '.localhost:' + port,
-        close: () => new Promise((done) => {
-          try { server.closeAllConnections?.() } catch { /* older node */ }
-          server.close(() => done())
-        }),
+    const start = (host, fallback) => {
+      server = http.createServer(handler)
+      server.once('error', (err) => {
+        if (fallback) {
+          try { server.close() } catch { /* never listened */ }
+          start(fallback, null)
+        } else {
+          rejectP(err)
+        }
       })
-    })
+      server.once('listening', () => {
+        const port = server.address().port
+        resolve({
+          port,
+          origin: 'http://org-' + orgSlug + '.localhost:' + port,
+          close: () => new Promise((done) => {
+            try { server.closeAllConnections?.() } catch { /* older node */ }
+            server.close(() => done())
+          }),
+        })
+      })
+      server.listen(0, host)
+    }
+    start('::', '127.0.0.1')
   })
 }
 

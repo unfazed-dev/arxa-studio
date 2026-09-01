@@ -80,29 +80,53 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   }
   // T5/D91 card routing: chips open the docked column, wt lane first, org fallback
   const t5client = fs.readFileSync(join(here, 'lib', 'client.js'), 'utf8')
-  assert.match(t5client, /__ARXA_AV_CHIP_INTERCEPT__/, 'chip interception installed once')
   assert.match(t5client, /\[data-produced-files-row\] button\[title\]/, 'interceptor targets stock produced-file chips only')
   assert.match(t5client, /CustomEvent\('arxa-av-open', \{ detail: sessionId \? \{ sessionId, relPath: path \}/, 'chip click dispatches the arxa-av-open bridge')
   assert.match(t5client, /path === '\.'\) return/, 'stock show-in-folder affordance stays stock')
   assert.match(t5client, /if \(ok\) return/, 'wt lane wins; org lane is the fallback on a miss')
-  // Org-lane calls pass relPath as an ARGUMENT (2026-09-01, found live):
-  // openArtifact read the draft STATE right after setDraft — the closure
-  // still saw '' on first open, the lane bailed silently, and the docked
-  // column stayed empty (D93 had already reserved the grid cell).
+  // Phase 1 conformance rebuild (docs/plans/dsh-plugin-ui-conformance.md):
+  // store-based ingress replaces the D93 retry ladder + parked payload.
   assert.match(t5client, /const openArtifact = async \(relPathArg\) => \{/, 'openArtifact takes the relPath argument')
-  assert.match(t5client, /String\(relPathArg \?\? draft \?\? ''\)/, 'draft stays the fallback for form submits')
-  // Cold-open race: the detail re-dispatch used to fire synchronously before
-  // the panel's listener existed — first-ever open lost the payload and the
-  // column stayed empty. The bridge now parks the payload; the panel consumes
-  // it on mount; the deferred dispatch skips if already consumed.
-  assert.match(t5client, /__ARXA_AV_PENDING__ = detail/, 'bridge parks the payload for a cold open')
-  assert.match(t5client, /const parked = window\.__ARXA_AV_PENDING__/, 'panel consumes the parked payload on mount')
-  assert.match(t5client, /if \(window\.__ARXA_AV_PENDING__ !== detail\) return/, 'dispatch attempts stop once the payload is consumed')
-  assert.match(t5client, /for \(const delay of \[0, 120, 400, 1000, 2000\]\)/, 'retry ladder bridges the column mount')
+  assert.match(t5client, /String\(relPathArg \|\| ''\)/, 'the debug path-input form and its draft state are gone')
+  const t5code = t5client.replace(/\/\*\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+  assert.doesNotMatch(t5code, /__ARXA_AV_PENDING__|for \(const delay of \[0, 120, 400, 1000, 2000\]\)|setInterval\(/,
+    'retry ladder, parked window global, and the 4s session poll are all gone (comments may narrate)')
+  assert.doesNotMatch(t5code, /__ARXA_AV_CHIP_INTERCEPT__|__ARXA_SESSIONS__|__ARXA_AV_DEBUG__/,
+    'window debug globals are gone (ctx.effect disposal replaces the install-once flag)')
+  assert.match(t5client, /function createAvStore\(\)/, 'ingress store exists')
+  assert.match(t5client, /store\.request\(\{ sessionId: detail\.sessionId \|\| null, relPath: detail\.relPath \}\)/, 'apply() parks opens in the store')
+  assert.match(t5client, /store\.consume\(\)/, 'the mounted panel consumes the pending open')
+  assert.match(t5client, /ctx\.layout\.openViewer\(\)/, 'the listener opens the column through the layout face')
+  assert.match(t5client, /sessions\.list\.subscribe/, 'session tracking subscribes the dsh sessions snapshot store')
+  assert.match(t5client, /MutationObserver/, 'first-produced-file-per-turn auto-open observer present')
+  assert.match(t5client, /ctx\.locale\.register\(NS, \{ en, pl, fr \}\)/, 'locale NS registered with en/pl/fr dictionaries')
+  assert.match(t5client, /const inject = \['slots', 'connection', 'layout', 'sessions', 'locale'\]/, 'inject declares locale')
+  assert.ok((t5client.match(/ctx\.effect\(/g) || []).length >= 5, 'every side effect sits inside ctx.effect (>=5)')
+  for (const prim of ['P.StateDot', 'P.Tooltip', 'P.Menu', 'P.Button', 'P.writeClipboard', 'P.IconCloseOutline16', 'P.IconCopyOutline16']) {
+    assert.ok(t5client.includes(prim), 'primitives aboard: ' + prim)
+  }
+  const hexes = t5client.match(/#[0-9a-fA-F]{3,8}\b/g) || []
+  assert.deepEqual([...new Set(hexes)].sort(), ['#fff'],
+    'no hardcoded hex colors — the only white left is the pdf/iframe document surface')
+  assert.match(t5client, /--dsw-alias-border-l2|--dsw-alias-label-error|--dsw-alias-brand-primary/, 'real theme tokens used')
   // wt lane accepts an absolute chip path that lives INSIDE the worktree,
   // and still refuses escapes (D91 re-base, escape checks intact)
   assert.match(wt, /path\.isAbsolute\(relPath\)/, 'absolute chip paths are re-based onto the worktree root')
   assert.match(wt, /'escape'\), \{ code: 'ESCAPE' \}\)\n/, 'escape check retained after the re-base')
+  // 2026-09-01 user report trio: session-scoped close, maximize glyph,
+  // toolbar tooltip placement.
+  assert.match(t5client, /IconFullscreenOutline16/, 'maximize uses the fullscreen glyph')
+  assert.doesNotMatch(t5client, /iconBtn\('max'[^]*?IconBrowseOutline16/, 'maximize no longer carries the browse glyph')
+  {
+    const calls = (t5client.match(/P\.Tooltip, \{/g) || []).length
+    const bottom = (t5client.match(/side: 'bottom'/g) || []).length
+    assert.ok(calls > 0 && calls === bottom, 'every viewer tooltip pins side bottom (' + bottom + '/' + calls + ') — toolbar tooltips must never cover sibling buttons')
+  }
+  assert.match(t5client, /seenSessionRef\.current = id/, 'session tracker records every id incl. null (null->X must close a stale viewer)')
+  assert.match(t5client, /wtRef\.current\.sessionId === id\) return/, 'a shown file bound to the new current session survives the switch')
+  assert.match(t5client, /if \(frameProps\.close\) frameProps\.close\(\)\n\s*setOpen\(false\)/, 'the session-switch reset closes the LAYOUT column, not only panel state')
+  assert.match(t5client, /typeof l\.closeViewer === 'function'/, 'the session mirror enforces the close at the layout level — the seat remount outlives any in-panel close')
+  assert.doesNotMatch(t5client, /if \(seenSessionRef\.current && id && seenSessionRef\.current !== id\)/, 'the over-guarded session->session-only reset is gone')
 }
 
 console.log('arxa-artifact-viewer selftest: GREEN')
@@ -181,6 +205,24 @@ assert.ok(trav.status === 403 || trav.status === 404,
   'encoded traversal never serves content, got: ' + trav.status)
 assert.equal((await req(port, '/leak.txt', { host: H })).status, 403, 'symlink escape rejected')
 assert.equal((await req(port, '/notes/a.md', { host: 'evil.example:1234' })).status, 403, 'host allowlist')
+
+// Dual-stack loopback (2026-09-01, first-open "Load failed"): macOS answers
+// every *.localhost name with ::1 FIRST (synthesized loopback), and the
+// desktop WKWebView's first cross-origin fetch to a v4-only listener died on
+// the refused v6 address with a raw "TypeError: Load failed" while every
+// later fetch reused the warm pool — the "switch to another file and back"
+// workaround. The org server must answer over BOTH loopback families.
+{
+  const v6 = await new Promise((resolve) => {
+    const rq = http.request({ host: '::1', port, path: '/healthz', headers: { host: H } }, (res) => {
+      res.resume()
+      resolve(res.statusCode)
+    })
+    rq.on('error', () => resolve(0))
+    rq.end()
+  })
+  assert.equal(v6, 200, 'org server answers over ::1 (dual-stack loopback)')
+}
 
 const rr = await req(port, '/vid.mp4', { host: H, method: 'GET' })
 Object.assign(rr.req ||= {}, {})
@@ -332,7 +374,8 @@ console.log('arxa-artifact-viewer selftest: GREEN (tokens + route)');
 // ---- Task 4: vendored bundles exist + vendor route serves them ------------
 import { createVendorRoutes } from './lib/index.js'
 const vendorDir = path2.join(here, 'lib', 'vendor')
-for (const f of ['codemirror.js', 'markdown.js', 'pdf.js', 'pdf.worker.js']) {
+for (const f of ['codemirror.js', 'markdown.js', 'pdf.js', 'pdf.worker.js',
+  'prettier.js', 'icons.js']) {
   assert.ok(fs.existsSync(path2.join(vendorDir, f)), 'vendored bundle present: ' + f)
   const bytes = fs.readFileSync(path2.join(vendorDir, f))
   assert.ok(bytes.length > 50_000, f + ' is a real bundle (' + bytes.length + ' bytes)')
@@ -350,11 +393,78 @@ assert.equal((await req(vport, '/markdown.js')).status, 200)
 assert.equal((await req(vport, '/codemirror.js', { method: 'POST' })).status, 405, 'vendor route GET-only')
 const vt = await req(vport, '/%2e%2e/index.js')
 assert.ok(vt.status === 404 || vt.status === 403, 'vendor traversal refused, got ' + vt.status)
+// 2026 editor (grilled 2026-09-03): theme port, lazy prettier, icon subset,
+// Fira Code woff2 with a real font content-type. ArxaTheme rides INSIDE the
+// codemirror bundle — a second IIFE would duplicate @codemirror/state and
+// break every extension instanceof check (measured live 2026-09-03).
+const vfont = await req(vport, '/fira-code-latin.woff2')
+assert.equal(vfont.status, 200, 'fira-code woff2 served')
+assert.equal(vfont.headers['content-type'], 'font/woff2', 'woff2 content-type')
+assert.equal((await req(vport, '/fira-code-latin-ext.woff2')).status, 200, 'latin-ext woff2 served (pl/fr glyphs)')
+// Prettier toggle chip: the OFFICIAL brand mark vendored as a binary asset
+// (favicon PNG from prettier/prettier website/static/icon.png, MIT).
+const vpngBuf = fs.readFileSync(path2.join(vendorDir, 'prettier.png'))
+assert.ok(vpngBuf.length > 500 && vpngBuf.length < 20_000, 'prettier.png vendored (' + vpngBuf.length + ' bytes)')
+assert.ok(vpngBuf[0] === 0x89 && vpngBuf[1] === 0x50 && vpngBuf[2] === 0x4e, 'prettier.png is a real PNG')
+const vpng = await req(vport, '/prettier.png')
+assert.equal(vpng.status, 200, 'vendor route serves prettier.png')
+assert.equal(vpng.headers['content-type'], 'image/png', 'png content-type')
+assert.ok(!fs.existsSync(path2.join(vendorDir, 'themes.js')), 'no separate themes bundle (single @codemirror instance)')
+const vThemes = fs.readFileSync(path2.join(vendorDir, 'codemirror.js'), 'utf8')
+assert.ok(vThemes.includes('ArxaTheme='), 'codemirror bundle sets ArxaTheme')
+assert.ok(vThemes.includes('2026 Dark') && vThemes.includes('2026 Light'), 'both 2026 palettes vendored')
+assert.ok(vThemes.includes('#121314'), '2026 Dark editor background in palette')
+assert.ok(vThemes.includes('#ff7b72'), 'GitHub keyword red in palette')
+assert.ok(vThemes.includes('cm-selectionBackground') && vThemes.includes('cm-gutters'), 'editor chrome mapped')
+const vCM = fs.readFileSync(path2.join(vendorDir, 'codemirror.js'), 'utf8')
+for (const key of ['langForExt', 'syntaxHighlighting', 'Compartment', 'indentUnit', 'legacy']) {
+  assert.ok(vCM.includes(key), 'ArxaCM exports ' + key)
+}
+for (const key of ['parsers:', 'resolveTag:', 'highlightTree:']) {
+  assert.ok(vCM.includes(key), 'ArxaCM exports ' + key + ' (single lezer instance for the md preview)')
+}
+const vMD = fs.readFileSync(path2.join(vendorDir, 'markdown.js'), 'utf8')
+assert.ok(!vMD.includes('pythonLanguage') && !vMD.includes('@lezer/highlight'), 'md bundle carries no second lezer/parsers copy')
+const vPrettier = fs.readFileSync(path2.join(vendorDir, 'prettier.js'), 'utf8')
+assert.ok(vPrettier.includes('window.ArxaPrettier=') && vPrettier.includes('parserForExt'), 'prettier bundle shape')
+assert.ok(vPrettier.includes('typescript') && vPrettier.includes('scss'), 'prettier parser coverage')
+const vIcons = fs.readFileSync(path2.join(vendorDir, 'icons.js'), 'utf8')
+assert.ok(vIcons.includes('window.ArxaIcons=') && vIcons.includes('folder-open'), 'icons bundle shape')
+assert.ok(vIcons.includes('width="16" height="16"'), 'material SVGs pinned to 16px')
+assert.ok(/#[0-9a-fA-F]{6}/.test(vIcons), 'material icons carry brand colors (full color)')
 await new Promise((r2) => vhttp.close(r2))
 // Markdown lane contract: the view reads window.ArxaMD, so the client must
 // actually kick the vendored markdown.js load (else the placeholder hangs).
 const clientSrc = fs.readFileSync(path2.join(here, 'lib', 'client.js'), 'utf8')
 assert.ok(clientSrc.includes("ensureVendor('markdown.js', 'ArxaMD')"), 'client loads the vendored markdown bundle (window.ArxaMD)')
+// 2026 editor client contracts (grilled 2026-09-03).
+assert.ok(clientSrc.includes("'.dart'"), '.dart joins the code lane')
+assert.match(clientSrc, /ensureVendor\('codemirror\.js', 'ArxaCM'\)[\s\S]{0,120}CM\.ArxaTheme/, 'palette read from the single CM bundle')
+assert.match(clientSrc, /ensureVendor\('icons\.js', 'ArxaIcons'\)/, 'client loads the material icon subset')
+assert.match(clientSrc, /ensureVendor\('prettier\.js', 'ArxaPrettier'\)/, 'prettier stays lazy (loaded only on format)')
+assert.ok(clientSrc.includes('CM.langForExt(ext)'), 'language routing rides the bundle map')
+assert.ok(clientSrc.includes('detectIndent('), 'indentation detected per file (VS Code detectIndentation)')
+assert.ok(clientSrc.includes('FORMAT_EXTS'), 'format-visible extension list present')
+assert.ok(clientSrc.includes("'Shift-Alt-F'"), 'VS Code format chord bound')
+assert.match(clientSrc, /IconEnhanceOutline16/, 'format action uses the enhance glyph')
+assert.ok(clientSrc.includes('aXa_av_palMd'), 'markdown preview adopts the palette chrome')
+assert.ok(clientSrc.includes("'--aXa_av_pal-bg'"), 'palette CSS vars set on the root')
+assert.ok(clientSrc.includes('data-ds-dark-theme'), 'palette follows the dsh dark flag')
+assert.ok(clientSrc.includes('--arxa-editor-font'), 'editor font follows the settings choice')
+assert.ok(clientSrc.includes('aXa_av_fileIcon'), 'viewer title carries the material file icon')
+// 2026-09-03 sweep fixes.
+assert.ok(clientSrc.includes('unwatchPal'), 'panel palette subscription unsubscribes on remount')
+assert.match(clientSrc, /h\(DiffView, \{ relPath: state\.relPath/, 'diff surface receives the file identity')
+assert.ok(clientSrc.includes('langComp.of(CM.langForExt(relPath)'), 'diff pane colors by language')
+assert.ok(clientSrc.includes('window.ArxaMD.setParsers'), 'preview highlighter fed from the single CM instance')
+assert.ok(clientSrc.includes('data-arxa-vendor'), 'vendor script tags marked for cross-loader reuse')
+// Prettier viewer toggle: ON by default, persisted, gates every format path.
+assert.ok(clientSrc.includes("'arxa.av.prettier'"), 'prettier toggle persists its choice')
+assert.ok(clientSrc.includes("!== 'off'"), 'prettier defaults ON (unset key = on)')
+assert.ok(clientSrc.includes('FORMAT_EXTS.has(formatExt) && prettierOn'), 'prettier toggle gates the format action (button + Shift-Alt-F)')
+assert.ok(clientSrc.includes("'aria-pressed'"), 'prettier toggle exposes pressed state')
+assert.ok(clientSrc.includes('aXa_av_prettierMark'), 'prettier brand chip rides the top bar')
+assert.ok(clientSrc.includes("'action.prettier.off'"), 'prettier toggle locales wired')
 console.log('arxa-artifact-viewer selftest: GREEN (vendor bundles + route)');
 
 // ---- Task 6: engine write API over a REAL git session worktree ------------
@@ -535,3 +645,46 @@ sseSrv.close()
 off()
 w11.stop()
 console.log('arxa-artifact-viewer selftest: GREEN (watcher + SSE)');
+
+// ---- editor-font consumption (2026-09-03): the cm-content rule's fallback
+// must ride the REAL dsh mono token (--ds-font-family-code). --dsw-font-mono
+// never existed; a var() chain ending in an undefined token is invalid at
+// computed-value time, the declaration dies, and CM's built-in monospace
+// inherits — the editor-font setting silently did nothing.
+assert.ok(!clientSrc.includes('--dsw-font-mono'), 'no phantom --dsw-font-mono token in the viewer css')
+// 2026-09-01: the fallback must NOT be --ds-font-family-code either — that
+// token lists "Fira Code" third, and with "SF Mono" unresolvable in WKWebView
+// + JetBrains Mono absent it resolved to the system-installed Fira Code:
+// the Default pill rendered Fira and the font toggle was a visual no-op
+// (render-truthed by in-app width probe: token == "Fira Code" at 366.61px).
+// The editor default is an explicit Fira-free stack landing on Menlo.
+assert.ok(clientSrc.includes('font-family:var(--arxa-editor-font,"SF Mono",ui-monospace,"JetBrains Mono",Consolas,"Liberation Mono",Menlo,monospace)'), 'cm-content consumes the editor-font var with a Fira-free default fallback')
+assert.ok(!clientSrc.includes('var(--arxa-editor-font,var(--ds-font-family-code))'), 'editor fallback no longer rides the Fira-containing dsh token')
+
+// ---- Task 11b: worktree-lane events (?session= binds a per-connection watcher)
+{
+  const wtRoot = fs.mkdtempSync(path2.join(os.tmpdir(), 'arxa-av-wtroot-'))
+  const orgW = createOrgWatcher({ intervalMs: 60 })
+  const route = createEventsRoute({ watcher: orgW, resolveSessionRoot: async (id) => id === 'sess-x' ? wtRoot : null })
+  const srv = http.createServer((rq, rs) => { void route.handle(rq, rs) })
+  await new Promise((r2) => srv.listen(0, '127.0.0.1', r2))
+  const port = srv.address().port
+  const wtChunks = []
+  const rq1 = http.get({ host: '127.0.0.1', port, path: '/?session=sess-x' }, (rs) => { rs.on('data', (c) => wtChunks.push(c.toString())) })
+  await sleep(150)
+  fs.writeFileSync(path2.join(wtRoot, 'out.md'), 'agent wrote\n')
+  await sleep(400)
+  assert.ok(wtChunks.join('').includes('"relPath":"out.md"'), '?session= pushes worktree changes')
+  rq1.destroy()
+  // unknown session falls back to the org watcher (no worktree events leak)
+  const orgChunks = []
+  const rq2 = http.get({ host: '127.0.0.1', port, path: '/?session=nope' }, (rs) => { rs.on('data', (c) => orgChunks.push(c.toString())) })
+  await sleep(120)
+  fs.writeFileSync(path2.join(wtRoot, 'leak.md'), 'x')
+  await sleep(300)
+  assert.ok(!orgChunks.join('').includes('leak.md'), 'unknown session never watches the worktree')
+  rq2.destroy()
+  srv.close()
+  orgW.stop()
+  console.log('arxa-artifact-viewer selftest: GREEN (worktree-lane events)')
+}
