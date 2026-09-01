@@ -68,17 +68,24 @@ function gitkeepEmptyDirs(root) {
   walk(root)
 }
 
-/** Commit the rename inside a project's OWN repo (projects are nested git
- * repos — the org repo's migration commits cannot carry their trees).
+/** Commit the tree change inside a project's OWN repo (projects are nested
+ * git repos — the org repo's migration commits cannot carry their trees).
  * Best-effort: a repo that cannot commit still gets the tree change, and
- * the publish/push path annotates anything loud. */
-function commitProjectRepoMigration(projectPath) {
+ * the publish/push path annotates anything loud.
+ *
+ * B17: `subject` MUST be a conventional subject. The old hardcoded
+ * `migrate: …` is not a type the frame gate accepts (`docs feat fix refactor
+ * test chore perf build ci style merge`), so arxa's own migration commit
+ * failed arxa's own commit gate — every migrated project went red on its
+ * next CI run, through nothing the user did. It also named v3 while
+ * migrating to any version, so the message lied after the second step. */
+function commitProjectRepoMigration(projectPath, subject) {
   if (!fs.existsSync(path.join(projectPath, '.git'))) return
   try {
     const status = runGit(['status', '--porcelain'], { cwd: projectPath })
     if (String(status ?? '').trim() === '') return
     runGit(['add', '-A'], { cwd: projectPath })
-    runGit(['commit', '-m', 'migrate: stage folders to template v3 (stage order, 2-digit prefixes) + .gitkeep'], { cwd: projectPath })
+    runGit(['commit', '-m', subject], { cwd: projectPath })
   } catch { /* best effort — the tree change stands regardless */ }
 }
 
@@ -149,7 +156,8 @@ export const MIGRATIONS = Object.freeze([
           // .gitkeep BEFORE the project commit — the emptiness markers are
           // exactly what the commit is supposed to carry.
           gitkeepEmptyDirs(project)
-          commitProjectRepoMigration(project)
+          commitProjectRepoMigration(project,
+            'chore(migrate): stage folders to template v3 (stage order, 2-digit prefixes) + .gitkeep')
         }
       }
       // The org repo's migration post-commit picks the org tree up; project
@@ -195,7 +203,7 @@ export const MIGRATIONS = Object.freeze([
             fs.mkdirSync(path.join(project, dir), { recursive: true })
           }
           gitkeepEmptyDirs(project)
-          commitProjectRepoMigration(project)
+          commitProjectRepoMigration(project, 'chore(migrate): track/target vocabulary (template v4)')
         }
       }
       gitkeepEmptyDirs(orgPath)
@@ -218,8 +226,16 @@ export function migrationChain(fromVersion, toVersion, migrations = MIGRATIONS) 
   return chain
 }
 
+/**
+ * B18: this used to build `stage: org format migration …` from STAGE_PREFIX,
+ * and `stage` is not a type the frame gate accepts. So the org repo's own
+ * migration commit pair failed the org gate's conventional-subject check —
+ * arxa reddening its own repo, on a commit the user never wrote and cannot
+ * amend. The commit PAIR is still the rewind mechanism; only the subject
+ * changes, to one the gate recognises.
+ */
 function migrationMessage(step, phase) {
-  return `${STAGE_PREFIX} org format migration v${step.from}→v${step.to} (${phase})`
+  return `chore(migrate): org format v${step.from}→v${step.to} (${phase})`
 }
 
 /**

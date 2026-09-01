@@ -533,11 +533,23 @@ ok('frame: org check.sh is green by absence, red on real rot (Q4)', () => {
   fs.mkdirSync(path.join(d, 'random-stuff'))
   assert.notEqual(sh(), 0, 'unexpected top-level directory goes red')
   fs.rmSync(path.join(d, 'random-stuff'), { recursive: true })
-  // stage naming
-  fs.mkdirSync(path.join(d, 'projects', '01-good'))
-  assert.equal(sh(), 0, 'NN-kebab accepted')
-  fs.mkdirSync(path.join(d, 'projects', '1bad'))
-  assert.notEqual(sh(), 0, 'non-NN stage folder goes red')
+  // Stage naming, at the level that actually has stages.
+  // B19: the org gate used to walk INTO projects/, which are nested separate
+  // repos holding the user's application. It failed on things like
+  // android/.gradle/9.1.0 — a Gradle cache, not a stage. Each repo now
+  // polices its own stages: the org walks its own docks, the project walks
+  // its own depth-1 stages.
+  fs.mkdirSync(path.join(d, 'notes', '01-good'))
+  assert.equal(sh(), 0, 'NN-kebab accepted in the org tree')
+  fs.mkdirSync(path.join(d, 'notes', '1bad'))
+  assert.notEqual(sh(), 0, 'non-NN folder in the ORG tree goes red')
+  fs.rmSync(path.join(d, 'notes', '1bad'), { recursive: true })
+  // A project slug is not a stage, and lives in another repo entirely.
+  fs.mkdirSync(path.join(d, 'projects', '2024-rebrand', '05-scaffold'), { recursive: true })
+  assert.equal(sh(), 0, 'the org gate does not judge names inside project repos')
+  // Deep application content that merely starts with a digit must be fine.
+  fs.mkdirSync(path.join(d, 'projects', 'p1', '05-scaffold', 'application', 'ios', 'android', '.gradle', '9.1.0'), { recursive: true })
+  assert.equal(sh(), 0, 'a Gradle cache directory is not a malformed stage (B19)')
 })
 
 ok('sessions: a deleted worktree is `missing`, never silently clean (B1)', () => {
@@ -556,6 +568,35 @@ ok('sessions: a deleted worktree is `missing`, never silently clean (B1)', () =>
     'a deleted worktree must not read as clean — git returns null and `?? \'\'` used to make that "no changes"')
   assert.equal(worktreeHealth(''), 'missing', 'an empty path is not a healthy worktree')
   assert.equal(worktreeHealth('/nonexistent/xyz'), 'missing')
+})
+
+ok('frame: the org gate never walks into nested project repos (B19)', () => {
+  const org = orgCheckSh()
+  assert.match(org, /-name projects -prune/,
+    'projects/ are separate repos (D37) whose content is the user\'s app — a Gradle cache dir like 9.1.0 must not read as a malformed stage')
+  // The project gate owns its own stages, and only at depth 1.
+  const proj = projectCheckSh()
+  assert.match(proj, /-mindepth 1 -maxdepth 1 -type d ! -name \.git/,
+    'a project checks its own stage names, at depth 1 only')
+  assert.match(proj, /stage folder not NN-kebab/)
+})
+
+ok('frame: every subject arxa itself commits passes its own gate (B17/B18)', () => {
+  // arxa writing a commit its own gate rejects is the worst kind of red: the
+  // user did not write it and cannot amend it.
+  for (const subject of [
+    'chore(migrate): org format v3→v4 (pre)',
+    'chore(migrate): org format v3→v4 (post)',
+    'chore(migrate): stage folders to template v3 (stage order, 2-digit prefixes) + .gitkeep',
+    'chore(migrate): track/target vocabulary (template v4)',
+    'chore(ci): wire the arxa frame (checks, workflow, PR template)',
+    `chore(ci): refresh the arxa frame to v${FRAME_VERSION}`,
+  ]) {
+    assert.ok(SUBJECT_RE.test(subject), `arxa commits this and its own gate rejects it: ${subject}`)
+  }
+  // The two prefixes that are MEANT to fail — they never reach main.
+  assert.equal(SUBJECT_RE.test('wip: auto-save'), false, 'wip tier is squashed away, never merged')
+  assert.equal(SUBJECT_RE.test('stage: anything'), false, 'bare stage: is not a conventional type')
 })
 
 ok('frame: generated files carry a version stamp after the shebang', () => {
