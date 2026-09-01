@@ -1,6 +1,6 @@
 {
   "name": "arxa-conversation",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "Engine half of the phone's conversation rail (mobile code_shell): on-demand transcript fold of the durable session log + plain user-turn send over the pairing tunnel.",

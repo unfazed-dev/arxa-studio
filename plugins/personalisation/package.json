@@ -1,0 +1,26 @@
+{
+  "name": "arxa-personalisation",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Settings > Personalisation tab (0.1.0, user request): the Background group had outgrown General, so every look-and-feel row now lives in a dedicated 4th settings section (nav order 18, between Plugins 15 and Agent presets 20). The section declares and renders the child slot settings.personalisation.item; the row owners retarget their registrations there — Accent + Editor font (arxa-theme-accent, orders 0/10) and the whole Background group (arxa-prism, order 20). General keeps behavior rows (Enter behavior, Browser session, Pair a device). The section chrome mirrors the General section's (flex column + last-row border removal); the nav icon for the new tab is a palette glyph swapped in via pure CSS (the settings shell's navIcon() hardcodes icons by section id and a new id would fall back to a second gear). Pure client side; the host half is a no-op stub so the composition row has a plugin to load.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "peerDependencies": {
+    "react": "^18.2.0"
+  }
+}

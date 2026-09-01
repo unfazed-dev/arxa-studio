@@ -51,6 +51,12 @@ check('headers: workspace part names its generator',
 check('headers: shell part names its generator',
   client.includes('scripts/gen-sidebar.mjs'))
 check('headers: client.js names dsh version', client.includes('0.1.1-rc.2'))
+// 2026-09-03: Material file/folder glyphs in the org tree — the generated
+// client carries the vendored-subset loader and both row injections.
+check('icons: tree loader present', client.includes('function arxaIcons(') && client.includes('/__arxa/artifacts/vendor/icons.js'))
+check('icons: file rows render material glyphs', client.includes('matIcons.file(name)'))
+check('icons: dir rows render material folder glyphs (open/closed)', client.includes('matIcons.folder(sub'))
+check('icons: stock dsh glyphs kept as fallback', client.includes('IconBrowseOutline16'))
 
 // ---- 3. rows-world content ----------------------------------------------------
 check('rows: org store present', client.includes('function createOrgStore()'))
@@ -105,7 +111,7 @@ check('rows-c: scope gate — orgT capture keeps stock-scope render sites locale
   client.includes('let orgT =') && client.includes('orgT = props.t')
   && /function SessionTree\(\{[^)]*\bt\b[^)]*\)\s*\{/.test(client))
 check('rows-c: OrgTreeSection dissolved', !client.includes('OrgTreeSection') && !client.includes('treeRows'))
-check('rows-c: selection tooltip in both locales', client.includes('"newSession.selectFirst": "Select a workspace to start a session"') && client.includes('"newSession.selectFirst": "先选择一个工作区再开始会话"'))
+check('rows-c: selection tooltip in all three locales', client.includes('"newSession.selectFirst": "Select a workspace to start a session"') && client.includes('"newSession.selectFirst": "Wybierz obszar roboczy, aby rozpocząć sesję"') && client.includes('"newSession.selectFirst": "Sélectionnez un espace de travail pour démarrer une session"'))
 check('rows-c: server snapshot serves the per-org tree face + workspace-scoped sessions with real timestamps',
   hostSrc().includes('tree: treeOf(path)') && hostSrc().includes('workspace: s.workspace ?? null') && hostSrc().includes('createdAt: s.createdAt ?? null'))
 check('rows-c: workspace.new-session takes a workspace path (loud on unknown); session.rename wired',
@@ -116,11 +122,11 @@ check('rows-c: workspace.new-session takes a workspace path (loud on unknown); s
 // for many minutes and froze the app mid-create. The contract now: create-at
 // defers the snapshot (detached worker), the rows client gates the New
 // Session CTA on the org's snapshotPending, and the message is human.
-check('rows-snap: New Session CTA gates on the org-scoped selection + selected org snapshot state (both locales)',
+check('rows-snap: New Session CTA gates on the org-scoped selection + selected org snapshot state (all three locales)',
   client.includes('return !(o && o.open && o.snapshotPending === true);')
   && client.includes('orgT("newSession.snapshotPending")')
   && client.includes('"newSession.snapshotPending": "Preparing git snapshot — sessions unlock when it lands"')
-  && client.includes('"newSession.snapshotPending": "正在准备 git 快照 — 完成后即可开始会话"'))
+  && client.includes('"newSession.snapshotPending": "Przygotowywanie migawki git — sesje odblokują się, gdy będzie gotowa"') && client.includes('"newSession.snapshotPending": "Préparation de l’instantané git — les sessions se débloqueront quand il sera prêt"'))
 check('rows-snap: server snapshot exposes snapshotPending (open org)', hostSrc().includes('snapshotPending: cur?.path === path'))
 check('rows-snap: create-at defers the initial snapshot (arxa-files-only history, fixed D92)', hostSrc().includes('deferSnapshot: true, includeExisting: false'))
 check('rows-snap: host answers folder-info (a count only) for the create-time question', hostSrc().includes("'arxa-sidebar-folder-info'") && hostSrc().includes('entryCount'))
@@ -130,17 +136,27 @@ check('card: draft returns evidence only — the engine never drafts (Q6)', host
 check('card: PR title validated (becomes the squash subject, Q7/Q8)', hostSrc().includes('title-not-conventional'))
 check('card: PR create dedupes before opening (file-pr rule 1)', hostSrc().includes('prListForHead') && hostSrc().includes('existing: true'))
 check('card: session-branch push is PR-purpose only (D73 relaxation)', hostSrc().includes('card.push serves session seats'))
-check('card: S4 surface — input-dock entry above the composer bar, session-bound (en+zh)', client.includes('data-arxa-git-card') && client.includes('ArxaGitCardDock') && client.includes('"conversation.input.dock"') && client.includes('order: 20') && client.includes('"card.subjectPlaceholder": "commit subject') && client.includes('"card.subjectPlaceholder": "提交主题') && !client.includes('createPortal'))
+check('card: S4 surface — input-dock entry above the composer bar, session-bound (en+pl+fr)', client.includes('data-arxa-git-card') && client.includes('ArxaGitCardDock') && client.includes('"conversation.input.dock"') && client.includes('order: 20') && client.includes('"card.subjectPlaceholder": "commit subject') && client.includes('"card.subjectPlaceholder": "temat commitu') && client.includes('"card.subjectPlaceholder": "sujet du commit') && !client.includes('createPortal'))
 check('card: S4 states — local-only badge + frame chip + collapsible head', client.includes('card.localOnly') && client.includes('card.frame') && client.includes('data-arxa-card-head') && client.includes('data-arxa-card-caret'))
 check('card: S4 Q6 — ask-the-session prefills the composer, never an engine LLM', client.includes('card.askDraft') && client.includes('Draft a conventional commit subject'))
-check('create: D92 live preview + collision contract localized (en + zh), snapshot radio deleted',
-  client.includes('"org.create.preview": "Creates at"') && client.includes('"org.create.preview": "将创建于"') && client.includes('"org.create.exists.nonempty": "That folder already exists and isn\'t empty — change the name or the location."') && client.includes('"org.create.exists.nonempty": "该文件夹已存在且不为空 — 请更改名称或位置。"') && client.includes('"org.create.exists.open": "Open it instead"') && client.includes('"org.create.exists.open": "改为打开它"') && !client.includes('org.create.existing') && !client.includes('includeExisting') && client.includes('folder-info'))
+check('create: D92 live preview + collision contract localized (en + pl + fr), snapshot radio deleted',
+  client.includes('"org.create.preview": "Creates at"') && client.includes('"org.create.preview": "Utworzy w"') && client.includes('"org.create.preview": "Sera créée dans"') && client.includes('"org.create.exists.nonempty": "That folder already exists and isn\'t empty — change the name or the location."') && client.includes('"org.create.exists.nonempty": "Ten folder już istnieje i nie jest pusty — zmień nazwę lub lokalizację."') && client.includes('"org.create.exists.nonempty": "Ce dossier existe déjà et n’est pas vide — changez le nom ou l’emplacement."') && client.includes('"org.create.exists.open": "Open it instead"') && client.includes('"org.create.exists.open": "Otwórz ją zamiast tego"') && client.includes('"org.create.exists.open": "L’ouvrir à la place"') && !client.includes('org.create.existing') && !client.includes('includeExisting') && client.includes('folder-info'))
 check('create: D92 engine target is ALWAYS root + slug(name); heuristic + includeExisting param deleted',
   hostSrc().includes('const target = path.join(expanded, nameSlug)') && !hostSrc().includes('pickedSlug') && hostSrc().includes("'folder-exists: '") && !hostSrc().includes('arg?.includeExisting'))
 check('create: D92 sticky root + defaults action + open-by-path fallback',
   hostSrc().includes('create-root.json') && hostSrc().includes("'create.defaults'") && hostSrc().includes("fs.existsSync(ref + '/org.json')") && client.includes('ORG_POST("create.defaults")'))
 check('rows-snap: create submit refreshes through the store (gate lifts at once, no create-again loop)', client.includes('orgStore.mutate("org.create-at"') && !client.includes('ORG_POST("org.create-at"'))
-check('welcome: blank-page gate with card when no org (D69 UX)', client.includes('function WelcomeGate(') && client.includes('"welcome.title": "Welcome to arxa studio"') && client.includes('"welcome.title": "欢迎使用 arxa studio"') && client.includes('!creating && (0, react_jsx_runtime.jsx)(WelcomeGate'))
+check('welcome: blank-page gate registers into the frame shell.overlay slot (Phase 2 — the fixed z-index war is gone)',
+  client.includes('function WelcomeGate(') && client.includes('"welcome.title": "Welcome to arxa studio"')
+  && client.includes('ctx.slots.inject("shell.overlay"') && client.includes('id: "arxa-welcome-gate",')
+  && !client.includes('zIndex: 2147483000') && !client.includes('position: "fixed", inset: 0, zIndex'))
+check('conformance: invented theme tokens are gone (text-critical/text-link/status-danger/text-secondary/bg-raised never existed)',
+  !/dsw-alias-(text-critical|text-link|status-danger|text-secondary|bg-raised)/.test(client))
+check('conformance: ErrorNote dedup — one shared error line across the org modals',
+  client.includes('function ErrorNote({ msg })') && (client.match(/ErrorNote, \{ msg: /g) || []).length >= 5)
+check('conformance: locale world is en/pl/fr — zhOver deleted, sparse plOver/frOver registered with per-key en fallback',
+  client.includes('ctx.locale.register(NS, { zh, en: { ...en, ...enOver }, pl: plOver, fr: frOver })')
+  && !client.includes('const zhOver = {') && client.includes('const plOver = {') && client.includes('const frOver = {'))
 check('welcome: TWO buttons - arxa studio (create) + arxa business (disabled, later)', client.includes('t("welcome.studio")') && client.includes('t("welcome.business")') && client.includes('"welcome.businessSoon"') && !client.includes('t("welcome.cta")'))
 check('welcome: one-shot resume to newest session of the open org', client.includes('resumeTried') && client.includes('maybeResume(next.orgs)') && client.includes('orgStore.mutate("session.open"'))
 check('content area (2026-08-30): arxa is the sole driver — row open + resume focus the conversation via the client sessions service (dsh own open call)',
@@ -154,7 +170,7 @@ check('content area (live, once-and-for-all): the rider kill is condition-driven
 check('content area (live): cross-client archive/rename reach every client without waiting on the 5s poll — the org view refreshes on dsh store bumps (sig-gated refresh makes repeats a no-op)',
   client.includes('ctx.get("workspaces").list.subscribe') && client.includes('arxaClientSessions.list.subscribe') && client.includes('orgStore.refresh()'))
 check('content area: the hero workspace picker is replaced by arxa guidance (raw engine sessions cannot be born from the hero)',
-  client.includes('ArxaHeroGuide') && client.includes('"conversation.hero.workspace"') && client.includes('"hero.guide": "Sessions start inside a workspace') && client.includes('"hero.guide": "会话从工作区开始'))
+  client.includes('ArxaHeroGuide') && client.includes('"conversation.hero.workspace"') && client.includes('"hero.guide": "Sessions start inside a workspace') && client.includes('"hero.guide": "Sesje zaczynają się wewnątrz obszaru roboczego') && client.includes('"hero.guide": "Les sessions démarrent dans un espace de travail'))
 check('content area: with NOTHING bound the text composer is hidden outright (2026-08-30 user ask) — a bound blank session keeps its composer',
   client.includes('[data-arxa-empty] [data-slot=') && client.includes('data-arxa-empty') && client.includes('const unbound = !snap || snap.current === void 0 || snap.current === null;'))
 check('empty state (2026-08-30 polish): guidance centered and spaced, arxa glyph in the hero lockup (brand plugin paints the mark, sidebar centers its slot)',
@@ -307,8 +323,8 @@ check('github: manual publish action routes to the open-org handle (D74 hybrid h
   hostSrc().includes("'github.publish'") && hostSrc().includes('cur.publishGithub()'))
 check('github: org menu carries the connect verb (github.publish action survives)',
   client.includes('"github.publish"') && client.includes('{ id: "connect", label: orgT("menu.org.connect")'))
-check('github: connect label localized (en + zh)',
-  client.includes('"menu.org.connect": "Connect to GitHub"') && client.includes('"menu.org.connect": "连接到 GitHub"'))
+check('github: connect label localized (en + pl + fr)',
+  client.includes('"menu.org.connect": "Connect to GitHub"') && client.includes('"menu.org.connect": "Połącz z GitHub"') && client.includes('"menu.org.connect": "Connecter à GitHub"'))
 
 // ---- D77 (the PLATO incident): publish silence + placement trap ----
 // The menu's publish row used to fire-and-forget (mutate().catch(() => {})):
@@ -325,8 +341,8 @@ check('publish: the menu row dispatches the modal event (no swallowed mutate)',
   client.includes('"arxa-publish-org"') && !client.includes('orgStore.mutate("github.publish"'))
 check('publish: modal runs the phase machine over the publish result',
   client.includes('function OrgPublishModal') && client.includes('target.projectSlug ? "project.connect" : "github.publish"') && client.includes('initial-snapshot-pending'))
-check('publish: modal localized (en + zh)',
-  client.includes('"publish.confirmCta": "Publish"') && client.includes('"publish.confirmCta": "发布"'))
+check('publish: modal localized (en + pl + fr)',
+  client.includes('"publish.confirmCta": "Publish"') && client.includes('"publish.confirmCta": "Opublikuj"') && client.includes('"publish.confirmCta": "Publier"'))
 
 // ---- D79: GitHub-parity labels + named project creation (D78 riders) ----
 // v3 containers carry their stage prefix on GitHub ("00-moodboard"); the
@@ -342,8 +358,8 @@ check('project create: the dock + opens a NAME modal (no pregenerated names in t
   client.includes('"arxa-create-project"') && client.includes('function OrgProjectModal') && !client.includes('orgStore.mutate("project.create"'))
 check('project create: modal sends the typed name through project.create',
   client.includes('ORG_POST("project.create", { orgId: target.orgId, name: n })'))
-check('project create: modal localized (en + zh)',
-  client.includes('"project.create": "Create project"') && client.includes('"project.create": "创建项目"'))
+check('project create: modal localized (en + pl + fr)',
+  client.includes('"project.create": "Create project"') && client.includes('"project.create": "Utwórz projekt"') && client.includes('"project.create": "Créer le projet"'))
 
 // ---- D80: row menus, the rename ride, the Trash row ----
 check('menus: ONLY org + project rows carry the kebab (docks/containers never)',
@@ -354,8 +370,8 @@ check('rename: the modal drives org.rename and project.rename',
   client.includes('function OrgRenameModal') && client.includes('ORG_POST("org.rename"') && client.includes('ORG_POST("project.rename"'))
 check('rename: events wired both directions',
   client.includes('"arxa-rename-org"') && client.includes('"arxa-rename-project"') && client.includes('window.addEventListener("arxa-rename-org", onRenameOrg)') && client.includes('window.addEventListener("arxa-rename-project", onRenameProject)'))
-check('trash: a permanent divider row with count badge + empty state (en + zh)',
-  client.includes('function TrashSection') && client.includes('borderTop: "1px solid var(--dsw-alias-border-l2') && client.includes('"trash.empty": "Trash is empty"') && client.includes('"trash.empty": "废纸篓是空的"') && !client.includes('if (rows.length === 0 || !view.open) return null;'))
+check('trash: a permanent divider row with count badge + empty state (en + pl + fr)',
+  client.includes('function TrashSection') && client.includes('borderTop: "1px solid var(--dsw-alias-border-l2') && client.includes('"trash.empty": "Trash is empty"') && client.includes('"trash.empty": "Kosz jest pusty"') && client.includes('"trash.empty": "La corbeille est vide"') && !client.includes('if (rows.length === 0 || !view.open) return null;'))
 check('routes: project.rename drives the full-move machinery; project.trash parks locally',
   hostSrc().includes("'project.rename'") && hostSrc().includes('l.renameProject(cur.path, arg.projectSlug, arg.name)') && hostSrc().includes("'project.trash'") && hostSrc().includes('cur.trashProject(arg.projectSlug)'))
 
@@ -365,13 +381,13 @@ check('purge: the modal drives orgtrash.purge and projecttrash.purge',
 check('purge: the trash row dispatches the confirmation event',
   client.includes('"arxa-purge-trash"') && client.includes('window.addEventListener("arxa-purge-trash", onPurge)'))
 check('trash: org group + delete-forever + project group (localized en + zh)',
-  client.includes('"trash.orgSection": "Organisations"') && client.includes('"trash.orgSection": "组织"') && client.includes('"trash.projectSection": "Projects"') && client.includes('"trash.projectSection": "项目"') && client.includes('"trash.deleteForever": "Delete forever"') && client.includes('"trash.deleteForever": "永久删除"'))
+  client.includes('"trash.orgSection": "Organisations"') && client.includes('"trash.orgSection": "Organizacje"') && client.includes('"trash.projectSection": "Projects"') && client.includes('"trash.projectSection": "Projekty"') && client.includes('"trash.projectSection": "Projets"') && client.includes('"trash.deleteForever": "Delete forever"') && client.includes('"trash.deleteForever": "Usuń na zawsze"') && client.includes('"trash.deleteForever": "Supprimer définitivement"'))
 check('routes: org trash/restore/purge wired to the service faces',
   hostSrc().includes("'org.trash'") && hostSrc().includes('l.trashOrg(orgByRef(arg?.orgId).path)') && hostSrc().includes("'orgtrash.restore'") && hostSrc().includes('l.restoreOrg(arg?.entryId)') && hostSrc().includes('l.purgeOrgTrash(arg.entryId)') && hostSrc().includes('cur.purgeTrash(arg.entryId)'))
 
 // ---- D82: org-menu Move to Trash + design-system trash surface ----
 check('menus: org menu REGAINS Move to Trash (danger) dispatching org.trash',
-  client.includes('id: "trash", label: orgT("menu.org.trash")') && client.includes('orgStore.mutate("org.trash", { orgId: d.orgId })') && client.includes('"menu.org.trash": "Move to Trash"') && client.includes('"menu.org.trash": "移到废纸篓"'))
+  client.includes('id: "trash", label: orgT("menu.org.trash")') && client.includes('orgStore.mutate("org.trash", { orgId: d.orgId })') && client.includes('"menu.org.trash": "Move to Trash"') && client.includes('"menu.org.trash": "Przenieś do Kosza"') && client.includes('"menu.org.trash": "Déplacer vers la corbeille"'))
 check('menus: every row-menu item carries a design-system glyph (edit/folder/github/trash)',
   client.includes('IconEditOutline16') && client.includes('icon: ghMark16') && client.includes('IconTrashOutline16, {}), danger: true }'))
 check('menus: D87 close is GONE (unscoped verb — opening another org already switches)',
@@ -397,7 +413,7 @@ check('files: leaf worktrees list their content in place (ARXA_LEAF_FILES, full 
 check('files: lazy tree route + one fresh-token 403 retry + arxa-av-open bridge unchanged',
   client.includes('"/__arxa/artifacts/tree?dir="') && client.includes('scope: "tree-read"') && client.includes('window.dispatchEvent(new CustomEvent("arxa-av-open", { detail: { relPath } }))'))
 check('files: expanding an org row opens the org (tree-read rides the open handle) + human hint when it is not open',
-  client.includes('if (isOrg && !open) orgStore.mutate("org.open", { orgId: d.orgId }).catch(() => {});') && client.includes('/no org open/i.test(entry.error || "")') && client.includes('"files.openHint": "Open this organisation to browse its files"') && client.includes('"files.openHint": "打开该组织即可浏览其文件"'))
+  client.includes('if (isOrg && !open) orgStore.mutate("org.open", { orgId: d.orgId }).catch(() => {});') && client.includes('/no org open/i.test(entry.error || "")') && client.includes('"files.openHint": "Open this organisation to browse its files"') && client.includes('"files.openHint": "Otwórz tę organizację, aby przeglądać jej pliki"') && client.includes('"files.openHint": "Ouvrez cette organisation pour parcourir ses fichiers"'))
 check('trash: restore/delete icon buttons are gapped (flex span, 12px user-tuned)',
   client.includes('style: { display: "flex", gap: 12, flex: "none", alignItems: "center" }, children: [') && client.includes('IconRefreshOutline16, onRestore),') && client.includes('IconTrashOutline16, onPurge, true)'))
 // ---- D84: the trash reads exactly like the tree above it ----
@@ -414,8 +430,8 @@ check('purge: the scope-stale 403 offers re-link & retry in the modal (device fl
   client.includes('errMsg.includes("re-link GitHub") && !relinking') && client.includes('onClick: relink') && client.includes('const relink = () => {') && client.includes('ORG_POST("github.link").then(() => {'))
 check('purge: the re-link surfaces the one-time code and AUTO-retries the same purge',
   client.includes('ORG_POST("github.device").then((r) => {') && client.includes('if (d && d.userCode) setDevCode(d);') && client.includes('children: devCode.userCode') && client.includes('setRelinking(false); setDevCode(null);\n\t\t\t\t\tsubmit();'))
-check('purge: re-link strings localized (en + zh)',
-  client.includes('"purge.relink": "Re-link GitHub & retry"') && client.includes('"purge.relink": "重新关联 GitHub 并重试"') && client.includes('"purge.relinkHint"'))
+check('purge: re-link strings localized (en + pl + fr)',
+  client.includes('"purge.relink": "Re-link GitHub & retry"') && client.includes('"purge.relink": "Połącz ponownie z GitHub i ponów"') && client.includes('"purge.relink": "Re-lier GitHub et réessayer"') && client.includes('"purge.relinkHint"'))
 // ---- D88: ghost-row sync fix + GitHub-style typed delete gate ----
 check('store: orgTrash rides the change signature (purge-only mutations must land)',
   client.includes('next.orgTrash, next.trashCount'))
@@ -423,8 +439,8 @@ check('purge: D88 typed-name gate arms Delete forever (exact, case-sensitive row
   client.includes('const matches = typed === target.name;') && client.includes('disabled: !matches || phase === "busy"') && client.includes('t("purge.typeName").replace("{name}", target.name)') && client.includes('placeholder: target.name'))
 check('purge: D88 busy LOCK (Close dead while deleting) + retry + auto-close + summary',
   client.includes('variant: "outline", disabled: phase === "busy", onClick: dismiss') && client.includes('t("purge.retry")') && client.includes('setTimeout(onClose, 1100)') && client.includes('res.deletedRepos.join(", ")'))
-check('purge: D88 typed gate + retry localized (en + zh)',
-  client.includes('"purge.typeName": "Type {name} exactly to confirm."') && client.includes('"purge.typeName": "输入 {name} 以确认。"') && client.includes('"purge.retry": "Try again"') && client.includes('"purge.retry": "重试"'))
+check('purge: D88 typed gate + retry localized (en + pl + fr)',
+  client.includes('"purge.typeName": "Type {name} exactly to confirm."') && client.includes('"purge.typeName": "Wpisz dokładnie {name}, aby potwierdzić."') && client.includes('"purge.typeName": "Saisissez {name} exactement pour confirmer."') && client.includes('"purge.retry": "Try again"') && client.includes('"purge.retry": "Spróbuj ponownie"') && client.includes('"purge.retry": "Réessayer"'))
 // ---- D90: link/unlink GitHub per org + project; local-only creation ----
 check('menus: D90 connect/disconnect replaces publish — state-dependent per org + project',
   client.includes('d.connected === false ? { id: "connect", label: orgT("menu.org.connect"), icon: ghMark16 } : { id: "disconnect", label: orgT("menu.org.disconnect"), icon: ghMark16 }') && client.includes('d.connected === false ? { id: "connect", label: orgT("menu.project.connect"), icon: ghMark16 }') && client.includes('"arxa-disconnect-github"') && !client.includes('menu.org.publish'))
@@ -438,8 +454,8 @@ check('disconnect: D90 org action covers project repos, project scoped; 403 reli
   client.includes('"org.disconnect"') && client.includes('"project.disconnect"') && client.includes('projectSlug: target.projectSlug, removeRepos }') && client.includes('errMsg.includes("re-link GitHub") && !relinking') && client.includes('setTimeout(onClose, 1100)'))
 check('publish: D90 project connect rides the same modal (projectSlug scope)',
   client.includes('target.projectSlug ? "project.connect" : "github.publish"') && client.includes('"publish.projectTitle"'))
-check('i18n: D90 connect/disconnect + create toggle localized (en + zh)',
-  client.includes('"menu.org.connect": "Connect to GitHub"') && client.includes('"menu.org.disconnect": "Disconnect GitHub…"') && client.includes('"disconnect.typeRepo": "Type {name} to confirm removal."') && client.includes('"disconnect.typeRepo": "输入 {name} 以确认移除。"') && client.includes('"org.create.ghOffHint": "This organisation stays on this device only. Connect it later from its menu."') && client.includes('"org.create.ghOffHint": "该组织仅保存在本机。之后可从其菜单连接 GitHub。"'))
+check('i18n: D90 connect/disconnect + create toggle localized (en + pl + fr)',
+  client.includes('"menu.org.connect": "Connect to GitHub"') && client.includes('"menu.org.disconnect": "Disconnect GitHub…"') && client.includes('"menu.org.disconnect": "Odłącz GitHub…"') && client.includes('"menu.org.disconnect": "Déconnecter GitHub…"') && client.includes('"disconnect.typeRepo": "Type {name} to confirm removal."') && client.includes('"disconnect.typeRepo": "Wpisz {name}, aby potwierdzić usunięcie."') && client.includes('"disconnect.typeRepo": "Saisissez {name} pour confirmer la suppression."') && client.includes('"org.create.ghOffHint": "This organisation stays on this device only. Connect it later from its menu."') && client.includes('"org.create.ghOffHint": "Ta organizacja pozostaje tylko na tym urządzeniu. Połącz ją później z jej menu."') && client.includes('"org.create.ghOffHint": "Cette organisation reste uniquement sur cet appareil. Connectez-la plus tard depuis son menu."'))
 check('create: D90 fragment children EVALUATE to 6 elements (guards the ASI call-chain swallow)', (() => {
   const lines = client.split('\n');
   let idx = -1;

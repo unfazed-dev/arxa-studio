@@ -1,6 +1,6 @@
 {
   "name": "arxa-frame",
-  "version": "0.1.1",
+  "version": "0.1.6",
   "private": true,
   "description": "arxa's AppFrame: the stock dsh three-column frame + the D88-D93 docked artifact-viewer column (session-bound presence, drag handle, maximize, narrow full-frame sheet). Generated from @deepseek-ai/dsh-client-ui-layout by scripts/gen-frame.mjs — do not hand-edit (drift gate). Replaces the ui-layout plugin row; the stock package stays byte-identical as reference.",
   "type": "module",
