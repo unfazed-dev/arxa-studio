@@ -16,7 +16,6 @@ import {
   runGit,
   isRepo,
   isDirty,
-  STAGE_PREFIX,
 } from '../../git-workspace/lib/index.js'
 import fs from 'node:fs'
 import path from 'node:path'

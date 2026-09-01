@@ -787,7 +787,12 @@ export function apply(ctx, opts = {}) {
                 chip: health === 'ok' ? gw.versionChip(repoPath) : null,
                 linked: Boolean(manifest.repoUrl),
                 localOnly: Boolean(manifest.localOnly),
-                frame: { wired: manifest.frameWired === true ? 'ok' : (manifest.frameWired ?? null), protection: manifest.frameProtection ?? null, runner: manifest.frameRunner ?? null },
+                // `files` is the per-file state of the GENERATED frame. openOrg
+                // upgrades a stale file on its own, but one a human edited comes
+                // back `modified` and is deliberately left alone — without this
+                // nobody could ever say so, and that repo would keep an old gate
+                // forever while looking fine.
+                frame: { wired: manifest.frameWired === true ? 'ok' : (manifest.frameWired ?? null), protection: manifest.frameProtection ?? null, runner: manifest.frameRunner ?? null, files: (() => { try { return gw.frameStatus(cur.path, 'org', { includeCiYml: true }) } catch { return null } })() },
               }
             },
             /** Q6: EVIDENCE ONLY — the session model drafts the subject. */

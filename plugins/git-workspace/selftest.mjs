@@ -134,7 +134,7 @@ ok('stage-boundary squash → ONE clean commit, content preserved', () => {
   const log = stageLog(projectPath)
   assert.equal(log.length, before - 3 + 1, 'WIP run did not collapse to one commit')
   assert.ok(log.every((c) => !c.subject.startsWith('wip:')), 'WIP commit survived in history')
-  assert.ok(log.every((c) => c.subject.startsWith('stage:') || SUBJECT_RE.test(c.subject)), 'non-conventional subject in history (Q7)')
+  assert.ok(log.every((c) => SUBJECT_RE.test(c.subject)), 'non-conventional subject in history (Q7) — no stage: escape hatch, that clause hid B18/B20')
   assert.equal(log[0].subject, 'docs(draft): first draft complete')
   const body = runGit(['log', '--format=%b', '-n', '1'], { cwd: projectPath })
   assert.ok(body.includes('Arxa-Stage: org test'), 'provenance rides the trailer, not the subject')
@@ -150,7 +150,7 @@ ok('second round trip: wall keeps working after a squash', () => {
   const res = mintAtStageBoundary(projectPath, { name: 'Second draft' })
   assert.equal(res.squashed, true)
   const log = stageLog(projectPath)
-  assert.ok(log.every((c) => c.subject.startsWith('stage:') || SUBJECT_RE.test(c.subject)), 'non-conventional subject in history (Q7)')
+  assert.ok(log.every((c) => SUBJECT_RE.test(c.subject)), 'non-conventional subject in history (Q7) — no stage: escape hatch, that clause hid B18/B20')
   assert.equal(log[0].subject, 'chore(version): mint Second draft (v1)')
 })
 

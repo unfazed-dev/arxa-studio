@@ -94,7 +94,10 @@ const SNAPSHOT_WORKER = [
   // PENDING state had to hope the machine was slow. On a fast disk it never
   // was, and the assertion failed for reasons that had nothing to do with
   // the code. A delay the test asks for explicitly makes that observable.
-  'const holdMs = Number(process.env.ARXA_SNAPSHOT_DELAY_MS || 0)',
+  // Bounded on purpose: this ships in the binary, and an unbounded sleep set
+  // through the environment would be a way to stall a user's first snapshot
+  // indefinitely. Ten seconds is far more than any test needs and harmless.
+  'const holdMs = Math.min(Math.max(Number(process.env.ARXA_SNAPSHOT_DELAY_MS) || 0, 0), 10000)',
   'if (holdMs > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, holdMs)',
   'try {',
   '  execFileSync(git, [...pin, \'add\', \'-A\'], opt)',

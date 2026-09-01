@@ -22,7 +22,6 @@ import { runGit, WIP_IDENTITY, STAGE_IDENTITY } from './run.js'
 
 export const STAGE_BASE_REF = 'refs/arxa/stage-base'
 export const WIP_PREFIX = 'wip:'
-export const STAGE_PREFIX = 'stage:'
 
 const SEP = '\x1f' // unit separator for log parsing
 

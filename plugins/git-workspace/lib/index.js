@@ -25,7 +25,6 @@ export { ORG_GITIGNORE, orgIgnoreFor, isRepo, hasHead, initOrgRepo, initProjectR
 export {
   STAGE_BASE_REF,
   WIP_PREFIX,
-  STAGE_PREFIX,
   isDirty,
   stageBase,
   wipCommit,
