@@ -677,3 +677,33 @@ specific: it protects *everything except the project it is currently running*.
 Given the §11 threat ranking — where the top two risks are the agent doing something
 wrong and cross-client contamination — **self-hosted remote addresses risk #2 well
 and risk #1 not at all.** Price it accordingly when the tiers are finalised.
+
+### 12a. Offline dependency mirrors — the Dart half is the weak one
+
+Air-gapping (`--network=none` during the agent's edit loop) only works if dependency
+resolution can be satisfied locally. arxa's two targets differ sharply here.
+
+**npm / `website/` — solved.** Verdaccio is the standard free self-hosted proxy
+registry; `npm ci` against a committed lockfile is already the right default.
+
+**Dart / `application/` — no first-party answer.** `dart pub` supports third-party
+repositories via a `hosted-url`, overridden with the **`PUB_HOSTED_URL`** environment
+variable — Dart's docs name mirroring pub.dev "in a restricted network environment"
+as the intended use case. But **there is no official pub.dev mirror server**; a
+standing feature request asks for a Verdaccio equivalent and none exists. Third-party
+options, all free:
+
+| Option | Shape | Fit for air-gapping |
+|---|---|---|
+| [`tuna/pub-mirror`](https://github.com/tuna/pub-mirror) | multi-threaded downloader; output served by any static HTTP server. Docker image `huiyiqun/pub_mirror`. Used for the TUNA mirrors. | **Best fit** — a pure read-only cache, no dynamic server, no database. |
+| [`unpub`](https://github.com/bytedance/unpub) | MongoDB-backed private host, community standard | heavier; aimed at publishing private packages |
+| [`ricardoboss/PubNet`](https://github.com/ricardoboss/PubNet) | self-hosted host with upstream fallback to `pub.dev/api/` | ⚠️ **reads are authenticated too**, not just publishing — friction for a build cache |
+| [pub-dev itself](https://github.com/dart-lang/pub-dev) | the real site's source, open | explicitly *not* designed for private hosting |
+
+JFrog Artifactory supports Dart repositories but is commercial — out of scope.
+
+**Consequence:** an air-gapped tier is credible for `website/` today and requires
+standing up `tuna/pub-mirror` for `application/`. Record as a prerequisite for any
+tier that denies egress during dependency resolution — the `(deny network*)` profile
+measured in §9b blocks `dart pub get` outright, so the network split must be
+**allow during install, deny during the edit loop**, not a blanket deny.
