@@ -1818,3 +1818,52 @@ selectively**.
 - [Changesets](https://github.com/changesets/changesets) · [Lerna independent/fixed mode](https://lerna.js.org/docs/features/version-and-publish) · [Nx release](https://nx.dev/features/manage-releases)
 - [Sketch — version history and starred versions](https://www.sketch.com/docs/designing/version-history/)
 - [semantic-versioning.org — hybrid versioning](https://semver.org/)
+
+### 26d. Storage: keep the file, ADD an annotated tag at Approved
+
+**Both, with distinct jobs.** `versions.json` stays the source of truth the UI reads —
+no git plumbing, works for non-technical viewers, satisfies D44. An **annotated** tag
+is added the moment a state flips to **Approved**, as the audit record.
+
+- **Annotated, not lightweight.** git's own docs: *"Annotated tags are meant for
+  release while lightweight tags are meant for private or temporary object labels."*
+- **Tag the POST-MERGE commit on `main`** — the tip after the `--no-ff` merge lands —
+  **not the pre-merge collapsed commit.** It is the only one reachable by branch name,
+  so it is what a checkout, CI run, or client clone actually sees. Both GitHub Releases
+  and `semantic-release` tag post-merge. Under a clean `--no-ff` merge the tree is
+  identical either way, so this is about identity and discoverability, not content.
+- **File + tag together is a standard pattern, not novel** — `npm version` bumps the
+  file, commits, and tags in one atomic step. Drift control is exactly that: one
+  automation step writes both, in the same run, in the same push.
+- **Immutability, honestly:** a tag is not force-proof (`git tag -f`, force-push), but
+  git's docs treat retargeting a *pushed* tag as abnormal and security-relevant —
+  *"people MUST be able to trust their tag-names."* Signing (`-s`) adds tamper-evidence
+  a file cannot have. GitHub's immutable releases go further but are a GitHub-side
+  feature, not core git.
+
+### ⚠️ 26e. VERIFIED GAP — arxa's pushes would never carry a tag
+
+`git push` does **not** push tags by default. Checked every push call site in the
+codebase; **none passes `--follow-tags` or `--tags`:**
+
+| Site | Command |
+|---|---|
+| `arxa-sidebar/lib/index.js:822` | `push -u <url> <branch>` |
+| `git-workspace/lib/repos.js:238` | `push <url> refs/heads/X:refs/heads/X` — an **explicit refspec**, which carries branch refs only |
+| `git-workspace/lib/sessions.js:367` | `push -u origin main` |
+
+**So an Approved version would exist in `versions.json` and in a local tag, and the tag
+would be invisible to GitHub, to a client clone, and to any server-side aggregation
+arxa business does.** Silent, and exactly the failure shape D95 exists to prevent.
+
+**Fix:** add `--follow-tags` to the push sites — it pushes annotated tags reachable
+from the refs being pushed, which is precisely "push my commit, and the tag if I made
+one." This must land **with** the tagging change, never after it.
+
+### Sources
+
+- [git-tag — annotated vs lightweight, "On Re-tagging"](https://git-scm.com/docs/git-tag)
+- [Pro Git — Sharing Tags (`push` does not transfer tags)](https://git-scm.com/book/en/v2/Git-Basics-Tagging)
+- [GitHub — managing releases](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)
+- [npm version — bump + commit + tag atomically](https://docs.npmjs.com/cli/v10/commands/npm-version)
+- [semantic-release — tags on merge to a release branch](https://github.com/semantic-release/semantic-release)
