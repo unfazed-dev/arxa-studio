@@ -45,8 +45,12 @@ await checkAsync('buildCsp is deny-by-default and only tightens', async () => {
 
 // --- against the real server --------------------------------------------
 let rpcHandler = null
+// discover() swallows every failure into logger.warn and returns 0 templates,
+// so a discarded warning turns a real connect/spawn error into a bare
+// "got (none)" with no cause. Keep them and put them in the failure message.
+const warnings = []
 const ctx = {
-  logger: { warn: () => {} },
+  logger: { warn: (m) => { warnings.push(String(m)) } },
   connection: { rpc: { handle: (_c, handler) => { rpcHandler = handler; return () => {} } } },
   effect: () => {},
 }
@@ -63,7 +67,8 @@ await checkAsync('discovers only the UI-declaring tool, over real stdio MCP', as
   assert.equal(res.ok, true, 'templates call failed')
   const names = Object.keys(res.value.templates)
   assert.deepEqual(names, ['mcp__arxatest__show_counter'],
-    `expected only the UI tool, got ${names.join(', ') || '(none)'}`)
+    `expected only the UI tool, got ${names.join(', ') || '(none)'}`
+    + (warnings.length ? ` | discovery warned: ${warnings.join(' ; ')}` : ' | discovery reported no error'))
   const t = res.value.templates['mcp__arxatest__show_counter']
   assert.equal(t.resourceUri, 'ui://arxa-test/counter')
   assert.match(t.html, /<button id="inc">/, 'template HTML did not come through')
@@ -73,7 +78,8 @@ await checkAsync('discovers only the UI-declaring tool, over real stdio MCP', as
 
 await checkAsync('tools/call proxy forwards an advertised tool', async () => {
   const first = await rpcHandler('call', { name: 'bump', arguments: { by: 2 } })
-  assert.equal(first.ok, true, JSON.stringify(first))
+  assert.equal(first.ok, true, JSON.stringify(first)
+    + (warnings.length ? ` | discovery warned: ${warnings.join(' ; ')}` : ''))
   const text = (first.value.content ?? []).map((c) => c.text).join('')
   assert.match(text, /counter is 2/)
   const second = await rpcHandler('call', { name: 'bump', arguments: { by: 3 } })
