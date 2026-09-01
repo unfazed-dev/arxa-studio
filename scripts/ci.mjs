@@ -20,8 +20,10 @@ const suites = readdirSync(pluginsDir, { withFileTypes: true })
   .filter((e) => e.isDirectory())
   .flatMap((e) => {
     const out = []
-    if (readdirSync(join(pluginsDir, e.name)).includes('selftest.mjs')) {
-      out.push([e.name, 'selftest.mjs'])
+    // selftest.mjs plus any selftest.<topic>.mjs — topic files let parallel
+    // work land tests without every branch appending to one shared file.
+    for (const f of readdirSync(join(pluginsDir, e.name)).filter((f) => /^selftest(\.[\w-]+)?\.mjs$/.test(f)).sort()) {
+      out.push([e.name, f])
     }
     if (e.name === 'arxa-sidebar' && readdirSync(join(pluginsDir, e.name)).includes('smoke.mjs')) {
       out.push([e.name, 'smoke.mjs'])
