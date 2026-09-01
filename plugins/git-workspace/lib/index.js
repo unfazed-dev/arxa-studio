@@ -66,6 +66,19 @@ export {
   reconcileWorktrees,
   repairWorktrees,
 } from './reconcile.js'
+export {
+  transitionVersion,
+  recordTargetRelease,
+  readTargetReleases,
+} from './versions.js'
+export {
+  behindMain,
+  branchTip,
+  isMergedIntoMain,
+  finishSession,
+  sweepMerged,
+  FinishRefusedError,
+} from './finish.js'
 
 import { stageBoundarySquash } from './commits.js'
 import { mintVersion, versionChip } from './versions.js'
