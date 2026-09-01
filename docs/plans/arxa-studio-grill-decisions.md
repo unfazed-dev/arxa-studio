@@ -940,3 +940,19 @@ architecture; this grill settles the editor extension it never covered.
   note for the operator to resolve. Local-only orgs (TESTO-style
   disconnects) are skipped by design.
 
+
+- **D97 — The manual sync door gets a visible affordance, and its
+  refusals are visible too.** (Follow-up to D95/D96, 2026-09-01.) `org.sync`
+  existed only as an engine action — no way to reach it from the UI. Org
+  rows now carry a `Sync with GitHub` menu item (org rows ONLY: the action
+  sweeps the org repo *and* every project under it, so on a project row the
+  label would promise far less than it does). The result lands as a badge
+  beside the GitHub mark. Two laws about that badge: (a) a failure ANYWHERE
+  in the sweep wins the label — a green "In sync" painted over a refused
+  push is the exact failure a manual sync door exists to prevent; (b) the
+  engine's raw per-repo status words (`push-failed: …`, `diverged`,
+  `no-creds`) ride the tooltip untranslated — diagnostic vocabulary, not UI
+  copy. Implementation note: the item calls `ORG_POST("org.sync", …)`
+  directly rather than `orgStore.mutate`, because `mutate` discards the
+  result (`.then((r) => refresh())`) and the per-repo status IS the
+  deliverable; the refresh is then done by hand.
