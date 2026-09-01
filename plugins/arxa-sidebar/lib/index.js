@@ -821,9 +821,26 @@ export function apply(ctx, opts = {}) {
                 return gw.sessionStageBoundary(cur.path, sid, { message: subject })
               }
               // Org seat: squash on main + the same gate, parked=false only on green.
+              // B3: this used to squash onto main and THEN gate, returning
+              // `parked: true` on red while the commit sat on main regardless —
+              // a gate that reported failure and prevented nothing. The session
+              // path avoids it structurally: it squashes on a BRANCH and only
+              // merges when green, so main is never touched by a red run.
+              //
+              // The org seat has no branch, so the equivalent is an explicit
+              // rewind: remember where main was, and put it back if the gate
+              // reds. `stageBoundarySquash` is commit-tree + update-ref, so
+              // resetting to the recorded SHA restores the exact prior state —
+              // the WIP run included. Nothing is lost, which is the same
+              // promise parkSession makes on the session path (D40).
+              const preSha = gw.runGit(['rev-parse', 'HEAD'], { cwd: cur.path, allowFail: true })
               const sq = gw.stageBoundarySquash(cur.path, { message: subject, trailer: 'Arxa-Stage: org' })
               const gate = gw.runGate(cur.path)
-              return { ...sq, gate, merged: gate.green, parked: !gate.green }
+              if (!gate.green) {
+                if (preSha) gw.runGit(['reset', '--hard', preSha], { cwd: cur.path, allowFail: true })
+                return { ...sq, gate, merged: false, parked: true, rewound: Boolean(preSha) }
+              }
+              return { ...sq, gate, merged: true, parked: false, rewound: false }
             },
             /** Push the session branch for PR purposes ONLY (the D73
              * relaxation, Q2): main pushes ride boundaries/heal. */
