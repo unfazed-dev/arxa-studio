@@ -1691,19 +1691,47 @@ permanently hidden** and the whole D20 surface is inert.
 Same shape as B8 (the runner-asleep CTA computed but never rendered) and B11 (a gate
 that cannot fail): **the mechanism exists, nothing drives it.**
 
-### ⚠️ B13 — NEW, verified: format-stamp drift on live data
+### ⚠️ B13 — CORRECTED: the project TREE was migrated, the project STAMP was not
 
 ```
 RESTO/org.json                          arxa-tree/3
 TESTO/org.json                          arxa-tree/3
 TOPO/org.json                           arxa-tree/3
 TESTO/projects/Fads/project.json        arxa-tree/3
-TOPO/projects/project-001/project.json  arxa-tree/2   <-- never migrated
+TOPO/projects/project-001/project.json  arxa-tree/2   <-- stale
 ```
 
-One project sits a format version behind everything else. Since CONTEXT.md:76 says the
-app "refuses a newer org format cleanly and migrations know their version", this is
-exactly the state the migration machinery exists to resolve — and it has not run.
+My first reading — "one project never got migrated" — was wrong. Traced properly:
+
+- `TEMPLATE_VERSION = 3` (`workspace/lib/template.js:10`) is current.
+- **The stamp check and the migration are ORG-SCOPED ONLY.** `checkOrgStamp(orgPath)`,
+  `readOrgStampVersion(orgPath)` and `migrateOrg(orgPath)` all read
+  `orgManifestPath` — the *org's* `org.json`. Nothing anywhere reads or validates a
+  **project's** `formatStamp`.
+- `createManifest()` writes a `formatStamp` into every project manifest, but no code
+  path ever checks it again.
+
+**And `project-001`'s tree is genuinely v3** — it has all ten stage containers plus
+`notes`, each with `website/` and `application/`, which is the v3 shape (CONTEXT.md:143:
+"Scaffolding and migrations both materialise the full set (template v3)").
+
+**So the defect is the inverse of what I reported:** migrations correctly updated the
+project's *tree*, but never restamped the project's *manifest*. The stamp is a stale
+claim about a tree that has already moved on.
+
+**Severity: low today, latent tomorrow.** Nothing reads project stamps, so nothing
+breaks — the drift is inert. It becomes real the moment any feature *starts* trusting
+a project stamp (a per-project migration, a compatibility gate, or arxa business
+reporting on tree formats). Two honest options: either restamp projects during
+`migrateOrg`, or **stop writing a `formatStamp` into project manifests at all**, since
+an unread field that can be wrong is worse than no field. The second is the smaller
+surface.
+
+**Note the family resemblance.** This is the third instance of one pattern in this
+codebase: B8 (runner CTA computed, never rendered), B11 (a gate that cannot fail),
+B12 (a version system with no caller), and now B13 (a stamp written but never read).
+**Built-but-unwired is the dominant defect class here** — worth naming as a review
+heuristic, not just fixing case by case.
 
 ### Open design questions this raises for the CI/CD plan
 
