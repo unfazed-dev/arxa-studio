@@ -1457,3 +1457,22 @@ B1–B2 — which is most of the value, and covers the two highest-ranked threat
 This also re-frames the org/project inheritance question: the inherited *setting* can
 be automatic, but an inherited **A5** may still stall on a sign-in the user has not
 done. Inheritance must therefore carry a "best available" fallback, not a hard demand.
+
+### S3 — Tier provisioning model, approved 2026-09-02
+
+Approved as proposed in §23b:
+
+1. **A0–A3 + B1–B2 provision silently at install.** No prompts, no choices, no README
+   steps. This is the bulk of the value and covers both top-ranked threats (§11).
+2. **A4 is automatic when Docker is present** — arxa **detects**, never assumes.
+3. **A5 is presented as the one tier carrying a one-time Docker sign-in**, stated
+   honestly at the moment of choosing it — **never discovered later as a failed
+   session**.
+4. **A missing A5 sign-in never breaks a session.** Degrade to the highest tier
+   actually available and say so plainly.
+5. **Inheritance carries "best available", not a hard demand.** An org set to A5 must
+   not stall a project whose user has not signed in.
+
+Corollary for the org/project offer: the inherited *setting* is automatic, but the
+*effective* tier is resolved per machine at session start. The card must show the
+effective tier, not the configured one, whenever they differ.
