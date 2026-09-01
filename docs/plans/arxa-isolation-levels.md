@@ -1640,3 +1640,81 @@ end of the matrix is cheap and universally good.
 
 **UI consequence, carried from S3:** the card shows the *effective* confinement level
 resolved on this machine, not the configured one, whenever they differ.
+
+---
+
+## 25. Version management — three layers, and the middle one is inert
+
+Investigated in response to "what about version management and how does it integrate
+with git CI/CD and self-containment". arxa has **three distinct version concepts**,
+deliberately separated by D20/D44.
+
+### The three layers
+
+| # | Layer | Where | Visible to user? |
+|---|---|---|---|
+| 1 | **Deliverable version** — `v1`, `v2`, … plus a state | `versions.json`, committed in the project repo | **Yes** — the chip, e.g. `v4 · Approved` |
+| 2 | **Tree format stamp** — `arxa-tree/N` | `org.json` / `project.json` | **No** — D44 forbids showing it |
+| 3 | **Git** — commits, branches, PRs, SHAs | the repo | **No** — "the invisible substrate" |
+
+`versions.js` states the intent verbatim: *"arxa owns the semantic layer — a linear
+named version timeline per deliverable, auto-minted at stage transitions — while git
+stays the invisible substrate. The chip shows semantic version + state and NEVER git
+SHAs or the format stamp."*
+
+States are `Draft · In review · Approved · Superseded`. Superseded entries are
+**archived in the chain, never deleted**. Minting supersedes the previous head.
+
+### How it integrates — and it is well designed for our purposes
+
+- **Self-containment: already correct.** `versions.json` lives *inside the project
+  repo* and is committed, so it travels with the D17 clone/share path — and, under L2,
+  it comes back over the git daemon like any other file. **No change needed for the
+  container tiers.**
+- **CI/CD: a version bump is a commit, not a tag.** `mintAtStageBoundary()`
+  (`git-workspace/lib/index.js:74`) mints and commits in one step, so a stage
+  transition is an ordinary commit in the project repo.
+- **Zero git tags exist** in any live repo (TOPO, project-001 both `tags: 0`). Versions
+  are deliberately *not* git tags.
+
+### ⚠️ B12 — NEW, verified: the version system is built but nothing ever triggers it
+
+**`versions.json` exists nowhere on disk.** Across all three orgs and both projects,
+`find` returns nothing — **`mintVersion` has never run.**
+
+The read path is wired: `versionChip()` is called at
+`arxa-sidebar/lib/index.js:771` and `artifact-viewer/lib/write-api.js:146`. But
+`mintVersion` / `mintAtStageBoundary` have **no caller anywhere** outside the module's
+own exports. `versionChip()` returns `null` before the first mint, so **the chip is
+permanently hidden** and the whole D20 surface is inert.
+
+Same shape as B8 (the runner-asleep CTA computed but never rendered) and B11 (a gate
+that cannot fail): **the mechanism exists, nothing drives it.**
+
+### ⚠️ B13 — NEW, verified: format-stamp drift on live data
+
+```
+RESTO/org.json                          arxa-tree/3
+TESTO/org.json                          arxa-tree/3
+TOPO/org.json                           arxa-tree/3
+TESTO/projects/Fads/project.json        arxa-tree/3
+TOPO/projects/project-001/project.json  arxa-tree/2   <-- never migrated
+```
+
+One project sits a format version behind everything else. Since CONTEXT.md:76 says the
+app "refuses a newer org format cleanly and migrations know their version", this is
+exactly the state the migration machinery exists to resolve — and it has not run.
+
+### Open design questions this raises for the CI/CD plan
+
+1. **Who mints, and when?** "Auto-minted at stage transitions" is the stated design,
+   but stage transitions now sit inside the session→PR→merge flow. Minting on a
+   *session* boundary and minting on *merge to main* are different products.
+2. **Collision with D107.** A session collapses to one commit before merge. If a mint
+   commit is created inside a session, **the collapse squashes it away** — the
+   `versions.json` content survives (it is a file), but the "one commit per version
+   bump" property does not. Decide whether minting happens before the collapse, or is
+   performed by the merge action itself.
+3. **Should an Approved version get a git tag after all?** D44 forbids *showing* SHAs
+   to the user, which is a UI rule — it does not forbid tagging. A tag would make
+   Approved states legible to anyone using git directly, and to arxa business.
