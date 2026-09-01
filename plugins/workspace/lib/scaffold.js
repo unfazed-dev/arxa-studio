@@ -11,7 +11,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { slugify, uniqueSlug } from './slug.js'
-import { getTemplate, stampFor, TEMPLATE_VERSION } from './template.js'
+import { getTemplate, stampFor, TEMPLATE_VERSION, validateTargets } from './template.js'
 import { validateWorkspaceRoot } from './root.js'
 import {
   createManifest,
@@ -113,19 +113,35 @@ export function scaffoldOrgInRoot(root, displayName) {
 /**
  * Create `<orgPath>/projects/<slug>/` for a new project by executing the
  * current template's project tree: project.json and a thin AGENTS.md.
- * (The org's stamp governs the whole tree; projects carry the same
- * stamp value informationally.)
+ * The org's stamp governs the whole tree; projects carry no stamp (B13).
  *
  * @returns {{ path: string, slug: string, manifest: object }}
+ *
+ * `targets` is the v4 selection — `{ application: ['ios'], website: ['landing'] }`
+ * — validated against the shipped catalogue. Only the CHOSEN targets get
+ * folders: arxa's contract is that targets are "chosen once at project
+ * creation", so scaffolding the whole catalogue would put fifty empty
+ * directories in every project and make the choice meaningless.
+ *
+ * The selection is recorded in `project.json` rather than inferred from the
+ * folders later, so "this project has no targets yet" is a fact the card can
+ * state, not an absence it has to guess at.
  */
-export function scaffoldProject(orgPath, displayName) {
+export function scaffoldProject(orgPath, displayName, { targets = {} } = {}) {
   const template = getTemplate()
+  const chosen = typeof template.project.projectDirs === 'function'
+    ? validateTargets(targets)
+    : {}
   const projectsDir = path.join(orgPath, 'projects')
   const slug = uniqueSlug(displayName, existingSlugs(projectsDir))
   const projectPath = path.join(projectsDir, slug)
-  executeTemplateTree(template.project, projectPath, { displayName })
+  const tree = typeof template.project.projectDirs === 'function'
+    ? { ...template.project, dirs: template.project.projectDirs(chosen) }
+    : template.project
+  executeTemplateTree(tree, projectPath, { displayName })
   // No project-level stamp (B13): the org's stamp governs the whole tree.
   const manifest = createManifest(displayName, null)
+  manifest.targets = chosen
   writeManifest(projectManifestPath(projectPath), manifest)
   return { path: projectPath, slug, manifest }
 }

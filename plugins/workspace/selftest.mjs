@@ -244,8 +244,8 @@ try {
 
   // ===== Phase 5 — template, stamp, migrations (D21/D44) =====
 
-  check('template v3 is the docks/containers tree; scaffold stamps the org with it (D44; D78 stage order)', () => {
-    assert.equal(TEMPLATE_VERSION, 3)
+  check('template v4 is the track/target tree; scaffold stamps the org with it (D44; D78 stage order; V1a tracks)', () => {
+    assert.equal(TEMPLATE_VERSION, 4)
     assert.deepEqual(
       [...getTemplate(3).org.dirs].sort(),
       [...CATEGORIES, ...getTemplate(3).fixedWorkspaces.filter((w) => w.includes('/'))].sort(),
@@ -255,7 +255,7 @@ try {
     assert.equal(getTemplate(3).projectTargets.join('+'), 'website+application')
     assert.equal(stampFor(2), 'arxa-tree/2')
     assert.equal(parseStamp('arxa-tree/7'), 7)
-    assert.equal(readOrgStampVersion(org.path), 3)
+    assert.equal(readOrgStampVersion(org.path), 4)
     assert.equal(org.manifest.formatStamp, stampFor(TEMPLATE_VERSION))
     // D78: containers carry a 2-digit prefix in arxa's own pipeline order;
     // notes is free-form (D42), not a stage, and stays unnumbered, last.
@@ -267,7 +267,26 @@ try {
     // GitHub) can track the folder.
     assert.ok(fs.existsSync(path.join(org.path, 'notes', '.gitkeep')), 'org dock .gitkeep')
     assert.ok(fs.existsSync(path.join(org.path, 'meetings', 'scheduler', '.gitkeep')), 'dock container .gitkeep')
-    assert.ok(fs.existsSync(path.join(project.path, '02-design', 'website', '.gitkeep')), 'project stage/target .gitkeep')
+    assert.ok(fs.existsSync(path.join(project.path, '02-design', 'website', '.gitkeep')), 'project stage/track .gitkeep')
+
+    // --- v4 pins the PAIR: track and target (V1/V1a) ---
+    const t4 = getTemplate(4)
+    assert.deepEqual([...t4.projectTracks], ['website', 'application'], 'tracks are the upper level')
+    assert.deepEqual([...t4.targetCatalogue.application].slice(0, 3), ['ios', 'android', 'macos'],
+      'application targets are arxa platforms — the contract holds for this track')
+    assert.deepEqual([...t4.targetCatalogue.website].slice(0, 2), ['landing', 'docs'],
+      'website targets are site types; the platform is web and stays implicit')
+    // v3 must keep emitting exactly what it always did — migrations replay it.
+    assert.equal(getTemplate(3).project.dirs.length, 30, 'v3 tree is untouched by v4')
+    assert.equal(t4.project.dirs.length, 30, 'v4 with no chosen targets equals the v3 shape')
+    // A chosen target adds one dir per stage, and only the chosen one.
+    const chosen = t4.project.projectDirs({ application: ['ios'] })
+    assert.equal(chosen.filter((d) => d.endsWith('/application/ios')).length, 10, 'one per stage')
+    assert.equal(chosen.filter((d) => d.includes('/android')).length, 0, 'unchosen targets are never scaffolded')
+    assert.throws(() => t4.project.projectDirs({ application: ['solaris'] }), /unknown target/)
+    assert.throws(() => t4.project.projectDirs({ nope: ['ios'] }), /unknown track/)
+    // The selection is recorded, so "no targets yet" is a fact, not a guess.
+    assert.deepEqual(project.manifest.targets, {}, 'a project with no chosen targets says so')
   })
 
   check('D73: the project template carries a .gitignore — noise + secrets only, never managed containers', () => {
@@ -454,7 +473,7 @@ try {
     runGit(['add', '-A'], { cwd: v2org.path })
     runGit(['commit', '-m', 'test: stamp at v2'], { cwd: v2org.path }) // migrations demand a clean tree
     const opened = openOrg(v2org.path, { appVersion: TEMPLATE_VERSION, migrations: MIGRATIONS })
-    assert.equal(readOrgStampVersion(v2org.path), 3, 'org restamped at v3')
+    assert.equal(readOrgStampVersion(v2org.path), 4, 'org restamped at the current template')
     assert.ok(fs.existsSync(path.join(proj, '02-design')), 'design → 02-design')
     assert.ok(!fs.existsSync(path.join(proj, 'design')), 'old design dir gone')
     assert.ok(fs.existsSync(path.join(proj, '00-moodboard', 'website')), 'targets rode along in the rename')

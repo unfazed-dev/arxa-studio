@@ -157,6 +157,50 @@ export const MIGRATIONS = Object.freeze([
       gitkeepEmptyDirs(orgPath)
     },
   }),
+  Object.freeze({
+    from: 3,
+    to: 4,
+    description: 'track/target vocabulary: <NN-stage>/<track>/<target>/ — the track level already exists from v3, so this moves the stamp and adds no folders',
+    /**
+     * Deliberately creates nothing, and that is not an oversight.
+     *
+     * v3 already builds `<stage>/website` and `<stage>/application` for every
+     * stage (`projectDirsV3`). v4 renames that level to TRACK and defines a
+     * TARGET level beneath it — but targets are chosen per project at
+     * creation, never scaffolded wholesale, because arxa's contract is that
+     * targets are "chosen once at project creation". Materialising
+     * ios/android/macos/landing/docs here would put fifty empty folders into
+     * every existing project and contradict the very model v4 exists to
+     * adopt.
+     *
+     * So the v3 tree is ALREADY v4-shaped. This entry exists to move the
+     * stamp, which is what lets `checkOrgStamp` stop refusing v4 builds.
+     * Existing content sitting directly under a track (the v3 habit) keeps
+     * working: the gate walks to any stack marker at any depth, so a project
+     * that never adopts targets still gates exactly as it did.
+     */
+    apply(orgPath) {
+      const template = getTemplate(4)
+      // Org level: additive, same rule as every step before it.
+      for (const dir of template.org.dirs) {
+        fs.mkdirSync(path.join(orgPath, dir), { recursive: true })
+      }
+      const projectsDir = path.join(orgPath, 'projects')
+      if (fs.existsSync(projectsDir)) {
+        for (const entry of fs.readdirSync(projectsDir, { withFileTypes: true })) {
+          if (!entry.isDirectory()) continue
+          const project = path.join(projectsDir, entry.name)
+          // Track dirs only — no target dirs. Idempotent: v3 already made these.
+          for (const dir of template.project.dirs) {
+            fs.mkdirSync(path.join(project, dir), { recursive: true })
+          }
+          gitkeepEmptyDirs(project)
+          commitProjectRepoMigration(project)
+        }
+      }
+      gitkeepEmptyDirs(orgPath)
+    },
+  }),
 ])
 
 /** Resolve the step chain from one version to another, or throw. */

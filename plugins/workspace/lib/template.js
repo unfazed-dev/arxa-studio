@@ -7,7 +7,7 @@
 // manifests (D41/Q3), and thin AGENTS.md context files (D43).
 
 /** The template version this build of the app scaffolds and expects. */
-export const TEMPLATE_VERSION = 3
+export const TEMPLATE_VERSION = 4
 
 /** Stamp string prefix; full stamps look like `arxa-tree/1` (D21/D44). */
 export const STAMP_PREFIX = 'arxa-tree/'
@@ -121,6 +121,83 @@ const PROJECT_CONTAINERS_V3 = Object.freeze([
 ])
 const PROJECT_TARGETS_V2 = Object.freeze(['website', 'application'])
 
+/**
+ * v4 vocabulary (V1 + V1a, grilled 2026-09-02). The tree gains one level:
+ *
+ *   <NN-stage>/<track>/<target>/
+ *              │        └─ ios, android, macos   (application)
+ *              │           landing, docs         (website)
+ *              └────────── application | website
+ *
+ * `application/` and `website/` are the **TRACK**. What sits under a track is
+ * the **TARGET**. This makes studio agree with arxa rather than compete with
+ * it: `ios`/`android` genuinely are arxa's targets, "the platforms a project
+ * ships to". It also stops `website` being a target name, which cleared
+ * arxa's `Artifact` _Avoid_ violation.
+ *
+ * The upper level is `Track`, NOT `Kind` — arxa already owns `Kind` as a
+ * gate-enforced closed vocabulary of UI widgets (`gate_kind_registry`).
+ *
+ * Accepted asymmetry, stated so nobody later reads it as an accident:
+ * arxa's targets are platform-only *by contract*, and that holds for the
+ * `application` track only. Under `website`, a target is the concrete thing
+ * shipped (`landing`, `docs`); the platform is always web and stays implicit.
+ *
+ * NOTE: the track level ALREADY EXISTS in v3 — `projectDirsV3()` builds
+ * `<stage>/website` and `<stage>/application` from PROJECT_TARGETS_V2. v4
+ * therefore renames the concept and adds the level beneath it; it does not
+ * restructure what v3 produced. PROJECT_TARGETS_V2 stays exactly as it is,
+ * because getTemplate(2)/(3) are replayed by migrations.
+ */
+const PROJECT_TRACKS_V4 = Object.freeze(['website', 'application'])
+
+/** The catalogue of targets each track may contain. */
+export const PROJECT_TARGETS_V4 = Object.freeze({
+  application: Object.freeze(['ios', 'android', 'macos', 'windows', 'linux', 'web']),
+  website: Object.freeze(['landing', 'docs', 'app']),
+})
+
+/**
+ * Validate a chosen `{ track: [target, …] }` selection against the catalogue.
+ * Throws on an unknown track or target — a typo here would silently scaffold
+ * a folder the gate then never recognises.
+ */
+export function validateTargets(selection = {}) {
+  const out = {}
+  for (const [track, targets] of Object.entries(selection)) {
+    if (!PROJECT_TRACKS_V4.includes(track)) {
+      throw new TypeError(`unknown track ${JSON.stringify(track)} — expected one of ${PROJECT_TRACKS_V4.join(', ')}`)
+    }
+    if (!Array.isArray(targets)) throw new TypeError(`targets for ${track} must be an array`)
+    for (const t of targets) {
+      if (!PROJECT_TARGETS_V4[track].includes(t)) {
+        throw new TypeError(`unknown target ${JSON.stringify(t)} for track ${track} — expected one of ${PROJECT_TARGETS_V4[track].join(', ')}`)
+      }
+    }
+    if (targets.length) out[track] = Object.freeze([...new Set(targets)])
+  }
+  return Object.freeze(out)
+}
+
+/**
+ * v4 project dirs: every stage, every track, plus one dir per CHOSEN target.
+ * Targets are chosen at project creation (arxa: "chosen once at project
+ * creation") — scaffolding all of them up front would contradict that and
+ * leave ten empty folders in every one of ten stages.
+ */
+function projectDirsV4(selection = {}) {
+  const chosen = validateTargets(selection)
+  const dirs = []
+  for (const c of PROJECT_CONTAINERS_V3) {
+    dirs.push(c)
+    for (const track of PROJECT_TRACKS_V4) {
+      dirs.push(`${c}/${track}`)
+      for (const target of chosen[track] ?? []) dirs.push(`${c}/${track}/${target}`)
+    }
+  }
+  return dirs
+}
+
 function orgDirsV2() {
   const dirs = []
   for (const dock of DOCKS_V2) {
@@ -218,6 +295,40 @@ export const TEMPLATES = Object.freeze({
     }),
     project: Object.freeze({
       dirs: Object.freeze(projectDirsV3()),
+      files: Object.freeze([
+        { path: 'AGENTS.md', content: (ctx) => projectAgentsStub(ctx.displayName) },
+        { path: '.gitignore', content: () => PROJECT_GITIGNORE },
+      ]),
+    }),
+  }),
+  4: Object.freeze({
+    version: 4,
+    docks: DOCKS_V2,
+    projectContainers: PROJECT_CONTAINERS_V3,
+    /** v4 renames this level: these are TRACKS, not targets (V1a). */
+    projectTracks: PROJECT_TRACKS_V4,
+    /** Kept under the old key so existing readers of `projectTargets` still
+     * see the track list rather than crashing; new code reads projectTracks. */
+    projectTargets: PROJECT_TRACKS_V4,
+    /** The catalogue a project chooses its targets from. */
+    targetCatalogue: PROJECT_TARGETS_V4,
+    fixedWorkspaces: Object.freeze(
+      orgDirsV2().filter((d) => {
+        if (d === 'projects') return false
+        const dock = DOCKS_V2.find((k) => k.slug === d)
+        return !dock || (dock.containers ?? []).length === 0
+      }),
+    ),
+    org: Object.freeze({
+      dirs: Object.freeze(orgDirsV2()),
+      files: Object.freeze([{ path: 'AGENTS.md', content: (ctx) => orgAgentsStub(ctx.displayName) }]),
+    }),
+    project: Object.freeze({
+      /** Tracks only. Target dirs are added per project from its chosen
+       * selection — see projectDirs(). */
+      dirs: Object.freeze(projectDirsV4()),
+      /** Build the dirs for a specific target selection. */
+      projectDirs: (selection) => Object.freeze(projectDirsV4(selection)),
       files: Object.freeze([
         { path: 'AGENTS.md', content: (ctx) => projectAgentsStub(ctx.displayName) },
         { path: '.gitignore', content: () => PROJECT_GITIGNORE },
