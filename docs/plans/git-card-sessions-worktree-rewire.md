@@ -1010,3 +1010,33 @@ actioned now — recorded so it is a decision later rather than a surprise.
 **Status:** the gate fix is complete and verified. The `settingsPayload` flip is
 **not** — the agreed order was fix → observe → flip, and only fix and a first
 observation are done.
+
+### §10.6 — the migration gap is closed and wired
+
+`FRAME_VERSION = 2`. Generated `check.sh` and `ci.yml` now carry
+`# arxa-frame: v<N> <hash>` (after the shebang, so the file stays executable);
+the PR template is prose and is deliberately never version-judged.
+
+`frameFileState()` distinguishes four states, which is the whole point — "old"
+and "customised" must not be confused:
+
+| state | meaning | upgrade behaviour |
+|---|---|---|
+| `missing` | never written | always written |
+| `current` | matches this version | left alone |
+| `stale` | older version, untouched since arxa wrote it | rewritten |
+| `unversioned` | predates stamping | rewritten |
+| `modified` | hash no longer matches — a human edited it | **`conflicted`, never overwritten** (only `force` gets past) |
+
+**Wired, not just built.** `openOrg` now upgrades the org's own frame *and*
+sweeps every project in it. That sweep matters because `wireFrameOnce`
+short-circuits permanently on `frameWired === true`, so nothing else would ever
+revisit a project's gate — it would stay frozen at the version it was born with.
+
+**Verified end-to-end on the real repos.** RESTO, TESTO, TOPO and project-001
+were all `unversioned`; all four upgraded to `current` with zero conflicts, and
+the upgraded project-001 gate still reds a broken target:
+`FAIL: flutter analyze (./05-scaffold/application/ios)`.
+
+`selftest.mjs` 51/51 (three new: stamp placement, the upgrade/conflict/force
+ladder, and `frameStatus` reporting without writing). `file-org-shell` 193/193.
