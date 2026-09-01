@@ -1476,3 +1476,107 @@ Approved as proposed in §23b:
 Corollary for the org/project offer: the inherited *setting* is automatic, but the
 *effective* tier is resolved per machine at session start. The card must show the
 effective tier, not the configured one, whenever they differ.
+
+---
+
+## 24. L2 VERIFIED END-TO-END — measured, not documented
+
+Real sandbox (`arxaclonetest`) created with `--clone` against a scratch git repo at
+`/Volumes/business_ssd/_sbxtest`, under the global `deny-all` policy. Image pull was
+~600 MB across layers.
+
+**Correct signature** (I got this wrong first time — worth writing down):
+`sbx create [flags] AGENT PATH [PATH...]`, e.g. `sbx create --clone --name <n> claude .`
+Extra read-only workspaces use a `:ro` suffix — `sbx create claude . /path/to/docs:ro`.
+**Directly useful for arxa:** mount the project read-write and reference material `:ro`.
+
+### What creation actually reports
+
+```
+mount  /Volumes/business_ssd/_sbxtest → /run/sandbox/source (ro, source)
+Git daemon: git://127.0.0.1:49152/_sbxtest
+Remote: sandbox-arxaclonetest
+```
+
+### ✅ 24a. `--clone` genuinely protects host source
+
+```
+$ sbx exec arxaclonetest sh -c 'echo PWNED >> /run/sandbox/source/app.txt'
+sh: cannot create /run/sandbox/source/app.txt: Read-only file system
+```
+
+The agent works in a **writable clone** whose path mirrors the host path
+(`pwd=/Volumes/business_ssd/_sbxtest` inside), while the real host tree is mounted
+read-only at `/run/sandbox/source`. §4's warning is confirmed by the tool itself.
+
+### ✅ 24b. Egress: deny-all works, and the ceiling is real — measured
+
+| Host | Result |
+|---|---|
+| `example.com` | proxy `403 Forbidden` — **denied** |
+| `registry.npmjs.org` | proxy `403 Forbidden` — **denied** |
+| `evil-exfil-test.example.net` | proxy `403 Forbidden` — **denied** |
+| **`api.anthropic.com`** | `Connection established` → real `HTTP/2 404` with the server's own `date:` header — **ALLOWED** |
+
+Denial message: `Blocked by network policy: domain example.com:443` /
+`no matching allow rule — blocked by default deny policy`.
+
+**The agent kit adds 6 allow rules on top of the global deny-all**
+(`sbx policy ls <name> --wide`):
+
+```
+api.anthropic.com:443            bridge.claudeusercontent.com:443
+claude.com:443                   downloads.claude.ai:443
+mcp-proxy.anthropic.com:443      platform.claude.com:443
+```
+
+**This is §13's ceiling, measured rather than argued.** Even at the strictest posture
+the model channel is open by construction, and it is an exfiltration path. Six of them.
+
+⚠️ **Denials surface as HTTP 403, not as network errors.** A blocked host completes a
+proxy CONNECT and then returns 403. Toolchains will report odd HTTP failures rather
+than "no network" — arxa must translate this, or `npm install` failures will be
+baffling.
+
+⚠️ **Filesystem policy is `allow all paths` for both read and write**
+(`default-fs-read-allow-all`, `default-fs-write-allow-all`). **The read-only guarantee
+comes from the MOUNT, not from policy.** Do not assume the policy engine is protecting
+the source.
+
+### ✅ 24c. Git round-trip works — and this is arxa's integration point
+
+Committing inside the sandbox and retrieving it on the host both work:
+
+```
+inside : 237ed83 feat: work done inside the microVM
+host   : git fetch git://127.0.0.1:49154/_sbxtest main  ->  237ed83 retrieved
+host worktree: clean throughout — no feature.txt, app.txt untouched
+```
+
+**This is the clean answer to the whole worktree/container problem (§6, §19):** the
+agent's commits come back over a git daemon. No bind-mounting of `.git`, no
+common-git-dir coupling, no exposure of sibling projects.
+
+### ⚠️ 24d. Three operational gotchas arxa MUST handle
+
+1. **The port is ephemeral and changes on every start.** Observed 49152 → 49153 →
+   49154 across restarts. **Never persist the URL.** Resolve it each time from
+   `sbx ls` (or `--format json`).
+2. **The sandbox auto-stops, and when stopped there is no git daemon and no port** —
+   `git fetch` fails with `Connection refused`, and `sbx ls` shows `PORTS` empty.
+   **The agent's work is only reachable while the sandbox runs.** arxa must start the
+   sandbox before any fetch. `sbx exec <name> true` starts it and reports
+   `Sandbox <name> started successfully`.
+3. **The advertised `Remote: sandbox-<name>` was NOT added to the host repo** —
+   `git remote -v` on the host is empty after creation. Either it is added elsewhere or
+   lazily; **arxa should add and maintain the remote itself rather than rely on it.**
+
+### Corrections this section makes to earlier research
+
+| Earlier claim | Measured reality |
+|---|---|
+| `sbx` is deny-by-default | **No policy exists** until `sbx policy init`; deny-all is one of three choices (§22a) |
+| deny-all blocks the model API | **api.anthropic.com is allowed** by the agent kit, plus 5 more |
+| `--no-share-skills` opts out of a shared store | **Flag does not exist**; store is shared but **empty until `sbx skills import`** (§22b) |
+| memory default is 8 GiB | **50 % of host, max 32 GiB** — 8 GiB here only because the host is 16 GiB |
+| `--clone` protects source | **Confirmed** — read-only mount, verified by a refused write |
