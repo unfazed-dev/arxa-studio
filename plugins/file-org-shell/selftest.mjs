@@ -879,7 +879,7 @@ try {
           gitCredentials: async () => ({ login: 'octocat', token: 'test-token' }),
           wireFrame: async (owner, name, payloads) => {
             wired.push(owner + '/' + name)
-            assert.ok(payloads.settings.allow_squash_merge === true && payloads.settings.allow_merge_commit === false, 'S1 settings payload locks squash-only')
+            assert.ok(payloads.settings.allow_squash_merge === false && payloads.settings.allow_merge_commit === true, 'D107 flip: merge-commit only — squash would destroy the ancestry collapse-then-no-ff depends on')
             assert.ok(payloads.protection.required_status_checks.strict === true, 'S1 protection is strict')
             return { ok: true, protection: 'plan-limited' }
           },
