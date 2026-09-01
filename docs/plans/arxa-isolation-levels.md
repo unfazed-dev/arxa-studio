@@ -1867,3 +1867,90 @@ one." This must land **with** the tagging change, never after it.
 - [GitHub — managing releases](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)
 - [npm version — bump + commit + tag atomically](https://docs.npmjs.com/cli/v10/commands/npm-version)
 - [semantic-release — tags on merge to a release branch](https://github.com/semantic-release/semantic-release)
+
+### 26f. WHEN to mint — the software-release model is a poor fit, and that is the finding
+
+**Three reasons the release-automation model does not transfer**, each decisive:
+
+1. **Semver encodes API compatibility.** A moodboard revision is neither breaking nor
+   non-breaking — **the axis does not exist**. No tool surveyed produces a monotonic
+   `v1, v2, v3`; arxa's scheme is already right.
+2. **Every tool derives the number from commit subjects.** That would re-couple the
+   client-facing chip to git, one level up from the SHA ban D44 already imposes.
+3. **`Draft / In review / Approved` is NOT a semver prerelease.** Semver clause 9:
+   prerelease means *"unstable, might not satisfy compatibility"*. arxa's states mean
+   *"no human has signed off"* — the artifact is finished. **The decisive detail: a
+   prerelease is part of the version STRING**, so `1.0.0-rc.1 → 1.0.0` is a *different
+   version*. arxa needs **v4 to stay v4 across approval**.
+   **Version identity and approval state must remain orthogonal fields** —
+   `versions.json` already models this correctly.
+
+**When each tool mints**
+
+| Tool | When |
+|---|---|
+| `semantic-release` | automatic, at merge/push, in CI — *"you deliberately cannot trigger a specific version release"* |
+| `changesets` | contributor declares bump size on the branch; number minted when a human merges the **Version PR** |
+| `release-please` | accumulates on main, keeps a **Release PR** updated; merging it cuts the version. Ships `autorelease: pending / tagged / published` labels |
+| `standard-version` | deprecated → points at release-please |
+
+**Structural finding: two of three living tools use a release PR.** *Accumulate →
+propose → human merges* is the dominant model, not a release-please quirk. And
+release-please's `autorelease:` **labels** are direct evidence that state belongs
+**beside** the version, not inside the string — exactly arxa's design.
+
+**⚠️ And our merge style breaks the tool-native escape hatch.** A branch collapsed to
+one commit then merged `--no-ff` is a **merge commit, not a squash**. release-please's
+own docs: Release PRs work with *"both squash-merge and merge commits"*, but
+`Release-As` *"will not work with plain merges because release-please does not know
+which commit(s) to apply the override to."* So D107's shape specifically disables the
+manual-version override. Noted, not fatal — we are not adopting release-please — but it
+kills the option of doing so later without revisiting D107.
+
+### 26g. Reconciling ver-tags and ver-semrel — they agree, read precisely
+
+They look opposed: one recommends an annotated tag, the other says a tag *"structurally
+cannot carry Draft → Approved."* Both are right, about different moments.
+
+- **Both agree the FILE is SSOT.** ver-semrel's rule states it generally: *if the
+  version carries state that mutates after minting, a file must be SSOT.*
+- **Do not tag at mint.** At mint the state is `Draft` and will change — tagging there
+  would require retagging, which is the `reference already exists` failure.
+- **Tag at `Approved` only.** That is a one-time, terminal-ish event, so no retagging
+  is needed.
+- **`Approved → Superseded` does not invalidate the tag.** The tag records *"v4 was
+  approved at commit X"*, which stays true forever. Superseded is a **relative** state
+  (something newer exists), not a contradiction of the tag.
+
+**Combined position: file is SSOT and carries state; an annotated tag is written once,
+at Approved, pointing at the post-merge commit on `main`; pushes gain `--follow-tags`
+(§26e).**
+
+### 26h. Agency contract practice — what "Approved" is actually worth
+
+The AIGA Standard Form of Agreement — the reference terms for design services —
+**does not contract in a fixed number of "rounds."** It uses:
+
+- **General Changes** — work outside scope billed at an hourly rate.
+- **Substantive Changes** — triggered when requested changes approach or exceed a
+  filled-in **percentage of the time required**, after which the designer is *not
+  obligated to proceed* until a revised Proposal is signed.
+- **Testing and Acceptance** — the designer makes corrections before delivery, with a
+  right to *"effect a cure"*: repair, correct or re-design non-conforming work to make
+  it acceptable.
+
+**Implication for minting.** "Approved" is not decoration — it is the **acceptance**
+event the contract is written around, and the boundary that determines whether further
+work is billable. That argues strongly that a version number should mark **client-facing
+acceptance moments**, not internal stage transitions: a number the client never saw
+cannot be the thing they accepted.
+
+It also cautions against auto-minting per stage. With ten stages × two targets, a
+number would move on work no client ever reviewed, and the count would stop
+corresponding to anything in the agreement.
+
+### Sources
+
+- [AIGA — Standard Form of Agreement for Design Services (resources)](https://www.aiga.org/resources/aiga-standard-form-of-agreement-for-design-services) · [2022 update PDF](https://www.aiga.org/sites/default/files/2023-11/Standardformofagreement_2022update.pdf) · [full PDF mirror](https://davidberman.com/wp-content/uploads/AIGA-Standard-Form-of-Agreement-for-Design-Services.pdf)
+- [AIGA — Business & Freelance Resources](https://www.aiga.org/resources/business-freelance-resources) · [The State of Our Contracts](https://www.aiga.org/resources/the-state-of-our-contracts)
+- [semver.org — clause 9, prerelease](https://semver.org/) · [release-please](https://github.com/googleapis/release-please) · [changesets](https://github.com/changesets/changesets) · [semantic-release](https://github.com/semantic-release/semantic-release)
