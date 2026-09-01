@@ -131,3 +131,118 @@ Per §28a, the gaps run both ways — these are **not** studio renames:
 Do not add a **sixth** vocabulary. The version work must adopt arxa's `Freeze`
 (hash identity) and `Publish` (client deploy) as they are defined, rather than
 introducing parallel studio terms that mean nearly-but-not-quite the same thing.
+
+---
+
+## V1 — DECIDED: `kind → target`, and it resolves the collision structurally
+
+**Owner decision, 2026-09-02.** The tree gains one level:
+
+```
+<org>/projects/<slug>/<NN-stage>/<kind>/<target>/
+                                  │       └─ ios, android, macos   (application)
+                                  │          landing, docs, …      (website)
+                                  └───────── application | website
+```
+
+- **`application/` and `website/` are the KIND.** (The owner's own word.)
+- **The level below is the TARGET.**
+
+### Why this is better than a rename
+
+`ios` and `android` **genuinely are** arxa's targets — *"the platforms a project ships
+to"* (`VOCABULARY.md:241`). Putting them at that level makes studio **agree with arxa**
+rather than compete with it. The old `Target` = `{website, application}` usage
+disappears on its own; nothing needs renaming to free the word.
+
+It also clears the second violation: `website` stops being a *target* name, so it no
+longer trips arxa's `Artifact` `_Avoid_: project, website, page`. It becomes a **kind**,
+which arxa does not define.
+
+### The accepted cost — write this down, do not leave it implied
+
+`website/landing` is **not** a platform. arxa's contract says targets are
+*"platform-only by contract"*, and that remains true **for the `application` kind
+only**. For `website`, `target` means *the concrete thing shipped*.
+
+**The shared glossary must state this explicitly**, or the next reader will find
+`website/landing` and conclude the contract was broken by accident. Proposed wording for
+studio's `CONTEXT.md`:
+
+> **Kind** — one of the two fixed subfolders of every stage container: `application/`
+> and `website/`.
+> **Target** — the concrete thing shipped, one level under a kind. For `application/`
+> these are arxa platforms (`ios`, `android`, `macos`) and arxa's platform-only contract
+> holds. For `website/` they are site types (`landing`, `docs`); the platform is always
+> web and is therefore left implicit.
+
+## V2 — Work this forces
+
+### Template v4 — an additive migration, following the existing pattern
+
+`MIGRATIONS` in `plugins/workspace/lib/migrate.js:85` is a chain of
+`{from, to, description, apply(orgPath)}`, and it is **additive only** — *"create
+missing template dirs, never touch existing content"*. A `{from: 3, to: 4}` entry is
+exactly the shape already used twice.
+
+| File | Change |
+|---|---|
+| `plugins/workspace/lib/template.js:9` | `TEMPLATE_VERSION` 3 → **4** |
+| `plugins/workspace/lib/template.js:122` | `PROJECT_TARGETS_V2 = ['website','application']` becomes the **kind** list; add a per-kind **target** list |
+| `plugins/workspace/lib/migrate.js:85` | add the `{from: 3, to: 4}` additive migration |
+| `CONTEXT.md:144` | rewrite `Target`; add `Kind` (wording above) |
+| selftests | *"selftests pin the pair"* (`CONTEXT.md:146`) — must now pin kind **and** target |
+
+### ⚠️ D113's gate walk changes depth — catch this now
+
+D113 (in `arxa-isolation-levels.md`) specified the project gate walks
+`<stage>/website/` and `<stage>/application/`. **Under V1 it must walk
+`<stage>/<kind>/<target>/`.** The Dart probe belongs at
+`application/<platform>/`, not at `application/`.
+
+**This must land in the same change as the template bump**, or the gate silently
+resumes testing nothing — which is B11 all over again, at one level deeper.
+
+### Default targets at creation
+
+Open: what does a new project scaffold with? Creating all of
+`ios/android/macos/landing/docs` up front contradicts arxa, where **targets are
+"chosen once at project creation"** (`VOCABULARY.md:241`). **Recommendation: ask at
+project creation and scaffold only the chosen targets** — matching arxa's model
+exactly, and avoiding ten empty folders per stage.
+
+## V3 — The two gaps, now accepted as work
+
+Both were identified in §28a of `arxa-isolation-levels.md`. Neither is a rename; each
+side is missing a concept the other has.
+
+### Gap 1 — arxa has no `superseded`
+
+Old versions in `_d_meta.json` are simply earlier entries in `assets.<name>.versions[]`.
+W3C defines superseded as a **relation** ("replaced by a newer version"), and
+21 CFR 820.40(a) requires obsolete versions be *"prevented from unintended use"* —
+which an implicit array position does not satisfy.
+
+**Fix:** add an explicit `supersededBy` pointer on the superseded entry. **This is an
+arxa-side change**, and it is the studio side that needs it, so it must be agreed
+across both.
+
+### Gap 2 — studio has no `changes-requested`
+
+arxa's design status vocabulary (`design_tools.dart:2944-2949`) is
+`needs-review | approved | changes-requested`. Studio's four states have no rejection
+state at all.
+
+This matters because of §26k: **client objection opens new work** (AIGA pairs objection
+with *cure*), so a rejection must be recordable and distinguishable from "not yet
+reviewed". Without it, a rejected deliverable is indistinguishable from an unreviewed
+one.
+
+**Fix:** studio adopts `changes-requested`, spelled exactly as arxa spells it.
+
+### Reminder from §28e — neither side's states have ever run
+
+`_d_meta.json` live data is **100 % `needs-review`, one version per asset, zero
+accumulation**. Studio's `versions.json` exists nowhere on disk. **Adding two states to
+two unexercised state machines means the first implementation exercises all of it for
+the first time.** Budget for the states being wrong, not merely unwired.
