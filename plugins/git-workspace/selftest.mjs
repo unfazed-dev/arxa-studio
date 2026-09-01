@@ -433,7 +433,7 @@ ok('pushRepo: pushes the PRIMARY branch to a remote URL (D73 push half, offline 
 
 // ---- 6. CI frame (Part B S1: Q3/Q4/Q5/Q7/Q8) ------------------------------
 
-import { SUBJECT_RE, FRAME_JOB, orgCheckSh, projectCheckSh, ciYml, prTemplate, protectionPayload, settingsPayload, writeFrameFiles } from './lib/frame.js'
+import { SUBJECT_RE, FRAME_JOB, orgCheckSh, projectCheckSh, ciYml, prTemplate, protectionPayload, settingsPayload, writeFrameFiles, frameStatus, frameFileState, readStamp, stampContent, FRAME_VERSION } from './lib/frame.js'
 import { createWipWatcher } from './lib/watch.js'
 import { execFileSync } from 'node:child_process'
 
@@ -537,6 +537,50 @@ ok('frame: org check.sh is green by absence, red on real rot (Q4)', () => {
   assert.equal(sh(), 0, 'NN-kebab accepted')
   fs.mkdirSync(path.join(d, 'projects', '1bad'))
   assert.notEqual(sh(), 0, 'non-NN stage folder goes red')
+})
+
+ok('frame: generated files carry a version stamp after the shebang', () => {
+  const sh = stampContent(projectCheckSh())
+  const lines = sh.split('\n')
+  assert.equal(lines[0], '#!/bin/sh', 'shebang stays first or the file stops being executable')
+  assert.match(lines[1], /^# arxa-frame: v\d+ [0-9a-f]{16}$/, 'stamp is line 2')
+  assert.equal(readStamp(sh).version, FRAME_VERSION)
+})
+
+ok('frame: an existing repo can be upgraded, and a hand-edit is never clobbered', () => {
+  const d = path.join(tmp, 'frame-upgrade')
+  fs.mkdirSync(d, { recursive: true })
+  const abs = path.join(d, 'check.sh')
+
+  writeFrameFiles(d, 'project')
+  assert.equal(frameFileState(abs), 'current', 'a fresh write is current')
+  assert.deepEqual(writeFrameFiles(d, 'project').upgraded, [], 'default never rewrites')
+
+  // A repo created before stamping existed.
+  fs.writeFileSync(abs, '#!/bin/sh\necho legacy\n')
+  assert.equal(frameFileState(abs), 'unversioned', 'pre-v2 files are detectable')
+  assert.deepEqual(writeFrameFiles(d, 'project').upgraded, [], 'still no silent rewrite')
+  assert.deepEqual(writeFrameFiles(d, 'project', { upgrade: true }).upgraded, ['check.sh'], 'upgrade reaches it')
+  assert.equal(frameFileState(abs), 'current')
+
+  // A human edited the generated file: that is data, not drift.
+  fs.appendFileSync(abs, '\n# local tweak\n')
+  assert.equal(frameFileState(abs), 'modified')
+  const r = writeFrameFiles(d, 'project', { upgrade: true })
+  assert.deepEqual(r.conflicted, ['check.sh'], 'an edited file conflicts instead of being overwritten')
+  assert.deepEqual(r.upgraded, [])
+  assert.ok(fs.readFileSync(abs, 'utf8').includes('# local tweak'), 'the edit survived')
+  assert.deepEqual(writeFrameFiles(d, 'project', { upgrade: true, force: true }).upgraded, ['check.sh'], 'force is the only way past')
+})
+
+ok('frame: frameStatus reports per-file state without writing', () => {
+  const d = path.join(tmp, 'frame-status')
+  fs.mkdirSync(d, { recursive: true })
+  assert.deepEqual(frameStatus(d, 'project'), { 'check.sh': 'missing' })
+  writeFrameFiles(d, 'project', { includeCiYml: true })
+  assert.deepEqual(frameStatus(d, 'project', { includeCiYml: true }),
+    { 'check.sh': 'current', '.github/workflows/ci.yml': 'current' })
+  assert.ok(!('.github/pull_request_template.md' in frameStatus(d, 'project')), 'prose is never version-judged')
 })
 
 ok('frame: project check.sh probes stacks only when present (Q4)', () => {

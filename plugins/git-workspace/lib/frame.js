@@ -8,8 +8,53 @@
 // here (JS, for the card + tests) and inside the check.sh bodies (sh, for
 // local + CI runs). Edit both together. The types list and the pattern
 // must stay identical.
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+
+/**
+ * Bumped whenever a generated frame file changes shape. Existing repos keep
+ * the file they were created with — `writeFrameFiles` never clobbers — so
+ * without a version a fix to the generator reaches new repos only and every
+ * older project keeps the old gate forever, silently. v2 is the per-target
+ * walk (B11/B15/B16); v1 is anything generated before stamping existed.
+ */
+export const FRAME_VERSION = 2
+
+const STAMP_RE = /^# arxa-frame: v(\d+) ([0-9a-f]{16})$/m
+const STAMP_LINE_RE = /^# arxa-frame: v\d+ [0-9a-f]{16}\n/m
+
+const digest = (body) => crypto.createHash('sha256').update(body).digest('hex').slice(0, 16)
+
+/** Stamp generated content: after the shebang when there is one, else on top. */
+export function stampContent(content) {
+  const line = `# arxa-frame: v${FRAME_VERSION} ${digest(content)}\n`
+  if (!content.startsWith('#!')) return line + content
+  const nl = content.indexOf('\n') + 1
+  return content.slice(0, nl) + line + content.slice(nl)
+}
+
+/** `{ version, hash }` for a stamped file, else null. */
+export function readStamp(text) {
+  const m = STAMP_RE.exec(text)
+  return m ? { version: Number(m[1]), hash: m[2] } : null
+}
+
+const unstamp = (text) => text.replace(STAMP_LINE_RE, '')
+
+/**
+ * How a frame file on disk relates to what the generator would write now.
+ * `modified` means a human edited it: an upgrade must never overwrite that,
+ * because the whole point of the hash is to tell "old" from "customised".
+ */
+export function frameFileState(abs) {
+  if (!fs.existsSync(abs)) return 'missing'
+  const text = fs.readFileSync(abs, 'utf8')
+  const st = readStamp(text)
+  if (!st) return 'unversioned'
+  if (digest(unstamp(text)) !== st.hash) return 'modified'
+  return st.version === FRAME_VERSION ? 'current' : 'stale'
+}
 
 /** The one CI job the day-one frame runs (protection contexts match it). */
 export const FRAME_JOB = 'frame-check'
@@ -220,23 +265,57 @@ export function settingsPayload() {
  * user (or a newer frame) and stays (returned under kept). check.sh lands
  * executable; ci.yml only when the repo is being published (a local-only
  * org has no use for workflow YAML). */
-export function writeFrameFiles(repoPath, kind = 'org', { includeCiYml = false } = {}) {
+/**
+ * The generated frame files. `stamped` files carry a version + content hash so
+ * a later fix can be rolled out to repos that already exist; the PR template is
+ * prose a human is meant to edit, so it is written once and never upgraded.
+ */
+function frameFiles(kind, includeCiYml) {
   const isOrg = kind === 'org'
   const files = [
-    { rel: 'check.sh', content: isOrg ? orgCheckSh() : projectCheckSh(), mode: 0o755 },
-    { rel: path.join('.github', 'pull_request_template.md'), content: prTemplate(), mode: 0o644 },
+    { rel: 'check.sh', content: isOrg ? orgCheckSh() : projectCheckSh(), mode: 0o755, stamped: true },
+    { rel: path.join('.github', 'pull_request_template.md'), content: prTemplate(), mode: 0o644, stamped: false },
   ]
-  if (includeCiYml) files.push({ rel: path.join('.github', 'workflows', 'ci.yml'), content: ciYml(), mode: 0o644 })
-  const written = []
-  const kept = []
-  for (const f of files) {
-    const abs = path.join(repoPath, f.rel)
-    if (fs.existsSync(abs)) { kept.push(f.rel); continue }
+  if (includeCiYml) files.push({ rel: path.join('.github', 'workflows', 'ci.yml'), content: ciYml(), mode: 0o644, stamped: true })
+  return files
+}
+
+/**
+ * Report each frame file's state without touching disk — the card's source for
+ * "this repo's frame is out of date". Only stamped files can be judged.
+ */
+export function frameStatus(repoPath, kind = 'org', { includeCiYml = false } = {}) {
+  const out = {}
+  for (const f of frameFiles(kind, includeCiYml)) {
+    if (!f.stamped) continue
+    out[f.rel] = frameFileState(path.join(repoPath, f.rel))
+  }
+  return out
+}
+
+/**
+ * Write the frame. Missing files are always created. An existing file is kept
+ * untouched unless `upgrade` is set, and even then a file a human has edited
+ * (hash no longer matches its stamp) is reported as `conflicted` rather than
+ * overwritten — `force` is the only way past that, and it is a data-losing
+ * operation the caller must ask for explicitly.
+ */
+export function writeFrameFiles(repoPath, kind = 'org', { includeCiYml = false, upgrade = false, force = false } = {}) {
+  const written = []; const kept = []; const upgraded = []; const conflicted = []
+  const put = (abs, f) => {
+    const body = f.stamped ? stampContent(f.content) : f.content
     fs.mkdirSync(path.dirname(abs), { recursive: true })
-    fs.writeFileSync(abs, f.content, { mode: f.mode })
+    fs.writeFileSync(abs, body, { mode: f.mode })
     // writeFileSync mode is masked by umask — chmod explicitly.
     fs.chmodSync(abs, f.mode)
-    written.push(f.rel)
   }
-  return { written, kept }
+  for (const f of frameFiles(kind, includeCiYml)) {
+    const abs = path.join(repoPath, f.rel)
+    const state = f.stamped ? frameFileState(abs) : (fs.existsSync(abs) ? 'current' : 'missing')
+    if (state === 'missing') { put(abs, f); written.push(f.rel); continue }
+    if (!upgrade || state === 'current') { kept.push(f.rel); continue }
+    if (state === 'modified' && !force) { conflicted.push(f.rel); continue }
+    put(abs, f); upgraded.push(f.rel)
+  }
+  return { written, kept, upgraded, conflicted }
 }
