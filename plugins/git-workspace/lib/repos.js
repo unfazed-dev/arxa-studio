@@ -91,7 +91,12 @@ const SNAPSHOT_WORKER = [
   'const opt = { cwd: org, env: process.env }',
   'try {',
   '  execFileSync(git, [...pin, \'add\', \'-A\'], opt)',
-  '  execFileSync(git, [...pin, \'commit\', \'-m\', \'stage: scaffold organisation\'], opt)',
+  // B20: this MUST match the sync path's subject and MUST be conventional.
+  // It was `stage: scaffold organisation`, which the frame gate rejects —
+  // so every org's very first commit, written by arxa itself, failed arxa's
+  // own gate. The detached worker is the production path; the sync form is
+  // only used by tests, so the bad subject was invisible to the suite.
+  '  execFileSync(git, [...pin, \'commit\', \'-m\', \'chore(org): scaffold the organisation tree\'], opt)',
   '  execFileSync(git, [...pin, \'update-ref\', \'refs/arxa/stage-base\', \'HEAD\'], opt)',
   '  fs.writeFileSync(marker, JSON.stringify({ state: \'done\', finishedAt: new Date().toISOString() }))',
   '} catch (e) {',

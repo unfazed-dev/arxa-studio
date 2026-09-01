@@ -570,6 +570,19 @@ ok('sessions: a deleted worktree is `missing`, never silently clean (B1)', () =>
   assert.equal(worktreeHealth('/nonexistent/xyz'), 'missing')
 })
 
+ok('repos: the detached snapshot worker commits the same subject as the sync path (B20)', () => {
+  const src = fs.readFileSync(new URL('./lib/repos.js', import.meta.url), 'utf8')
+  // The ORG scaffold subject appears twice: once in the synchronous path
+  // (which the tests exercise) and once inside the detached worker source
+  // (which production actually runs). They diverged, the worker's was
+  // `stage: scaffold organisation`, and no test could see it.
+  const orgSubject = 'chore(org): scaffold the organisation tree'
+  const hits = src.split(orgSubject).length - 1
+  assert.equal(hits, 2, 'the sync path and the detached worker must commit the SAME org subject')
+  assert.ok(SUBJECT_RE.test(orgSubject), "arxa's first commit must pass arxa's own gate")
+  assert.ok(!/'stage: scaffold/.test(src), 'no stage:-prefixed scaffold subject may survive — the gate rejects it')
+})
+
 ok('frame: the org gate never walks into nested project repos (B19)', () => {
   const org = orgCheckSh()
   assert.match(org, /-name projects -prune/,
@@ -590,6 +603,8 @@ ok('frame: every subject arxa itself commits passes its own gate (B17/B18)', () 
     'chore(migrate): stage folders to template v3 (stage order, 2-digit prefixes) + .gitkeep',
     'chore(migrate): track/target vocabulary (template v4)',
     'chore(ci): wire the arxa frame (checks, workflow, PR template)',
+    'chore(org): scaffold the organisation tree',
+    'chore(project): scaffold the project tree',
     `chore(ci): refresh the arxa frame to v${FRAME_VERSION}`,
   ]) {
     assert.ok(SUBJECT_RE.test(subject), `arxa commits this and its own gate rejects it: ${subject}`)

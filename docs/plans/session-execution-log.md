@@ -15,6 +15,19 @@ Newest last. Every entry is verified, not assumed.
 | 5 | **mcp-apps flake** — discovery warnings were swallowed | proved: failure now names `MCP error -32000: Connection closed` |
 | 6 | **B1** card reported a dead worktree as clean | `worktreeHealth()`; deleted worktree → `missing`/`null`, no throw |
 
+| 7 | **B13** project format stamp written, published, never read | removed from the project contract; org stays the only authority |
+| 8 | **Template v4** track/target vocabulary + per-project chosen targets | 3 real orgs migrated 3→4; v3 output byte-identical |
+| 9 | **B17** project migration commit `migrate:` fails the frame gate | now `chore(migrate): …` |
+| 10 | **B18** org migration pair `stage:` fails the org gate | now `chore(migrate): …` |
+| 11 | **B19** org gate walked into project repos, failed on `android/.gradle/9.1.0` | org prunes `projects/`; project gate owns depth-1 stages |
+| 12 | **B20** detached snapshot worker committed `stage: scaffold organisation` | the production path's FIRST commit failed the gate while the suite stayed green (only the sync path was tested) |
+| 13 | `scripts/e2e-self-gate.mjs` | new: proves arxa's own scaffold passes arxa's own gate |
+
+**B17/B18/B20 are one family:** arxa writing commits its own gate rejects — a
+red on a commit the user never wrote and cannot amend. Nothing tested it
+because the tests exercised the sync path while production ran the detached
+one. `scripts/e2e-self-gate.mjs` now closes that whole class.
+
 Suite: **17/17 plugin selftests green.** git-workspace 52/52, file-org-shell 193/193,
 arxa-sidebar drift gate green.
 
