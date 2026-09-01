@@ -2412,16 +2412,29 @@ no competing vocabulary.**
 This is the smallest change that satisfies §26k, and it lands on a route that already
 exists and already refuses to run unless the tree is clean and merged.
 
-### 29h. A third pipeline model — three now reported, probably not contradictory
+### 29h. RESOLVED — three pipeline models, three different axes, no contradiction
 
-- studio: **10 stages** `00-moodboard … 08-deploy`
-- arxa `phases.dart:13-20`: **7 FSM phases** — intake, prototype, design, scaffold, review, build, deploy
-- arxa `gate_runner.dart:28` `gateOrder`: **14 gates** — intake, freeze, structure, kind_registry, scaffold, fidelity, coverage, tests, memory, advertise, review, native_deps, lens, deploy
+I flagged this as unverified. Verified from source; the two agents were each right
+about their own object.
 
-Two agents reported different arxa models. **These are most likely different axes —
-phases as lifecycle state, gates as checks that run — not a contradiction.** But it is
-unverified, and studio's ten stages map cleanly onto neither. **Resolve before any
-stage-based logic is written on either side.**
+| Model | What it actually is | Count |
+|---|---|---|
+| studio `00-moodboard … 08-deploy` | **folder taxonomy** — where deliverable files live on disk | 10 |
+| arxa `phases.dart:12-21` | **FSM lifecycle state** — *"Pipeline phases, in FSM order"*, the current phase read from `pipeline/state/default.state.json` | 7 |
+| arxa `gate_runner.dart:28` `gateOrder` | **check execution order** — *"matches gates/run_all.sh:148-164"*, the sequence of gates that run | 14 |
+
+**Phases = where the run IS. Gates = what gets CHECKED. Studio stages = where files
+LIVE.** Orthogonal, and all three can be true simultaneously.
+
+**But the vocabulary collides again, and this is the fifth collision.** `intake`,
+`scaffold`, `review` and `deploy` appear in **both** arxa lists, and studio has
+`01-intake`, `05-scaffold`, `08-deploy` as folders. **The same four words name three
+different kinds of thing.** Anyone reading across the two products will conflate them —
+and any code that maps "stage" to "phase" to "gate" by name will be silently wrong.
+
+**Add this to §29e's collision table as a structural item, not a wording nit.** Whatever
+studio calls its stages in shared docs must disambiguate against arxa's phases and
+gates, or the mapping has to be explicit and written down.
 
 ### Doc-vs-code corrections found
 
