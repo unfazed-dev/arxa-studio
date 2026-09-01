@@ -159,7 +159,8 @@
   - id: arxa-waiting-page
     name: arxa-waiting-page
 
-# 12. Theme accent (2026-08-27): Settings > General "Accent" row — three
+# 12. Theme accent (2026-08-27): Settings > Personalisation "Accent" row (General
+#     before the Personalisation tab, row 19) — three
 #     fixed swatches (#0EBAE4 / #0EE4E0 / #12D49A). The client half rewrites
 #     the dsh accent scale (--dsw-static-deepseek-*) as color-mix tints of
 #     the choice, inline on <body> so it outranks both theme token blocks;
@@ -263,3 +264,28 @@
 - insert:
   - id: arxa-conversation
     name: /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/conversation/lib/index.js
+
+# 18. Prism background field (step 1, grilled 2026-09): one 100x100 square at
+#     the top-left of the conversation scrollport — tile (0,0) of the future
+#     full-background wall — split by the TR->BL diagonal into two
+#     independently animated, in-spectrum triangles derived from the LIVE
+#     accent token. Pure client-side CSS (stable [data-conversation-scroll]
+#     hook, one owned <style> + two pick timers); no dsh forks, no slot
+#     takeovers, local-only (no database, no persistence). By PACKAGE NAME —
+#     the browser half is discovered through package.json dsh.client, same as
+#     the design panel and brand rows above.
+- insert:
+  - id: arxa-prism
+    name: arxa-prism
+
+# 19. Personalisation settings tab (2026-09, user request): the Background
+#     group outgrew General, so the look-and-feel rows get their own section
+#     — the 4th nav entry (order 18, between Plugins 15 and Agent presets
+#     20). The section declares/renders settings.personalisation.item; the
+#     row owners retarget there: Accent + Editor font (arxa-theme-accent,
+#     orders 0/10) and the whole Background group (arxa-prism, order 20).
+#     General keeps the behavior rows (Enter behavior, Browser session, Pair
+#     a device). By PACKAGE NAME — browser half via package.json dsh.client.
+- insert:
+  - id: arxa-personalisation
+    name: arxa-personalisation
