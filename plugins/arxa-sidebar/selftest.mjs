@@ -473,7 +473,8 @@ check('sync: D97 a failure ANYWHERE wins the badge — no green over a refused p
 })())
 check('sync: D97 badge paints the error alias and carries the raw per-repo detail',
   client.includes('"data-arxa-sync": syncState.busy ? "busy" : syncState.bad ? "failed" : "ok"') &&
-  client.includes('var(--dsw-alias-label-error)') &&
+  client.includes('var(--dsw-alias-state-error-primary)') &&
+  !/syncState\.bad \? "var\(--dsw-alias-label-error\)"/.test(client) &&
   client.includes('title: syncState.detail || undefined'))
 check('sync: D97 strings localized (en + pl + fr)',
   ["Sync with GitHub", "Synchronizuj z GitHub", "Synchroniser avec GitHub",

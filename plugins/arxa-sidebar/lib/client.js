@@ -3512,7 +3512,7 @@ window.__ModuleLoader__.load({
 					syncState ? (0, react_jsx_runtime.jsx)("span", {
 						title: syncState.detail || undefined,
 						"data-arxa-sync": syncState.busy ? "busy" : syncState.bad ? "failed" : "ok",
-						style: { fontSize: 11, flex: "none", marginLeft: 6, marginRight: 2, opacity: syncState.bad ? 1 : 0.55, color: syncState.bad ? "var(--dsw-alias-label-error)" : undefined },
+						style: { fontSize: 11, flex: "none", marginLeft: 6, marginRight: 2, opacity: syncState.bad ? 1 : 0.55, color: syncState.bad ? "var(--dsw-alias-state-error-primary)" : undefined },
 						children: orgT(syncState.busy ? "rows.sync.busy" : syncState.key)
 					}) : null,
 					d.count > 0 ? (0, react_jsx_runtime.jsx)("span", {
