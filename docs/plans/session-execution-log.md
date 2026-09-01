@@ -75,3 +75,17 @@ permission error on every Flutter command. Next steps, in order:
 shape. Building it unilaterally is the `Kind` mistake again.
 
 **Container tiers (L1/L2).** Depend on session→repo routing, which is not done.
+
+## Final verification (all green)
+
+- Plugin selftests **17/17, twice consecutively**
+- `scripts/e2e-self-gate.mjs` PASS — arxa's own scaffold passes arxa's own gate
+- `scripts/e2e-org-seat-gate.mjs` PASS — a red gate rewinds main, work preserved
+- `scripts/frame-gate-fixture.sh` 4/4 states
+- Real orgs RESTO/TESTO/TOPO: frame `current`; the newly-wired `frameStatus`
+  immediately found two `unversioned` `ci.yml` files and upgraded them, which is
+  the wiring proving itself
+- project-001 still reds a broken real Flutter target:
+  `FAIL: flutter analyze (./05-scaffold/application/ios)`
+- arxa repo untouched: `kit/showcase_app` 0 modified, 27/27 relative deps, HEAD
+  unchanged at `bdcb530f`
