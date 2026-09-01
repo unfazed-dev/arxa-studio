@@ -42,7 +42,6 @@ import {
   runGit,
   resetProbe,
   GitUnavailableError,
-  STAGE_PREFIX,
 } from '../git-workspace/lib/index.js'
 
 let failures = 0
@@ -414,7 +413,7 @@ try {
     stampV1(interruptedOrg.path)
     // Simulate a run that died mid-step: pre commit made, apply half done,
     // stamp already bumped on disk, post commit never published.
-    runGit(['commit', '--allow-empty', '-m', `${STAGE_PREFIX} org format migration v1→v2 (pre)`], {
+    runGit(['commit', '--allow-empty', '-m', 'chore(migrate): org format migration v1→v2 (pre)'], {
       cwd: interruptedOrg.path,
     })
     fs.writeFileSync(path.join(interruptedOrg.path, 'notes', 'half-done.md'), 'partial\n')
