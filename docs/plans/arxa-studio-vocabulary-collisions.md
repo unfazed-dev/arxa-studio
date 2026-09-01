@@ -309,3 +309,90 @@ checking it against arxa's glossary, which is the very failure this document exi
 prevent. **Every proposed term must be availability-checked against
 `arxa/docs/VOCABULARY.md` AND the code before it is written down**, including terms the
 owner uses informally. Informal use is not a reservation.
+
+---
+
+## V4 — `Track` ADOPTED, and the two outstanding items addressed
+
+**Owner decision, 2026-09-02: the upper level is `Track`.**
+
+```
+<org>/projects/<slug>/<NN-stage>/<track>/<target>/
+                                  │        └─ ios, android, macos | landing, docs
+                                  └────────── application | website
+```
+
+Glossary wording for studio's `CONTEXT.md`, replacing the current `Target` entry:
+
+> **Track** — one of the two fixed subfolders of every stage container:
+> `application/` and `website/`. Two parallel lines of work, each shipping to its
+> own targets.
+> **Target** — the concrete thing shipped, one level under a track. For
+> `application/` these are arxa platforms (`ios`, `android`, `macos`) and arxa's
+> platform-only contract holds. For `website/` they are site types (`landing`,
+> `docs`); the platform is always web and is left implicit.
+
+### Item 1 — gate-count drift: FIXED
+
+`arxa/gates/README.md` claimed *"Eleven live in `arxa/lib/gate_*.dart`"* and listed 11,
+omitting **`kind_registry`** and **`fidelity`** — both of which have real gate files and
+both of which are in `gateOrder`.
+
+Corrected in the arxa repo (commit `bdcb530f`, single file, isolated from the 40 files
+other sessions have in flight). The README now states **thirteen in lib, fourteen in
+`gateOrder`** including `review`, listed in `gateOrder` sequence.
+
+**Also documented while there:** `gate_design_styles.dart` and
+`gate_design_widgets.dart` share the `gate_` prefix but are **not** pipeline gates —
+they are design-time checks called from `design_tools.dart` / `design_annotate.dart` /
+`design_selftest.dart` and never appear in `gateOrder`. That prefix collision is what
+made the count ambiguous in the first place.
+
+### Item 2 — the versioning gap: arxa is asking OUR question, from the other end
+
+`arxa/docs/plans/post-scaffold-iteration.md` is unbuilt and says the boundary is
+*"undesigned today"*. But reading it properly, it is not merely a gap — **it contains
+the same open question we just answered.**
+
+Its Open Questions include:
+
+> **Multi-platform patch-number consistency.** … whether patch numbers stay identical
+> across platforms is undocumented … **affects whether the release-version ledger
+> (Workstream 6) can key on a single number or needs one per platform.**
+
+**That is our question.** arxa asks *"one number, or one per platform?"*; studio asked
+*"one project version, or one per target?"* — and under V1, **studio's targets ARE
+arxa's platforms.** The two designs converge:
+
+- **Per-target versioning (§26a) answers arxa's ledger question too**: one number per
+  platform, because the platforms are where the artifacts actually differ (the
+  scaffolder already emits different file counts per target — macos 3, ios/android 4,
+  web 5).
+- Anything that keys on a single project-wide number would break for exactly the reason
+  arxa flags.
+
+**Recommendation: raise this as a shared decision, not two separate ones.** If studio
+ships per-target versions and arxa later ships a single-number ledger, they disagree
+permanently and silently.
+
+### The generation-gap risk, and why our design already survives it
+
+The plan's central worry is the **generation-gap boundary** — what a re-scaffold may
+overwrite versus what a developer owns — with *"no decision recorded"* on marker format.
+That is a live risk for versioning: **if regen can overwrite content, "v5 is what the
+client saw" stops being true.**
+
+**Our design is already immune, for a reason worth stating explicitly:**
+
+1. The mint fires on **`/ship/deploy`**, which refuses unless the branch is `main`, the
+   tree is clean, and no PR is open (§29a). So a version is only ever minted from
+   committed, merged state — never from a working tree a regen could be mid-way through.
+2. The mint records the **`designHash`** (§29g), so the version points at a **content
+   identity**, not a mutable file set. A later regen that changes files produces a
+   different hash, and therefore new work and a new version — it cannot silently
+   redefine what v5 was.
+
+**This is Freeze's model doing exactly what it was built for** — *"approval binds to the
+design hash, any post-approval change goes stale loudly"* — applied one level up, to
+client-facing deliverables. Aligning to Freeze (§29d) was not just vocabulary hygiene;
+it is what makes the version survive regeneration.
