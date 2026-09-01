@@ -18,17 +18,27 @@ export const PROJECT_MANIFEST = 'project.json'
  */
 export const FORMAT_STAMP = stampFor(TEMPLATE_VERSION)
 
-/** Build a fresh manifest object for a new org or project. */
+/**
+ * Build a fresh manifest object for a new org or project. Pass `null` for
+ * `formatStamp` to omit it: only ORGS carry one.
+ *
+ * B13 — migration is org-scoped and atomic (`migrateOrg` walks the whole tree,
+ * projects included), so a per-project stamp is derived data whose only
+ * possible divergence is being stale. It was written at creation, republished
+ * by the workspace index, and never read by any decision — a field that looks
+ * authoritative and is not. The org stamp is the single authority.
+ */
 export function createManifest(displayName, formatStamp = FORMAT_STAMP) {
   if (typeof displayName !== 'string' || displayName.trim() === '') {
     throw new TypeError('displayName must be a non-empty string')
   }
-  return {
+  const manifest = {
     id: randomUUID(),
     name: displayName,
     createdAt: new Date().toISOString(),
-    formatStamp,
   }
+  if (formatStamp !== null) manifest.formatStamp = formatStamp
+  return manifest
 }
 
 /** Read and validate a manifest file. Throws if missing or malformed. */

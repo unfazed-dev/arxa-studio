@@ -124,7 +124,8 @@ export function scaffoldProject(orgPath, displayName) {
   const slug = uniqueSlug(displayName, existingSlugs(projectsDir))
   const projectPath = path.join(projectsDir, slug)
   executeTemplateTree(template.project, projectPath, { displayName })
-  const manifest = createManifest(displayName, stampFor(template.version))
+  // No project-level stamp (B13): the org's stamp governs the whole tree.
+  const manifest = createManifest(displayName, null)
   writeManifest(projectManifestPath(projectPath), manifest)
   return { path: projectPath, slug, manifest }
 }

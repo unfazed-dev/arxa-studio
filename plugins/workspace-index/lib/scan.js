@@ -54,7 +54,7 @@ function kindOf(relParts) {
  * Scan the workspace at `root`. Returns { orgs, projects, files }, each a
  * deterministically sorted array of plain rows:
  *   org:     { id, slug, name, createdAt, formatStamp, path }
- *   project: { id, slug, orgId, name, createdAt, formatStamp, path }
+ *   project: { id, slug, orgId, name, createdAt, path }  (no stamp — B13)
  *   file:    { path, kind, orgId, projectId, mtimeMs, size }
  * All paths are posix-style, relative to `root`.
  */
@@ -91,7 +91,9 @@ export function scanWorkspace(root) {
           orgId: manifest.id ?? null,
           name: pm.name ?? null,
           createdAt: pm.createdAt ?? null,
-          formatStamp: pm.formatStamp ?? null,
+          // No formatStamp for projects (B13) — the org's is the only one that
+          // is maintained, so republishing a project's would publish a stale
+          // claim to every consumer of the index.
           path: `${orgSlug}/projects/${p.name}/project.json`,
         })
       }

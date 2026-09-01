@@ -107,11 +107,17 @@ try {
     assert.ok(fs.existsSync(path.join(org.path, 'AGENTS.md')))
     assert.ok(fs.existsSync(path.join(project.path, 'AGENTS.md')))
   })
-  check('manifests written with id/name/createdAt/formatStamp', () => {
+  check('manifests written with id/name/createdAt; only the ORG is stamped (B13)', () => {
     for (const m of [org.manifest, project.manifest]) {
       assert.match(m.id, /^[0-9a-f-]{36}$/)
-      assert.ok(m.createdAt && m.formatStamp)
+      assert.ok(m.createdAt)
     }
+    assert.ok(org.manifest.formatStamp, 'the org carries the tree-format stamp')
+    // A project stamp would be derived data that migrateOrg never refreshes,
+    // so it could only ever go stale while looking authoritative.
+    assert.equal('formatStamp' in project.manifest, false, 'projects carry no stamp')
+    assert.equal('formatStamp' in readManifest(path.join(project.path, 'project.json')), false,
+      'and none is written to disk either')
     assert.equal(readManifest(path.join(project.path, 'project.json')).name, 'Project One')
   })
 
