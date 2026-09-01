@@ -2132,3 +2132,33 @@ Three ways forward, and it is a product question, not a versioning-mechanics one
 for a client-facing view. If the client's window onto a project is arxa business rather
 than a repo clone, then **the publish event belongs at the boundary between studio and
 business** — which would make option 1 a decision to defer rather than reject.
+
+### S5 — Client delivery is in scope NOW. Do not defer the mint trigger.
+
+**Owner direction, 2026-09-02**, overriding my "defer — mint at merge for now"
+recommendation in §27:
+
+- **Client delivery will happen through arxa studio itself**, not through repo access
+  and not only later via arxa business.
+- **The `designer` skill is the prime candidate** for the first delivery path,
+  because **the client gets a copy of what designer produces**.
+- **`designer` and `scaffolder` are to be wired into studio as soon as git management
+  is finished** — i.e. immediately after the work already planned.
+- **`arxa dial`** was already worked on and would normally have carried a version-
+  management design; align to it rather than inventing a competing model.
+- Therefore: **arxa studio has to get this right now**, not after arxa business ships.
+
+**Consequence for §27.** Option 1 ("add a real publish-to-client action") is the
+selected direction, and options 2 and 3 (stage-boundary or merge-time minting) are
+rejected as the *permanent* answer. The mint attaches to the delivery event, per §26k.
+
+**Consequence for the build order (S-order).** Session→repo routing stays first — it is
+still the prerequisite for both plans — but designer/scaffolder wiring now follows
+immediately behind git management rather than being unscheduled. The version mint is
+designed **as part of that wiring**, not retrofitted.
+
+**Open until the arxa docs are read** (three agents dispatched): what `designer`
+actually produces, how a client receives a copy, whether designer already has an
+iteration concept the version system must align to, and what `arxa dial` defines.
+**Do not design the mint until those land** — §26k's whole point is that the number
+must refer to a real client-facing event, and only the arxa side knows what that is.
