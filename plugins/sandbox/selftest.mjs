@@ -195,6 +195,16 @@ const world = (paths, links = {}) => ({
       roots.includes(canonicalPath(join(homedir(), '.dart-tool'))) || !existsSync(join(homedir(), '.dart-tool')),
       '~/.dart-tool is granted when it exists — the measured blocker for `flutter --version`'
     )
+    // Blast-radius guard. Every grant is a `(subpath ...)`, so granting the
+    // home directory or `/` would silently turn workspace-write into
+    // danger-full-access. scripts/s1-sandbox-verify.mjs proves the live
+    // subpath grants do not leak UPWARD; this pins that no resolver change can
+    // ever name one of these as a root in the first place.
+    const forbidden = new Set([canonicalPath(homedir()), canonicalPath('/'), canonicalPath('/Users'), canonicalPath('/Volumes')])
+    for (const root of roots) {
+      assert.ok(!forbidden.has(root), `grant must never be a home/filesystem root: ${root}`)
+      assert.ok(root.split('/').filter(Boolean).length >= 2, `grant must be specific, not near-root: ${root}`)
+    }
     // The grants must be ADDITIONS, never a replacement of dsh's own.
     const provider = new ArxaSandboxProvider(new Context(), { runnerCommand: [], runnerFailureSignatures: [], probeTimeoutMs: 5000 })
     const policy = { mode: 'workspace-write', workspaceRoot: process.cwd() }

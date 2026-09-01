@@ -78,7 +78,29 @@ function confined (argv) {
 }
 
 const insideTarget = join(workspace, 'written-inside.txt')
-const outsideTarget = join(sibling, 'written-outside.txt')
+
+/** A write case: the target file is what actually decides pass/deny. */
+const write = (name, target, expect) => ({
+  name,
+  target,
+  expect,
+  argv: ['/bin/sh', '-c', `printf s1probe > ${JSON.stringify(target)}`]
+})
+
+// The grants this provider ADDS are the ones worth attacking. `(subpath X)`
+// must mean X and nothing above it: granting `<sdk>/bin/cache` must NOT make
+// `<sdk>/bin` or `<sdk>` writable. Without these rows the table cannot tell
+// this provider apart from one that granted the whole SDK — every other row
+// would pass either way. The probes are non-destructive when confinement
+// holds (nothing is created); if one lands, that IS the finding, and the row
+// fails loudly after deleting the file.
+const grantedCache = provider.extraWritableRoots(policy).find((r) => r.endsWith('/bin/cache'))
+const escapeCases = grantedCache === undefined
+  ? []
+  : [
+      write('write to <sdk>/bin (parent of grant)', join(dirname(grantedCache), '.s1-probe-denied'), 'deny'),
+      write('write to <sdk> root (grandparent)', join(dirname(dirname(grantedCache)), '.s1-probe-denied'), 'deny')
+    ]
 
 const cases = [
   { name: 'dart --version', argv: ['dart', '--version'], expect: 'pass', tool: 'dart' },
@@ -86,16 +108,9 @@ const cases = [
   { name: 'git status', argv: ['git', 'status', '--porcelain'], expect: 'pass', tool: 'git' },
   { name: 'node -e 1', argv: ['node', '-e', '1'], expect: 'pass', tool: 'node' },
   { name: 'npm --version', argv: ['npm', '--version'], expect: 'pass', tool: 'npm' },
-  {
-    name: 'write INSIDE workspace',
-    argv: ['/bin/sh', '-c', `printf ok > ${JSON.stringify(insideTarget)}`],
-    expect: 'pass'
-  },
-  {
-    name: 'write OUTSIDE (sibling)',
-    argv: ['/bin/sh', '-c', `printf leaked > ${JSON.stringify(outsideTarget)}`],
-    expect: 'deny'
-  }
+  write('write INSIDE workspace', insideTarget, 'pass'),
+  write('write OUTSIDE (sibling)', join(sibling, 'written-outside.txt'), 'deny'),
+  ...escapeCases
 ]
 
 /** @returns {boolean} whether the named tool is on PATH at all. */
@@ -128,8 +143,10 @@ for (const c of cases) {
     if (!ok) got += out === '' ? '' : ` — ${out.split('\n')[0].slice(0, 110)}`
   } else {
     // A denial must be a DENIAL, not merely a non-zero exit: the write must
-    // not have landed.
-    const landed = existsSync(outsideTarget)
+    // not have landed. If it did, remove it before reporting — the probe must
+    // never leave a file behind on a host it was not supposed to reach.
+    const landed = existsSync(c.target)
+    if (landed) rmSync(c.target, { force: true })
     verdict = !ok && !landed ? 'PASS' : 'FAIL'
     got = landed
       ? 'WROTE THE FILE (sandbox escape)'
@@ -141,7 +158,7 @@ for (const c of cases) {
 }
 
 // The inside-write must have produced its file, not just exited 0.
-const insideOk = existsSync(insideTarget) && readFileSync(insideTarget, 'utf8') === 'ok'
+const insideOk = existsSync(insideTarget) && readFileSync(insideTarget, 'utf8') === 's1probe'
 const insideRow = rows.find((r) => r.name === 'write INSIDE workspace')
 if (insideRow !== undefined && insideRow.verdict === 'PASS' && !insideOk) {
   insideRow.verdict = 'FAIL'
