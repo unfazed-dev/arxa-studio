@@ -459,7 +459,10 @@ ok('frame: ci.yml carries the canon runner labels, concurrency, timeout (Q5)', (
 ok('frame: protection + settings payloads (Q3/Q8)', () => {
   assert.deepEqual(protectionPayload().required_status_checks, { strict: true, checks: [{ context: FRAME_JOB }] })
   assert.equal(protectionPayload().enforce_admins, false, 'solo machine commits ride main (S0 V4)')
-  assert.deepEqual(settingsPayload(), { allow_squash_merge: true, allow_merge_commit: false, allow_rebase_merge: false })
+  // D107 flip: collapse-then-`--no-ff` needs a real merge commit. GitHub's
+  // squash merge writes a commit whose ancestry excludes the branch, which
+  // breaks every "is this session in main?" question the card asks.
+  assert.deepEqual(settingsPayload(), { allow_squash_merge: false, allow_merge_commit: true, allow_rebase_merge: false })
 })
 
 ok('frame: projectCheckSh walks to every target, not just the root (B11)', () => {

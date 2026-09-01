@@ -272,10 +272,25 @@ export function protectionPayload() {
 }
 
 /** Repo settings payload (Q8): squash-only, locked structurally. */
+/**
+ * Repo merge settings (D107, flipped 2026-09-02 after the gate was proven).
+ *
+ * The session flow collapses its WIP run on the BRANCH and then merges with
+ * `--no-ff`, so the merge commit's ancestry contains the branch. GitHub's
+ * *squash* merge creates a new commit whose ancestry does NOT include the
+ * branch — which silently breaks `git branch --merged`, "is this session in
+ * main?", and every ancestry question the card asks. Squash was the day-one
+ * default; keeping it would have made the collapse-then-`--no-ff` decision
+ * unenforceable on the server side.
+ *
+ * Order matters and was chosen deliberately: fix the gate, watch it red real
+ * code, THEN flip. Flipping first would have left a window where main was
+ * protected by a gate that checked nothing.
+ */
 export function settingsPayload() {
   return {
-    allow_squash_merge: true,
-    allow_merge_commit: false,
+    allow_squash_merge: false,
+    allow_merge_commit: true,
     allow_rebase_merge: false,
   }
 }
