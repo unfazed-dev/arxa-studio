@@ -45,8 +45,29 @@ arxa-sidebar drift gate green.
   `lib/workspace-region.snippet.txt` + `scripts/gen-workspace.mjs`, and a byte
   drift gate enforces it. Regenerate with
   `node scripts/gen-workspace.mjs > plugins/arxa-sidebar/lib/client.js`.
-- `mcp-apps` failed twice then passed 12/12 unchanged. Root cause never
-  reproduced; the test no longer hides the reason.
+- `mcp-apps`: **I got this wrong and it is corrected below.** I recorded the
+  failure as environmental because the files looked byte-identical to HEAD. They
+  were — because my own `git add -A` had already swept a teammate's fix into
+  commit `bf78bd4` under an unrelated lifecycle message. Comparing the tree to a
+  HEAD that already contained the fix is a circular check, and it produced a
+  false conclusion. The root cause is real, deterministic, and still verifiable:
+
+  `~/.dsh/profiles/node_modules/@modelcontextprotocol/sdk` is a symlink to
+  `~/.arxa/engine/6cd810205d1a/…`, a build directory that no longer exists (only
+  `3c34d5a39844` and `ded09d413a60` remain). `mcp-apps` resolved the SDK through
+  that path **only**, with no fallback, so every dynamic import threw
+  `ERR_MODULE_NOT_FOUND` — swallowed by `discover().catch()` into zero tools.
+  Measured just now: old path `ERR_MODULE_NOT_FOUND`, new path resolves via
+  arxa's own install.
+
+  The fix mirrors `pi-delegate`/`gen-ui`: arxa's own install first, operator
+  profile second. **The dangling symlink itself is untouched** — an engine
+  profile-sync concern, not a plugin bug, and anything that genuinely needs the
+  operator's SDK version will still silently miss it until that resyncs.
+
+**Lesson worth keeping:** `git add -A` in a session with concurrent agents
+attributes their work to whatever commit happens to be open. Two of my commit
+messages describe less than they contain.
 
 ## Deliberately NOT done, and why
 
