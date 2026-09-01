@@ -1,0 +1,254 @@
+#!/usr/bin/env node
+// Selftest for Phase 3 session lifecycle helpers (D108, D104 as revised by
+// D107): plugins/git-workspace/lib/finish.js. Covers:
+//  1. merged session (via sessionStageBoundary, which under D107 already
+//     produces real ancestry — ff-only or --no-ff) → finishSession
+//     succeeds and leaves no worktree/branch/base-ref behind
+//  2. unmerged (parked, gate red) session → finishSession refuses with a
+//     typed FinishRefusedError, reason 'not-merged', and changes nothing
+//     (worktree, branch, registry bytes all unchanged)
+//  3. behindMain is correct, including after extra commits land on main
+//  4. branchTip matches the branch's own HEAD
+//  5. sweepMerged: dryRun previews without touching anything; non-dry run
+//     finishes only the merged branches
+//  6. pressure: 30 sessions, 15 merged, sweepMerged finishes exactly 15
+//     in under 5s
+//
+// Runs against a throwaway repo under a temp dir; isolated HOME-free git
+// via run.js — nothing machine-global is touched.
+
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { runGit } from './lib/run.js'
+import { initProjectRepo } from './lib/repos.js'
+import {
+  openSession, sessionStageBoundary, archiveSession, listSessions,
+  SESSION_BASE_PREFIX, GATE_CHECK_SCRIPT,
+} from './lib/sessions.js'
+import { behindMain, branchTip, isMergedIntoMain, finishSession, sweepMerged, FinishRefusedError } from './lib/finish.js'
+
+let passed = 0
+function ok(label, fn) {
+  fn()
+  passed += 1
+  console.log(`ok ${passed} - ${label}`)
+}
+
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-git-finish-selftest-'))
+process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
+
+const proj = path.join(tmp, 'project')
+fs.mkdirSync(proj, { recursive: true })
+fs.writeFileSync(path.join(proj, 'README.md'), '# project\n')
+initProjectRepo(proj)
+
+function registryBytes() {
+  const commonDir = runGit(['rev-parse', '--git-common-dir'], { cwd: proj })
+  const p = path.join(path.resolve(proj, commonDir), 'arxa', 'sessions.json')
+  return fs.existsSync(p) ? fs.readFileSync(p) : null
+}
+
+// ---- 1. merged session: finishSession succeeds, cleans up fully -----------
+
+ok('finishSession on a merged session removes worktree, branch and base ref', () => {
+  const s = openSession(proj, { id: 'done1', name: 'Done one' })
+  fs.writeFileSync(path.join(s.worktree, 'x.txt'), 'work\n')
+  const res = sessionStageBoundary(proj, 'done1')
+  assert.equal(res.merged, true)
+  assert.equal(isMergedIntoMain(proj, s.branch), true)
+  const baseRef = `${SESSION_BASE_PREFIX}done1`
+  assert.ok(runGit(['show-ref', '--verify', '--quiet', baseRef], { cwd: proj, allowFail: true }) !== null)
+
+  const fin = finishSession(proj, 'done1')
+  assert.equal(fin.finished, true)
+  assert.equal(fin.branchDeleted, true)
+  assert.equal(fin.baseRefDeleted, true)
+  assert.ok(!fs.existsSync(s.worktree), 'worktree still on disk')
+  assert.equal(runGit(['branch', '--list', s.branch], { cwd: proj }), '', 'branch survived finish')
+  assert.equal(runGit(['show-ref', '--verify', '--quiet', baseRef], { cwd: proj, allowFail: true }), null, 'base ref survived finish')
+
+  const row = listSessions(proj).find((r) => r.id === 'done1')
+  assert.ok(row && typeof row.finishedAt === 'number', 'finishedAt not stamped on the finished session row')
+})
+
+// ---- 1b. dirty worktree at finish time: refuses, changes nothing ----------
+
+ok('finishSession on a merged session with an unexpectedly dirty worktree refuses and changes nothing', () => {
+  const s = openSession(proj, { id: 'dirty1', name: 'Dirty one' })
+  fs.writeFileSync(path.join(s.worktree, 'x.txt'), 'work\n')
+  const res = sessionStageBoundary(proj, 'dirty1')
+  assert.equal(res.merged, true)
+
+  // Something writes into the worktree AFTER the merge landed — the
+  // ancestry check still passes, but archiving now would WIP-commit past
+  // what was actually verified.
+  fs.writeFileSync(path.join(s.worktree, 'late.txt'), 'unreviewed\n')
+
+  const beforeBytes = registryBytes()
+  const worktreeBefore = fs.existsSync(s.worktree)
+  const branchBefore = runGit(['branch', '--list', s.branch], { cwd: proj })
+
+  assert.throws(() => finishSession(proj, 'dirty1'), FinishRefusedError)
+  try {
+    finishSession(proj, 'dirty1')
+  } catch (err) {
+    assert.equal(err.reason, 'worktree-dirty')
+  }
+
+  assert.equal(fs.existsSync(s.worktree), worktreeBefore, 'worktree presence changed')
+  assert.equal(runGit(['branch', '--list', s.branch], { cwd: proj }), branchBefore, 'branch changed')
+  assert.deepEqual(registryBytes(), beforeBytes, 'registry bytes changed on a dirty-worktree refusal')
+
+  const dry = finishSession(proj, 'dirty1', { dryRun: true })
+  assert.equal(dry.finished, false)
+  assert.equal(dry.reason, 'worktree-dirty')
+
+  // Clean it up (the stray file was never committed — just delete it, no
+  // new commit, so the branch tip stays exactly what was verified merged).
+  fs.rmSync(path.join(s.worktree, 'late.txt'))
+  const cleaned = finishSession(proj, 'dirty1')
+  assert.equal(cleaned.finished, true)
+})
+
+// ---- 2. unmerged session: refuses, changes nothing -------------------------
+
+ok('finishSession on an unmerged (parked) session refuses and changes nothing', () => {
+  const s = openSession(proj, { id: 'red1', name: 'Red one' })
+  fs.writeFileSync(path.join(s.worktree, GATE_CHECK_SCRIPT), 'exit 1\n')
+  fs.writeFileSync(path.join(s.worktree, 'risky.txt'), 'unreviewed\n')
+  const res = sessionStageBoundary(proj, 'red1')
+  assert.equal(res.merged, false)
+  assert.equal(isMergedIntoMain(proj, s.branch), false)
+
+  const beforeBytes = registryBytes()
+  const worktreeBefore = fs.existsSync(s.worktree)
+  const branchBefore = runGit(['branch', '--list', s.branch], { cwd: proj })
+
+  assert.throws(() => finishSession(proj, 'red1'), FinishRefusedError)
+  try {
+    finishSession(proj, 'red1')
+  } catch (err) {
+    assert.equal(err.reason, 'not-merged')
+  }
+
+  assert.equal(fs.existsSync(s.worktree), worktreeBefore, 'worktree presence changed')
+  assert.equal(runGit(['branch', '--list', s.branch], { cwd: proj }), branchBefore, 'branch changed')
+  assert.deepEqual(registryBytes(), beforeBytes, 'registry bytes changed on a refused finish')
+
+  const dry = finishSession(proj, 'red1', { dryRun: true })
+  assert.equal(dry.finished, false)
+  assert.equal(dry.reason, 'not-merged')
+  assert.equal(fs.existsSync(s.worktree), worktreeBefore, 'dry run touched the worktree')
+})
+
+// ---- 3. behindMain --------------------------------------------------------
+
+ok('behindMain counts commits main has that the branch lacks', () => {
+  const s = openSession(proj, { id: 'behind1', name: 'Behind one' })
+  assert.equal(behindMain(proj, s.branch), 0)
+  fs.writeFileSync(path.join(proj, 'main-only.txt'), 'a\n')
+  runGit(['add', '-A'], { cwd: proj })
+  runGit(['commit', '-m', 'chore: main-only a'], { cwd: proj })
+  assert.equal(behindMain(proj, s.branch), 1)
+  fs.writeFileSync(path.join(proj, 'main-only-2.txt'), 'b\n')
+  runGit(['add', '-A'], { cwd: proj })
+  runGit(['commit', '-m', 'chore: main-only b'], { cwd: proj })
+  assert.equal(behindMain(proj, s.branch), 2)
+  archiveSession(proj, 'behind1')
+})
+
+// ---- 4. branchTip ----------------------------------------------------------
+
+ok('branchTip matches the branch\'s own HEAD sha + subject', () => {
+  const s = openSession(proj, { id: 'tip1', name: 'Tip one' })
+  fs.writeFileSync(path.join(s.worktree, 'y.txt'), 'edit\n')
+  runGit(['add', '-A'], { cwd: s.worktree })
+  runGit(['commit', '-m', 'feat: tip commit'], { cwd: s.worktree })
+  const expectedSha = runGit(['rev-parse', s.branch], { cwd: proj })
+  const tip = branchTip(proj, s.branch)
+  assert.equal(tip.sha, expectedSha)
+  assert.equal(tip.subject, 'feat: tip commit')
+  archiveSession(proj, 'tip1')
+})
+
+// ---- 5. sweepMerged: dryRun previews, non-dry finishes only merged --------
+
+ok('sweepMerged dryRun lists candidates without touching anything', () => {
+  const a = openSession(proj, { id: 'sweep-a' })
+  fs.writeFileSync(path.join(a.worktree, 'sa.txt'), 'a\n')
+  assert.equal(sessionStageBoundary(proj, 'sweep-a').merged, true)
+
+  const b = openSession(proj, { id: 'sweep-b' })
+  fs.writeFileSync(path.join(b.worktree, GATE_CHECK_SCRIPT), 'exit 1\n')
+  fs.writeFileSync(path.join(b.worktree, 'sb.txt'), 'b\n')
+  assert.equal(sessionStageBoundary(proj, 'sweep-b').merged, false)
+
+  const preview = sweepMerged(proj, { dryRun: true })
+  assert.ok(preview.finished.some((r) => r.id === 'sweep-a'))
+  assert.ok(preview.skipped.some((r) => r.id === 'sweep-b'))
+  assert.ok(fs.existsSync(a.worktree), 'dry run removed a worktree')
+  assert.ok(runGit(['branch', '--list', a.branch], { cwd: proj }) !== '', 'dry run deleted a branch')
+
+  const real = sweepMerged(proj, { dryRun: false })
+  assert.ok(real.finished.some((r) => r.id === 'sweep-a' && r.finished === true))
+  assert.ok(real.skipped.some((r) => r.id === 'sweep-b'))
+  assert.equal(runGit(['branch', '--list', a.branch], { cwd: proj }), '', 'real sweep left a merged branch behind')
+  assert.ok(runGit(['branch', '--list', b.branch], { cwd: proj }) !== '', 'real sweep deleted an unmerged branch')
+
+  // Re-sweep: sweep-a is already finished (branch gone) — it must NOT come
+  // back as 'not-merged' forever. sweep-b is still legitimately unmerged.
+  const again = sweepMerged(proj, { dryRun: false })
+  const aRow = again.skipped.find((r) => r.id === 'sweep-a')
+  assert.ok(aRow, 'already-finished session vanished from skipped entirely')
+  assert.equal(aRow.reason, 'already-finished', 'already-finished session misreported as not-merged')
+  const bRow = again.skipped.find((r) => r.id === 'sweep-b')
+  assert.equal(bRow.reason, 'not-merged')
+
+  archiveSession(proj, 'sweep-b')
+})
+
+// ---- 6. pressure: 30 sessions, 15 merged, sweep < 5s -----------------------
+
+ok('pressure: 30 sessions, 15 merged, sweepMerged finishes exactly 15 in under 5s', () => {
+  const mergedIds = []
+  const unmergedIds = []
+  for (let i = 0; i < 30; i++) {
+    const id = `p${i}`
+    const s = openSession(proj, { id })
+    fs.writeFileSync(path.join(s.worktree, 'p.txt'), `edit ${i}\n`)
+    if (i % 2 === 0) {
+      const res = sessionStageBoundary(proj, id)
+      assert.equal(res.merged, true)
+      mergedIds.push(id)
+    } else {
+      fs.writeFileSync(path.join(s.worktree, GATE_CHECK_SCRIPT), 'exit 1\n')
+      const res = sessionStageBoundary(proj, id)
+      assert.equal(res.merged, false)
+      unmergedIds.push(id)
+    }
+  }
+  assert.equal(mergedIds.length, 15)
+  assert.equal(unmergedIds.length, 15)
+
+  const t0 = Date.now()
+  const res = sweepMerged(proj, { dryRun: false })
+  const elapsed = Date.now() - t0
+  assert.ok(elapsed < 5000, `sweepMerged took ${elapsed}ms, wanted < 5000ms`)
+
+  const finishedMerged = res.finished.filter((r) => mergedIds.includes(r.id))
+  assert.equal(finishedMerged.length, 15)
+  assert.ok(res.finished.every((r) => r.finished === true))
+  for (const id of mergedIds) {
+    const branch = `arxa/session/${id}`
+    assert.equal(runGit(['branch', '--list', branch], { cwd: proj }), '', `${branch} survived the sweep`)
+  }
+  for (const id of unmergedIds) {
+    const branch = `arxa/session/${id}`
+    assert.ok(runGit(['branch', '--list', branch], { cwd: proj }) !== '', `${branch} was wrongly deleted`)
+    archiveSession(proj, id)
+  }
+})
+
+console.log(`# ${passed} passed`)
