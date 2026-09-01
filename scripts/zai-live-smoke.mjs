@@ -12,7 +12,7 @@ const catalog = require(fileURLToPath(new URL('../node_modules/@earendil-works/p
 const apiKey = process.env.ZAI_API_KEY
 if (!apiKey) {
   console.error('ZAI_API_KEY is not set. Resolve the credential first, e.g.:')
-  console.error('  ZAI_API_KEY=$(appbox credentials exec ZAI_API_KEY -- printenv ZAI_API_KEY) node scripts/zai-live-smoke.mjs')
+  console.error('  ZAI_API_KEY=$(arxa credentials exec ZAI_API_KEY -- printenv ZAI_API_KEY)   # needs ZAI_API_KEY in env/vault node scripts/zai-live-smoke.mjs')
   process.exit(2)
 }
 

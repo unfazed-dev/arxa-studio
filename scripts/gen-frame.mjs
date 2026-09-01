@@ -64,7 +64,15 @@ const VW = [
   ".aXa_fr_sheetLayer{position:absolute;inset:0;z-index:15;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base)}",
   ".aXa_fr_sheetHead{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--dsw-alias-border-l2)}",
   ".aXa_fr_sheetBack{cursor:pointer;border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-primary);border-radius:6px;padding:4px 10px;font-size:12px}",
-  ".aXa_fr_sheetBody{flex:1;min-height:0;display:flex}"
+  ".aXa_fr_sheetBody{flex:1;min-height:0;display:flex}",
+  // gutter symmetry (2026-09-03): the stock scrollBody reserves scrollbar-gutter
+  // stable on the right only, so the hero composer sat gutter px (8 headless,
+  // 15-16 classic scrollbars) farther from the viewer col than from the
+  // sidebar col, at every width, viewer open or closed. Dropping the
+  // reservation inside the center col makes the composer equidistant from its
+  // neighbours in every state; on classic systems the visible scrollbar band
+  // explains the right edge only while the transcript actually overflows.
+  ".aXa_fr_centerCol [class*=\"scrollBody\"]{scrollbar-gutter:auto}"
 ].join("")
 const VWq = VW.replaceAll("\"", String.fromCharCode(92) + "\"")
 repString(".aXa_fr_overlayLayer>*{pointer-events:auto}\"", ".aXa_fr_overlayLayer>*{pointer-events:auto}" + VWq + "\"", "2b viewer css")
@@ -85,13 +93,13 @@ repString("sidebar: 280," + LF + T(5) + "details: 0,",
     I + "d.details = 0;",
     K + "},",
     K + "setViewer: (d, px) => {",
-    I + "d.viewer = clampWidth(px, 320, 100000);",
+    I + "d.viewer = clampWidth(px, VIEWER_MIN, VIEWER_PREF_CAP);",
     I + "try { localStorage.setItem('arxa.frame.viewer', String(d.viewer)); } catch { }",
     K + "},",
     K + "openViewer: (d) => {",
     I + "if (d.viewer === 0) {",
-    I + I + "let w = 420;",
-    I + I + "try { const saved = Number(localStorage.getItem('arxa.frame.viewer')); if (saved >= 320) w = saved; } catch { }",
+    I + I + "let w = viewerDefault(typeof window !== \"undefined\" ? window.innerWidth : 0);",
+    I + I + "try { const saved = Number(localStorage.getItem('arxa.frame.viewer')); if (saved >= VIEWER_MIN) w = saved; } catch { }",
     I + I + "d.viewer = w;",
     I + "}",
     K + "},",
@@ -112,10 +120,31 @@ repString("sidebar: 280," + LF + T(5) + "details: 0,",
   if (closeAt < 0) dies("4: computeColumns close not found")
   const b = T(3), c = T(4)
   const next = [
-    "function computeColumns(viewport, sidebar, details, viewer) {",
+    "// arxa frame layout spec — the ONLY place arxa pixel values live (the",
+    "// 2026-09-01 no-hardcode directive; stock contract values — sidebar",
+    "// 264/280/420/56, details 300/360/520, the 640 comfort floor — stay",
+    "// inline in the stock paths they govern). VS Code sash semantics,",
+    "// researched in docs/research/vscode-workbench-pane-resizing.md.",
+    "const VIEWER_MIN = 320; // narrowest usable artifact lane",
+    "const VIEWER_MAX = 560; // ceiling for the ratio-derived DEFAULT below",
+    "const VIEWER_PREF_CAP = 100000; // persisted-preference ceiling (serialization guard)",
+    "const CENTER_VIEWER_MIN = 220; // VS Code editor-part sash minimum (DEFAULT_EDITOR_MIN_DIMENSIONS)",
+    "const VIEWER_SNAP = CENTER_VIEWER_MIN >> 1; // VS Code snap threshold formula floor(min/2) = 110",
+    "// VS Code first-run sizing pattern (min(300, W/4)): the preferred viewer",
+    "// width is viewport-derived — a 4K monitor and a laptop get proportional",
+    "// defaults, clamped into the usable lane.",
+    "const viewerDefault = (vp) => clampWidth(Math.round(vp / 3), VIEWER_MIN, VIEWER_MAX);",
+    "// centerMin is the floor the chat keeps AGAINST THE VIEWER: 0 while a",
+    "// handle drag is live (continuous all the way — the 2026-09-01 slow-drag",
+    "// dead-zone fix), CENTER_VIEWER_MIN at rest. The 640 comfort floor keeps",
+    "// governing only the DETAILS concession (a secondary pane closes rather",
+    "// than cramp the chat); the viewer is a primary work surface. Within one",
+    "// snap threshold of the sidebar edge the viewer takes over fully (center",
+    "// hidden) — the sash twin of VS Code's toggleMaximizedPanel.",
+    "function computeColumns(viewport, sidebar, details, viewer, centerMin) {",
     b + "const s = sidebar === 0 ? 56 : clampWidth(sidebar, 264, 420);",
     b + "const d0 = details === 0 ? 0 : clampWidth(details, 300, 520);",
-    b + "const v0 = viewer === 0 ? 0 : clampWidth(viewer, 320, 100000);",
+    b + "const v0 = viewer === 0 ? 0 : clampWidth(viewer, VIEWER_MIN, VIEWER_PREF_CAP);",
     b + "if (s + d0 + v0 + 640 <= viewport) return {",
     c + "sidebar: s,",
     c + "center: viewport - s - d0 - v0,",
@@ -129,10 +158,16 @@ repString("sidebar: 280," + LF + T(5) + "details: 0,",
     c + "details: d1,",
     c + "viewer: v0",
     b + "};",
-    b + "const v1 = Math.min(v0, Math.max(320, viewport - s - 640));",
-    b + "if (s + v1 + 640 <= viewport) return {",
+    b + "if (v0 >= viewport - s - VIEWER_SNAP) return {",
     c + "sidebar: s,",
-    c + "center: 640,",
+    c + "center: 0,",
+    c + "details: 0,",
+    c + "viewer: Math.max(VIEWER_MIN, viewport - s)",
+    b + "};",
+    b + "const v1 = Math.min(v0, Math.max(VIEWER_MIN, viewport - s - centerMin));",
+    b + "if (s + v1 + centerMin <= viewport) return {",
+    c + "sidebar: s,",
+    c + "center: viewport - s - v1,",
     c + "details: 0,",
     c + "viewer: v1",
     b + "};",
@@ -150,7 +185,11 @@ repString("sidebar: 280," + LF + T(5) + "details: 0,",
 
 // 5. AppFrame deltas
 repString("detailsSession === void 0 ? 0 : panels.details);",
-  "detailsSession === void 0 ? 0 : panels.details, panels.viewer);", "5a cols call site")
+  "detailsSession === void 0 ? 0 : panels.details, panels.viewer, dragging ? 0 : CENTER_VIEWER_MIN);", "5a cols call site")
+repString("const cols = computeColumns(viewport,",
+  "const [dragging, setDragging] = (0, react.useState)(false);" + LF + T(3) + "const cols = computeColumns(viewport,", "5a hoist dragging above the solve")
+repString(LF + T(3) + "const [dragging, setDragging] = (0, react.useState)(false);" + LF + T(3) + "const onDragEnd",
+  LF + T(3) + "const onDragEnd", "5a drop the stock dragging decl (hoisted)")
 {
   const a = "const onDetailsDrag"
   const i = s.indexOf(a)
@@ -158,22 +197,39 @@ repString("detailsSession === void 0 ? 0 : panels.details);",
   if (i < 0 || end < 0) dies("5b: onDetailsDrag anchor not found")
   const stop = end + ", [actions]);".length
   const b = T(3), c = T(4), d = T(5)
+  // Sign convention (2026-09 regression): the viewer is a RIGHT-edge panel —
+  // its handle sits at the column's left edge, so dragging LEFT (dx < 0) must
+  // GROW it: width follows base − dx, exactly like details. +dx inverted the
+  // drag (grew toward the window edge, clamped at 320 toward the center).
   const add = LF + b + "const viewerBase = (0, react.useRef)(0);" + LF
     + b + "const onViewerStart = (0, react.useCallback)(() => {" + LF
     + c + "viewerBase.current = colsRef.current.viewer;" + LF
     + c + "setDragging(true);" + LF
     + b + "}, []);" + LF
     + b + "const onViewerDrag = (0, react.useCallback)((dx) => {" + LF
-    + c + "actions.setViewer(viewerBase.current + dx);" + LF
+    + c + "actions.setViewer(viewerBase.current - dx);" + LF
     + b + "}, [actions]);" + LF
+    + b + "// Release snap (threshold = floor(min/2), VS Code's snap formula;" + LF
+    + b + "// workbench parts skip snap — the 2026-09-01 directive applies it):" + LF
+    + b + "// a drop leaving the chat under half its minimum means 'basically" + LF
+    + b + "// full' — magnetically take over (persists). Otherwise the resting" + LF
+    + b + "// solver floor (centerMin 220) reasserts itself on render — no pref" + LF
+    + b + "// churn. During the drag itself centerMin is 0, so the handle" + LF
+    + b + "// follows the pointer continuously all the way — no dead zone." + LF
+    + b + "const onViewerEnd = (0, react.useCallback)(() => {" + LF
+    + c + "const c2 = colsRef.current;" + LF
+    + c + "if (c2.center > 0 && c2.center < VIEWER_SNAP) actions.setViewer(viewport);" + LF
+    + c + "setDragging(false);" + LF
+    + b + "}, [actions, viewport]);" + LF
+    + b + "const viewerPreMax = (0, react.useRef)(0);" + LF
     + b + "const requestViewerMax = (0, react.useCallback)(() => {" + LF
     + c + "const c2 = colsRef.current;" + LF
-    + c + "let room = viewport - c2.sidebar - (c2.details > 0 ? c2.details : 0) - 640;" + LF
-    + c + "if (room < 320 && c2.details > 0) {" + LF
-    + d + "actions.closeDetails();" + LF
-    + d + "room = viewport - c2.sidebar - 640;" + LF
+    + c + "if (c2.center === 0) {" + LF
+    + d + "actions.setViewer(viewerPreMax.current >= VIEWER_MIN ? viewerPreMax.current : viewerDefault(viewport));" + LF
+    + d + "return;" + LF
     + c + "}" + LF
-    + c + "actions.setViewer(Math.max(320, room));" + LF
+    + c + "viewerPreMax.current = c2.viewer;" + LF
+    + c + "actions.setViewer(viewport - c2.sidebar);" + LF
     + b + "}, [actions, viewport]);"
   s = s.slice(0, stop) + add + s.slice(stop)
   log.push("5b viewer callbacks + maximize")
@@ -214,11 +270,23 @@ repString("\"data-details-collapsed\": cols.details === 0 || void 0,",
     + c + "left: viewport - cols.viewer," + LF
     + c + "onStart: onViewerStart," + LF
     + c + "onDrag: onViewerDrag," + LF
-    + c + "onEnd: onDragEnd" + LF
+    + c + "onReset: () => actions.setViewer(viewerDefault(viewport))," + LF
+    + c + "onEnd: onViewerEnd" + LF
     + b + "})"
   s = s.slice(0, stop) + add + s.slice(stop)
   log.push("5f viewer drag handle")
 }
+
+// 5g. Sash double-click reset (VS Code: sash dblclick → onDidReset → the
+// adjacent view returns to its preferred size). DragHandle forwards
+// props.onReset as onDoubleClick; each handle resets to its contract default
+// (sidebar 280 / details 360 / viewer 420 — the arxa preferred sizes).
+repString(T(4) + "\"data-dragging\": dragging || void 0," + LF + T(4) + "onPointerDown,",
+  T(4) + "\"data-dragging\": dragging || void 0," + LF + T(4) + "onDoubleClick: props.onReset," + LF + T(4) + "onPointerDown,", "5g DragHandle dblclick forward")
+repString("onDrag: onSidebarDrag," + LF + T(6) + "onEnd: onDragEnd",
+  "onDrag: onSidebarDrag," + LF + T(6) + "onReset: () => actions.setSidebar(280)," + LF + T(6) + "onEnd: onDragEnd", "5g sidebar dblclick reset 280")
+repString("onDrag: onDetailsDrag," + LF + T(6) + "onEnd: onDragEnd",
+  "onDrag: onDetailsDrag," + LF + T(6) + "onReset: () => actions.setDetails(360)," + LF + T(6) + "onEnd: onDragEnd", "5g details dblclick reset 360")
 
 // 6. child seat declaration
 {
@@ -304,6 +372,10 @@ repString("narrow && detailsSession !== void 0 && panels.viewer > 0",
   "narrow && (detailsSession !== void 0 || panels.viewer > 0) && panels.viewer > 0", "9b sheet gate");
 repString("!narrow && detailsSession !== void 0 && cols.viewer > 0",
   "!narrow && (detailsSession !== void 0 || panels.viewer > 0) && cols.viewer > 0", "9c viewerCol gate");
+
+// Provenance header — every arxa generated bundle names its generator + dsh
+// pin (gen-sidebar/gen-workspace/gen-locale convention; the selftest gates it).
+s = "// GENERATED by scripts/gen-frame.mjs from @deepseek-ai/dsh-client-ui-layout (dsh 0.1.1-rc.2) — do not hand-edit (drift gate: node scripts/gen-frame.mjs --check)." + LF + s
 
 mkdirSync(dirname(outPath), { recursive: true })
 if (process.argv.includes("--check")) {
