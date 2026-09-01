@@ -817,3 +817,92 @@ Raised in review, not blocking Phase 0, but must be settled before the phase nam
    so no PR (direct-to-main or an ephemeral branch?), and sessions in an unpublished
    repo such as `TESTO/projects/Fads` (refuse, local-merge fallback, or prompt to
    publish?).
+
+---
+
+## §10 — D113 unblocked: the gate fixture exists, and it found a second bug
+
+**Status:** D113's stated prerequisite ("no positive Dart test case exists") is
+**cleared**. Two fixtures now exist, one synthetic and one real.
+
+### The real-app evidence (decisive)
+
+A source-only copy of arxa's `kit/showcase_app` (482 files / 19 MB; `build/`,
+`.dart_tool/`, `ios/Pods/` excluded) now sits at:
+
+```
+TOPO/projects/project-001/05-scaffold/application/ios/
+```
+
+Its 27 `path: ../<kit>` deps were rewritten **in the copy only** to absolute
+paths into `arxa/kit/` (original kept as `pubspec.yaml.orig`). `dart pub get`
+resolves all 27 — exit 0. **arxa's own tree is untouched: `git status
+--porcelain -- kit/showcase_app` reports 0 modified files.**
+
+With a genuine type error planted in `lib/`:
+
+| | result |
+|---|---|
+| `dart analyze` in the target | **exit 3** — `invalid_assignment`, 1 issue |
+| `sh ./check.sh` at project root | **exit 0 in 0.033 s** |
+
+The gate does not analyze the app. It does not fail to analyze it — it never
+reaches it. 0.033 s is the cost of not looking. **B11 is confirmed against real
+arxa code, not just a scaffold.**
+
+### B15 (new) — `[ -d test ]` ANDs away the analyzer
+
+`frame.js:103`:
+
+```sh
+if [ -f pubspec.yaml ] && command -v dart >/dev/null 2>&1 && [ -d test ]; then
+  dart pub get >/dev/null 2>&1 || fail "dart pub get"
+  dart analyze || fail "dart analyze"
+  dart test    || fail "dart test"
+fi
+```
+
+A target with a `pubspec.yaml` but no `test/` directory is skipped **entirely** —
+no `pub get`, no `analyze`. Analysis does not require tests. Every freshly
+scaffolded target is in exactly this state, so the gate is green precisely when
+a project is youngest and most likely to be broken.
+
+Fix — split the condition:
+- `pubspec.yaml` present → `pub get` + `analyze` (**always**)
+- `test/` also present → `dart test`
+
+This is independent of B11's depth bug and must be fixed with it; fixing depth
+alone still leaves every test-less target unanalyzed.
+
+### The fixture
+
+`scripts/frame-gate-fixture.sh` — self-contained, no network beyond one
+`test` dev-dep, builds a two-package Dart workspace and runs the **real**
+generated `projectCheckSh()` in four states:
+
+| state | want | today |
+|---|---|---|
+| S1 clean target | 0 | **0** ok |
+| S2 broken Dart, `test/` present | 1 | **1** ok |
+| S3 broken Dart, no `test/` | 1 | **0** ← B15 |
+| S4 broken Dart nested under `<stage>/<track>/<target>/` | 1 | **0** ← B11 |
+
+It exits non-zero until both bugs are fixed, so it is a regression test, not a
+demo. Wire it into `plugins/git-workspace/selftest.mjs` as part of the fix.
+
+### Two harness traps worth remembering
+
+1. `check.sh` line 6 is `cd "$(dirname "$0")"` — it runs relative to **its own**
+   location, not the caller's cwd. A test that invokes it from outside the
+   fixture silently tests an empty directory and passes by absence. This
+   produced a full round of false results before it was caught.
+2. Copying a Dart package away from its `path:` siblings breaks dependency
+   resolution, and the gate reports that as `FAIL: dart pub get` — a red that
+   looks like a real finding but is a fixture defect. Keep siblings together.
+
+### Verified environment facts
+
+- `dart` on PATH is fvm's, **3.12.2 stable** (`macos_arm64`).
+- Plain `dart pub get` **does** resolve `flutter: {sdk: flutter}` here, so the
+  gate's use of `dart` rather than `flutter` is not a defect on this runner.
+  It would break on a runner with a standalone Dart and no Flutter SDK.
