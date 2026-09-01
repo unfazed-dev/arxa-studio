@@ -940,3 +940,39 @@ never succeeded. Unresolved imports then produce a wall of analyzer errors — a
 red for the wrong reason, which is how teams learn to ignore a gate. The S3
 fixture has resolvable deps and will **not** catch this, so the chosen semantics
 needs its own case (S5).
+
+### §10.3 — B11/B15 fixed, and the fix found B16
+
+`projectCheckSh()` now walks to every stack marker and probes inside that
+target's own directory, pruning `node_modules`, `.dart_tool`, `build`, `Pods`,
+`vendor`, `.symlinks`, `ephemeral`, `.git`, `.arxa` so a dependency is never
+mistaken for a target. Analysis no longer sits behind `[ -d test ]`; only the
+test run does. An unresolvable pubspec is a hard red (decided).
+
+**B16 — `dart test` reds a healthy Flutter app.** The first run of the fixed
+gate against the real target failed with `Could not find package test`. Flutter
+targets carry `flutter_test` (an SDK dep), not `test`, and cannot be driven by
+`dart` — `dart test` cannot load `dart:ui`. The gate now picks its runner per
+target by grepping the pubspec for an `sdk: flutter` dep and uses `flutter
+pub get` / `flutter analyze` / `flutter test` accordingly. Without this the gate
+would have gone red on every Flutter target it newly reached — the exact failure
+that teaches a team to ignore a gate.
+
+### §10.4 — measured, on the real 106 MB arxa app
+
+| | before | after |
+|---|---|---|
+| clean target | exit 0 in 0.033 s (never looked) | **exit 0 in 84 s, 169 Flutter tests pass** |
+| broken target | **exit 0 in 0.033 s** | **exit 1 in 12 s** |
+
+The red names the defect and the target:
+`FAIL: flutter analyze (./05-scaffold/application/ios)` with file, line and rule.
+
+0.033 s was the cost of not looking. 84 s is the cost of the gate meaning
+something — worth pricing into the 15-minute CI timeout when several targets
+land in one project.
+
+`selftest.mjs` 48/48. Three new structural tests pin the walk, the ungated
+analyze, and the per-target runner choice; the pre-existing "tool-presence
+guards" assertion was updated (not weakened) because the dart guard is now
+`command -v "$run"`. End-to-end coverage stays in `scripts/frame-gate-fixture.sh`.
