@@ -695,15 +695,113 @@ options, all free:
 
 | Option | Shape | Fit for air-gapping |
 |---|---|---|
-| [`tuna/pub-mirror`](https://github.com/tuna/pub-mirror) | multi-threaded downloader; output served by any static HTTP server. Docker image `huiyiqun/pub_mirror`. Used for the TUNA mirrors. | **Best fit** — a pure read-only cache, no dynamic server, no database. |
+| [`tuna/pub-mirror`](https://github.com/tuna/pub-mirror) | multi-threaded downloader; static output | ❌ **ARCHIVED** — verified via GitHub API: `archived=true`, last push **2022-10-25**, 16 stars. Do not adopt. |
 | [`unpub`](https://github.com/bytedance/unpub) | MongoDB-backed private host, community standard | heavier; aimed at publishing private packages |
 | [`ricardoboss/PubNet`](https://github.com/ricardoboss/PubNet) | self-hosted host with upstream fallback to `pub.dev/api/` | ⚠️ **reads are authenticated too**, not just publishing — friction for a build cache |
 | [pub-dev itself](https://github.com/dart-lang/pub-dev) | the real site's source, open | explicitly *not* designed for private hosting |
 
 JFrog Artifactory supports Dart repositories but is commercial — out of scope.
 
-**Consequence:** an air-gapped tier is credible for `website/` today and requires
-standing up `tuna/pub-mirror` for `application/`. Record as a prerequisite for any
+**CORRECTED — there is no healthy free pub mirror.** Verified via the GitHub API:
+`tuna/pub-mirror` is **archived** (last push 2022-10-25); `unpub` is dormant;
+`ricardoboss/PubNet` is alive (pushed 2026-08-29, Apache-2.0) but small at 48 stars
+**and authenticates reads**, not just publishes. By contrast Verdaccio for npm is
+17.8k stars, MIT, pushed today. **The Dart answer is a warm `PUB_CACHE`, not a mirror
+server.** An earlier note in this file recommending `tuna/pub-mirror` was wrong and
+is retracted.
+
+**Consequence:** an air-gapped tier is credible for `website/` today and rests on
+cache warming for `application/`. Record as a prerequisite for any
 tier that denies egress during dependency resolution — the `(deny network*)` profile
 measured in §9b blocks `dart pub get` outright, so the network split must be
 **allow during install, deny during the edit loop**, not a blanket deny.
+
+---
+
+## 13. The egress ladder — and its hard ceiling
+
+| Rung | Mechanism | Stops |
+|---|---|---|
+| 0 | unrestricted | nothing |
+| 1 | **log-only** (`sbx policy log`, incl. `--json`) | nothing — but tells you what normal looks like. Records allowed *and* blocked hosts with the matching rule. |
+| 2 | default-deny + coarse hostname allowlist | naive exfil, reverse shells, DNS tunnelling. **Where L2 already sits.** |
+| 3 | minimal allowlist, per-sandbox (`--sandbox` scoping, effective immediately) | most of the above, scoped per project |
+| 4a | **SNI filtering** (Squid peek/splice) — terminate on SNI mismatch, no TLS break | IP-literal and shared-CDN holes |
+| 4b | **MITM + private CA** (mitmproxy) | the only rung that can say "GET yes, POST no" on an allowed host |
+| 5 | **phase split** — no network in the edit loop, network only during dependency install | agent-initiated fetches mid-edit |
+| 6 | air-gapped build with warm caches / local mirrors | resolution-time supply chain |
+| 7 | `--network=none` | **the only rung whose guarantee does not depend on software being correct** |
+
+### ⚠️ The ceiling: rung 7 is unreachable for an agent edit loop
+
+Docker's own docs state the Locked Down preset blocks **model provider APIs**,
+including `api.anthropic.com`. An agent that cannot reach its model cannot run. So
+"air-gapped edit loop" actually means **"exactly one allowed hostname" — and that
+hostname is itself an exfiltration path.**
+
+**This is the ceiling on the entire ladder, and it should be stated in the UI.** No
+egress tier can claim to prevent exfiltration by an agent that can still talk to its
+own model.
+
+### Two limits that change the tier maths
+
+- **`sbx` rules cannot express repo-level or read-vs-write granularity.** Rules are
+  hostname / CIDR / port with action `connect:tcp`. Allowing `github.com:443` so
+  `git pull` works **also allows `git push` to any repo**. Only rung 4b closes this —
+  and that means running a private CA.
+- **Credentials never enter the VM.** The host proxy injects auth headers, so the
+  agent cannot read raw values. **For the credential half of the threat model, L2
+  already sits above plain allowlisting.** Source-code exfiltration is the hard half,
+  and it is the one the ceiling above applies to.
+
+### The phase split — adopt, with two corrections
+
+The idea in §12a is sound: both toolchains have frozen-install modes and relocatable
+caches, and it converts "the agent added a dependency" into a **reviewable lockfile
+diff**. Corrections: (1) under `sbx` this is **policy toggling**, not
+`--network=none`; (2) the edit loop still needs the model API, per the ceiling.
+
+### Offline specifics per toolchain
+
+- **npm — clean.** `npm ci --offline`. **Not `--prefer-offline`, which still reaches
+  out.** Verdaccio (MIT, active) if a mirror is wanted.
+- **Dart — `dart pub get --offline` + committed `pubspec.lock` + warm `PUB_CACHE`.**
+  Documented trap: **offline resolution silently pins stale versions if the cache is
+  old** — a correctness risk, not just a convenience one.
+- **Flutter needs more than pub.** Engine artifacts are separate
+  (`FLUTTER_STORAGE_BASE_URL`, `flutter precache`); Gradle needs `--offline` with a
+  warm `~/.gradle/caches/modules-2`; **CocoaPods is the weak link for iOS.**
+
+### macOS host layer
+
+**The built-in Application Firewall is inbound-only** — Apple's documentation
+describes it purely in terms of incoming connections. That is why Little Snitch
+exists (and Little Snitch is paid). **`pf` is the free outbound answer**: scriptable
+via named anchors, and it logs UID + PID to `pflog0`. Granularity is **IP/CIDR/port
+only, never domains**, so treat it as a coarse backstop and an audit log, never as
+the primary allowlist. OpenSnitch is Linux-only.
+
+### Two default-on settings to flip for client work
+
+- **Workspace is a read-write direct mount by default.** A poisoned git hook or
+  `postinstall` runs on *your host* later. `--clone` is opt-in. (Same finding as §4,
+  arriving independently.)
+- **The shared skills store is read-write across sandboxes by default.** One session
+  can plant instructions another client's session later loads. `--no-share-skills`
+  opts out. **This is a cross-client contamination path that has nothing to do with
+  the filesystem mount** — threat #2 in the §11 ranking, via a route neither the
+  Seatbelt work nor the mount design covers.
+
+### Recommended landing point
+
+Rung **3** for the agent loop — plus `--clone`, `--no-share-skills`, and **logging
+always on**. Rung **7** for a separate, *agent-free* build/test container. An
+explicit, supervised install phase between them. Escalate to 4b only if pull-vs-push
+granularity matters more than the cost of running a private CA.
+
+### Open empirical question — settle before committing
+
+**Does `flutter build` actually complete at rung 7 with warm caches?** The Gradle
+path is documented-supported and CocoaPods is flagged as the weak link, but this was
+inferred from docs, not tested. **Proof-of-concept required** — it is the difference
+between the agent-free build container being real or theoretical.
