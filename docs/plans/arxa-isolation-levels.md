@@ -600,3 +600,80 @@ and `.gitconfig` **inside** the working directory, unexemptable by any allow rul
 Docker documents that a plain workspace mount does **not** stop an agent writing a git
 hook the host later executes. **An L2 that fails to reproduce that protected list is
 a regression against L1.** Carry the list forward explicitly.
+
+---
+
+## 12. L3/L4 candidate — remote execution. Verdict: only the self-hosted form survives.
+
+### Both vendor options are disqualified, and not primarily on price
+
+**Docker Offload — no longer free, and the plugin's presence is misleading.**
+`docker offload` appears in this machine's plugin list, but as of GA (Apr 2026) it is
+a **paid add-on to Docker Business (~$24/user/month), sold only through Docker
+sales** — no self-serve price, no free tier. The "300 free GPU minutes" figure that
+circulates was a mid-2025 beta promotion and is gone.
+
+**GitHub Codespaces — free tier is real but thin.** GitHub Free (personal) gives
+15 GB-month storage and 120 core-hours/month — roughly 60 real hours on a 2-core
+box. An always-on agent loop burns that in days.
+
+**The disqualifier is data residency, not cost.** Both ship **client source code to a
+third party to be executed**, not merely stored. For agency work under NDA/MSA,
+"client source processed on a named third-party vendor" is typically exactly the
+clause that blocks it — and it is a per-client contractual question a solo shop
+cannot waive unilaterally. **This rules them out even if they were free.**
+
+### Self-hosted remote — the one that works, and it is genuinely free
+
+`DOCKER_HOST=ssh://user@host` (or a Docker context) pointed at a spare machine or a
+genuine free-tier VM. Docker's context/SSH tooling costs nothing. You provision and
+control the box, so no third party is *processing* the code — the contract problem
+disappears.
+
+**Ergonomics: naive setup is slow, and the fix is configuration, not architecture.**
+Roughly 3–4 s per docker command without connection reuse; `docker context ls` on a
+remote SSH context takes ~2.5 s versus ~0.026 s for the local default, because it
+probes the endpoint. Fix with SSH connection multiplexing in `~/.ssh/config`:
+
+```
+Host <remote>
+  ControlMaster auto
+  ControlPath ~/.ssh/cm-%C      # %C hashes host/port/user — avoids macOS path-length limits
+  ControlPersist 600
+```
+
+Verify by opening a second terminal and SSH-ing to the same host: it should connect
+without re-authenticating. Tuned, it is close to native.
+
+**Gotchas worth writing down now:**
+- **Keys + ssh-agent only.** Password auth is not supported by Docker and is not possible with a `DOCKER_HOST` configuration.
+- **Pre-populate `known_hosts`** — connect once manually and approve the key.
+- **Host aliases are not universally honoured.** The plain `docker` CLI respects `~/.ssh/config` aliases, but some tooling requires `ssh://user@host:port` to be a globally resolvable DNS name or IP.
+- **Known connection leak** — the local client can open a new connection every 15 minutes without closing it, spawning a process on the remote each time. Check with `pgrep -c sshd` on the remote if memory creeps.
+- **Use Compose v2.** Compose v1 had a pathological bug: `docker-compose up` on a single-service file taking 5+ minutes on macOS against a remote host that responded in seconds from Linux. v2 shares the CLI's `commandconn` path.
+
+### What physical separation actually buys over L2
+
+Removes shared-hardware exposure: no side-channel risk, no shared-hypervisor blast
+radius, and independence from the Mac's own security state. It protects **the
+developer's machine and the other clients' projects not loaded onto that box.**
+
+**It does not protect the current client's own code and secrets in that session.** A
+compromised agent on the remote box can still exfiltrate that client's IP unless
+egress is locked down exactly as L2 locks it down. **Remote is additive to egress
+control, not a substitute for it.**
+
+### A local-VM-as-Docker-host variant is NOT a new tier
+
+Running a second local VM as the Docker host (free, no residency question) buys
+**organizational containment** — a daemon crash or compromise stays in the VM — but
+it is the same silicon as the host, so none of the physical-separation benefit above
+applies. **Record it as a restructuring of L2, not as L3.**
+
+### Consequence for the tier ladder
+
+"Remote" is a real tier only in its self-hosted form, and its value is narrow and
+specific: it protects *everything except the project it is currently running*.
+Given the §11 threat ranking — where the top two risks are the agent doing something
+wrong and cross-client contamination — **self-hosted remote addresses risk #2 well
+and risk #1 not at all.** Price it accordingly when the tiers are finalised.
