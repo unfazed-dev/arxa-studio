@@ -585,8 +585,8 @@ ok('frame: every subject arxa itself commits passes its own gate (B17/B18)', () 
   // arxa writing a commit its own gate rejects is the worst kind of red: the
   // user did not write it and cannot amend it.
   for (const subject of [
-    'chore(migrate): org format v3→v4 (pre)',
-    'chore(migrate): org format v3→v4 (post)',
+    'chore(migrate): org format migration v3→v4 (pre)',
+    'chore(migrate): org format migration v3→v4 (post)',
     'chore(migrate): stage folders to template v3 (stage order, 2-digit prefixes) + .gitkeep',
     'chore(migrate): track/target vocabulary (template v4)',
     'chore(ci): wire the arxa frame (checks, workflow, PR template)',

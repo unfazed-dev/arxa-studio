@@ -235,7 +235,7 @@ export function migrationChain(fromVersion, toVersion, migrations = MIGRATIONS) 
  * changes, to one the gate recognises.
  */
 function migrationMessage(step, phase) {
-  return `chore(migrate): org format v${step.from}→v${step.to} (${phase})`
+  return `chore(migrate): org format migration v${step.from}→v${step.to} (${phase})`
 }
 
 /**

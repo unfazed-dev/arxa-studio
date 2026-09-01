@@ -480,7 +480,7 @@ try {
     assert.ok(fs.existsSync(path.join(proj, '08-deploy', 'application', '.gitkeep')), '.gitkeep in the emptied target dir')
     assert.ok(fs.existsSync(path.join(v2org.path, 'notes', '.gitkeep')), 'org-level empties gitkeep’d too')
     const log = runGit(['log', '--format=%s'], { cwd: proj })
-    assert.match(log, /migrate: stage folders to template v3/, 'the project REPO carries the migration commit (pushable)')
+    assert.match(log, /chore\(migrate\): stage folders to template v3/, 'the project REPO carries the migration commit, with a subject the frame gate accepts (B17)')
     assert.ok(opened.migrated.some((m) => m.from === 2 && m.to === 3), 'openOrg ran the shipped 2→3 step')
   })
 
