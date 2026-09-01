@@ -110,3 +110,39 @@ shape. Building it unilaterally is the `Kind` mistake again.
   `FAIL: flutter analyze (./05-scaffold/application/ios)`
 - arxa repo untouched: `kit/showcase_app` 0 modified, 27/27 relative deps, HEAD
   unchanged at `bdcb530f`
+
+## Cross-check against the independent 44-item worklist
+
+An independent scan of all three plan docs produced 44 items (28 decided, 8 open
+decisions, 11 open implementation). Mapping this session's work onto it:
+
+**Closed:** B1, B3, B11, B13, B15, D112, D113.
+
+**Not on that list at all — found only by running things:** B16 (`dart test`
+reds a healthy Flutter app), B17/B18/B20 (arxa committing subjects its own gate
+rejects), B19 (org gate failing on a Gradle cache), the frame-migration gap
+(`writeFrameFiles` never clobbers, so no fix ever reached an existing repo), the
+`rows-snap` test that could only pass on a slow disk, and the `mcp-apps` dangling
+engine symlink. Seven defects that a document review could not have surfaced,
+because each one needed real code, a real app, or a real repo to appear.
+
+**Still open, accurately:**
+- D110 write amplification, D111 red-main vs never-completed — decisions
+- B2 project-scoped session routing (this is D98/D99; nothing else moves first)
+- B7 worktree ↔ registry ↔ git reconciliation
+- B8 runner-asleep wake CTA (classified in `prChecksApi`, no UI consumer)
+- B12 version system unwired — blocked on arxa having no publish-to-client event
+- V3 Gap 1 (`superseded`) and Gap 2 (`changes-requested`) — both cross-product
+- Phase 0b destructive data cleanup — **explicitly requires authorization; not
+  touched**
+- Flutter build PoC, Phases 2–4, and the L0/L1/L2 tier programme
+
+### One judgement call to flag on D112
+
+The worklist frames D112 as "flip the settings, **and decide whether to gate the
+flip on there being no open PRs**". I made the flip and did **not** add that
+gate. Reasoning: branch protection returns 403 on this Free account, no PR flow
+is live yet, and there are no open PRs anywhere to strand. The flip is also not
+destructive — GitHub simply stops offering squash on an existing PR. If a PR
+flow goes live on a paid account before Phase 2 lands, that gate should be added
+before the frame is re-applied to a repo with open PRs.
