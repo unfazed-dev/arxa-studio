@@ -1,5 +1,5 @@
 {
-  "url": "http://127.0.0.1:7899/",
+  "url": "http://arxa.studio.localhost:7897",
   "rungs": [
     {
       "name": "compact",
@@ -8,48 +8,48 @@
       "consoleErrors": 0,
       "overflow": false,
       "settled": true,
-      "settleMs": 1908,
+      "settleMs": 2029,
       "clean": true,
       "png": "designs/artifact-viewer/evidence/lens/compact_390.png",
-      "uniformPct": "40.7",
+      "uniformPct": "64.6",
       "uniformColor": [
-        236,
-        248,
-        252
+        27,
+        35,
+        38
       ]
     },
     {
       "name": "medium",
       "width": 744,
       "height": 1133,
-      "consoleErrors": 1,
+      "consoleErrors": 0,
       "overflow": false,
       "settled": true,
-      "settleMs": 1970,
-      "clean": false,
+      "settleMs": 2239,
+      "clean": true,
       "png": "designs/artifact-viewer/evidence/lens/medium_744.png",
-      "uniformPct": "99.4",
+      "uniformPct": "62.8",
       "uniformColor": [
-        16,
-        16,
-        20
+        27,
+        35,
+        38
       ]
     },
     {
       "name": "expanded",
       "width": 1280,
       "height": 832,
-      "consoleErrors": 1,
+      "consoleErrors": 0,
       "overflow": false,
       "settled": true,
-      "settleMs": 1969,
-      "clean": false,
+      "settleMs": 2282,
+      "clean": true,
       "png": "designs/artifact-viewer/evidence/lens/expanded_1280.png",
-      "uniformPct": "99.5",
+      "uniformPct": "40.3",
       "uniformColor": [
-        16,
-        16,
-        20
+        27,
+        35,
+        38
       ]
     }
   ]
