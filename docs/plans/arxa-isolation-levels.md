@@ -2081,3 +2081,54 @@ overhead to trim.
 - [eCFR — 21 CFR 820.40 document controls](https://www.ecfr.gov/current/title-21/chapter-I/subchapter-H/part-820/subpart-D/section-820.40)
 - [W3C — maturity levels / superseded](https://www.w3.org/policies/process/)
 - [AIGA Standard Form of Agreement (2022 update, PDF)](https://www.aiga.org/sites/default/files/2023-11/Standardformofagreement_2022update.pdf)
+
+## 27. THE ROOT CAUSE OF B12 — arxa has no publish-to-client event
+
+I asked whether work reaches the client before or after merge. **Neither. There is no
+client-delivery step in arxa studio at all.** Searched the action surfaces, CONTEXT.md,
+and the decision log:
+
+- **No share / publish / deliver / handoff action** exists in any plugin's action list.
+- The only `export` is `conversation/lib/index.js:568` — a conversation transcript
+  dump, unrelated.
+- **"publish" in CONTEXT.md means publishing a repo to GitHub as *private*** (`CONTEXT.md:22`),
+  not showing anything to a client.
+- **"Sync sweep"** (`CONTEXT.md:148`) is the push/fast-forward pass to GitHub.
+- **D17 "Tree sharing: C, git under the hood"** — sharing *is* cloning the git tree.
+  The client-facing act, in arxa's model, is **granting someone access to the repo** —
+  a GitHub permission change made outside the app, not an in-app event.
+
+### Why this matters more than it looks
+
+**D20's deliverable-version design presupposes a client-delivery event that the product
+does not have.** §26k established that the correct mint trigger is publish-to-client.
+There is nothing to attach it to.
+
+**This is the actual root cause of B12.** The version system is not unwired through
+oversight — **there was no event to wire it to.** That reframes the whole finding: B12
+is a missing product concept surfacing as dead code, and it belongs with B8/B11/B13 in
+the built-but-unwired family for the same underlying reason.
+
+### The decision this forces
+
+Three ways forward, and it is a product question, not a versioning-mechanics one:
+
+1. **Add a publish-to-client concept.** A real "share this deliverable" action — the
+   thing that grants the client access and mints the version in the same step. Most
+   faithful to the research, and gives `v5 = "the fifth time we showed you this"` an
+   honest referent. Largest new surface, and it needs an answer for *how* a client
+   actually views it (repo access? a rendered artifact? arxa business?).
+2. **Mint at stage boundary** — the closest existing wired event
+   (`sessionStageBoundary` / `stageBoundarySquash` are live and called from
+   `arxa-sidebar/lib/index.js:800-803`). Cheapest by far, and it is what D20 originally
+   said. But §26f showed it burns numbers on work no client ever saw, and §26k showed
+   the number then means something other than client rounds.
+3. **Mint at merge to `main`** — also already wired, and it is Figma's model. Honest
+   *only if* merging is treated as "this is now the delivered state of the project".
+   Given arxa auto-pushes to a private GitHub repo the client may have access to, this
+   is arguably closer to publication than it first appears.
+
+**Scope note:** arxa business is the stated next product and would be the natural home
+for a client-facing view. If the client's window onto a project is arxa business rather
+than a repo clone, then **the publish event belongs at the boundary between studio and
+business** — which would make option 1 a decision to defer rather than reject.
