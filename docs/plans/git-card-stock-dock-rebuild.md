@@ -207,8 +207,13 @@ same way (its `ToolDetails.module.css` + `ToolRow.module.css` rules under
    any other fault stays verbatim. Evidence:
    `designs/git-card/evidence/insight/gc-b-insight-streak-orgseat-locale-1280.png`
    ("Open this from a session — the report follows the session’s branch.").
-   Known flake, not ours: `artifact-viewer/selftest.mjs:263` ("no verifier
-   -> deny-default", a socket case) fails roughly one run in two.
+   Flake at `artifact-viewer/selftest.mjs:263` ("no verifier -> deny-default")
+   was ours — fixed 2026-09-02 (`90af935`): the org server listened on the
+   `'::'` wildcard, which on BSD/macOS lets a foreign `127.0.0.1:N` listener
+   coexist on the same port and steal v4 traffic. Now binds `::1:0` then
+   `127.0.0.1` on the same port, retries on EADDRINUSE, runs v4-only on
+   v6-less hosts; selftest asserts a second bind of either family fails
+   EADDRINUSE. 3/3 green runs after the fix.
 5. `docs: mark git-card phase 4 UI superseded` — pointer from
    `git-card-phase-4-card-rebuild.md` §A2/A3 to this plan.
 
