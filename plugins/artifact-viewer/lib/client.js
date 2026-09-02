@@ -130,6 +130,24 @@ window.__ModuleLoader__.load({
       + '.aXa_av_pdfPage{font-size:12px;color:var(--dsw-alias-label-secondary)}'
       + '.aXa_av_pdfCanvasWrap{flex:1;min-height:0;overflow:auto;padding:12px;display:flex;justify-content:center;align-items:flex-start}'
       + '.aXa_av_pdfCanvas{border:1px solid var(--dsw-alias-border-l2);background:#fff;border-radius:4px}'
+      // Insight surface (Phase 4 A3): reports, not files. Four streak steps
+      // are token-defined so the grid reads in light AND dark.
+      + '.aXa_av_insight{display:flex;flex-direction:column;gap:8px;padding:12px}'
+      + '.aXa_av_insightNums{display:flex;gap:16px;font-size:12px;color:var(--dsw-alias-label-secondary)}'
+      + '.aXa_av_streakGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(11px,1fr));gap:3px}'
+      + '.aXa_av_streakCell{width:11px;height:11px;border-radius:2px;background:var(--dsw-alias-bg-layer-2)}'
+      + '.aXa_av_streakCell[data-level="2"]{background:color-mix(in oklab,var(--dsw-alias-brand-primary) 30%,var(--dsw-alias-bg-layer-2))}'
+      + '.aXa_av_streakCell[data-level="3"]{background:color-mix(in oklab,var(--dsw-alias-brand-primary) 60%,var(--dsw-alias-bg-layer-2))}'
+      + '.aXa_av_streakCell[data-level="4"]{background:var(--dsw-alias-brand-primary)}'
+      + '.aXa_av_insightRow{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--dsw-alias-border-l2);font-size:12px}'
+      + '.aXa_av_insightName{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-primary)}'
+      + '.aXa_av_insightMeta{color:var(--dsw-alias-label-tertiary);flex:none}'
+      + '.aXa_av_insightChip{flex:none;padding:1px 7px;border-radius:999px;border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary)}'
+      + '.aXa_av_insightLink{flex:none;color:var(--dsw-alias-brand-primary)}'
+      + '.aXa_av_insightBtn{flex:none;padding:2px 8px;border-radius:6px;border:1px solid var(--dsw-alias-border-l2);background:transparent;color:inherit;font:inherit;cursor:pointer}'
+      + '.aXa_av_insightBtn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}'
+      + '.aXa_av_insightBtn:disabled{opacity:.45;cursor:default}'
+      + '.aXa_av_insightInput{flex:none;width:130px;padding:2px 6px;border-radius:6px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);color:inherit;font:inherit}'
 
     function ensureCss() {
       const tagId = 'arxa-artifact-viewer/panel.css'
@@ -182,6 +200,20 @@ window.__ModuleLoader__.load({
       'error.load': 'Failed to load {path}: {reason}',
       'saved.wipPending': 'Saved (WIP commit pending: {warning})',
       'saved.committed': 'Saved · WIP committed to {session}',
+      'insight.title.streak': 'Commit streak',
+      'insight.title.ci': 'CI runs',
+      'insight.title.sessions': 'Sessions',
+      'insight.loading': 'Loading…',
+      'insight.unavailable': 'Not available for this repository.',
+      'insight.streak.current': 'Current',
+      'insight.streak.longest': 'Longest',
+      'insight.streak.empty': 'No commits in the last 90 days.',
+      'insight.ci.open': 'Open',
+      'insight.ci.empty': 'No workflow runs on this branch.',
+      'insight.sessions.open': 'Open',
+      'insight.sessions.rename': 'Rename',
+      'insight.sessions.archive': 'Archive',
+      'insight.sessions.empty': 'No sessions in this organisation.',
     }
     const pl = {
       'title': 'Artefakty',
@@ -223,6 +255,21 @@ window.__ModuleLoader__.load({
       'error.load': 'Nie udało się załadować {path}: {reason}',
       'saved.wipPending': 'Zapisano (commit WIP oczekuje: {warning})',
       'saved.committed': 'Zapisano · WIP zacommitowano do {session}',
+      // TODO native review (conformance decision 4): machine-drafted.
+      'insight.title.streak': 'Passa commitów',
+      'insight.title.ci': 'Przebiegi CI',
+      'insight.title.sessions': 'Sesje',
+      'insight.loading': 'Wczytywanie…',
+      'insight.unavailable': 'Niedostępne dla tego repozytorium.',
+      'insight.streak.current': 'Obecna',
+      'insight.streak.longest': 'Najdłuższa',
+      'insight.streak.empty': 'Brak commitów w ciągu ostatnich 90 dni.',
+      'insight.ci.open': 'Otwórz',
+      'insight.ci.empty': 'Brak przebiegów workflow na tej gałęzi.',
+      'insight.sessions.open': 'Otwórz',
+      'insight.sessions.rename': 'Zmień nazwę',
+      'insight.sessions.archive': 'Archiwizuj',
+      'insight.sessions.empty': 'Brak sesji w tej organizacji.',
     }
     const fr = {
       'title': 'Artefacts',
@@ -264,6 +311,21 @@ window.__ModuleLoader__.load({
       'error.load': 'Échec du chargement de {path} : {reason}',
       'saved.wipPending': 'Enregistré (commit WIP en attente : {warning})',
       'saved.committed': 'Enregistré · WIP commité dans {session}',
+      // TODO native review (conformance decision 4): machine-drafted.
+      'insight.title.streak': 'Série de commits',
+      'insight.title.ci': 'Exécutions CI',
+      'insight.title.sessions': 'Sessions',
+      'insight.loading': 'Chargement…',
+      'insight.unavailable': 'Indisponible pour ce dépôt.',
+      'insight.streak.current': 'Actuelle',
+      'insight.streak.longest': 'Plus longue',
+      'insight.streak.empty': 'Aucun commit sur les 90 derniers jours.',
+      'insight.ci.open': 'Ouvrir',
+      'insight.ci.empty': 'Aucune exécution de workflow sur cette branche.',
+      'insight.sessions.open': 'Ouvrir',
+      'insight.sessions.rename': 'Renommer',
+      'insight.sessions.archive': 'Archiver',
+      'insight.sessions.empty': 'Aucune session dans cette organisation.',
     }
 
     // ---- ingress store (the 0px-column race dies here) ----------------------
@@ -572,6 +634,134 @@ window.__ModuleLoader__.load({
       return 'done'
     }
 
+    // ---- insight panel (Phase 4 A3) -----------------------------------------
+    // The docked column is not only a file surface: the git card's three
+    // "Insights" links open it on a REPORT instead — commit streak, CI runs,
+    // sessions across the org. Same ingress event, same column, same sheet
+    // behaviour below 744px; only the payload differs (`kind: 'insight'`).
+    // Every read goes through the sidebar action route the card already uses,
+    // so there is one server surface, not two.
+    const postAction = async (action, arg) => {
+      const r = await fetch(ACTION_ROUTE, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action, arg }),
+      })
+      const b = await r.json().catch(() => ({}))
+      if (!b.ok) throw new Error(b.error || action)
+      return b.result
+    }
+    /** Streak intensity is a class, never an inline colour: the four steps are
+     * token-defined so light and dark both read. */
+    const streakLevel = (count) => (count >= 8 ? 4 : count >= 4 ? 3 : count >= 1 ? 2 : 1)
+    /** CI conclusion → StateDot vocabulary (done|ongoing|warning|error). */
+    const ciState = (run) => {
+      if (run.asleep) return 'warning'
+      if (run.status && run.status !== 'completed') return 'ongoing'
+      if (run.conclusion === 'success') return 'done'
+      if (run.conclusion === 'failure' || run.conclusion === 'timed_out') return 'error'
+      return 'warning'
+    }
+    function InsightPanel({ t, view, sessionId, orgId }) {
+      const [phase, setPhase] = React.useState('loading')
+      const [data, setData] = React.useState(null)
+      const [note, setNote] = React.useState('')
+      const [busy, setBusy] = React.useState(null)
+      const [tick, setTick] = React.useState(0)
+      const [renaming, setRenaming] = React.useState(null)
+      const [draft, setDraft] = React.useState('')
+      const load = React.useCallback(() => {
+        let live = true
+        setPhase('loading')
+        const action = 'insight.' + view
+        const arg = view === 'sessions' ? { orgId } : { sessionId }
+        postAction(action, arg).then((res) => {
+          if (!live) return
+          // The server says "unavailable" rather than inventing an empty
+          // report — a repo with no GitHub link has no CI to show, and an
+          // empty list would read as "your CI is fine".
+          if (res && res.reason === 'unavailable') { setPhase('unavailable'); return }
+          setData(res || {}); setPhase('ready')
+        }, (e) => { if (live) { setNote(String((e && e.message) || e)); setPhase('error') } })
+        return () => { live = false }
+      }, [view, sessionId, orgId])
+      React.useEffect(() => load(), [load, tick])
+      if (phase === 'loading') return h('div', { className: 'aXa_av_idle' }, h('div', { className: 'aXa_av_hint' }, t('insight.loading')))
+      if (phase === 'unavailable') return h('div', { className: 'aXa_av_idle' }, h('div', { className: 'aXa_av_hint' }, t('insight.unavailable')))
+      if (phase === 'error') return h('div', { className: 'aXa_av_idle' }, h('div', { className: 'aXa_av_note', 'data-tone': 'error' }, note))
+      const d = data || {}
+      if (view === 'streak') {
+        const days = d.days || []
+        if (days.length === 0) return h('div', { className: 'aXa_av_idle' }, h('div', { className: 'aXa_av_hint' }, t('insight.streak.empty')))
+        return h('div', { className: 'aXa_av_scroll' },
+          h('div', { className: 'aXa_av_insight' },
+            h('div', { className: 'aXa_av_insightNums' },
+              h('span', null, t('insight.streak.current') + ' ' + (d.current || 0)),
+              h('span', null, t('insight.streak.longest') + ' ' + (d.longest || 0))),
+            h('div', { className: 'aXa_av_streakGrid' },
+              days.map((x) => h('span', {
+                key: x.day,
+                className: 'aXa_av_streakCell',
+                'data-level': String(streakLevel(x.count || 0)),
+                title: x.day + ' · ' + (x.count || 0),
+              })))))
+      }
+      if (view === 'ci') {
+        const runs = d.runs || []
+        if (runs.length === 0) return h('div', { className: 'aXa_av_idle' }, h('div', { className: 'aXa_av_hint' }, t('insight.ci.empty')))
+        return h('div', { className: 'aXa_av_scroll' },
+          h('div', { className: 'aXa_av_insight' },
+            runs.map((run) => h('div', { key: run.id, className: 'aXa_av_insightRow' },
+              h(P.StateDot, { state: ciState(run) }),
+              h('span', { className: 'aXa_av_insightName' }, run.name || String(run.id)),
+              h('span', { className: 'aXa_av_insightMeta' }, String(run.conclusion || run.status || '')),
+              run.headSha && h('span', { className: 'aXa_av_insightMeta' }, String(run.headSha).slice(0, 7)),
+              run.url && h('a', { className: 'aXa_av_insightLink', href: run.url, target: '_blank', rel: 'noreferrer' }, t('insight.ci.open'))))))
+      }
+      // sessions
+      const rows = d.rows || []
+      if (rows.length === 0) return h('div', { className: 'aXa_av_idle' }, h('div', { className: 'aXa_av_hint' }, t('insight.sessions.empty')))
+      // The three buttons reuse the sidebar's EXISTING session actions — this
+      // panel adds a second place to reach them, never a second way to do them.
+      const act = (label, action, arg) => {
+        setBusy(label); setNote('')
+        postAction(action, arg).then(() => { setBusy(null); setTick((n) => n + 1) },
+          (e) => { setBusy(null); setNote(String((e && e.message) || e)) })
+      }
+      return h('div', { className: 'aXa_av_scroll' },
+        h('div', { className: 'aXa_av_insight' },
+          note && h('div', { className: 'aXa_av_note', 'data-tone': 'error' }, note),
+          rows.map((row) => h('div', { key: row.id, className: 'aXa_av_insightRow' },
+            h('span', { className: 'aXa_av_insightChip' }, String(row.state || '')),
+            h('span', { className: 'aXa_av_insightName' }, row.name || row.id),
+            row.repo && h('span', { className: 'aXa_av_insightMeta' }, String(row.repo)),
+            h('button', {
+              className: 'aXa_av_insightBtn', disabled: busy != null,
+              onClick: () => act('open', 'session.open', { orgId: row.orgId || orgId, sessionId: row.id }),
+            }, t('insight.sessions.open')),
+            // Rename is an inline field, never window.prompt — Tauri's
+            // WKWebView does not implement prompt (the sidebar learned this
+            // the hard way and the selftest still guards it there).
+            renaming === row.id
+              ? h('input', {
+                className: 'aXa_av_insightInput', value: draft, autoFocus: true,
+                'aria-label': t('insight.sessions.rename'),
+                onChange: (e) => setDraft(e.target.value),
+                onKeyDown: (e) => {
+                  if (e.key === 'Escape') { setRenaming(null); return }
+                  if (e.key !== 'Enter' || draft.trim() === '') return
+                  setRenaming(null)
+                  act('rename', 'session.rename', { orgId: row.orgId || orgId, sessionId: row.id, name: draft.trim() })
+                },
+              })
+              : h('button', {
+                className: 'aXa_av_insightBtn', disabled: busy != null,
+                onClick: () => { setRenaming(row.id); setDraft(row.name || row.id) },
+              }, t('insight.sessions.rename')),
+            h('button', {
+              className: 'aXa_av_insightBtn', disabled: busy != null,
+              onClick: () => act('archive', 'session.archive', { orgId: row.orgId || orgId, sessionId: row.id }),
+            }, t('insight.sessions.archive'))))))
+    }
     function ArtifactPanel(props) {
       const frameProps = props || {}
       const t = frameProps.t || ((k) => k)
@@ -655,6 +845,11 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         const p = store.consume()
         if (!p) return
+        if (p.kind === 'insight') {
+          setOpen(true)
+          setState({ phase: 'insight', view: p.view, sessionId: p.sessionId || null, orgId: p.orgId || null })
+          return
+        }
         if (p.sessionId && p.relPath) {
           void Promise.resolve(openWorktreeRef.current && openWorktreeRef.current(p.sessionId, p.relPath)).then((ok) => {
             if (ok) return
@@ -691,6 +886,10 @@ window.__ModuleLoader__.load({
         // file survives only when it IS the new current session's worktree
         // file; the org lane (bound to no session) closes too.
         if (!open) return
+        // An insight report is not a stale artifact: re-point it at the new
+        // current session so it re-fetches, rather than closing the column the
+        // user just opened. The sessions view is org-keyed and ignores this.
+        if (state.phase === 'insight') { setState((st) => ({ ...st, sessionId: id })); return }
         if (id && wtRef.current && wtRef.current.sessionId === id) return
         // Close the LAYOUT column (the frame face), not just the panel state:
         // the old reset only flipped internal state while the frame kept the
@@ -700,7 +899,10 @@ window.__ModuleLoader__.load({
         setDirty(false); setSavePhase('idle'); setSaveNote('')
         setShowSource(false); setShowDiff(false); setChip(null); setTimeline([])
         wtRef.current = null
-      }, [snap.sessionId, open, refreshChanges])
+        // state.phase is a dep on purpose: the insight guard above reads it,
+        // and without it a panel that BECAME an insight after the last session
+        // change would be judged by a stale closure and closed.
+      }, [snap.sessionId, open, refreshChanges, state.phase])
       React.useEffect(() => { void refreshChanges() }, [refreshChanges])
 
       // Markdown lane: kick the vendored markdown-it+DOMPurify bundle.
@@ -1004,7 +1206,8 @@ window.__ModuleLoader__.load({
       const header = h('div', { className: 'aXa_av_head' },
         h('div', { className: 'aXa_av_titleWrap' },
           filename && h(FileIcon, { name: filename }),
-          h('span', { className: 'aXa_av_filename' }, filename || t('title')),
+          h('span', { className: 'aXa_av_filename' },
+            state.phase === 'insight' ? t('insight.title.' + state.view) : (filename || t('title'))),
           state.phase === 'ready' && lane && h('span', { className: 'aXa_av_lane' }, t('lane.' + lane) !== 'lane.' + lane ? t('lane.' + lane) : lane),
           dotVisible && h(P.Tooltip, { label: dotLabel, delayMs: 500, side: 'bottom' },
             h('span', { style: { display: 'inline-flex', alignItems: 'center' } },
@@ -1057,6 +1260,8 @@ window.__ModuleLoader__.load({
             },
               h(P.IconEditOutline16, { size: 14 }),
               h('span', { className: 'aXa_av_changePath' }, f.relPath || f)))))
+      } else if (state.phase === 'insight') {
+        body = h(InsightPanel, { t, view: state.view, sessionId: state.sessionId, orgId: state.orgId })
       } else if (state.phase === 'loading') {
         body = h('div', { className: 'aXa_av_idle' }, h('div', { className: 'aXa_av_hint' }, t('loading') + ' ' + state.relPath))
       } else if (state.phase === 'error') {
@@ -1145,8 +1350,17 @@ window.__ModuleLoader__.load({
       ctx.effect(() => {
         const onOpen = (ev) => {
           const detail = (ev && ev.detail) || {}
-          if (!detail.relPath) return
-          store.request({ sessionId: detail.sessionId || null, relPath: detail.relPath })
+          // Two payload shapes ride ONE event: a file open (relPath) and an
+          // insight report (kind:'insight' + view). The column, the sheet
+          // behaviour below 744px and the store are shared; only the panel
+          // body differs, so there is no second ingress to keep in step.
+          if (detail.kind === 'insight') {
+            if (!detail.view) return
+            store.request({ kind: 'insight', view: detail.view, sessionId: detail.sessionId || null, orgId: detail.orgId || null })
+          } else {
+            if (!detail.relPath) return
+            store.request({ sessionId: detail.sessionId || null, relPath: detail.relPath })
+          }
           try { if (ctx.layout && typeof ctx.layout.openViewer === 'function') ctx.layout.openViewer() } catch { /* face not wired yet */ }
         }
         window.addEventListener('arxa-av-open', onOpen)

@@ -136,9 +136,66 @@ check('card: draft returns evidence only — the engine never drafts (Q6)', host
 check('card: PR title validated (becomes the squash subject, Q7/Q8)', hostSrc().includes('title-not-conventional'))
 check('card: PR create dedupes before opening (file-pr rule 1)', hostSrc().includes('prListForHead') && hostSrc().includes('existing: true'))
 check('card: session-branch push is PR-purpose only (D73 relaxation)', hostSrc().includes('card.push serves session seats'))
-check('card: S4 surface — input-dock entry above the composer bar, session-bound (en+pl+fr)', client.includes('data-arxa-git-card') && client.includes('ArxaGitCardDock') && client.includes('"conversation.input.dock"') && client.includes('order: 20') && client.includes('"card.subjectPlaceholder": "commit subject') && client.includes('"card.subjectPlaceholder": "temat commitu') && client.includes('"card.subjectPlaceholder": "sujet du commit') && !client.includes('createPortal'))
+check('card: S4 surface — input-dock entry above the composer bar, session-bound (en+pl+fr)', client.includes('data-arxa-git-card') && client.includes('ArxaGitCardDock') && client.includes('"conversation.input.dock"') && client.includes('order: 30') && client.includes('"card.subjectPlaceholder": "commit subject') && client.includes('"card.subjectPlaceholder": "temat commitu') && client.includes('"card.subjectPlaceholder": "sujet du commit') && !client.includes('createPortal'))
 check('card: S4 states — local-only badge + frame chip + collapsible head', client.includes('card.localOnly') && client.includes('card.frame') && client.includes('data-arxa-card-head') && client.includes('data-arxa-card-caret'))
 check('card: S4 Q6 — ask-the-session prefills the composer, never an engine LLM', client.includes('card.askDraft') && client.includes('Draft a conventional commit subject'))
+// ---- Phase 4 A2: the card is a three-slide strip ------------------------------
+// CLIENT assertions only. The matching server actions (card.runner.wake,
+// card.pr.merge, version.mint, insight.*) land in lib/index.js on another
+// agent's clock — pinning them here would make this gate red for work that is
+// not this file's, and green-by-coincidence when it lands.
+check('card A2: dock order is 30 — the card sits nearest the composer bar (todo=0, goal=10, card=30)',
+  /id: "arxa-git-card",\s*\n\s*order: 30,/.test(client))
+check('card A2: slide strip markers — clipping strip, translated track, three named slides',
+  ['data-arxa-card-teaser', 'data-arxa-card-strip', 'data-arxa-card-track',
+    '"data-arxa-card-slide": "status"', '"data-arxa-card-slide": "commit"', '"data-arxa-card-slide": "approve"',
+    'data-arxa-card-prev', 'data-arxa-card-next', 'data-arxa-card-dot',
+  ].every((m) => client.includes(m)))
+check('card A2: the track slides by transform, not by reflow',
+  client.includes('translateX(" + (-slide * 100) + "%)') && client.includes('transition:transform var(--ds-transition-duration-slow)'))
+check('card A2: slide state resets to 0 on session change and jumps to approve after a PR opens',
+  client.includes('setSlide(0)') && client.includes('setSlide(2)'))
+check('card A2: approve-slide + wake/merge/mint markers present',
+  ['data-arxa-card-wake', 'data-arxa-card-merge', 'data-arxa-card-mint', 'data-arxa-card-mintchip', 'data-arxa-card-prinfo'].every((m) => client.includes(m)))
+check('card A2: merge is gated on green checks AND an open PR (the one irreversible button)',
+  client.includes('checkState !== "green" || pr.state !== "open"'))
+check('card A2: the client calls the four new actions by name',
+  ['"card.runner.wake"', '"card.pr.merge"', '"version.mint"', '"card.pr.status"'].every((a) => client.includes('ORG_POST(' + a)))
+check('card A2: PR polling is scoped to the approve slide with a live PR (no idle GitHub traffic)',
+  client.includes('if (slide !== 2 || !sid || prNumber == null) return void 0'))
+check('card A2: three Insights links dispatch the arxa-av-open insight detail (kind/view/sessionId/orgId)',
+  client.includes('new CustomEvent("arxa-av-open", { detail: { kind: "insight", view, sessionId: sid, orgId } })')
+  && ['"data-arxa-card-insight": "streak"', '"data-arxa-card-insight": "ci"', '"data-arxa-card-insight": "sessions"'].every((m) => client.includes(m)))
+check('card A2: frame health reads through StateDot, not a hand-rolled dot',
+  client.includes('_deepseek_ai_dsh_client_ui_primitives.StateDot, { state }') && client.includes('data-arxa-card-frame'))
+check('card A2: notice + main-red are sentences, not codes',
+  client.includes('"runner-asleep"') && client.includes('"checks-pending"') && client.includes('m.indexOf("main-red") >= 0'))
+// Conformance, card block only: the CSS now carries a disposer, every colour is
+// a real token, and the dead --dsw-alias-label-error alias is gone from it.
+check('card A2 conformance: card CSS is injected from an effect WITH a disposer (was bare at factory scope)',
+  client.includes('tag.dataset.pluginCss = "arxa-sidebar-card"') && client.includes('return () => { try { tag.remove() }')
+  && !/pluginCss = "arxa-sidebar-empty-state";[\s\S]{0,4000}data-arxa-card-body/.test(client))
+const cardCss = client.slice(client.indexOf('const CARD_CSS'), client.indexOf('const CHECK_STATE'))
+check('card A2 conformance: the card CSS block was found (the slice the next check reads)', cardCss.length > 1000)
+check('card A2 conformance: no hex and no color-mix guesswork left in the card block — --dsw-* tokens only',
+  !/#[0-9a-fA-F]{3,8}\b/.test(cardCss)
+  && !cardCss.includes('color-mix')
+  // --dsw-alias-label-error is dead; errors paint --dsw-alias-state-error-primary.
+  && !cardCss.includes('--dsw-alias-label-error')
+  && cardCss.includes('--dsw-alias-state-error-primary'))
+for (const key of ['card.slide.status', 'card.slide.commit', 'card.slide.approve', 'card.slide.prev', 'card.slide.next',
+  'card.teaser.runnerAsleep', 'card.teaser.mainRed', 'card.mainRed', 'card.frameWired.ok', 'card.frameWired.missing',
+  'card.runner.online', 'card.runner.asleep', 'card.runner.unknown', 'card.wake', 'card.wakeStarted', 'card.wakeManual',
+  'card.insight.streak', 'card.insight.ci', 'card.insight.sessions',
+  'card.checks.green', 'card.checks.red', 'card.checks.pending', 'card.checks.asleep', 'card.checks.none', 'card.checks.unknown',
+  'card.merge', 'card.merged', 'card.mergeRefused', 'card.mint',
+  'card.notice.runnerAsleep', 'card.notice.checksPending']) {
+  check('card A2 locale: "' + key + '" is in all three dicts (en/pl/fr)',
+    (client.match(new RegExp('"' + key.replace(/\./g, '\\.') + '":', 'g')) || []).length === 3)
+}
+check('card A2 locale: the machine-drafted pl/fr card block is flagged for native review (decision 4)',
+  (client.match(/TODO native review \(conformance decision 4\)/g) || []).length === 2)
+check('card A2: still no createPortal anywhere in the bundle', !client.includes('createPortal'))
 check('create: D92 live preview + collision contract localized (en + pl + fr), snapshot radio deleted',
   client.includes('"org.create.preview": "Creates at"') && client.includes('"org.create.preview": "Utworzy w"') && client.includes('"org.create.preview": "Sera créée dans"') && client.includes('"org.create.exists.nonempty": "That folder already exists and isn\'t empty — change the name or the location."') && client.includes('"org.create.exists.nonempty": "Ten folder już istnieje i nie jest pusty — zmień nazwę lub lokalizację."') && client.includes('"org.create.exists.nonempty": "Ce dossier existe déjà et n’est pas vide — changez le nom ou l’emplacement."') && client.includes('"org.create.exists.open": "Open it instead"') && client.includes('"org.create.exists.open": "Otwórz ją zamiast tego"') && client.includes('"org.create.exists.open": "L’ouvrir à la place"') && !client.includes('org.create.existing') && !client.includes('includeExisting') && client.includes('folder-info'))
 check('create: D92 engine target is ALWAYS root + slug(name); heuristic + includeExisting param deleted',

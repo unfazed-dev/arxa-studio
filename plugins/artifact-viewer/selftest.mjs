@@ -109,6 +109,47 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   assert.deepEqual([...new Set(hexes)].sort(), ['#fff'],
     'no hardcoded hex colors — the only white left is the pdf/iframe document surface')
   assert.match(t5client, /--dsw-alias-border-l2|--dsw-alias-label-error|--dsw-alias-brand-primary/, 'real theme tokens used')
+  // ---- Phase 4 A3: the insight branch -----------------------------------------
+  // Client-side only. The three insight.* server actions land in the sidebar's
+  // lib/index.js on another agent's clock; asserting them here would make this
+  // gate red for work that is not this file's.
+  assert.match(t5client, /if \(detail\.kind === 'insight'\)/, 'the ingress accepts an insight payload alongside a file open')
+  assert.match(t5client, /store\.request\(\{ kind: 'insight', view: detail\.view, sessionId: detail\.sessionId \|\| null, orgId: detail\.orgId \|\| null \}\)/,
+    'the insight payload is parked in the SAME store as a file open')
+  assert.match(t5client, /if \(!detail\.view\) return/, 'an insight event without a view is refused, not opened blank')
+  assert.match(t5client, /if \(p\.kind === 'insight'\)/, 'the panel consumes the insight payload before the file flow')
+  assert.match(t5client, /phase: 'insight', view: p\.view/, 'the consume branch sets the insight phase')
+  assert.match(t5client, /\} else if \(state\.phase === 'insight'\) \{\n\s*body = h\(InsightPanel,/,
+    'the body renders InsightPanel for the insight phase and the file flow otherwise')
+  assert.match(t5client, /function InsightPanel\(\{ t, view, sessionId, orgId \}\)/, 'InsightPanel exists with the four-prop face')
+  assert.match(t5client, /body: JSON\.stringify\(\{ action, arg \}\)/, 'InsightPanel posts {action,arg} — the same shape the git card uses')
+  assert.match(t5client, /const arg = view === 'sessions' \? \{ orgId \} : \{ sessionId \}/,
+    'sessions is org-keyed; streak and CI are session-keyed')
+  for (const a of ["'insight.' + view"]) assert.ok(t5client.includes(a), 'insight action name is derived from the view: ' + a)
+  for (const a of ["'session.open'", "'session.rename'", "'session.archive'"]) {
+    assert.ok(t5client.includes(a), 'sessions rows reuse the EXISTING sidebar action, no new one: ' + a)
+  }
+  assert.match(t5client, /res\.reason === 'unavailable'/, "an 'unavailable' reason renders a sentence, never an empty report")
+  assert.match(t5client, /t\('insight\.unavailable'\)/, 'the unavailable string goes through t()')
+  assert.match(t5client, /aXa_av_streakGrid/, 'streak renders a CSS grid of day cells')
+  assert.ok((t5client.match(/aXa_av_streakCell\[data-level=/g) || []).length === 3
+    && t5client.includes(".aXa_av_streakCell{"), 'four streak intensity steps (base + 3 levels), token-derived')
+  assert.match(t5client, /h\(P\.StateDot, \{ state: ciState\(run\) \}\)/, 'CI rows carry a StateDot, not a hand-rolled dot')
+  // t5code is the comment-stripped source: the rule is about CODE, and the
+  // comment next to the inline field names the banned call to explain itself.
+  assert.doesNotMatch(t5code, /window\.prompt/, 'the sessions rename is an inline field — Tauri WKWebView has no window.prompt')
+  assert.match(t5client, /className: 'aXa_av_insightInput'/, 'the rename field is a real input in the row')
+  assert.match(t5client, /if \(state\.phase === 'insight'\) \{ setState\(\(st\) => \(\{ \.\.\.st, sessionId: id \}\)\); return \}/,
+    'a session switch re-points an open insight panel instead of closing the column')
+  for (const key of ['insight.title.streak', 'insight.title.ci', 'insight.title.sessions', 'insight.loading',
+    'insight.unavailable', 'insight.streak.current', 'insight.streak.longest', 'insight.streak.empty',
+    'insight.ci.open', 'insight.ci.empty', 'insight.sessions.open', 'insight.sessions.rename',
+    'insight.sessions.archive', 'insight.sessions.empty']) {
+    const n = (t5client.match(new RegExp("'" + key.replace(/\./g, '\\.') + "':", 'g')) || []).length
+    assert.equal(n, 3, 'insight string "' + key + '" is in all three dicts (en/pl/fr), found ' + n)
+  }
+  assert.equal((t5client.match(/TODO native review \(conformance decision 4\)/g) || []).length, 2,
+    'the machine-drafted pl/fr insight strings are flagged for native review')
   // wt lane accepts an absolute chip path that lives INSIDE the worktree,
   // and still refuses escapes (D91 re-base, escape checks intact)
   assert.match(wt, /path\.isAbsolute\(relPath\)/, 'absolute chip paths are re-based onto the worktree root')
