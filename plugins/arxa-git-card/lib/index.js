@@ -118,6 +118,27 @@ export function apply(ctx) {
             return { owner: manifest.repoOwner, name: manifest.repoName }
           }
 
+          /** Resolve the repo a run-control call must act on.
+           * D98 again: a project session's workflow runs live in the PROJECT
+           * repo, so reading the org manifest would re-run or cancel a run in
+           * the wrong repository. Every neighbouring PR handler refuses a
+           * project seat for exactly this reason; these do the same rather than
+           * act confidently on the wrong remote. */
+          const ciTarget = async () => {
+            const g = await getGithub().catch(() => null)
+            if (!g) throw new Error('github-unavailable')
+            const runId = arg?.runId
+            if (runId === undefined || runId === null || runId === '') throw new Error('runId-required')
+            const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+            if (sid) {
+              const gw = await importGitWorkspace()
+              const s = gw.parkedSessions(handle().path).find((x) => x.id === sid)
+              if (s && s.origin === 'project') throw new Error('project-session-pr-pending: run control for project repos lands in Phase 2')
+            }
+            const { owner, name } = await orgRepoFor(handle())
+            return { g, owner, name, runId }
+          }
+
           const pushSessionBranch = async (gw, cur, sid, { loud = false } = {}) => {
             const fail = (reason) => { if (loud) throw new Error(reason); return { ok: false, reason } }
             const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
@@ -254,7 +275,12 @@ export function apply(ctx) {
                 // pushed. The push is ADVISORY: it never fails the commit, and
                 // it never runs for an unlinked or local-only repo, so an
                 // offline stage boundary behaves exactly as it did before.
-                if (out && out.parked !== true) {
+                // Both real returns set `parked` explicitly (green:
+                // {parked:false, merged:true}; red: {parked:true}), so test for
+                // the exact green value rather than "not true" — a future
+                // return that omits the field must not silently start pushing.
+                // A merge conflict throws SessionMergeError and never gets here.
+                if (out && out.parked === false) {
                   out.pushed = await pushSessionBranch(gw, cur, sid).catch((err) => ({ ok: false, reason: String(err?.message ?? err).slice(0, 120) }))
                 }
                 return out
@@ -356,19 +382,11 @@ export function apply(ctx) {
             /** Q8: run control from the card. Both take the run id the status
               * call already surfaced, so the UI never has to guess one. */
             'card.ci.rerun': async () => {
-              const g = await getGithub().catch(() => null)
-              if (!g) throw new Error('github-unavailable')
-              const { owner, name } = await orgRepoFor(handle())
-              const runId = arg?.runId
-              if (runId === undefined || runId === null || runId === '') throw new Error('runId-required')
+              const { g, owner, name, runId } = await ciTarget()
               return g.rerunRun({ owner, name, runId, failedOnly: arg?.failedOnly === true })
             },
             'card.ci.cancel': async () => {
-              const g = await getGithub().catch(() => null)
-              if (!g) throw new Error('github-unavailable')
-              const { owner, name } = await orgRepoFor(handle())
-              const runId = arg?.runId
-              if (runId === undefined || runId === null || runId === '') throw new Error('runId-required')
+              const { g, owner, name, runId } = await ciTarget()
               return g.cancelRun({ owner, name, runId })
             },
             /** D116: merge-commit the reviewed PR, pinned to the sha the

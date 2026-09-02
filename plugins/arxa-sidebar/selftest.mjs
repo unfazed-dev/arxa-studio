@@ -280,19 +280,35 @@ check('Q6: opening/resuming a session reveals its row — ancestors expanded (ne
       && ghLink.includes('async function gitCredentials(force = false)')
       && ghLink.includes('const accessToken = await getToken(force === true)'))
   check('S3/Q6: syncRepoNow no longer leaves a healed org reading publish-failed forever',
-    lifecycle.includes('const clearStaleStatus = ()')
+    lifecycle.includes('const clearStaleStatus = async ()')
       && lifecycle.includes("/^(publish-failed|sync-conflict|push-failed)/.test(st)")
       && lifecycle.includes("githubStatus: 'published'"))
   check('S3/Q6: the push path itself is routed through the retry — no bare pushRepo left in sync/publish',
     !lifecycle.includes('if (pushCreds.ok) pushRepo(') && !lifecycle.includes('if (c2.ok) pushRepo('))
   check('S3/Q6-Q7: a GREEN stage boundary publishes the session branch; a parked one does not, and the push never fails the commit',
-    card.includes('if (out && out.parked !== true)')
+    card.includes('if (out && out.parked === false)')
       && card.includes('out.pushed = await pushSessionBranch(gw, cur, sid).catch(')
       && card.includes('const pushSessionBranch = async (gw, cur, sid, { loud = false } = {})'))
   check('S3/Q8: checks are read for the BRANCH with or without a PR, and run control is wired',
     card.includes("const checks = await g.prChecks(manifest.repoOwner, manifest.repoName, s.branch)")
       && card.includes("'card.ci.rerun'") && card.includes("'card.ci.cancel'")
       && card.includes('g.rerunRun({ owner, name, runId') && card.includes('g.cancelRun({ owner, name, runId })'))
+  // A project session's runs live in the PROJECT repo; reading the org manifest
+  // would re-run or cancel in the wrong repository, which is why every
+  // neighbouring PR handler refuses a project seat.
+  check('S3/Q8: run control refuses a project seat instead of acting on the org repo',
+    card.includes('const ciTarget = async () =>')
+      && card.includes("if (s && s.origin === 'project') throw new Error('project-session-pr-pending: run control for project repos lands in Phase 2')")
+      && !card.includes('const { owner, name } = await orgRepoFor(handle())\n              const runId = arg?.runId'))
+  // The clear commit is made AFTER the ahead/behind read, so nothing upstream
+  // pushes it — leaving it would swap a stale error for a repo permanently 1
+  // ahead, the exact symptom being fixed.
+  check('S3/Q6: the status-clearing commit is pushed, not left stranding main one ahead',
+    lifecycle.includes('const clearStaleStatus = async () =>')
+      && lifecycle.includes('if (committed !== null) await pushWithAuthRetry(repoPath, manifest.repoUrl, kind)')
+      && (lifecycle.match(/await clearStaleStatus\(\)/g) || []).length === 3)
+  check('S3/Q6-Q7: the boundary push tests the EXACT green value, so a return that omits parked cannot start pushing',
+    card.includes('if (out && out.parked === false)') && !card.includes('out.parked !== true'))
 
   check('S1/Q1: the header title is PINNED to the worktree name on both spawn paths, throw-proof, from the STORE not the handle',
     hostSrc.includes('const pinTitle = (live) =>')

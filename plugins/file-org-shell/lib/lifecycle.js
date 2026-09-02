@@ -407,7 +407,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
        * Without this one blip left `publish-failed: … Invalid username or
        * token` on the manifest forever, so the org read as broken long after
        * it had healed — which is most of why RESTO "looked" unsynced. */
-      const clearStaleStatus = () => {
+      const clearStaleStatus = async () => {
         try {
           const st = manifest.githubStatus
           if (typeof st !== 'string') return
@@ -417,7 +417,13 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           else annotateProjectManifest(repoPath, fields)
           const file = path.basename(manifestFile)
           runGit(['add', file], { cwd: repoPath, allowFail: true })
-          runGit(['commit', '-m', 'chore(github): clear a healed sync status', '--', file], { cwd: repoPath, allowFail: true })
+          const committed = runGit(['commit', '-m', 'chore(github): clear a healed sync status', '--', file], { cwd: repoPath, allowFail: true })
+          // This commit is made AFTER the ahead/behind read, so nothing above
+          // will push it: leaving it here would trade "stuck showing a stale
+          // error" for "permanently 1 ahead of origin" — the very symptom
+          // being fixed. Push it now. Best-effort: a failure just means the
+          // next sync finds ahead>0 and pushes it then.
+          if (committed !== null) await pushWithAuthRetry(repoPath, manifest.repoUrl, kind).catch(() => null)
         } catch { /* advisory — never fail a good sync on bookkeeping */ }
       }
       const state = mainSyncState(repoPath, env)
@@ -440,7 +446,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
         try {
           const pushed = await pushWithAuthRetry(repoPath, manifest.repoUrl, kind)
           if (!pushed.ok) return 'no-creds'
-          clearStaleStatus()
+          await clearStaleStatus()
           return 'pushed'
         } catch (err) {
           return 'push-failed: ' + String(err?.message ?? err).slice(0, 120)
@@ -448,10 +454,10 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       }
       if (state.behind > 0) {
         const pulled = ffMergeMain(repoPath, env)
-        if (pulled) clearStaleStatus()
+        if (pulled) await clearStaleStatus()
         return pulled ? 'pulled' : 'in-sync'
       }
-      clearStaleStatus()
+      await clearStaleStatus()
       return 'in-sync'
     } catch (err) {
       return 'error: ' + String(err?.message ?? err).slice(0, 120)

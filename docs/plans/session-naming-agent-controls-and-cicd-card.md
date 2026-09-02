@@ -241,7 +241,8 @@ Measured on a real engine (`ARXA_HOME=/tmp/arxa-s1`, port 7896):
 - Crumb renders `SMOKE / notes / note-wt-260903-001` with `tailDuplicated: false`
   — Q3's collapse confirmed in the DOM.
 - `session.list` shows `agentPreset:"arxa"` on **both `arxa-*` sessions** — the exact
-  field `AgentPresetLabel` reads. Before the fix this was absent.
+  field `AgentPresetLabel` reads. Before the fix this was absent. **Wire verified;
+  the chip's rendered pixels were NOT observed** (see gap 3).
 - `projections.values.title == "note-wt-260903-001"` on a freshly created session.
 - Sidebar row label follows a rename (`Pricing research` observed).
 
@@ -256,7 +257,8 @@ inside a container stays natural, the day-namespace is shared. Recorded in
 ### Stage 3 — server half LANDED (`ddf70a7`); card UI NOT built
 Done and covered by tests: `pushWithAuthRetry` + `gitCredentials(force)` threaded
 through github-bridge → github-link; `clearStaleStatus` on pushed/pulled/in-sync;
-session-branch push on a GREEN stage boundary (advisory, never fails the commit);
+session-branch push on a GREEN stage boundary (advisory, never fails the commit) —
+**wired and statically checked, never executed: no stage boundary ran this session**;
 `ci.yml` watches `arxa/session/**` with `FRAME_VERSION` 2→3; `card.pr.status`
 reads branch checks with or without a PR and returns `runs`; `card.ci.rerun` /
 `card.ci.cancel` actions plus `rerunRunApi` / `cancelRunApi`.
@@ -272,6 +274,18 @@ entries), each returning null once its stock counterpart goes live; muted
 
 **Not built:** pause/resume/cancel controls and the subagent/job detail panel.
 Stopped deliberately rather than ship dead buttons — see Known gaps.
+
+### Advisor review fixes (post-implementation)
+- **`card.ci.rerun` / `card.ci.cancel` read the org manifest with no session
+  lookup**, so on a project seat they would have re-run or cancelled a run in
+  the wrong repository. Now routed through `ciTarget()`, which refuses a project
+  seat exactly as the neighbouring PR handlers do.
+- **`clearStaleStatus` committed after the ahead/behind read**, so nothing
+  upstream pushed it — trading "stuck showing a stale error" for "permanently 1
+  ahead of origin", the very symptom being fixed. It now pushes what it commits.
+- **The boundary-push guard was `parked !== true`**, which `undefined` also
+  passes. Both real returns set `parked` explicitly (green `false`, red `true`),
+  so it now tests `=== false`.
 
 ## Known gaps and exactly where they sit
 
