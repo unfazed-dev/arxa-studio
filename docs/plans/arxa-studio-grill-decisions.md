@@ -116,10 +116,25 @@ open questions tracked at the bottom.
     dividing line), ACID/audit-trail requirements for money, GitOps
     derived-index pattern + dual-write warnings.
 
-- **D12 — Payment gate provider: B, merchant of record.**
-  - Paddle or Lemon Squeezy handles checkout, global sales tax/VAT, and
-    issues license keys; ~5% fees accepted as the cost of not being the
-    merchant.
+- **D12 — Payment gate provider: B, merchant of record → Paddle.**
+  - Paddle handles checkout, global sales tax/VAT; ~5% + $0.50 fees
+    accepted as the cost of not being the merchant. arxa issues its own
+    entitlement tokens (Paddle Billing has no licence-key primitive).
+  - Lemon Squeezy REMOVED (2026-09-02): its CEO's 28 Jan 2026 post names
+    Stripe Managed Payments "the future" and says the goal is to migrate
+    LS users onto it. Building on LS = building on a product its owner
+    is retiring. Research: `arxa/docs/research/payment-architecture/
+    mor-provider-comparison.md`.
+  - Switch condition: if the seller entity ends up Australian (or EU)
+    AND Stripe confirms Managed Payments eligibility in writing, go
+    Stripe MP directly instead of Paddle → skips the later migration.
+    A Mauritius entity closes that door (Stripe MP regions: NA/EU/APAC,
+    Mauritius not expected) → Paddle stays. Polar is the fallback if
+    Paddle rejects the account.
+  - OPEN (gates the contract, not the design): seller-of-record legal
+    entity is undecided between Mauritius and Australia. Payout facts
+    either way: Paddle pays monthly (1st → by 15th), $100 minimum, wire
+    in AUD/EUR/USD (no MUR; $15 wire fee off local rails).
   - dsh validates the license key inside the same mount-point enforcer
     from D10; offline-tolerant cached check (grace window).
   - Enforcement goal is honest-user + server-side issuance, not DRM — the
@@ -149,16 +164,18 @@ open questions tracked at the bottom.
     `plans_viewmodel.js` with `attemptCheckout`/`applyUpgrade`, arxa.dev
     sign-in; prior decisions in
     `docs/plans/scaffold-shell-kit-picker-decisions.md`).
-  - The D12 merchant of record (Paddle/Lemon Squeezy) is the single money
-    pipe for everything: one-time kit/tier purchases in arxa AND the
+  - The D12 merchant of record (Paddle; Stripe Managed Payments if the
+    D12 switch condition is met) is the single money pipe for everything: one-time kit/tier purchases in arxa AND the
     Agency subscription. arxa.dev issues/holds entitlements only — it
     never touches money.
   - The existing plans-paywall flow gets retrofitted onto MoR checkout.
   - Pricing shape: Studio free; Agency subscription; arxa freemium with
     one-time premium kit purchases (matches boilerplate-market norms:
     base kits free, premium one-time $199–$599 range).
-  - Free tier must still produce a complete usable scaffold — never a
-    crippled one.
+  - ~~Free tier must still produce a complete usable scaffold — never a
+    crippled one.~~ Superseded by D104 (2026-09-02): scaffold is paid;
+    the "never crippled" rule applies to a Pro user's scaffold on base
+    kits — premium kits add, never repair.
 
 - **D16 — Accounts: C, anonymous free with optional early link.**
   - Free Studio and free arxa kits run fully anonymous and local.
@@ -956,3 +973,154 @@ architecture; this grill settles the editor extension it never covered.
   directly rather than `orgStore.mutate`, because `mutate` discards the
   result (`.then((r) => refresh())`) and the per-repo status IS the
   deliverable; the refresh is then done by hand.
+
+- **D98 — Engine ships locally; ship-vs-host is closed with revisit
+  triggers.** (Confirms D30 and consolidate #11, 2026-09-02.) The engine
+  (13 MB Dart AOT) stays a Tauri sidecar on the customer's disk; kits are
+  delivered from a static signed bucket (not bundled, not computed); hosted
+  conveniences (kit CDN, resold cloud builds, later Totem Cloud) are the
+  growth path and never sit between the user and a scaffold. Licence stays
+  the offline-verified Ed25519 JWT with grace — the Unity/JetBrains shape.
+  The question was reopened on an install-size worry; measured, the engine
+  is 13 MB and the 193 MB harness is 116 MB of node runtime, so size is not
+  an argument for hosting. Reopen ONLY if one fires: verified piracy >10 %
+  of paid seats in a quarter; a feature that cannot run on a laptop
+  (non-BYO model, >8 GB, GPU); a contract demanding sub-TTL revocation the
+  customer won't take as a shorter TTL; a second operator to hold on-call.
+  Full analysis: `arxa/docs/research/payment-architecture/engine-distribution-options.md`.
+  Fallout work (not hosting arguments): kit distribution (engine currently
+  needs a repo checkout via `findRepoRoot()`), Linux build (no linux triple
+  anywhere), optional harness slimming.
+
+- **D99 — Offline window for paid scaffold: 30 days of grace after token
+  expiry.** (2026-09-02.) Token TTL stays ~7 days with refresh at <48 h
+  left; after `exp` the engine keeps unlocking for 30 days
+  (`entitlement.dart:93 gracePeriod = Duration(days: 30)` — already in
+  code, now a decision rather than a default). Cached kits stay valid for
+  the same window. Licence sharing inside that window is accepted (D98).
+  Air-gapped-forever is out of scope; no manual activation path.
+
+- **D100 — Agency is the Studio binary in an entitlement-gated mode.**
+  (2026-09-02.) One Studio artifact per D14 channel; no separate Agency
+  build, download, or launcher. The Agency sidebar sections (admin,
+  business, clients, …) render only when the signed entitlement token
+  (D10/D99 JWT) carries the `agency` claim; a company buys the D15
+  subscription and the sections appear at the next token refresh. Agency
+  UI code therefore ships to every Studio user (not secret, just gated) —
+  accepted, because enforcement is server-issued tokens, not hidden code
+  (D12 "inherently crackable"). Rejected: separate build launched from
+  Studio (four release pipelines for no enforcement gain); hosted Agency in
+  a webview (contradicts D13 local-first SQLite and D98 engine-local).
+  "Only via Studio" = there is no other artifact; nothing to reach outside
+  it.
+
+- **D101 — Supabase is the entitlement authority and nothing else.**
+  (2026-09-02.) Supabase holds arxa.dev accounts and the entitlements
+  ledger. Paddle webhooks land in ONE edge function that writes
+  `subscriptions`/entitlements; `/activate` signs the Ed25519 JWT from that
+  table (D99 TTL/grace). Supabase never holds customers' agency/business
+  data (D13: local SQLite, pluggable remote) and never touches money
+  (D15: Paddle is the only money pipe). The two existing migration trees
+  that both write `subscriptions` must be reconciled into this one ledger
+  before the Paddle webhook is built. Rejected: Supabase as the Agency
+  multi-seat remote now (customer data on arxa's Supabase before a
+  tenancy/RLS design — security research's top Supabase failure mode;
+  revisit when a paying company asks); Supabase-runs-everything
+  (contradicts D98 static kit bucket; single lock-out point).
+  Diagram: `arxa/docs/research/payment-architecture/architecture-diagram.md`.
+
+- **D102 — Agency subscription is per-seat; the buyer is org owner and
+  invites members.** (2026-09-02.) The Paddle subscription carries
+  `quantity = seats`. The purchasing arxa.dev account becomes the org's
+  owner; owner invites members by email; a member's own `/activate` token
+  carries `agency` (+ org id) only while they hold a seat. Ledger gains
+  `orgs` and `org_members` next to entitlements — still entitlement data,
+  inside D101's boundary; no business data. Seat count is enforced at
+  invite time (owner cannot exceed quantity) and at token issue (member
+  without a seat gets no `agency` claim). Webhook `subscription.updated`
+  with a lower quantity marks the org over-limit; owner must remove
+  members before new invites, existing members keep access until their
+  token's D99 window ends. Rejected: flat per-company (no lever for a
+  50-person agency vs a freelancer); per-user with no org (companies can't
+  buy centrally or get one invoice; would push every company deal into
+  Paddle's sales-gated invoicing).
+
+- **D103 — Agency has a 14-day trial, card required, run by Paddle.**
+  (2026-09-02.) The trial is a Paddle trial subscription: Paddle collects
+  the card, owns the disclosure/reminder obligations (its trial-compliance
+  requirements apply to arxa's checkout copy), and converts or cancels on
+  day 14. The ledger gains a `trialing` state fed by the same webhook;
+  `/activate` issues `agency` on `trialing` exactly as on `active`, so
+  trial and paid are indistinguishable to the Studio. Seats during trial =
+  the quantity chosen at checkout (D102). Rejected: no trial (pay before
+  seeing the business sections — weak for an unknown product); card-less
+  trial minted by arxa.dev (arxa would own trial logic, abuse controls and
+  conversion nags — work Paddle does, plus a fraud surface flagged in
+  `security-research.md`).
+
+- **D104 — Solo free/paid line: scaffold is paid (kit-picker decision 17
+  stands; D15's free-scaffold bullet superseded).** (2026-09-02.) Free =
+  intake, design, eject (the take-away htmx artifact, kit-picker 11),
+  fully anonymous and local (D16). Scaffold and every stage after it
+  require the Pro entitlement — per-seat, recurring (kit-picker 19's
+  Pro, ~$20–40/seat/mo, price band still open). One-time premium kits
+  ($199–$599, D15) sit on top of Pro, never replace it; a Pro user's
+  scaffold on base kits is complete. The engine gate stays where it is
+  (`gates.dart:50` — scaffold is the only gate consuming
+  `~/.arxa/entitlement.jwt`); the Studio paywall surface is the
+  `arxa-plan` dsh plugin (D106) — NOT the earlier `plans_viewmodel.js`
+  design artifact under `designs/arxa-studio/`, which predates the dsh
+  Studio and is stale (its state names signedout | free | entitled and
+  pay outcomes succeed | decline | cancel | error | timeout carry over
+  as the plugin's vocabulary, nothing else does). Rejected: free scaffold
+  funded by one-time kits + paid operate-for-you stages (moat ships free
+  again — the regret recorded in 17; no recurring solo revenue; gate
+  moves back to deploy); free scaffold with a monthly cap (caps on an
+  offline fingerprint-bound engine reset trivially — abuse controls D103
+  refused). Open: exact Pro price. Checkout hand-off: D105.
+
+- **D105 — Checkout happens in the system browser on an arxa.dev page;
+  Studio gets the result by deep link + `/activate` poll.** (2026-09-02.)
+  From the `plans` view, Studio (or the CLI, which prints the URL) opens
+  `https://arxa.dev/checkout?price=<paddle price id>&uid=<arxa.dev user>`
+  in the default browser. That page is arxa's, runs Paddle.js overlay
+  checkout, and on Paddle's `checkout.completed` event redirects to
+  `arxa://checkout/done`; Studio meanwhile polls `/activate` until the
+  D101 webhook has written the entitlement, then refreshes the token.
+  Card data never enters the desktop webview; same loopback/deep-link
+  shape as D18's PKCE sign-in. Sources read: Paddle "Handle checkout
+  success" (Paddle.js `checkout.completed` event callback or redirect;
+  provision via webhooks) and "Hosted checkout URL query parameters"
+  (hosted no-page links require additional approval from Paddle —
+  sellers@paddle.com — sandbox only until granted). Rejected: Paddle.js
+  inside the Tauri webview (3DS/bank redirects and wallet pay in an
+  embedded WebKit/WebView2 are unsupported territory; Paddle's guidance
+  for apps is purchase-outside-the-app); Paddle Hosted Checkout links as
+  the launch plan (approval-gated — acceptable later simplification).
+
+- **D106 — The paywall is a new dsh/cordis plugin, `arxa-plan`: host +
+  client, sidebar plan card + overlay wall.** (2026-09-02.) Corrects the
+  stale premise that the Studio paywall lives in
+  `designs/arxa-studio/.../plans_viewmodel.js` — the Studio is dsh now,
+  and UI is contributed only by cordis plugins (`profile/cordis.patch.yml`
+  insert/disable rows; `docs/plans/dsh-plugin-ui-conformance.md`).
+  Host half: shells `arxa entitlement status` (one JSON line —
+  entitled | unentitled | none, `features`, `expires`, honest `reason`;
+  `entitlement_cli.dart`) and `arxa entitlement refresh`; exposes
+  `POST /__arxa/plan/action` with actions `checkout` (opens the D105 URL
+  in the system browser), `refresh`, `sign-in`; observes the scaffold
+  gate's refusal so the wall opens at the moment Run is denied. Client
+  half: hand-written zero-dep bundle (conformance decision 3), en/pl/fr
+  via arxa-locale, light + dark; a plan card in the `sidebar.footer.action`
+  hole (signed-out | Free | Pro | Scale, upgrade CTA) and a wall in the
+  `shell.overlay` slot (kind:list, scope:root — the slot WelcomeGate is
+  moving to) that shows the engine's `reason` verbatim — the verdict text
+  is the one source of truth, the plugin never re-verifies tokens. Own
+  row after arxa-sidebar; delete the row → stock dsh, package untouched.
+  Rejected: a plan section inside arxa-sidebar's generated snippet (welds
+  billing into a sidebar scoped "surgical only"; wall still homeless);
+  host-only extension of arxa-gate (a refusal string is not a paywall).
+  Wall position (which action is refused for Free — Run after a fully
+  usable picker, vs entry to the scaffold stage) is still OPEN; it was
+  asked against stale references and must be re-asked against the dsh
+  scaffold flow.
