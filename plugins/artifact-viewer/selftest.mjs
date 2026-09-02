@@ -162,10 +162,15 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   for (const key of ['insight.title.streak', 'insight.title.ci', 'insight.title.sessions', 'insight.loading',
     'insight.unavailable', 'insight.streak.current', 'insight.streak.longest', 'insight.streak.empty', 'insight.streak.days',
     'insight.ci.open', 'insight.ci.empty', 'insight.sessions.open', 'insight.sessions.rename',
-    'insight.sessions.archive', 'insight.sessions.empty']) {
+    'insight.sessions.archive', 'insight.sessions.empty', 'insight.seatRequired']) {
     const n = (t5client.match(new RegExp("'" + key.replace(/\./g, '\\.') + "':", 'g')) || []).length
     assert.equal(n, 3, 'insight string "' + key + '" is in all three dicts (en/pl/fr), found ' + n)
   }
+  // The host's org-seat refusal ("insight.<view> serves session seats") is a
+  // dev string — the panel translates that one and passes every other fault
+  // through verbatim so real errors stay diagnosable.
+  assert.match(t5client, /\/serves session seats\/\.test\(m\) \? t\('insight\.seatRequired'\) : m/,
+    'insight error phase maps the seat refusal to insight.seatRequired and keeps other messages raw')
   assert.equal((t5client.match(/TODO native review \(conformance decision 4\)/g) || []).length, 2,
     'the machine-drafted pl/fr insight strings are flagged for native review')
   // wt lane accepts an absolute chip path that lives INSIDE the worktree,

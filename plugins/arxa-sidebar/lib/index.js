@@ -768,7 +768,12 @@ export function apply(ctx, opts = {}) {
             'org.open': async () => {
               const ref = arg?.orgId ?? arg
               try {
-                return ensureOpen(ref)
+                // `await` is load-bearing: a bare `return promise` resolves
+                // OUTSIDE this try, so an unknown-ref rejection skipped the
+                // catch and the by-path fallback below was unreachable
+                // (measured 2026-09-02: org.open with a bare path on a fresh
+                // home answered "org not found").
+                return await ensureOpen(ref)
               } catch (e) {
                 // D92: open-by-path when the org exists on disk but fell out
                 // of recents — the create modal's "already lives here — open

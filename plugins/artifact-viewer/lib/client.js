@@ -240,6 +240,7 @@ window.__ModuleLoader__.load({
       'insight.loading': 'Loading…',
       'insight.streak.days': 'Last 90 days',
       'insight.unavailable': 'Not available for this repository.',
+      'insight.seatRequired': 'Open this from a session — the report follows the session’s branch.',
       'insight.streak.current': 'Current',
       'insight.streak.longest': 'Longest',
       'insight.streak.empty': 'No commits in the last 90 days.',
@@ -297,6 +298,7 @@ window.__ModuleLoader__.load({
       'insight.loading': 'Wczytywanie…',
       'insight.streak.days': 'Ostatnie 90 dni',
       'insight.unavailable': 'Niedostępne dla tego repozytorium.',
+      'insight.seatRequired': 'Otwórz z poziomu sesji — raport podąża za gałęzią sesji.',
       'insight.streak.current': 'Obecna',
       'insight.streak.longest': 'Najdłuższa',
       'insight.streak.empty': 'Brak commitów w ciągu ostatnich 90 dni.',
@@ -354,6 +356,7 @@ window.__ModuleLoader__.load({
       'insight.loading': 'Chargement…',
       'insight.streak.days': '90 derniers jours',
       'insight.unavailable': 'Indisponible pour ce dépôt.',
+      'insight.seatRequired': 'Ouvrez depuis une session — le rapport suit la branche de la session.',
       'insight.streak.current': 'Actuelle',
       'insight.streak.longest': 'Plus longue',
       'insight.streak.empty': 'Aucun commit sur les 90 derniers jours.',
@@ -718,7 +721,16 @@ window.__ModuleLoader__.load({
           // empty list would read as "your CI is fine".
           if (res && res.reason === 'unavailable') { setPhase('unavailable'); return }
           setData(res || {}); setPhase('ready')
-        }, (e) => { if (live) { setNote(String((e && e.message) || e)); setPhase('error') } })
+        }, (e) => {
+          if (!live) return
+          // The host's seat refusals are dev-facing strings ("insight.streak
+          // serves session seats"); translate the one the org seat always
+          // hits, pass anything else through verbatim so real faults stay
+          // diagnosable.
+          const m = String((e && e.message) || e)
+          setNote(/serves session seats/.test(m) ? t('insight.seatRequired') : m)
+          setPhase('error')
+        })
         return () => { live = false }
       }, [view, sessionId, orgId])
       React.useEffect(() => load(), [load, tick])

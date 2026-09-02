@@ -197,11 +197,18 @@ same way (its `ToolDetails.module.css` + `ToolRow.module.css` rules under
    `arxa-file-org-shell` as a pnpm symlink → every sidebar route answers
    `no-workspace`; the launcher's flat-copy post-step must be re-run after
    any manual `--force` (done by hand here). (b) `org.open` D92 open-by-path
-   is dead code: `return ensureOpen(ref)` inside `try` is async, so the
-   rejection never reaches the `catch` — needs `await`; not fixed here
-   (out of scope, tracked). (c) The panel's error phase prints the server
-   reason verbatim (`insight.streak serves session seats`) — same convention
-   as the card action routes; a locale key would be the follow-up.
+   WAS dead code: `return ensureOpen(ref)` inside `try` resolved outside it,
+   so the rejection never reached the `catch`. FIXED (`return await`), sidebar
+   selftest case added; proven live — `org.open` with the bare path of an
+   unregistered org folder (`/tmp/arxa-smoke/root/Ghost-Org`) answered
+   `ok:true` and the org landed in `organisation.json`. (c) The panel's error
+   phase printed the server reason verbatim (`insight.streak serves session
+   seats`). FIXED — that refusal maps to `insight.seatRequired` (en/pl/fr);
+   any other fault stays verbatim. Evidence:
+   `designs/git-card/evidence/insight/gc-b-insight-streak-orgseat-locale-1280.png`
+   ("Open this from a session — the report follows the session’s branch.").
+   Known flake, not ours: `artifact-viewer/selftest.mjs:263` ("no verifier
+   -> deny-default", a socket case) fails roughly one run in two.
 5. `docs: mark git-card phase 4 UI superseded` — pointer from
    `git-card-phase-4-card-rebuild.md` §A2/A3 to this plan.
 
