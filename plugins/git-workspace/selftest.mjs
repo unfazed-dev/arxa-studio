@@ -456,6 +456,17 @@ ok('frame: ci.yml carries the canon runner labels, concurrency, timeout (Q5)', (
   assert.ok(!y.includes('ubuntu-latest') && !y.includes('macos-1'), 'never GitHub-hosted')
 })
 
+// Q7 (2026-09-03): without this trigger a session-branch push fires no
+// workflow at all, so "push the branch at the stage boundary" would have been
+// a backup rather than CI. The version bump is what rolls it out to repos that
+// already carry a v2 frame.
+ok('frame: ci.yml runs frame-check on session branches as well as main (Q7)', () => {
+  const y = ciYml()
+  assert.ok(y.includes("branches: [main, 'arxa/session/**']"), 'session branches are watched')
+  assert.ok(y.includes('pull_request:'), 'the PR trigger survives — the review path is unchanged')
+  assert.equal(FRAME_VERSION, 3, 'the stamp version bumped so existing published repos heal to the new trigger')
+})
+
 ok('frame: protection + settings payloads (Q3/Q8)', () => {
   assert.deepEqual(protectionPayload().required_status_checks, { strict: true, checks: [{ context: FRAME_JOB }] })
   assert.equal(protectionPayload().enforce_admins, false, 'solo machine commits ride main (S0 V4)')

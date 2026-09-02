@@ -480,6 +480,41 @@ try {
   ok(failure.status === 'completed' && failure.conclusion === 'failure' && failure.asleep === false, 'frame: completed-failure run maps conclusion:"failure"')
 
   await assert.rejects(() => workflowRunsApi({ ...wbase, name: 'missing-repo' }), /workflow runs failed \(404\)/, 'frame: workflowRunsApi throws loud on a non-ok response')
+
+  // ---- Q8 (2026-09-03): run control — rerun + cancel ----------------------
+  // Both are empty-body POSTs, so the STATUS is the whole answer.
+  {
+    const { rerunRunApi, cancelRunApi } = await import('./lib/index.js')
+    const hits = []
+    const ctlFetch = async (url, opts = {}) => {
+      const u = String(url)
+      hits.push({ url: u, method: opts.method ?? 'GET', headers: opts.headers ?? {} })
+      if (/\/actions\/runs\/9\/(rerun|rerun-failed-jobs|cancel)$/.test(u)) return { ok: true, status: 202, json: async () => ({}) }
+      if (/\/actions\/runs\/8\/cancel$/.test(u)) return { ok: false, status: 409, json: async () => ({}) }
+      return { ok: false, status: 404, json: async () => ({}) }
+    }
+    const cbase = { owner: 'octocat', name: 'framed', accessToken: 't', fetch: ctlFetch, apiBase: 'https://api.github.com' }
+
+    await rerunRunApi({ ...cbase, runId: 9 })
+    ok(hits.at(-1).method === 'POST' && hits.at(-1).url.endsWith('/actions/runs/9/rerun'), 'frame: rerunRunApi POSTs the documented rerun route')
+    ok(hits.at(-1).headers['X-GitHub-Api-Version'] === '2022-11-28', 'frame: rerunRunApi pins the REST API version')
+
+    await rerunRunApi({ ...cbase, runId: 9, failedOnly: true })
+    ok(hits.at(-1).url.endsWith('/actions/runs/9/rerun-failed-jobs'), 'frame: failedOnly re-runs only the failed jobs (cheaper on a self-hosted runner)')
+
+    const cancelled = await cancelRunApi({ ...cbase, runId: 9 })
+    ok(hits.at(-1).method === 'POST' && cancelled.outcome === 'cancellation-requested', 'frame: cancelRunApi requests cancellation')
+
+    // 409 means the run already finished — a state answer, not a failure the
+    // user can act on, so it must not surface as an error.
+    const already = await cancelRunApi({ ...cbase, runId: 8 })
+    ok(already.ok === true && already.outcome === 'already-finished', 'frame: cancelling a finished run reports already-finished, never throws')
+
+    await assert.rejects(() => rerunRunApi({ ...cbase, runId: 404 }), /rerun failed \(404\)/, 'frame: rerunRunApi throws loud on a non-ok response')
+    await assert.rejects(() => cancelRunApi({ ...cbase, runId: 404 }), /cancel failed \(404\)/, 'frame: cancelRunApi throws loud on a non-ok response')
+    passed += 7
+    console.log('  ✓ frame: rerunRunApi + cancelRunApi verified (routes, failedOnly, 409 already-finished, loud failures)')
+  }
   passed++
   console.log('  ✓ frame: workflowRunsApi verified (queued/success/failure mapping, asleep flags, url shape)')
 

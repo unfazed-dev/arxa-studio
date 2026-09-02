@@ -261,6 +261,51 @@ export async function workflowRunsApi({ owner, name, branch, perPage = 20, acces
   return { runs }
 }
 
+/**
+ * Q8 (2026-09-03): run control from the git card — re-run and cancel.
+ * Both are plain POSTs that return 201/202 with an EMPTY body, so success is
+ * the status alone; there is nothing to parse.
+ * https://docs.github.com/en/rest/actions/workflow-runs
+ *
+ * `rerunFailedOnly` targets /rerun-failed-jobs, which re-runs just the failed
+ * jobs of a run rather than the whole thing — cheaper on a self-hosted runner.
+ */
+export async function rerunRunApi({ owner, name, runId, failedOnly = false, accessToken, fetch, apiBase }) {
+  const leaf = failedOnly ? 'rerun-failed-jobs' : 'rerun'
+  const res = await fetch(new URL('/repos/' + owner + '/' + name + '/actions/runs/' + encodeURIComponent(runId) + '/' + leaf, apiBase), {
+    method: 'POST',
+    headers: {
+      accept: 'application/vnd.github+json',
+      authorization: 'Bearer ' + accessToken,
+      'user-agent': 'arxa-studio',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  })
+  // 403 here is usually "this run is not re-runnable yet" (still in progress),
+  // which is a state answer, not an auth problem — say so rather than sending
+  // the user to re-link.
+  if (!res.ok) throw new Error('github-link: workflow rerun failed (' + res.status + ')')
+  return { ok: true, runId, failedOnly }
+}
+
+/** Request cancellation of an in-flight run. 202 = accepted; the run settles
+ *  as `cancelled` once the runner actually stops. */
+export async function cancelRunApi({ owner, name, runId, accessToken, fetch, apiBase }) {
+  const res = await fetch(new URL('/repos/' + owner + '/' + name + '/actions/runs/' + encodeURIComponent(runId) + '/cancel', apiBase), {
+    method: 'POST',
+    headers: {
+      accept: 'application/vnd.github+json',
+      authorization: 'Bearer ' + accessToken,
+      'user-agent': 'arxa-studio',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  })
+  // 409 = already finished; that is not an error the user can act on.
+  if (res.status === 409) return { ok: true, runId, outcome: 'already-finished' }
+  if (!res.ok) throw new Error('github-link: workflow cancel failed (' + res.status + ')')
+  return { ok: true, runId, outcome: 'cancellation-requested' }
+}
+
 /** The osx-arm64 tarball URL of the latest actions/runner release. */
 export async function latestRunnerTarballApi({ accessToken, fetch, apiBase }) {
   const res = await fetch(new URL('/repos/actions/runner/releases/latest', apiBase), {

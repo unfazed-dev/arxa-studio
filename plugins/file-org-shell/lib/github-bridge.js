@@ -159,10 +159,10 @@ export function createGithubBridge(faces = {}) {
     * (D73): the push half needs HTTPS credentials; an unavailable face
     * degrades exactly like the others. The token is handed ONLY to the
     * lifecycle's push call, never logged, never persisted. */
-  async function gitCredentials() {
+  async function gitCredentials(force = false) {
     if (typeof f.gitCredentials !== 'function') return { ok: false, reason: 'github-unavailable' }
     try {
-      const c = await f.gitCredentials()
+      const c = await f.gitCredentials(force === true)
       if (!c || typeof c !== 'object' || typeof c.login !== 'string' || typeof c.token !== 'string') {
         return { ok: false, reason: 'github-unavailable' }
       }

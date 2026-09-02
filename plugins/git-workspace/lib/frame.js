@@ -19,7 +19,11 @@ import path from 'node:path'
  * older project keeps the old gate forever, silently. v2 is the per-target
  * walk (B11/B15/B16); v1 is anything generated before stamping existed.
  */
-export const FRAME_VERSION = 2
+/* v3 (2026-09-03, Q7): ci.yml's push trigger gained `arxa/session/**` so a
+ * session branch pushed at its stage boundary is actually CHECKED on GitHub.
+ * Before this a session-branch push fired no workflow at all — the trigger was
+ * main-only — so "push the branch" would have been a backup, not CI. */
+export const FRAME_VERSION = 3
 
 const STAMP_RE = /^# arxa-frame: v(\d+) ([0-9a-f]{16})$/m
 const STAMP_LINE_RE = /^# arxa-frame: v\d+ [0-9a-f]{16}\n/m
@@ -226,7 +230,12 @@ export function ciYml() {
     'name: ci',
     'on:',
     '  push:',
-    '    branches: [main]',
+    // Q7 (2026-09-03): session branches are checked too. The stage boundary
+    // already runs this exact check.sh locally before it merges; this is the
+    // same gate re-run on the runner against what actually landed. The local
+    // gate stays authoritative for the merge, so an offline or local-only org
+    // is unaffected (a local-only org gets no ci.yml at all).
+    "    branches: [main, 'arxa/session/**']",
     '  pull_request:',
     'concurrency:',
     '  group: ci-@@EXPR@@',

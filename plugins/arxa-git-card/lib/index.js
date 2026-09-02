@@ -95,6 +95,54 @@ export function apply(ctx) {
             if (hit && hit.id !== arg.sessionId) arg = { ...arg, sessionId: hit.id }
           }
 
+          /**
+           * Publish a session's branch to its OWN repo's remote.
+           *
+           * D98: push the repo that actually HOLDS this branch. A project
+           * session's `arxa/session/<id>` exists only in the project repo and
+           * its origin is the project's remote — pushing it from the org would
+           * push a ref that is not there, to the wrong remote.
+           *
+           * Two callers, two temperaments: `card.push` is an explicit button so
+           * it throws loudly (`loud`), while the stage boundary calls it as a
+           * side effect and must never turn a landed commit into a failure —
+           * there it returns a reason instead.
+           */
+          /** The published org repo behind the current handle. Throws the same
+           * `org-not-published` the PR handlers use, so the card's error
+           * vocabulary stays one word wide. */
+          const orgRepoFor = async (cur) => {
+            let manifest = {}
+            try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
+            if (!manifest.repoOwner || !manifest.repoName) throw new Error('org-not-published')
+            return { owner: manifest.repoOwner, name: manifest.repoName }
+          }
+
+          const pushSessionBranch = async (gw, cur, sid, { loud = false } = {}) => {
+            const fail = (reason) => { if (loud) throw new Error(reason); return { ok: false, reason } }
+            const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+            if (!s) return fail('session-not-found: ' + sid)
+            const g = await getGithub().catch(() => null)
+            if (!g) return fail('github-unavailable')
+            const repoPath = s.repoPath ?? cur.path
+            const origin = gw.getOrigin(repoPath)
+            if (!origin) return fail('no-origin — connect this org to GitHub first')
+            const urlFor = (creds) => origin.replace('https://', 'https://' + encodeURIComponent(creds.login) + ':' + creds.token + '@')
+            let creds
+            try { creds = await g.gitCredentials() } catch (err) { return fail(String(err?.message ?? err).slice(0, 120)) }
+            let out = gw.runGit(['push', '-u', urlFor(creds), s.branch], { cwd: repoPath, allowFail: true })
+            if (out === null) {
+              // Same hole the org sync had: git reports a dead token as text on
+              // a non-zero exit, so nothing retries unless we ask. One forced
+              // refresh, one retry — then report.
+              try {
+                const fresh = await g.gitCredentials(true)
+                out = gw.runGit(['push', '-u', urlFor(fresh), s.branch], { cwd: repoPath, allowFail: true })
+              } catch { /* refresh unavailable — fall through to the failure */ }
+            }
+            return out !== null ? { ok: true, branch: s.branch } : fail('push-failed')
+          }
+
           const table = {
             // ---- Part B S3: composer git card engine actions (Q1/Q2/Q6/
             // Q7/Q10 — docs/plans/git-card-part-b-grill.md). The card is
@@ -198,7 +246,18 @@ export function apply(ctx) {
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               if (sid) {
                 // Session seat: squash + gate + merge to main (Q2 local half).
-                return gw.sessionStageBoundary(cur.path, sid, { message: subject })
+                const out = gw.sessionStageBoundary(cur.path, sid, { message: subject })
+                // Q6/Q7 (2026-09-03): a GREEN boundary publishes the session
+                // branch, which is what makes frame-check run against it on
+                // GitHub (ci.yml v3 watches arxa/session/**). A red boundary
+                // parked the work — there is nothing to check, so nothing is
+                // pushed. The push is ADVISORY: it never fails the commit, and
+                // it never runs for an unlinked or local-only repo, so an
+                // offline stage boundary behaves exactly as it did before.
+                if (out && out.parked !== true) {
+                  out.pushed = await pushSessionBranch(gw, cur, sid).catch((err) => ({ ok: false, reason: String(err?.message ?? err).slice(0, 120) }))
+                }
+                return out
               }
               // Org seat: squash on main + the same gate, parked=false only on green.
               // B3: this used to squash onto main and THEN gate, returning
@@ -229,21 +288,7 @@ export function apply(ctx) {
               const cur = handle()
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               if (!sid) throw new Error('card.push serves session seats — the org primary rides its boundaries')
-              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
-              if (!s) throw new Error('session-not-found: ' + sid)
-              const g = await getGithub().catch(() => null)
-              if (!g) throw new Error('github-unavailable')
-              const creds = await g.gitCredentials()
-              // D98: push the repo that actually HOLDS this branch. A project
-              // session's `arxa/session/<id>` exists only in the project repo,
-              // and its origin is the project's remote — pushing it from the
-              // org would push a ref that is not there, to the wrong remote.
-              const repoPath = s.repoPath ?? cur.path
-              const origin = gw.getOrigin(repoPath)
-              if (!origin) throw new Error('no-origin — connect this org to GitHub first')
-              const url = origin.replace('https://', 'https://' + encodeURIComponent(creds.login) + ':' + creds.token + '@')
-              const out = gw.runGit(['push', '-u', url, s.branch], { cwd: repoPath, allowFail: true })
-              return out !== null ? { ok: true, branch: s.branch } : { ok: false, reason: 'push-failed' }
+              return pushSessionBranch(gw, cur, sid, { loud: true })
             },
             'card.pr.create': async () => {
               const gw = await importGitWorkspace()
@@ -290,10 +335,41 @@ export function apply(ctx) {
               try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
               if (!manifest.repoOwner || !manifest.repoName) throw new Error('org-not-published')
               const prs = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
-              if (!Array.isArray(prs) || prs.length === 0) return { ok: true, pr: null }
+              // Q8 (2026-09-03): checks are read for the BRANCH whether or not
+              // a PR exists. Since ci.yml v3 watches arxa/session/**, a stage
+              // boundary push runs frame-check with no PR attached — the card
+              // used to read checks only through the PR head, so that run was
+              // invisible and the card looked like nothing was happening.
+              // prChecksApi takes any ref, so the branch name works directly.
+              const noChecks = { state: 'unknown', asleep: false, runs: [] }
+              const runsFor = async () => {
+                try { return (await g.workflowRuns({ owner: manifest.repoOwner, name: manifest.repoName, branch: s.branch, perPage: 10 }))?.runs ?? [] } catch { return [] }
+              }
+              if (!Array.isArray(prs) || prs.length === 0) {
+                const checks = await g.prChecks(manifest.repoOwner, manifest.repoName, s.branch).catch(() => noChecks)
+                return { ok: true, pr: null, checks, runs: await runsFor(), branch: s.branch }
+              }
               const pr = prs[0]
-              const checks = await g.prChecks(manifest.repoOwner, manifest.repoName, pr.head?.sha ?? s.branch).catch(() => ({ state: 'unknown', asleep: false, runs: [] }))
-              return { ok: true, pr: { number: pr.number, url: pr.html_url, state: pr.state }, checks }
+              const checks = await g.prChecks(manifest.repoOwner, manifest.repoName, pr.head?.sha ?? s.branch).catch(() => noChecks)
+              return { ok: true, pr: { number: pr.number, url: pr.html_url, state: pr.state }, checks, runs: await runsFor(), branch: s.branch }
+            },
+            /** Q8: run control from the card. Both take the run id the status
+              * call already surfaced, so the UI never has to guess one. */
+            'card.ci.rerun': async () => {
+              const g = await getGithub().catch(() => null)
+              if (!g) throw new Error('github-unavailable')
+              const { owner, name } = await orgRepoFor(handle())
+              const runId = arg?.runId
+              if (runId === undefined || runId === null || runId === '') throw new Error('runId-required')
+              return g.rerunRun({ owner, name, runId, failedOnly: arg?.failedOnly === true })
+            },
+            'card.ci.cancel': async () => {
+              const g = await getGithub().catch(() => null)
+              if (!g) throw new Error('github-unavailable')
+              const { owner, name } = await orgRepoFor(handle())
+              const runId = arg?.runId
+              if (runId === undefined || runId === null || runId === '') throw new Error('runId-required')
+              return g.cancelRun({ owner, name, runId })
             },
             /** D116: merge-commit the reviewed PR, pinned to the sha the
               * checks were read from (D107) — never on anything but a fully

@@ -182,6 +182,40 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     * command line only — it is never persisted, never logged, and never
     * written into .git/config (origin keeps the clean URL). Non-GitHub
     * URLs (test doubles point at local bare repos) pass through as-is. */
+  /** Git reports a rejected token as TEXT on a non-zero exit, not as a status
+   * code, so this is the only way to tell "your token is dead" apart from
+   * "the remote hung up". Kept deliberately broad — a false positive costs one
+   * wasted token refresh, a false negative costs a repo that never syncs
+   * again (measured on RESTO, 2026-09-03). */
+  const AUTH_FAILURE_RE = /invalid username or token|authentication failed|could not read username|403 forbidden|401/i
+
+  /**
+   * Push, and on an auth-shaped failure mint a FORCED fresh credential and try
+   * once more. This mirrors what createPrivateRepo / renameRepo / wireFrame
+   * already do for their REST calls; the push path was the one hole, so a
+   * token GitHub had already rejected while the local expiry clock still read
+   * "alive" failed permanently with no route back.
+   *
+   * Throws the ORIGINAL error when the retry also fails, so the manifest
+   * records the real cause rather than "retry failed".
+   */
+  async function pushWithAuthRetry(repoPath, repoUrl, kind = 'org') {
+    const creds = await githubBridge.gitCredentials()
+    if (!creds || !creds.ok) return { ok: false, reason: 'no-creds' }
+    try {
+      pushRepo(repoPath, pushUrlFor(repoUrl, creds), env)
+      return { ok: true, refreshed: false }
+    } catch (err) {
+      if (!AUTH_FAILURE_RE.test(String(err?.message ?? err))) throw err
+      const fresh = await githubBridge.gitCredentials(true).catch(() => null)
+      if (!fresh || !fresh.ok) throw err
+      try {
+        pushRepo(repoPath, pushUrlFor(repoUrl, fresh), env)
+        return { ok: true, refreshed: true }
+      } catch { throw err }
+    }
+  }
+
   function pushUrlFor(repoUrl, creds) {
     if (typeof repoUrl !== 'string' || !repoUrl.startsWith('https://github.com/')) return repoUrl
     return 'https://' + encodeURIComponent(creds.login) + ':' + encodeURIComponent(creds.token)
@@ -310,8 +344,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       if (wrote.written.length) {
         runGit(['add', 'check.sh', '.github'], { cwd: repoPath, allowFail: true })
         runGit(['commit', '-m', 'chore(ci): wire the arxa frame (checks, workflow, PR template)'], { cwd: repoPath, allowFail: true })
-        const pushCreds = await githubBridge.gitCredentials()
-        if (pushCreds.ok) pushRepo(repoPath, pushUrlFor(m.repoUrl, pushCreds), env)
+        await pushWithAuthRetry(repoPath, m.repoUrl, kind).catch(() => null)
       }
       const wired = await githubBridge.wireFrame(m.repoOwner, m.repoName, { settings: settingsPayload(), protection: protectionPayload() })
       const fields = {}
@@ -330,8 +363,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
         runGit(['add', file], { cwd: repoPath, allowFail: true })
         runGit(['commit', '-m', 'chore(github): record frame state', '--', file], { cwd: repoPath, allowFail: true })
         if (fields.frameWired === true) {
-          const c2 = await githubBridge.gitCredentials()
-          if (c2.ok) pushRepo(repoPath, pushUrlFor(m.repoUrl, c2), env)
+          await pushWithAuthRetry(repoPath, m.repoUrl, kind).catch(() => null)
         }
       } catch { /* annotation best-effort */ }
       return { ok: wired.ok === true, protection: wired.protection ?? null }
@@ -371,6 +403,23 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       if (!creds || !creds.ok) return 'no-creds'
       const url = pushUrlFor(manifest.repoUrl, creds)
       if (!fetchRepo(repoPath, url, env)) return 'fetch-failed'
+      /** A sync that reaches a healthy end state must CLEAR a stale failure.
+       * Without this one blip left `publish-failed: … Invalid username or
+       * token` on the manifest forever, so the org read as broken long after
+       * it had healed — which is most of why RESTO "looked" unsynced. */
+      const clearStaleStatus = () => {
+        try {
+          const st = manifest.githubStatus
+          if (typeof st !== 'string') return
+          if (!/^(publish-failed|sync-conflict|push-failed)/.test(st)) return
+          const fields = { githubStatus: 'published' }
+          if (kind === 'org') annotateOrgManifest(repoPath, fields)
+          else annotateProjectManifest(repoPath, fields)
+          const file = path.basename(manifestFile)
+          runGit(['add', file], { cwd: repoPath, allowFail: true })
+          runGit(['commit', '-m', 'chore(github): clear a healed sync status', '--', file], { cwd: repoPath, allowFail: true })
+        } catch { /* advisory — never fail a good sync on bookkeeping */ }
+      }
       const state = mainSyncState(repoPath, env)
       if (state.diverged) {
         // Park ONCE (the note itself commits — D78: never leave the
@@ -389,13 +438,20 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       }
       if (state.ahead > 0) {
         try {
-          pushRepo(repoPath, url, env)
+          const pushed = await pushWithAuthRetry(repoPath, manifest.repoUrl, kind)
+          if (!pushed.ok) return 'no-creds'
+          clearStaleStatus()
           return 'pushed'
         } catch (err) {
           return 'push-failed: ' + String(err?.message ?? err).slice(0, 120)
         }
       }
-      if (state.behind > 0) return ffMergeMain(repoPath, env) ? 'pulled' : 'in-sync'
+      if (state.behind > 0) {
+        const pulled = ffMergeMain(repoPath, env)
+        if (pulled) clearStaleStatus()
+        return pulled ? 'pulled' : 'in-sync'
+      }
+      clearStaleStatus()
       return 'in-sync'
     } catch (err) {
       return 'error: ' + String(err?.message ?? err).slice(0, 120)

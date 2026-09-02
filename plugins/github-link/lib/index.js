@@ -10,13 +10,13 @@
  */
 
 import { getClientId, defaultApiBase, defaultTokenBase, linkViaBrowser, linkViaDevice, createPrivateRepoApi, renameRepoApi, repoNameAvailableApi, deleteRepoApi, refreshAccessToken, SCOPES, SHIPPED_CLIENT_ID, defaultOpen } from './auth.js'
-import { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prStateApi, prChecksApi, workflowRunsApi } from './frame.js'
+import { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prStateApi, prChecksApi, workflowRunsApi, rerunRunApi, cancelRunApi } from './frame.js'
 import { ensureRunner } from './runner.js'
 import { createKeyring } from './keyring.js'
 import { readState, writeState, clearState } from './state.js'
 
 export { SCOPES, createPkcePair, pkceChallenge, getClientId, loadClientId, linkViaBrowser, linkViaDevice, createPrivateRepoApi, renameRepoApi, repoNameAvailableApi } from './auth.js'
-export { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prStateApi, prChecksApi, workflowRunsApi } from './frame.js'
+export { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prStateApi, prChecksApi, workflowRunsApi, rerunRunApi, cancelRunApi } from './frame.js'
 export { ensureRunner, runnerExists } from './runner.js'
 export { createKeyring, KEYCHAIN_SERVICE, SECURITY_PATH } from './keyring.js'
 export { readState, writeState, clearState, statePath, arxaHome } from './state.js'
@@ -248,10 +248,16 @@ export function createGithubLink({
    * push command line — it is not logged, not persisted, not returned to
    * any client surface. Throws loud when unlinked / token unavailable.
    */
-  async function gitCredentials() {
+  async function gitCredentials(force = false) {
     const state = readState(env)
     if (!state?.linked) throw new Error('github-link: not linked (push needs a linked GitHub account)')
-    const accessToken = await getToken()
+    // `force` mints a fresh token even when the recorded clock still reads
+    // "alive". A git push is the one caller that cannot self-heal on its own:
+    // every REST path here retries a 401 through getToken(true), but git
+    // reports auth failure as text on a non-zero exit, so the caller has to
+    // ask for the retry explicitly (2026-09-03: RESTO sat on
+    // "Invalid username or token" with a clock that still said valid).
+    const accessToken = await getToken(force === true)
     return { login: state.login, token: accessToken }
   }
 
@@ -318,6 +324,14 @@ export function createGithubLink({
   function prChecks(owner, name, ref) {
     return withRefresh((t) => prChecksApi({ owner, name, ref, accessToken: t, fetch, apiBase }))
   }
+  /** Q8: re-run a workflow run (optionally only its failed jobs). */
+  function rerunRun({ owner, name, runId, failedOnly } = {}) {
+    return withRefresh((t) => rerunRunApi({ owner, name, runId, failedOnly, accessToken: t, fetch, apiBase }))
+  }
+  /** Q8: request cancellation of an in-flight workflow run. */
+  function cancelRun({ owner, name, runId } = {}) {
+    return withRefresh((t) => cancelRunApi({ owner, name, runId, accessToken: t, fetch, apiBase }))
+  }
   /** D101/A3: recent workflow runs for a branch (insight panel CI history).
    *  Single-options-object call shape (unlike prChecks' positional args) —
    *  matches the sidebar call site: g.workflowRuns({ owner, name, branch, perPage }). */
@@ -348,6 +362,8 @@ export function createGithubLink({
     prMerge,
     prState,
     prChecks,
+    rerunRun,
+    cancelRun,
     workflowRuns,
     deviceCode,
   }
