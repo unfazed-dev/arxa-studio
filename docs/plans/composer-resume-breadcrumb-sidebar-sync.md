@@ -108,3 +108,10 @@ Out of scope: session rename/archive, PR/CI card, anything needing a DB.
   - Evidence: dock reads `arxa/session/s-mtk3qnbs-earnv2 · clean · 1 wip · local-only`, Commit enabled; subject `docs(notes): add smoke note` → worktree `fe48606`, main fast-forwarded to `fe48606`, card back to `clean · nothing to commit`. `selftest.mjs`, `selftest.actions.mjs` (git card) and the sidebar selftest ALL GREEN.
   - Smoke-server trap: the launcher re-execs (`node --import …/bin/loopback…`), so `pkill -f 'bin/arxa-studio.mjs'` never reaches the listener and a "restart" silently keeps the old code (`EADDRINUSE` in the new log). Restart by `kill $(lsof -nP -iTCP:7891 -sTCP:LISTEN -t)` and confirm the listening pid changed.
 - Not done: desktop app rebuild + user confirmation of flows 1–2 on real `~/.arxa`.
+
+## Packed-desktop rebuild — 2026-09-02 23:52 (verified live)
+
+- **Problem:** first rebuild after a89b02e produced a sidecar that died on boot with `ERR_MODULE_NOT_FOUND` for `bin/materialise-preset.mjs` — the launcher imported it, but `scripts/pack-sidecar.mjs` copied a hard-coded two-file list into the stage.
+- **Fix:** single `BIN_FILES` constant drives both the existence check and the stage copy (explicit list, not a glob — `bin/` also holds dev-only scripts that must not ship).
+- **Verified on the installed app:** sidecar pid under `arxa-desktop`, `DSH_HOME=~/.arxa/dsh`, engine `2549e9e1f3b5`, `dsh web: http://127.0.0.1:7891`; served `/plugins/arxa-git-card/client.js` contains the `wipRun > 0` commit gate; `/__arxa/sidebar/state` returns the real `RESTO` org.
+- **Gap noted:** the smoke suite runs the engine from the repo, so pack-list drift is only caught by a real bundle boot. Candidate follow-up: a `pack-sidecar --check` step that boots the packed binary once and asserts the port binds.
