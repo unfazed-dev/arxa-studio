@@ -9,13 +9,17 @@
 # This AGENT PRESET holds what one session contributes to those registries:
 # its persona, its tools, its prompt sections. Three rows that used to sit
 # in the host patch moved here because they are agent-plane, not
-# host-plane: arxa-memory (a systemPrompt section), arxa-pi-delegate (a
-# tool), arxa-gen-ui (a tool). Their `name:` values are unchanged by the
-# move — an absolute path resolves to the same file regardless of which
-# composition references it, and a bare package name resolves against the
-# HOST composition's own node_modules either way
-# (dsh-agent-presets/lib/index.js, PresetTree.import), not the preset
-# file's own directory.
+# host-plane: arxa-memory (a systemPrompt section, absolute path),
+# arxa-pi-delegate (a tool, absolute path), arxa-gen-ui (a tool, bare
+# package name resolved via the profile's package.json dependencies). All
+# three rows moved BYTE-IDENTICAL, no `name:` rewriting: an absolute path
+# resolves to the same file regardless of which composition references it,
+# and a bare package name resolves against the HOST composition's own
+# node_modules either way, not the preset file's own directory — only a
+# RELATIVE path needs the preset's own baseUrl
+# (@deepseek-ai/dsh-agent-presets README.md, "How a preset's rows
+# resolve"; implementation: dsh-agent-presets/lib/index.js,
+# PresetTree.import).
 #
 # Row set copied from the shipped `standard` preset (the full coding
 # agent); structure and comment style copied from the shipped `cordis`
