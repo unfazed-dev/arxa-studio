@@ -51,9 +51,9 @@
 #    absolute path because arxa declares no npm dependency on the plugin).
 - insert:
   - id: arxa-gate
-    name: /Volumes/developer_ssd/Developer/totem_labs/arxa/harness/dsh-external-gate/index.mjs
+    name: /Volumes/business_ssd/arxa_digital_solutions/arxa/harness/dsh-external-gate/index.mjs
     config:
-      command: /Volumes/developer_ssd/Developer/totem_labs/arxa/harness/verdict.sh
+      command: /Volumes/business_ssd/arxa_digital_solutions/arxa/harness/verdict.sh
       # dsh-native tool names (dsh-tool-fs registers write/edit, not Write/Edit).
       # The 2026-08-21 booted check proved Claude-cased names match nothing here.
       tools: [write, edit, str_replace_editor, bash]
@@ -99,7 +99,7 @@
   disabled: true
 - insert:
   - id: arxa-sandbox
-    name: /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/sandbox/lib/index.js
+    name: /Volumes/business_ssd/arxa_digital_solutions/arxa-studio/plugins/sandbox/lib/index.js
 
 # 7. The design panel (H4, viewer-first): shell.overlay dock iframing a live
 #    `arxa design serve` with the viewport-rung ladder. By PACKAGE NAME —
@@ -154,7 +154,7 @@
 #       transport: stdio
 #       command: node
 #       args:
-#         - /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/mcp-apps/testserver.mjs
+#         - /Volumes/business_ssd/arxa_digital_solutions/arxa-studio/plugins/mcp-apps/testserver.mjs
 #
 # - insert:
 #   - id: arxa-mcp-apps
@@ -164,7 +164,7 @@
 #       transport: stdio
 #       command: node
 #       args:
-#         - /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/mcp-apps/testserver.mjs
+#         - /Volumes/business_ssd/arxa_digital_solutions/arxa-studio/plugins/mcp-apps/testserver.mjs
 
 # 11. Waiting-page / browser-surface lifecycle (desktop-first, 2026-08-27):
 #     the desktop app OWNS the studio server — when it quits the server tree
@@ -248,7 +248,7 @@
 #     before they moved to the arxa preset (rows 5/6).
 - insert:
   - id: arxa-approvals
-    name: /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/approvals/lib/index.js
+    name: /Volumes/business_ssd/arxa_digital_solutions/arxa-studio/plugins/approvals/lib/index.js
 
 # 15. Artifact viewer-editor (D7 + D78-D87, 2026-08-30): the per-org,
 #     origin-separated artifact viewer with the text-family editor (CM6 in
@@ -286,7 +286,7 @@
 #     source of truth. Host-only plugin, absolute path — same shape as row 14.
 - insert:
   - id: arxa-conversation
-    name: /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/conversation/lib/index.js
+    name: /Volumes/business_ssd/arxa_digital_solutions/arxa-studio/plugins/conversation/lib/index.js
 
 # 18. Prism background field (step 1, grilled 2026-09): one 100x100 square at
 #     the top-left of the conversation scrollport — tile (0,0) of the future
