@@ -1,6 +1,11 @@
 # Git card — Phase 4 card rebuild + composition harmony with the `cordis` preset
 
 Status: LANDED 2026-09-02 — all of §5 shipped on master; `ci.mjs` 29/29 GREEN.
+**UI half SUPERSEDED (2026-09-02):** §A2 (card slides) and §A3 (insight surface)
+are replaced by `git-card-stock-dock-rebuild.md` — the card is now its own
+plugin `arxa-git-card` generated from the stock QueueDock grammar (Part A3),
+and the insight panel uses the stock ToolDetails grammar (Part B). The host
+actions (§A1) and tests (§A4) were moved, not rewritten, and remain current.
 A1 `ade8f2e` + `43e6167` + `9de6104` (D117) · A2 `eb97bd2` + `5fa0eb1` (D116) · A3 `8a46a4c` +
 `6a03469` + `7429dab` · B1–B6 `a89b02e` + `f14576d` + `09b64cf` + `4593b16` +
 `ee0b702` (D118) · viewer selftest flake diagnosed test-side, `3370a37` (D119).
@@ -74,6 +79,8 @@ decision-complete plan; implementation only after explicit approval.
 - Dock registration `order: 30` (snippet; `selftest.mjs:139` updated to assert 30).
 
 ### A2. Slides (client, snippet `ArxaGitCard` rewrite, lines 408-521)
+> SUPERSEDED — see `git-card-stock-dock-rebuild.md` §3 (Part A3, `arxa-git-card`
+> stock QueueDock grammar). Kept for the history of the markers and tests.
 - Markers: `[data-arxa-card-strip]` (overflow hidden) › `[data-arxa-card-track]` (flex
   row, `transform: translateX(-idx*100%)`, transition `var(--ds-transition-duration-slow)`)
   › three `[data-arxa-card-slide=status|commit|approve]`; nav = prev/next Icon buttons +
@@ -97,6 +104,9 @@ decision-complete plan; implementation only after explicit approval.
   review per conformance decision 4).
 
 ### A3. Insight surface (right column)
+> SUPERSEDED — see `git-card-stock-dock-rebuild.md` §4 (Part B, stock ToolDetails
+> grammar, `aXa_ins_` classes). The `arxa-av-open` insight event contract below
+> still holds; only the rendering changed.
 - `plugins/artifact-viewer/lib/client.js:1146-1154`: accept `detail.kind==='insight'`
   (today returns when `!relPath`); `store.request({kind:'insight', view, sessionId})`;
   panel renders `InsightPanel` for that kind, existing file flow otherwise. Below 744 px
