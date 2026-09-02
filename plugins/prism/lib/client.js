@@ -244,7 +244,18 @@ window.__ModuleLoader__.load({
     const NATURAL = Math.sqrt(RATE_MIN * RATE_MAX) // 9486.8ms — center detent
     const P_MIN = 1500, P_MAX = 60000 // per-triangle period clamp: 60s max is literal
     const CHASE_MS = 300  // tempo chase time constant — velocity never jumps
-    const DT_MAX = 100    // ms — hidden-tab gap clamp: breath pauses, never teleports
+    const DT_MAX = 100    // ms — per-frame dt clamp: breath never teleports
+    // Stall immunity (0.8.0, ring-proven: the app stalls the rAF loop 1-2.4s
+    // on a ~60s cadence; the hard DT_MAX clamp turned every stall into a
+    // visible 2s freeze = the user's "stopping and starting over"). Classic
+    // animation-clock catch-up: time lost past DT_MAX accrues as DEBT and is
+    // repaid gradually at +33% speed (dt*4/3 per frame), so a 2s stall is
+    // absorbed as a gentle ~6s hurry instead of a freeze — the SAME
+    // integrator advances, position stays continuous, nothing teleports.
+    // Debt is hard-capped (2.5s) and FORGIVEN on visibility flips: a hidden
+    // tab still pauses the organism and resumes seamlessly, never hurries.
+    const DEBT_MAX = 2500   // ms — beyond this, resume in place (occlusion)
+    const DEBT_RATE = 1 / 3 // extra dt per frame while repaying (~6s per 2s)
 
     // Master switch (user request): a Settings > Personalisation toggle, default ON.
     // Off suppresses the wall layers AND the frost (frost without the mosaic
@@ -349,7 +360,7 @@ window.__ModuleLoader__.load({
         // Colors are time-based, so this repaints the CURRENT breath state
         // instantly — no fade-in from stale hues, no phase jump on resume.
         const now = performance.now()
-        fixStage()
+        fixStage(true)
         ensureGrid(now)
         writeAll(now)
       }
@@ -480,6 +491,37 @@ window.__ModuleLoader__.load({
     let stageRect = { l: -1, t: -1, w: -1, h: -1 } // last written stage box
     let stageVisible = false // conversation box present — loop gate
 
+    // Reset/jank evidence ring (0.7.2, user report "the wall resets itself —
+    // stops and starts over"): transition-only events (boot, loop stop with
+    // reason, loop start, stage hide/show with reason, grid rebuild, rAF gap
+    // >750ms, visibility flips) persisted to localStorage so the REAL
+    // window's history survives reloads and can be read from the WebKit
+    // store afterwards. Cap 60, persist throttled to 1/s + a pagehide flush
+    // — zero per-frame cost. Read-only diagnostics, like __arxaPrismDebug.
+    const EVENTS_KEY = 'arxa.prismEvents'
+    let events = []
+    try {
+      const parsed = JSON.parse(localStorage.getItem(EVENTS_KEY) || '[]')
+      if (Array.isArray(parsed)) events = parsed.slice(-60)
+    } catch { /* storage blocked — ring stays memory-only */ }
+    let evLastPersist = 0
+    function persistEvents() {
+      try { localStorage.setItem(EVENTS_KEY, JSON.stringify(events)) } catch { /* full/blocked */ }
+    }
+    function logEvent(e, detail) {
+      events.push({ t: Date.now(), e: detail ? e + ':' + detail : e })
+      if (events.length > 60) events.splice(0, events.length - 60)
+      const n = Date.now()
+      if (n - evLastPersist > 1000) { evLastPersist = n; persistEvents() }
+    }
+    window.addEventListener('pagehide', persistEvents)
+    document.addEventListener('visibilitychange', () => {
+      logEvent('vis', document.hidden ? 'hidden' : 'visible')
+      // Occlusion forgiveness (0.8.0): a hidden tab pauses the organism and
+      // resumes IN PLACE — the stall debt is forgiven, never hurried back.
+      if (!document.hidden) debt = 0
+    })
+
     // The dash-draw occluder needs the EXACT surface color behind the wall
     // (an oklab/color-mix string is fine — it is handed straight back to
     // CSS, never parsed). Walk up from the stage host past punched-
@@ -504,34 +546,47 @@ window.__ModuleLoader__.load({
     // verified position:relative, and it paints the same surface token the
     // occluding root does); the stage box is the scrollport's border box
     // re-expressed in host coordinates — so it covers the classic-scrollbar
-    // lane by construction (the 0.1.2 leak fix is now architectural). Runs
-    // every breath frame plus RO/heal pokes; writes only on change. No
-    // scrollport (trajectory, waiting room) or a detached one -> hide + the
-    // loop gate closes.
-    function fixStage() {
+    // lane by construction (the 0.1.2 leak fix is now architectural).
+    // 0.7.2 layout-thrash fix (web.dev "Avoid forced synchronous layouts"):
+    // the breath frame calls this with hostWalk=false BEFORE its var writes
+    // — pure geometry reads against the previous frame's clean layout, no
+    // getComputedStyle walk, so the loop never forces a synchronous layout
+    // the docs warn about. The host-position walk (getComputedStyle chain)
+    // runs only on the mount/RO/heal paths (hostWalk=true). No scrollport
+    // (trajectory, waiting room) or a detached one -> hide + the loop gate
+    // closes.
+    function hideStage(reason) {
+      if (stageEl && stageVisible) {
+        stageVisible = false
+        stageEl.style.display = 'none'
+        logEvent('hide', reason)
+      }
+    }
+    function fixStage(hostWalk) {
       if (mountedEl && !mountedEl.isConnected) mountedEl = null
       const sp = mountedEl
-      if (!sp || !stageEl) {
-        if (stageEl && stageVisible) { stageVisible = false; stageEl.style.display = 'none' }
-        return
-      }
-      let host = sp.parentElement
-      while (host && host !== document.body && getComputedStyle(host).position === 'static') host = host.parentElement
-      if (!host) host = document.body
-      if (host !== stageHost) {
-        stageHost = host
-        if (stageEl.parentNode !== host) host.insertBefore(stageEl, host.firstChild)
-        sampleSurface() // the occluder's erase color follows the host
+      if (!sp || !stageEl) { hideStage('no-scrollport'); return }
+      if (hostWalk || !stageHost) {
+        let host = sp.parentElement
+        while (host && host !== document.body && getComputedStyle(host).position === 'static') host = host.parentElement
+        if (!host) host = document.body
+        if (host !== stageHost) {
+          stageHost = host
+          if (stageEl.parentNode !== host) host.insertBefore(stageEl, host.firstChild)
+          sampleSurface() // the occluder's erase color follows the host
+        }
       }
       const r = sp.getBoundingClientRect()
       const hr = stageHost.getBoundingClientRect()
       const l = Math.round(r.left - hr.left), t = Math.round(r.top - hr.top)
       const w = Math.round(r.width), hgt = Math.round(r.height)
-      if (!w || !hgt) {
-        if (stageVisible) { stageVisible = false; stageEl.style.display = 'none' }
-        return
+      if (!w || !hgt) { hideStage('zero-rect'); return }
+      if (!stageVisible) {
+        stageVisible = true
+        stageEl.style.display = ''
+        logEvent('show')
+        kick()
       }
-      if (!stageVisible) { stageVisible = true; stageEl.style.display = ''; kick() }
       const sr = stageRect
       if (l !== sr.l || t !== sr.t || w !== sr.w || hgt !== sr.h) {
         stageRect = { l: l, t: t, w: w, h: hgt }
@@ -665,6 +720,17 @@ window.__ModuleLoader__.load({
         try { localStorage.setItem(SEED_KEY, String(n)) } catch { /* remix still runs */ }
       }
       applySeed(n, false)
+    }
+    // Auto mode (0.8.0, user report "no randomness on the diagonal
+    // variants" — a stored seed replays the SAME field at every boot, and
+    // the row had no way back): clearSeed drops the stored seed and remixes
+    // to a FRESH unseeded field on the spot (a random seed applied for this
+    // boot only, never persisted) — every launch is a new wall again.
+    function clearSeed(persist) {
+      if (persist) {
+        try { localStorage.removeItem(SEED_KEY) } catch { /* remix still runs */ }
+      }
+      applySeed(Math.floor(Math.random() * 1000000), false)
     }
 
     // The rolling swell: two INTEGRATED global drift phases (advanced by dt
@@ -889,6 +955,7 @@ window.__ModuleLoader__.load({
       const cols = Math.ceil(w / sq), rows = Math.ceil(hgt / sq)
       if (cols === gridCols && rows === gridRows && sq === gridSq) return
       gridCols = cols; gridRows = rows; gridSq = sq
+      logEvent('grid', cols + 'x' + rows + '@' + sq)
       // Multi-scale pass: even-aligned 2x2 supercells roll their block
       // decision ONCE per coordinate; winners own a big tile whose breath
       // and flip identity run forever. RENDERING is stroke-only (0.6.1):
@@ -934,13 +1001,40 @@ window.__ModuleLoader__.load({
     // The rAF loop runs FOREVER (a sine never stops breathing). Every
     // advancement rides dt clamped to DT_MAX: a hidden tab pauses the
     // organism; refocus resumes seamlessly instead of jumping.
+    // 0.7.2 frame discipline (docs-backed): geometry READS lead the frame
+    // (fixStage(false) — no host walk), style WRITES follow; never a read
+    // after this frame's writes, so no forced synchronous layout.
     let rafId = 0
     let lastNow = 0
+    let lastGapAt = 0
+    let debt = 0 // ms of stalled time still to repay (stall immunity, 0.8.0)
     function frame(now) {
-      if (!stageEl || reducedMotion() || !enabled || wallOp <= 0 || !stageVisible) { rafId = 0; lastNow = 0; return }
+      if (!stageEl || reducedMotion() || !enabled || wallOp <= 0 || !stageVisible) {
+        rafId = 0
+        logEvent('stop',
+          !stageEl ? 'no-stage'
+            : reducedMotion() ? 'reduced-motion'
+            : !enabled ? 'disabled'
+            : wallOp <= 0 ? 'opacity-0' : 'stage-hidden')
+        lastNow = 0
+        return
+      }
       if (!lastNow) lastNow = now
-      const dt = Math.min(now - lastNow, DT_MAX)
+      const rawDt = now - lastNow
+      if (rawDt > 750 && now - lastGapAt > 4000) {
+        lastGapAt = now
+        logEvent('gap', String(Math.round(rawDt)))
+      }
       lastNow = now
+      // Stall catch-up (0.8.0): time past DT_MAX becomes debt, repaid at
+      // +33% of each frame's own clamped step — a 2s stall melts away as a
+      // ~6s gentle hurry on the SAME integrator, never a freeze, never a
+      // snap (the recovery frame itself repays only 33ms).
+      if (rawDt > DT_MAX) debt = Math.min(debt + rawDt - DT_MAX, DEBT_MAX)
+      const clamped = Math.min(rawDt, DT_MAX)
+      const repay = Math.min(debt, clamped * DEBT_RATE)
+      debt -= repay
+      const dt = clamped + repay
       // The tempo chase: scale eases toward the slider's target with a
       // ~300ms time constant, so even whip-drags change VELOCITY smoothly
       // (position is already continuous by integrator construction).
@@ -950,6 +1044,9 @@ window.__ModuleLoader__.load({
       }
       drift.thH += TAU * dt / DRIFT_T_H
       drift.thL += TAU * dt / DRIFT_T_L
+      // READ phase: track the conversation box against the previous frame's
+      // clean layout — before a single style write below.
+      fixStage(false)
       const tick = (sq) => {
         if (sq.gx >= gridCols || sq.gy >= gridRows) return
         flipTick(sq, now)
@@ -978,10 +1075,14 @@ window.__ModuleLoader__.load({
       }
       for (const sq of squares.values()) tick(sq)
       for (const b of blocks.values()) tick(b)
-      fixStage()
       rafId = requestAnimationFrame(frame)
     }
-    const kick = () => { if (!rafId && !reducedMotion() && enabled && wallOp > 0 && stageVisible) rafId = requestAnimationFrame(frame) }
+    const kick = () => {
+      if (!rafId && !reducedMotion() && enabled && wallOp > 0 && stageVisible) {
+        rafId = requestAnimationFrame(frame)
+        logEvent('start')
+      }
+    }
 
     //#region settings row (Language-row metrics, own class names)
     const rowCss = {
@@ -996,6 +1097,8 @@ window.__ModuleLoader__.load({
       sw: 'arxaPrism_switch',
       swOn: 'arxaPrism_switchOn',
       thumb: 'arxaPrism_thumb',
+      chip: 'arxaPrism_chip',
+      chipOn: 'arxaPrism_chipOn',
       group: 'arxaPrism_group',
       groupLabel: 'arxaPrism_groupLabel',
     }
@@ -1035,6 +1138,17 @@ window.__ModuleLoader__.load({
       'transition:transform .2s ease}' +
       '.arxaPrism_switchOn .arxaPrism_thumb{transform:translateX(16px)}' +
       '.arxaPrism_switch:focus-visible{outline:2px solid var(--dsw-static-deepseek-500);' +
+      'outline-offset:2px}' +
+      // Auto chip (0.8.0 seed row): small pill right of the readout; the
+      // active state carries the accent like the switch's on state.
+      '.arxaPrism_chip{height:22px;padding:0 10px;border-radius:11px;flex:none;' +
+      'border:1px solid var(--dsw-alias-border-l2);background:transparent;' +
+      'color:var(--dsw-alias-label-tertiary);font:inherit;font-size:11px;' +
+      'line-height:20px;cursor:pointer;margin-left:8px}' +
+      '.arxaPrism_chip:hover{border-color:var(--dsw-alias-label-tertiary)}' +
+      '.arxaPrism_chipOn{border-color:var(--dsw-static-deepseek-500);' +
+      'color:var(--dsw-static-deepseek-500)}' +
+      '.arxaPrism_chip:focus-visible{outline:2px solid var(--dsw-static-deepseek-500);' +
       'outline-offset:2px}' +
       // Background group: one settings.general.item registration wrapping all
       // four background rows — a small section label on top, hairlines inside,
@@ -1102,15 +1216,19 @@ window.__ModuleLoader__.load({
     // the remix applies debounced 350ms after the scrub settles — a dip per
     // pixel would strobe the wall. A boot with no stored seed shows the
     // middle without applying anything (the field stays boot-random until
-    // first touched).
+    // first touched). 0.8.0: the Auto chip is the way back to boot-random —
+    // it clears the stored seed (until then, a pinned number replays the
+    // same field at every launch, which read as "no randomness").
     function SeedRow() {
       const [n, setN] = React.useState(() => { const s = storedSeed(); return s === null ? 500 : s })
+      const [auto, setAuto] = React.useState(() => storedSeed() === null)
       const timer = React.useRef(0)
       React.useEffect(() => {
         const onStorage = (e) => {
           if (e.key !== SEED_KEY) return
+          if (e.newValue === null) { setAuto(true); setN(500); return }
           const v = parseInt(e.newValue, 10)
-          if (isFinite(v)) setN(clamp(v, 0, 999))
+          if (isFinite(v)) { setAuto(false); setN(clamp(v, 0, 999)) }
         }
         window.addEventListener('storage', onStorage)
         return () => { window.removeEventListener('storage', onStorage); clearTimeout(timer.current) }
@@ -1118,16 +1236,23 @@ window.__ModuleLoader__.load({
       const onChange = (e) => {
         const v = parseInt(e.target.value, 10)
         if (!isFinite(v)) return
+        setAuto(false)
         setN(v)
         clearTimeout(timer.current)
         timer.current = setTimeout(() => setSeed(v, true), 350)
+      }
+      const onAuto = () => {
+        setAuto(true)
+        setN(500)
+        clearTimeout(timer.current)
+        clearSeed(true)
       }
       const pct = (n / 999 * 100).toFixed(1)
       return h('div', { className: rowCss.row },
         h('div', { className: rowCss.rowText },
           h('div', { className: rowCss.title }, 'Randomness'),
           h('div', { className: rowCss.desc },
-            "Seed for the wall's random identities — slide to remix squares, tones and diagonals; a number replays the same field.")),
+            "Seed for the wall's random identities — slide to remix squares, tones and diagonals; a number replays the same field at every launch. Auto returns to a fresh field each time.")),
         h('div', { className: rowCss.ctrl },
           h('span', { className: rowCss.cap, 'aria-hidden': 'true' }, '0'),
           h('input', {
@@ -1137,14 +1262,22 @@ window.__ModuleLoader__.load({
             value: n,
             onChange,
             'aria-label': 'Randomness seed',
-            'aria-valuetext': 'Seed ' + n,
+            'aria-valuetext': auto ? 'Auto — fresh field each launch' : 'Seed ' + n,
             style: {
+              opacity: auto ? 0.5 : 1,
               background: 'linear-gradient(90deg, var(--dsw-static-deepseek-500) ' +
                 pct + '%, var(--dsw-alias-border-l2) ' + pct + '%)',
             },
           }),
           h('span', { className: rowCss.cap, 'aria-hidden': 'true' }, '999'),
-          h('span', { className: rowCss.val }, String(n))))
+          h('span', { className: rowCss.val }, auto ? '—' : String(n)),
+          h('button', {
+            type: 'button',
+            className: rowCss.chip + (auto ? ' ' + rowCss.chipOn : ''),
+            onClick: onAuto,
+            'aria-pressed': auto ? 'true' : 'false',
+            'aria-label': 'Auto randomness — a fresh field each launch',
+          }, 'Auto')))
     }
 
     function EnabledRow() {
@@ -1328,7 +1461,7 @@ window.__ModuleLoader__.load({
       let roDebounce = 0
       resizeObs = new ResizeObserver(() => {
         clearTimeout(roDebounce)
-        roDebounce = setTimeout(() => fixStage(), 150)
+        roDebounce = setTimeout(() => fixStage(true), 150)
       })
 
       seed = seedNow()
@@ -1338,6 +1471,7 @@ window.__ModuleLoader__.load({
       // (variants assigned directly — nothing has rendered yet).
       const bootSeed = storedSeed()
       if (bootSeed !== null) applySeed(bootSeed, true)
+      logEvent('boot', bootSeed !== null ? 'seed-' + bootSeed : 'boot-random')
       kick()
 
       // React re-mounts the scrollport on some navigations — a MutationObserver
@@ -1387,6 +1521,7 @@ window.__ModuleLoader__.load({
         }
         if (e.key === STROKE_KEY) { setStroke(e.newValue === '1', false); return }
         if (e.key === SEED_KEY) {
+          if (e.newValue === null) { clearSeed(false); return } // Auto in another window
           const v = parseInt(e.newValue, 10)
           if (isFinite(v)) setSeed(v, false)
         }
@@ -1406,8 +1541,8 @@ window.__ModuleLoader__.load({
 
     function mount(force) {
       const el = document.querySelector('[data-conversation-scroll]')
-      if (!el) { mountedEl = null; fixStage(); return }
-      if (el === mountedEl && !force) { fixStage(); return }
+      if (!el) { mountedEl = null; fixStage(true); return }
+      if (el === mountedEl && !force) { fixStage(true); return }
       mountedEl = el
       // The scrollport instance changed — re-point the grid observer.
       if (resizeObs) { resizeObs.disconnect(); resizeObs.observe(el) }
@@ -1423,7 +1558,7 @@ window.__ModuleLoader__.load({
         stageEl.appendChild(wallEl)
         stageEl.appendChild(frostEl)
       }
-      fixStage() // re-host (if remounted) + re-pin the box
+      fixStage(true) // re-host (if remounted) + re-pin the box
       applyOpacityVars()
       applyStrokeAttr() // boot/remount: the mode lands before the first paint
       const now = performance.now()
