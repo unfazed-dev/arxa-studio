@@ -1179,11 +1179,21 @@ the same row to the arxa preset, mirroring the host patch byte-for-byte
 (the preset's row is the one a mounted session runs, not the host's patched
 copy). (b) `js-yaml` was used by `preset-check.mjs` as an undeclared
 transitive dep of `@deepseek-ai/dsh-agent-presets` — `4593b16` declares it
-as a devDependency; `ee0b702` hardens the preset-check assertion on the
-agent-instructions config.
+as a devDependency; `ee0b702` hardens the 9th preset-check assertion on the
+agent-instructions config (a `deepEqual` that passed on `undefined ===
+undefined` now also asserts the value is present; proven by breaking the
+preset value, seeing RED, reverting). `npm install` was deliberately not run
+in the shared checkout — see the lockfile note below.
 
-**Verified.** `preset-check.mjs` 8/8, `ci.mjs` 29/29, `settings.yaml`
+**Verified.** `preset-check.mjs` 9/9, `ci.mjs` 29/29, `settings.yaml`
 byte-identical after a second `--materialise-only` run.
+
+**Lockfile.** `4593b16` edited `package.json` only, so `package-lock.json`'s
+root `devDependencies` stayed empty and `npm ci` would have refused the
+tree (plain `npm install` would not). Synced by the team lead with
+`npm install --package-lock-only` (no `node_modules` write, safe in the
+shared checkout): the hoisted `js-yaml@4.3.1` was already in the lock, only
+the root entry was missing. Same commit as the `ci.mjs` change under D119.
 
 ### D119 — `artifact-viewer/selftest.mjs` Task 11 flake is test-side; watcher unchanged.
 
@@ -1203,6 +1213,14 @@ deadline.
 reported (proves armed), counts only `a.md` events, and replaces every fixed
 sleep in Task 11 (coalescing and the SSE push) with a condition wait capped
 at 5 s. 5/5 standalone runs and `ci.mjs` 29/29 green after the change.
+
+**Why it took five runs to attribute (U2's finding).** `scripts/ci.mjs`
+printed only stdout's last six lines on RED and discarded stderr — where
+node puts `AssertionError [ERR_ASSERTION]: …` — so an intermittent red
+looked unattributable from the CI summary alone. Fixed in the same commit
+as the D118 lockfile sync: on RED the runner now prints the stderr lines
+that name the error (top of the block) plus the tail, and any spawn error.
+Proven on a forced failure before committing.
 
 **Gap found, being closed.** The user-facing new-session button lives in the
 generated shell (`scripts/gen-sidebar.mjs:73`), whose handler drops `!b.ok`

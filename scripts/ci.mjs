@@ -49,7 +49,18 @@ for (const [base, plugin, script] of suites) {
   const green = r.status === 0
   if (!green) { failed++; failedNames.push(label) }
   console.log((green ? 'GREEN  ' : 'RED    ') + label)
+  // On RED show the tail of BOTH streams: assertion messages and stack traces
+  // go to stderr, and a suite that dies there prints nothing useful on stdout.
   if (!green && r.stdout) console.log(r.stdout.split('\n').slice(-6).join('\n'))
+  if (!green && r.stderr) {
+    // The message ("AssertionError [ERR_ASSERTION]: …", "Error: …") sits at the
+    // TOP of node's stderr block; the tail is stack frames and the node version.
+    const lines = r.stderr.trim().split('\n')
+    const named = lines.filter((l) => /error|assert/i.test(l)).slice(0, 4)
+    const tail = lines.slice(-3).filter((l) => !named.includes(l))
+    console.log('stderr: ' + [...named, ...(tail.length ? ['…', ...tail] : [])].join('\n'))
+  }
+  if (!green && r.error) console.log('spawn error: ' + r.error.message)
 }
 if (failed > 0) {
   console.log('arxa-studio CI: ' + failed + ' FAILURE(S): ' + failedNames.join(', '))
