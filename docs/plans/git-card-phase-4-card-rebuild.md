@@ -1,6 +1,12 @@
 # Git card — Phase 4 card rebuild + composition harmony with the `cordis` preset
 
-Status: APPROVED 2026-09-02 ("Approve as written"). Implementation in progress.
+Status: LANDED 2026-09-02 — all of §5 shipped on master; `ci.mjs` 29/29 GREEN.
+A1 `ade8f2e` + `43e6167` + `9de6104` (D117) · A2 `eb97bd2` + `5fa0eb1` (D116) · A3 `8a46a4c` +
+`6a03469` + `7429dab` · B1–B6 `a89b02e` + `f14576d` + `09b64cf` + `4593b16` +
+`ee0b702` (D118) · viewer selftest flake diagnosed test-side, `3370a37` (D119).
+Ledger: `git-card-sessions-worktree-rewire.md` D116–D119. Original approval line kept
+below for the record.
+Was: APPROVED 2026-09-02 ("Approve as written"). Implementation in progress.
 Discipline (user-chosen, from the dsh `cordis` preset persona): explore first; ONE
 decision-complete plan; implementation only after explicit approval.
 

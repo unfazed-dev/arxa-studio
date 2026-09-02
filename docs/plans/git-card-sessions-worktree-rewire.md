@@ -1167,16 +1167,20 @@ scope, as the Phase 4 plan §6 says; only the card block is conformant.
   auto-discover `scripts/*.mjs`).
 - `f14576d` — drops a stray `insert:` wrapper the first commit left in the
   preset (caught by `preset-check.mjs` before the report went out).
-- `09b6c4f` — comment-only: names which of the three rows use absolute paths
+- `09b64cf` — comment-only: names which of the three rows use absolute paths
   vs bare package names (bare names resolve against the HOST composition's
   `node_modules`, only relative paths need the preset's own `baseUrl`).
 
-**Noted, not changed.** The shipped `standard`/`cordis` presets' own
-`agent-instructions` row has no `instructionFileCandidates`, so the preset
-reads AGENTS.md + CLAUDE.md by default; the host patch restricts to
-`[AGENTS.md]` only. Pre-existing, not a regression — surfaced for a later
-decision. `js-yaml` is used by `preset-check.mjs` as a transitive dep of
-`@deepseek-ai/dsh-agent-presets`, not declared in `package.json`.
+**Two gaps P2 flagged, closed the same day.** (a) The shipped
+`standard`/`cordis` presets' `agent-instructions` row has no
+`instructionFileCandidates`, so a preset-mounted session read AGENTS.md +
+CLAUDE.md while the host patch restricts to `[AGENTS.md]` — `4593b16` adds
+the same row to the arxa preset, mirroring the host patch byte-for-byte
+(the preset's row is the one a mounted session runs, not the host's patched
+copy). (b) `js-yaml` was used by `preset-check.mjs` as an undeclared
+transitive dep of `@deepseek-ai/dsh-agent-presets` — `4593b16` declares it
+as a devDependency; `ee0b702` hardens the preset-check assertion on the
+agent-instructions config.
 
 **Verified.** `preset-check.mjs` 8/8, `ci.mjs` 29/29, `settings.yaml`
 byte-identical after a second `--materialise-only` run.
