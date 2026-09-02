@@ -35,6 +35,8 @@ window.__ModuleLoader__.load({
     const WRITE_ROUTE = '/__arxa/artifacts/write'
     const STATE_ROUTE = '/__arxa/sidebar/state'
     const ACTION_ROUTE = '/__arxa/sidebar/action'
+    // insight.* live in the arxa-git-card host (docs/plans/git-card-stock-dock-rebuild.md A2)
+    const CARD_ROUTE = '/__arxa/git-card/action'
     const EVENTS_ROUTE = '/__arxa/artifacts/events'
     const VENDOR = (n) => '/__arxa/artifacts/vendor/' + n
     const EDITABLE_LANES = new Set(['markdown', 'code', 'text'])
@@ -639,10 +641,10 @@ window.__ModuleLoader__.load({
     // "Insights" links open it on a REPORT instead — commit streak, CI runs,
     // sessions across the org. Same ingress event, same column, same sheet
     // behaviour below 744px; only the payload differs (`kind: 'insight'`).
-    // Every read goes through the sidebar action route the card already uses,
+    // Every read goes through the git-card action route the card already uses,
     // so there is one server surface, not two.
     const postAction = async (action, arg) => {
-      const r = await fetch(ACTION_ROUTE, {
+      const r = await fetch(CARD_ROUTE, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ action, arg }),
       })

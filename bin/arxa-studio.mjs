@@ -129,6 +129,10 @@ const waitingPageDir = resolve(here, '..', 'plugins', 'waiting-page')
 const themeAccentDir = resolve(here, '..', 'plugins', 'theme-accent')
 const pairingDir = resolve(here, '..', 'plugins', 'pairing')
 const sidebarDir = resolve(here, '..', 'plugins', 'arxa-sidebar')
+// Git card (docs/plans/git-card-stock-dock-rebuild.md): its own plugin —
+// host half serves /__arxa/git-card/action over the sidebar's org shell;
+// browser half is the conversation.input.dock card in stock QueueDock grammar.
+const gitCardDir = resolve(here, '..', 'plugins', 'arxa-git-card')
 // Approvals loop (grill D60–D68): approvals doors new pendings through the
 // push-doorbell library by bare-name-then-relative import probe (the sidebar
 // importShell pattern) — both dirs ride the flat copies below so the probe
@@ -170,6 +174,7 @@ writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
     'arxa-theme-accent': `file:${themeAccentDir}`,
     'arxa-pairing': `file:${pairingDir}`,
     'arxa-sidebar': `file:${sidebarDir}`,
+    'arxa-git-card': `file:${gitCardDir}`,
     'arxa-file-org-shell': `file:${fileOrgShellDir}`,
     'arxa-github-link': `file:${githubLinkDir}`,
     'arxa-artifact-viewer': `file:${artifactViewerDir}`,
@@ -346,7 +351,7 @@ engineLog('dsh bin resolved: ' + dshBin)
 // The design panel, brand and gen-ui plugins resolve by package name (their
 // browser halves are discovered through package.json dsh.client, which a
 // file-path entry never reaches).
-const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa-mcp-apps', 'arxa-waiting-page', 'arxa-theme-accent', 'arxa-pairing', 'arxa-sidebar', 'arxa-artifact-viewer', 'arxa-frame', 'arxa-locale', 'arxa-prism']
+const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa-mcp-apps', 'arxa-waiting-page', 'arxa-theme-accent', 'arxa-pairing', 'arxa-sidebar', 'arxa-git-card', 'arxa-artifact-viewer', 'arxa-frame', 'arxa-locale', 'arxa-prism']
 // ALWAYS install, never skip on presence: these are file: dependencies, and
 // pnpm copies them into .pnpm at add-time. A plain `pnpm install` sees the
 // lockfile entry unchanged and keeps the OLD copy — measured 2026-08-25: the
@@ -395,6 +400,7 @@ if (packed) {
     ['arxa-theme-accent', themeAccentDir],
     ['arxa-pairing', pairingDir],
     ['arxa-sidebar', sidebarDir],
+    ['arxa-git-card', gitCardDir],
     ['arxa-file-org-shell', fileOrgShellDir],
     ['arxa-github-link', githubLinkDir],
     ['arxa-artifact-viewer', artifactViewerDir],

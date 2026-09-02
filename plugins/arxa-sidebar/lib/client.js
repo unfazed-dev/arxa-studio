@@ -2770,7 +2770,12 @@ window.__ModuleLoader__.load({
 			const r = await fetch("/__arxa/sidebar/state" + q);
 			return r.json();
 		};
-		const ORG_POST = (action, arg) => fetch("/__arxa/sidebar/action", {
+		// card.* / insight.* / version.* moved to the arxa-git-card host
+		// (docs/plans/git-card-stock-dock-rebuild.md A2); routed by prefix
+		// until the card itself leaves this bundle (plan step 3).
+		const ORG_ROUTE_FOR = (action) => /^(card|insight|version)\./.test(action)
+			? "/__arxa/git-card/action" : "/__arxa/sidebar/action";
+		const ORG_POST = (action, arg) => fetch(ORG_ROUTE_FOR(action), {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ action, arg })

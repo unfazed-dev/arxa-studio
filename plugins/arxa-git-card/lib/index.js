@@ -1,0 +1,387 @@
+/**
+ * arxa-git-card — host half (docs/plans/git-card-stock-dock-rebuild.md, A2).
+ *
+ * The Git card's engine actions, MOVED verbatim out of arxa-sidebar's action
+ * table (2026-09-02): card.status / card.commit.draft / card.commit /
+ * card.push / card.pr.create / card.pr.status / card.pr.merge /
+ * version.mint / card.runner.wake / insight.streak / insight.ci /
+ * insight.sessions. One route on the same webServer pattern:
+ *
+ *   POST /__arxa/git-card/action  body { action, arg }
+ *     → { ok: true, action, result } | { ok: false, error, action? }
+ *
+ * The org shell (single open-org handle, ensureOpen, lifecycle) stays owned
+ * by arxa-sidebar; this half reaches it through the host object the sidebar
+ * publishes under Symbol.for('arxa.sidebar.host') — one process-wide
+ * singleton, immune to the two module instances pnpm's virtual store can
+ * produce for file: deps (bare import falls back for the checkout shape).
+ * Nothing here is duplicated from the sidebar: getGithub / mainChecksFor /
+ * importGitWorkspace ride on that object because workspace.new-session
+ * (D111 gate) still needs them there.
+ */
+
+export const name = 'arxa-git-card'
+export const inject = ['webServer']
+
+const HOST_KEY = Symbol.for('arxa.sidebar.host')
+
+/** The sidebar's published host object, or null before its apply() ran. */
+async function sidebarHost() {
+  const g = globalThis[HOST_KEY]
+  if (g?.ready) return g
+  try {
+    const m = await import('arxa-sidebar')
+    if (m.sidebarHost?.ready) return m.sidebarHost
+  } catch { /* not resolvable bare — checkout shape below */ }
+  try {
+    const m = await import(new URL('../../arxa-sidebar/lib/index.js', import.meta.url).href)
+    if (m.sidebarHost?.ready) return m.sidebarHost
+  } catch { /* fall through */ }
+  return globalThis[HOST_KEY]?.ready ? globalThis[HOST_KEY] : null
+}
+
+/** prflow.js is not re-exported by the git-workspace barrel (D116); it is
+  * reachable bare only through the "./lib/prflow.js" exports entry. */
+let prflowCache = null
+async function importPrflow() {
+  if (prflowCache) return prflowCache
+  try {
+    prflowCache = await import('git-workspace/lib/prflow.js')
+  } catch {
+    prflowCache = await import(new URL('../../git-workspace/lib/prflow.js', import.meta.url).href)
+  }
+  return prflowCache
+}
+
+export function apply(ctx) {
+  const json = (res, body) => {
+    res.writeHead(200, {
+      'content-type': 'application/json',
+      'cache-control': 'no-store',
+    })
+    res.end(JSON.stringify(body))
+  }
+
+  ctx.webServer.register({
+    name: 'arxa-git-card-action',
+    path: '/__arxa/git-card/action',
+    kind: 'exact',
+    handler: async (req, res) => {
+      let raw = ''
+      req.on('data', (c) => { raw += c })
+      req.on('end', async () => {
+        try {
+          const { action, arg } = JSON.parse(raw || '{}')
+          const sb = await sidebarHost()
+          if (!sb) return json(res, { ok: false, error: 'sidebar-not-ready', action })
+          const oc = await sb.orgContext()
+          if (!oc) return json(res, { ok: false, seam: sb.seam, error: 'no-workspace', action })
+          const { handle, ensureOpen } = oc
+          const { getGithub, mainChecksFor, importGitWorkspace } = sb
+
+          const table = {
+            // ---- Part B S3: composer git card engine actions (Q1/Q2/Q6/
+            // Q7/Q10 — docs/plans/git-card-part-b-grill.md). The card is
+            // SEAT-AWARE: a sessionId resolves the session worktree + its
+            // branch; without one it serves the org primary worktree. The
+            // engine NEVER drafts messages (Q6): card.commit.draft returns
+            // evidence only — the session model writes the subject.
+            'card.status': async () => {
+              const gw = await importGitWorkspace()
+              const cur = handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              let repoPath = cur.path
+              let branch = 'main'
+              let sessionRow = null
+              if (sid) {
+                // D98: a session id can live in the org registry OR any
+                // project registry. `parkedSessions` merges every repo's
+                // rows (each tagged with its owning `repoPath`); looking
+                // only at the org registry made project sessions
+                // unresolvable — "session-not-found" for work that exists.
+                sessionRow = gw.parkedSessions(cur.path).find((s) => s.id === sid) ?? null
+                if (!sessionRow) throw new Error('session-not-found: ' + sid)
+                repoPath = sessionRow.worktree
+                branch = sessionRow.branch
+              }
+              // B1: a session worktree can be deleted out from under the
+              // registry. `status --porcelain` then returns null, and the old
+              // `?? ''` turned that into "no output" — which the counters below
+              // read as CLEAN, so the card reported a worktree that no longer
+              // exists as having nothing to commit. Ask health first, and never
+              // report counts we did not actually measure.
+              const health = gw.worktreeHealth(repoPath)
+              const porcelain = health === 'ok'
+                ? (gw.runGit(['status', '--porcelain'], { cwd: repoPath, allowFail: true }) ?? '')
+                : ''
+              let staged = 0; let unstaged = 0; let untracked = 0
+              for (const line of porcelain.split('\n')) {
+                if (!line) continue
+                const x = line[0]; const y = line[1]
+                if (line.startsWith('??')) untracked++
+                else { if (x !== ' ' && x !== '?') staged++; if (y !== ' ' && y !== '?') unstaged++ }
+              }
+              let aheadBehind = null
+              if (health === 'ok' && gw.runGit(['rev-parse', '-q', '--verify', 'origin/main'], { cwd: cur.path, allowFail: true }) !== null) {
+                const c = gw.runGit(['rev-list', '--left-right', '--count', 'origin/main...HEAD'], { cwd: repoPath, allowFail: true })
+                if (c) { const [behind, ahead] = c.split(/\s+/).map(Number); aheadBehind = { ahead, behind } }
+              }
+              let manifest = {}
+              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch { /* unreadable — plain status */ }
+              const g = await getGithub().catch(() => null)
+              const mainChecks = await mainChecksFor(cur.path, manifest, g, gw).catch(() => null)
+              return {
+                seat: { kind: sid ? 'session' : 'org', sessionId: sid, branch },
+                // `health` is what the card must read before any count. When it
+                // is not 'ok' the counts were never measured, so they are null
+                // rather than zero — zero is a claim, and it would be a lie.
+                health,
+                dirty: health === 'ok' ? { staged, unstaged, untracked } : null,
+                aheadBehind,
+                // wipRun throws outright on a missing worktree, which used to
+                // reject the whole card.status call; the client swallows that
+                // and leaves stale numbers on screen.
+                wipRun: health === 'ok' ? gw.wipRun(repoPath).length : null,
+                chip: health === 'ok' ? gw.versionChip(repoPath) : null,
+                linked: Boolean(manifest.repoUrl),
+                localOnly: Boolean(manifest.localOnly),
+                // `files` is the per-file state of the GENERATED frame. openOrg
+                // upgrades a stale file on its own, but one a human edited comes
+                // back `modified` and is deliberately left alone — without this
+                // nobody could ever say so, and that repo would keep an old gate
+                // forever while looking fine.
+                frame: { wired: manifest.frameWired === true ? 'ok' : (manifest.frameWired ?? null), protection: manifest.frameProtection ?? null, runner: manifest.frameRunner ?? null, files: (() => { try { return gw.frameStatus(cur.path, 'org', { includeCiYml: true }) } catch { return null } })() },
+                main: { checks: mainChecks?.state ?? null },
+              }
+            },
+            /** Q6: EVIDENCE ONLY — the session model drafts the subject. */
+            'card.commit.draft': async () => {
+              const gw = await importGitWorkspace()
+              const cur = handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              const repoPath = sid
+                ? (gw.parkedSessions(cur.path).find((s) => s.id === sid) ?? {}).worktree ?? cur.path
+                : cur.path
+              return {
+                uncommittedStat: gw.runGit(['diff', '--stat'], { cwd: repoPath, allowFail: true }) ?? '',
+                wipSubjects: gw.wipRun(repoPath).map((c) => c.subject),
+                recentStageSubjects: gw.stageLog(repoPath).slice(0, 5).map((c) => c.subject),
+                rule: '<type>(<scope>): <what is now true, in words a human would use> — types: ' + gw.SUBJECT_TYPES.join(' '),
+              }
+            },
+            'card.commit': async () => {
+              const gw = await importGitWorkspace()
+              const cur = handle()
+              const subject = String(arg?.subject ?? '').split('\n')[0].trim()
+              if (!gw.SUBJECT_RE.test(subject)) throw new Error('subject-not-conventional: use <type>(<scope>): <what is now true> — got: ' + subject)
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (sid) {
+                // Session seat: squash + gate + merge to main (Q2 local half).
+                return gw.sessionStageBoundary(cur.path, sid, { message: subject })
+              }
+              // Org seat: squash on main + the same gate, parked=false only on green.
+              // B3: this used to squash onto main and THEN gate, returning
+              // `parked: true` on red while the commit sat on main regardless —
+              // a gate that reported failure and prevented nothing. The session
+              // path avoids it structurally: it squashes on a BRANCH and only
+              // merges when green, so main is never touched by a red run.
+              //
+              // The org seat has no branch, so the equivalent is an explicit
+              // rewind: remember where main was, and put it back if the gate
+              // reds. `stageBoundarySquash` is commit-tree + update-ref, so
+              // resetting to the recorded SHA restores the exact prior state —
+              // the WIP run included. Nothing is lost, which is the same
+              // promise parkSession makes on the session path (D40).
+              const preSha = gw.runGit(['rev-parse', 'HEAD'], { cwd: cur.path, allowFail: true })
+              const sq = gw.stageBoundarySquash(cur.path, { message: subject, trailer: 'Arxa-Stage: org' })
+              const gate = gw.runGate(cur.path)
+              if (!gate.green) {
+                if (preSha) gw.runGit(['reset', '--hard', preSha], { cwd: cur.path, allowFail: true })
+                return { ...sq, gate, merged: false, parked: true, rewound: Boolean(preSha) }
+              }
+              return { ...sq, gate, merged: true, parked: false, rewound: false }
+            },
+            /** Push the session branch for PR purposes ONLY (the D73
+             * relaxation, Q2): main pushes ride boundaries/heal. */
+            'card.push': async () => {
+              const gw = await importGitWorkspace()
+              const cur = handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (!sid) throw new Error('card.push serves session seats — the org primary rides its boundaries')
+              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              if (!s) throw new Error('session-not-found: ' + sid)
+              const g = await getGithub().catch(() => null)
+              if (!g) throw new Error('github-unavailable')
+              const creds = await g.gitCredentials()
+              // D98: push the repo that actually HOLDS this branch. A project
+              // session's `arxa/session/<id>` exists only in the project repo,
+              // and its origin is the project's remote — pushing it from the
+              // org would push a ref that is not there, to the wrong remote.
+              const repoPath = s.repoPath ?? cur.path
+              const origin = gw.getOrigin(repoPath)
+              if (!origin) throw new Error('no-origin — connect this org to GitHub first')
+              const url = origin.replace('https://', 'https://' + encodeURIComponent(creds.login) + ':' + creds.token + '@')
+              const out = gw.runGit(['push', '-u', url, s.branch], { cwd: repoPath, allowFail: true })
+              return out !== null ? { ok: true, branch: s.branch } : { ok: false, reason: 'push-failed' }
+            },
+            'card.pr.create': async () => {
+              const gw = await importGitWorkspace()
+              const g = await getGithub().catch(() => null)
+              if (!g) throw new Error('github-unavailable')
+              const cur = handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (!sid) throw new Error('card.pr.create serves session seats')
+              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              if (!s) throw new Error('session-not-found: ' + sid)
+              // D98: a project session's branch and remote belong to the
+              // PROJECT repo, but the PR below is built from the ORG manifest.
+              // Before routing this seat was unreachable for project sessions
+              // (the org registry had no such id, so it threw). Keep it loud
+              // rather than silently filing an org-scoped PR for project work —
+              // choosing the right manifest is Phase 2 (D102/D107).
+              if (s.origin === 'project') throw new Error('project-session-pr-pending: PR flow for project repos lands in Phase 2')
+              let manifest = {}
+              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
+              if (!manifest.repoOwner || !manifest.repoName) throw new Error('org-not-published')
+              const title = String(arg?.title ?? '').trim()
+              if (!gw.SUBJECT_RE.test(title)) throw new Error('title-not-conventional: the PR title becomes the squash-merge subject (Q7/Q8)')
+              const attribution = '— written by ' + String(arg?.model ?? 'the session model') + ' in arxa studio'
+              const body = [String(arg?.problem ?? ''), String(arg?.fix ?? ''), attribution].filter((x) => x !== '').join('\n\n')
+              // file-pr rule 1: dedupe — update, never duplicate.
+              const existing = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
+              if (Array.isArray(existing) && existing.length > 0) return { ok: true, existing: true, pr: { number: existing[0].number, url: existing[0].html_url } }
+              const pr = await g.prCreate(manifest.repoOwner, manifest.repoName, { title, body, head: s.branch, base: 'main' })
+              return { ok: true, pr: { number: pr.number, url: pr.html_url } }
+            },
+            'card.pr.status': async () => {
+              const gw = await importGitWorkspace()
+              const g = await getGithub().catch(() => null)
+              if (!g) throw new Error('github-unavailable')
+              const cur = handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (!sid) throw new Error('card.pr.status serves session seats')
+              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              if (!s) throw new Error('session-not-found: ' + sid)
+              // D98: same as card.pr.create — the org manifest is the wrong
+              // source for a project session's PR. Loud, not silently wrong.
+              if (s.origin === 'project') throw new Error('project-session-pr-pending: PR flow for project repos lands in Phase 2')
+              let manifest = {}
+              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
+              if (!manifest.repoOwner || !manifest.repoName) throw new Error('org-not-published')
+              const prs = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
+              if (!Array.isArray(prs) || prs.length === 0) return { ok: true, pr: null }
+              const pr = prs[0]
+              const checks = await g.prChecks(manifest.repoOwner, manifest.repoName, pr.head?.sha ?? s.branch).catch(() => ({ state: 'unknown', asleep: false, runs: [] }))
+              return { ok: true, pr: { number: pr.number, url: pr.html_url, state: pr.state }, checks }
+            },
+            /** D116: merge-commit the reviewed PR, pinned to the sha the
+              * checks were read from (D107) — never on anything but a fully
+              * green run (asleep/pending/red/none all refuse, loud reason). */
+            'card.pr.merge': async () => {
+              const gw = await importGitWorkspace()
+              const g = await getGithub().catch(() => null)
+              if (!g) throw new Error('github-unavailable')
+              const cur = handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (!sid) throw new Error('card.pr.merge serves session seats')
+              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              if (!s) throw new Error('session-not-found: ' + sid)
+              if (s.origin === 'project') throw new Error('project-session-pr-pending: PR flow for project repos lands in Phase 2')
+              let manifest = {}
+              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
+              if (!manifest.repoOwner || !manifest.repoName) throw new Error('org-not-published')
+              const prs = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
+              if (!Array.isArray(prs) || prs.length === 0) return { ok: false, reason: 'no-pr' }
+              const pr = prs[0]
+              const checks = await g.prChecks(manifest.repoOwner, manifest.repoName, pr.head?.sha ?? s.branch).catch(() => ({ state: 'unknown', asleep: false, runs: [] }))
+              if (checks.state !== 'green') return { ok: false, reason: 'checks-' + checks.state }
+              // prflow.js has no other caller yet (D116) — imported directly
+              // rather than through the index barrel, which does not re-export it.
+              const { mergeSessionPr } = await importPrflow()
+              const repoPath = s.repoPath ?? cur.path
+              const origin = gw.getOrigin(repoPath)
+              const result = await mergeSessionPr(repoPath, sid, {
+                owner: manifest.repoOwner,
+                name: manifest.repoName,
+                number: pr.number,
+                sha: pr.head?.sha ?? null,
+                subject: pr.title,
+                api: { prMerge: g.prMerge },
+                origin,
+              })
+              return { ok: true, merged: result.merged, mergeSha: result.mergeSha, reconcile: result.reconcile }
+            },
+            /** D116: human-initiated "publish to client" — mint the next
+              * semantic version into the session's own worktree (same target
+              * `stageBoundarySquash` already uses inside sessionStageBoundary,
+              * sessions.js:423), captured in one clean stage commit. */
+            'version.mint': async () => {
+              const gw = await importGitWorkspace()
+              const cur = handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (!sid) throw new Error('version.mint serves session seats')
+              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              if (!s) throw new Error('session-not-found: ' + sid)
+              const name = typeof arg?.name === 'string' && arg.name.trim() !== '' ? arg.name.trim() : undefined
+              const state = typeof arg?.state === 'string' && arg.state.trim() !== '' ? arg.state.trim() : undefined
+              const result = gw.mintAtStageBoundary(s.worktree, { name, state, env: process.env })
+              return { ok: true, squashed: result.squashed, sha: result.sha, chip: result.chip }
+            },
+            /** D116/B8: wake the self-hosted runner for this org's linked
+              * repo. A human action (runner.js:10-16) — never throws; the
+              * client shows the manual `svc.sh start` instruction on ok:false. */
+            'card.runner.wake': async () => {
+              const cur = handle()
+              let manifest = {}
+              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
+              if (!manifest.repoOwner || !manifest.repoName) return { ok: false, reason: 'unlinked' }
+              const g = await getGithub().catch(() => null)
+              if (!g) return { ok: false, reason: 'unlinked' }
+              return g.ensureRunner(manifest.repoOwner, manifest.repoName)
+            },
+            /** A3: insight column, right-panel surfaces (D101/D105). Each
+              * degrades to an 'unavailable' shape rather than throwing when
+              * its backend export has not landed yet — a missing export
+              * must never break the whole card. */
+            'insight.streak': async () => {
+              const gw = await importGitWorkspace()
+              const cur = handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (!sid) throw new Error('insight.streak serves session seats')
+              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              if (!s) throw new Error('session-not-found: ' + sid)
+              if (typeof gw.commitDays !== 'function') return { days: [], current: 0, longest: 0, reason: 'unavailable' }
+              const repoPath = s.repoPath ?? cur.path
+              return gw.commitDays(repoPath, { since: '90 days', env: process.env })
+            },
+            'insight.ci': async () => {
+              const gw = await importGitWorkspace()
+              const g = await getGithub().catch(() => null)
+              const cur = handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (!sid) throw new Error('insight.ci serves session seats')
+              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              if (!s) throw new Error('session-not-found: ' + sid)
+              if (!g || typeof g.workflowRuns !== 'function') return { runs: [], reason: 'unavailable' }
+              let manifest = {}
+              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
+              if (!manifest.repoOwner || !manifest.repoName) return { runs: [], reason: 'unavailable' }
+              return g.workflowRuns({ owner: manifest.repoOwner, name: manifest.repoName, branch: s.branch, perPage: 20 })
+            },
+            'insight.sessions': async () => {
+              const gw = await importGitWorkspace()
+              const cur = arg?.orgId ? await ensureOpen(arg.orgId) : handle()
+              return { rows: gw.parkedSessions(cur.path) }
+            },
+          }
+          const fn = table[action]
+          if (!fn) return json(res, { ok: false, error: 'unknown-action', action })
+          const out = await fn()
+          json(res, out !== undefined ? { ok: true, action, result: out } : { ok: true, action })
+        } catch (e) {
+          json(res, { ok: false, error: String(e?.message ?? e) })
+        }
+      })
+    },
+  })
+}

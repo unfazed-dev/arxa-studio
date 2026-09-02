@@ -1,14 +1,12 @@
 #!/usr/bin/env node
 /**
- * arxa-sidebar action-table selftest — D116 phase 4 additions
- * (docs/plans/git-card-phase-4-card-rebuild.md §3 A1/A3). Real Phase A
- * lifecycle, fake webServer + fake github (same harness as smoke.mjs),
- * fully sandboxed (temp ARXA_HOME + workspace). Covers the eight things
- * added to the action dispatch table in lib/index.js:
- *   card.pr.merge (refuse non-green / merge on green), version.mint,
- *   card.runner.wake (unlinked / linked), workspace.new-session D111 gate
- *   (red / asleep / pending / unlinked), insight.streak / insight.ci
- *   (unavailable + real shape), insight.sessions.
+ * arxa-sidebar action-table selftest — the D111 new-session gate. Real
+ * Phase A lifecycle, fake webServer + fake github (same harness as
+ * smoke.mjs), fully sandboxed (temp ARXA_HOME + workspace). Covers
+ * workspace.new-session's main-checks gate (red / asleep / pending /
+ * unlinked). The card.* / version.mint / insight.* cases moved with their
+ * actions to plugins/arxa-git-card/selftest.actions.mjs on 2026-09-02
+ * (docs/plans/git-card-stock-dock-rebuild.md A2).
  * Exit 0 = every assertion held.
  */
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -101,63 +99,6 @@ async function patchProjectManifest(projPath, patch) {
 }
 
 // ============================================================
-// A. card.pr.merge — refuse on non-green, merge on green
-// ============================================================
-{
-  const org = await makeOrg('PR Co')
-  const sid = await makeSession(org)
-  await patchManifest(org.path, { repoOwner: 'acme', repoName: 'widgets', localOnly: false })
-
-  fakeGh.prListForHead = async () => [{ number: 7, title: 'feat: land the thing', head: { sha: 'deadbeef' }, html_url: 'https://x/7' }]
-  fakeGh.prChecks = async () => ({ state: 'pending', asleep: false, runs: [] })
-  let r = await act('card.pr.merge', { sessionId: sid })
-  check('card.pr.merge refuses on non-green checks (reason string)',
-    r.ok === true && r.result.ok === false && r.result.reason === 'checks-pending', JSON.stringify(r))
-
-  fakeGh.prChecks = async () => ({ state: 'green', asleep: false, runs: [] })
-  fakeGh.prMerge = async (owner, name, { number, sha, subject }) =>
-    ({ merged: true, sha: 'merged-sha-123', number, owner, name, subject })
-  r = await act('card.pr.merge', { sessionId: sid })
-  check('card.pr.merge merges on green (merged true, mergeSha, reconcile present)',
-    r.ok === true && r.result.ok === true && r.result.merged === true &&
-    r.result.mergeSha === 'merged-sha-123' && r.result.reconcile && typeof r.result.reconcile === 'object',
-    JSON.stringify(r))
-}
-
-// ============================================================
-// B. version.mint — returns a chip
-// ============================================================
-{
-  const org = await makeOrg('Version Co')
-  const sid = await makeSession(org)
-  const s = gw.parkedSessions(org.path).find((x) => x.id === sid)
-  writeFileSync(path.join(s.worktree, 'notes.txt'), 'first draft\n')
-
-  const r = await act('version.mint', { sessionId: sid, name: 'Widgets', state: 'Draft' })
-  check('version.mint squashes the dirty worktree and returns a chip',
-    r.ok === true && r.result.ok === true && r.result.squashed === true &&
-    typeof r.result.sha === 'string' && r.result.chip && r.result.chip.name === 'Widgets' && r.result.chip.state === 'Draft',
-    JSON.stringify(r))
-}
-
-// ============================================================
-// C. card.runner.wake — unlinked path, then linked path with a fake api
-// ============================================================
-{
-  const org = await makeOrg('Runner Co')
-  let r = await act('card.runner.wake', {})
-  check('card.runner.wake: unlinked repo refuses loud (no throw)',
-    r.ok === true && r.result.ok === false && r.result.reason === 'unlinked', JSON.stringify(r))
-
-  await patchManifest(org.path, { repoOwner: 'acme', repoName: 'widgets', localOnly: false })
-  fakeGh.ensureRunner = async (owner, name) => ({ ok: true, woke: true, owner, name })
-  r = await act('card.runner.wake', {})
-  check('card.runner.wake: linked repo returns the api result verbatim',
-    r.ok === true && r.result.ok === true && r.result.woke === true &&
-    r.result.owner === 'acme' && r.result.name === 'widgets', JSON.stringify(r))
-}
-
-// ============================================================
 // D. workspace.new-session D111 gate — red / asleep / pending / unlinked
 // ============================================================
 {
@@ -228,48 +169,6 @@ async function patchProjectManifest(projPath, patch) {
 }
 
 // ============================================================
-// E. insight.streak / insight.ci / insight.sessions
-// ============================================================
-{
-  const org = await makeOrg('Insight Co')
-  const sid = await makeSession(org)
-
-  // insight.streak: shape depends on whether gw.commitDays has landed
-  // (another agent's concurrent addition) — check both branches live
-  // rather than assuming either state.
-  let r = await act('insight.streak', { sessionId: sid })
-  if (typeof gw.commitDays === 'function') {
-    check('insight.streak: commitDays landed — real shape served',
-      r.ok === true && Array.isArray(r.result.days) && typeof r.result.current === 'number' && typeof r.result.longest === 'number',
-      JSON.stringify(r))
-  } else {
-    check('insight.streak: commitDays not yet landed — unavailable shape',
-      r.ok === true && r.result.reason === 'unavailable' &&
-      Array.isArray(r.result.days) && r.result.days.length === 0 &&
-      r.result.current === 0 && r.result.longest === 0,
-      JSON.stringify(r))
-  }
-
-  // insight.ci: fakeGh has no workflowRuns yet — unavailable shape.
-  r = await act('insight.ci', { sessionId: sid })
-  check('insight.ci: missing workflowRuns export — unavailable shape',
-    r.ok === true && r.result.reason === 'unavailable' && Array.isArray(r.result.runs) && r.result.runs.length === 0,
-    JSON.stringify(r))
-
-  // insight.ci: now with a fake workflowRuns + a published manifest — real shape.
-  await patchManifest(org.path, { repoOwner: 'acme', repoName: 'widgets', localOnly: false })
-  fakeGh.workflowRuns = async ({ owner, name, branch, perPage }) => ([{ id: 1, owner, name, branch, perPage, status: 'completed', conclusion: 'success' }])
-  r = await act('insight.ci', { sessionId: sid })
-  check('insight.ci: workflowRuns present — real shape served',
-    r.ok === true && Array.isArray(r.result) && r.result.length === 1 && r.result[0].owner === 'acme',
-    JSON.stringify(r))
-
-  r = await act('insight.sessions', { orgId: org.id })
-  check('insight.sessions: rows include the created session',
-    r.ok === true && Array.isArray(r.result.rows) && r.result.rows.some((x) => x.id === sid),
-    JSON.stringify(r))
-}
-
 console.log(failures === 0 ? '\narxa-sidebar selftest.actions: ALL GREEN' : `\narxa-sidebar selftest.actions: ${failures} FAILURE(S)`)
 rmSync(sandbox, { recursive: true, force: true })
 process.exit(failures === 0 ? 0 : 1)
