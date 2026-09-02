@@ -1167,3 +1167,114 @@ architecture; this grill settles the editor extension it never covered.
   protection is NOT in force for the scaffolder skill; the methodology
   text ships with the skill. Reopen only if skill-text piracy becomes
   measurable.
+
+- **D109 — Pro and Agency stay separate seats; a bundled Pro+Agency seat
+  price exists for the same person holding both.** (2026-09-03.) Claims
+  stay distinct (`pro`-tier scaffold entitlement vs `agency`) on distinct
+  axes, so D107 holds; an org owner can buy a combined seat at one Paddle
+  price id below the sum of the two. A business-only member (accountant,
+  PM) buys Agency alone and never pays for the pipeline; a developer
+  without business duties buys Pro alone. Ledger: two claims, one price
+  id. Rejected: Agency seat includes Pro (accountant pays for scaffold;
+  Agency stops being "beside the ladder"; undercuts Pro for mixed teams);
+  fully separate with no bundle (the double charge the research names as
+  the churn trigger for agencies with in-house developers). Bundle
+  discount size is a pricing number — see the price-band decisions.
+
+- **D110 — Pro seat: $29/mo monthly, $24/mo billed annually.**
+  (2026-09-03, from
+  `arxa/docs/research/payment-architecture/pricing-bands-pro-and-agency.md`,
+  19 readable pricing pages.) Generic per-developer tools cluster
+  $10–20/seat (Cursor, Copilot, Retool; median $16); FlutterFlow — the
+  one comparable doing the same design-to-app job — is $39 Basic / $80
+  Growth per seat, and is the relevant comp. $29 sits in the upper half
+  of the monetization plan's $20–40 assumption and under FlutterFlow
+  Basic, so the pitch is "same job, cheaper, ships Flutter you own".
+  ~17% annual discount matches the comparables. Leaves room for a
+  Pro+Agency bundle (D109) under $50. Rejected: $39 (price-match
+  FlutterFlow — peer positioning, weaker switch argument, bundle lands
+  $55–60); $19 (IDE-assistant cluster — anchors arxa as a code helper,
+  halves margin on the product's core value). USD; other currencies are
+  Paddle's localized pricing, not separate decisions.
+
+- **D111 — Agency seat: $19/mo monthly, $16/mo annually. Pro+Agency
+  bundled seat (D109): $39/mo monthly, $32/mo annually.** (2026-09-03,
+  same research file.) Agency internal-ops comparables (Productive,
+  Scoro, Harvest, Teamwork, Float, Bonsai, Monday, ClickUp, Notion)
+  median ~$19.50/seat, IQR $14.50–$25; Agency is a module inside the
+  Studio, not a standalone PSA suite, so it prices at the median, not
+  the top. A business-only member pays less than a developer, matching
+  value. Bundle = $48 sum − $9 (−19%), landing on FlutterFlow Basic's $39
+  for a seat that does both jobs. Rejected: $25 (top of IQR — earned
+  only once accounting-lite and HR-lite ship, which are later phases);
+  $14 (bottom of IQR — leaves the most on the table from 10+-seat
+  agencies, whose seats scale with headcount). Paddle: three prices —
+  `pro_seat`, `agency_seat`, `pro_agency_seat` — each monthly + annual.
+
+- **D112 — No Agency seat minimum; free Viewer seats for clients and
+  stakeholders.** (2026-09-03, same research file.) Agency turns on at 1
+  paid seat — a freelancer can add it (D107) and the 14-day card trial
+  (D104-era decision) converts on the smallest yes. None of 9 readable
+  comparables require 10 seats (Productive's "10" is a wire-transfer
+  threshold only); only Scoro floors at 5. Free viewer/guest seats are
+  common (6 of 19: Float, Monday, ClickUp, Vercel, Figma, Webflow) and
+  are the growth loop into paid seats. Viewer = a member role in the
+  seat ledger with no `agency` claim and a read-only `viewer` claim:
+  sees approvals, invoices, project status; cannot edit; never counted in
+  Paddle `quantity`. Rejected: 3-seat minimum (no comparable does it;
+  kills the freelancer path); no free seats (forces agencies to pay for
+  read-only stakeholders — the per-head friction the research flags).
+  This closes research §6's open pricing items: Pro band (D110), Agency
+  band and bundle (D111), minimum seats and viewer seats (D112),
+  one-seat-or-two (D109).
+
+- **D113 — Scale replaces Pro seats: a Scale org has no Pro seats, every
+  member scaffolds. Agency still stacks per seat on a Scale org, at the
+  plain $19 (no D111 bundle, since scaffold is already org-wide).**
+  (2026-09-03; advisor gap — D107 left stacking unstated.) The ladder is
+  Free → Pro (per developer) → Scale (per org: everyone scaffolds, plus
+  released apps and installs). The crossover — a 6+ developer team is
+  cheaper on Scale ($149) than on Pro seats (6 × $29 = $174) — is
+  intended: D30 holds that seats are not a cost driver and released apps
+  are, and Scale orgs pay +$49/app beyond 3. Claim model: Scale grants
+  the scaffold entitlement at org level, so the per-member `pro` seat
+  claim is absent and the engine gate (D108) accepts the org-level
+  claim. Rejected: Scale stacks on Pro seats (10 devs pay $290 + $149;
+  contradicts D30's "unlimited seats"; Scale becomes a fourth line item,
+  not a tier); Scale includes N seats then per-seat (the seat-band model
+  D107 rejected). Ledger consequence: upgrading Pro → Scale cancels the
+  org's `pro_seat` lines and starts one `scale` line; Paddle proration
+  handles the mid-cycle switch.
+
+- **D114 — Viewer is strictly read-only; approving, commenting,
+  uploading and editing are paid-seat actions.** (2026-09-03; advisor
+  gap — "sees approvals" in D112 was ambiguous.) A Viewer reads
+  approvals, invoices and project status and nothing else. Client
+  sign-off on a deliverable uses the existing per-item, token-scoped
+  approval link (the approvals rail already carries per-item tokens),
+  not the Viewer role — so a client can still approve without Viewer
+  becoming a workable free seat. Rejected: read + approve items
+  addressed to them (the owner names Viewers as approvers on
+  everything and runs the shop on free seats); read + comment (the
+  thread is where work happens; first step to the same leak). Matches
+  Figma's View seat and Float's viewer. Enforcement: `viewer` claim
+  grants read routes only; every mutating route requires `agency`.
+
+- **D115 — Install overage becomes prepaid install packs; auto-buy is an
+  opt-in toggle, off by default. Amends D30's overage line only; amounts
+  unchanged.** (2026-09-03; advisor gap — Paddle has no usage-meter API,
+  so post-hoc overage meant arxa reconciling usage itself and pushing a
+  surprise one-time charge onto a tier sold as "flat".) Installs are
+  sold in advance as one-time Paddle charges at D30's rate — e.g. a
+  25,000-install pack at $15 ($1.50 per 2,500). When an org's allowance
+  (50,000 bundled on Scale) runs out, OTA installs for that org pause
+  until a pack is bought; the billing page offers "auto-buy a pack when I
+  run out", off by default. Consent lands before the charge; "flat" stays
+  true; the only Paddle primitive needed is the one-time charge that
+  exists. Rejected: post-hoc overage as written (needs a reconciliation
+  job and a customer-visible usage ledger first; chargeback bait above
+  ~10% of orgs tripping the allowance); folding installs into the
+  +$49/app fee with a hard cap (a viral app hits the cap with no way to
+  buy more). Engine consequence: the install counter that gates OTA
+  delivery must be server-side (Supabase, per org), not in the customer
+  binary — the same fail-closed rule as the scaffold gate.
