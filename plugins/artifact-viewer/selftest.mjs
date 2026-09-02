@@ -655,16 +655,34 @@ const w11 = createOrgWatcher({ intervalMs: 60 })
 const events = []
 const off = w11.onChange((rel, mtime) => events.push({ rel, mtime }))
 w11.setRoot(wroot)
+// fs.watch (FSEvents on macOS) arms asynchronously and delivers with a latency
+// that stretches under I/O load. Measured on this suite's flake (2026-09-02):
+// a write made right after setRoot is never reported ~1/40 runs (0/40 once the
+// watcher has had 300 ms), and under concurrent fs churn 4/20 events arrive
+// later than the old fixed 400 ms sleep. Neither touches the product — the org
+// root is set at open, edits come later, nothing waits on a deadline — so the
+// test proves the watcher is armed with a probe write, then waits on the
+// condition (capped) rather than on a fixed sleep, and counts only `a.md`
+// events so a late duplicate FSEvents callback for the probe cannot over-count.
+const until = async (cond, label, capMs = 5000) => {
+  const cap = Date.now() + capMs
+  while (!cond() && Date.now() < cap) await sleep(10)
+  assert.ok(cond(), label + ' (within ' + capMs + ' ms)')
+}
+const aEvents = () => events.filter((e) => e.rel === 'a.md')
+fs.writeFileSync(path2.join(wroot, 'probe.md'), 'arm\n')
+await until(() => events.some((e) => e.rel === 'probe.md'), 'watcher armed: probe write reported')
 fs.writeFileSync(path2.join(wroot, 'a.md'), 'one\n')
 fs.writeFileSync(path2.join(wroot, 'a.md'), 'two\n')
 fs.writeFileSync(path2.join(wroot, 'a.md'), 'three\n')
-await sleep(400)
-assert.equal(events.length, 1, 'rapid writes coalesce to one event, got ' + events.length)
-assert.equal(events[0].rel, 'a.md')
+await until(() => aEvents().length >= 1, 'rapid writes produce an event')
+await sleep(200) // > 3x the 60 ms coalescing window: a second flush would have fired by now
+assert.equal(aEvents().length, 1, 'rapid writes coalesce to one event, got ' + aEvents().length)
+assert.equal(events[events.length - 1].rel, 'a.md')
 fs.mkdirSync(path2.join(wroot, '.arxa'), { recursive: true })
 fs.writeFileSync(path2.join(wroot, '.arxa', 'x.db'), 'state')
 await sleep(200)
-assert.equal(events.length, 1, '.arxa runtime state never pushes')
+assert.equal(events.filter((e) => e.rel.startsWith('.arxa')).length, 0, '.arxa runtime state never pushes')
 
 // SSE route over a real connection
 const sse = createEventsRoute({ watcher: w11 })
@@ -675,12 +693,9 @@ const sseChunks = []
 const httpReq = http.get({ host: '127.0.0.1', port: ssePort, path: '/' }, (rs) => {
   rs.on('data', (c) => sseChunks.push(c.toString()))
 })
-await sleep(120)
-assert.ok(sseChunks.join('').startsWith('retry: 2000'), 'SSE retry frame sent')
+await until(() => sseChunks.join('').startsWith('retry: 2000'), 'SSE retry frame sent')
 fs.writeFileSync(path2.join(wroot, 'b.md'), 'pushed\n')
-await sleep(400)
-const sseText = sseChunks.join('')
-assert.ok(sseText.includes('"relPath":"b.md"'), 'external change pushed over SSE')
+await until(() => sseChunks.join('').includes('"relPath":"b.md"'), 'external change pushed over SSE')
 httpReq.destroy()
 sseSrv.close()
 off()
