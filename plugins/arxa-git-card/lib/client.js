@@ -86,6 +86,13 @@ window.__ModuleLoader__.load({
       'git.pr.created': 'PR #{n} opened',
       'git.pr.merged': 'PR merged',
       'git.pr.failed': 'Pull request failed: {reason}',
+      'git.ci.rerun': 'Re-run the latest checks',
+      'git.ci.cancel': 'Cancel the running checks',
+      'git.ci.open': 'Open the run on GitHub',
+      'git.ci.rerunStarted': 'Re-run requested',
+      'git.ci.cancelled': 'Cancel requested',
+      'git.ci.alreadyFinished': 'That run already finished',
+      'git.ci.failed': 'Run control failed: {reason}',
       'git.statusFailed': 'Git status failed: {reason}',
       'git.title.subject': 'PR title',
       'git.localOnly': 'local-only',
@@ -140,6 +147,13 @@ window.__ModuleLoader__.load({
       'git.pr.created': 'Otwarto PR #{n}',
       'git.pr.merged': 'PR scalony',
       'git.pr.failed': 'Pull request nie powiódł się: {reason}',
+      'git.ci.rerun': 'Uruchom ponownie ostatnie testy',
+      'git.ci.cancel': 'Anuluj trwające testy',
+      'git.ci.open': 'Otwórz przebieg na GitHubie',
+      'git.ci.rerunStarted': 'Zażądano ponownego uruchomienia',
+      'git.ci.cancelled': 'Zażądano anulowania',
+      'git.ci.alreadyFinished': 'Ten przebieg już się zakończył',
+      'git.ci.failed': 'Sterowanie przebiegiem nie powiodło się: {reason}',
       'git.statusFailed': 'Status git nie powiódł się: {reason}',
       'git.title.subject': 'Tytuł PR',
       // TODO native review (conformance decision 4): machine-drafted.
@@ -195,6 +209,13 @@ window.__ModuleLoader__.load({
       'git.pr.created': 'PR #{n} ouverte',
       'git.pr.merged': 'PR fusionnée',
       'git.pr.failed': 'Échec de la pull request : {reason}',
+      'git.ci.rerun': 'Relancer les dernières vérifications',
+      'git.ci.cancel': 'Annuler les vérifications en cours',
+      'git.ci.open': 'Ouvrir l’exécution sur GitHub',
+      'git.ci.rerunStarted': 'Relance demandée',
+      'git.ci.cancelled': 'Annulation demandée',
+      'git.ci.alreadyFinished': 'Cette exécution est déjà terminée',
+      'git.ci.failed': 'Échec du contrôle d’exécution : {reason}',
       'git.statusFailed': 'Échec du statut git : {reason}',
       'git.title.subject': 'Titre de la PR',
       // TODO native review (conformance decision 4): machine-drafted.
@@ -381,6 +402,29 @@ window.__ModuleLoader__.load({
         })
       }
 
+      /** Q8: run control from the card. `card.pr.status` already surfaced the
+       * run ids, so these never guess one — the newest run on the seat's branch
+       * is the target. The host refuses a project seat (ciTarget), and a 409 on
+       * cancel comes back as `already-finished` rather than an error. */
+      const latestRun = pr && pr.ok && Array.isArray(pr.runs) && pr.runs.length > 0 ? pr.runs[0] : null
+      const runLive = Boolean(latestRun && latestRun.status !== 'completed')
+      const ciControl = (which) => async () => {
+        if (!latestRun) return
+        await run('ci-' + which, async () => {
+          try {
+            const r = await post('card.ci.' + which, { ...seatArg(), runId: latestRun.id })
+            if (!alive.current) return
+            notify('info', r && r.outcome === 'already-finished'
+              ? t('git.ci.alreadyFinished')
+              : t(which === 'rerun' ? 'git.ci.rerunStarted' : 'git.ci.cancelled'))
+            loadPr()
+          } catch (e) { notify('error', t('git.ci.failed', { reason: reasonOf(e) })) }
+        })
+      }
+      const rerunCi = ciControl('rerun')
+      const cancelCi = ciControl('cancel')
+      const openRun = () => { if (latestRun && latestRun.url) window.open(latestRun.url, '_blank', 'noopener') }
+
       /** D116/B8: a human action — the host never throws; ok:false carries the
        * manual svc.sh instruction. */
       const wake = async () => {
@@ -506,6 +550,13 @@ window.__ModuleLoader__.load({
               : [
                 action('pr-refresh', t('git.pr.refresh'), Icon('IconRefreshOutline16', 'IconRefreshOutline16', 14), { onClick: loadPr }),
                 checkState === 'asleep' ? wakeAction() : null,
+                // Q8: the run itself is controllable from the card. All three
+                // appear only once a run exists on this branch; re-run waits for
+                // it to finish and cancel waits for it to be live, so the pair is
+                // never both-enabled on the same run.
+                latestRun ? action('ci-rerun', t('git.ci.rerun'), Icon('IconRefreshOutline16', 'IconRefreshOutline16', 14), { disabled: runLive, onClick: rerunCi }) : null,
+                latestRun ? action('ci-cancel', t('git.ci.cancel'), Icon('IconCloseOutline16', 'IconCloseFill14', 14), { disabled: !runLive, onClick: cancelCi }) : null,
+                latestRun && latestRun.url ? action('ci-open', t('git.ci.open'), Icon('IconBrowseOutline16', 'IconInspectOutline12', 14), { onClick: openRun }) : null,
                 // Merge is the one irreversible button: green checks AND an open PR.
                 prOpen
                   ? action('merge', t('git.pr.merge'), Icon('IconCheckOutline16', 'IconCheckOutline16', 14), { disabled: !(pr.checks && pr.checks.state === 'green' && pr.pr.state === 'open'), onClick: mergePr })

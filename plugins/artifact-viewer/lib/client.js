@@ -246,6 +246,8 @@ window.__ModuleLoader__.load({
       'insight.streak.empty': 'No commits in the last 90 days.',
       'insight.ci.open': 'Open',
       'insight.ci.empty': 'No workflow runs on this branch.',
+      'insight.ci.rerun': 'Re-run',
+      'insight.ci.cancel': 'Cancel',
       'insight.sessions.open': 'Open',
       'insight.sessions.rename': 'Rename',
       'insight.sessions.archive': 'Archive',
@@ -304,6 +306,8 @@ window.__ModuleLoader__.load({
       'insight.streak.empty': 'Brak commitów w ciągu ostatnich 90 dni.',
       'insight.ci.open': 'Otwórz',
       'insight.ci.empty': 'Brak przebiegów workflow na tej gałęzi.',
+      'insight.ci.rerun': 'Uruchom ponownie',
+      'insight.ci.cancel': 'Anuluj',
       'insight.sessions.open': 'Otwórz',
       'insight.sessions.rename': 'Zmień nazwę',
       'insight.sessions.archive': 'Archiwizuj',
@@ -362,6 +366,8 @@ window.__ModuleLoader__.load({
       'insight.streak.empty': 'Aucun commit sur les 90 derniers jours.',
       'insight.ci.open': 'Ouvrir',
       'insight.ci.empty': 'Aucune exécution de workflow sur cette branche.',
+      'insight.ci.rerun': 'Relancer',
+      'insight.ci.cancel': 'Annuler',
       'insight.sessions.open': 'Ouvrir',
       'insight.sessions.rename': 'Renommer',
       'insight.sessions.archive': 'Archiver',
@@ -760,6 +766,17 @@ window.__ModuleLoader__.load({
           summary ? h('span', { className: I.summary }, summary) : null,
           suffix || null),
       })
+      // Row actions reuse the host actions the card ALREADY owns — this panel
+      // is a second place to reach them, never a second way to do them.
+      const act = (label, action, arg) => {
+        setBusy(label); setNote('')
+        postAction(action, arg).then(() => { setBusy(null); setTick((n) => n + 1) },
+          (e) => { setBusy(null); setNote(String((e && e.message) || e)) })
+      }
+      // Trailing actions wear the stock ToolRow inspect-button face (revealed on row hover / focus).
+      const trailing = (label, onClick, disabled) => h('button', {
+        type: 'button', className: I.inspectButton, disabled: busy != null || disabled === true, onClick,
+      }, label)
       if (view === 'streak') {
         const days = d.days || []
         if (days.length === 0) return empty(t('insight.streak.empty'))
@@ -781,26 +798,29 @@ window.__ModuleLoader__.load({
       if (view === 'ci') {
         const runs = d.runs || []
         if (runs.length === 0) return empty(t('insight.ci.empty'))
+        // Q8: the card's run control, mirrored per row. Every run here is
+        // individually addressable, where the card only reaches the newest —
+        // that is the whole reason the panel carries the buttons too. Re-run
+        // waits for the run to finish, cancel waits for it to be live, so the
+        // pair is never both-enabled on one row.
         return root(h('div', { className: 'aXa_av_scroll' },
-          runs.map((run) => row(run.id,
-            h(P.StateDot, { state: ciState(run) }),
-            run.name || String(run.id),
-            String(run.conclusion || run.status || '') + (run.headSha ? ' · ' + String(run.headSha).slice(0, 7) : ''),
-            run.url && h('a', { className: I.summarySuffix, href: run.url, target: '_blank', rel: 'noreferrer' }, t('insight.ci.open'))))))
+          note && h('div', { className: 'aXa_av_note', 'data-tone': 'error' }, note),
+          runs.map((run) => {
+            const live = run.status !== 'completed'
+            return row(run.id,
+              h(P.StateDot, { state: ciState(run) }),
+              run.name || String(run.id),
+              String(run.conclusion || run.status || '') + (run.headSha ? ' · ' + String(run.headSha).slice(0, 7) : ''),
+              h(React.Fragment, null,
+                trailing(t('insight.ci.rerun'), () => act('ci-rerun', 'card.ci.rerun', { sessionId, runId: run.id }), live),
+                trailing(t('insight.ci.cancel'), () => act('ci-cancel', 'card.ci.cancel', { sessionId, runId: run.id }), !live),
+                run.url ? h('a', { className: I.summarySuffix, href: run.url, target: '_blank', rel: 'noreferrer' }, t('insight.ci.open')) : null))
+          })))
       }
       // sessions
       const rows = d.rows || []
       if (rows.length === 0) return empty(t('insight.sessions.empty'))
-      // The three buttons reuse the sidebar's EXISTING session actions — this
-      // panel adds a second place to reach them, never a second way to do them.
-      const act = (label, action, arg) => {
-        setBusy(label); setNote('')
-        postAction(action, arg).then(() => { setBusy(null); setTick((n) => n + 1) },
-          (e) => { setBusy(null); setNote(String((e && e.message) || e)) })
-      }
       const sessionDot = (state) => (state === 'open' ? 'ongoing' : state === 'archived' ? 'done' : 'warning')
-      // Trailing actions wear the stock ToolRow inspect-button face (revealed on row hover / focus).
-      const trailing = (label, onClick) => h('button', { type: 'button', className: I.inspectButton, disabled: busy != null, onClick }, label)
       return root(h('div', { className: 'aXa_av_scroll' },
         note && h('div', { className: 'aXa_av_note', 'data-tone': 'error' }, note),
         rows.map((row0) => row(row0.id,

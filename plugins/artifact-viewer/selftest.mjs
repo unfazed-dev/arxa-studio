@@ -542,6 +542,17 @@ assert.ok(clientSrc.includes('FORMAT_EXTS.has(formatExt) && prettierOn'), 'prett
 assert.ok(clientSrc.includes("'aria-pressed'"), 'prettier toggle exposes pressed state')
 assert.ok(clientSrc.includes('aXa_av_prettierMark'), 'prettier brand chip rides the top bar')
 assert.ok(clientSrc.includes("'action.prettier.off'"), 'prettier toggle locales wired')
+
+// Q8 (2026-09-03): the CI insight panel mirrors the card's run control, but
+// per row — the card only ever reaches the newest run, this reaches every one.
+assert.ok(clientSrc.includes("act('ci-rerun', 'card.ci.rerun', { sessionId, runId: run.id })"), 'CI panel re-runs the row it is on, through the card host action')
+assert.ok(clientSrc.includes("act('ci-cancel', 'card.ci.cancel', { sessionId, runId: run.id })"), 'CI panel cancels the row it is on')
+assert.match(clientSrc, /const live = run\.status !== 'completed'/, 'row liveness decides which of the pair is enabled')
+assert.ok(clientSrc.includes("trailing(t('insight.ci.rerun'), () => act('ci-rerun'"), 'rerun wears the stock trailing-action face')
+for (const k of ['insight.ci.rerun', 'insight.ci.cancel']) {
+  assert.equal(clientSrc.split("'" + k + "':").length - 1, 3, k + ' present in en/pl/fr')
+}
+
 console.log('arxa-artifact-viewer selftest: GREEN (vendor bundles + route)');
 
 // ---- Task 6: engine write API over a REAL git session worktree ------------

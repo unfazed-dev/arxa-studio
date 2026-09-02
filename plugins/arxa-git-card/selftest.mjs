@@ -63,6 +63,20 @@ check('client: seat-aware status with org fallback; commit/push+PR/merge ride th
   clientSrc.includes("CARD_ROUTE = '/__arxa/git-card/action'") && clientSrc.includes("post('card.status'") && clientSrc.includes('session-not-found') && ["post('card.commit'", "post('card.push'", "post('card.pr.create'", "post('card.pr.status'", "post('card.pr.merge'"].every((s) => clientSrc.includes(s)))
 check('client: renders nothing without an org (no-org-open / no-workspace / sidebar-not-ready), like the empty queue',
   clientSrc.includes('no-org-open|no-workspace|sidebar-not-ready') && clientSrc.includes('if (absent || status === null) return null'))
+// Q8 (2026-09-03): the card CONTROLS the run, it does not merely report it.
+// Re-run/cancel are mutually exclusive on one run (`runLive` gates both), and
+// neither invents a run id — both take the one card.pr.status surfaced.
+check('client: CI run control wired to the newest run on the branch (rerun/cancel/open)',
+  ["post('card.ci.' + which", 'const latestRun =', "latestRun.status !== 'completed'", "action('ci-rerun'", "action('ci-cancel'", "action('ci-open'"].every((x) => clientSrc.includes(x)))
+check('client: rerun waits for the run to finish and cancel waits for it to be live (never both enabled)',
+  clientSrc.includes('disabled: runLive, onClick: rerunCi') && clientSrc.includes('disabled: !runLive, onClick: cancelCi'))
+check('client: run control passes the seat AND the run id, never guesses either',
+  clientSrc.includes('{ ...seatArg(), runId: latestRun.id }') && clientSrc.includes("if (!latestRun) return"))
+check('client: a 409 on cancel reads as already-finished, not an error',
+  clientSrc.includes("r.outcome === 'already-finished'") && clientSrc.includes('git.ci.alreadyFinished'))
+check('client: ci locale keys in all three dictionaries',
+  ['git.ci.rerun', 'git.ci.cancel', 'git.ci.open', 'git.ci.failed'].every((k) => (clientSrc.split("'" + k + "':").length - 1) === 3))
+
 check('client: en/pl/fr dictionaries registered under NS', ['const en = {', 'const pl = {', 'const fr = {'].every((s) => clientSrc.includes(s)) && clientSrc.includes('ctx.locale.register(NS, { en, pl, fr })'))
 
 console.log(failures === 0 ? '\narxa-git-card selftest: ALL GREEN' : `\narxa-git-card selftest: ${failures} FAILURE(S)`)
