@@ -139,6 +139,31 @@ check('card: session-branch push is PR-purpose only (D73 relaxation)', hostSrc()
 check('card: S4 surface — input-dock entry above the composer bar, session-bound (en+pl+fr)', client.includes('data-arxa-git-card') && client.includes('ArxaGitCardDock') && client.includes('"conversation.input.dock"') && client.includes('order: 30') && client.includes('"card.subjectPlaceholder": "commit subject') && client.includes('"card.subjectPlaceholder": "temat commitu') && client.includes('"card.subjectPlaceholder": "sujet du commit') && !client.includes('createPortal'))
 check('card: S4 states — local-only badge + frame chip + collapsible head', client.includes('card.localOnly') && client.includes('card.frame') && client.includes('data-arxa-card-head') && client.includes('data-arxa-card-caret'))
 check('card: S4 Q6 — ask-the-session prefills the composer, never an engine LLM', client.includes('card.askDraft') && client.includes('Draft a conventional commit subject'))
+// ---- D111: the shell's new-session refusal is VISIBLE --------------------------
+// Before this, the shell dropped a refusal twice over — a { ok:false } body fell
+// out of the success `if` with no branch, and a throw died in a bare catch — so
+// a red main read to the user as a dead button.
+check('D111 shell: a !b.ok body is branched on, and the catch reports instead of swallowing',
+  client.includes('if (!b || !b.ok) { notice(String((b && b.error) || "unknown")); return; }')
+  && client.includes('.catch((e) => notice(String((e && e.message) || e)))')
+  && !/action: "workspace\.new-session"[\s\S]{0,600}\}\)\.catch\(\(\) => \{\}\);/.test(client))
+check('D111 shell: main-red renders a sentence in a shell-owned notice element',
+  client.includes('"data-arxa-cta-notice": ctaNotice')
+  && client.includes('ctaNotice === "main-red" ? t("session.new.err.mainRed") : ctaNotice')
+  && client.includes('className: "aXa_sb_ctaNotice"'))
+check('D111 shell: the notice auto-clears — every click dispatches a null code before the POST',
+  client.includes('new CustomEvent("arxa-sidebar-notice", { detail: { code: null } })')
+  && client.includes('const [ctaNotice, setCtaNotice] = (0, react.useState)(null);')
+  && client.includes('window.addEventListener("arxa-sidebar-notice", onNotice)')
+  && client.includes('return () => window.removeEventListener("arxa-sidebar-notice", onNotice)'))
+check('D111 shell: the wording lives in the SHELL\'s own "sidebar" namespace (en+pl+fr), no arxa NS added',
+  client.includes('"session.new.err.mainRed": "main is red — fix main before starting a session"')
+  && client.includes('"session.new.err.mainRed": "main jest czerwony')
+  && client.includes('"session.new.err.mainRed": "main est au rouge')
+  && /ctx\.locale\.register\(NS, \{\n\t*zh,\n\t*en,\n\t*pl,\n\t*fr\n\t*\}\), "ui-sidebar: dictionaries"/.test(client))
+check('D111 shell: the notice is styled with tokens only — no hex, no invented alias',
+  /aXa_sb_ctaNotice\{[^}]*var\(--dsw-alias-state-error-primary\)[^}]*\}/.test(client)
+  && !/aXa_sb_ctaNotice\{[^}]*#[0-9a-fA-F]{3,8}/.test(client))
 // ---- Phase 4 A2: the card is a three-slide strip ------------------------------
 // CLIENT assertions only. The matching server actions (card.runner.wake,
 // card.pr.merge, version.mint, insight.*) land in lib/index.js on another
@@ -214,8 +239,11 @@ for (const key of ['card.slide.status', 'card.slide.commit', 'card.slide.approve
   check('card A2 locale: "' + key + '" is in all three dicts (en/pl/fr)',
     (client.match(new RegExp('"' + key.replace(/\./g, '\\.') + '":', 'g')) || []).length === 3)
 }
+// Scoped to the WORKSPACE half's dicts: the shell half carries its own two
+// markers for the D111 wording, so a bundle-wide count would conflate them.
+const overDicts = client.slice(client.indexOf('const plOver = {'))
 check('card A2 locale: the machine-drafted pl/fr card block is flagged for native review (decision 4)',
-  (client.match(/TODO native review \(conformance decision 4\)/g) || []).length === 2)
+  overDicts.length > 1000 && (overDicts.match(/TODO native review \(conformance decision 4\)/g) || []).length === 2)
 check('card A2: still no createPortal anywhere in the bundle', !client.includes('createPortal'))
 check('create: D92 live preview + collision contract localized (en + pl + fr), snapshot radio deleted',
   client.includes('"org.create.preview": "Creates at"') && client.includes('"org.create.preview": "Utworzy w"') && client.includes('"org.create.preview": "Sera créée dans"') && client.includes('"org.create.exists.nonempty": "That folder already exists and isn\'t empty — change the name or the location."') && client.includes('"org.create.exists.nonempty": "Ten folder już istnieje i nie jest pusty — zmień nazwę lub lokalizację."') && client.includes('"org.create.exists.nonempty": "Ce dossier existe déjà et n’est pas vide — changez le nom ou l’emplacement."') && client.includes('"org.create.exists.open": "Open it instead"') && client.includes('"org.create.exists.open": "Otwórz ją zamiast tego"') && client.includes('"org.create.exists.open": "L’ouvrir à la place"') && !client.includes('org.create.existing') && !client.includes('includeExisting') && client.includes('folder-info'))

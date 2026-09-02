@@ -64,13 +64,25 @@ out = out.slice(0, ssStart) + [
   '					const w = window.__ARXA_SIDEBAR__;',
   '					const sel = w && w.selectedWorkspace ? w.selectedWorkspace() : null;',
   '					if (!sel) return;',
+  '					// D111 (2026-09-02): a refusal must be VISIBLE. This handler used',
+  '					// to drop it twice over — a { ok: false } body fell out of the',
+  '					// `if` below without a branch, and a thrown error died in a bare',
+  '					// catch — so a red main read to the user as a dead button. The',
+  '					// code travels to SidebarRoot on an event (the same shape the',
+  '					// ctaReady levers already use) because startSession lives in',
+  '					// injectProps, outside the component that owns the notice state.',
+  '					window.dispatchEvent(new CustomEvent("arxa-sidebar-notice", { detail: { code: null } }));',
+  '					const notice = (code) => window.dispatchEvent(new CustomEvent("arxa-sidebar-notice", { detail: { code } }));',
   '					fetch("/__arxa/sidebar/action", {',
   '						method: "POST",',
   '						headers: { "content-type": "application/json" },',
   '						body: JSON.stringify({ action: "workspace.new-session", arg: { orgId: sel.orgId, workspace: sel.rowId } })',
   '					}).then((r) => r.json()).then((b) => {',
-  '						if (b && b.ok && b.result && b.result.id && typeof w.openCreated === "function") w.openCreated(sel.orgId, b.result.id);',
-  '					}).catch(() => {});',
+  '						// The action route answers { ok: false, error } — `error` is the',
+  '						// thrown message verbatim, so "main-red" arrives as that string.',
+  '						if (!b || !b.ok) { notice(String((b && b.error) || "unknown")); return; }',
+  '						if (b.result && b.result.id && typeof w.openCreated === "function") w.openCreated(sel.orgId, b.result.id);',
+  '					}).catch((e) => notice(String((e && e.message) || e)));',
   '				},',
 ].join('\n') + out.slice(ssEnd)
 
@@ -86,7 +98,80 @@ out = out.replace(WIDE_ANCHOR, [
   '			window.addEventListener("arxa-sidebar-state", onOrgState);',
   '			return () => window.removeEventListener("arxa-sidebar-state", onOrgState);',
   '		}, []);',
+  '		// D111 refusal notice. The CODE is held, not the sentence, so a locale',
+  '		// switch re-renders the message instead of freezing the wording chosen',
+  '		// at click time. startSession dispatches null before every POST, which',
+  '		// is what makes the line auto-clear on the next click.',
+  '		const [ctaNotice, setCtaNotice] = (0, react.useState)(null);',
+  '		(0, react.useEffect)(() => {',
+  '			const onNotice = (ev) => setCtaNotice((ev && ev.detail && ev.detail.code) || null);',
+  '			window.addEventListener("arxa-sidebar-notice", onNotice);',
+  '			return () => window.removeEventListener("arxa-sidebar-notice", onNotice);',
+  '		}, []);',
 ].join('\n'))
+
+// 5b. D111: render the refusal next to the CTA. The shell had NO error surface
+//     — the old handler dropped a { ok:false } body and swallowed throws — so a
+//     red main looked like a dead button. One line, shell-owned, tokens only.
+const NOTICE_ANCHOR = [
+  '					(0, react_jsx_runtime.jsx)("div", {',
+  '						className: SidebarRoot_module_css_default.regionArea,',
+].join('\n')
+if (!out.includes(NOTICE_ANCHOR)) throw new Error('SidebarRoot regionArea anchor missing — stock shape moved?')
+out = out.replace(NOTICE_ANCHOR, [
+  '					ctaNotice && wide ? (0, react_jsx_runtime.jsx)("div", {',
+  '						className: "aXa_sb_ctaNotice",',
+  '						"data-arxa-cta-notice": ctaNotice,',
+  '						role: "status",',
+  '						// Known codes get a sentence; anything else shows the server\'s own',
+  '						// message rather than a shrug — an unmapped refusal is still more',
+  '						// use to the reader than silence.',
+  '						children: ctaNotice === "main-red" ? t("session.new.err.mainRed") : ctaNotice',
+  '					}) : null,',
+  NOTICE_ANCHOR,
+].join('\n'))
+
+// 5c. D111 wording lives in the shell's OWN dictionary namespace ("sidebar",
+//     stock) — no arxa namespace is added here, and the workspace half's dicts
+//     are untouched. pl/fr stay sparse: the stock lookup chain falls back per
+//     key to en, the same contract plOver/frOver rely on in the other half.
+const DICT_ANCHOR = '		const en = {'
+if (!out.includes(DICT_ANCHOR)) throw new Error('shell en dictionary anchor missing — stock shape moved?')
+out = out.replace(DICT_ANCHOR, [
+  '		const pl = {',
+  '			// TODO native review (conformance decision 4): machine-drafted.',
+  '			"session.new.err.mainRed": "main jest czerwony — napraw main przed rozpoczęciem sesji"',
+  '		};',
+  '		const fr = {',
+  '			// TODO native review (conformance decision 4): machine-drafted.',
+  '			"session.new.err.mainRed": "main est au rouge — corrigez main avant de démarrer une session"',
+  '		};',
+  DICT_ANCHOR,
+  '			"session.new.err.mainRed": "main is red — fix main before starting a session",',
+].join('\n'))
+const REG_ANCHOR = [
+  '			ctx.effect(() => ctx.locale.register(NS, {',
+  '				zh,',
+  '				en',
+  '			}), "ui-sidebar: dictionaries");',
+].join('\n')
+if (!out.includes(REG_ANCHOR)) throw new Error('shell locale.register anchor missing — stock shape moved?')
+out = out.replace(REG_ANCHOR, [
+  '			ctx.effect(() => ctx.locale.register(NS, {',
+  '				zh,',
+  '				en,',
+  '				pl,',
+  '				fr',
+  '			}), "ui-sidebar: dictionaries");',
+].join('\n'))
+
+// 5d. one CSS rule for the notice, appended to the shell's own css string.
+const CSS_END = ';animation:none}}";'
+if (!out.includes(CSS_END)) throw new Error('shell css tail anchor missing — stock shape moved?')
+out = out.replace(CSS_END, ';animation:none}}"'
+  + ' + ".aXa_sb_ctaNotice{margin:-4px 2px 8px;padding:5px 8px;border-radius:8px;'
+  + 'border:1px solid var(--dsw-alias-state-error-primary);color:var(--dsw-alias-state-error-primary);'
+  + 'background:var(--dsw-alias-bg-layer-1);font-size:11.5px;line-height:15px;word-break:break-word}";')
 const NS_BUTTON_ANCHOR = 'className: SidebarRoot_module_css_default.newSession,'
 if (!out.includes(NS_BUTTON_ANCHOR)) throw new Error('shell new-session button anchor missing — stock shape moved?')
 out = out.replace(NS_BUTTON_ANCHOR, [
