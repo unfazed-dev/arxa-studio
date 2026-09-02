@@ -305,7 +305,20 @@ try {
     ok(listSessions(orgB.path, env).find((s) => s.id === regRow.id).dshStatus === 'dsh-unavailable', 'annotation persisted on the registry row')
     ok(regRow.workspace === 'notes' && typeof regRow.createdAt === 'number' && regRow.updatedAt >= regRow.createdAt, 'session row carries its workspace scope + real timestamps (v2; the 56y bug was fake ordinals)')
     const autoRow = await hNo.newSession(undefined, 'notes')
-    ok(autoRow.name === 'note-001', 'auto-name: singular(folder)+counter, no ids (grilled 2026-08-30)')
+    // Q2/Q3 (2026-09-03) supersede the 2026-08-30 auto-name: the id itself is
+    // minted from the workspace context and `name` DEFAULTS TO IT, so one
+    // string reads across the worktree dir, branch, sidebar row, breadcrumb
+    // tail and header title. Stamp is computed, not frozen — a hardcoded date
+    // would rot tomorrow.
+    const dstamp = (d = new Date()) =>
+      String(d.getFullYear() % 100).padStart(2, '0') +
+      String(d.getMonth() + 1).padStart(2, '0') +
+      String(d.getDate()).padStart(2, '0')
+    // -002, not -001: the explicitly-named `no-dsh` row above already holds
+    // -001. An explicit name diverges from the id; it does not skip the mint.
+    ok(autoRow.id === `note-wt-${dstamp()}-002`, `auto-id: <prefix>-wt-<YYMMDD>-<NNN> from the workspace folder (${autoRow.id})`)
+    ok(autoRow.name === autoRow.id, 'auto-name defaults to the id — one display name everywhere (Q3)')
+    ok(autoRow.worktree.endsWith(autoRow.id) && autoRow.branch === `arxa/session/${autoRow.id}`, 'the minted id IS the worktree dir and the branch suffix')
     try { await hNo.newSession('bad', null) } catch (e) { ok(/workspace-required/.test(String(e.message)), 'org-level sessions are impossible — workspace is required (v2)') }
     try { await hNo.newSession('bad', 'nope/deep') } catch (e) { ok(/unknown-workspace/.test(String(e.message)), 'unknown workspace fails loud') }
     svcNoDsh.closeOrg()

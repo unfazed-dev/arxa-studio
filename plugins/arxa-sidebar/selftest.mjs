@@ -247,6 +247,29 @@ check('Q6: opening/resuming a session reveals its row — ancestors expanded (ne
     bridge.includes('async function hasUserMessage(id)') && bridge.includes("if (typeof out === 'boolean') return { ok: true, value: out }") && bridge.includes("out.ok === true && typeof out.value === 'boolean'") && bridge.includes('return { spawn, attach, list, archive, hasUserMessage }'))
   check('Q3 host face: live Session.events first, on-disk zstd log fallback, never a silent "empty"',
     hostSrc.includes('faces.hasUserMessage = async (id) =>') && hostSrc.includes("e.type === 'user/message'") && hostSrc.includes('readLogHasUserMessage(id)') && hostSrc.includes("'dsh-log-missing: '") && hostSrc.includes("dropIfEmpty: arg?.dropIfEmpty === true"))
+
+  // ---- session-naming-agent-controls-and-cicd-card, stage 1 (2026-09-03) ----
+  const sessionsSrc = readFileSync(new URL('../git-workspace/lib/sessions.js', import.meta.url), 'utf8')
+  check('S1/Q2: the readable session id is minted from the workspace context, counter per workspace per day, with a taken-set skip',
+    sessionsSrc.includes('export function nextSessionId(sessions, workspace, now = new Date())')
+      && sessionsSrc.includes("const base = prefix + '-wt-' + stamp")
+      && sessionsSrc.includes('while (taken.has(base') && sessionsSrc.includes('taken.add(s.id)'))
+  check('S1/Q2: the mint reads the CROSS-REGISTRY aggregate — the id becomes the dsh session id, so uniqueness must span every repo',
+    lifecycle.includes('nextSessionId(allSessions(resolved, env), ws)'))
+  check('S1/Q3: when the caller names nothing, the registry name DEFAULTS TO THE ID (one display name everywhere)',
+    lifecycle.includes("const title = typeof name === 'string' && name.trim() !== '' ? name.trim() : sid")
+      && lifecycle.includes('openSession(repoPath, { id: sid, name: title,'))
+  check('S1/Q3: the crumb collapses the duplicate tail — the session segment appears only once a rename diverges it from the worktree id',
+    client.includes('if (!wt || nm !== wt) out.push({') && client.includes('const nm = row.name || row.id;'))
+  check('S1/item1: the resolved preset id rides on meta so it lands in the session HEADER and the stock AgentPresetLabel lights up',
+    hostSrc.includes('meta: { cwd, ...(presetId === undefined ? {} : { agentPreset: presetId }) }')
+      && hostSrc.includes('const resolved = await presets.resolve(undefined)')
+      && hostSrc.includes('setup = async (agentCtx) => { await presets.mount(agentCtx, resolved.id) }'))
+  check('S1/Q1: the header title is PINNED to the worktree name on both spawn paths, throw-proof, against the exact live session',
+    hostSrc.includes('const pinTitle = (live) =>')
+      && hostSrc.includes('svc.rename(live, name)')
+      && hostSrc.includes('pinTitle(handle && handle.session)')
+      && hostSrc.includes("pinTitle(typeof sessions.get === 'function' ? sessions.get(id) : undefined)"))
 }
 check('empty state (2026-08-30 polish): guidance centered and spaced, arxa glyph in the hero lockup (brand plugin paints the mark, sidebar centers its slot)',
   client.includes('[data-arxa-empty] [data-arxa-hero-guide]{text-align:center') && client.includes('margin:12px auto 0') && !client.includes('textAlign: "left"'));

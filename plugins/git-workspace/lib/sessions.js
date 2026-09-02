@@ -233,6 +233,52 @@ export function nextSessionName(sessions, workspace) {
   return prefix + '-' + String(max + 1).padStart(3, '0')
 }
 
+/** The workspace folder, de-pluralised — the shared prefix rule behind both
+ * nextSessionName and nextSessionId. */
+function workspacePrefix(workspace) {
+  const folder = String(workspace || '').split('/').filter(Boolean).pop() || 'session'
+  return folder.length > 3 && folder.endsWith('s') ? folder.slice(0, -1) : folder
+}
+
+/**
+ * Readable session id (grilled 2026-09-03 Q2): `<prefix>-wt-<YYMMDD>-<NNN>`,
+ * e.g. `note-wt-260903-001`. The id IS the worktree directory name and the
+ * branch suffix, so naming it names the worktree — and because `name`
+ * defaults to the id (Q3), one string reads across the sidebar row, the
+ * breadcrumb tail and the header title.
+ *
+ * Counter is scoped per workspace PER DAY: the date already separates days,
+ * so an all-time counter would grow forever while telling you nothing the
+ * stamp does. A same-day id freed by a drop is skipped rather than reused —
+ * the registry is the authority, not the arithmetic.
+ *
+ * The result always satisfies openSession's branch/path guard
+ * `^[A-Za-z0-9][A-Za-z0-9._-]*$` provided the workspace folder does (folders
+ * are slugged upstream); a folder that slugs to nothing falls back to
+ * `session`.
+ */
+export function nextSessionId(sessions, workspace, now = new Date()) {
+  const prefix = workspacePrefix(workspace)
+  const stamp =
+    String(now.getFullYear() % 100).padStart(2, '0') +
+    String(now.getMonth() + 1).padStart(2, '0') +
+    String(now.getDate()).padStart(2, '0')
+  const base = prefix + '-wt-' + stamp
+  const taken = new Set()
+  let max = 0
+  for (const s of Array.isArray(sessions) ? sessions : []) {
+    if (!s || typeof s.id !== 'string') continue
+    taken.add(s.id)
+    // Same workspace AND same day — a different folder's counter is its own.
+    if (s.workspace !== workspace) continue
+    const m = new RegExp('^' + base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '-(\\d+)$').exec(s.id)
+    if (m) max = Math.max(max, Number(m[1]))
+  }
+  let n = max + 1
+  while (taken.has(base + '-' + String(n).padStart(3, '0'))) n++
+  return base + '-' + String(n).padStart(3, '0')
+}
+
 /**
  * Rekey the project scope of every session row (D72 proper rename): after a
  * project's folder+slug move, registry rows carrying `project: oldSlug`

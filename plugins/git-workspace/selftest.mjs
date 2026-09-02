@@ -27,7 +27,7 @@ import {
   mintAtStageBoundary, versionChip, readVersions,
   SessionMergeError, GATE_CHECK_SCRIPT,
   openSession, sessionStageBoundary, archiveSession, reviveSession,
-  listSessions, archivedSessionIds,
+  listSessions, archivedSessionIds, nextSessionId,
   getOrigin, setOrigin, rekeySessionsProject,
   pushRepo, fetchRepo, mainSyncState, ffMergeMain,
   worktreeHealth,
@@ -755,6 +755,76 @@ ok('frame: project check.sh probes stacks only when present (Q4)', () => {
   } finally {
     fs.rmSync(syncTmp, { recursive: true, force: true })
   }
+}
+
+// ---- Q2 (2026-09-03): readable session ids --------------------------------
+// `<prefix>-wt-<YYMMDD>-<NNN>`. The id IS the worktree dir and the branch
+// suffix, so these cases guard a path/branch component, not a label.
+{
+  const D = (y, m, d) => new Date(y, m - 1, d)
+  const row = (id, workspace) => ({ id, workspace })
+
+  ok('id: first of the day is -001, prefix de-pluralised from the folder', () =>
+    assert.equal(nextSessionId([], 'notes', D(2026, 9, 3)), 'note-wt-260903-001'))
+
+  ok('id: counter advances within the same workspace on the same day', () =>
+    assert.equal(
+      nextSessionId([row('note-wt-260903-001', 'notes'), row('note-wt-260903-002', 'notes')], 'notes', D(2026, 9, 3)),
+      'note-wt-260903-003',
+    ))
+
+  ok('id: a different day restarts the counter', () =>
+    assert.equal(
+      nextSessionId([row('note-wt-260903-001', 'notes')], 'notes', D(2026, 9, 4)),
+      'note-wt-260904-001',
+    ))
+
+  ok('id: a different workspace does not inherit the other folder`s count', () =>
+    assert.equal(
+      nextSessionId([row('email-wt-260903-001', 'emails'), row('email-wt-260903-002', 'emails')], 'notes', D(2026, 9, 3)),
+      'note-wt-260903-001',
+    ))
+
+  // Uniqueness beats the per-workspace count: the id becomes the dsh session
+  // id, and dsh has ONE store for the whole app.
+  ok('id: an id taken by another workspace is skipped, never reused', () =>
+    assert.equal(
+      nextSessionId([row('note-wt-260903-001', 'projects/alpha/notes')], 'projects/beta/notes', D(2026, 9, 3)),
+      'note-wt-260903-002',
+    ))
+
+  ok('id: a same-day id freed by a drop is not reused (registry is the authority)', () =>
+    assert.equal(
+      nextSessionId([row('note-wt-260903-002', 'notes')], 'notes', D(2026, 9, 3)),
+      'note-wt-260903-003',
+    ))
+
+  // The old nextSessionName counter never advanced for digit-leading folders
+  // (its prefix regex demanded a leading letter). nextSessionId matches the
+  // full base verbatim, so these count correctly.
+  ok('id: a digit-leading container counts (the old prefix-regex bug is gone)', () =>
+    assert.equal(
+      nextSessionId([row('01-intake-wt-260903-001', 'projects/rocket/01-intake')], 'projects/rocket/01-intake', D(2026, 9, 3)),
+      '01-intake-wt-260903-002',
+    ))
+
+  ok('id: an empty workspace falls back to a usable prefix', () =>
+    assert.equal(nextSessionId([], '', D(2026, 9, 3)), 'session-wt-260903-001'))
+
+  // openSession's guard — a minted id that fails this is a broken worktree
+  // path and an unpushable branch name.
+  ok('id: every minted id satisfies openSession`s branch/path guard', () => {
+    const guard = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+    for (const ws of ['notes', 'emails', 'projects/rocket/01-intake', '', 'projects/alpha/design']) {
+      const id = nextSessionId([], ws, D(2026, 9, 3))
+      assert.ok(guard.test(id), `${ws} -> ${id}`)
+    }
+  })
+
+  ok('id: zero-padding survives past 999 without truncating', () => {
+    const rows = [row('note-wt-260903-999', 'notes')]
+    assert.equal(nextSessionId(rows, 'notes', D(2026, 9, 3)), 'note-wt-260903-1000')
+  })
 }
 
 console.log(`\nselftest: ${passed}/${passed} passed`)

@@ -3595,8 +3595,16 @@ window.__ModuleLoader__.load({
 				prefix = prefix ? prefix + "/" + p : p;
 				out.push({ key: "ws" + i, label: labelFor(org.id + "|" + prefix, p) });
 			});
-			out.push({ key: "session", label: row.name || row.id, keep: true });
 			const wt = typeof row.worktree === "string" && row.worktree !== "" ? row.worktree.split("/").filter(Boolean).pop() : null;
+			const nm = row.name || row.id;
+			/* Q3 (2026-09-03): `name` now DEFAULTS TO THE ID, and the id is the
+			 * worktree directory name — so the old unconditional pair rendered
+			 * the same string twice (".../note-wt-260903-001/note-wt-260903-001").
+			 * The session segment earns its place only once a rename has actually
+			 * diverged it from the worktree; the worktree id stays pinned at the
+			 * tail either way, so the crumb always says which worktree you are in
+			 * even after the session is given a human name. */
+			if (!wt || nm !== wt) out.push({ key: "session", label: nm, keep: true });
 			if (wt) out.push({ key: "worktree", label: wt, keep: true, current: true });
 			else out[out.length - 1].current = true;
 			return out;

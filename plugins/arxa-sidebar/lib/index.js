@@ -183,24 +183,54 @@ export function apply(ctx, opts = {}) {
           //    agent loop — prompting works from the first message.
           const wanted = typeof arxaId === 'string' && arxaId.trim() !== '' ? `arxa-${arxaId}` : undefined
           const agents = ctx.agents
+          // Q1 (2026-09-03): pin the header title to the worktree name.
+          // Untouched, dsh generates a title from the first few words of the
+          // opening message, so the header disagreed with both the sidebar row
+          // and the breadcrumb tail. rename() appends source:{kind:'user'},
+          // which supersedes in-flight automatic generation AND stops later
+          // messages scheduling any — a pin, not just a first value. It needs
+          // the EXACT live Session (it identity-checks against the store), so
+          // it runs here rather than through the id. `name` is the registry
+          // name, which Q3 defaults to the id and a rename diverges.
+          const pinTitle = (live) => {
+            try {
+              const svc = ctx.sessionTitle
+              if (!live || !svc || typeof svc.rename !== 'function') return
+              if (typeof name !== 'string' || name.trim() === '') return
+              svc.rename(live, name)
+            } catch { /* title is presentation — a spawn never fails on it */ }
+          }
           if (agents && typeof agents.create === 'function') {
             try {
               let setup
+              let presetId
               try {
                 const presets = typeof ctx.get === 'function' ? ctx.get('agentPresets') : undefined
                 if (presets && typeof presets.resolve === 'function' && typeof presets.mount === 'function') {
-                  setup = async (agentCtx) => {
-                    const resolved = await presets.resolve(undefined)
-                    await presets.mount(agentCtx, resolved.id)
-                  }
+                  // 3. RECORDED PRESET (2026-09-03) — resolve BEFORE create.
+                  //    Mounting inside setup composes the agent correctly but
+                  //    leaves NOTHING on the session, so the stock
+                  //    AgentPresetLabel (header.actions, reads
+                  //    state.byId[id].agentPreset) rendered null on every
+                  //    arxa-spawned session while dsh-spawned ones showed
+                  //    their mode. The id has to ride on `meta`: agents.create
+                  //    forwards meta to sessions.prepare (dsh-agent-loop
+                  //    createAgent), which writes header.agentPreset
+                  //    (dsh-session prepare), which the wire SessionSummary
+                  //    passes through. Resolve failure degrades exactly as
+                  //    before — no preset recorded, host default composition.
+                  const resolved = await presets.resolve(undefined)
+                  if (resolved && typeof resolved.id === 'string' && resolved.id !== '') presetId = resolved.id
+                  setup = async (agentCtx) => { await presets.mount(agentCtx, resolved.id) }
                 }
               } catch { /* no preset roster — the host default composition stands */ }
               const handle = await agents.create({
                 ...(wanted === undefined ? {} : { sessionId: wanted }),
-                meta: { cwd },
+                meta: { cwd, ...(presetId === undefined ? {} : { agentPreset: presetId }) },
                 ...(setup === undefined ? {} : { setup })
               })
               const id = (handle && handle.session && handle.session.id) || (handle && handle.id) || wanted
+              pinTitle(handle && handle.session)
               try {
                 const registry = ctx.workspaceRegistry
                 if (registry && typeof registry.resolveByPath === 'function') {
@@ -223,6 +253,7 @@ export function apply(ctx, opts = {}) {
             if (!(wanted && typeof sessions.get === 'function' && sessions.get(wanted))) throw e
             id = wanted
           }
+          pinTitle(typeof sessions.get === 'function' ? sessions.get(id) : undefined)
           try {
             const registry = ctx.workspaceRegistry
             if (registry && typeof registry.resolveByPath === 'function') {

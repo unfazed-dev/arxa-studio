@@ -143,17 +143,40 @@ try {
   // still start at note-001, and advance within alpha alone. Drawing the
   // counter from the org registry — the pre-D98 behaviour — would have made
   // alpha's first note-002 and let two projects share one namespace.
-  // (Containers whose folder starts with a digit, e.g. `02-design`, never
-  //  advance the counter at all: nextSessionName's prefix regex requires a
-  //  leading letter. Pre-existing, unrelated to routing — noted, not fixed.)
+  // Q2 (2026-09-03): the counter now lives on the minted ID
+  // (`note-wt-<YYMMDD>-<NNN>`), scoped per workspace PER DAY. Per-repo
+  // isolation is unchanged and is what this case exists to prove.
+  // (The old `02-design` quirk — a digit-leading folder never advancing the
+  //  counter, because nextSessionName's prefix regex demanded a leading
+  //  letter — does NOT carry over: nextSessionId matches the full base
+  //  verbatim, so digit-leading containers count correctly now.)
+  const ymd = (d = new Date()) =>
+    String(d.getFullYear() % 100).padStart(2, '0') +
+    String(d.getMonth() + 1).padStart(2, '0') +
+    String(d.getDate()).padStart(2, '0')
   const aAuto1 = await h.newSession(undefined, 'projects/alpha/notes')
   const aAuto2 = await h.newSession(undefined, 'projects/alpha/notes')
   const ps2 = await h.newSession(undefined, 'projects/beta/notes')
+  const seq = (id) => Number(/-(\d+)$/.exec(id)[1])
   ok(
-    aAuto1.name === 'note-001' && aAuto2.name === 'note-002',
-    `alpha's counter starts fresh and advances within its own repo (${aAuto1.name}, ${aAuto2.name})`,
+    new RegExp(`^note-wt-${ymd()}-\\d{3}$`).test(aAuto1.id) &&
+      new RegExp(`^note-wt-${ymd()}-\\d{3}$`).test(aAuto2.id) &&
+      seq(aAuto2.id) === seq(aAuto1.id) + 1,
+    `alpha's two sessions ascend consecutively within its own container (${aAuto1.id}, ${aAuto2.id})`,
   )
-  ok(ps2.name === 'note-001', `the counter is per-repo: beta's first is its own note-001 (${ps2.name})`)
+  // D98's per-repo counters do NOT survive Q2/Q3, and the reason is
+  // load-bearing: the id is now the dsh session id (`arxa-<id>`), and dsh
+  // keeps ONE session store for the whole app — two projects minting the same
+  // readable id would put two arxa sessions on one conversation. So the mint
+  // reads the cross-registry aggregate and skips ids already taken anywhere.
+  // beta's first does NOT restart at -001: the org and alpha already hold
+  // numbers in today's shared namespace, so beta takes the next free one.
+  // Numbering inside a container is still natural; the namespace is shared.
+  // That is the deliberate price of readable ids.
+  ok(
+    new RegExp(`^note-wt-${ymd()}-\\d{3}$`).test(ps2.id) && seq(ps2.id) > seq(aAuto2.id),
+    `the day-namespace is shared so ids stay globally unique (${ps2.id})`,
+  )
   ok(
     commonDir(ps2.worktree) === fs.realpathSync(path.join(proj2.path, '.git')),
     'the second project session lands in the second project repo',

@@ -80,7 +80,7 @@ import {
   archivedSessionIds,
   openSession,
   annotateSession,
-  nextSessionName,
+  nextSessionId,
   reviveSession,
   dropSession,
   archiveSession as archiveSessionBranch,
@@ -1004,10 +1004,26 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           // ids — the branch/worktree keep the session id as stable key.
           // The counter reads the OWNING repo's registry: two projects each
           // get their own design-001 rather than colliding through the org.
-          const title = typeof name === 'string' && name.trim() !== ''
-            ? name.trim()
-            : nextSessionName(listSessions(repoPath, env), ws)
-          const session = openSession(repoPath, { name: title, project: projectSlug, workspace: ws, env })
+          // Q2 (2026-09-03): the id is minted from the workspace context —
+          // `note-wt-260903-001` — so the worktree directory and the branch
+          // read as the thing they are. Q3: when the caller supplies no
+          // name, `name` DEFAULTS TO THE ID rather than to the old
+          // singular+counter, so one string reads across the sidebar row,
+          // the breadcrumb tail and the header title. An explicit name still
+          // wins and simply diverges from the id (rename semantics, D-2026-08-30).
+          // Uniqueness must span EVERY registry, not just this repo's: the id
+          // becomes the dsh session id (`arxa-<id>`), and dsh has one session
+          // store for the whole app — two projects minting the same readable
+          // id would put two arxa sessions on one conversation. So the mint
+          // reads the cross-registry aggregate. The counter still keys on the
+          // workspace string (unique per project: `projects/alpha/notes` vs
+          // `projects/beta/notes`), so numbering inside a container is
+          // natural; the day-namespace is shared, which is the deliberate
+          // trade for readable ids (supersedes D98's per-repo counters —
+          // those were safe only while ids were opaque and separate).
+          const sid = nextSessionId(allSessions(resolved, env), ws)
+          const title = typeof name === 'string' && name.trim() !== '' ? name.trim() : sid
+          const session = openSession(repoPath, { id: sid, name: title, project: projectSlug, workspace: ws, env })
           // Phase D (D71): AFTER branch+worktree exist, spawn the dsh session
           // with cwd = the worktree path (dsh sessions.create cwd contract)
           // and store its id on the registry row. Unavailable dsh degrades to

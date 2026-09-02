@@ -64,6 +64,7 @@ export {
   archivedSessionIds,
   annotateSession,
   nextSessionName,
+  nextSessionId,
   rekeySessionsProject,
   openSession,
   runGate,
