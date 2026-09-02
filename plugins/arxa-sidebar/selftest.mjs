@@ -268,6 +268,32 @@ check('Q6: opening/resuming a session reveals its row — ancestors expanded (ne
   // Measured 2026-09-03: the AgentHandle carries NO `.session` (live=false in
   // the debug line), and rename() identity-checks against the store — so BOTH
   // paths must take the session from the store, never from the handle.
+  // ---- stage 3: github sync + session-branch CI (2026-09-03) --------------
+  const ghBridge = readFileSync(new URL('../file-org-shell/lib/github-bridge.js', import.meta.url), 'utf8')
+  const ghLink = readFileSync(new URL('../github-link/lib/index.js', import.meta.url), 'utf8')
+  const card = readFileSync(new URL('../arxa-git-card/lib/index.js', import.meta.url), 'utf8')
+  check('S3/Q6: a push that fails on auth mints a FORCED token and retries once, then rethrows the ORIGINAL error',
+    lifecycle.includes('async function pushWithAuthRetry(repoPath, repoUrl, kind')
+      && lifecycle.includes('if (!AUTH_FAILURE_RE.test(String(err?.message ?? err))) throw err')
+      && lifecycle.includes('await githubBridge.gitCredentials(true)')
+      && ghBridge.includes('async function gitCredentials(force = false)')
+      && ghLink.includes('async function gitCredentials(force = false)')
+      && ghLink.includes('const accessToken = await getToken(force === true)'))
+  check('S3/Q6: syncRepoNow no longer leaves a healed org reading publish-failed forever',
+    lifecycle.includes('const clearStaleStatus = ()')
+      && lifecycle.includes("/^(publish-failed|sync-conflict|push-failed)/.test(st)")
+      && lifecycle.includes("githubStatus: 'published'"))
+  check('S3/Q6: the push path itself is routed through the retry — no bare pushRepo left in sync/publish',
+    !lifecycle.includes('if (pushCreds.ok) pushRepo(') && !lifecycle.includes('if (c2.ok) pushRepo('))
+  check('S3/Q6-Q7: a GREEN stage boundary publishes the session branch; a parked one does not, and the push never fails the commit',
+    card.includes('if (out && out.parked !== true)')
+      && card.includes('out.pushed = await pushSessionBranch(gw, cur, sid).catch(')
+      && card.includes('const pushSessionBranch = async (gw, cur, sid, { loud = false } = {})'))
+  check('S3/Q8: checks are read for the BRANCH with or without a PR, and run control is wired',
+    card.includes("const checks = await g.prChecks(manifest.repoOwner, manifest.repoName, s.branch)")
+      && card.includes("'card.ci.rerun'") && card.includes("'card.ci.cancel'")
+      && card.includes('g.rerunRun({ owner, name, runId') && card.includes('g.cancelRun({ owner, name, runId })'))
+
   check('S1/Q1: the header title is PINNED to the worktree name on both spawn paths, throw-proof, from the STORE not the handle',
     hostSrc.includes('const pinTitle = (live) =>')
       && hostSrc.includes('svc.rename(live, name)')

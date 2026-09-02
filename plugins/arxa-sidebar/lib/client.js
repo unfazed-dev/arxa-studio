@@ -3355,6 +3355,68 @@ window.__ModuleLoader__.load({
 			}
 			return props;
 		}
+		/* Q4 (2026-09-03): subagents and background jobs must be VISIBLE as
+		 * capabilities before anything has used them. Both stock chips exist
+		 * already and are wired; they simply return null at zero
+		 * (client-ui-jobs: `if (jobs.length === 0) return null`; the subagent
+		 * CatalogDropdown: `descendantCount > 0` in its visible gate). So
+		 * nothing needs building — only revealing.
+		 *
+		 * These placeholders occupy conversation.session.header.actions, which
+		 * the cordis catalogue declares kind:list / replaceRisk:none, so they
+		 * sit BESIDE the stock entries rather than replacing them. The subagent
+		 * catalog itself lives on header.lineage, which is kind:SINGLE and
+		 * already occupied — registering there would have deleted the very
+		 * dropdown we want back, so the placeholder deliberately lives here and
+		 * the real chip appears in the lineage region beside the title. That
+		 * region change on first use is a known, accepted consequence.
+		 *
+		 * Each returns null the moment its stock counterpart goes live, so the
+		 * two are never on screen together.
+		 *
+		 * `useSessions` is a framework owner prop of this slot (both stock
+		 * occupants destructure it with no inject face of their own). */
+		const ARXA_AGENT_PANEL = "arxa-av-open";
+		function openAgentPanel(view, sessionId) {
+			try { window.dispatchEvent(new CustomEvent(ARXA_AGENT_PANEL, { detail: { kind: "insight", view: view, sessionId: sessionId } })); } catch { /* no bridge */ }
+		}
+		function ArxaEmptyChip({ label, title, onClick }) {
+			return (0, react_jsx_runtime.jsx)("button", {
+				type: "button",
+				"data-arxa-empty-chip": label,
+				className: "aXa_emptyChip",
+				title: title,
+				onClick: onClick,
+				children: label
+			});
+		}
+		function ArxaJobsPlaceholder({ sessionId, useSessions, t }) {
+			const jobs = useSessions((state) => state.jobsBySession?.[sessionId]);
+			if (jobs && jobs.length > 0) return null; /* stock JobListAction owns it now */
+			return (0, react_jsx_runtime.jsx)(ArxaEmptyChip, {
+				label: t("agents.jobs.empty"),
+				title: t("agents.jobs.emptyHint"),
+				onClick: () => openAgentPanel("jobs", sessionId)
+			});
+		}
+		function ArxaSubagentsPlaceholder({ sessionId, useSessions, t }) {
+			/* Descendants are derived from the session map rather than from
+			 * indexSubagentDescendants: a durable child carries
+			 * origin:"subagent" plus this session as its parent, which is the
+			 * same durable bit the stock index folds, with no extra import. */
+			const count = useSessions((state) => {
+				const by = state.byId || {};
+				let n = 0;
+				for (const k in by) { const s = by[k]; if (s && s.origin === "subagent" && s.parentSessionId === sessionId) n += 1; }
+				return n;
+			});
+			if (count > 0) return null; /* stock CatalogDropdown owns it now */
+			return (0, react_jsx_runtime.jsx)(ArxaEmptyChip, {
+				label: t("agents.subagents.empty"),
+				title: t("agents.subagents.emptyHint"),
+				onClick: () => openAgentPanel("subagents", sessionId)
+			});
+		}
 		function ArxaPresetCorner({ slots, t }) {
 			const subscribe = (0, react.useCallback)((fn) => slots.subscribe(PRESET_SEAT_KEY, fn), [slots]);
 			const read = (0, react.useCallback)(() => slots.entriesOfSlot(PRESET_SEAT_KEY)[0], [slots]);
@@ -3421,6 +3483,11 @@ window.__ModuleLoader__.load({
 				// by the width the corner publishes; equal padding keeps the mirror's
 				// wrapping in sync with the textarea's.
 				+ "[data-arxa-preset-corner]{position:absolute;top:10px;right:14px;z-index:2}"
+				/* Q4 placeholder chips: present but quiet. They read as a
+				 * capability that exists and is idle, never as a live control —
+				 * the stock chip that replaces them carries the real weight. */
+				+ ".aXa_emptyChip{background:none;border:0;padding:2px 6px;border-radius:6px;font:inherit;font-size:12px;line-height:18px;color:var(--dsw-alias-label-caption);cursor:pointer;white-space:nowrap}"
+				+ ".aXa_emptyChip:hover{color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-bg-layer-2)}"
 				+ ".uV2eYG_root:not(.uV2eYG_hero) [data-arxa-preset-corner]{display:none}"
 				+ ".uV2eYG_hero [data-composer-card] :is(.uV2eYG_input,.uV2eYG_mirror,.uV2eYG_backdrop){box-sizing:border-box;padding-right:var(--arxa-preset-inset,120px)}";
 			document.head.appendChild(tag);
@@ -4925,6 +4992,10 @@ window.__ModuleLoader__.load({
 			"welcome.businessSoon": "arxa business (agency) — coming soon",
 			"tree.dock.projects": "Projects",
 			"crumbs.label": "Session location",
+			"agents.jobs.empty": "No background jobs",
+			"agents.jobs.emptyHint": "Background jobs appear here once one is started. Open the panel for details.",
+			"agents.subagents.empty": "No subagents",
+			"agents.subagents.emptyHint": "Subagents appear here once one is delegated. Open the panel for details.",
 			"hero.guide": "Sessions start inside a workspace — open an organisation, expand to a folder row, hover it and press + to start a session.",
 			"tree.dock.notes": "Notes",
 			"tree.dock.meetings": "Meetings",
@@ -5085,6 +5156,10 @@ window.__ModuleLoader__.load({
 			"welcome.businessSoon": "arxa business (agencja) — wkrótce",
 			"tree.dock.projects": "Projekty",
 			"crumbs.label": "Położenie sesji",
+			"agents.jobs.empty": "Brak zadań w tle",
+			"agents.jobs.emptyHint": "Zadania w tle pojawią się tutaj po uruchomieniu. Otwórz panel, aby zobaczyć szczegóły.",
+			"agents.subagents.empty": "Brak podagentów",
+			"agents.subagents.emptyHint": "Podagenci pojawią się tutaj po delegowaniu. Otwórz panel, aby zobaczyć szczegóły.",
 			"hero.guide": "Sesje zaczynają się wewnątrz obszaru roboczego — otwórz organizację, rozwiń do wiersza folderu, najedź na niego i naciśnij +, aby rozpocząć sesję.",
 			"tree.dock.notes": "Notatki",
 			"tree.dock.meetings": "Spotkania",
@@ -5245,6 +5320,10 @@ window.__ModuleLoader__.load({
 			"welcome.businessSoon": "arxa business (agence) — bientôt disponible",
 			"tree.dock.projects": "Projets",
 			"crumbs.label": "Emplacement de la session",
+			"agents.jobs.empty": "Aucune tâche en arrière-plan",
+			"agents.jobs.emptyHint": "Les tâches en arrière-plan apparaîtront ici une fois lancées. Ouvrez le panneau pour les détails.",
+			"agents.subagents.empty": "Aucun sous-agent",
+			"agents.subagents.emptyHint": "Les sous-agents apparaîtront ici une fois délégués. Ouvrez le panneau pour les détails.",
 			"hero.guide": "Les sessions démarrent dans un espace de travail — ouvrez une organisation, dépliez jusqu’à une ligne de dossier, survolez-la et appuyez sur + pour démarrer une session.",
 			"tree.dock.notes": "Notes",
 			"tree.dock.meetings": "Réunions",
@@ -5475,6 +5554,24 @@ window.__ModuleLoader__.load({
 				locale: "settings.agentPreset",
 				inject: () => ({ slots: ctx.slots })
 			}, ArxaPresetCorner));
+			// Agent-capability placeholders (2026-09-03, Q4): header.actions is
+			// kind:list / replaceRisk:none, so these sit BESIDE the stock
+			// agent-preset (order -10) and job-list (order 20) entries. Orders
+			// bracket the stock job chip so the empty and live states occupy the
+			// same place in the row. NOT header.lineage: that is kind:single and
+			// already held by the subagent catalog we are trying to surface.
+			ctx.slots.inject("conversation.session.header.actions", () => ctx.slots.register({
+				name: "conversation.session.header.actions",
+				id: "arxa-jobs-empty",
+				order: 19,
+				locale: NS
+			}, ArxaJobsPlaceholder));
+			ctx.slots.inject("conversation.session.header.actions", () => ctx.slots.register({
+				name: "conversation.session.header.actions",
+				id: "arxa-subagents-empty",
+				order: 21,
+				locale: NS
+			}, ArxaSubagentsPlaceholder));
 			// Welcome gate (Phase 2, conformance plan): the frame declares
 			// shell.overlay (kind:list, scope:root) — the gate registers THERE
 			// instead of fighting the shell with position:fixed + z-index
