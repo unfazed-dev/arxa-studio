@@ -1,6 +1,6 @@
 # Git card — stock dock-card rebuild as its own plugin (`arxa-git-card`)
 
-Status: PART A LANDED (A1–A4, 2026-09-02) — Part B (insight re-skin) pending. Grilled 2026-09-02. Supersedes the UI half of
+Status: PART A + PART B LANDED (2026-09-02) — only item 5 (docs pointer) open. Grilled 2026-09-02. Supersedes the UI half of
 `git-card-phase-4-card-rebuild.md` (Part A2/A3); the host actions and tests
 from Phase 4 are kept and MOVED, not rewritten.
 
@@ -180,6 +180,28 @@ same way (its `ToolDetails.module.css` + `ToolRow.module.css` rules under
    (A4; regenerate sidebar) — sidebar selftests green, no dock registration
    left.
 4. `feat: reskin insight panel with stock tool details grammar` (Part B).
+   **LANDED 2026-09-02.** `scripts/gen-insight-css.mjs` lifts the
+   `ToolDetails` + `ToolRow` + `TerminalBlock` rules out of the stock bundle
+   (dsh 0.1.1-rc.2) as `INSIGHT_CSS` / `I` (`aXa_ins_`), injected in the
+   viewer's existing style tag; `--check` is the drift gate (OK). Root is
+   `[data-arxa-insight=<view>]` with `aXa_ins_cardBody aXa_ins_root`.
+   Evidence (smoke org Acme Labs, session `s-mtjq7r11-c2tt7m`, 1280×800):
+   `designs/git-card/evidence/insight/gc-b-insight-{streak,ci,sessions}[-seat]-1280.png`
+   — streak = Current / Longest / Last 90 days rows; ci = "Not available
+   for this repository." (smoke org is localOnly); sessions = one stock
+   row `01-intake-001 · open`; org-seat variants show the seat-required
+   state. DOM eval per capture: style tag carries `.aXa_ins_root`, zero
+   `o3BgMG_`/`xDAfVq_` leaks. Captured with `/tmp/arxa-smoke/lens/cdp-shot.mjs`
+   (raw CDP over `ws`; lens `shot` still refuses the SMIL page).
+   Notes: (a) `pnpm install --force` on a profile re-creates
+   `arxa-file-org-shell` as a pnpm symlink → every sidebar route answers
+   `no-workspace`; the launcher's flat-copy post-step must be re-run after
+   any manual `--force` (done by hand here). (b) `org.open` D92 open-by-path
+   is dead code: `return ensureOpen(ref)` inside `try` is async, so the
+   rejection never reaches the `catch` — needs `await`; not fixed here
+   (out of scope, tracked). (c) The panel's error phase prints the server
+   reason verbatim (`insight.streak serves session seats`) — same convention
+   as the card action routes; a locale key would be the follow-up.
 5. `docs: mark git-card phase 4 UI superseded` — pointer from
    `git-card-phase-4-card-rebuild.md` §A2/A3 to this plan.
 

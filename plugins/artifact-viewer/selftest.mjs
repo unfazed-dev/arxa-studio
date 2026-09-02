@@ -61,6 +61,8 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
 {
   const gen = execFileSync(process.execPath, [join(root, 'scripts', 'gen-frame.mjs'), '--check'], { cwd: root })
   assert.match(String(gen), /--check OK/, 'arxa-frame drift gate: generated client matches gen-frame.mjs')
+  const genIns = execFileSync(process.execPath, [join(root, 'scripts', 'gen-insight-css.mjs'), '--check'], { cwd: root })
+  assert.match(String(genIns), /--check OK/, 'insight-css drift gate: the lifted ToolRow/ToolDetails copy matches the stock bundle')
   const clientSrc = fs.readFileSync(join(here, 'lib', 'client.js'), 'utf8')
   assert.doesNotMatch(clientSrc, /inject\('shell\.overlay'/, 'viewer never floats over the frame again (D88)')
   assert.match(clientSrc, /inject\('viewer'/, 'viewer registers into the docked viewer seat')
@@ -105,7 +107,9 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   for (const prim of ['P.StateDot', 'P.Tooltip', 'P.Menu', 'P.Button', 'P.writeClipboard', 'P.IconCloseOutline16', 'P.IconCopyOutline16']) {
     assert.ok(t5client.includes(prim), 'primitives aboard: ' + prim)
   }
-  const hexes = t5client.match(/#[0-9a-fA-F]{3,8}\b/g) || []
+  // The generated insight-css region is a verbatim stock copy (its #0000 is a transparent scrollbar border) — the rule is about OUR css.
+  const handWritten = t5client.replace(/\/\/ >>> insight-css[\s\S]*?\/\/ <<< insight-css/, "")
+  const hexes = handWritten.match(/#[0-9a-fA-F]{3,8}\b/g) || []
   assert.deepEqual([...new Set(hexes)].sort(), ['#fff'],
     'no hardcoded hex colors — the only white left is the pdf/iframe document surface')
   assert.match(t5client, /--dsw-alias-border-l2|--dsw-alias-label-error|--dsw-alias-brand-primary/, 'real theme tokens used')
@@ -135,6 +139,20 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   assert.ok((t5client.match(/aXa_av_streakCell\[data-level=/g) || []).length === 3
     && t5client.includes(".aXa_av_streakCell{"), 'four streak intensity steps (base + 3 levels), token-derived')
   assert.match(t5client, /h\(P\.StateDot, \{ state: ciState\(run\) \}\)/, 'CI rows carry a StateDot, not a hand-rolled dot')
+  // ---- Part B (git-card-stock-dock-rebuild §4): stock tool-details grammar ---
+  assert.match(t5client, /const INSIGHT_CSS = "/, 'INSIGHT_CSS is the generated verbatim copy of the stock ToolRow+ToolDetails CSS')
+  assert.match(t5client, /tag\.textContent = css \+ INSIGHT_CSS/, 'the copied CSS ships in the same style tag as the panel CSS')
+  assert.ok(!t5client.includes('o3BgMG_') && !t5client.includes('xDAfVq_'), 'no stock hashed prefix leaks — every class is aXa_ins_')
+  assert.match(t5client, /'data-arxa-insight': view/, 'the insight root carries the single [data-arxa-insight] marker (no per-element markers)')
+  assert.match(t5client, /className: I\.cardBody \+ ' ' \+ I\.root/, 'the report container is ToolDetails.cardBody')
+  assert.match(t5client, /h\(P\.DisclosureRow, \{\n\s*key, icon, title, open: false, expandable: false/, 'runs and sessions are stock DisclosureRows (non-expanding)')
+  assert.match(t5client, /rowClassName: I\.row, leadingClassName: I\.leading, titleClassName: I\.title, chevronClassName: I\.chevron/, 'the row wears the copied ToolRow classes')
+  assert.match(t5client, /ioSection\('current', t\('insight\.streak\.current'\)/, 'streak metrics are ToolRow IN/OUT sections')
+  assert.match(t5client, /className: I\.empty \}/, 'empty / loading / unavailable use ToolDetails.empty')
+  assert.match(t5client, /className: I\.inspectButton/, 'session actions wear the stock inspect-button face')
+  for (const dead of ['aXa_av_insightRow', 'aXa_av_insightBtn', 'aXa_av_insightChip', 'aXa_av_insightNums', 'aXa_av_idle\'} }, h(\'div\', { className: \'aXa_av_hint\'} }, t(\'insight']) {
+    assert.ok(!t5client.includes(dead), 'hand-rolled insight styling is gone: ' + dead)
+  }
   // t5code is the comment-stripped source: the rule is about CODE, and the
   // comment next to the inline field names the banned call to explain itself.
   assert.doesNotMatch(t5code, /window\.prompt/, 'the sessions rename is an inline field — Tauri WKWebView has no window.prompt')
@@ -142,7 +160,7 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   assert.match(t5client, /if \(state\.phase === 'insight'\) \{ setState\(\(st\) => \(\{ \.\.\.st, sessionId: id \}\)\); return \}/,
     'a session switch re-points an open insight panel instead of closing the column')
   for (const key of ['insight.title.streak', 'insight.title.ci', 'insight.title.sessions', 'insight.loading',
-    'insight.unavailable', 'insight.streak.current', 'insight.streak.longest', 'insight.streak.empty',
+    'insight.unavailable', 'insight.streak.current', 'insight.streak.longest', 'insight.streak.empty', 'insight.streak.days',
     'insight.ci.open', 'insight.ci.empty', 'insight.sessions.open', 'insight.sessions.rename',
     'insight.sessions.archive', 'insight.sessions.empty']) {
     const n = (t5client.match(new RegExp("'" + key.replace(/\./g, '\\.') + "':", 'g')) || []).length
