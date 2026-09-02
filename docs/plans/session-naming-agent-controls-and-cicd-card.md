@@ -229,6 +229,78 @@ Bump `FRAME_VERSION` 2 → 3 so existing published repos heal on their next pass
 - `plugins/github-link/selftest.mjs` green (+ mocked rerun/cancel/401-retry).
 - Smoke against a **local** bare-repo remote — never the user's GitHub.
 
+## Status — 2026-09-03 (autonomous run)
+
+Full plugin sweep: **29 suites, 0 red.**
+
+### Stage 1 — LANDED and verified live (`61c9e0c`, `f5d96ca`)
+Measured on a real engine (`ARXA_HOME=/tmp/arxa-s1`, port 7896):
+- `id: note-wt-260903-001`, `name` == id, `branch: arxa/session/note-wt-260903-001`,
+  worktree dir `…/worktrees/note-wt-260903-001`, `dshSessionId: arxa-note-wt-260903-001`;
+  a second create increments to `-002`.
+- Crumb renders `SMOKE / notes / note-wt-260903-001` with `tailDuplicated: false`
+  — Q3's collapse confirmed in the DOM.
+- `session.list` shows `agentPreset:"arxa"` on **both `arxa-*` sessions** — the exact
+  field `AgentPresetLabel` reads. Before the fix this was absent.
+- `projections.values.title == "note-wt-260903-001"` on a freshly created session.
+- Sidebar row label follows a rename (`Pricing research` observed).
+
+**Design consequence discovered by testing, not planned:** D98's per-repo name
+counters cannot survive Q2/Q3. The id is now the dsh session id (`arxa-<id>`)
+and dsh keeps ONE session store for the whole app, so two projects minting the
+same readable id would put two arxa sessions on one conversation. The mint
+therefore reads the cross-registry aggregate and skips taken ids: numbering
+inside a container stays natural, the day-namespace is shared. Recorded in
+`selftest.routing.mjs`.
+
+### Stage 3 — server half LANDED (`ddf70a7`); card UI NOT built
+Done and covered by tests: `pushWithAuthRetry` + `gitCredentials(force)` threaded
+through github-bridge → github-link; `clearStaleStatus` on pushed/pulled/in-sync;
+session-branch push on a GREEN stage boundary (advisory, never fails the commit);
+`ci.yml` watches `arxa/session/**` with `FRAME_VERSION` 2→3; `card.pr.status`
+reads branch checks with or without a PR and returns `runs`; `card.ci.rerun` /
+`card.ci.cancel` actions plus `rerunRunApi` / `cancelRunApi`.
+
+**Not built:** the card's own Re-run / Cancel / Open-on-GitHub BUTTONS. The
+actions and APIs behind them exist and are tested; the snippet UI is not wired.
+
+### Stage 2 — placeholders LANDED; controls and panel NOT built
+Done: `ArxaJobsPlaceholder` + `ArxaSubagentsPlaceholder` on
+`conversation.session.header.actions` (kind:list, so they sit beside the stock
+entries), each returning null once its stock counterpart goes live; muted
+`.aXa_emptyChip` styling; en/pl/fr strings.
+
+**Not built:** pause/resume/cancel controls and the subagent/job detail panel.
+Stopped deliberately rather than ship dead buttons — see Known gaps.
+
+## Known gaps and exactly where they sit
+
+1. **Agent controls + detail panel (Q5, 2B/2C).** `subagent.interrupt` /
+   `subagent.prompt` exist as RPC methods but **no stock client calls them** —
+   there is no `interrupt` call site anywhere in `dsh-client-ui-subagent`, and no
+   short `connection.request` path was found from a plugin context. Job cancel
+   is clearer: `ctx.jobs.kill(id, caller, reason)` needs `caller.id ===
+   job.owner.id`, and `job.owner` is the owning **session**, so a host action can
+   legitimately pass the live session from the store. Next step is deciding the
+   transport (client RPC vs a new `/__arxa/agent.*` host action) before writing
+   either.
+2. **Region jump on first subagent.** The placeholder sits on `header.actions`;
+   the real `CatalogDropdown` lives on `header.lineage`, which is
+   **kind:single** and already occupied — registering there would delete the
+   dropdown we want to surface. So the affordance moves regions the first time a
+   subagent appears. Accepted consciously.
+3. **Two Stage 1 DOM claims unverified.** The rename-divergence crumb (two tail
+   segments) and the mode chip's rendered pixels. Both were blocked by a harness
+   problem, not a product one: fixture sessions have no user message, so every
+   fresh client boot **drops them** via the Q3 empty-drop before the probe can
+   look. Fix for next run: give the fixture session a real `user/message` so it
+   survives, then reuse `/tmp/arxa-s1/lens.mjs`.
+4. **Nothing was pushed to the user's GitHub.** By design for an unattended run
+   — see the standing constraint above. RESTO is untouched; `main` is still 1
+   ahead of `origin/main`. The auth-retry and status-clear fixes take effect on
+   the next org open, which happens when the user next launches the app.
+5. **Desktop app not rebuilt.** The repo-served engine was used throughout.
+
 ## Commits
 1. `feat: mint readable session ids and pin the worktree name across sidebar, crumb and header`
 2. `feat: record the agent preset on arxa-spawned sessions so the header shows the mode`
