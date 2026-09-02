@@ -286,6 +286,19 @@ assert.equal((await req(port, '/notes/a.md', { host: 'evil.example:1234' })).sta
     rq.end()
   })
   assert.equal(v6, 200, 'org server answers over ::1 (dual-stack loopback)')
+  // Port exclusivity (2026-09-02 flake): the old '::' wildcard let a foreign
+  // 127.0.0.1:N listener coexist on our port (BSD dual-stack rule) and steal
+  // v4 traffic. With explicit ::1 + 127.0.0.1 binds a second bind of either
+  // family on N must fail EADDRINUSE — nobody can sit in front of us.
+  for (const fam of ['::1', '127.0.0.1']) {
+    const code = await new Promise((resolve) => {
+      const probe = http.createServer(() => {})
+      probe.once('error', (e) => resolve(e.code))
+      probe.once('listening', () => probe.close(() => resolve('LISTENED')))
+      probe.listen(port, fam)
+    })
+    assert.equal(code, 'EADDRINUSE', 'org port is exclusive on ' + fam + ' (got ' + code + ')')
+  }
 }
 
 const rr = await req(port, '/vid.mp4', { host: H, method: 'GET' })

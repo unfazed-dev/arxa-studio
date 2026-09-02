@@ -1,6 +1,7 @@
 // Per-org READ-ONLY artifact file server (D7 lanes 2-3 + D81).
 //
-// - Binds 127.0.0.1:0 (ephemeral); the studio references it through the
+// - Binds ::1 + 127.0.0.1 on one ephemeral port (never the '::' wildcard —
+//   see the listen block); the studio references it through the
 //   org-<slug>.localhost hostname so rendered content NEVER shares an origin
 //   with the studio (cookies are port-agnostic — a bare port would weaken
 //   the D7 wall).
@@ -116,39 +117,62 @@ export function createOrgServer({ orgRoot, orgSlug, verify = null }) {
       server.emit('orgServer:error', err)
     }
   }
-  // Dual-stack loopback listen (2026-09-01, first-open "Load failed"): macOS
-  // answers every *.localhost name with ::1 FIRST (synthesized loopback), and
-  // the desktop WKWebView's FIRST cross-origin fetch to the old v4-only
-  // listener died on the refused v6 address with a raw "TypeError: Load
-  // failed" — every later fetch reused the warm pool and worked, which is
-  // exactly why "switch to another file and come back" healed it. Listening
-  // on '::' (ipv6Only defaults to false) accepts both families so the first
-  // fetch connects; v6-less hosts fall back to 127.0.0.1.
-  return new Promise((resolve, rejectP) => {
-    const start = (host, fallback) => {
-      server = http.createServer(handler)
-      server.once('error', (err) => {
-        if (fallback) {
-          try { server.close() } catch { /* never listened */ }
-          start(fallback, null)
-        } else {
-          rejectP(err)
-        }
-      })
-      server.once('listening', () => {
-        const port = server.address().port
-        resolve({
-          port,
-          origin: 'http://org-' + orgSlug + '.localhost:' + port,
-          close: () => new Promise((done) => {
-            try { server.closeAllConnections?.() } catch { /* older node */ }
-            server.close(() => done())
-          }),
-        })
-      })
-      server.listen(0, host)
+  // Explicit dual-loopback listen (2026-09-01 "Load failed", root-fixed
+  // 2026-09-02): macOS answers every *.localhost name with ::1 FIRST
+  // (synthesized loopback), and the desktop WKWebView's FIRST cross-origin
+  // fetch to the old v4-only listener died on the refused v6 address with a
+  // raw "TypeError: Load failed" — later fetches reused the warm pool, which
+  // is why "switch file and come back" healed it. The first fix listened on
+  // the '::' wildcard; that inherits IPV6_V6ONLY's per-OS default (off on
+  // Linux/macOS, ON on Windows) and let a foreign 127.0.0.1:N listener
+  // coexist on the same port (BSD dual-stack rule) — the selftest flaked
+  // exactly that way. Now: bind ::1:0 first (v6 is the family more likely to
+  // be missing), then 127.0.0.1 on the SAME port; retry on EADDRINUSE with a
+  // fresh ephemeral port; on a v6-less host (EADDRNOTAVAIL/EAFNOSUPPORT) run
+  // v4-only — browsers get RST on ::1 and fall through to 127.0.0.1 in ms.
+  // Never persist the port: the token-bearing URL carries it each launch.
+  const MAX_ATTEMPTS = 10
+  const closeOne = (s) => new Promise((done) => {
+    try { s.closeAllConnections?.() } catch { /* older node */ }
+    s.close(() => done())
+  })
+  const bind = (host, port) => new Promise((ok, bad) => {
+    const s = http.createServer(handler)
+    s.once('error', (err) => { try { s.close() } catch { /* never listened */ } bad(err) })
+    s.once('listening', () => { s.removeAllListeners('error'); ok(s) })
+    s.listen(port, host)
+  })
+  const attempt = async (n, lastErr) => {
+    if (n >= MAX_ATTEMPTS) throw lastErr
+    let v6 = null
+    try {
+      v6 = await bind('::1', 0)
+    } catch (err) {
+      if (err?.code !== 'EADDRNOTAVAIL' && err?.code !== 'EAFNOSUPPORT') throw err
+      if (n === 0) console.warn('[artifact-viewer] ::1 unavailable (' + err.code + '); org server is 127.0.0.1-only')
     }
-    start('::', '127.0.0.1')
+    try {
+      const v4 = await bind('127.0.0.1', v6 ? v6.address().port : 0)
+      return { v4, v6 }
+    } catch (err) {
+      if (v6) await closeOne(v6)
+      if (v6 && err?.code === 'EADDRINUSE') return attempt(n + 1, err)
+      throw err
+    }
+  }
+  return attempt(0, null).then(({ v4, v6 }) => {
+    server = v4 // the handler's allowed-host list reads server.address()
+    const sockets = v6 ? [v4, v6] : [v4]
+    const port = v4.address().port
+    const close = () => Promise.all(sockets.map(closeOne)).then(() => undefined)
+    // A later listener error on either family takes the whole pair down —
+    // half a dual-loopback server is the exact bug this block exists to fix.
+    for (const s of sockets) s.on('error', (err) => { server.emit('orgServer:error', err); close() })
+    return {
+      port,
+      origin: 'http://org-' + orgSlug + '.localhost:' + port,
+      close,
+    }
   })
 }
 
