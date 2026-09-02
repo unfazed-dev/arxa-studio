@@ -392,6 +392,33 @@ without any of that. Recorded as a deliberate substitution, not an omission.
 - **NOT executed:** any GitHub call. No push, no re-run, no cancel against a
   real repo, per the standing constraint.
 
+### Desktop rebuild — done, and it found a shipping bug
+
+`node scripts/pack-sidecar.mjs` + `desktop/scripts/build-release.sh` produced
+`Arxa Studio.app`, the `.dmg` and a signed updater tarball. The first boot of
+that sidecar **died before binding its port**: `Cannot find package
+'arxa-personalisation'`.
+
+Root cause: packed mode copies plugin directories from a **hand-maintained
+list** in `bin/arxa-studio.mjs`, and `arxa-personalisation` was in the profile
+`package.json` deps but not in that list. Silent because packed mode sends the
+engine's stdio to `<ARXA_HOME>/dsh/engine.log`, so the terminal shows only the
+banner. This is the same failure shape as `eb9f088` (the `bin/` file list that
+became `BIN_FILES`), so it got the same cure rather than a second patch: one
+`PROFILE_PLUGINS` constant now feeds **both** the profile deps and the packed
+copy, with a regression test in `plugins/workspace-index/selftest.mjs`
+asserting the two cannot drift apart again.
+
+Pre-existing, not caused by this work — but it means **every desktop build
+since `arxa-personalisation` landed was broken on a clean install**, and only a
+real bundle boot could have caught it. That is the follow-up the previous
+session's notes asked for, now closed.
+
+Verified after the fix, from an empty `ARXA_HOME`: engine binds, 23 profile
+plugins installed, **zero errors in the engine log**, and the sidecar serves
+the new `ArxaAgentControl`, the `ci-rerun` button and the personalisation
+bundle.
+
 ## Known gaps — as of the session-2 run (2026-09-03)
 
 Gaps 1, 4 and 5 from the first run are **closed**; what follows is what is
