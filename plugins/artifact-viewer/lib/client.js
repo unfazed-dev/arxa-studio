@@ -37,6 +37,7 @@ window.__ModuleLoader__.load({
     const ACTION_ROUTE = '/__arxa/sidebar/action'
     // insight.* live in the arxa-git-card host (docs/plans/git-card-stock-dock-rebuild.md A2)
     const CARD_ROUTE = '/__arxa/git-card/action'
+    const SIDEBAR_ROUTE = '/__arxa/sidebar/action'
     const EVENTS_ROUTE = '/__arxa/artifacts/events'
     const VENDOR = (n) => '/__arxa/artifacts/vendor/' + n
     const EDITABLE_LANES = new Set(['markdown', 'code', 'text'])
@@ -237,6 +238,22 @@ window.__ModuleLoader__.load({
       'insight.title.streak': 'Commit streak',
       'insight.title.ci': 'CI runs',
       'insight.title.sessions': 'Sessions',
+      'insight.title.jobs': 'Background jobs',
+      'insight.title.subagents': 'Subagents',
+      'agents.jobs.empty': 'No background jobs',
+      'agents.subagents.empty': 'No subagents',
+      'agents.pause': 'Pause',
+      'agents.resume': 'Resume',
+      'agents.cancel': 'Cancel',
+      'agents.why.one-shot': 'A one-shot subagent runs to completion — it cannot be paused or stopped.',
+      'agents.why.not-running': 'Nothing is running right now.',
+      'agents.why.send-message': 'A paused subagent resumes when you send it a message.',
+      'agents.why.no-terminate-verb': 'The engine has no way to terminate a subagent — pause is the only stop.',
+      'agents.why.jobs-have-no-pause': 'Background jobs cannot be paused — only cancelled.',
+      'agents.why.already-finished': 'This one has already finished.',
+      'agents.why.owner-not-live': 'This session is not live, so its jobs cannot be reached.',
+      'agents.why.service-unavailable': 'This engine build does not provide that service.',
+      'agents.why.unavailable': 'Not available here.',
       'insight.loading': 'Loading…',
       'insight.streak.days': 'Last 90 days',
       'insight.unavailable': 'Not available for this repository.',
@@ -297,6 +314,22 @@ window.__ModuleLoader__.load({
       'insight.title.streak': 'Passa commitów',
       'insight.title.ci': 'Przebiegi CI',
       'insight.title.sessions': 'Sesje',
+      'insight.title.jobs': 'Zadania w tle',
+      'insight.title.subagents': 'Podagenci',
+      'agents.jobs.empty': 'Brak zadań w tle',
+      'agents.subagents.empty': 'Brak podagentów',
+      'agents.pause': 'Wstrzymaj',
+      'agents.resume': 'Wznów',
+      'agents.cancel': 'Anuluj',
+      'agents.why.one-shot': 'Podagent jednorazowy działa do końca — nie można go wstrzymać ani zatrzymać.',
+      'agents.why.not-running': 'Nic teraz nie działa.',
+      'agents.why.send-message': 'Wstrzymany podagent wznawia się po wysłaniu mu wiadomości.',
+      'agents.why.no-terminate-verb': 'Silnik nie potrafi zakończyć podagenta — wstrzymanie to jedyne zatrzymanie.',
+      'agents.why.jobs-have-no-pause': 'Zadań w tle nie można wstrzymać — tylko anulować.',
+      'agents.why.already-finished': 'To już się zakończyło.',
+      'agents.why.owner-not-live': 'Ta sesja nie jest aktywna, więc jej zadania są nieosiągalne.',
+      'agents.why.service-unavailable': 'Ta wersja silnika nie udostępnia tej usługi.',
+      'agents.why.unavailable': 'Niedostępne tutaj.',
       'insight.loading': 'Wczytywanie…',
       'insight.streak.days': 'Ostatnie 90 dni',
       'insight.unavailable': 'Niedostępne dla tego repozytorium.',
@@ -357,6 +390,22 @@ window.__ModuleLoader__.load({
       'insight.title.streak': 'Série de commits',
       'insight.title.ci': 'Exécutions CI',
       'insight.title.sessions': 'Sessions',
+      'insight.title.jobs': 'Tâches en arrière-plan',
+      'insight.title.subagents': 'Sous-agents',
+      'agents.jobs.empty': 'Aucune tâche en arrière-plan',
+      'agents.subagents.empty': 'Aucun sous-agent',
+      'agents.pause': 'Suspendre',
+      'agents.resume': 'Reprendre',
+      'agents.cancel': 'Annuler',
+      'agents.why.one-shot': 'Un sous-agent à usage unique va jusqu’au bout — impossible de le suspendre ou de l’arrêter.',
+      'agents.why.not-running': 'Rien ne tourne pour le moment.',
+      'agents.why.send-message': 'Un sous-agent suspendu reprend lorsque vous lui envoyez un message.',
+      'agents.why.no-terminate-verb': 'Le moteur ne sait pas terminer un sous-agent — suspendre est le seul arrêt.',
+      'agents.why.jobs-have-no-pause': 'Les tâches en arrière-plan ne se suspendent pas — elles s’annulent.',
+      'agents.why.already-finished': 'Celle-ci est déjà terminée.',
+      'agents.why.owner-not-live': 'Cette session n’est pas active, ses tâches sont donc inaccessibles.',
+      'agents.why.service-unavailable': 'Cette version du moteur ne fournit pas ce service.',
+      'agents.why.unavailable': 'Indisponible ici.',
       'insight.loading': 'Chargement…',
       'insight.streak.days': '90 derniers jours',
       'insight.unavailable': 'Indisponible pour ce dépôt.',
@@ -687,8 +736,12 @@ window.__ModuleLoader__.load({
     // behaviour below 744px; only the payload differs (`kind: 'insight'`).
     // Every read goes through the git-card action route the card already uses,
     // so there is one server surface, not two.
+    // `agent.*` lives on the SIDEBAR host, not the card host — a session's
+    // children and jobs are not a git concern. Same prefix split the sidebar
+    // bundle uses, kept in one place on each side.
+    const ROUTE_FOR = (action) => (/^agent\./.test(action) ? SIDEBAR_ROUTE : CARD_ROUTE)
     const postAction = async (action, arg) => {
-      const r = await fetch(CARD_ROUTE, {
+      const r = await fetch(ROUTE_FOR(action), {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ action, arg }),
       })
@@ -699,6 +752,17 @@ window.__ModuleLoader__.load({
     /** Streak intensity is a class, never an inline colour: the four steps are
      * token-defined so light and dark both read. */
     const streakLevel = (count) => (count >= 8 ? 4 : count >= 4 ? 3 : count >= 1 ? 2 : 1)
+    /** Subagent / job row → StateDot vocabulary. A paused-or-cold child and a
+     * killed job both read as `warning`: stopped, but not by completing. */
+    const agentDot = (row) => {
+      if (row.kind === 'job') {
+        if (row.status === 'completed') return 'done'
+        if (row.status === 'failed') return 'error'
+        if (row.status === 'running') return 'ongoing'
+        return 'warning'
+      }
+      return row.activity === 'running' ? 'ongoing' : 'warning'
+    }
     /** CI conclusion → StateDot vocabulary (done|ongoing|warning|error). */
     const ciState = (run) => {
       if (run.asleep) return 'warning'
@@ -718,7 +782,8 @@ window.__ModuleLoader__.load({
       const load = React.useCallback(() => {
         let live = true
         setPhase('loading')
-        const action = 'insight.' + view
+        const agentView = view === 'jobs' || view === 'subagents'
+        const action = agentView ? 'agent.list' : 'insight.' + view
         const arg = view === 'sessions' ? { orgId } : { sessionId }
         postAction(action, arg).then((res) => {
           if (!live) return
@@ -770,8 +835,13 @@ window.__ModuleLoader__.load({
       // is a second place to reach them, never a second way to do them.
       const act = (label, action, arg) => {
         setBusy(label); setNote('')
-        postAction(action, arg).then(() => { setBusy(null); setTick((n) => n + 1) },
-          (e) => { setBusy(null); setNote(String((e && e.message) || e)) })
+        postAction(action, arg).then((r) => {
+          setBusy(null)
+          // A refused verb comes back ok:false with a reason — say it rather
+          // than refreshing as though the action had landed.
+          if (r && r.ok === false) { setNote(t('agents.why.' + String(r.reason || 'unavailable'))); return }
+          setTick((n) => n + 1)
+        }, (e) => { setBusy(null); setNote(String((e && e.message) || e)) })
       }
       // Trailing actions wear the stock ToolRow inspect-button face (revealed on row hover / focus).
       const trailing = (label, onClick, disabled) => h('button', {
@@ -794,6 +864,35 @@ window.__ModuleLoader__.load({
                   'data-level': String(streakLevel(x.count || 0)),
                   title: x.day + ' · ' + (x.count || 0),
                 })))))))
+      }
+      // Q5 (2026-09-03): the session's children, in full, with the same
+      // controls the header dropdown carries. The capability map rides on
+      // every row from the host — a disabled button here says WHY on hover
+      // rather than pretending the verb exists. See the sidebar host's
+      // agent.* block for why a subagent pauses and a job cancels.
+      if (view === 'jobs' || view === 'subagents') {
+        const list = (view === 'jobs' ? d.jobs : d.subagents) || []
+        if (view === 'jobs' && d.jobsReadable === false) return empty(t('agents.why.owner-not-live'))
+        if (list.length === 0) return empty(t(view === 'jobs' ? 'agents.jobs.empty' : 'agents.subagents.empty'))
+        const verbAction = (row, verb) => {
+          const allowed = row.can && row.can[verb] === true
+          const why = row.why && row.why[verb]
+          return h('button', {
+            key: verb,
+            type: 'button',
+            className: I.inspectButton,
+            disabled: busy != null || !allowed,
+            title: allowed ? t('agents.' + verb) : t('agents.why.' + String(why || 'unavailable')),
+            onClick: () => act('agent-' + verb, 'agent.' + verb, { sessionId, kind: row.kind, id: row.id }),
+          }, t('agents.' + verb))
+        }
+        return root(h('div', { className: 'aXa_av_scroll' },
+          note && h('div', { className: 'aXa_av_note', 'data-tone': 'error' }, note),
+          list.map((row0) => row(row0.id,
+            h(P.StateDot, { state: agentDot(row0) }),
+            row0.label || row0.id,
+            [row0.mode || row0.jobKind, row0.status || row0.activity, row0.detail].filter(Boolean).join(' · '),
+            h(React.Fragment, null, ['pause', 'resume', 'cancel'].map((v) => verbAction(row0, v)))))))
       }
       if (view === 'ci') {
         const runs = d.runs || []

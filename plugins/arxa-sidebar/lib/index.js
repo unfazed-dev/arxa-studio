@@ -808,6 +808,150 @@ export function apply(ctx, opts = {}) {
             // snapshot runs detached; includeExisting is fixed false (above)
             return json(res, { ok: true, action, result: { path: created.path, slug: created.slug ?? path.basename(created.path) } })
           }
+          /**
+           * Q4/Q5 (2026-09-03): subagent + background-job control.
+           *
+           * These sit ABOVE the lifecycle gate on purpose. A session's
+           * children and its jobs exist whether or not an arxa org is open,
+           * so answering them with `no-workspace` would be a lie about the
+           * machine's state.
+           *
+           * ID CURRENCY: the DSH session id, raw. `listChildren` and
+           * `interrupt` both address durable dsh sessions. Nothing on this
+           * path may normalise it to a registry id the way the git-card
+           * route does for ITS actions — that would address a different
+           * object and silently answer about the wrong thing.
+           *
+           * The capability map is computed HERE and shipped with every row,
+           * because it is not uniform and the client must not guess it:
+           *
+           *   dsh-subagent's ONLY stop verb is `interrupt`, and its own
+           *   contract (dsh-subagent/lib/types/index.d.ts:138-152) says it
+           *   PRESERVES the Activation and parks unclaimed inbox work —
+           *   "once the interrupted driver is idle, a waking send resumes
+           *   the parked FIFO queue". That is a pause. There is no terminate
+           *   verb for a subagent at all, and an interrupt aimed at a
+           *   one-shot child is documented as an accepted no-op.
+           *
+           *   dsh-jobs is the mirror image: `kill` is a real cancel, and the
+           *   status union (running|stopping|completed|killed|failed) has no
+           *   paused member — there is nothing to pause with.
+           *
+           * So subagents pause, jobs cancel, and every other cell is false
+           * carrying the reason the UI puts on the disabled control. Naming
+           * the gap is the feature; a button that lies is not.
+           */
+          if (action.startsWith('agent.')) {
+            // A service the profile did not load THROWS on property access
+            // ("cannot get property X without inject", cordis ReflectService)
+            // rather than reading undefined — optional chaining is not enough
+            // here. A missing service degrades the whole surface to
+            // disabled-with-reason instead of taking the sidebar down with it.
+            const svc = (key) => { try { return ctx[key] ?? null } catch { return null } }
+            const subagents = svc('subagents')
+            const jobs = svc('jobs')
+            const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+            if (!sid) return json(res, { ok: false, error: 'sessionId-required', action })
+            // `jobs.list`/`jobs.kill` fence on the OWNER agent: a cold session
+            // has no live Agent, so its jobs are neither listable nor
+            // killable. That is a disabled-with-reason state, not an error.
+            let parent = null
+            try { parent = ctx.agents?.get(sid) ?? null } catch { parent = null }
+
+            const subRows = async () => {
+              if (!subagents) return []
+              let children = []
+              try { children = await subagents.listChildren(sid) } catch { return [] }
+              return (children ?? []).filter((c) => c && c.kind === 'child').map((c) => {
+                const continuable = c.mode === 'continuable'
+                const running = c.activity === 'running'
+                return {
+                  kind: 'subagent',
+                  id: c.id,
+                  label: c.label || c.id,
+                  mode: c.mode,
+                  activity: c.activity,
+                  hasChildren: c.hasChildren === true,
+                  can: { pause: continuable && running, resume: false, cancel: false },
+                  why: {
+                    ...(continuable && running ? {} : { pause: continuable ? 'not-running' : 'one-shot' }),
+                    resume: continuable ? 'send-message' : 'one-shot',
+                    cancel: 'no-terminate-verb',
+                  },
+                }
+              })
+            }
+            const jobRows = () => {
+              if (!jobs || !parent) return []
+              let snaps = []
+              try { snaps = jobs.list(parent) ?? [] } catch { return [] }
+              return snaps.filter((j) => j && j.ownerSession === sid).map((j) => {
+                const live = j.status === 'running' || j.status === 'stopping'
+                return {
+                  kind: 'job',
+                  id: j.id,
+                  label: j.label || j.id,
+                  jobKind: j.kind,
+                  status: j.status,
+                  detail: j.detail ?? null,
+                  startedAt: j.startedAt ?? null,
+                  finishedAt: j.finishedAt ?? null,
+                  can: { pause: false, resume: false, cancel: live },
+                  why: {
+                    pause: 'jobs-have-no-pause',
+                    resume: 'jobs-have-no-pause',
+                    ...(live ? {} : { cancel: 'already-finished' }),
+                  },
+                }
+              })
+            }
+
+            const agentTable = {
+              'agent.list': async () => ({
+                sessionId: sid,
+                parentLive: parent !== null,
+                services: { subagents: subagents !== null, jobs: jobs !== null },
+                subagents: await subRows(),
+                // A cold session's jobs are invisible, not empty — say which.
+                jobs: jobRows(),
+                jobsReadable: Boolean(jobs && parent),
+              }),
+              /** The one live pause. Continuable children only; the runtime
+                * throws UNAUTHORIZED when this session does not own the
+                * target, which is the fence we want. */
+              'agent.pause': async () => {
+                if (arg?.kind !== 'subagent') return { ok: false, reason: 'jobs-have-no-pause' }
+                if (!subagents) return { ok: false, reason: 'service-unavailable' }
+                const id = arg?.id
+                if (typeof id !== 'string' || id === '') return { ok: false, reason: 'id-required' }
+                subagents.interrupt(id, { kind: 'user', parentSessionId: sid })
+                return { ok: true, outcome: 'paused' }
+              },
+              /** No resume verb exists. `followup` needs synthesized content
+                * AND a live parent Agent — inventing a message the human did
+                * not write is not a resume, so this refuses and says how a
+                * paused child actually wakes. */
+              'agent.resume': async () => ({
+                ok: false,
+                reason: arg?.kind === 'job' ? 'jobs-have-no-pause' : 'send-message',
+              }),
+              /** The one live cancel. Jobs only — a subagent has no terminate
+                * verb in the runtime, so refusing is the honest answer. */
+              'agent.cancel': async () => {
+                if (arg?.kind !== 'job') return { ok: false, reason: 'no-terminate-verb' }
+                if (!jobs) return { ok: false, reason: 'service-unavailable' }
+                if (!parent) return { ok: false, reason: 'owner-not-live' }
+                const id = arg?.id
+                if (typeof id !== 'string' || id === '') return { ok: false, reason: 'id-required' }
+                return { ok: true, outcome: jobs.kill(id, parent, 'cancelled from the arxa session header') }
+              },
+            }
+            const agentFn = agentTable[action]
+            if (!agentFn) return json(res, { ok: false, error: 'unknown-action', action })
+            const agentOut = await agentFn()
+            return json(res, { ok: true, action, result: agentOut })
+          }
+
           const l = await getLifecycle()
           if (!l) return json(res, { ok: false, seam: SEAM_LIFECYCLE_STUBBED, error: 'no-workspace', action })
           const { orgByRef, handle, ensureOpen } = orgHelpers(l)

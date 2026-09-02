@@ -628,9 +628,108 @@
 				children: label
 			});
 		}
+		/* Q5 (2026-09-03): the honest control surface for a session's children.
+		 *
+		 * The capability map is NOT computed here — it rides on every row from
+		 * the host (`agent.list`), because it is not uniform and the browser
+		 * cannot see the runtime that decides it. dsh-subagent's only stop verb
+		 * is `interrupt`, which PRESERVES the Activation and parks the inbox —
+		 * a pause, not a cancel; dsh-jobs is the mirror, with a real `kill` and
+		 * no paused state at all. So a subagent pauses, a job cancels, and the
+		 * rest are rendered disabled carrying the reason the host gave. A
+		 * button that lies is worse than a button that explains itself.
+		 *
+		 * Placement, per the grill: the actions live in the side panel AND on
+		 * hover over these dropdown rows. The stock chips beside this one stay
+		 * untouched — they list, this controls. `header.actions` is a kind:list
+		 * slot with replaceRisk:none, so adding here removes nothing. */
+		const ARXA_AGENT_VERBS = ["pause", "resume", "cancel"];
+		function ArxaAgentRowActions({ row, t, busy, onAct }) {
+			return (0, react_jsx_runtime.jsx)("span", {
+				className: "aXa_agentActs",
+				children: ARXA_AGENT_VERBS.map((verb) => {
+					const allowed = row.can && row.can[verb] === true;
+					const why = row.why && row.why[verb];
+					return (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: "aXa_agentAct",
+						"data-verb": verb,
+						disabled: !allowed || busy,
+						/* The disabled control still explains itself — that is the
+						 * whole point of shipping the reason with the row. */
+						title: allowed ? t("agents." + verb) : t("agents.why." + String(why || "unavailable")),
+						onClick: () => onAct(verb, row),
+						children: t("agents." + verb)
+					}, verb);
+				})
+			});
+		}
+		function ArxaAgentControl({ kind, sessionId, count, t }) {
+			const [open, setOpen] = (0, react.useState)(false);
+			const [rows, setRows] = (0, react.useState)(null);
+			const [busy, setBusy] = (0, react.useState)(false);
+			const [note, setNote] = (0, react.useState)("");
+			const load = (0, react.useCallback)(() => {
+				ORG_POST("agent.list", { sessionId: sessionId }).then((b) => {
+					const r = (b && b.result) || {};
+					setNote("");
+					/* A cold session's jobs are UNREACHABLE, not absent — the host
+					 * says which, and saying "no jobs" for either would be wrong. */
+					if (kind === "jobs" && r.jobsReadable === false) { setRows([]); setNote(t("agents.why.owner-not-live")); return; }
+					setRows(kind === "jobs" ? (r.jobs || []) : (r.subagents || []));
+				}, (e) => { setNote(String((e && e.message) || e)); setRows([]); });
+			}, [sessionId, kind, t]);
+			(0, react.useEffect)(() => { if (open) load(); }, [open, load]);
+			const act = (verb, row) => {
+				setBusy(true);
+				ORG_POST("agent." + verb, { sessionId: sessionId, kind: row.kind, id: row.id }).then((b) => {
+					setBusy(false);
+					const r = b && b.result;
+					if (r && r.ok === false) setNote(t("agents.why." + String(r.reason || "unavailable")));
+					else load();
+				}, (e) => { setBusy(false); setNote(String((e && e.message) || e)); });
+			};
+			return (0, react_jsx_runtime.jsxs)("span", {
+				className: "aXa_agentWrap",
+				"data-arxa-agent-control": kind,
+				children: [(0, react_jsx_runtime.jsxs)("button", {
+					type: "button",
+					className: "aXa_emptyChip aXa_agentChip",
+					"aria-expanded": open,
+					title: t(kind === "jobs" ? "agents.jobs.control" : "agents.subagents.control"),
+					onClick: () => setOpen((v) => !v),
+					children: [t(kind === "jobs" ? "agents.jobs.label" : "agents.subagents.label"), " · ", String(count)]
+				}), open ? (0, react_jsx_runtime.jsxs)("span", {
+					className: "aXa_agentMenu",
+					role: "menu",
+					children: [
+						note ? (0, react_jsx_runtime.jsx)("span", { className: "aXa_agentNote", children: note }) : null,
+						rows === null ? (0, react_jsx_runtime.jsx)("span", { className: "aXa_agentNote", children: t("agents.loading") }) : null,
+						rows && rows.length === 0 ? (0, react_jsx_runtime.jsx)("span", { className: "aXa_agentNote", children: t(kind === "jobs" ? "agents.jobs.empty" : "agents.subagents.empty") }) : null,
+						(rows || []).map((row) => (0, react_jsx_runtime.jsxs)("span", {
+							className: "aXa_agentRow",
+							role: "menuitem",
+							children: [
+								(0, react_jsx_runtime.jsx)("span", { className: "aXa_agentLabel", title: row.label, children: row.label }),
+								(0, react_jsx_runtime.jsx)("span", { className: "aXa_agentState", children: String(row.status || row.activity || "") }),
+								(0, react_jsx_runtime.jsx)(ArxaAgentRowActions, { row: row, t: t, busy: busy, onAct: act })
+							]
+						}, row.id)),
+						(0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							className: "aXa_agentDetails",
+							onClick: () => { setOpen(false); openAgentPanel(kind, sessionId); },
+							children: t("agents.details")
+						})
+					]
+				}) : null]
+			});
+		}
 		function ArxaJobsPlaceholder({ sessionId, useSessions, t }) {
 			const jobs = useSessions((state) => state.jobsBySession?.[sessionId]);
-			if (jobs && jobs.length > 0) return null; /* stock JobListAction owns it now */
+			const count = jobs ? jobs.length : 0;
+			/* Q4: present at zero as a muted placeholder, a live control above it. */
+			if (count > 0) return (0, react_jsx_runtime.jsx)(ArxaAgentControl, { kind: "jobs", sessionId: sessionId, count: count, t: t });
 			return (0, react_jsx_runtime.jsx)(ArxaEmptyChip, {
 				label: t("agents.jobs.empty"),
 				title: t("agents.jobs.emptyHint"),
@@ -648,7 +747,7 @@
 				for (const k in by) { const s = by[k]; if (s && s.origin === "subagent" && s.parentSessionId === sessionId) n += 1; }
 				return n;
 			});
-			if (count > 0) return null; /* stock CatalogDropdown owns it now */
+			if (count > 0) return (0, react_jsx_runtime.jsx)(ArxaAgentControl, { kind: "subagents", sessionId: sessionId, count: count, t: t });
 			return (0, react_jsx_runtime.jsx)(ArxaEmptyChip, {
 				label: t("agents.subagents.empty"),
 				title: t("agents.subagents.emptyHint"),
@@ -726,6 +825,21 @@
 				 * the stock chip that replaces them carries the real weight. */
 				+ ".aXa_emptyChip{background:none;border:0;padding:2px 6px;border-radius:6px;font:inherit;font-size:12px;line-height:18px;color:var(--dsw-alias-label-caption);cursor:pointer;white-space:nowrap}"
 				+ ".aXa_emptyChip:hover{color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-bg-layer-2)}"
+				+ ".aXa_agentWrap{position:relative;display:inline-flex}"
+				+ ".aXa_agentChip[aria-expanded=true]{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-2)}"
+				+ ".aXa_agentMenu{position:absolute;top:100%;right:0;z-index:40;min-width:260px;display:flex;flex-direction:column;gap:2px;margin-top:4px;padding:4px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);box-shadow:0 8px 24px rgba(0,0,0,.18)}"
+				+ ".aXa_agentRow{display:flex;align-items:center;gap:6px;padding:3px 6px;border-radius:6px;font-size:12px;line-height:18px;white-space:nowrap}"
+				+ ".aXa_agentRow:hover{background:var(--dsw-alias-bg-layer-2)}"
+				+ ".aXa_agentLabel{flex:1;overflow:hidden;text-overflow:ellipsis}"
+				+ ".aXa_agentState{flex:none;color:var(--dsw-alias-label-caption)}"
+				+ ".aXa_agentActs{flex:none;display:inline-flex;gap:2px;opacity:0;transition:opacity .12s}"
+				+ ".aXa_agentRow:hover .aXa_agentActs,.aXa_agentActs:focus-within{opacity:1}"
+				+ ".aXa_agentAct{background:none;border:0;padding:1px 5px;border-radius:5px;font:inherit;font-size:11px;color:var(--dsw-alias-label-tertiary);cursor:pointer;text-transform:capitalize}"
+				+ ".aXa_agentAct:hover:not(:disabled){color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3)}"
+				+ ".aXa_agentAct:disabled{opacity:.38;cursor:not-allowed}"
+				+ ".aXa_agentNote{padding:3px 6px;font-size:11px;color:var(--dsw-alias-label-caption);white-space:normal}"
+				+ ".aXa_agentDetails{margin-top:2px;background:none;border:0;border-top:1px solid var(--dsw-alias-border-l2);padding:5px 6px 2px;font:inherit;font-size:11px;color:var(--dsw-alias-label-tertiary);cursor:pointer;text-align:left}"
+				+ ".aXa_agentDetails:hover{color:var(--dsw-alias-label-primary)}"
 				+ ".uV2eYG_root:not(.uV2eYG_hero) [data-arxa-preset-corner]{display:none}"
 				+ ".uV2eYG_hero [data-composer-card] :is(.uV2eYG_input,.uV2eYG_mirror,.uV2eYG_backdrop){box-sizing:border-box;padding-right:var(--arxa-preset-inset,120px)}";
 			document.head.appendChild(tag);
@@ -2234,6 +2348,24 @@
 			"agents.jobs.emptyHint": "Background jobs appear here once one is started. Open the panel for details.",
 			"agents.subagents.empty": "No subagents",
 			"agents.subagents.emptyHint": "Subagents appear here once one is delegated. Open the panel for details.",
+			"agents.jobs.label": "Jobs",
+			"agents.subagents.label": "Subagents",
+			"agents.jobs.control": "Control this session's background jobs",
+			"agents.subagents.control": "Control this session's subagents",
+			"agents.loading": "Loading\u2026",
+			"agents.details": "Open details panel",
+			"agents.pause": "Pause",
+			"agents.resume": "Resume",
+			"agents.cancel": "Cancel",
+			"agents.why.one-shot": "A one-shot subagent runs to completion \u2014 it cannot be paused or stopped.",
+			"agents.why.not-running": "Nothing is running right now.",
+			"agents.why.send-message": "A paused subagent resumes when you send it a message.",
+			"agents.why.no-terminate-verb": "The engine has no way to terminate a subagent \u2014 pause is the only stop.",
+			"agents.why.jobs-have-no-pause": "Background jobs cannot be paused \u2014 only cancelled.",
+			"agents.why.already-finished": "This one has already finished.",
+			"agents.why.owner-not-live": "This session is not live, so its jobs cannot be reached.",
+			"agents.why.service-unavailable": "This engine build does not provide that service.",
+			"agents.why.unavailable": "Not available here.",
 			"hero.guide": "Sessions start inside a workspace — open an organisation, expand to a folder row, hover it and press + to start a session.",
 			"tree.dock.notes": "Notes",
 			"tree.dock.meetings": "Meetings",
@@ -2398,6 +2530,24 @@
 			"agents.jobs.emptyHint": "Zadania w tle pojawią się tutaj po uruchomieniu. Otwórz panel, aby zobaczyć szczegóły.",
 			"agents.subagents.empty": "Brak podagentów",
 			"agents.subagents.emptyHint": "Podagenci pojawią się tutaj po delegowaniu. Otwórz panel, aby zobaczyć szczegóły.",
+			"agents.jobs.label": "Zadania",
+			"agents.subagents.label": "Podagenci",
+			"agents.jobs.control": "Steruj zadaniami w tle tej sesji",
+			"agents.subagents.control": "Steruj podagentami tej sesji",
+			"agents.loading": "Wczytywanie\u2026",
+			"agents.details": "Otwórz panel szczegółów",
+			"agents.pause": "Wstrzymaj",
+			"agents.resume": "Wznów",
+			"agents.cancel": "Anuluj",
+			"agents.why.one-shot": "Podagent jednorazowy działa do końca \u2014 nie można go wstrzymać ani zatrzymać.",
+			"agents.why.not-running": "Nic teraz nie działa.",
+			"agents.why.send-message": "Wstrzymany podagent wznawia się po wysłaniu mu wiadomości.",
+			"agents.why.no-terminate-verb": "Silnik nie potrafi zakończyć podagenta \u2014 wstrzymanie to jedyne zatrzymanie.",
+			"agents.why.jobs-have-no-pause": "Zadań w tle nie można wstrzymać \u2014 tylko anulować.",
+			"agents.why.already-finished": "To już się zakończyło.",
+			"agents.why.owner-not-live": "Ta sesja nie jest aktywna, więc jej zadania są nieosiągalne.",
+			"agents.why.service-unavailable": "Ta wersja silnika nie udostępnia tej usługi.",
+			"agents.why.unavailable": "Niedostępne tutaj.",
 			"hero.guide": "Sesje zaczynają się wewnątrz obszaru roboczego — otwórz organizację, rozwiń do wiersza folderu, najedź na niego i naciśnij +, aby rozpocząć sesję.",
 			"tree.dock.notes": "Notatki",
 			"tree.dock.meetings": "Spotkania",
@@ -2562,6 +2712,24 @@
 			"agents.jobs.emptyHint": "Les tâches en arrière-plan apparaîtront ici une fois lancées. Ouvrez le panneau pour les détails.",
 			"agents.subagents.empty": "Aucun sous-agent",
 			"agents.subagents.emptyHint": "Les sous-agents apparaîtront ici une fois délégués. Ouvrez le panneau pour les détails.",
+			"agents.jobs.label": "Tâches",
+			"agents.subagents.label": "Sous-agents",
+			"agents.jobs.control": "Piloter les tâches en arrière-plan de cette session",
+			"agents.subagents.control": "Piloter les sous-agents de cette session",
+			"agents.loading": "Chargement\u2026",
+			"agents.details": "Ouvrir le panneau de détails",
+			"agents.pause": "Suspendre",
+			"agents.resume": "Reprendre",
+			"agents.cancel": "Annuler",
+			"agents.why.one-shot": "Un sous-agent à usage unique va jusqu\u2019au bout \u2014 impossible de le suspendre ou de l\u2019arrêter.",
+			"agents.why.not-running": "Rien ne tourne pour le moment.",
+			"agents.why.send-message": "Un sous-agent suspendu reprend lorsque vous lui envoyez un message.",
+			"agents.why.no-terminate-verb": "Le moteur ne sait pas terminer un sous-agent \u2014 suspendre est le seul arrêt.",
+			"agents.why.jobs-have-no-pause": "Les tâches en arrière-plan ne se suspendent pas \u2014 elles s\u2019annulent.",
+			"agents.why.already-finished": "Celle-ci est déjà terminée.",
+			"agents.why.owner-not-live": "Cette session n\u2019est pas active, ses tâches sont donc inaccessibles.",
+			"agents.why.service-unavailable": "Cette version du moteur ne fournit pas ce service.",
+			"agents.why.unavailable": "Indisponible ici.",
 			"hero.guide": "Les sessions démarrent dans un espace de travail — ouvrez une organisation, dépliez jusqu’à une ligne de dossier, survolez-la et appuyez sur + pour démarrer une session.",
 			"tree.dock.notes": "Notes",
 			"tree.dock.meetings": "Réunions",

@@ -642,5 +642,30 @@ check('sync: D97 strings localized (en + pl + fr)',
   ["Sync with GitHub", "Synchronizuj z GitHub", "Synchroniser avec GitHub",
    "Sync failed", "Błąd synchronizacji", "Échec de la synchronisation"].every((v) => client.includes('": "' + v + '"')))
 
+
+// Q5 (2026-09-03): the header chip is a CONTROL, not just a count. The
+// capability map arrives from the host with every row — the browser cannot
+// see the runtime that decides which verbs exist, so it must never infer them.
+check('client: agent control chip renders in place of the placeholder once populated',
+  ['function ArxaAgentControl(', 'function ArxaAgentRowActions(', 'ArxaAgentControl, { kind: "jobs"', 'ArxaAgentControl, { kind: "subagents"'].every((x) => client.includes(x)))
+check('client: verbs are gated by the HOST capability map, never inferred in the browser',
+  client.includes('row.can && row.can[verb] === true') && client.includes('row.why && row.why[verb]'))
+check('client: a disabled verb still explains itself on hover',
+  client.includes('t("agents.why." + String(why || "unavailable"))'))
+check('client: all three verbs are offered on every row (the gap is shown, not hidden)',
+  client.includes('const ARXA_AGENT_VERBS = ["pause", "resume", "cancel"]'))
+check('client: actions ride the sidebar route and reload the list after one lands',
+  client.includes('ORG_POST("agent.list"') && client.includes('ORG_POST("agent." + verb'))
+check('client: a host refusal (ok:false) surfaces its reason instead of a silent refresh',
+  client.includes('if (r && r.ok === false) setNote(t("agents.why." + String(r.reason || "unavailable")))'))
+check('client: a cold session reads as unreachable, never as "no jobs"',
+  client.includes('r.jobsReadable === false'))
+check('client: the dropdown row reveals its actions on hover (stock ToolRow behaviour)',
+  client.includes('.aXa_agentActs{') && client.includes('.aXa_agentRow:hover .aXa_agentActs,.aXa_agentActs:focus-within{opacity:1}'))
+check('client: the dropdown taps through to the side panel',
+  client.includes('aXa_agentDetails') && client.includes('openAgentPanel(kind, sessionId)'))
+check('client: agent verb + reason strings localized in en/pl/fr',
+  ['agents.pause', 'agents.cancel', 'agents.why.no-terminate-verb', 'agents.why.owner-not-live'].every((k) => (client.split('"' + k + '":').length - 1) === 3))
+
 console.log(failures === 0 ? '\narxa-sidebar selftest: ALL GREEN' : `\narxa-sidebar selftest: ${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)

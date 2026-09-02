@@ -546,6 +546,21 @@ assert.ok(clientSrc.includes("'action.prettier.off'"), 'prettier toggle locales 
 // Q8 (2026-09-03): the CI insight panel mirrors the card's run control, but
 // per row — the card only ever reaches the newest run, this reaches every one.
 assert.ok(clientSrc.includes("act('ci-rerun', 'card.ci.rerun', { sessionId, runId: run.id })"), 'CI panel re-runs the row it is on, through the card host action')
+
+// Q5 (2026-09-03): the subagent / job detail panel — the same controls the
+// header dropdown carries, on the full record. agent.* is a SIDEBAR action:
+// a session's children are not a git concern and must not ride the card route.
+assert.ok(clientSrc.includes("const ROUTE_FOR = (action) => (/^agent\\./.test(action) ? SIDEBAR_ROUTE : CARD_ROUTE)"), 'agent.* is routed to the sidebar host, not the card host')
+assert.ok(clientSrc.includes("const action = agentView ? 'agent.list' : 'insight.' + view"), 'the agent views ask agent.list rather than a non-existent insight.jobs')
+assert.match(clientSrc, /view === 'jobs' \|\| view === 'subagents'/, 'both agent views render')
+assert.ok(clientSrc.includes("row.can && row.can[verb] === true"), 'panel verbs are gated by the host capability map, never inferred')
+assert.ok(clientSrc.includes("t('agents.why.' + String(why || 'unavailable'))"), 'a disabled panel verb explains itself')
+assert.ok(clientSrc.includes("d.jobsReadable === false"), 'a cold session reads as unreachable, not as "no jobs"')
+assert.ok(clientSrc.includes("if (r && r.ok === false) { setNote(t('agents.why.' + String(r.reason || 'unavailable'))); return }"), 'a refused verb surfaces its reason instead of a silent refresh')
+for (const k of ['agents.pause', 'agents.cancel', 'agents.why.no-terminate-verb', 'insight.title.jobs', 'insight.title.subagents']) {
+  assert.equal(clientSrc.split("'" + k + "':").length - 1, 3, k + ' present in en/pl/fr')
+}
+
 assert.ok(clientSrc.includes("act('ci-cancel', 'card.ci.cancel', { sessionId, runId: run.id })"), 'CI panel cancels the row it is on')
 assert.match(clientSrc, /const live = run\.status !== 'completed'/, 'row liveness decides which of the pair is enabled')
 assert.ok(clientSrc.includes("trailing(t('insight.ci.rerun'), () => act('ci-rerun'"), 'rerun wears the stock trailing-action face')
