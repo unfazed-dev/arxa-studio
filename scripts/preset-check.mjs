@@ -2,13 +2,11 @@
 // arxa-harness-and-distribution.md). GREEN/RED per check, non-zero exit on
 // any failure — same report shape as scripts/ci.mjs.
 //
-// Uses js-yaml to parse both preset files and the host patch. NOTE: js-yaml
-// is NOT a direct dependency of this package (package.json lists only the
-// @deepseek-ai/dsh-* bundles) — it resolves here only because npm hoists it
-// as a transitive dependency of @deepseek-ai/dsh-agent-presets. That is an
-// undeclared-dependency risk: an npm install elsewhere in the tree could
-// stop hoisting it flat and this script would fail to resolve. Flagged, not
-// fixed, per instruction not to add a dependency without saying so.
+// Uses js-yaml to parse both preset files and the host patch. js-yaml is
+// declared in package.json's devDependencies (pinned to ^4.3.1, matching
+// what was already hoisted) — only this dev-time check script imports it;
+// bin/arxa-studio.mjs and bin/materialise-preset.mjs don't use it at
+// runtime, so it isn't a `dependencies` entry.
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -149,8 +147,15 @@ check('moved rows are present in the arxa preset', missingFromPreset.length === 
 // preset-mounted session. This check keeps the two configs from drifting.
 const presetInstructionsRow = findRow(presetEntries, 'agent-instructions')
 const hostInstructionsRow = findRow(hostEntries, 'agent-instructions')
+// Guard against both configs being absent: deepEqual(undefined, undefined)
+// is true, so a plain equality check would go GREEN if the restriction were
+// deleted from both rows. Require the actual restriction to be present, not
+// just "the two sides agree with each other" (which "both empty" satisfies).
+const presetCandidates = presetInstructionsRow?.config?.instructionFileCandidates
+const hasRestriction = Array.isArray(presetCandidates)
+  && presetCandidates.length === 1 && presetCandidates[0] === 'AGENTS.md'
 const instructionsConfigsMatch = Boolean(presetInstructionsRow) && Boolean(hostInstructionsRow)
-  && deepEqual(presetInstructionsRow.config, hostInstructionsRow.config)
+  && hasRestriction && deepEqual(presetInstructionsRow.config, hostInstructionsRow.config)
 check('preset agent-instructions config matches host patch\'s agent-instructions config',
   instructionsConfigsMatch,
   instructionsConfigsMatch ? '' : 'preset: ' + JSON.stringify(presetInstructionsRow?.config)
