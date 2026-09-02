@@ -1092,3 +1092,34 @@ it (verified by grep, not by test). A lazy `initProjectRepo` in `newSession`,
 or a project pass in `openOrg`, would close it — not done here, to keep D99's
 "never silently attach" refusal as decided. Fixture-wise, `smoke.mjs` now
 mirrors the product path so this gap is no longer masked by a test.
+
+### D116 — Card geometry built (Phase 4, `git-card-phase-4-card-rebuild.md` A2/A3).
+
+**What landed.** The card is a wired frame + carousel + insight panel, no longer
+a status line:
+
+- `8a46a4c` — `git-workspace` `commitDays(repoPath, {since, env})` (daily
+  buckets, `current`/`longest` streaks, 60 s TTL cache keyed by repo+since) and
+  `github-link` `workflowRunsApi({owner, name, branch, perPage, accessToken,
+  fetch, apiBase})` (single options object, unlike positional `prChecksApi` —
+  chosen because the plan's call shape was explicit). Selftests
+  `selftest.commits.mjs` (4 cases) and `github-link/selftest.mjs` (+1 block).
+- `eb97bd2` — slides (teaser, strip, track, status/approve, prev/next, dot
+  nav, frame) + insight panel in `workspace-region.snippet.txt`, regenerated via
+  `gen-workspace.mjs --write`; drift gate byte-identical; card CSS via
+  `ctx.locale.register`/document stylesheet, order 30, tokens only
+  (`--dsw-alias-*`, `--ds-transition-duration-slow` verified in the theme
+  package). `react.useEffect` is used because `ctx.effect` is not in the
+  snippet's scope — documented in the snippet.
+- `5fa0eb1` — approve slide discovers an existing PR on mount.
+- `6a03469` — the card reads `card.pr.status` once per `sessionId` (and keeps
+  the 30 s poll only while the approve slide is visible) so the teaser can name
+  `PR #N <state>` without the approve slide. `card.status` deliberately does NOT
+  grow `pr`/`checks` fields (shape stays as D117 landed it: `main.checks` only).
+
+**Verified.** `arxa-sidebar/selftest.mjs` ALL GREEN (drift + all markers),
+`artifact-viewer/selftest.mjs` GREEN, `smoke.mjs` ALL GREEN, `scripts/ci.mjs`
+29/29 GREEN on the merged tree at `09b64cf`.
+
+**Not done here.** Conformance Phase 2 items 1–6 (whole-sidebar) stay out of
+scope, as the Phase 4 plan §6 says; only the card block is conformant.
