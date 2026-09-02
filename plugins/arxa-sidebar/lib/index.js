@@ -101,6 +101,25 @@ export function apply(ctx, opts = {}) {
     return ghSvc
   }
 
+  /** D111/D116: live checks for `main`'s head, shared by card.status's
+    * teaser face and the new-session gate — 30 s per-repo cache so neither
+    * a status poll nor every session birth pays a fresh API round trip.
+    * Returns null (never a false green) when the repo is unlinked,
+    * local-only, has no manifest, has no `main`, or the API call fails. */
+  const mainChecksCache = new Map() // repoPath -> { at, checks }
+  const MAIN_CHECKS_TTL_MS = 30_000
+  const mainChecksFor = async (repoPath, manifest, g, gw) => {
+    if (!manifest?.repoOwner || !manifest?.repoName || manifest?.localOnly) return null
+    if (!g) return null
+    const cached = mainChecksCache.get(repoPath)
+    if (cached && Date.now() - cached.at < MAIN_CHECKS_TTL_MS) return cached.checks
+    const mainSha = gw.runGit(['rev-parse', 'main'], { cwd: repoPath, allowFail: true })
+    if (!mainSha) return null
+    const checks = await g.prChecks(manifest.repoOwner, manifest.repoName, mainSha).catch(() => null)
+    mainChecksCache.set(repoPath, { at: Date.now(), checks })
+    return checks
+  }
+
   /**
    * Real dsh faces over the engine's in-process services. sessions.create
    * carries the worktree cwd (dsh's sessions.create cwd contract); the
@@ -782,6 +801,8 @@ export function apply(ctx, opts = {}) {
               }
               let manifest = {}
               try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch { /* unreadable — plain status */ }
+              const g = await getGithub().catch(() => null)
+              const mainChecks = await mainChecksFor(cur.path, manifest, g, gw).catch(() => null)
               return {
                 seat: { kind: sid ? 'session' : 'org', sessionId: sid, branch },
                 // `health` is what the card must read before any count. When it
@@ -803,6 +824,7 @@ export function apply(ctx, opts = {}) {
                 // nobody could ever say so, and that repo would keep an old gate
                 // forever while looking fine.
                 frame: { wired: manifest.frameWired === true ? 'ok' : (manifest.frameWired ?? null), protection: manifest.frameProtection ?? null, runner: manifest.frameRunner ?? null, files: (() => { try { return gw.frameStatus(cur.path, 'org', { includeCiYml: true }) } catch { return null } })() },
+                main: { checks: mainChecks?.state ?? null },
               }
             },
             /** Q6: EVIDENCE ONLY — the session model drafts the subject. */
@@ -925,6 +947,105 @@ export function apply(ctx, opts = {}) {
               const checks = await g.prChecks(manifest.repoOwner, manifest.repoName, pr.head?.sha ?? s.branch).catch(() => ({ state: 'unknown', asleep: false, runs: [] }))
               return { ok: true, pr: { number: pr.number, url: pr.html_url, state: pr.state }, checks }
             },
+            /** D116: merge-commit the reviewed PR, pinned to the sha the
+              * checks were read from (D107) — never on anything but a fully
+              * green run (asleep/pending/red/none all refuse, loud reason). */
+            'card.pr.merge': async () => {
+              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+              const g = await getGithub().catch(() => null)
+              if (!g) throw new Error('github-unavailable')
+              const cur = handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (!sid) throw new Error('card.pr.merge serves session seats')
+              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              if (!s) throw new Error('session-not-found: ' + sid)
+              if (s.origin === 'project') throw new Error('project-session-pr-pending: PR flow for project repos lands in Phase 2')
+              let manifest = {}
+              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
+              if (!manifest.repoOwner || !manifest.repoName) throw new Error('org-not-published')
+              const prs = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
+              if (!Array.isArray(prs) || prs.length === 0) return { ok: false, reason: 'no-pr' }
+              const pr = prs[0]
+              const checks = await g.prChecks(manifest.repoOwner, manifest.repoName, pr.head?.sha ?? s.branch).catch(() => ({ state: 'unknown', asleep: false, runs: [] }))
+              if (checks.state !== 'green') return { ok: false, reason: 'checks-' + checks.state }
+              // prflow.js has no other caller yet (D116) — imported directly
+              // rather than through the index barrel, which does not re-export it.
+              const { mergeSessionPr } = await import(new URL('../../git-workspace/lib/prflow.js', import.meta.url).href)
+              const repoPath = s.repoPath ?? cur.path
+              const origin = gw.getOrigin(repoPath)
+              const result = await mergeSessionPr(repoPath, sid, {
+                owner: manifest.repoOwner,
+                name: manifest.repoName,
+                number: pr.number,
+                sha: pr.head?.sha ?? null,
+                subject: pr.title,
+                api: { prMerge: g.prMerge },
+                origin,
+              })
+              return { ok: true, merged: result.merged, mergeSha: result.mergeSha, reconcile: result.reconcile }
+            },
+            /** D116: human-initiated "publish to client" — mint the next
+              * semantic version into the session's own worktree (same target
+              * `stageBoundarySquash` already uses inside sessionStageBoundary,
+              * sessions.js:423), captured in one clean stage commit. */
+            'version.mint': async () => {
+              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+              const cur = handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (!sid) throw new Error('version.mint serves session seats')
+              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              if (!s) throw new Error('session-not-found: ' + sid)
+              const name = typeof arg?.name === 'string' && arg.name.trim() !== '' ? arg.name.trim() : undefined
+              const state = typeof arg?.state === 'string' && arg.state.trim() !== '' ? arg.state.trim() : undefined
+              const result = gw.mintAtStageBoundary(s.worktree, { name, state, env: process.env })
+              return { ok: true, squashed: result.squashed, sha: result.sha, chip: result.chip }
+            },
+            /** D116/B8: wake the self-hosted runner for this org's linked
+              * repo. A human action (runner.js:10-16) — never throws; the
+              * client shows the manual `svc.sh start` instruction on ok:false. */
+            'card.runner.wake': async () => {
+              const cur = handle()
+              let manifest = {}
+              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
+              if (!manifest.repoOwner || !manifest.repoName) return { ok: false, reason: 'unlinked' }
+              const g = await getGithub().catch(() => null)
+              if (!g) return { ok: false, reason: 'unlinked' }
+              return g.ensureRunner(manifest.repoOwner, manifest.repoName)
+            },
+            /** A3: insight column, right-panel surfaces (D101/D105). Each
+              * degrades to an 'unavailable' shape rather than throwing when
+              * its backend export has not landed yet — a missing export
+              * must never break the whole card. */
+            'insight.streak': async () => {
+              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+              const cur = handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (!sid) throw new Error('insight.streak serves session seats')
+              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              if (!s) throw new Error('session-not-found: ' + sid)
+              if (typeof gw.commitDays !== 'function') return { days: [], current: 0, longest: 0, reason: 'unavailable' }
+              const repoPath = s.repoPath ?? cur.path
+              return gw.commitDays(repoPath, { since: '90 days', env: process.env })
+            },
+            'insight.ci': async () => {
+              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+              const g = await getGithub().catch(() => null)
+              const cur = handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (!sid) throw new Error('insight.ci serves session seats')
+              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              if (!s) throw new Error('session-not-found: ' + sid)
+              if (!g || typeof g.workflowRuns !== 'function') return { runs: [], reason: 'unavailable' }
+              let manifest = {}
+              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
+              if (!manifest.repoOwner || !manifest.repoName) return { runs: [], reason: 'unavailable' }
+              return g.workflowRuns({ owner: manifest.repoOwner, name: manifest.repoName, branch: s.branch, perPage: 20 })
+            },
+            'insight.sessions': async () => {
+              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+              const cur = arg?.orgId ? await ensureOpen(arg.orgId) : handle()
+              return { rows: gw.parkedSessions(cur.path) }
+            },
             // 'org.new-session' is GONE (grilled 2026-08-30): org rows
             // never host sessions — the legacy + path that reached this
             // action created org-level worktrees by accident. Unknown
@@ -938,7 +1059,27 @@ export function apply(ctx, opts = {}) {
               const cur = arg?.orgId ? await ensureOpen(arg.orgId) : handle()
               const ws = typeof arg?.workspace === 'string' ? arg.workspace : ''
               if (ws === '') throw new Error('workspace-required')
-              return cur.newSession(undefined, ws)
+              // D111: a genuinely red main blocks a new session from being
+              // born onto it (nobody should start work on a broken base) —
+              // but a sleepy runner, a still-running check, or no CI at all
+              // must never stop a session from starting. Unlinked/local-only
+              // repos and any API failure proceed silently (infrastructure
+              // never blocks); the notice rides along for the client to show.
+              let notice = null
+              const g = await getGithub().catch(() => null)
+              let manifest = {}
+              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
+              if (g && manifest.repoOwner && manifest.repoName && !manifest.localOnly) {
+                const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+                const checks = await mainChecksFor(cur.path, manifest, g, gw).catch(() => null)
+                if (checks) {
+                  if (checks.state === 'red') throw new Error('main-red')
+                  if (checks.asleep) notice = 'runner-asleep'
+                  else if (checks.state === 'pending') notice = 'checks-pending'
+                }
+              }
+              const session = await cur.newSession(undefined, ws)
+              return { ...session, notice }
             },
             'session.rename': async () => {
               // One rename, every surface (grilled 2026-08-30): registry
