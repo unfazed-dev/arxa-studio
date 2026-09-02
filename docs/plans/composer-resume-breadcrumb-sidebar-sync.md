@@ -38,7 +38,7 @@ Status: GRILLED 2026-09-02 (Q1–Q7 confirmed). Supersedes nothing; follows
 | Q2 | Left chip = cordis breadcrumb `org / dock / project / session / worktree`, read-only, from sidebar tree data. Stock `WorkspacePicker` removed from composer. |
 | Q3 | New session left empty then quit is not resumed; relaunch shows welcome hero; empty session is dropped (no orphan row). |
 | Q4 | Breadcrumb `flex:1; min-width:0`; middle segments ellipsize; session + worktree always visible. |
-| Q5 | Mode chip `margin-left:auto`, mirrored 20px inset on the right edge. |
+| Q5 | Mode chip `margin-left:auto`, mirrored 20px inset on the right edge. **Revised 2026-09-03:** the hero-row crumb is gone (the composer crumb is the only one); the preset chip is pushed to the composer's top-right by a rule on the chip itself — dsh renders the `agentPreset` slot wrapper `display:contents`, so the original margin on the wrapper was a no-op. 16px inset (the card's own inset inside the stack), bound state only. An overlay re-home (`conversation.input.overlay` + `renderSlot`) was tried and withdrawn: slot components never receive `renderSlot` (runtime: only root does). |
 | Q6 | `revealSession(id)`: expand every ancestor container + leaf group (force, even if user collapsed), scroll row into view, selected highlight. Called from boot-resume and every `session.open`. Adds only; never collapses. |
 | Q7 | Four smoke flows on `ARXA_HOME=/tmp/arxa-smoke`, each lens PNG + selftest assertion; then desktop rebuild for manual check of flows 1–2. |
 
@@ -62,8 +62,11 @@ Out of scope: session rename/archive, PR/CI card, anything needing a DB.
 - B2 Remove stock `WorkspacePicker` from composer row (keep it in hero
   override where it is already replaced).
 - B3 CSS: crumb `flex:1;min-width:0`, segments `text-overflow:ellipsis`,
-  last two segments `flex-shrink:0`. Mode chip `margin-left:auto;
-  margin-right:var(--dsh-composer-side-clearance)`.
+  last two segments `flex-shrink:0`. Mode chip (revised 2026-09-03):
+  `.wSkVaW_composerStack:not([data-arxa-empty]) .wSkVaW_heroWorkspaceRow>[data-slot='conversation.hero.agentPreset']>*{margin-left:auto;margin-right:16px}`
+  — targets the chip, not its `display:contents` wrapper. The hero-row crumb
+  (`ArxaHeroGuide` bound branch) renders a hidden anchor, so the composer crumb
+  is the only breadcrumb on screen.
 - B4 selftest: crumb text order, no `<select>`/dropdown role in composer,
   mode chip right edge within 1px of composer right edge − 20px.
 

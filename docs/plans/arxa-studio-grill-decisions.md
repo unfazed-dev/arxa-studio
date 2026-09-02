@@ -1124,3 +1124,46 @@ architecture; this grill settles the editor extension it never covered.
   usable picker, vs entry to the scaffold stage) is still OPEN; it was
   asked against stale references and must be re-asked against the dsh
   scaffold flow.
+
+- **D107 — Agency is NOT the Scale tier: two SKUs on two value axes;
+  D30 and D102 both stand.** (2026-09-03, from
+  `arxa/docs/research/payment-architecture/pricing-unit-seat-vs-org-vs-usage.md`,
+  27 sources.) Pro = per developer seat (D104). Scale = D30 unchanged:
+  $149/mo per org flat, unlimited seats, 3 released apps, +$49/app/mo
+  beyond, 50,000 OTA installs, $1.50 per 2,500 over — billed on
+  app-fleet volume because released apps and installs are the only things
+  that cost arxa money and seats are not a cost driver. Agency = D102
+  unchanged: per member seat, quantity bought by the org owner — billed
+  on headcount because a 12-person agency gets ~12× a freelancer's value
+  from the business sections. Agency sits beside the ladder, not on it:
+  a Pro or a Scale customer can each add it. D30's "never per-seat" is
+  scoped to the app-output ladder, not a company-wide rule. Paddle shape:
+  Pro and Agency = subscription with `quantity = seats`; Scale = quantity
+  1 plus a recurring per-app price; install overage cannot use a Paddle
+  usage meter (no usage-records API) — meter externally and bill via
+  `POST /subscriptions/{id}/charge` or a custom line item. Rejected:
+  Agency folded into Scale per-org flat (no expansion lever on the
+  business module — the documented flat-unlimited leak); per-org with
+  seat bands (per-seat with extra steps; drags Scale back onto the seat
+  axis). Open, in the research §6: Agency price band; minimum Agency
+  seats (5 vs 10 in comparables); free viewer seats; whether a Pro seat
+  and an Agency seat for the same person are one seat or two; Shorebird's
+  current raw rate unverified (site unreadable 2026-09-02).
+
+- **D108 — The wall is the engine gate at `arxa emit scaffold`, and only
+  there; the plan card is always visible.** (2026-09-03; closes D106's
+  open item.) Free users can run intake, design, eject and plan a
+  scaffold with the agent; the stop is `gate_scaffold.dart:54`'s
+  refusal (fail-closed, already in code). The `arxa-plan` host half
+  observes that refusal and raises the `shell.overlay` wall carrying the
+  verdict `reason` verbatim; the `sidebar.footer.action` plan card shows
+  Free/Pro state throughout, so the wall is never a surprise. One gate,
+  one source of truth. Rejected: also gating the scaffolder skill's
+  methodology via D18's `arxa brief <stage>` (verb never built; moves the
+  wall before the user has seen what arxa inferred — earlier than the
+  value); refusing the tool call in the harness's arxa-gate row
+  (duplicates the Dart verdict in JavaScript on the customer's machine —
+  two sources of truth). Consequence: D18's stub-skill methodology
+  protection is NOT in force for the scaffolder skill; the methodology
+  text ships with the skill. Reopen only if skill-text piracy becomes
+  measurable.

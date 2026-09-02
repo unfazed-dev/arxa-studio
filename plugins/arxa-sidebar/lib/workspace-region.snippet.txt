@@ -506,7 +506,14 @@
 				"data-arxa-hero-guide": "",
 				children: [t("hero.guide")]
 			});
-			return arxaCrumbNav(t, org, current, ref);
+			// Bound (2026-09-03): the crumb is rendered once, in the composer left
+			// zone (ArxaCrumbBar); the hero row is hidden by CSS. Keep a ref-bearing
+			// anchor so the data-arxa-empty effect above still finds the stack.
+			return (0, react_jsx_runtime.jsx)("span", {
+				ref,
+				"data-arxa-hero-anchor": "",
+				hidden: true
+			});
 		}
 		/** Cordis breadcrumb nav (org / dock / project / session / worktree) — shared by the
 		 * hero slot (ArxaHeroGuide, bound state) and the composer left zone (ArxaCrumbBar).
@@ -562,7 +569,6 @@
 				// grammar, copied verbatim minus the click affordance): the crumb
 				// takes the row's free width, middle segments ellipsize, the last
 				// two (session + worktree) never shrink.
-				+ ".wSkVaW_heroWorkspaceRow>[data-slot='conversation.hero.workspace']{flex:1 1 auto;min-width:0;display:flex}"
 				+ "[data-slot='conversation.input.left']{flex:1 1 auto;min-width:0;display:flex;align-items:center}"
 				+ "[data-arxa-crumbs]{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:4px;white-space:nowrap;overflow:hidden}"
 				+ "[data-arxa-crumb-seg]{display:inline-flex;align-items:center;gap:4px;min-width:0}"
@@ -571,9 +577,14 @@
 				+ "[data-arxa-crumbs]>[data-arxa-crumb-seg]:first-child [data-arxa-crumb]{padding-left:0}"
 				+ "[data-arxa-crumb][data-current]{color:var(--dsw-alias-label-primary);font-weight:500}"
 				+ "[data-arxa-crumb-sep]{color:var(--dsw-alias-label-caption);font-size:14px;line-height:20px}"
-				// Q5: the mode chip sits on the composer's right edge — mirrored
-				// 20px inset (the row's own padding-left is 20px).
-				+ ".wSkVaW_heroWorkspaceRow>:last-child{margin-left:auto;margin-right:var(--dsh-composer-side-clearance,20px)}";
+				// Q5 (revised 2026-09-03): the preset chip sits at the composer's
+				// top-right. dsh renders the agentPreset slot wrapper display:contents,
+				// so a margin on the wrapper (the old :last-child rule) was a no-op and
+				// the chip stayed left — push the CHIP, the wrapper's child. The 16px
+				// inset mirrors the card's own inset inside the composer stack (780px
+				// card centered in 812px). Bound state only: the empty state centers
+				// the guide copy in this same row.
+				+ ".wSkVaW_composerStack:not([data-arxa-empty]) .wSkVaW_heroWorkspaceRow>[data-slot='conversation.hero.agentPreset']>*{margin-left:auto;margin-right:16px}";
 			document.head.appendChild(tag);
 		}
 		/** Parse "<orgId>|<wsPath>" composite ids. */
