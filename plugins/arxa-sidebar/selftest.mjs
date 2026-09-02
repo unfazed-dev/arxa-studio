@@ -161,8 +161,17 @@ check('card A2: merge is gated on green checks AND an open PR (the one irreversi
   client.includes('checkState !== "green" || pr.state !== "open"'))
 check('card A2: the client calls the four new actions by name',
   ['"card.runner.wake"', '"card.pr.merge"', '"version.mint"', '"card.pr.status"'].every((a) => client.includes('ORG_POST(' + a)))
-check('card A2: PR polling is scoped to the approve slide with a live PR (no idle GitHub traffic)',
-  client.includes('if (slide !== 2 || !sid || prNumber == null) return void 0'))
+check('card A2: PR polling is scoped to the approve slide (no idle GitHub traffic), but the FIRST read is ungated',
+  // prNumber is derived from what refreshPr() returns. Gating the one-shot on
+  // it would make an already-open PR undiscoverable and pin the slide to the
+  // create form forever — so only the repeating timer may be PR-gated.
+  client.includes('if (slide !== 2 || !sid) return void 0')
+  && /refreshPr\(\);\s*\n\s*if \(prNumber == null\) return void 0;\s*\n\s*const id = window\.setInterval/.test(client))
+check('card A2: the notice line is transient — a refresh with no notice takes it down, and every action clears it',
+  client.includes('setNotice((r.result && r.result.notice) || null)')
+  && client.includes('setBusy(label); setErr(null); setNotice(null);'))
+check('card A2: the dead two-step prMode flow is gone (the approve slide branches on the PR itself)',
+  !client.includes('prMode') && !client.includes('"card.pr": '))
 check('card A2: three Insights links dispatch the arxa-av-open insight detail (kind/view/sessionId/orgId)',
   client.includes('new CustomEvent("arxa-av-open", { detail: { kind: "insight", view, sessionId: sid, orgId } })')
   && ['"data-arxa-card-insight": "streak"', '"data-arxa-card-insight": "ci"', '"data-arxa-card-insight": "sessions"'].every((m) => client.includes(m)))

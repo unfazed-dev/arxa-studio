@@ -454,7 +454,6 @@
 			const [slide, setSlide] = react.useState(0);
 			const [data, setData] = react.useState(null);
 			const [subject, setSubject] = react.useState("");
-			const [prMode, setPrMode] = react.useState(false);
 			const [prProblem, setPrProblem] = react.useState("");
 			const [prFix, setPrFix] = react.useState("");
 			const [prState, setPrState] = react.useState(null);
@@ -480,14 +479,17 @@
 					setData(r.result);
 					// A status payload may carry the same transient notice the
 					// new-session response does (runner-asleep / checks-pending).
-					if (r.result && r.result.notice) setNotice(r.result.notice);
+					// Transient means it CLEARS: a refresh that no longer reports
+					// one takes the line down, so a woken runner stops being
+					// described as asleep without the user reloading anything.
+					setNotice((r.result && r.result.notice) || null);
 				}, () => {});
 			}, [sid]);
 			// Session change resets the whole card, slide included: slide 2 of the
 			// PREVIOUS seat's approve flow is a lie about the new one.
 			react.useEffect(() => {
 				setSubject(""); setErr(null); setNotice(null); setSlide(0);
-				setPrMode(false); setPrProblem(""); setPrFix(""); setPrState(null); setMintChip(null);
+				setPrProblem(""); setPrFix(""); setPrState(null); setMintChip(null);
 				refresh();
 			}, [refresh]);
 			react.useEffect(() => {
@@ -502,8 +504,14 @@
 			// PR polling is scoped: only while the approve slide is on screen AND a
 			// PR exists. An idle status slide must not hammer the GitHub API.
 			react.useEffect(() => {
-				if (slide !== 2 || !sid || prNumber == null) return void 0;
+				if (slide !== 2 || !sid) return void 0;
+				// The one-shot read is UNGATED on purpose: prNumber is derived from
+				// what this call returns, so gating the fetch on it would make an
+				// already-open PR undiscoverable and pin the slide to the create
+				// form forever. Only the repeating timer is PR-gated — that is the
+				// half the "poll only while a PR exists" rule is about.
 				refreshPr();
+				if (prNumber == null) return void 0;
 				const id = window.setInterval(() => { if (!busy) refreshPr(); }, 30000);
 				return () => window.clearInterval(id);
 			}, [slide, sid, prNumber, refreshPr, busy]);
@@ -513,7 +521,7 @@
 				// The gate speaks in codes; the card speaks in sentences.
 				setErr(m.indexOf("main-red") >= 0 ? t("card.mainRed") : m);
 			};
-			const run = (label, fn) => { setBusy(label); setErr(null); Promise.resolve().then(fn).then(() => refresh()).then(() => setBusy(null), (e) => { showErr(e); setBusy(null); }); };
+			const run = (label, fn) => { setBusy(label); setErr(null); setNotice(null); Promise.resolve().then(fn).then(() => refresh()).then(() => setBusy(null), (e) => { showErr(e); setBusy(null); }); };
 			const askDraft = () => {
 				ORG_POST("card.commit.draft", { sessionId: sid }).then((r) => {
 					const ta = stack.querySelector("[data-slot='conversation.composer.bar'] textarea");
@@ -636,7 +644,6 @@
 						disabled: busy != null || subject.trim() === "",
 						onClick: () => run("pr", () => ORG_POST("card.pr.create", { sessionId: sid, title: subject, problem: prProblem, fix: prFix }).then((r) => {
 							if (r.result && r.result.pr && r.result.pr.url) window.__arxaLastPrUrl = r.result.pr.url;
-							setPrMode(false);
 							// A just-opened PR is the thing to look at: land on it.
 							setSlide(2);
 							return refreshPr();
@@ -2120,7 +2127,6 @@
 			"card.askDraft": "Ask the session to draft",
 			"card.commit": "Commit",
 			"card.push": "Push branch",
-			"card.pr": "Open PR…",
 			"card.prOpen": "Create the PR",
 			"card.prProblem": "Problem (the user words)",
 			"card.prFix": "How it was fixed",
@@ -2326,7 +2332,6 @@
 			"card.askDraft": "Poproś sesję o przygotowanie szkicu",
 			"card.commit": "Commit",
 			"card.push": "Push branch",
-			"card.pr": "Otwórz PR…",
 			"card.prOpen": "Utwórz PR",
 			"card.prProblem": "Problem (słowami użytkownika)",
 			"card.prFix": "Jak to naprawiono",
@@ -2533,7 +2538,6 @@
 			"card.askDraft": "Demander à la session de rédiger",
 			"card.commit": "Commit",
 			"card.push": "Push branch",
-			"card.pr": "Ouvrir une PR…",
 			"card.prOpen": "Créer la PR",
 			"card.prProblem": "Problème (mots de l’utilisateur)",
 			"card.prFix": "Comment cela a été corrigé",
