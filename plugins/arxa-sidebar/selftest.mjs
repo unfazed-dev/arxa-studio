@@ -265,11 +265,14 @@ check('Q6: opening/resuming a session reveals its row — ancestors expanded (ne
     hostSrc.includes('meta: { cwd, ...(presetId === undefined ? {} : { agentPreset: presetId }) }')
       && hostSrc.includes('const resolved = await presets.resolve(undefined)')
       && hostSrc.includes('setup = async (agentCtx) => { await presets.mount(agentCtx, resolved.id) }'))
-  check('S1/Q1: the header title is PINNED to the worktree name on both spawn paths, throw-proof, against the exact live session',
+  // Measured 2026-09-03: the AgentHandle carries NO `.session` (live=false in
+  // the debug line), and rename() identity-checks against the store — so BOTH
+  // paths must take the session from the store, never from the handle.
+  check('S1/Q1: the header title is PINNED to the worktree name on both spawn paths, throw-proof, from the STORE not the handle',
     hostSrc.includes('const pinTitle = (live) =>')
       && hostSrc.includes('svc.rename(live, name)')
-      && hostSrc.includes('pinTitle(handle && handle.session)')
-      && hostSrc.includes("pinTitle(typeof sessions.get === 'function' ? sessions.get(id) : undefined)"))
+      && !hostSrc.includes('pinTitle(handle && handle.session)')
+      && (hostSrc.match(/pinTitle\(typeof sessions\.get === 'function' \? sessions\.get\(id\) : undefined\)/g) || []).length === 2)
 }
 check('empty state (2026-08-30 polish): guidance centered and spaced, arxa glyph in the hero lockup (brand plugin paints the mark, sidebar centers its slot)',
   client.includes('[data-arxa-empty] [data-arxa-hero-guide]{text-align:center') && client.includes('margin:12px auto 0') && !client.includes('textAlign: "left"'));

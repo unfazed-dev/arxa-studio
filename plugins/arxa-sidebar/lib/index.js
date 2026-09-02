@@ -195,10 +195,15 @@ export function apply(ctx, opts = {}) {
           const pinTitle = (live) => {
             try {
               const svc = ctx.sessionTitle
+              if (process.env.ARXA_DEBUG_TITLE) console.error('[pinTitle] live=' + !!live + ' svc=' + !!svc + ' rename=' + (typeof svc?.rename) + ' name=' + JSON.stringify(name))
               if (!live || !svc || typeof svc.rename !== 'function') return
               if (typeof name !== 'string' || name.trim() === '') return
               svc.rename(live, name)
-            } catch { /* title is presentation — a spawn never fails on it */ }
+              if (process.env.ARXA_DEBUG_TITLE) console.error('[pinTitle] renamed ok')
+            } catch (err) {
+              if (process.env.ARXA_DEBUG_TITLE) console.error('[pinTitle] threw: ' + String(err?.message ?? err))
+              /* title is presentation — a spawn never fails on it */
+            }
           }
           if (agents && typeof agents.create === 'function') {
             try {
@@ -230,7 +235,11 @@ export function apply(ctx, opts = {}) {
                 ...(setup === undefined ? {} : { setup })
               })
               const id = (handle && handle.session && handle.session.id) || (handle && handle.id) || wanted
-              pinTitle(handle && handle.session)
+              // The AgentHandle does NOT carry `.session` (measured: live=false
+              // — that is also why the id resolver above falls through to
+              // handle.id). rename() identity-checks against the store, so the
+              // store is the only place to get an object it will accept.
+              pinTitle(typeof sessions.get === 'function' ? sessions.get(id) : undefined)
               try {
                 const registry = ctx.workspaceRegistry
                 if (registry && typeof registry.resolveByPath === 'function') {
