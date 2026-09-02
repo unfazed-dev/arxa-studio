@@ -82,6 +82,7 @@ import {
   annotateSession,
   nextSessionName,
   reviveSession,
+  dropSession,
   archiveSession as archiveSessionBranch,
   sessionStageBoundary,
   rekeySessionsProject,
@@ -1034,7 +1035,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           if (allSessions(resolved, env).every((s) => s.id !== id)) throw new Error('unknown-session: ' + id)
           return annotateSession(resolved, id, { name: title }, env)
         },
-        async resumeSession(id) {
+        async resumeSession(id, opts = {}) {
           // Sessions branch from HEAD; until the initial snapshot lands
           // there is nothing to branch from. Loud, human, and the rows
           // client normally prevents reaching this at all (CTA disabled).
@@ -1043,6 +1044,23 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           // reviveSession's own preamble routes the git work; this lookup
           // only needs the dsh annotation, so read the aggregate.
           const row = allSessions(resolved, env).find((s) => s.id === id)
+          // Q3 (grilled 2026-09-02): a BOOT resume of a session whose
+          // conversation never received a user message is not a resume —
+          // the row is dropped (dsh archive, worktree, branch, registry
+          // row) and the caller lands on the welcome hero. Only a POSITIVE
+          // "no message" verdict drops; dsh unavailable/unknown keeps the
+          // row (never destroy on doubt). Rows without a dshSessionId were
+          // never conversed in — nothing to judge, they resume as before.
+          if (opts?.dropIfEmpty === true && row?.dshSessionId) {
+            const probe = await dshBridge.hasUserMessage(row.dshSessionId)
+            if (probe.ok && probe.value === false) {
+              await dshBridge.archive([row.dshSessionId])
+              const dropped = dropSession(resolved, id, env)
+              dshLive = await dshBridge.list()
+              syncWipWatchPaths() // session set changed — re-watch
+              return { ...dropped, dropped: true, state: 'dropped' }
+            }
+          }
           const out = reviveSession(resolved, id, env)
           // Re-attach the dsh conversation (focus/open by dshSessionId) when
           // the row carries one. Rows born while dsh was unavailable (or

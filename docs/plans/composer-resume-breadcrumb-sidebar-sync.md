@@ -95,3 +95,11 @@ Out of scope: session rename/archive, PR/CI card, anything needing a DB.
 - `node plugins/arxa-sidebar/selftest.mjs` ALL GREEN.
 - Lens PNGs reviewed (read back, not just exit code).
 - Desktop app rebuilt and launched; user confirms flows 1–2.
+
+## Status (2026-09-02, smoke on `/tmp/arxa-smoke`)
+- A/B/C landed in one commit — the snippet, `client.js`, `dsh-bridge.js`, `lifecycle.js` and `git-workspace/sessions.js` carry all three areas in the same regions, so the four planned commits were folded into one.
+- Breadcrumb now registered in the composer's **left** zone (`conversation.input.left`), not only the shell's workspace slot: the composer's own stock `WorkspacePicker` slot host is `display:contents`, so the crumb sizes from the composer flex row. Served row now carries `worktree`; crumb renders six segments (`Acme Labs / projects / rocket / 01-intake / 01-intake-001 / s-<id>`), last one `aria-current`.
+- Row "+" flow was broken: it created the registry row (server) but never opened it client-side. Fixed in `workspace-region.snippet.txt` — the "+" handler now opens the created session directly (`orgStore.openSession` → `arxaOpenConversation`), evidence: new session current at 300 ms, composer visible, message sent, dsh log `user/message` ×4 + `turn/end` ×1 (frame-aware zstd read).
+- Sidebar selftest ALL GREEN (`node plugins/arxa-sidebar/selftest.mjs`).
+- Scratch lens drivers (`/tmp/arxa-smoke/lens/cdp-flow1.mjs`, `cdp-console.mjs`, `cdp-shot.mjs`) are not in the repo; the driver skips already-open tree groups on a resumed boot.
+- Not done: desktop app rebuild + user confirmation of flows 1–2 on real `~/.arxa`; flow 2 (git card / worktree wiring) not yet driven end-to-end on the new bundle.

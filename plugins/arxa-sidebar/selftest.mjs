@@ -99,6 +99,13 @@ check('rows-c: leaf click selects the workspace (composite id parse) — the ONL
   client.includes('ARXA_SELECT_WS(row.workspaceId)') && client.includes('workspace.new-session') && client.includes('const i = s.indexOf("|")'))
 check('rows-c: shell CTA closes the loop (2026-09-01) — create then openCreated (session.open + conversation focus), never fire-and-forget',
   client.includes('w.openCreated(sel.orgId, b.result.id)') && client.includes('get ctaReady()') && client.includes('openCreated(orgId, sessionId)'))
+check('rows-c: row "+" closes the loop too (found live 2026-09-02) — create → session.open → reveal → conversation focus, never create-and-stop',
+  client.includes('orgStore.mutate("workspace.new-session", { orgId: s.slice(0, i), workspace: s.slice(i + 1) }).then((row) => {')
+  && client.includes('orgStore.mutate("session.open", { orgId: s.slice(0, i), sessionId: row.id })')
+  && client.includes('return arxaOpenConversation(row.id); });'))
+check('crumbs: breadcrumb registered in the composer left zone too (2026-09-02) — the hero slot alone vanishes once a conversation opens',
+  client.includes('ctx.slots.inject("conversation.input.left"') && client.includes('id: "arxa-crumbs"') && client.includes('}, ArxaCrumbBar));')
+  && client.includes('function ArxaCrumbBar({ t })') && client.includes('if (current === void 0 || current === null) return null;'))
 check('rows-c: CTA gate is DECLARATIVE — levers read at render; the imperative DOM gate is gone (it lost the re-render race)',
   client.includes('window.__ARXA_SIDEBAR__?.ctaReady !== true') && client.includes('window.__ARXA_SIDEBAR__?.ctaTitle ?? void 0') && !client.includes('useSessionCtaGate'))
 check('rows-c: real session timestamps (the 56y bug fed ordinals as ages from 1970)',
@@ -200,7 +207,36 @@ check('content area (live): cross-client archive/rename reach every client witho
 check('content area: the hero workspace picker is replaced by arxa guidance (raw engine sessions cannot be born from the hero)',
   client.includes('ArxaHeroGuide') && client.includes('"conversation.hero.workspace"') && client.includes('"hero.guide": "Sessions start inside a workspace') && client.includes('"hero.guide": "Sesje zaczynają się wewnątrz obszaru roboczego') && client.includes('"hero.guide": "Les sessions démarrent dans un espace de travail'))
 check('content area: with NOTHING bound the text composer is hidden outright (2026-08-30 user ask) — a bound blank session keeps its composer',
-  client.includes('[data-arxa-empty] [data-slot=') && client.includes('data-arxa-empty') && client.includes('const unbound = !snap || snap.current === void 0 || snap.current === null;'))
+  client.includes('[data-arxa-empty] [data-slot=') && client.includes('data-arxa-empty') && client.includes('const unbound = current === void 0 || current === null;'))
+// composer-resume-breadcrumb-sidebar-sync (grilled 2026-09-02, Q1–Q6)
+check('Q1: the "sessions start…" guide renders ONLY when nothing is bound — a bound session shows the crumb instead',
+  client.includes('if (unbound) return (0, react_jsx_runtime.jsxs)("div", {') && client.includes('const crumbs = arxaCrumbsFor(org, current) || [];'))
+check('Q2: the hero row carries a read-only cordis crumb (org / dock / project / session / worktree) and the stock picker button is hidden in EVERY state',
+  client.includes('"data-arxa-crumbs"') && client.includes('"aria-current": "location"') && client.includes('.wSkVaW_heroWorkspaceRow>button{display:none!important}') && !client.includes('[data-arxa-empty] .wSkVaW_heroWorkspaceRow>button'))
+check('Q2: crumb grammar is the stock crumbs/crumbSeg/crumbSep/crumb/crumbCurrent tokens (label-tertiary middle, label-primary current, label-caption separators)',
+  client.includes('[data-arxa-crumb]{display:block;max-width:220px;color:var(--dsw-alias-label-tertiary)') && client.includes('[data-arxa-crumb][data-current]{color:var(--dsw-alias-label-primary);font-weight:500}') && client.includes('[data-arxa-crumb-sep]{color:var(--dsw-alias-label-caption)'))
+check('Q4: the crumb takes the free width; session + worktree segments never shrink',
+  client.includes('[data-arxa-crumbs]{flex:1 1 auto;min-width:0') && client.includes('[data-arxa-crumb-seg][data-keep]{flex-shrink:0}'))
+check('Q5: the mode chip sits on the composer right edge (mirrored 20px side clearance)',
+  client.includes('.wSkVaW_heroWorkspaceRow>:last-child{margin-left:auto;margin-right:var(--dsh-composer-side-clearance,20px)}'))
+check('Q3 guard: the boot resume decision is made ONCE the org list settled — no-candidate branches set resumeTried, so a row created later via "+" is never opened with dropIfEmpty',
+  (client.match(/if \(!state\.loading\) resumeTried = true;/g) || []).length === 2)
+check('Q3: boot resume asks the host to drop a never-typed-in candidate and lands on the welcome hero when it did',
+  client.includes('dropIfEmpty: true') && client.includes('if (r && r.dropped === true) {') && client.includes('return r ? r.result : void 0'))
+check('Q6: opening/resuming a session reveals its row — ancestors expanded (never toggled), stock leaf group opened, row scrolled into view',
+  client.includes('revealSession(sessionId) {') && client.includes('arxaViewActions = actions;') && client.includes('"data-session-id": node.id') && client.includes('el.scrollIntoView({ block: "nearest" })') && client.split('orgStore.revealSession(').length >= 4)
+{
+  const { readFileSync } = await import('node:fs')
+  const lifecycle = readFileSync(new URL('../file-org-shell/lib/lifecycle.js', import.meta.url), 'utf8')
+  const bridge = readFileSync(new URL('../file-org-shell/lib/dsh-bridge.js', import.meta.url), 'utf8')
+  const hostSrc = readFileSync(new URL('./lib/index.js', import.meta.url), 'utf8')
+  check('Q3 host: resumeSession(id, { dropIfEmpty }) drops ONLY on a positive "no user message" verdict (dsh doubt keeps the row) and archives the dsh side first',
+    lifecycle.includes('async resumeSession(id, opts = {})') && lifecycle.includes('if (probe.ok && probe.value === false) {') && lifecycle.includes('await dshBridge.archive([row.dshSessionId])') && lifecycle.includes('dropSession(resolved, id, env)'))
+  check('Q3 bridge: hasUserMessage is a throw-proof fifth face — non-boolean/throw/missing all read as dsh-unavailable',
+    bridge.includes('async function hasUserMessage(id)') && bridge.includes("if (typeof out === 'boolean') return { ok: true, value: out }") && bridge.includes("out.ok === true && typeof out.value === 'boolean'") && bridge.includes('return { spawn, attach, list, archive, hasUserMessage }'))
+  check('Q3 host face: live Session.events first, on-disk zstd log fallback, never a silent "empty"',
+    hostSrc.includes('faces.hasUserMessage = async (id) =>') && hostSrc.includes("e.type === 'user/message'") && hostSrc.includes('readLogHasUserMessage(id)') && hostSrc.includes("'dsh-log-missing: '") && hostSrc.includes("dropIfEmpty: arg?.dropIfEmpty === true"))
+}
 check('empty state (2026-08-30 polish): guidance centered and spaced, arxa glyph in the hero lockup (brand plugin paints the mark, sidebar centers its slot)',
   client.includes('[data-arxa-empty] [data-arxa-hero-guide]{text-align:center') && client.includes('margin:12px auto 0') && !client.includes('textAlign: "left"'));
 

@@ -255,6 +255,19 @@ export function apply(ctx, opts = {}) {
       if (typeof sessions.get === 'function') {
         faces.attach = async (id) => ({ ok: !!sessions.get(id) })
       }
+      // Q3 empty-session probe (2026-09-02): has a user message ever landed
+      // in this dsh session? Live store first (Session.events); a session
+      // not loaded in-process is read from its on-disk log under
+      // $DSH_HOME/sessions/<cwd-slug>/<id>/session.jsonl.zstd — one zstd
+      // frame per append, so split on the frame magic and inflate each.
+      // Throws when neither source can answer: the bridge turns that into
+      // {ok:false} and the lifecycle keeps the row (never drop on doubt).
+      faces.hasUserMessage = async (id) => {
+        const live = typeof sessions.get === 'function' ? sessions.get(id) : undefined
+        const events = live && Array.isArray(live.events) ? live.events : null
+        if (events) return events.some((e) => e && e.type === 'user/message')
+        return readLogHasUserMessage(id)
+      }
       const registry = ctx.workspaceRegistry
       if (registry && typeof registry.archiveSession === 'function') {
         faces.archive = async (ids) => {
@@ -265,6 +278,33 @@ export function apply(ctx, opts = {}) {
     } catch {
       return {}
     }
+  }
+
+  async function readLogHasUserMessage(id) {
+    const fs = await import('node:fs/promises')
+    const path = await import('node:path')
+    const os = await import('node:os')
+    const zlib = await import('node:zlib')
+    const envHome = typeof process.env.DSH_HOME === 'string' ? process.env.DSH_HOME.trim() : ''
+    const root = path.join(envHome !== '' ? envHome : path.join(os.homedir(), '.dsh'), 'sessions')
+    let scopes
+    try { scopes = await fs.readdir(root) } catch { throw new Error('dsh-log-unavailable: ' + root) }
+    if (typeof zlib.zstdDecompressSync !== 'function') throw new Error('zstd-unavailable')
+    const MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
+    for (const scope of scopes) {
+      let buf
+      try { buf = await fs.readFile(path.join(root, scope, id, 'session.jsonl.zstd')) } catch { continue }
+      const starts = []
+      let i = 0
+      while ((i = buf.indexOf(MAGIC, i)) !== -1) { starts.push(i); i += 4 }
+      for (let k = 0; k < starts.length; k++) {
+        let text
+        try { text = zlib.zstdDecompressSync(buf.subarray(starts[k], starts[k + 1] ?? buf.length)).toString('utf8') } catch { continue }
+        if (text.includes('"type":"user/message"')) return true
+      }
+      return false
+    }
+    throw new Error('dsh-log-missing: ' + id)
   }
 
   const getBridge = () => {
@@ -378,6 +418,9 @@ export function apply(ctx, opts = {}) {
           createdAt: s.createdAt ?? null,
           updatedAt: s.updatedAt ?? null,
           dshSessionId: s.dshSessionId ?? null,
+          // The crumb last segment (Q2: … / session / worktree) reads this — it was
+          // never served, so the segment silently never rendered (2026-09-02).
+          worktree: s.worktree ?? null,
         }))
       const bridge = getBridge()
       const live = bridge ? await bridge.list() : []
@@ -913,7 +956,7 @@ export function apply(ctx, opts = {}) {
             },
             'session.open': async () => {
               const cur = await ensureOpen(arg?.orgId)
-              return cur.resumeSession(arg?.sessionId)
+              return cur.resumeSession(arg?.sessionId, { dropIfEmpty: arg?.dropIfEmpty === true })
             },
             'session.archive': async () => {
               const cur = await ensureOpen(arg?.orgId)

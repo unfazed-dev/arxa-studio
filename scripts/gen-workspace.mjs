@@ -149,6 +149,19 @@ const MENU_ANCHOR = 'actions !== void 0 && (0, react_jsx_runtime.jsx)(_deepseek_
 if (!out.includes(MENU_ANCHOR) || out.indexOf(MENU_ANCHOR) !== out.lastIndexOf(MENU_ANCHOR)) throw new Error('menu anchor missing/dup — stock shape moved?')
 out = out.replace(MENU_ANCHOR, 'false && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {')
 
+// 6e. (Q6, grilled 2026-09-02) the browser stashes the view store's
+//     actions in the region's `arxaViewActions` so orgStore.revealSession
+//     can open the stock leaf group (setGroupExpanded) from outside React.
+const VIEW_ACTIONS = 'const groupExpansion = useStore((s) => s.groupExpansion);'
+if (!out.includes(VIEW_ACTIONS) || out.indexOf(VIEW_ACTIONS) !== out.lastIndexOf(VIEW_ACTIONS)) throw new Error('view actions anchor missing/dup — stock shape moved?')
+out = out.replace(VIEW_ACTIONS, VIEW_ACTIONS + '\n' + T(3) + 'arxaViewActions = actions;')
+
+// 6f. (Q6) every session row carries its id in the DOM so revealSession can
+//     scrollIntoView the resumed/opened row once the tree has mounted it.
+const SESSION_ROW = 'className: clsx(Rows_module_css_default.sessionRow, selected && Rows_module_css_default.selected, menuOpen && Rows_module_css_default.menuOpen,'
+if (!out.includes(SESSION_ROW) || out.indexOf(SESSION_ROW) !== out.lastIndexOf(SESSION_ROW)) throw new Error('session row anchor missing/dup — stock shape moved?')
+out = out.replace(SESSION_ROW, '"data-session-id": node.id, ' + SESSION_ROW)
+
 // 6z. (D83) the trash surface rides the GROUPED tree's tail: injected as
 //      the last child of the treeBody (after the org-groups list, before
 //      the fade) so it sits DIRECTLY under the last org row always —
@@ -259,14 +272,21 @@ const ourApply = [
   T(5) + '// legacy org-level fallback is GONE (it created org-root worktrees).',
   T(5) + 'const s = String(workspaceId ?? "");',
   T(5) + 'const i = s.indexOf("|");',
-  T(5) + 'if (i > 0 && i < s.length - 1) orgStore.mutate("workspace.new-session", { orgId: s.slice(0, i), workspace: s.slice(i + 1) }).catch(() => {});',
+  T(5) + '// Close the loop like the shell CTA (found live 2026-09-02): create',
+  T(5) + '// alone left the composer dead — the row landed in the tree but the',
+  T(5) + '// conversation never opened until a second, manual open. Same chain',
+  T(5) + '// as the `open` lever below: session.open → reveal → conversation focus.',
+  T(5) + 'if (i > 0 && i < s.length - 1) orgStore.mutate("workspace.new-session", { orgId: s.slice(0, i), workspace: s.slice(i + 1) }).then((row) => {',
+  T(6) + 'if (!row || typeof row.id !== "string") return;',
+  T(6) + 'return orgStore.mutate("session.open", { orgId: s.slice(0, i), sessionId: row.id }).then(() => { try { orgStore.revealSession(row.id) } catch { /* presentation */ } return arxaOpenConversation(row.id); });',
+  T(5) + '}).catch(() => {});',
   T(4) + '},',
   T(4) + 'open: (sessionId) => {',
   T(5) + 'const orgId = orgOfSession(sessionId);',
   T(5) + '// Host revive first (spawns the engine conversation when the row',
   T(5) + '// lacks one), then the mutate-carried refresh lands the fresh',
   T(5) + '// dshSessionId, THEN focus the conversation — dsh own row-open call.',
-  T(5) + 'if (orgId !== void 0) orgStore.mutate("session.open", { orgId, sessionId }).then(() => arxaOpenConversation(sessionId)).catch(() => {});',
+  T(5) + 'if (orgId !== void 0) orgStore.mutate("session.open", { orgId, sessionId }).then(() => { try { orgStore.revealSession(sessionId) } catch { /* presentation */ } return arxaOpenConversation(sessionId); }).catch(() => {});',
   T(4) + '},',
   T(4) + '// Local derivation already matches session + org names (Q4); the content',
   T(4) + '// search fetch is an honest empty — we hold no transcript index.',
@@ -314,6 +334,16 @@ const ourApply = [
   T(4) + 'name: "conversation.hero.workspace",',
   T(4) + 'locale: NS',
   T(3) + '}, ArxaHeroGuide));',
+  T(3) + '// Composer breadcrumb (found live 2026-09-02): dsh unmounts the hero slot once a',
+  T(3) + '// conversation is open, so the path chip must live in the composer left zone',
+  T(3) + '// (conversation.input.left, kind:list, scope:session, nothing stock registers there).',
+  T(3) + 'ctx.slots.inject("conversation.input.left", () => ctx.slots.register({',
+  T(4) + 'name: "conversation.input.left",',
+  T(4) + 'id: "arxa-crumbs",',
+  T(4) + 'order: 0,',
+  T(4) + 'locale: NS,',
+  T(4) + 'inject: (sessionId) => ({ sessionId })',
+  T(3) + '}, ArxaCrumbBar));',
   T(3) + '// Welcome gate (Phase 2, conformance plan): the frame declares',
   T(3) + '// shell.overlay (kind:list, scope:root) — the gate registers THERE',
   T(3) + '// instead of fighting the shell with position:fixed + z-index',

@@ -1125,7 +1125,7 @@ window.__ModuleLoader__.load({
 			];
 			return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.HoverCard, {
 				anchor: (0, react_jsx_runtime.jsxs)("div", {
-					className: clsx(Rows_module_css_default.sessionRow, selected && Rows_module_css_default.selected, menuOpen && Rows_module_css_default.menuOpen, flat && !showStatus && Rows_module_css_default.flatSessionRowWithoutStatus, drag?.marker === "before" && Rows_module_css_default.dropBefore, drag?.marker === "after" && Rows_module_css_default.dropAfter),
+					"data-session-id": node.id, className: clsx(Rows_module_css_default.sessionRow, selected && Rows_module_css_default.selected, menuOpen && Rows_module_css_default.menuOpen, flat && !showStatus && Rows_module_css_default.flatSessionRowWithoutStatus, drag?.marker === "before" && Rows_module_css_default.dropBefore, drag?.marker === "after" && Rows_module_css_default.dropAfter),
 					role: "treeitem",
 					"aria-selected": selected,
 					onClick: () => {
@@ -2072,6 +2072,7 @@ window.__ModuleLoader__.load({
 			const groupBy = useStore((s) => s.groupBy);
 			const orderBy = useStore((s) => s.orderBy);
 			const groupExpansion = useStore((s) => s.groupExpansion);
+			arxaViewActions = actions;
 			const sessionOrderByAccount = useStore((s) => s.sessionOrderByAccount);
 			const sessionUpdatedAtByAccount = useStore((s) => s.sessionUpdatedAtByAccount);
 			const currentBlankSessionId = useSessions((state) => {
@@ -2837,21 +2838,39 @@ window.__ModuleLoader__.load({
 				if (resumeTried) return;
 				if (!orgs || orgs.length === 0) {
 					// Welcome world (no orgs): land on the empty state too.
+					if (!state.loading) resumeTried = true; // boot decision is made ONCE the org list settled — a row the user creates later is never a stale boot candidate (found live 2026-09-02: fresh "+" session dropped by dropIfEmpty)
 					clearIfNothingToResume();
 					return;
 				}
-				// No org open YET (fresh boot): keep the shot — a later poll may
-				// see one (org.open switches server-side); once the data has
-				// settled with nothing openable, clear once.
-				const open = orgs.find((o) => o.open);
-				if (!open || !open.sessions || open.sessions.length === 0) {
+				// The open-org handle is server memory — after every relaunch NO org
+				// is open, so an open-org-only candidate never resumes anything
+				// (welcome hero on every boot). Design keeps "no org auto-opened"
+				// (file-org-shell lifecycle), so the org is opened BECAUSE a session
+				// is resumed: `session.open` runs ensureOpen(orgId) server-side.
+				// Candidate = the open org's last open-state row when one is open;
+				// otherwise the most recently updated open-state row across orgs.
+				const pickIn = (org) => {
+					const rows = (org && org.sessions) || [];
+					const openRows = rows.filter((x) => x.state === "open");
+					return openRows.length ? openRows[openRows.length - 1] : null;
+				};
+				let open = orgs.find((o) => o.open);
+				let cand = open ? (pickIn(open) || (open.sessions || [])[open.sessions.length - 1] || null) : null;
+				if (!cand) {
+					const ts = (x) => Date.parse(x.updatedAt || x.createdAt || "") || 0;
+					open = null;
+					for (const o of orgs) {
+						const r = pickIn(o);
+						if (r && (!cand || ts(r) > ts(cand))) { cand = r; open = o; }
+					}
+				}
+				if (!open || !cand) {
+					if (!state.loading) resumeTried = true; // boot decision is made ONCE the org list settled — a row the user creates later is never a stale boot candidate (found live 2026-09-02: fresh "+" session dropped by dropIfEmpty)
 					clearIfNothingToResume();
 					return;
 				}
 				resumeTried = true;
 				bootDecided = true;
-				const openSessions = open.sessions.filter((x) => x.state === "open");
-				const cand = openSessions.length ? openSessions[openSessions.length - 1] : open.sessions[open.sessions.length - 1];
 				currentSessionId = cand.id;
 			// The sig gate blocks the next state replacement when server data is
 			// unchanged — surface current NOW or the stock auto-expand (which
@@ -2861,8 +2880,24 @@ window.__ModuleLoader__.load({
 			emit();
 			// Host revive first (may spawn the engine conversation), then the
 			// refresh the mutate carries lands the fresh dshSessionId, then
-			// open the conversation — dsh's own resume call.
-			orgStore.mutate("session.open", { orgId: open.id, sessionId: cand.id }).then(() => arxaOpenConversation(cand.id)).catch(() => {});
+			// open the conversation — dsh's own resume call. Boot passes
+			// dropIfEmpty (Q3): a candidate that never received a user message
+			// comes back { dropped: true } — the row is gone; land on the
+			// welcome hero instead of an empty thread. Otherwise reveal the row
+			// in the tree (Q6) before opening.
+			orgStore.mutate("session.open", { orgId: open.id, sessionId: cand.id, dropIfEmpty: true }).then((r) => {
+				if (r && r.dropped === true) {
+					currentSessionId = null;
+					bootDecided = false;
+					state = { ...state, currentSessionId: null };
+					state.sessionsView = sessionsList(state);
+					emit();
+					clearIfNothingToResume();
+					return;
+				}
+				try { orgStore.revealSession(cand.id) } catch { /* reveal is presentation — never blocks the open */ }
+				return arxaOpenConversation(cand.id);
+			}).catch(() => {});
 			};
 			const emit = () => {
 				subs.forEach((l) => l());
@@ -2925,7 +2960,13 @@ window.__ModuleLoader__.load({
 						state.sessionsView = sessionsList(state);
 						emit();
 					}
-					return ORG_POST(action, arg).then((r) => refresh()).then(() => {}, (e) => {
+					// Resolves with the server's `result` (e.g. session.open →
+					// { dropped: true } on the Q3 empty-drop path) once the refresh
+					// that carries the new rows has landed.
+					return ORG_POST(action, arg).then(async (r) => {
+						await refresh();
+						return r ? r.result : void 0;
+					}).catch((e) => {
 						refresh();
 						throw e;
 					});
@@ -2959,6 +3000,51 @@ window.__ModuleLoader__.load({
 					state = { ...state, expanded: x };
 					state.emit = buildEmit(state);
 					emit();
+				},
+				/** Reveal (Q6, grilled 2026-09-02): open every ancestor container
+				 * of the session's row (org + each `orgId|prefix`, written true —
+				 * never toggled, so an already-open branch stays open), open the
+				 * stock leaf group (`orgId|ws`), then scroll the row into view once
+				 * it has mounted (rows land a render or two after the emit —
+				 * bounded rAF retry). Adds only; never collapses. Presentation:
+				 * every step degrades silently. */
+				revealSession(sessionId) {
+					let org = null;
+					let row = null;
+					for (const o of state.orgs || []) {
+						const hit = (o.sessions || []).find((x) => x.id === sessionId);
+						if (hit) {
+							org = o;
+							row = hit;
+							break;
+						}
+					}
+					if (!org || !row) return false;
+					const x = { ...(state.expanded ?? {}) };
+					x[org.id] = true;
+					const ws = typeof row.workspace === "string" ? row.workspace : "";
+					let prefix = "";
+					for (const p of ws.split("/").filter(Boolean)) {
+						prefix = prefix ? prefix + "/" + p : p;
+						x[org.id + "|" + prefix] = true;
+					}
+					state = { ...state, expanded: x };
+					state.emit = buildEmit(state);
+					emit();
+					const leafKey = ws === "" ? org.id : org.id + "|" + ws;
+					try {
+						if (arxaViewActions && typeof arxaViewActions.setGroupExpanded === "function") arxaViewActions.setGroupExpanded(leafKey, true);
+					} catch { /* view store missing — the tree still opens via `expanded` */ }
+					const scroll = (left) => {
+						const el = typeof document !== "undefined" ? document.querySelector('[data-session-id="' + (window.CSS && CSS.escape ? CSS.escape(sessionId) : sessionId) + '"]') : null;
+						if (el && typeof el.scrollIntoView === "function") {
+							el.scrollIntoView({ block: "nearest" });
+							return;
+						}
+						if (left > 0) window.requestAnimationFrame(() => scroll(left - 1));
+					};
+					window.requestAnimationFrame(() => scroll(10));
+					return true;
 				}
 			};
 		}
@@ -3009,7 +3095,10 @@ window.__ModuleLoader__.load({
 				return o && o.open && o.snapshotPending === true ? orgT("newSession.snapshotPending") : void 0;
 			},
 			openCreated(orgId, sessionId) {
-				orgStore.mutate("session.open", { orgId, sessionId }).then(() => arxaOpenConversation(sessionId)).catch(() => {});
+				orgStore.mutate("session.open", { orgId, sessionId }).then(() => {
+					try { orgStore.revealSession(sessionId) } catch { /* presentation */ }
+					return arxaOpenConversation(sessionId);
+				}).catch(() => {});
 			},
 			/** Diagnostic (2026-08-30): is the client sessions service bound?
 			 * Drives conversation focus (resume like dsh + row open). */
@@ -3158,21 +3247,65 @@ window.__ModuleLoader__.load({
 		 * entry, stock QueueDock grammar. Nothing card-related lives here. */
 		function ArxaHeroGuide({ t }) {
 			const ref = (0, react.useRef)(null);
+			const org = (0, react.useSyncExternalStore)(orgSubscribe, orgStore.get, orgStore.get);
+			const listSnap = (0, react.useSyncExternalStore)(arxaListSubscribe, arxaListGet, arxaListGet);
+			const current = listSnap ? listSnap.current : void 0;
+			const unbound = current === void 0 || current === null;
 			(0, react.useEffect)(() => {
 				const stack = ref.current ? ref.current.parentElement?.parentElement?.parentElement : null;
 				if (!stack) return;
-				const s = arxaClientSessions;
-				const snap = s && s.list && typeof s.list.getSnapshot === "function" ? s.list.getSnapshot() : null;
-				const unbound = !snap || snap.current === void 0 || snap.current === null;
 				if (unbound) stack.setAttribute("data-arxa-empty", "");
 				else stack.removeAttribute("data-arxa-empty");
 				return () => stack.removeAttribute("data-arxa-empty");
 			});
-			return (0, react_jsx_runtime.jsxs)("div", {
+			// Q1 (grilled 2026-09-02): the "sessions start…" guide ONLY when
+			// nothing is bound. A bound session — resumed or fresh — shows where
+			// it lives instead (Q2 cordis crumb: org / dock / project / session /
+			// worktree), read-only; the stock picker button is hidden by CSS
+			// below (the org model owns session creation).
+			if (unbound) return (0, react_jsx_runtime.jsxs)("div", {
 				ref,
 				"data-arxa-hero-guide": "",
 				children: [t("hero.guide")]
 			});
+			return arxaCrumbNav(t, org, current, ref);
+		}
+		/** Cordis breadcrumb nav (org / dock / project / session / worktree) — shared by the
+		 * hero slot (ArxaHeroGuide, bound state) and the composer left zone (ArxaCrumbBar).
+		 * The hero slot is unmounted by dsh once a conversation is open (found live
+		 * 2026-09-02: no crumb on a resumed or freshly opened session), so the composer
+		 * registration is the one users actually see while working. */
+		const arxaCrumbNav = (t, org, current, ref) => {
+			const crumbs = arxaCrumbsFor(org, current) || [];
+			return (0, react_jsx_runtime.jsx)("nav", {
+				ref,
+				"data-arxa-crumbs": "",
+				"aria-label": t("crumbs.label"),
+				children: crumbs.map((c, i) => (0, react_jsx_runtime.jsxs)("span", {
+					"data-arxa-crumb-seg": "",
+					...c.keep ? { "data-keep": "" } : {},
+					children: [i > 0 ? (0, react_jsx_runtime.jsx)("span", {
+						"data-arxa-crumb-sep": "",
+						"aria-hidden": "true",
+						children: "/"
+					}) : null, (0, react_jsx_runtime.jsx)("span", {
+						"data-arxa-crumb": "",
+						...c.current ? {
+							"data-current": "",
+							"aria-current": "location"
+						} : {},
+						title: c.label,
+						children: c.label
+					})]
+				}, c.key))
+			});
+		};
+		function ArxaCrumbBar({ t }) {
+			const org = (0, react.useSyncExternalStore)(orgSubscribe, orgStore.get, orgStore.get);
+			const listSnap = (0, react.useSyncExternalStore)(arxaListSubscribe, arxaListGet, arxaListGet);
+			const current = listSnap ? listSnap.current : void 0;
+			if (current === void 0 || current === null) return null;
+			return arxaCrumbNav(t, org, current, null);
 		}
 		// Empty-state CSS (2026-08-30): inside a marked stack the text
 		// composer is gone — the data-slot anchor is the framework outlet
@@ -3182,9 +3315,27 @@ window.__ModuleLoader__.load({
 			tag.dataset.pluginCss = "arxa-sidebar-empty-state";
 			tag.textContent = "[data-arxa-hero-guide]{font-size:12.5px;opacity:.72;line-height:1.55;max-width:470px}"
 				+ "[data-arxa-empty] [data-slot='conversation.composer.bar']{display:none!important}"
-				+ "[data-arxa-empty] .wSkVaW_heroWorkspaceRow>button{display:none!important}"
+				// Q2: the stock workspace picker button is gone from the hero row in
+				// every state — the org model owns where sessions live.
+				+ ".wSkVaW_heroWorkspaceRow>button{display:none!important}"
 				+ "[data-arxa-empty] [data-slot='conversation.hero.agentPreset']{display:none!important}"
-				+ "[data-arxa-empty] [data-arxa-hero-guide]{text-align:center;max-width:560px;margin:12px auto 0;font-size:13px;opacity:.78;line-height:1.7}";
+				+ "[data-arxa-empty] [data-arxa-hero-guide]{text-align:center;max-width:560px;margin:12px auto 0;font-size:13px;opacity:.78;line-height:1.7}"
+				// Q2/Q4 cordis crumb (stock crumbs/crumbSeg/crumbSep/crumb/crumbCurrent
+				// grammar, copied verbatim minus the click affordance): the crumb
+				// takes the row's free width, middle segments ellipsize, the last
+				// two (session + worktree) never shrink.
+				+ ".wSkVaW_heroWorkspaceRow>[data-slot='conversation.hero.workspace']{flex:1 1 auto;min-width:0;display:flex}"
+				+ "[data-slot='conversation.input.left']{flex:1 1 auto;min-width:0;display:flex;align-items:center}"
+				+ "[data-arxa-crumbs]{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:4px;white-space:nowrap;overflow:hidden}"
+				+ "[data-arxa-crumb-seg]{display:inline-flex;align-items:center;gap:4px;min-width:0}"
+				+ "[data-arxa-crumb-seg][data-keep]{flex-shrink:0}"
+				+ "[data-arxa-crumb]{display:block;max-width:220px;color:var(--dsw-alias-label-tertiary);font-size:14px;line-height:20px;padding:4px 8px;border-radius:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+				+ "[data-arxa-crumbs]>[data-arxa-crumb-seg]:first-child [data-arxa-crumb]{padding-left:0}"
+				+ "[data-arxa-crumb][data-current]{color:var(--dsw-alias-label-primary);font-weight:500}"
+				+ "[data-arxa-crumb-sep]{color:var(--dsw-alias-label-caption);font-size:14px;line-height:20px}"
+				// Q5: the mode chip sits on the composer's right edge — mirrored
+				// 20px inset (the row's own padding-left is 20px).
+				+ ".wSkVaW_heroWorkspaceRow>:last-child{margin-left:auto;margin-right:var(--dsh-composer-side-clearance,20px)}";
 			document.head.appendChild(tag);
 		}
 		/** Parse "<orgId>|<wsPath>" composite ids. */
@@ -3309,6 +3460,60 @@ window.__ModuleLoader__.load({
 		// nothing to resume clears — pre-arxa/hero stranding sessions stop
 		// riding along. Null when the service is absent (degrade silently).
 		let arxaClientSessions = null;
+		/** The workspace view store's actions (setGroupExpanded …), captured
+		 * when the browser mounts so revealSession (Q6) can open the leaf group
+		 * from outside React. Null until the sidebar renders once. */
+		let arxaViewActions = null;
+		const arxaListSubscribe = (l) => {
+			const s = arxaClientSessions;
+			if (s && s.list && typeof s.list.subscribe === "function") {
+				const off = s.list.subscribe(l);
+				return typeof off === "function" ? off : () => {};
+			}
+			return () => {};
+		};
+		const arxaListGet = () => {
+			const s = arxaClientSessions;
+			return s && s.list && typeof s.list.getSnapshot === "function" ? s.list.getSnapshot() : null;
+		};
+		/** Crumb segments for the bound session (Q2, grilled 2026-09-02):
+		 * org / dock / project / session / worktree, read from the org tree —
+		 * read-only, navigation lives in the sidebar; the row tells the user
+		 * WHERE the thread lives. Container labels come from the emitted tree
+		 * rows when present (same words as the sidebar), raw path segments
+		 * otherwise. Null when the dsh current session is not an org row. */
+		const arxaCrumbsFor = (s, current) => {
+			if (!s || !Array.isArray(s.orgs)) return null;
+			let org = null;
+			let row = null;
+			for (const o of s.orgs) {
+				const hit = (o.sessions || []).find((x) => (current !== void 0 && current !== null && x.dshSessionId === current) || (s.currentSessionId && x.id === s.currentSessionId));
+				if (hit) {
+					org = o;
+					row = hit;
+					break;
+				}
+			}
+			if (!org || !row) return null;
+			const rows = Array.isArray(s.emit) ? s.emit : [];
+			const labelFor = (key, fallback) => {
+				const r = rows.find((x) => x && x.key === key);
+				return r && typeof r.label === "string" && r.label !== "" ? r.label : fallback;
+			};
+			const ws = typeof row.workspace === "string" ? row.workspace : "";
+			const parts = ws.split("/").filter(Boolean);
+			const out = [{ key: "org", label: org.name || org.id }];
+			let prefix = "";
+			parts.forEach((p, i) => {
+				prefix = prefix ? prefix + "/" + p : p;
+				out.push({ key: "ws" + i, label: labelFor(org.id + "|" + prefix, p) });
+			});
+			out.push({ key: "session", label: row.name || row.id, keep: true });
+			const wt = typeof row.worktree === "string" && row.worktree !== "" ? row.worktree.split("/").filter(Boolean).pop() : null;
+			if (wt) out.push({ key: "worktree", label: wt, keep: true, current: true });
+			else out[out.length - 1].current = true;
+			return out;
+		};
 		const orgUseWorkspaces = (sel) => useOrg((s) => sel(s.workspacesView));
 		const orgUseSessions = (sel) => useOrg((s) => sel(s.sessionsView));
 		const orgUseDirectoryFlow = (sel) => sel(orgNoFlow.getSnapshot());
@@ -4624,6 +4829,7 @@ window.__ModuleLoader__.load({
 			"welcome.business": "arxa business",
 			"welcome.businessSoon": "arxa business (agency) — coming soon",
 			"tree.dock.projects": "Projects",
+			"crumbs.label": "Session location",
 			"hero.guide": "Sessions start inside a workspace — open an organisation, expand to a folder row, hover it and press + to start a session.",
 			"tree.dock.notes": "Notes",
 			"tree.dock.meetings": "Meetings",
@@ -4783,6 +4989,7 @@ window.__ModuleLoader__.load({
 			"welcome.business": "arxa business",
 			"welcome.businessSoon": "arxa business (agencja) — wkrótce",
 			"tree.dock.projects": "Projekty",
+			"crumbs.label": "Położenie sesji",
 			"hero.guide": "Sesje zaczynają się wewnątrz obszaru roboczego — otwórz organizację, rozwiń do wiersza folderu, najedź na niego i naciśnij +, aby rozpocząć sesję.",
 			"tree.dock.notes": "Notatki",
 			"tree.dock.meetings": "Spotkania",
@@ -4942,6 +5149,7 @@ window.__ModuleLoader__.load({
 			"welcome.business": "arxa business",
 			"welcome.businessSoon": "arxa business (agence) — bientôt disponible",
 			"tree.dock.projects": "Projets",
+			"crumbs.label": "Emplacement de la session",
 			"hero.guide": "Les sessions démarrent dans un espace de travail — ouvrez une organisation, dépliez jusqu’à une ligne de dossier, survolez-la et appuyez sur + pour démarrer une session.",
 			"tree.dock.notes": "Notes",
 			"tree.dock.meetings": "Réunions",
@@ -5087,14 +5295,21 @@ window.__ModuleLoader__.load({
 					// legacy org-level fallback is GONE (it created org-root worktrees).
 					const s = String(workspaceId ?? "");
 					const i = s.indexOf("|");
-					if (i > 0 && i < s.length - 1) orgStore.mutate("workspace.new-session", { orgId: s.slice(0, i), workspace: s.slice(i + 1) }).catch(() => {});
+					// Close the loop like the shell CTA (found live 2026-09-02): create
+					// alone left the composer dead — the row landed in the tree but the
+					// conversation never opened until a second, manual open. Same chain
+					// as the `open` lever below: session.open → reveal → conversation focus.
+					if (i > 0 && i < s.length - 1) orgStore.mutate("workspace.new-session", { orgId: s.slice(0, i), workspace: s.slice(i + 1) }).then((row) => {
+						if (!row || typeof row.id !== "string") return;
+						return orgStore.mutate("session.open", { orgId: s.slice(0, i), sessionId: row.id }).then(() => { try { orgStore.revealSession(row.id) } catch { /* presentation */ } return arxaOpenConversation(row.id); });
+					}).catch(() => {});
 				},
 				open: (sessionId) => {
 					const orgId = orgOfSession(sessionId);
 					// Host revive first (spawns the engine conversation when the row
 					// lacks one), then the mutate-carried refresh lands the fresh
 					// dshSessionId, THEN focus the conversation — dsh own row-open call.
-					if (orgId !== void 0) orgStore.mutate("session.open", { orgId, sessionId }).then(() => arxaOpenConversation(sessionId)).catch(() => {});
+					if (orgId !== void 0) orgStore.mutate("session.open", { orgId, sessionId }).then(() => { try { orgStore.revealSession(sessionId) } catch { /* presentation */ } return arxaOpenConversation(sessionId); }).catch(() => {});
 				},
 				// Local derivation already matches session + org names (Q4); the content
 				// search fetch is an honest empty — we hold no transcript index.
@@ -5142,6 +5357,16 @@ window.__ModuleLoader__.load({
 				name: "conversation.hero.workspace",
 				locale: NS
 			}, ArxaHeroGuide));
+			// Composer breadcrumb (found live 2026-09-02): dsh unmounts the hero slot once a
+			// conversation is open, so the path chip must live in the composer left zone
+			// (conversation.input.left, kind:list, scope:session, nothing stock registers there).
+			ctx.slots.inject("conversation.input.left", () => ctx.slots.register({
+				name: "conversation.input.left",
+				id: "arxa-crumbs",
+				order: 0,
+				locale: NS,
+				inject: (sessionId) => ({ sessionId })
+			}, ArxaCrumbBar));
 			// Welcome gate (Phase 2, conformance plan): the frame declares
 			// shell.overlay (kind:list, scope:root) — the gate registers THERE
 			// instead of fighting the shell with position:fixed + z-index

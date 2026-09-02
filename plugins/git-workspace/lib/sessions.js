@@ -517,3 +517,30 @@ export function reviveSession(repoPath, id, env = process.env) {
   writeRegistry(repoPath, registry, env)
   return session
 }
+
+/**
+ * Drop (grilled 2026-09-02, Q3): a session that was opened but never used —
+ * no user message ever landed in its conversation — is not resumed on
+ * relaunch; it is removed outright so no orphan row survives. Worktree
+ * (force: a never-typed-in session has no work worth a WIP snapshot),
+ * branch, squash-base ref and registry row all go. Idempotent: an unknown
+ * id is a `dropped:false` result, never a throw — boot cleanup must never
+ * fail the boot.
+ *
+ * @returns {{ id, dropped: boolean, worktree?: string, branch?: string }}
+ */
+export function dropSession(repoPath, id, env = process.env) {
+  repoPath = sessionRepoFor(repoPath, id, env) // D98 repo-discovery preamble
+  const registry = readRegistry(repoPath, env)
+  const session = registry.sessions.find((s) => s.id === id)
+  if (!session) return { id, dropped: false }
+  if (session.worktree && fs.existsSync(session.worktree)) {
+    runGit(['worktree', 'remove', '--force', session.worktree], { cwd: repoPath, env, allowFail: true })
+  }
+  runGit(['worktree', 'prune'], { cwd: repoPath, env, allowFail: true })
+  if (session.branch) runGit(['branch', '-D', session.branch], { cwd: repoPath, env, allowFail: true })
+  runGit(['update-ref', '-d', `${SESSION_BASE_PREFIX}${id}`], { cwd: repoPath, env, allowFail: true })
+  registry.sessions = registry.sessions.filter((s) => s.id !== id)
+  writeRegistry(repoPath, registry, env)
+  return { id, dropped: true, worktree: session.worktree, branch: session.branch }
+}

@@ -71,6 +71,7 @@ export {
   holdSession,
   archiveSession,
   reviveSession,
+  dropSession,
   worktreeHealth,
 } from './sessions.js'
 export {
