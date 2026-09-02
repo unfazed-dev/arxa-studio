@@ -40,5 +40,30 @@ check('card: PR title validated (becomes the squash subject, Q7/Q8)', hostSrc().
 check('card: PR create dedupes before opening (file-pr rule 1)', hostSrc().includes('prListForHead') && hostSrc().includes('existing: true'))
 check('card: session-branch push is PR-purpose only (D73 relaxation)', hostSrc().includes('card.push serves session seats'))
 
+// ---- browser half: generated from the stock QueueDock grammar (A3) --------
+import { execFileSync } from 'node:child_process'
+const clientPath = join(here, 'lib', 'client.js')
+const clientSrc = readFileSync(clientPath, 'utf8')
+const pkg = JSON.parse(readFileSync(join(here, 'package.json'), 'utf8'))
+let drift = ''
+try { execFileSync(process.execPath, [join(here, '..', '..', 'scripts', 'gen-git-card.mjs'), '--check'], { stdio: ['ignore', 'pipe', 'pipe'] }) }
+catch (e) { drift = String(e.stderr || e.stdout || e.message).trim() }
+check('client: lib/client.js is byte-identical to gen-git-card.mjs output (drift gate)', drift === '', drift)
+check('client: package exports ./client and declares dsh.client (runtime + ui-conversation + locale)',
+  pkg.exports['./client'] === './lib/client.js' && Array.isArray(pkg.dsh?.client?.inject) && ['@deepseek-ai/dsh-client-runtime', '@deepseek-ai/dsh-client-ui-conversation', '@deepseek-ai/dsh-client-locale'].every((d) => pkg.dsh.client.inject.includes(d)))
+check('client: stock QueueDock CSS carried under its own identity (tag + prefix), stock prefix absent',
+  clientSrc.includes("CSS_TAG = 'arxa-git-card/GitDock.module.css'") && clientSrc.includes('.aXa_gc_dock{') && !clientSrc.includes('_7yHdaG_'))
+check('client: full stock class map present (12 keys)',
+  ['action', 'actions', 'chevron', 'count', 'dock', 'editor', 'header', 'lead', 'list', 'panel', 'preview', 'row'].every((k) => clientSrc.includes('"' + k + '": "aXa_gc_' + k + '"')))
+check('client: registers conversation.input.dock id=git order=10 between todo(0) and queue(20), locale-scoped',
+  clientSrc.includes("ctx.slots.inject('conversation.input.dock'") && clientSrc.includes("id: 'git'") && clientSrc.includes('order: 10') && clientSrc.includes('locale: NS'))
+check('client: tree mirrors QueueDock — dock > panel > header[lead,count,chevron] + list > row[preview|editor, actions > action]',
+  ['S.dock', 'S.panel', 'S.header', 'S.lead', 'S.count', 'S.chevron', 'S.list', 'S.row', 'S.preview', 'S.editor', 'S.actions', 'S.action'].every((s) => clientSrc.includes(s)) && clientSrc.includes("'data-git-dock': ''") && clientSrc.includes("'aria-controls': listId"))
+check('client: seat-aware status with org fallback; commit/push+PR/merge ride the one host route',
+  clientSrc.includes("CARD_ROUTE = '/__arxa/git-card/action'") && clientSrc.includes("post('card.status'") && clientSrc.includes('session-not-found') && ["post('card.commit'", "post('card.push'", "post('card.pr.create'", "post('card.pr.status'", "post('card.pr.merge'"].every((s) => clientSrc.includes(s)))
+check('client: renders nothing without an org (no-org-open / no-workspace / sidebar-not-ready), like the empty queue',
+  clientSrc.includes('no-org-open|no-workspace|sidebar-not-ready') && clientSrc.includes('if (absent || status === null) return null'))
+check('client: en/pl/fr dictionaries registered under NS', ['const en = {', 'const pl = {', 'const fr = {'].every((s) => clientSrc.includes(s)) && clientSrc.includes('ctx.locale.register(NS, { en, pl, fr })'))
+
 console.log(failures === 0 ? '\narxa-git-card selftest: ALL GREEN' : `\narxa-git-card selftest: ${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)

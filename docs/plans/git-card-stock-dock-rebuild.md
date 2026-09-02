@@ -153,6 +153,29 @@ same way (its `ToolDetails.module.css` + `ToolRow.module.css` rules under
    callers repointed) — selftests green.
 2. `feat: generate arxa-git-card client from stock QueueDock grammar`
    (A3 generator + snippet + locales) — lens goldens captured.
+   **LANDED 2026-09-02.** `scripts/gen-git-card.mjs` lifts `css$8` +
+   `QueueDock_module_css_default` out of the stock bundle (dsh 0.1.1-rc.2),
+   rewrites `_7yHdaG_`→`aXa_gc_` and the tagId to
+   `arxa-git-card/GitDock.module.css`, wraps `lib/git-card.snippet.txt`
+   (GitDock: header chip + Status / Commit / Approve rows) in the
+   `__ModuleLoader__` shape, parse-checks, and `--check` is the selftest
+   drift gate (20/20 green). Registered `conversation.input.dock` id `git`
+   order 10 (todo 0 · queue 20). package.json gained `./client` +
+   `dsh.client.inject` (runtime, ui-conversation, locale).
+   Evidence (smoke org Acme Labs, org seat): `/tmp/arxa-smoke/lens/`
+   `git-card-expanded-1280.png` — chip "main · clean", rows "3 wip" /
+   "nothing to commit", stock dividers + icon buttons; DOM eval confirmed
+   `aXa_gc_dock > aXa_gc_panel > button.aXa_gc_header[aria-expanded=false]`
+   on fresh load, style tag present, console clean.
+   Notes: (a) plan said drop `.editor/.preview` — both KEPT, the commit
+   subject / PR title reuse the stock inline-edit grammar; (b) the host
+   answers `no-org-open` (not only `no-workspace`) without an org — the card
+   renders nothing for all three; (c) lens `shot` refuses this page (178
+   SMIL icon animations never settle) — `check --expect` still writes the
+   PNG; run captures sequentially, a parallel Chrome loses the single-tab
+   presence claim and photographs "Already open in another tab".
+   Approve row (PR create/merge) is session-seat + linked-org only — not
+   exercised on the localOnly smoke org; covered by the A2 action selftest.
 3. `refactor: remove git card carousel from arxa-sidebar splice`
    (A4; regenerate sidebar) — sidebar selftests green, no dock registration
    left.
