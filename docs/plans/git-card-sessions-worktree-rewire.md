@@ -1123,3 +1123,35 @@ a status line:
 
 **Not done here.** Conformance Phase 2 items 1–6 (whole-sidebar) stay out of
 scope, as the Phase 4 plan §6 says; only the card block is conformant.
+
+### D117 — D111 wired: red main refuses, asleep runner warns (Phase 4 A1).
+
+**What landed.**
+
+- `ade8f2e` — `arxa-sidebar/lib/index.js`: `mainChecksFor` helper + cache
+  (`MAIN_CHECKS_TTL_MS`), `card.status` gains `main.checks` (its only new
+  field), four server actions (`card.pr.merge`, `version.mint`,
+  `card.runner.wake`, `insight.*`), and the D111 gate inside
+  `workspace.new-session`: `main` red → throws `main-red`; runner asleep →
+  `notice: 'runner-asleep'`; checks pending → `notice: 'checks-pending'`;
+  unlinked → `notice: null`. `selftest.actions.mjs` new (13 cases).
+- `43e6167` (S2's own correction #4, its files) — the gate resolves the
+  session's target repo first via `gw.resolveSessionRepo` (the same routing
+  `newSession` uses) and gates on THAT repo's `main` and manifest (`org.json`
+  or `project.json`), not always the org's — D98/D99 project sessions were
+  otherwise gated on the wrong repo. Any routing failure inside the gate is
+  treated as unlinked (`notice: null`); `newSession` stays the sole source of
+  workspace-shape errors. Accepted as-is: D111 is advisory, infra failures
+  never block. +2 cases (project-routed red; project unlinked does not fall
+  back to the org).
+
+**Verified.** `selftest.actions.mjs` 16/16, `selftest.mjs` ALL GREEN,
+`smoke.mjs` ALL GREEN, `ci.mjs` 29/29 on the merged tree.
+
+**Gap found, being closed.** The user-facing new-session button lives in the
+generated shell (`scripts/gen-sidebar.mjs:73`), whose handler drops `!b.ok`
+and swallows the catch — so a `main-red` refusal was SILENT (click, nothing
+happens). The card teaser shows "main red" independently, but the refusal
+itself must be visible where it happens. Task 2b (shell notice adjacent to
+the button, no arxa locale namespace added to the shell) — entry updated when
+it lands.
