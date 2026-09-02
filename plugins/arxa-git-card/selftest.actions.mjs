@@ -213,6 +213,42 @@ async function patchProjectManifest(projPath, patch) {
     JSON.stringify(r))
 }
 
+// ============================================================
+// F. card.status seat lookup — the shell injects the dsh conversation id
+//    (`arxa-<id>`, stored on the row as dshSessionId), not the bare registry
+//    id. Matching only `id` answered session-not-found for every live seat
+//    and the client fell back to the org seat ("main") (2026-09-02).
+// ============================================================
+{
+  const org = await makeOrg('Seat Co')
+  const sid = await makeSession(org)
+  const dshId = 'arxa-' + sid
+  gw.annotateSession(org.path, sid, { dshSessionId: dshId })
+
+  let r = await act('card.status', { sessionId: sid })
+  check('card.status: bare registry id resolves the session seat',
+    r.ok === true && r.result.seat && r.result.seat.kind === 'session' && r.result.seat.branch === 'arxa/session/' + sid,
+    JSON.stringify(r).slice(0, 300))
+
+  r = await act('card.status', { sessionId: dshId })
+  check('card.status: dsh conversation id (dshSessionId) resolves the same seat',
+    r.ok === true && r.result.seat && r.result.seat.kind === 'session' && r.result.seat.branch === 'arxa/session/' + sid,
+    JSON.stringify(r).slice(0, 300))
+
+  r = await act('card.status', { sessionId: 'arxa-s-nope' })
+  check('card.status: unknown id still answers session-not-found',
+    r.ok === false && /^session-not-found/.test(String(r.error)),
+    JSON.stringify(r).slice(0, 300))
+
+  // The resolver sits at the action boundary, so handlers that hand the id
+  // down into git-workspace get a registry id too — version.mint is the
+  // cheapest such handler (card.commit would need a WIP run + gate).
+  r = await act('version.mint', { sessionId: dshId, name: 'Seatlets', state: 'Draft' })
+  check('version.mint: dsh conversation id reaches git-workspace as the registry id',
+    r.ok === true && r.result && typeof r.result === 'object' && !/unknown session/.test(JSON.stringify(r)),
+    JSON.stringify(r).slice(0, 300))
+}
+
 console.log(failures === 0 ? '\narxa-git-card selftest.actions: ALL GREEN' : `\narxa-git-card selftest.actions: ${failures} FAILURE(S)`)
 rmSync(sandbox, { recursive: true, force: true })
 process.exit(failures === 0 ? 0 : 1)

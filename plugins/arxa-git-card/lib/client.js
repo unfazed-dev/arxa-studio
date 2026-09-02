@@ -465,13 +465,18 @@ window.__ModuleLoader__.load({
             sessionSeat ? action('insight-ci', t('git.insight.ci'), Icon('IconQueueOutline14', 'IconInspectOutline12', 14), { onClick: () => openInsight('ci') }) : null,
             sessionSeat ? action('insight-sessions', t('git.insight.sessions'), Icon('IconBrowseOutline16', 'IconInspectOutline12', 14), { onClick: () => openInsight('sessions') }) : null,
           ])))
-      // 2. Commit
-      const canCommit = status.health === 'ok' && changed !== null && changed > 0
+      // 2. Commit — a stage boundary squashes the WIP run above the session
+      // base (gw.sessionStageBoundary), so a clean tree with WIP commits is
+      // committable. Gating on dirty files alone left Commit dark whenever the
+      // watcher had already auto-saved the work (2026-09-02, flow 2 smoke).
+      const wipRun = typeof status.wipRun === 'number' ? status.wipRun : 0
+      const canCommit = status.health === 'ok' && ((changed !== null && changed > 0) || wipRun > 0)
+      const commitPreview = changed === 0 && wipRun > 0 ? t('git.wip', { n: wipRun }) : summary
       const committing = editing !== null && editing.kind === 'commit'
       rows.push(h('li', { key: 'commit', className: S.row },
         committing
           ? editor('commit', t('git.commitSubject'), commit)
-          : h('span', { className: S.preview }, canCommit ? summary : t('git.commitHint')),
+          : h('span', { className: S.preview }, canCommit ? commitPreview : t('git.commitHint')),
         h('div', { className: S.actions },
           committing
             ? editActions(commit)

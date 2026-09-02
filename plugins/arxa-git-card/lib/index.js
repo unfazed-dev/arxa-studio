@@ -71,13 +71,29 @@ export function apply(ctx) {
       req.on('data', (c) => { raw += c })
       req.on('end', async () => {
         try {
-          const { action, arg } = JSON.parse(raw || '{}')
+          const parsed = JSON.parse(raw || '{}')
+          const action = parsed.action
+          let arg = parsed.arg
           const sb = await sidebarHost()
           if (!sb) return json(res, { ok: false, error: 'sidebar-not-ready', action })
           const oc = await sb.orgContext()
           if (!oc) return json(res, { ok: false, seam: sb.seam, error: 'no-workspace', action })
           const { handle, ensureOpen } = oc
           const { getGithub, mainChecksFor, importGitWorkspace } = sb
+
+          // The shell seats the card with the dsh conversation id
+          // (`arxa-<id>`, stored on the registry row as dshSessionId), while
+          // git-workspace only knows registry ids — handing the dsh id down
+          // made card.commit / version.mint / insight.* answer "unknown
+          // session" for every live seat (2026-09-02, flow 2 smoke). Resolve
+          // ONCE here so every handler below sees a registry id; a bare
+          // registry id passes through untouched.
+          if (typeof arg?.sessionId === 'string' && arg.sessionId !== '') {
+            const gw = await importGitWorkspace()
+            const rows = gw.parkedSessions(handle().path)
+            const hit = rows.find((s) => s.id === arg.sessionId) || rows.find((s) => s.dshSessionId === arg.sessionId) || null
+            if (hit && hit.id !== arg.sessionId) arg = { ...arg, sessionId: hit.id }
+          }
 
           const table = {
             // ---- Part B S3: composer git card engine actions (Q1/Q2/Q6/
@@ -99,7 +115,12 @@ export function apply(ctx) {
                 // rows (each tagged with its owning `repoPath`); looking
                 // only at the org registry made project sessions
                 // unresolvable — "session-not-found" for work that exists.
-                sessionRow = gw.parkedSessions(cur.path).find((s) => s.id === sid) ?? null
+                // The shell injects the dsh conversation id (`arxa-<id>`),
+                // which the registry stores as `dshSessionId`; matching only
+                // the bare `id` answered session-not-found for every live seat
+                // and the client silently fell back to the org seat ("main")
+                // (2026-09-02).
+                sessionRow = gw.parkedSessions(cur.path).find((s) => s.id === sid || s.dshSessionId === sid) ?? null
                 if (!sessionRow) throw new Error('session-not-found: ' + sid)
                 repoPath = sessionRow.worktree
                 branch = sessionRow.branch
@@ -160,7 +181,7 @@ export function apply(ctx) {
               const cur = handle()
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               const repoPath = sid
-                ? (gw.parkedSessions(cur.path).find((s) => s.id === sid) ?? {}).worktree ?? cur.path
+                ? (gw.parkedSessions(cur.path).find((s) => s.id === sid || s.dshSessionId === sid) ?? {}).worktree ?? cur.path
                 : cur.path
               return {
                 uncommittedStat: gw.runGit(['diff', '--stat'], { cwd: repoPath, allowFail: true }) ?? '',
