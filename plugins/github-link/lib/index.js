@@ -10,13 +10,13 @@
  */
 
 import { getClientId, defaultApiBase, defaultTokenBase, linkViaBrowser, linkViaDevice, createPrivateRepoApi, renameRepoApi, repoNameAvailableApi, deleteRepoApi, refreshAccessToken, SCOPES, SHIPPED_CLIENT_ID, defaultOpen } from './auth.js'
-import { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prStateApi, prChecksApi } from './frame.js'
+import { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prStateApi, prChecksApi, workflowRunsApi } from './frame.js'
 import { ensureRunner } from './runner.js'
 import { createKeyring } from './keyring.js'
 import { readState, writeState, clearState } from './state.js'
 
 export { SCOPES, createPkcePair, pkceChallenge, getClientId, loadClientId, linkViaBrowser, linkViaDevice, createPrivateRepoApi, renameRepoApi, repoNameAvailableApi } from './auth.js'
-export { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prStateApi, prChecksApi } from './frame.js'
+export { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prStateApi, prChecksApi, workflowRunsApi } from './frame.js'
 export { ensureRunner, runnerExists } from './runner.js'
 export { createKeyring, KEYCHAIN_SERVICE, SECURITY_PATH } from './keyring.js'
 export { readState, writeState, clearState, statePath, arxaHome } from './state.js'
@@ -318,6 +318,12 @@ export function createGithubLink({
   function prChecks(owner, name, ref) {
     return withRefresh((t) => prChecksApi({ owner, name, ref, accessToken: t, fetch, apiBase }))
   }
+  /** D101/A3: recent workflow runs for a branch (insight panel CI history).
+   *  Single-options-object call shape (unlike prChecks' positional args) —
+   *  matches the sidebar call site: g.workflowRuns({ owner, name, branch, perPage }). */
+  function workflowRuns({ owner, name, branch, perPage } = {}) {
+    return withRefresh((t) => workflowRunsApi({ owner, name, branch, perPage, accessToken: t, fetch, apiBase }))
+  }
 
   /** Latest device-flow code for the UI (null until a link() starts one). */
   function deviceCode() {
@@ -342,6 +348,7 @@ export function createGithubLink({
     prMerge,
     prState,
     prChecks,
+    workflowRuns,
     deviceCode,
   }
 }

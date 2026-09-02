@@ -434,3 +434,68 @@ try {
   passed++
   console.log('  ✓ frame API + runner verified (settings / plan-limited protection / reg-token / arm64 asset / idempotent runner)')
 }
+
+// ---- D101/A3: workflowRunsApi + service.workflowRuns (insight CI history) --
+{
+  const { workflowRunsApi } = await import('./lib/index.js')
+  const seen = []
+  const wrFetch = async (url, opts = {}) => {
+    const u = String(url)
+    seen.push({ url: u, method: opts.method ?? 'GET', headers: opts.headers ?? {} })
+    if (u.startsWith('https://api.github.com/repos/octocat/framed/actions/runs')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          workflow_runs: [
+            { id: 1, name: 'ci', status: 'queued', conclusion: null, created_at: '2026-08-30T10:00:00Z', html_url: 'https://github.com/octocat/framed/actions/runs/1', head_sha: 'sha-queued' },
+            { id: 2, name: 'ci', status: 'completed', conclusion: 'success', created_at: '2026-08-30T09:00:00Z', html_url: 'https://github.com/octocat/framed/actions/runs/2', head_sha: 'sha-ok' },
+            { id: 3, name: 'ci', status: 'completed', conclusion: 'failure', created_at: '2026-08-30T08:00:00Z', html_url: 'https://github.com/octocat/framed/actions/runs/3', head_sha: 'sha-bad' },
+          ],
+        }),
+      }
+    }
+    return { ok: false, status: 404, json: async () => ({ message: 'no route: ' + u }) }
+  }
+  const wbase = { owner: 'octocat', name: 'framed', branch: 'arxa/session/s1', perPage: 20, accessToken: 't', fetch: wrFetch, apiBase: 'https://api.github.com' }
+
+  const { runs } = await workflowRunsApi(wbase)
+  const req = seen.at(-1)
+  ok(req.method === 'GET', 'frame: workflowRunsApi GETs the workflow runs endpoint')
+  ok(req.url.includes('/repos/octocat/framed/actions/runs'), 'frame: workflowRunsApi hits the documented list-runs route')
+  ok(req.url.includes('branch=' + encodeURIComponent('arxa/session/s1')), 'frame: workflowRunsApi filters by branch')
+  ok(req.url.includes('per_page=20'), 'frame: workflowRunsApi paginates via per_page')
+  ok(req.headers['X-GitHub-Api-Version'] === '2022-11-28', 'frame: workflowRunsApi pins the REST API version')
+  ok(runs.length === 3, 'frame: workflowRunsApi maps all workflow_runs entries')
+
+  const queued = runs.find((r) => r.id === 1)
+  ok(queued.status === 'queued' && queued.asleep === true, 'frame: a queued run is classified asleep (runner-asleep canon, same as prChecksApi)')
+  ok(queued.createdAt === '2026-08-30T10:00:00Z' && queued.url === 'https://github.com/octocat/framed/actions/runs/1' && queued.headSha === 'sha-queued',
+    'frame: queued run flattens created_at/html_url/head_sha to createdAt/url/headSha')
+
+  const success = runs.find((r) => r.id === 2)
+  ok(success.status === 'completed' && success.conclusion === 'success' && success.asleep === false, 'frame: completed-success run maps status/conclusion, not asleep')
+
+  const failure = runs.find((r) => r.id === 3)
+  ok(failure.status === 'completed' && failure.conclusion === 'failure' && failure.asleep === false, 'frame: completed-failure run maps conclusion:"failure"')
+
+  await assert.rejects(() => workflowRunsApi({ ...wbase, name: 'missing-repo' }), /workflow runs failed \(404\)/, 'frame: workflowRunsApi throws loud on a non-ok response')
+  passed++
+  console.log('  ✓ frame: workflowRunsApi verified (queued/success/failure mapping, asleep flags, url shape)')
+
+  // service.workflowRuns: single-options-object call shape, token wrapper wired.
+  const { writeState: writeStateW, clearState: clearStateW } = await import('./lib/index.js')
+  const homeW = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-gh-wr-'))
+  const envW = { ...process.env, ARXA_HOME: homeW }
+  const svcW = createGithubLink({ fetch: wrFetch, tokenBase: 'https://api.github.com', apiBase: 'https://api.github.com', env: envW, keyring })
+  try {
+    writeStateW({ linked: true, login: 'octocat', scopes: ['repo'], accessExpiresAt: new Date(Date.now() + 3600_000).toISOString() }, envW)
+    await keyring.setSecret('octocat', 'dev-token-2')
+    const { runs: svcRuns } = await svcW.workflowRuns({ owner: 'octocat', name: 'framed', branch: 'arxa/session/s1', perPage: 20 })
+    ok(typeof svcW.workflowRuns === 'function', 'service: workflowRuns is exposed on the createGithubLink() service object')
+    ok(svcRuns.length === 3, 'service: workflowRuns({owner,name,branch,perPage}) round-trips through the token wrapper')
+  } finally {
+    await keyring.deleteSecret('octocat').catch(() => {})
+    clearStateW(envW)
+  }
+}

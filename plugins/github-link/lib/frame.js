@@ -224,6 +224,43 @@ export async function prChecksApi({ owner, name, ref, accessToken, fetch, apiBas
   return { state, asleep: runs.some((r) => r.asleep), runs }
 }
 
+/**
+ * Recent workflow runs for a branch (phase 4 A3 insight surface, D101 —
+ * live from the provider, no persisted history). GitHub REST "List
+ * workflow runs for a repository":
+ * https://docs.github.com/en/rest/actions/workflow-runs#list-workflow-runs-for-a-repository
+ * GET /repos/{owner}/{repo}/actions/runs?branch=&per_page=
+ *
+ * Mirrors prChecksApi's url/header/error shape. `asleep` reuses the same
+ * queued-not-running classification as prChecksApi (S0 V1 canon: wake it,
+ * never fix code).
+ *
+ * @returns {{ runs: {id:number, name:string, status:string, conclusion:string|null, createdAt:string, url:string, headSha:string, asleep:boolean}[] }}
+ */
+export async function workflowRunsApi({ owner, name, branch, perPage = 20, accessToken, fetch, apiBase }) {
+  const res = await fetch(new URL('/repos/' + owner + '/' + name + '/actions/runs?branch=' + encodeURIComponent(branch) + '&per_page=' + perPage, apiBase), {
+    headers: {
+      accept: 'application/vnd.github+json',
+      authorization: 'Bearer ' + accessToken,
+      'user-agent': 'arxa-studio',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  })
+  if (!res.ok) throw new Error('github-link: workflow runs failed (' + res.status + ')')
+  const body = await res.json()
+  const runs = (body.workflow_runs ?? []).map((r) => ({
+    id: r.id,
+    name: r.name,
+    status: r.status,
+    conclusion: r.conclusion ?? null,
+    createdAt: r.created_at,
+    url: r.html_url,
+    headSha: r.head_sha,
+    asleep: r.status === 'queued',
+  }))
+  return { runs }
+}
+
 /** The osx-arm64 tarball URL of the latest actions/runner release. */
 export async function latestRunnerTarballApi({ accessToken, fetch, apiBase }) {
   const res = await fetch(new URL('/repos/actions/runner/releases/latest', apiBase), {

@@ -41,6 +41,7 @@ export {
   wipRun,
   stageBoundarySquash,
   stageLog,
+  commitDays,
 } from './commits.js'
 export {
   VERSIONS_FILE,

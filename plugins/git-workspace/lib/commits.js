@@ -135,3 +135,97 @@ export function stageLog(repoPath, env = process.env) {
     return { sha, subject }
   })
 }
+
+// ---- D101: commit-day streaks, derived live from git --------------------
+// Streaks are computed from `git log` on demand, never persisted — git is
+// authoritative and this codebase's dominant bug class is stale caches
+// (D88, D96, B7). A short, module-scope, per-repo cache only smooths
+// repeated reads within one open (e.g. re-renders of the insight panel),
+// it is not a store.
+
+const COMMIT_DAYS_TTL_MS = 60_000
+const commitDaysCache = new Map() // repoPath -> { at, since, value }
+
+/** Local calendar day (YYYY-MM-DD) for "today"/"yesterday" comparisons —
+ *  matches `git log --date=short`, which renders in local time. */
+function localYmd(date) {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function addDays(ymd, delta) {
+  const [y, m, d] = ymd.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  dt.setDate(dt.getDate() + delta)
+  return localYmd(dt)
+}
+
+/**
+ * Commit-day streak data for the insight panel (D101, phase 4 A3):
+ * `git log --date=short --pretty=%ad --since=<since>`, bucketed by day.
+ *
+ * @param {string} repoPath
+ * @param {{ since?: string, env?: object }} [opts] `since` is any git
+ *        `--since` expression (default '90 days' — a rolling window, not
+ *        a fixed date, so the cache key does not need to change daily).
+ * @returns {{ days: {day:string, count:number}[], current: number, longest: number }}
+ *          `days` ascending by date. `current` counts consecutive days
+ *          ending today; if today has no commits yet (the session is
+ *          still in progress) it falls back to counting the streak ending
+ *          yesterday, so an in-progress streak isn't shown as broken
+ *          before the day is even over. `longest` is the longest run in
+ *          the queried window.
+ */
+export function commitDays(repoPath, { since = '90 days', env = process.env } = {}) {
+  const cached = commitDaysCache.get(repoPath)
+  const now = Date.now()
+  if (cached && cached.since === since && now - cached.at < COMMIT_DAYS_TTL_MS) {
+    return cached.value
+  }
+
+  // allowFail: an empty/newly-initialised repo (no commits yet) must read
+  // as all-zeros, never throw.
+  const out = runGit(
+    ['log', '--date=short', '--pretty=%ad', `--since=${since}`],
+    { cwd: repoPath, env, allowFail: true },
+  )
+
+  const counts = new Map() // day -> count
+  if (out) {
+    for (const day of out.split('\n')) {
+      if (!day) continue
+      counts.set(day, (counts.get(day) ?? 0) + 1)
+    }
+  }
+
+  const days = [...counts.entries()]
+    .map(([day, count]) => ({ day, count }))
+    .sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0))
+
+  const today = localYmd(new Date())
+  const startDay = counts.has(today) ? today : addDays(today, -1)
+  let current = 0
+  let cursor = startDay
+  while (counts.has(cursor)) {
+    current += 1
+    cursor = addDays(cursor, -1)
+  }
+
+  let longest = 0
+  let run = 0
+  let prevDay = null
+  for (const { day } of days) {
+    run = prevDay !== null && addDays(prevDay, 1) === day ? run + 1 : 1
+    longest = Math.max(longest, run)
+    prevDay = day
+  }
+
+  const value = { days, current, longest }
+  commitDaysCache.set(repoPath, { at: now, since, value })
+  return value
+}
+
+/** Test-only escape hatch: force the next commitDays() call to recompute. */
+commitDays.clearCache = () => commitDaysCache.clear()
