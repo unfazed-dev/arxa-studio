@@ -287,33 +287,145 @@ Stopped deliberately rather than ship dead buttons — see Known gaps.
   passes. Both real returns set `parked` explicitly (green `false`, red `true`),
   so it now tests `=== false`.
 
-## Known gaps and exactly where they sit
+## Session 2 — 2026-09-03 (completing the unfinished business)
 
-1. **Agent controls + detail panel (Q5, 2B/2C).** `subagent.interrupt` /
-   `subagent.prompt` exist as RPC methods but **no stock client calls them** —
-   there is no `interrupt` call site anywhere in `dsh-client-ui-subagent`, and no
-   short `connection.request` path was found from a plugin context. Job cancel
-   is clearer: `ctx.jobs.kill(id, caller, reason)` needs `caller.id ===
-   job.owner.id`, and `job.owner` is the owning **session**, so a host action can
-   legitimately pass the live session from the store. Next step is deciding the
-   transport (client RPC vs a new `/__arxa/agent.*` host action) before writing
-   either.
-2. **Region jump on first subagent.** The placeholder sits on `header.actions`;
-   the real `CatalogDropdown` lives on `header.lineage`, which is
-   **kind:single** and already occupied — registering there would delete the
-   dropdown we want to surface. So the affordance moves regions the first time a
-   subagent appears. Accepted consciously.
-3. **Two Stage 1 DOM claims unverified.** The rename-divergence crumb (two tail
-   segments) and the mode chip's rendered pixels. Both were blocked by a harness
-   problem, not a product one: fixture sessions have no user message, so every
-   fresh client boot **drops them** via the Q3 empty-drop before the probe can
-   look. Fix for next run: give the fixture session a real `user/message` so it
-   survives, then reuse `/tmp/arxa-s1/lens.mjs`.
-4. **Nothing was pushed to the user's GitHub.** By design for an unattended run
-   — see the standing constraint above. RESTO is untouched; `main` is still 1
-   ahead of `origin/main`. The auth-retry and status-clear fixes take effect on
-   the next org open, which happens when the user next launches the app.
-5. **Desktop app not rebuilt.** The repo-served engine was used throughout.
+Everything left open by the first autonomous run was picked up. One finding
+below **overturns a decision the grill recorded**, so read that first.
+
+### The capability map was backwards — corrected against the sources
+
+Q5 was recorded as *"cancel live everywhere; pause/resume live only on
+continuable subagents."* Reading the runtime contracts instead of trusting the
+shorthand, the truth is close to the inverse.
+
+`dsh-subagent/lib/types/index.d.ts:138-152` documents `interrupt` as:
+
+> "Unclaimed pending inbox work, **the Activation**, and published descendants
+> **are preserved** … Once the interrupted driver is idle, **a waking send
+> resumes** the parked FIFO queue. An absent target — **including a one-shot**
+> or unknown id — is an accepted **no-op**."
+
+That is a **pause**, not a cancel, and it is the ONLY stop verb on the whole
+`SubagentRuntime` surface. So:
+
+| target | pause | resume | cancel |
+|---|---|---|---|
+| continuable subagent, running | **live** (`interrupt`) | no verb — a paused child wakes on a message the human writes | **no terminate verb exists** |
+| continuable subagent, inactive | `not-running` | `send-message` | `no-terminate-verb` |
+| one-shot subagent | `one-shot` (interrupt is a documented no-op) | `one-shot` | `no-terminate-verb` |
+| background job | `no-job-api` | `no-job-api` | `no-job-api` |
+
+The jobs row is the second correction, found by
+`scripts/agent-services-probe.mjs` against a live engine: **there is no job
+API at all.** `JobView` is push-only (jobs reach the client through the event
+stream as `state.jobsBySession`), the RPC map has no `job.*` method, the
+ApiProxy has no jobs field, and `ctx.jobs` is composed under the agent scope
+where a top-level plugin cannot resolve it. A job cannot be stopped from any
+plugin surface in this build. The stock `JobListAction` only lists, which is
+consistent.
+
+All three verbs are still rendered in all three places the grill asked for —
+the ones that cannot fire are disabled and carry the reason on hover. Naming
+the gap is the feature; a button that lies is not.
+
+### Transport — settled, after a wrong first answer
+
+First attempt read `ctx.subagents` / `ctx.jobs` directly. Both failed live
+while `subagent.list` answered fine over RPC. Two cordis facts explain it:
+a service not in the plugin's `inject` **throws** on property access
+(`ReflectService`, cordis/lib/index.js:675), and these services are not in this
+fiber's store at all, so `ctx.reflect.get` returns nothing either. Adding them
+to `inject` would not have helped and would have made a missing service stop
+the whole arxa shell from loading.
+
+**Settled transport:** `ctx.apiProxy.subagents` (`list` + `interrupt`), reached
+defensively so a build without it degrades to disabled-with-reason.
+`plugins/approvals` and `plugins/conversation` already inject `apiProxy`, so it
+is a safe dependency. Actions ride the existing `/__arxa/sidebar/action` route,
+registered **above** the lifecycle gate — a session's children exist whether or
+not an arxa org is open, so answering `no-workspace` would be a lie.
+
+### What landed
+
+- **`b424adc` — CI run control.** Re-run / Cancel run / Open on GitHub on the
+  git card (newest run on the branch) and per-row in the CI insight panel,
+  where every run is individually addressable. Re-run waits for the run to
+  finish, cancel waits for it to be live, so the pair is never both-enabled.
+  A 409 on cancel reads as `already-finished`, not an error.
+- **`ccc73f6` / `b2e66e4` — agent controls + detail panel.** Host `agent.*`
+  actions; a control chip in the session header that keeps the Q4 muted
+  placeholder at zero and becomes a dropdown when populated, with the verbs
+  revealed on row hover; a `subagents` / `jobs` side panel in artifact-viewer
+  reached by tapping through. Jobs rows come from the client store and ride
+  the open event to the panel, since no host call can enumerate them.
+- **`plugins/arxa-sidebar/selftest.agents.mjs`** — 18 assertions driving the
+  REAL handler with a fake apiProxy. Includes a ctx that throws exactly like
+  cordis does, so the degradation path is tested rather than assumed.
+- **`scripts/agent-services-probe.mjs`** — deterministic live probe. This is
+  the one that earned its keep: it failed on first run and is how both the
+  composition-scoping and the missing job API were found.
+
+### The smoke flow was deliberately NOT built as specified
+
+Q4 asked for a flow that really spawns a subagent and a job. Driving that
+through `session.prompt` would make the test's green depend on `ZAI_API_KEY`,
+a network round-trip, and a model *choosing* to background a bash call and
+delegate a child — a red for reasons that are not facts about this code, and
+it could never join `npm test`. The service-presence probe covers the gap the
+fakes cannot (that the real services resolve and match the assumed shapes)
+without any of that. Recorded as a deliberate substitution, not an omission.
+
+### Verification
+
+- `npm test` — **32 suites, ALL GREEN.**
+- `scripts/agent-services-probe.mjs` against a live engine — **ALL GREEN**
+  (after the apiProxy fix; it was 2 RED before, which is the point).
+- Session naming re-confirmed end-to-end on a live engine: id, `name`, branch
+  `arxa/session/note-wt-260903-001` and the worktree folder all agree.
+- **NOT observed:** the rendered header pixels. The headless CDP harness could
+  not bind a conversation — `openCreated` resolves without navigating and
+  clicking the tree row does not open it either. Root cause of the older
+  fixture flakiness IS now pinned: a session with no user message is deleted
+  on **every** client boot, and `session.prompt` fixes that (verified: the
+  session survived). The remaining blocker is conversation binding under
+  headless Chrome, not the fixture.
+- **NOT executed:** any GitHub call. No push, no re-run, no cancel against a
+  real repo, per the standing constraint.
+
+## Known gaps — as of the session-2 run (2026-09-03)
+
+Gaps 1, 4 and 5 from the first run are **closed**; what follows is what is
+still open, restated against the corrected capability map.
+
+1. **No job control exists in this dsh build.** Not a shortcut — there is no
+   `job.*` RPC, no jobs field on the ApiProxy, and `ctx.jobs` is composed under
+   the agent scope. The UI shows the jobs and refuses all three verbs with
+   `no-job-api`. Closing this needs a dsh-side API (or a jobs producer plugin
+   of our own that keeps its own kill switch), not a client change.
+2. **No resume verb.** `followup` is the only wake path and it needs content
+   the human writes plus a live parent Agent. Rendering a Resume button that
+   synthesizes a message would be inventing user input, so it stays disabled
+   with the reason. If dsh ever adds a contentless wake, this is a one-line
+   change in the host's capability map.
+3. **Region jump on first subagent.** Unchanged and still accepted: the arxa
+   chip sits on `header.actions` (kind:list, `replaceRisk: none`) while the
+   stock `CatalogDropdown` lives on `header.lineage`, which is **kind:single**
+   and already occupied — registering there would delete the very dropdown we
+   want to surface. Consequence: when populated, the arxa control chip sits
+   *beside* the stock chip rather than replacing it. Stock lists, arxa
+   controls. Deleting stock UI was judged the worse trade.
+4. **Header pixels still not observed.** The wiring is unit-tested and the host
+   contract is verified live, but the rendered chip, its hover actions and the
+   two-segment renamed crumb have not been seen. The fixture half is solved
+   (`session.prompt` keeps the session alive — verified); the blocker is that
+   headless Chrome will not bind a conversation via `openCreated` or a tree
+   click. Worth one attempt from a real browser session rather than more
+   headless effort.
+5. **Session-branch push still never executed.** Wired and statically checked;
+   no stage boundary ran in either session, and firing one would have pushed to
+   a real repo.
+6. **Nothing was pushed to GitHub in either run.** RESTO remains untouched.
+   The auth-retry and status-clear fixes take effect on the next org open.
 
 ## Commits
 1. `feat: mint readable session ids and pin the worktree name across sidebar, crumb and header`
