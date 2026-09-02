@@ -661,7 +661,14 @@ check('client: a host refusal (ok:false) surfaces its reason instead of a silent
   client.includes('if (r && r.ok === false) setNote(t("agents.why." + String(r.reason || "unavailable")))'))
 check('client: jobs come from the client store — no host API can enumerate or stop them',
   client.includes('function arxaJobRow(') && client.includes('why: { pause: "no-job-api", resume: "no-job-api", cancel: "no-job-api" }')
-  && client.includes('if (kind === "jobs") { setRows(given || []); setNote(""); return; }'))
+  && client.includes('const rows = isJobs ? (given || []) : fetched'))
+// `given` is a fresh array on every store push. Writing it into state would
+// re-render, re-allocate and write again for as long as the menu sat open over
+// a live job — a loop, not churn. Job rows must stay OUT of state, and `load`
+// must not depend on them.
+check('client: job rows never enter state, so a live job cannot spin the menu',
+  client.includes('if (isJobs) return;') && /\}, \[sessionId, isJobs\]\)/.test(client)
+  && !client.includes('setRows(given'))
 check('client: the panel is handed the rows, since it lives in another bundle',
   client.includes('openAgentPanel(kind, sessionId, rows)') && client.includes('rows: rows || null'))
 check('client: the dropdown row reveals its actions on hover (stock ToolRow behaviour)',

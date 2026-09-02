@@ -3428,25 +3428,28 @@ window.__ModuleLoader__.load({
 		}
 		function ArxaAgentControl({ kind, sessionId, count, given, t }) {
 			const [open, setOpen] = (0, react.useState)(false);
-			const [rows, setRows] = (0, react.useState)(null);
+			const [fetched, setFetched] = (0, react.useState)(null);
 			const [busy, setBusy] = (0, react.useState)(false);
 			const [note, setNote] = (0, react.useState)("");
+			/* Jobs never round-trip and never enter state: `JobView` is PUSH-only,
+			 * so the store rows handed down are already the truth. Routing them
+			 * through setRows would also LOOP — `given` is a fresh array on every
+			 * store push, so a state write per push re-renders, re-allocates and
+			 * writes again for as long as the menu is open over a live job. */
+			const isJobs = kind === "jobs";
+			const rows = isJobs ? (given || []) : fetched;
 			const load = (0, react.useCallback)(() => {
-				/* Jobs never round-trip: `JobView` is PUSH-only, so the client
-				 * store is the only place they exist. There is no job.* RPC and
-				 * no jobs field on the ApiProxy, which is why every verb on a
-				 * job row is refused with `no-job-api` rather than offered. */
-				if (kind === "jobs") { setRows(given || []); setNote(""); return; }
+				if (isJobs) return;
 				/* ORG_POST rejects on ok:false, and the host refuses a missing
 				 * sessionId — without this guard a seat that has not resolved
 				 * its session yet would paint a raw "sessionId-required" note. */
-				if (!sessionId) { setRows([]); setNote(""); return; }
+				if (!sessionId) { setFetched([]); setNote(""); return; }
 				ORG_POST("agent.list", { sessionId: sessionId }).then((b) => {
 					const r = (b && b.result) || {};
 					setNote("");
-					setRows(r.subagents || []);
-				}, (e) => { setNote(String((e && e.message) || e)); setRows([]); });
-			}, [sessionId, kind, given]);
+					setFetched(r.subagents || []);
+				}, (e) => { setNote(String((e && e.message) || e)); setFetched([]); });
+			}, [sessionId, isJobs]);
 			(0, react.useEffect)(() => { if (open) load(); }, [open, load]);
 			const act = (verb, row) => {
 				setBusy(true);
