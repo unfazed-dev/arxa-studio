@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Browser half of arxa-git-card — GENERATOR (docs/plans/git-card-stock-dock-rebuild.md A3).
 //
-// The Git card is the `conversation.input.dock` entry between the stock todo
-// strip (order 0) and the stock queue strip (order 20). Its LOOK is the stock
+// The Git card is the `conversation.input.dock` entry between the stock goal
+// strip (order 10) and the stock queue strip (order 20; todo is 0). Its LOOK is the stock
 // QueueDock's, byte-for-byte: this script lifts QueueDock.module.css and its
 // class map out of @deepseek-ai/dsh-client-ui-conversation/lib/client.js,
 // rewrites the identity (tagId + class prefix) so the two never collide, and
@@ -117,7 +117,7 @@ const out = [
   T(3) + "ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({",
   T(4) + "name: 'conversation.input.dock',",
   T(4) + "id: 'git',",
-  T(4) + 'order: 10,',
+  T(4) + 'order: 15,',
   T(4) + 'locale: NS,',
   T(4) + 'inject: (sessionId) => {',
   T(5) + 'const actx = ctx.sessions.scope(sessionId)',

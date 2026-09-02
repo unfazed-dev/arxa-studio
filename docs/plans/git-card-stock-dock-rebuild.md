@@ -1,6 +1,6 @@
 # Git card — stock dock-card rebuild as its own plugin (`arxa-git-card`)
 
-Status: PLANNED (grilled 2026-09-02). Supersedes the UI half of
+Status: PART A LANDED (A1–A4, 2026-09-02) — Part B (insight re-skin) pending. Grilled 2026-09-02. Supersedes the UI half of
 `git-card-phase-4-card-rebuild.md` (Part A2/A3); the host actions and tests
 from Phase 4 are kept and MOVED, not rewritten.
 
@@ -202,3 +202,11 @@ three widths; a red console is a fail regardless of the PNG.
 - Any change to `git-workspace`, `prflow`, GitHub link flows.
 - A shared "arxa dock card" library — one plugin copies stock; a second
   consumer would justify extracting.
+
+## 8. A4 evidence (2026-09-02)
+
+- Sidebar no longer registers the dock; `plugins/arxa-sidebar/lib/client.js` shrank by ~470 lines (no `ArxaGitCard` symbol in the served bundle); `arxa-git-card` registers `conversation.input.dock` at order 15 (between Goal 10 and Queue 20).
+- Fresh launch (`node bin/arxa-studio.mjs --no-open`, profile re-copies the package — the served bundle is a copy, so a relaunch is required after every regen) → RESTO opened via `org.open` → `card.status` ok, seat `org`, health `ok`.
+- Lens 1280×832, console clean: `designs/git-card/evidence/dock/collapsed-1280.png` (strip `main · clean`, chevron, stock QueueDock grammar above the composer) and `expanded-1280.png` (rows `8 wip · frame wired · runner online` + refresh, `nothing to commit` + disabled check).
+- Fix found by the smoke: host reports `frame.runner: "ok"` (manifest.frameRunner); the readout mapped only `online` → showed "runner unknown". Now `ok`/`online` both → online.
+- Lens gotcha: two `lens_check` Chromes launched in parallel race — the second gets `web app: missing #root`. Run captures serially.

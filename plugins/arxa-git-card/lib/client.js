@@ -88,6 +88,24 @@ window.__ModuleLoader__.load({
       'git.pr.failed': 'Pull request failed: {reason}',
       'git.statusFailed': 'Git status failed: {reason}',
       'git.title.subject': 'PR title',
+      'git.localOnly': 'local-only',
+      'git.frame.wired': 'frame wired',
+      'git.frame.missing': 'frame missing',
+      'git.runner.online': 'runner online',
+      'git.runner.asleep': 'runner asleep',
+      'git.runner.unknown': 'runner unknown',
+      'git.mainRed': 'main is red',
+      'git.wake': 'Wake the runner',
+      'git.wakeStarted': 'Waking the runner — checks resume when it reports in.',
+      'git.wakeManual': 'Start it by hand: run svc.sh start in ~/.arxa/runners/<owner>__<name>. {reason}',
+      'git.askDraft': 'Ask the session to draft the subject',
+      'git.draftFailed': 'Draft request failed: {reason}',
+      'git.insight.streak': 'Streak',
+      'git.insight.ci': 'CI',
+      'git.insight.sessions': 'Sessions',
+      'git.mint': 'Mint a version',
+      'git.minted': 'Minted {chip}',
+      'git.mintFailed': 'Mint failed: {reason}',
     }
     const pl = {
       'git.head': '{branch} · {summary}',
@@ -124,6 +142,25 @@ window.__ModuleLoader__.load({
       'git.pr.failed': 'Pull request nie powiódł się: {reason}',
       'git.statusFailed': 'Status git nie powiódł się: {reason}',
       'git.title.subject': 'Tytuł PR',
+      // TODO native review (conformance decision 4): machine-drafted.
+      'git.localOnly': 'tylko lokalnie',
+      'git.frame.wired': 'rama podłączona',
+      'git.frame.missing': 'brak ramy',
+      'git.runner.online': 'runner online',
+      'git.runner.asleep': 'runner uśpiony',
+      'git.runner.unknown': 'runner nieznany',
+      'git.mainRed': 'main czerwony',
+      'git.wake': 'Obudź runnera',
+      'git.wakeStarted': 'Budzenie runnera — kontrole wznowią się, gdy się zgłosi.',
+      'git.wakeManual': 'Uruchom ręcznie: svc.sh start w ~/.arxa/runners/<owner>__<name>. {reason}',
+      'git.askDraft': 'Poproś sesję o szkic tematu',
+      'git.draftFailed': 'Szkic nie powiódł się: {reason}',
+      'git.insight.streak': 'Seria',
+      'git.insight.ci': 'CI',
+      'git.insight.sessions': 'Sesje',
+      'git.mint': 'Wybij wersję',
+      'git.minted': 'Wybito {chip}',
+      'git.mintFailed': 'Wybicie nie powiodło się: {reason}',
     }
     const fr = {
       'git.head': '{branch} · {summary}',
@@ -160,6 +197,25 @@ window.__ModuleLoader__.load({
       'git.pr.failed': 'Échec de la pull request : {reason}',
       'git.statusFailed': 'Échec du statut git : {reason}',
       'git.title.subject': 'Titre de la PR',
+      // TODO native review (conformance decision 4): machine-drafted.
+      'git.localOnly': 'local uniquement',
+      'git.frame.wired': 'cadre câblé',
+      'git.frame.missing': 'cadre manquant',
+      'git.runner.online': 'runner en ligne',
+      'git.runner.asleep': 'runner en veille',
+      'git.runner.unknown': 'runner inconnu',
+      'git.mainRed': 'main est rouge',
+      'git.wake': 'Réveiller le runner',
+      'git.wakeStarted': 'Réveil du runner — les contrôles reprennent dès qu’il répond.',
+      'git.wakeManual': 'Lancez-le à la main : svc.sh start dans ~/.arxa/runners/<owner>__<name>. {reason}',
+      'git.askDraft': 'Demander à la session un sujet',
+      'git.draftFailed': 'Échec de la demande de brouillon : {reason}',
+      'git.insight.streak': 'Série',
+      'git.insight.ci': 'CI',
+      'git.insight.sessions': 'Sessions',
+      'git.mint': 'Frapper une version',
+      'git.minted': 'Version {chip} frappée',
+      'git.mintFailed': 'Échec de la frappe : {reason}',
     }
 
     /** Every read and write goes through the one host route. `arg.sessionId`
@@ -189,6 +245,7 @@ window.__ModuleLoader__.load({
       const [editing, setEditing] = React.useState(null)
       const [busy, setBusy] = React.useState(null)
       const [seatSession, setSeatSession] = React.useState(sessionId || null)
+      const [mintChip, setMintChip] = React.useState(null)
       const listId = React.useId()
       const alive = React.useRef(true)
       React.useEffect(() => () => { alive.current = false }, [])
@@ -219,7 +276,7 @@ window.__ModuleLoader__.load({
         catch (e) { if (alive.current) setPr({ ok: false, reason: reasonOf(e) }) }
       }, [post, seatSession])
 
-      React.useEffect(() => { setSeatSession(sessionId || null); load() }, [sessionId, load])
+      React.useEffect(() => { setSeatSession(sessionId || null); setPr(void 0); setMintChip(null); load() }, [sessionId, load])
       React.useEffect(() => {
         const on = () => { load(); if (!collapsed) loadPr() }
         window.addEventListener('arxa-git-card-refresh', on)
@@ -229,6 +286,20 @@ window.__ModuleLoader__.load({
         if (!status || collapsed) return
         if (status.seat && status.seat.kind === 'session' && status.linked && !status.localOnly && pr === void 0) loadPr()
       }, [status, collapsed, pr, loadPr])
+
+      // Polling (A3, unchanged from Phase 4): status every 30 s; the PR read only
+      // while expanded AND a PR exists — no idle GitHub traffic. Timers live in
+      // effects with disposers.
+      const hasPr = Boolean(pr && pr.ok && pr.pr)
+      React.useEffect(() => {
+        const id = window.setInterval(() => { if (busy === null) load() }, 30000)
+        return () => window.clearInterval(id)
+      }, [load, busy])
+      React.useEffect(() => {
+        if (collapsed || !hasPr) return
+        const id = window.setInterval(() => { if (busy === null) loadPr() }, 30000)
+        return () => window.clearInterval(id)
+      }, [collapsed, hasPr, loadPr, busy])
 
       if (absent || status === null) return null
 
@@ -251,6 +322,18 @@ window.__ModuleLoader__.load({
       }
       if (status.wipRun) detailParts.push(t('git.wip', { n: status.wipRun }))
       if (status.chip) detailParts.push(String(status.chip))
+      // Frame health + runner + main gate ride the same readout (old status
+      // slide). A missing part is not a zero — only measured parts are said.
+      const frame = status.frame || {}
+      const checks = (pr && pr.ok && pr.checks) || null
+      const checkState = checks ? (checks.asleep ? 'asleep' : String(checks.state || 'unknown')) : 'none'
+      const runnerAsleep = frame.runner === 'asleep' || checkState === 'asleep'
+      const sessionSeat = Boolean(status.seat && status.seat.kind === 'session')
+      if (status.localOnly) detailParts.push(t('git.localOnly'))
+      if (frame.wired) detailParts.push(t(frame.wired === 'ok' ? 'git.frame.wired' : 'git.frame.missing'))
+      // host says 'ok' (manifest.frameRunner) or 'online' (live probe) — both are up
+      if (frame.runner) detailParts.push(t(frame.runner === 'ok' || frame.runner === 'online' ? 'git.runner.online' : frame.runner === 'asleep' ? 'git.runner.asleep' : 'git.runner.unknown'))
+      if (status.main && status.main.checks === 'red') detailParts.push(t('git.mainRed'))
       const detail = detailParts.length ? detailParts.join(' · ') : summary
 
       const run = async (key, fn) => {
@@ -298,6 +381,59 @@ window.__ModuleLoader__.load({
         })
       }
 
+      /** D116/B8: a human action — the host never throws; ok:false carries the
+       * manual svc.sh instruction. */
+      const wake = async () => {
+        await run('wake', async () => {
+          try {
+            const r = await post('card.runner.wake', seatArg())
+            if (!alive.current) return
+            notify(r && r.ok ? 'info' : 'error', r && r.ok ? t('git.wakeStarted') : t('git.wakeManual', { reason: String((r && r.reason) || '') }))
+            load(); if (pr !== void 0) loadPr()
+          } catch (e) { notify('error', t('git.wakeManual', { reason: reasonOf(e) })) }
+        })
+      }
+      /** Stage boundary: mint a version on the merged seat; the chip it returns
+       * joins the approve readout until the session changes. */
+      const mint = async () => {
+        await run('mint', async () => {
+          try {
+            const r = await post('version.mint', seatArg())
+            if (!alive.current) return
+            const chip = r && r.chip ? r.chip : null
+            if (chip) setMintChip(chip)
+            notify('info', t('git.minted', { chip: chip ? (chip.label || String(chip)) : '' }))
+            load()
+          } catch (e) { notify('error', t('git.mintFailed', { reason: reasonOf(e) })) }
+        })
+      }
+      /** Q6: the engine never drafts — the host returns EVIDENCE and the session
+       * model writes the subject. Prefill the composer through the native value
+       * setter so React sees the input. */
+      const askDraft = async () => {
+        await run('draft', async () => {
+          try {
+            const r = await post('card.commit.draft', seatArg())
+            if (!alive.current) return
+            const ta = document.querySelector("[data-slot='conversation.composer.bar'] textarea")
+            if (!ta) throw new Error('composer-not-found')
+            const text = 'Draft a conventional commit subject for the current changes. ' + String((r && r.rule) || '')
+              + ' Evidence — stat: ' + String((r && r.uncommittedStat) || '(committed via WIP)')
+              + ' Recent stage subjects: ' + (((r && r.recentStageSubjects) || []).join(' | '))
+            const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')
+            if (setter && setter.set) setter.set.call(ta, text); else ta.value = text
+            ta.dispatchEvent(new Event('input', { bubbles: true }))
+            ta.focus()
+            window.__arxaCardDraftRule = r && r.rule
+          } catch (e) { notify('error', t('git.draftFailed', { reason: reasonOf(e) })) }
+        })
+      }
+      /** Insight links: right-panel surfaces owned by artifact-viewer (A3). */
+      const openInsight = (view) => {
+        try { window.dispatchEvent(new CustomEvent('arxa-av-open', { detail: { kind: 'insight', view, sessionId: seatSession } })) } catch { /* no bridge */ }
+      }
+      const wakeAction = () => action('wake', t('git.wake'), Icon('IconTriangleRightFill14', 'IconRefreshOutline16', 14), { onClick: wake })
+
       const action = (key, label, icon, opts) => h(P.Tooltip, { key, label, side: 'bottom', delayMs: 500 },
         h('button', {
           type: 'button', className: S.action, 'aria-label': label,
@@ -322,7 +458,13 @@ window.__ModuleLoader__.load({
       rows.push(h('li', { key: 'status', className: S.row },
         h('span', { className: S.preview }, detail),
         h('div', { className: S.actions },
-          action('refresh', t('git.refresh'), Icon('IconRefreshOutline16', 'IconRefreshOutline16', 14), { onClick: () => { load(); if (pr !== void 0) loadPr() } }))))
+          [
+            action('refresh', t('git.refresh'), Icon('IconRefreshOutline16', 'IconRefreshOutline16', 14), { onClick: () => { load(); if (pr !== void 0) loadPr() } }),
+            runnerAsleep ? wakeAction() : null,
+            sessionSeat ? action('insight-streak', t('git.insight.streak'), Icon('IconChecklistOutline14', 'IconInspectOutline12', 14), { onClick: () => openInsight('streak') }) : null,
+            sessionSeat ? action('insight-ci', t('git.insight.ci'), Icon('IconQueueOutline14', 'IconInspectOutline12', 14), { onClick: () => openInsight('ci') }) : null,
+            sessionSeat ? action('insight-sessions', t('git.insight.sessions'), Icon('IconBrowseOutline16', 'IconInspectOutline12', 14), { onClick: () => openInsight('sessions') }) : null,
+          ])))
       // 2. Commit
       const canCommit = status.health === 'ok' && changed !== null && changed > 0
       const committing = editing !== null && editing.kind === 'commit'
@@ -333,13 +475,20 @@ window.__ModuleLoader__.load({
         h('div', { className: S.actions },
           committing
             ? editActions(commit)
-            : action('commit', t('git.commit'), Icon('IconCheckOutline16', 'IconCheckOutline16', 14), { disabled: !canCommit, onClick: () => setEditing({ kind: 'commit', text: '' }) }))))
+            : [
+              canCommit ? action('draft', t('git.askDraft'), Icon('IconEnhanceOutline16', 'IconEditOutline16', 14), { onClick: askDraft }) : null,
+              action('commit', t('git.commit'), Icon('IconCheckOutline16', 'IconCheckOutline16', 14), { disabled: !canCommit, onClick: () => setEditing({ kind: 'commit', text: '' }) }),
+            ])))
       // 3. Approve — session seats of a linked org only
       if (status.seat && status.seat.kind === 'session' && status.linked && !status.localOnly) {
-        const prOpen = pr && pr.ok && pr.pr
+        const prAny = pr && pr.ok && pr.pr
+        const prMerged = Boolean(prAny && (pr.merged || pr.pr.state === 'merged'))
+        const prOpen = Boolean(prAny && !prMerged)
         const prText = pr === void 0 ? t('git.loading')
           : pr && pr.ok === false ? pr.reason
-          : prOpen ? t('git.pr.open', { n: pr.pr.number, state: pr.pr.state }) + (pr.checks && pr.checks.state ? ' · ' + t('git.pr.checks', { state: pr.checks.state }) : '')
+          : prAny ? t('git.pr.open', { n: pr.pr.number, state: pr.pr.state })
+            + (checkState !== 'none' ? ' · ' + t('git.pr.checks', { state: checkState === 'asleep' ? t('git.runner.asleep') : checkState }) : '')
+            + (mintChip ? ' · ' + (mintChip.label || String(mintChip)) : '')
           : t('git.pr.none')
         const titling = editing !== null && editing.kind === 'pr'
         rows.push(h('li', { key: 'approve', className: S.row },
@@ -351,9 +500,13 @@ window.__ModuleLoader__.load({
               ? editActions(createPr)
               : [
                 action('pr-refresh', t('git.pr.refresh'), Icon('IconRefreshOutline16', 'IconRefreshOutline16', 14), { onClick: loadPr }),
+                checkState === 'asleep' ? wakeAction() : null,
+                // Merge is the one irreversible button: green checks AND an open PR.
                 prOpen
-                  ? action('merge', t('git.pr.merge'), Icon('IconCheckOutline16', 'IconCheckOutline16', 14), { disabled: !(pr.checks && pr.checks.state === 'green'), onClick: mergePr })
-                  : action('pr-create', t('git.pr.create'), Icon('IconPlusOutline16', 'IconPlusOutline16', 14), { disabled: pr === void 0, onClick: () => setEditing({ kind: 'pr', text: '' }) }),
+                  ? action('merge', t('git.pr.merge'), Icon('IconCheckOutline16', 'IconCheckOutline16', 14), { disabled: !(pr.checks && pr.checks.state === 'green' && pr.pr.state === 'open'), onClick: mergePr })
+                  : prMerged
+                    ? action('mint', t('git.mint'), Icon('IconUploadOutline16', 'IconPlusOutline16', 14), { onClick: mint })
+                    : action('pr-create', t('git.pr.create'), Icon('IconPlusOutline16', 'IconPlusOutline16', 14), { disabled: pr === void 0, onClick: () => setEditing({ kind: 'pr', text: '' }) }),
               ])))
       }
 
@@ -377,7 +530,7 @@ window.__ModuleLoader__.load({
       ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
         name: 'conversation.input.dock',
         id: 'git',
-        order: 10,
+        order: 15,
         locale: NS,
         inject: (sessionId) => {
           const actx = ctx.sessions.scope(sessionId)

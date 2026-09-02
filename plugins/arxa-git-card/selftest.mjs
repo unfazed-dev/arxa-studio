@@ -55,8 +55,8 @@ check('client: stock QueueDock CSS carried under its own identity (tag + prefix)
   clientSrc.includes("CSS_TAG = 'arxa-git-card/GitDock.module.css'") && clientSrc.includes('.aXa_gc_dock{') && !clientSrc.includes('_7yHdaG_'))
 check('client: full stock class map present (12 keys)',
   ['action', 'actions', 'chevron', 'count', 'dock', 'editor', 'header', 'lead', 'list', 'panel', 'preview', 'row'].every((k) => clientSrc.includes('"' + k + '": "aXa_gc_' + k + '"')))
-check('client: registers conversation.input.dock id=git order=10 between todo(0) and queue(20), locale-scoped',
-  clientSrc.includes("ctx.slots.inject('conversation.input.dock'") && clientSrc.includes("id: 'git'") && clientSrc.includes('order: 10') && clientSrc.includes('locale: NS'))
+check('client: registers conversation.input.dock id=git order=15 between goal(10) and queue(20), locale-scoped',
+  clientSrc.includes("ctx.slots.inject('conversation.input.dock'") && clientSrc.includes("id: 'git'") && clientSrc.includes('order: 15') && clientSrc.includes('locale: NS'))
 check('client: tree mirrors QueueDock — dock > panel > header[lead,count,chevron] + list > row[preview|editor, actions > action]',
   ['S.dock', 'S.panel', 'S.header', 'S.lead', 'S.count', 'S.chevron', 'S.list', 'S.row', 'S.preview', 'S.editor', 'S.actions', 'S.action'].every((s) => clientSrc.includes(s)) && clientSrc.includes("'data-git-dock': ''") && clientSrc.includes("'aria-controls': listId"))
 check('client: seat-aware status with org fallback; commit/push+PR/merge ride the one host route',
