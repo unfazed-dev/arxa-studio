@@ -496,11 +496,17 @@
 				const id = window.setInterval(() => { if (!busy) refresh(); }, 30000);
 				return () => window.clearInterval(id);
 			}, [refresh, busy]);
-			const prNumber = prState && prState.pr ? prState.pr.number : (data && data.pr ? data.pr.number : null);
+			const prNumber = prState && prState.pr ? prState.pr.number : null;
 			const refreshPr = react.useCallback(() => {
 				if (!sid) return Promise.resolve();
 				return ORG_POST("card.pr.status", { sessionId: sid }).then((r) => setPrState(r.result), () => {});
 			}, [sid]);
+			const prReadable = Boolean(data && data.linked && !data.localOnly);
+			react.useEffect(() => {
+				if (!sid || !prReadable) return void 0;
+				refreshPr();
+				return void 0;
+			}, [sid, prReadable, refreshPr]);
 			// PR polling is scoped: only while the approve slide is on screen AND a
 			// PR exists. An idle status slide must not hammer the GitHub API.
 			react.useEffect(() => {
@@ -534,9 +540,9 @@
 			const chip = (k, v) => v == null ? null : (0, react_jsx_runtime.jsx)("span", { "data-arxa-card-chip": k, children: t("card." + k) + " " + v });
 			const d = data || {};
 			const frame = d.frame || {};
-			const checks = (prState && prState.checks) || d.checks || null;
+			const checks = (prState && prState.checks) || null;
 			const checkState = checks ? (checks.asleep ? "asleep" : String(checks.state || "unknown")) : "none";
-			const pr = (prState && prState.pr) || d.pr || null;
+			const pr = (prState && prState.pr) || null;
 			const runnerAsleep = frame.runner === "asleep" || checkState === "asleep";
 			// Teaser: only the parts that MEASURED something. A missing part is not
 			// a zero — "0 dirty" and "we could not look" are different sentences.

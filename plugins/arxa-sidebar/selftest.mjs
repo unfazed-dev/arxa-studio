@@ -167,6 +167,15 @@ check('card A2: PR polling is scoped to the approve slide (no idle GitHub traffi
   // create form forever — so only the repeating timer may be PR-gated.
   client.includes('if (slide !== 2 || !sid) return void 0')
   && /refreshPr\(\);\s*\n\s*if \(prNumber == null\) return void 0;\s*\n\s*const id = window\.setInterval/.test(client))
+check('card A2: the teaser PR part reads card.pr.status once per session — card.status (ade8f2e) has no pr/checks',
+  client.includes('const prReadable = Boolean(data && data.linked && !data.localOnly)')
+  && /if \(!sid \|\| !prReadable\) return void 0;\s*\n\s*refreshPr\(\);/.test(client)
+  // One source for every PR fact: the dead card.status fallbacks are gone.
+  && client.includes('const prNumber = prState && prState.pr ? prState.pr.number : null;')
+  && client.includes('const pr = (prState && prState.pr) || null;')
+  && client.includes('const checks = (prState && prState.checks) || null;'))
+check('card A2: "main red" still comes from card.status.main.checks, not from the PR read',
+  client.includes('d.main && d.main.checks === "red"'))
 check('card A2: the notice line is transient — a refresh with no notice takes it down, and every action clears it',
   client.includes('setNotice((r.result && r.result.notice) || null)')
   && client.includes('setBusy(label); setErr(null); setNotice(null);'))
