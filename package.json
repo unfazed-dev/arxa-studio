@@ -16,6 +16,9 @@
     "@deepseek-ai/dsh-headless": "0.1.1-rc.2",
     "@deepseek-ai/dsh-web-app": "0.1.1-rc.2"
   },
+  "devDependencies": {
+    "js-yaml": "^4.3.1"
+  },
   "overrides": {
     "@earendil-works/pi-ai": "0.84.4"
   },
@@ -25,6 +28,13 @@
     "arxa update = bump these pins, run the suite. That is the whole upstream story.",
     "overrides pins pi-ai 0.84.4 past dsh 0.1.1-rc.2's ^0.82.1 range: TEMPORARY",
     "until a dsh release bumps llm-pi-ai (issue filed upstream). Unlocks the",
-    "catalog-served glm-5.3/glm-5.3-flash entries (zaiToolStream, maxTokensField)."
+    "catalog-served glm-5.3/glm-5.3-flash entries (zaiToolStream, maxTokensField).",
+    "js-yaml (devDependencies) was previously an UNDECLARED transitive dependency",
+    "(hoisted only via @deepseek-ai/dsh-agent-presets) that scripts/preset-check.mjs",
+    "relies on directly; now declared explicitly, pinned to the major already",
+    "hoisted in node_modules (4.3.1) so a future install cannot silently stop",
+    "hoisting it flat. devDependencies, not dependencies: only the dev-time",
+    "check script imports it \u2014 bin/arxa-studio.mjs and bin/materialise-preset.mjs",
+    "do not use js-yaml at runtime."
   ]
 }

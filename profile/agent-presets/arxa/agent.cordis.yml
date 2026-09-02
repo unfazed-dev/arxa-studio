@@ -53,8 +53,17 @@
 
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
+  # Mirrors profile/cordis.patch.yml's agent-instructions patch row
+  # byte-for-byte. A preset-mounted session runs THIS row, in the preset's
+  # own subtree — not the host composition's patched copy — so the host's
+  # restriction to AGENTS.md only (dropping dsh's default CLAUDE.md read,
+  # which feeds Claude-Code-only MCP routing rules that don't apply here)
+  # must be repeated here or it silently never takes effect for any
+  # preset-mounted session, arxa's or shipped. Keep these two configs equal;
+  # scripts/preset-check.mjs asserts it.
   config:
     maxBytes: 65536
+    instructionFileCandidates: [AGENTS.md]
 
 # ── project memory (arxa) ──────────────────────────────────────────────────
 

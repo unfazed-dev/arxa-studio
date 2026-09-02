@@ -66,6 +66,35 @@ function entryListProblem(rows, at = '') {
   }
 }
 
+// Finds a row by id, recursing into group rows' config lists the same way
+// collectIds does. Used to pull matching rows out of the preset and the
+// host patch for a byte-for-byte config comparison.
+function findRow(rows, id) {
+  if (!Array.isArray(rows)) return undefined
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue
+    if (row.id === id) return row
+    if (Array.isArray(row.config)) {
+      const nested = findRow(row.config, id)
+      if (nested) return nested
+    }
+  }
+  return undefined
+}
+
+// Plain structural equality — good enough for cordis row `config` blocks
+// (nested maps/arrays of strings, numbers, booleans). Key order doesn't
+// matter; array/object shape does.
+function deepEqual(a, b) {
+  if (a === b) return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  const aKeys = Object.keys(a)
+  const bKeys = Object.keys(b)
+  if (aKeys.length !== bKeys.length) return false
+  return aKeys.every((k) => Object.prototype.hasOwnProperty.call(b, k) && deepEqual(a[k], b[k]))
+}
+
 let failed = 0
 function check(label, ok, detail) {
   console.log((ok ? 'GREEN  ' : 'RED    ') + label)
@@ -112,6 +141,20 @@ check('moved rows are absent from profile/cordis.patch.yml', stillInHost.length 
 const missingFromPreset = moved.filter((id) => !presetIds.has(id))
 check('moved rows are present in the arxa preset', missingFromPreset.length === 0,
   missingFromPreset.length ? 'missing: ' + missingFromPreset.join(', ') : '')
+
+// A preset-mounted session runs the preset's own agent-instructions row, in
+// its own mounted subtree — never the host composition's patched copy. So
+// the host patch's restriction to AGENTS.md only (profile/cordis.patch.yml)
+// has to be repeated in the preset's row or it silently never applies to a
+// preset-mounted session. This check keeps the two configs from drifting.
+const presetInstructionsRow = findRow(presetEntries, 'agent-instructions')
+const hostInstructionsRow = findRow(hostEntries, 'agent-instructions')
+const instructionsConfigsMatch = Boolean(presetInstructionsRow) && Boolean(hostInstructionsRow)
+  && deepEqual(presetInstructionsRow.config, hostInstructionsRow.config)
+check('preset agent-instructions config matches host patch\'s agent-instructions config',
+  instructionsConfigsMatch,
+  instructionsConfigsMatch ? '' : 'preset: ' + JSON.stringify(presetInstructionsRow?.config)
+    + ' vs host: ' + JSON.stringify(hostInstructionsRow?.config))
 
 // -- 3. materialise writes the preset files under a temp DSH_HOME -----------
 const tmpDshHome = mkdtempSync(join(tmpdir(), 'arxa-preset-check-'))
