@@ -76,6 +76,41 @@ async function importGithubLink() {
   return await import(new URL('../../github-link/lib/index.js', import.meta.url).href)
 }
 
+/** Import-probe git-workspace (Phase 4 card actions) in both deployment
+  * shapes — same discipline as importShell / artifact-viewer's gw():
+  *   1. bare "git-workspace" — the flat copy bin/arxa-studio.mjs places in
+  *      the profile's top-level node_modules (fiveLibs);
+  *   2. relative ../../git-workspace — repo checkout (smoke.mjs, selftests).
+  * The relative shape alone is NOT enough in an installed profile: this
+  * plugin is a pnpm file: symlink into the .pnpm virtual store, so
+  * ../../git-workspace resolves beside the store entry, where no sibling
+  * exists (measured live 2026-09-02: workspace.new-session → Cannot find
+  * module …/.pnpm/arxa-sidebar@…/node_modules/git-workspace/lib/index.js).
+  * Cached: the card actions call this per request. */
+let gwCache = null
+async function importGitWorkspace() {
+  if (gwCache) return gwCache
+  try {
+    gwCache = await import('git-workspace')
+  } catch {
+    gwCache = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+  }
+  return gwCache
+}
+
+/** prflow.js is not re-exported by the git-workspace barrel (D116); it is
+  * reachable bare only through the "./lib/prflow.js" exports entry. */
+let prflowCache = null
+async function importPrflow() {
+  if (prflowCache) return prflowCache
+  try {
+    prflowCache = await import('git-workspace/lib/prflow.js')
+  } catch {
+    prflowCache = await import(new URL('../../git-workspace/lib/prflow.js', import.meta.url).href)
+  }
+  return prflowCache
+}
+
 export function apply(ctx, opts = {}) {
   /** Singleton — holds the single open-org handle across requests. */
   let lifecycle = null
@@ -601,7 +636,10 @@ export function apply(ctx, opts = {}) {
             // live; this is the server-side mirror (never trust the client).
             // A non-empty target is a hard refusal: never merge, never
             // version foreign files unasked (the PLATO lesson, kept).
-            const { slugify } = await import(new URL('../../workspace/lib/slug.js', import.meta.url).href)
+            // Dual probe (see importGitWorkspace): bare "workspace" is the
+            // flat profile copy; the relative shape only resolves in-repo.
+            const { slugify } = await import('workspace').catch(
+              () => import(new URL('../../workspace/lib/slug.js', import.meta.url).href))
             const nameSlug = slugify(nm)
             if (nameSlug === '' || nameSlug === 'untitled') {
               return json(res, { ok: false, error: 'org name has no slug: ' + nm, action })
@@ -760,7 +798,7 @@ export function apply(ctx, opts = {}) {
             // engine NEVER drafts messages (Q6): card.commit.draft returns
             // evidence only — the session model writes the subject.
             'card.status': async () => {
-              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+              const gw = await importGitWorkspace()
               const cur = handle()
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               let repoPath = cur.path
@@ -829,7 +867,7 @@ export function apply(ctx, opts = {}) {
             },
             /** Q6: EVIDENCE ONLY — the session model drafts the subject. */
             'card.commit.draft': async () => {
-              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+              const gw = await importGitWorkspace()
               const cur = handle()
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               const repoPath = sid
@@ -843,7 +881,7 @@ export function apply(ctx, opts = {}) {
               }
             },
             'card.commit': async () => {
-              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+              const gw = await importGitWorkspace()
               const cur = handle()
               const subject = String(arg?.subject ?? '').split('\n')[0].trim()
               if (!gw.SUBJECT_RE.test(subject)) throw new Error('subject-not-conventional: use <type>(<scope>): <what is now true> — got: ' + subject)
@@ -877,7 +915,7 @@ export function apply(ctx, opts = {}) {
             /** Push the session branch for PR purposes ONLY (the D73
              * relaxation, Q2): main pushes ride boundaries/heal. */
             'card.push': async () => {
-              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+              const gw = await importGitWorkspace()
               const cur = handle()
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               if (!sid) throw new Error('card.push serves session seats — the org primary rides its boundaries')
@@ -898,7 +936,7 @@ export function apply(ctx, opts = {}) {
               return out !== null ? { ok: true, branch: s.branch } : { ok: false, reason: 'push-failed' }
             },
             'card.pr.create': async () => {
-              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+              const gw = await importGitWorkspace()
               const g = await getGithub().catch(() => null)
               if (!g) throw new Error('github-unavailable')
               const cur = handle()
@@ -927,7 +965,7 @@ export function apply(ctx, opts = {}) {
               return { ok: true, pr: { number: pr.number, url: pr.html_url } }
             },
             'card.pr.status': async () => {
-              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+              const gw = await importGitWorkspace()
               const g = await getGithub().catch(() => null)
               if (!g) throw new Error('github-unavailable')
               const cur = handle()
@@ -951,7 +989,7 @@ export function apply(ctx, opts = {}) {
               * checks were read from (D107) — never on anything but a fully
               * green run (asleep/pending/red/none all refuse, loud reason). */
             'card.pr.merge': async () => {
-              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+              const gw = await importGitWorkspace()
               const g = await getGithub().catch(() => null)
               if (!g) throw new Error('github-unavailable')
               const cur = handle()
@@ -970,7 +1008,7 @@ export function apply(ctx, opts = {}) {
               if (checks.state !== 'green') return { ok: false, reason: 'checks-' + checks.state }
               // prflow.js has no other caller yet (D116) — imported directly
               // rather than through the index barrel, which does not re-export it.
-              const { mergeSessionPr } = await import(new URL('../../git-workspace/lib/prflow.js', import.meta.url).href)
+              const { mergeSessionPr } = await importPrflow()
               const repoPath = s.repoPath ?? cur.path
               const origin = gw.getOrigin(repoPath)
               const result = await mergeSessionPr(repoPath, sid, {
@@ -989,7 +1027,7 @@ export function apply(ctx, opts = {}) {
               * `stageBoundarySquash` already uses inside sessionStageBoundary,
               * sessions.js:423), captured in one clean stage commit. */
             'version.mint': async () => {
-              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+              const gw = await importGitWorkspace()
               const cur = handle()
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               if (!sid) throw new Error('version.mint serves session seats')
@@ -1017,7 +1055,7 @@ export function apply(ctx, opts = {}) {
               * its backend export has not landed yet — a missing export
               * must never break the whole card. */
             'insight.streak': async () => {
-              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+              const gw = await importGitWorkspace()
               const cur = handle()
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               if (!sid) throw new Error('insight.streak serves session seats')
@@ -1028,7 +1066,7 @@ export function apply(ctx, opts = {}) {
               return gw.commitDays(repoPath, { since: '90 days', env: process.env })
             },
             'insight.ci': async () => {
-              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+              const gw = await importGitWorkspace()
               const g = await getGithub().catch(() => null)
               const cur = handle()
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
@@ -1042,7 +1080,7 @@ export function apply(ctx, opts = {}) {
               return g.workflowRuns({ owner: manifest.repoOwner, name: manifest.repoName, branch: s.branch, perPage: 20 })
             },
             'insight.sessions': async () => {
-              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+              const gw = await importGitWorkspace()
               const cur = arg?.orgId ? await ensureOpen(arg.orgId) : handle()
               return { rows: gw.parkedSessions(cur.path) }
             },
@@ -1078,7 +1116,7 @@ export function apply(ctx, opts = {}) {
               let notice = null
               const g = await getGithub().catch(() => null)
               if (g) {
-                const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+                const gw = await importGitWorkspace()
                 let route = null
                 try { route = gw.resolveSessionRepo(cur.path, ws, { env: process.env }) } catch { route = null }
                 if (route) {
