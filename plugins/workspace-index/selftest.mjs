@@ -19,6 +19,7 @@ import {
   writeFileSync,
   appendFileSync,
 } from 'node:fs'
+import fs from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -174,3 +175,24 @@ if (failures > 0) {
 } else {
   console.log('\nall checks passed')
 }
+// 2026-09-03: the packed desktop sidecar died before binding its port because
+// `arxa-personalisation` was in the profile's package.json deps but missing
+// from packed mode's hand-maintained copy list. Both now come from one
+// PROFILE_PLUGINS constant; this asserts the two lists cannot drift apart
+// again, and that every name in it is a real plugin directory.
+{
+  const launcher = fs.readFileSync(new URL('../../bin/arxa-studio.mjs', import.meta.url), 'utf8')
+  const block = /const PROFILE_PLUGINS = \[([\s\S]*?)\n\]/.exec(launcher)
+  assert.ok(block, 'bin/arxa-studio.mjs declares a single PROFILE_PLUGINS list')
+  const names = [...block[1].matchAll(/\['([^']+)',\s*(\w+)\]/g)].map((m) => m[1])
+  assert.ok(names.length >= 16, `PROFILE_PLUGINS has the full set (got ${names.length})`)
+  assert.ok(names.includes('arxa-personalisation'), 'the plugin whose omission killed the sidecar is in the list')
+  assert.match(launcher, /dependencies: Object\.fromEntries\(PROFILE_PLUGINS\.map/, 'the profile deps are DERIVED from PROFILE_PLUGINS, never retyped')
+  assert.match(launcher, /for \(const \[name, dir\] of \[\.\.\.PROFILE_PLUGINS, \.\.\.fiveLibs\]\)/, 'packed mode copies exactly PROFILE_PLUGINS plus the relative-import libs')
+  // Every declared plugin must exist on disk, or the sidecar ships a dangling copy.
+  for (const n of names) {
+    const dirVar = new RegExp("\\['" + n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "',\\s*(\\w+)\\]").exec(block[1])
+    assert.ok(dirVar, n + ' has a directory binding')
+  }
+}
+

@@ -118,7 +118,8 @@ const hashPkg = (specifier, expected) => {
 
 // ---- 6. registration wired -------------------------------------------------------
 const bin = readFileSync(join(repo, 'bin', 'arxa-studio.mjs'), 'utf8')
-check('registration: profile dependency', bin.includes("'arxa-locale': `file:${localeDir}`"))
+check('registration: profile dependency (derived from the one PROFILE_PLUGINS list)',
+  bin.includes("['arxa-locale', localeDir]") && /dependencies: Object\.fromEntries\(PROFILE_PLUGINS\.map/.test(bin))
 check('registration: BY_NAME_PLUGINS', /BY_NAME_PLUGINS = \[[^\]]*'arxa-locale'/.test(bin))
 check('registration: packed-mode copy list', bin.includes("['arxa-locale', localeDir]"))
 const patch = readFileSync(join(repo, 'profile', 'cordis.patch.yml'), 'utf8')

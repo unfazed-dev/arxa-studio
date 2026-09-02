@@ -162,27 +162,40 @@ const prismDir = resolve(here, '..', 'plugins', 'prism')
 // look-and-feel rows (accent/editor-font/Background retarget there).
 const personalisationDir = resolve(here, '..', 'plugins', 'personalisation')
 mkdirSync(profileDir, { recursive: true })
+/**
+ * The profile's plugin set — ONE list, two consumers.
+ *
+ * It feeds the profile package.json below (checkout mode, where pnpm installs
+ * the file: deps) AND the packed-mode directory copy further down. Those were
+ * two hand-maintained lists until 2026-09-03, when `arxa-personalisation` sat
+ * in the deps but not in the packed copy: the desktop sidecar extracted fine,
+ * printed its banner, then died on `Cannot find package 'arxa-personalisation'`
+ * before binding its port — silently, because packed mode sends engine stdio
+ * to the engine log. Same failure shape as the bin/ file list that became
+ * BIN_FILES in eb9f088, so it gets the same cure rather than a second patch.
+ */
+const PROFILE_PLUGINS = [
+  ['arxa-design-panel', designPanelDir],
+  ['arxa-brand', brandDir],
+  ['arxa-gen-ui', genUiDir],
+  ['arxa-mcp-apps', mcpAppsDir],
+  ['arxa-waiting-page', waitingPageDir],
+  ['arxa-theme-accent', themeAccentDir],
+  ['arxa-pairing', pairingDir],
+  ['arxa-sidebar', sidebarDir],
+  ['arxa-git-card', gitCardDir],
+  ['arxa-file-org-shell', fileOrgShellDir],
+  ['arxa-github-link', githubLinkDir],
+  ['arxa-artifact-viewer', artifactViewerDir],
+  ['arxa-frame', arxaFrameDir],
+  ['arxa-locale', localeDir],
+  ['arxa-prism', prismDir],
+  ['arxa-personalisation', personalisationDir],
+]
 writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
   name: 'dsh-profile-arxa',
   private: true,
-  dependencies: {
-    'arxa-design-panel': `file:${designPanelDir}`,
-    'arxa-brand': `file:${brandDir}`,
-    'arxa-gen-ui': `file:${genUiDir}`,
-    'arxa-mcp-apps': `file:${mcpAppsDir}`,
-    'arxa-waiting-page': `file:${waitingPageDir}`,
-    'arxa-theme-accent': `file:${themeAccentDir}`,
-    'arxa-pairing': `file:${pairingDir}`,
-    'arxa-sidebar': `file:${sidebarDir}`,
-    'arxa-git-card': `file:${gitCardDir}`,
-    'arxa-file-org-shell': `file:${fileOrgShellDir}`,
-    'arxa-github-link': `file:${githubLinkDir}`,
-    'arxa-artifact-viewer': `file:${artifactViewerDir}`,
-    'arxa-frame': `file:${arxaFrameDir}`,
-    'arxa-locale': `file:${localeDir}`,
-    'arxa-prism': `file:${prismDir}`,
-    'arxa-personalisation': `file:${personalisationDir}`,
-  },
+  dependencies: Object.fromEntries(PROFILE_PLUGINS.map(([name, dir]) => [name, `file:${dir}`])),
   dsh: { profile: { bundles } },
 }, null, 2) + '\n')
 writeFileSync(join(profileDir, 'cordis.patch.yml'), readFileSync(template))
@@ -391,24 +404,11 @@ const fiveLibs = [
 ]
 const nm = join(profileDir, 'node_modules')
 if (packed) {
-  for (const [name, dir] of [
-    ['arxa-design-panel', designPanelDir],
-    ['arxa-brand', brandDir],
-    ['arxa-gen-ui', genUiDir],
-    ['arxa-mcp-apps', mcpAppsDir],
-    ['arxa-waiting-page', waitingPageDir],
-    ['arxa-theme-accent', themeAccentDir],
-    ['arxa-pairing', pairingDir],
-    ['arxa-sidebar', sidebarDir],
-    ['arxa-git-card', gitCardDir],
-    ['arxa-file-org-shell', fileOrgShellDir],
-    ['arxa-github-link', githubLinkDir],
-    ['arxa-artifact-viewer', artifactViewerDir],
-    ['arxa-frame', arxaFrameDir],
-    ['arxa-locale', localeDir],
-    ['arxa-prism', prismDir],
-    ...fiveLibs,
-  ]) {
+  // PROFILE_PLUGINS (above) is the single source for the plugin set; only the
+  // relative-import libs are extra here. A plugin added to the profile is
+  // therefore shipped by the sidecar automatically — the drift that killed the
+  // 2026-09-03 build cannot recur by omission.
+  for (const [name, dir] of [...PROFILE_PLUGINS, ...fiveLibs]) {
     rmSync(join(nm, name), { recursive: true, force: true })
     cpSync(dir, join(nm, name), { recursive: true })
   }

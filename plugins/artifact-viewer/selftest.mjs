@@ -49,8 +49,10 @@ assert.match(patch, /- id: arxa-artifact-viewer\r?\n    name: arxa-artifact-view
   'patch row registers the plugin by package name')
 
 const launcher = fs.readFileSync(join(root, 'bin', 'arxa-studio.mjs'), 'utf8')
-assert.match(launcher, /'arxa-artifact-viewer':\s+\S*file:/,
-  'profile package.json materializes the file: dep')
+assert.match(launcher, /\['arxa-artifact-viewer', artifactViewerDir\]/,
+  'the plugin is in the one PROFILE_PLUGINS list (profile dep AND packed copy)')
+assert.match(launcher, /dependencies: Object\.fromEntries\(PROFILE_PLUGINS\.map/,
+  'profile package.json deps are derived from that list, never retyped')
 assert.match(launcher, /BY_NAME_PLUGINS = \[[^\]]*'arxa-artifact-viewer'/,
   'BY_NAME_PLUGINS carries the package name')
 assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
