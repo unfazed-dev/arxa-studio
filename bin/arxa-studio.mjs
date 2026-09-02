@@ -23,13 +23,19 @@ import { spawn, spawnSync } from 'node:child_process'
 import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { homedir } from 'node:os'
+import { materialisePreset } from './materialise-preset.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const template = join(here, '..', 'profile', 'cordis.patch.yml')
+const presetSrcDir = join(here, '..', 'profile', 'agent-presets', 'arxa')
 
 const args = process.argv.slice(2)
 const headless = args.includes('--headless')
-const passthrough = args.filter((a) => a !== '--headless')
+// Materialises the profile patch and the arxa agent preset into DSH_HOME
+// (and seeds/rewrites settings.yaml) without pnpm-installing the profile,
+// resolving the dsh bin, or exec'ing it — for CI and scripts/preset-check.mjs.
+const materialiseOnly = args.includes('--materialise-only')
+const passthrough = args.filter((a) => a !== '--headless' && a !== '--materialise-only')
 
 // PACKED MODE (desktop sidecar) isolation: `open -a` / LaunchServices forward
 // the CALLING shell's environment, and a shell inside any dsh session exports
@@ -177,6 +183,12 @@ writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
 writeFileSync(join(profileDir, 'cordis.patch.yml'), readFileSync(template))
 engineLog('profile materialized: ' + profileDir)
 
+// The arxa agent preset (AGENT-PLANE, docs/plans/arxa-harness-and-distribution.md)
+// — same build-product treatment as the profile patch above: copied fresh on
+// every launch, never hand-edited at the destination.
+const presetDir = materialisePreset(dshHome, presetSrcDir)
+engineLog('preset materialized: ' + presetDir)
+
 // Seed once, then the operator owns it (the web Models/Settings pages write
 // here). glm-5.3 effort max on the CODING endpoint is the arxa default —
 // bench 2026-08-29: flash is the slow tier (~7.4s TTFT with tools, 26-50 tok/s
@@ -224,10 +236,31 @@ agent-default-model:
   model: glm-5.3
   reasoningEffort: max
 agent-presets:
-  default: code
+  default: arxa
 permission:
   defaultPreset: danger-full-access
 `)
+} else {
+  // agent-presets.default previously seeded (or hand-set) to one of the
+  // shipped preset names now gets rewritten to arxa, once, with a printed
+  // notice; any other value (arxa already, or an operator's own preset id)
+  // is left alone. Line-based, not a full YAML parse+reserialize, so every
+  // other byte of an existing settings.yaml — comments included — survives.
+  const raw = readFileSync(settingsFile, 'utf8')
+  const lines = raw.split('\n')
+  const shipped = new Set(['code', 'cordis', 'standard', 'minimal'])
+  const topIdx = lines.findIndex((l) => l === 'agent-presets:')
+  if (topIdx !== -1) {
+    for (let i = topIdx + 1; i < lines.length && (lines[i] === '' || /^\s/.test(lines[i])); i++) {
+      const m = lines[i].match(/^(\s*default:\s*)(\S+)\s*$/)
+      if (m && shipped.has(m[2])) {
+        lines[i] = m[1] + 'arxa'
+        writeFileSync(settingsFile, lines.join('\n'))
+        console.log(`arxa: settings.yaml agent-presets.default was '${m[2]}' (a shipped preset) — set to 'arxa'.`)
+        break
+      }
+    }
+  }
 }
 
 // Seed the credential store from the operator's dsh install, once. A plain
@@ -236,6 +269,11 @@ const credFile = join(dshHome, '.credentials.yaml')
 const operatorCreds = join(homedir(), '.dsh', '.credentials.yaml')
 if (!existsSync(credFile) && existsSync(operatorCreds)) {
   try { copyFileSync(operatorCreds, credFile) } catch { /* env layer still works */ }
+}
+
+if (materialiseOnly) {
+  console.log('arxa: materialise-only — profile at ' + profileDir + ', preset at ' + presetDir)
+  process.exit(0)
 }
 
 // ---- pi home -----------------------------------------------------------------

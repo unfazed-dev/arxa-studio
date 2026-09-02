@@ -1,0 +1,3 @@
+name: arxa
+description: arxa's own agent preset — the standard coding agent, plus arxa's project memory, Pi delegation, and generative UI tools.
+order: 0

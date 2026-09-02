@@ -59,22 +59,16 @@
       tools: [write, edit, str_replace_editor, bash]
       timeoutMs: 5000
 
-# 5. Project memory injection (H5): shells `arxa memory recall` for the
-#    boot cwd and registers it as a system-prompt section. Absolute path —
-#    host-only plugin, no client half to discover.
-- insert:
-  - id: arxa-memory
-    name: /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/memory/index.mjs
-    config:
-      project: !!js process.cwd()
+# 5. Project memory injection (H5) — AGENT-PLANE, moved to the arxa preset
+#    (profile/agent-presets/arxa/agent.cordis.yml, row arxa-memory). A
+#    systemPrompt section is one session's own contribution, not a host
+#    registry; see docs/plans/arxa-harness-and-distribution.md.
 
-# 6. Pi as a delegated subagent engine (decision 3ii): one tool, delegate_pi,
-#    one-shot `pi -p` in the workspace. The spawned Pi inherits
-#    PI_CODING_AGENT_DIR=~/.arxa/pi from bin/arxa-studio.mjs, so the arxa gate
-#    extension rides along. Absolute path — host-only plugin.
-- insert:
-  - id: arxa-pi-delegate
-    name: /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/pi-delegate/index.mjs
+# 6. Pi delegation (decision 3ii) — AGENT-PLANE, moved to the arxa preset
+#    (profile/agent-presets/arxa/agent.cordis.yml, row arxa-pi-delegate). A
+#    tool row belongs with the other delegation tools on the plane that
+#    contributes tools, not the plane that owns registries; see
+#    docs/plans/arxa-harness-and-distribution.md.
 
 # 6b. The arxa sandbox provider (S1, docs/plans/arxa-isolation-levels.md §17-18).
 #     dsh-base's `sandbox` row mounts @deepseek-ai/dsh-sandbox-local, whose
@@ -99,7 +93,8 @@
 #     ordered (arxa-frame/arxa-locale replace ctx.layout/ctx.locale the same way).
 #
 #     Absolute path — host-only plugin, no client half to discover, and arxa
-#     declares no npm dependency on it (same shape as rows 5, 6 and 14).
+#     declares no npm dependency on it (same shape as row 14; rows 5 and 6
+#     were this shape too, before they moved to the arxa preset).
 - id: sandbox
   disabled: true
 - insert:
@@ -124,15 +119,12 @@
   - id: arxa-brand
     name: arxa-brand
 
-# 9. arxa generative UI: the `gen_ui` tool (host half) plus the keyed
-#    `tool.call.toolview` renderer for it (browser half), so a tool result
-#    becomes live React inline in the conversation instead of prose.
-#    Stages 1-3 of arxa/docs/plans/inline-generative-ui-in-dsh.md.
-#    By PACKAGE NAME — the browser half is discovered through package.json
-#    dsh.client, same as the design panel and brand rows above.
-- insert:
-  - id: arxa-gen-ui
-    name: arxa-gen-ui
+# 9. arxa generative UI — AGENT-PLANE, moved to the arxa preset
+#    (profile/agent-presets/arxa/agent.cordis.yml, row arxa-gen-ui). The
+#    `gen_ui` tool is model-facing and per-session, like tool-ask-user and
+#    tool-todo; the browser-side `tool.call.toolview` renderer is still
+#    discovered through package.json dsh.client (unaffected by which cordis
+#    file declares the row) — see docs/plans/arxa-harness-and-distribution.md.
 
 # 10. arxa as an MCP Apps host (SEP-1865) — stage 4. DISABLED BY DEFAULT
 #     because it needs a real MCP server to point at; uncomment BOTH rows to
@@ -252,7 +244,8 @@
 #     and serves the phone over the pairing tunnel: GET /__arxa/approvals +
 #     POST decide → apiProxy.respond (first claimant wins, so the desktop
 #     composer and the phone can never double-answer). Host-only plugin,
-#     absolute path — same shape as rows 5/6 (arxa-memory, arxa-pi-delegate).
+#     absolute path — same shape arxa-memory and arxa-pi-delegate had here
+#     before they moved to the arxa preset (rows 5/6).
 - insert:
   - id: arxa-approvals
     name: /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/approvals/lib/index.js
