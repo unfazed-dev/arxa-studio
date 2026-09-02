@@ -59,11 +59,16 @@
 # registry other sessions read — moved here from the host patch (row 5,
 # docs/plans/arxa-harness-and-distribution.md). Absolute path — host-only
 # plugin, no client half to discover, so the move needed no `name:` change.
-- insert:
-  - id: arxa-memory
-    name: /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/memory/index.mjs
-    config:
-      project: !!js process.cwd()
+# A composition row, not a patch: no `insert:` wrapper — that verb belongs
+# to cordis-plugin-include's PATCH format (profile/cordis.patch.yml only);
+# a preset's agent.cordis.yml is a plain top-level entry list, and
+# dsh-agent-presets' own health check (entryListProblem) requires every row
+# to be a map with a `name` — an `insert:`-wrapped row has none and would
+# mark the whole preset broken.
+- id: arxa-memory
+  name: /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/memory/index.mjs
+  config:
+    project: !!js process.cwd()
 
 # ── shell ───────────────────────────────────────────────────────────────────
 
@@ -275,10 +280,10 @@
 # PI_CODING_AGENT_DIR=~/.arxa/pi from bin/arxa-studio.mjs, so the arxa gate
 # extension rides along. No isolate realm: it registers a tool, not a
 # `workflows` service. Absolute path — host-only plugin, no `name:` change
-# needed for the move.
-- insert:
-  - id: arxa-pi-delegate
-    name: /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/pi-delegate/index.mjs
+# needed for the move. Plain composition row (see the arxa-memory comment
+# above for why no `insert:` wrapper).
+- id: arxa-pi-delegate
+  name: /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/pi-delegate/index.mjs
 
 # ── remaining model-facing rows ─────────────────────────────────────────────
 
@@ -309,7 +314,7 @@
 # preset resolves against the harness's baseUrl, not the preset's own
 # directory), so this `name:` form is unchanged from the host patch. The
 # browser half is still discovered through package.json dsh.client,
-# unaffected by which cordis file declares the row.
-- insert:
-  - id: arxa-gen-ui
-    name: arxa-gen-ui
+# unaffected by which cordis file declares the row. Plain composition row
+# (see the arxa-memory comment above for why no `insert:` wrapper).
+- id: arxa-gen-ui
+  name: arxa-gen-ui

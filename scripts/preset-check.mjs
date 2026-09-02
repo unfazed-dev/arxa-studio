@@ -39,10 +39,31 @@ function collectIds(list, out = new Set()) {
   for (const entry of list) {
     if (!entry || typeof entry !== 'object') continue
     if (entry.id) out.add(entry.id)
-    if (Array.isArray(entry.insert)) collectIds(entry.insert, out)
     if (Array.isArray(entry.config)) collectIds(entry.config, out)
   }
   return out
+}
+
+// Mirrors dsh-agent-presets' own pre-mount health check (entryListProblem in
+// @deepseek-ai/dsh-agent-presets/lib/index.js): every row must be a map with
+// a `name` string, or the WHOLE preset is discovered as broken and refuses
+// to mount. `insert:` is cordis-plugin-include's PATCH verb (the form
+// profile/cordis.patch.yml uses) — a bare `- insert: [...]` row has no
+// `name` and fails this exact check. A preset's agent.cordis.yml must never
+// use it; this function catches that class of mistake mechanically.
+function entryListProblem(rows, at = '') {
+  if (!Array.isArray(rows)) return at === '' ? 'the composition must be a top-level list of plugin rows' : `group ${at} must hold a list of plugin rows`
+  for (const [index, row] of rows.entries()) {
+    const label = at === '' ? `row ${index + 1}` : `${at} row ${index + 1}`
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return `${label} is not a plugin row (expected a map with a "name")`
+    if (row.insert !== undefined) return `${label} uses the patch-only \`insert:\` verb — not valid in a preset composition`
+    const { name, group, config } = row
+    if (typeof name !== 'string' || name === '') return `${label} names no plugin (a "name" string is required)`
+    if (group === true) {
+      const nested = entryListProblem(config, label)
+      if (nested !== undefined) return nested
+    }
+  }
 }
 
 let failed = 0
@@ -71,6 +92,10 @@ check('agent.cordis.yml parses and has all expected row ids', missing.length ===
   missing.length ? 'missing: ' + missing.join(', ') : '')
 check('agent.cordis.yml has no tool-cordis / skill-authoring rows',
   !presetIds.has('tool-cordis'))
+
+const shapeProblem = entryListProblem(presetEntries)
+check('agent.cordis.yml rows match dsh-agent-presets\' health check shape (no `insert:`, every row has a name)',
+  shapeProblem === undefined, shapeProblem || '')
 
 const metadata = yaml.load(readFileSync(metadataFile, 'utf8'))
 check('preset.yml has name/description/order',
