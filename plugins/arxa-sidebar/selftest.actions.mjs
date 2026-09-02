@@ -25,6 +25,7 @@ const here = path.dirname(new URL(import.meta.url).pathname)
 const shell = await import(path.join(here, '..', 'file-org-shell', 'lib', 'index.js'))
 shell.saveWorkspaceRoot(root)
 const gw = await import(path.join(here, '..', 'git-workspace', 'lib', 'index.js'))
+const ws = await import(path.join(here, '..', 'workspace', 'lib', 'index.js'))
 
 const routes = {}
 const host = await import(path.join(here, 'lib', 'index.js'))
@@ -79,6 +80,24 @@ async function makeSession(org, workspace = 'notes') {
   const r = await act('workspace.new-session', { orgId: org.id, workspace })
   if (!r.ok) throw new Error('workspace.new-session failed: ' + r.error)
   return r.result.id
+}
+
+/** Scaffold a project WITH its own repo (D98/D99) — the same fixture shape
+  * smoke.mjs uses for 'projects/<slug>/<container>' sessions. */
+async function makeProject(org, slug) {
+  const proj = ws.scaffoldProject(org.path, slug)
+  if (!proj?.path) throw new Error('scaffoldProject failed for ' + slug)
+  gw.initProjectRepo(proj.path)
+  return proj
+}
+
+/** Same idea as patchManifest but for a PROJECT's own project.json — a
+  * project repo has its own repoOwner/repoName, independent of its org's. */
+async function patchProjectManifest(projPath, patch) {
+  const fs = await import('node:fs')
+  const p = path.join(projPath, 'project.json')
+  const cur = JSON.parse(fs.readFileSync(p, 'utf8'))
+  fs.writeFileSync(p, JSON.stringify({ ...cur, ...patch }, null, 2))
 }
 
 // ============================================================
@@ -173,6 +192,39 @@ async function makeSession(org, workspace = 'notes') {
   const r = await act('workspace.new-session', { orgId: org.id, workspace: 'notes' })
   check('D111: pending (not asleep) proceeds with notice checks-pending',
     r.ok === true && r.result.notice === 'checks-pending', JSON.stringify(r))
+}
+{
+  // D5: project-routed workspace — the gate must check the PROJECT's own
+  // repo/manifest, not the org's. Org repo is green; project repo is red.
+  // A session on 'notes' (org route) must sail through while a session on
+  // the project's own container must throw main-red — proving the checks
+  // call actually targeted the project repo, not the org's.
+  const org = await makeOrg('Gate Project Co')
+  await patchManifest(org.path, { repoOwner: 'acme', repoName: 'org-repo', localOnly: false })
+  const proj = await makeProject(org, 'rocket')
+  await patchProjectManifest(proj.path, { repoOwner: 'acme', repoName: 'project-repo', localOnly: false })
+  fakeGh.prChecks = async (owner, name) =>
+    name === 'project-repo' ? { state: 'red', asleep: false, runs: [] } : { state: 'green', asleep: false, runs: [] }
+
+  const orgSession = await act('workspace.new-session', { orgId: org.id, workspace: 'notes' })
+  check('D111 (project-routed): org-repo session unaffected by the project repo being red',
+    orgSession.ok === true && orgSession.result.notice === null, JSON.stringify(orgSession))
+
+  const projSession = await act('workspace.new-session', { orgId: org.id, workspace: 'projects/rocket/02-design' })
+  check('D111 (project-routed): project-repo session gated on the PROJECT manifest, not the org\'s',
+    projSession.ok === false && projSession.error === 'main-red', JSON.stringify(projSession))
+}
+{
+  // D6: project repo unlinked (no repoOwner on project.json) while the ORG
+  // itself is linked and green — must proceed with notice null, not fall
+  // back to reading the org's linked/green state for a project session.
+  const org = await makeOrg('Gate Project Unlinked Co')
+  await patchManifest(org.path, { repoOwner: 'acme', repoName: 'org-repo', localOnly: false })
+  await makeProject(org, 'rocket')
+  fakeGh.prChecks = async () => ({ state: 'red', asleep: false, runs: [] }) // org would be red if (wrongly) consulted
+  const r = await act('workspace.new-session', { orgId: org.id, workspace: 'projects/rocket/02-design' })
+  check('D111 (project-routed): unlinked project proceeds with notice null (does not fall back to org)',
+    r.ok === true && r.result.notice === null, JSON.stringify(r))
 }
 
 // ============================================================

@@ -1065,17 +1065,32 @@ export function apply(ctx, opts = {}) {
               // must never stop a session from starting. Unlinked/local-only
               // repos and any API failure proceed silently (infrastructure
               // never blocks); the notice rides along for the client to show.
+              //
+              // A workspace can route to the org repo OR a project's own
+              // repo (D98/D99) — a project has its own manifest and its own
+              // GitHub link, independent of the org's. Gate against whatever
+              // repo the session will actually land in, not always the org.
+              // `newSession` below performs its own routing/validation and
+              // stays the sole source of truth for workspace-shape errors —
+              // a resolution failure here just means "can't tell it's
+              // linked", so it is treated the same as unlinked (notice null)
+              // and the real error still surfaces from `newSession` itself.
               let notice = null
               const g = await getGithub().catch(() => null)
-              let manifest = {}
-              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
-              if (g && manifest.repoOwner && manifest.repoName && !manifest.localOnly) {
+              if (g) {
                 const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
-                const checks = await mainChecksFor(cur.path, manifest, g, gw).catch(() => null)
-                if (checks) {
-                  if (checks.state === 'red') throw new Error('main-red')
-                  if (checks.asleep) notice = 'runner-asleep'
-                  else if (checks.state === 'pending') notice = 'checks-pending'
+                let route = null
+                try { route = gw.resolveSessionRepo(cur.path, ws, { env: process.env }) } catch { route = null }
+                if (route) {
+                  const manifestFile = route.repoPath + (route.kind === 'project' ? '/project.json' : '/org.json')
+                  let manifest = {}
+                  try { manifest = JSON.parse((await import('node:fs')).readFileSync(manifestFile, 'utf8')) } catch {}
+                  const checks = await mainChecksFor(route.repoPath, manifest, g, gw).catch(() => null)
+                  if (checks) {
+                    if (checks.state === 'red') throw new Error('main-red')
+                    if (checks.asleep) notice = 'runner-asleep'
+                    else if (checks.state === 'pending') notice = 'checks-pending'
+                  }
                 }
               }
               const session = await cur.newSession(undefined, ws)
