@@ -79,7 +79,7 @@
 # to be a map with a `name` — an `insert:`-wrapped row has none and would
 # mark the whole preset broken.
 - id: arxa-memory
-  name: /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/memory/index.mjs
+  name: /Volumes/business_ssd/arxa_digital_solutions/arxa-studio/plugins/memory/index.mjs
   config:
     project: !!js process.cwd()
 
@@ -296,7 +296,7 @@
 # needed for the move. Plain composition row (see the arxa-memory comment
 # above for why no `insert:` wrapper).
 - id: arxa-pi-delegate
-  name: /Volumes/developer_ssd/Developer/totem_labs/arxa-studio/plugins/pi-delegate/index.mjs
+  name: /Volumes/business_ssd/arxa_digital_solutions/arxa-studio/plugins/pi-delegate/index.mjs
 
 # ── remaining model-facing rows ─────────────────────────────────────────────
 
