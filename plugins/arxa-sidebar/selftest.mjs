@@ -168,6 +168,9 @@ check('card A2: PR polling is scoped to the approve slide (no idle GitHub traffi
   client.includes('if (slide !== 2 || !sid) return void 0')
   && /refreshPr\(\);\s*\n\s*if \(prNumber == null\) return void 0;\s*\n\s*const id = window\.setInterval/.test(client))
 check('card A2: the teaser PR part reads card.pr.status once per session — card.status (ade8f2e) has no pr/checks',
+  // The gate skips local-only orgs only. It is NOT a claim that every call it
+  // lets through can succeed: org-not-published and project-session-pr-pending
+  // both still throw, refreshPr swallows them, and the teaser stays PR-less.
   client.includes('const prReadable = Boolean(data && data.linked && !data.localOnly)')
   && /if \(!sid \|\| !prReadable\) return void 0;\s*\n\s*refreshPr\(\);/.test(client)
   // One source for every PR fact: the dead card.status fallbacks are gone.

@@ -3220,6 +3220,20 @@ window.__ModuleLoader__.load({
 				if (!sid) return Promise.resolve();
 				return ORG_POST("card.pr.status", { sessionId: sid }).then((r) => setPrState(r.result), () => {});
 			}, [sid]);
+			/* A once-per-session PR read, so the TEASER can name the PR without the
+			 * user first walking to the approve slide. card.status carries no pr and
+			 * no checks (its shape is settled, ade8f2e), so card.pr.status is the
+			 * only source for either.
+			 *
+			 * This gate skips the LOCAL-ONLY case and nothing else. It is not a
+			 * complete filter: card.status reports `linked` from the org manifest's
+			 * repoUrl, while card.pr.status throws org-not-published on a missing
+			 * repoOwner/repoName and project-session-pr-pending for a project-origin
+			 * session — neither of which repoUrl predicts. Those calls still go out
+			 * and still throw; refreshPr swallows the error and the teaser stays
+			 * PR-less. The gate earns its place because a local-only org is the
+			 * common case that can NEVER have a PR, not because it makes every
+			 * remaining call a valid one. */
 			const prReadable = Boolean(data && data.linked && !data.localOnly);
 			react.useEffect(() => {
 				if (!sid || !prReadable) return void 0;
