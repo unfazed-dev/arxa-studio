@@ -1148,6 +1148,58 @@ scope, as the Phase 4 plan §6 says; only the card block is conformant.
 **Verified.** `selftest.actions.mjs` 16/16, `selftest.mjs` ALL GREEN,
 `smoke.mjs` ALL GREEN, `ci.mjs` 29/29 on the merged tree.
 
+### D118 — arxa's agent preset split from the host cordis patch (Phase 4 P2).
+
+**What landed.**
+
+- `a89b02e` — `profile/agent-presets/arxa/agent.cordis.yml` (new): the three
+  rows that belong to a SESSION — `arxa-memory`, `arxa-pi-delegate`,
+  `arxa-gen-ui` — moved out of `profile/cordis.patch.yml`, which keeps only
+  HOST-plane rows (webserver, sandbox policy, model route). Plain `- id:`
+  entries, NOT `insert:` blocks: `insert:` is the patch-application verb the
+  HOST patch uses; inside a preset it is an `entryListProblem` and the whole
+  preset would refuse to mount. `bin/arxa-studio.mjs --materialise-only`
+  copies the patch + preset, rewrites `~/.arxa/dsh/settings.yaml`
+  (`agent-presets.default: cordis` → `arxa`), exits 0, never starts the
+  server. `scripts/preset-check.mjs` (new, 8 checks) validates the
+  materialised preset against the real `@deepseek-ai/dsh-agent-presets`
+  loader and is wired explicitly into `scripts/ci.mjs` (it does not
+  auto-discover `scripts/*.mjs`).
+- `f14576d` — drops a stray `insert:` wrapper the first commit left in the
+  preset (caught by `preset-check.mjs` before the report went out).
+- `09b6c4f` — comment-only: names which of the three rows use absolute paths
+  vs bare package names (bare names resolve against the HOST composition's
+  `node_modules`, only relative paths need the preset's own `baseUrl`).
+
+**Noted, not changed.** The shipped `standard`/`cordis` presets' own
+`agent-instructions` row has no `instructionFileCandidates`, so the preset
+reads AGENTS.md + CLAUDE.md by default; the host patch restricts to
+`[AGENTS.md]` only. Pre-existing, not a regression — surfaced for a later
+decision. `js-yaml` is used by `preset-check.mjs` as a transitive dep of
+`@deepseek-ai/dsh-agent-presets`, not declared in `package.json`.
+
+**Verified.** `preset-check.mjs` 8/8, `ci.mjs` 29/29, `settings.yaml`
+byte-identical after a second `--materialise-only` run.
+
+### D119 — `artifact-viewer/selftest.mjs` Task 11 flake is test-side; watcher unchanged.
+
+**Symptom.** "rapid writes coalesce to one event, got 0" — twice out of ~10
+runs, once inside CI's parallel wave and once standalone right after it.
+
+**Measured (macOS FSEvents, 2026-09-02).** A write made immediately after
+`setRoot` is never reported 1/40 runs; 0/40 once the watcher has had 300 ms —
+so the loss is startup-only (the recursive `fs.watch` arms asynchronously).
+Separately, under concurrent fs churn 4/20 events arrive later than the
+test's fixed 400 ms wait (idle median 68 ms, loaded median 372 ms, max 461).
+Nothing was lost once armed and given time. The product is unaffected: the
+org root is set at open, edits come later, and no consumer waits on a
+deadline.
+
+**Fix.** `3370a37` — the test writes a probe file and waits until it is
+reported (proves armed), counts only `a.md` events, and replaces every fixed
+sleep in Task 11 (coalescing and the SSE push) with a condition wait capped
+at 5 s. 5/5 standalone runs and `ci.mjs` 29/29 green after the change.
+
 **Gap found, being closed.** The user-facing new-session button lives in the
 generated shell (`scripts/gen-sidebar.mjs:73`), whose handler drops `!b.ok`
 and swallows the catch — so a `main-red` refusal was SILENT (click, nothing
