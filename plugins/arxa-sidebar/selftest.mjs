@@ -658,14 +658,17 @@ check('client: actions ride the sidebar route and reload the list after one land
   client.includes('ORG_POST("agent.list"') && client.includes('ORG_POST("agent." + verb'))
 check('client: a host refusal (ok:false) surfaces its reason instead of a silent refresh',
   client.includes('if (r && r.ok === false) setNote(t("agents.why." + String(r.reason || "unavailable")))'))
-check('client: a cold session reads as unreachable, never as "no jobs"',
-  client.includes('r.jobsReadable === false'))
+check('client: jobs come from the client store — no host API can enumerate or stop them',
+  client.includes('function arxaJobRow(') && client.includes('why: { pause: "no-job-api", resume: "no-job-api", cancel: "no-job-api" }')
+  && client.includes('if (kind === "jobs") { setRows(given || []); setNote(""); return; }'))
+check('client: the panel is handed the rows, since it lives in another bundle',
+  client.includes('openAgentPanel(kind, sessionId, rows)') && client.includes('rows: rows || null'))
 check('client: the dropdown row reveals its actions on hover (stock ToolRow behaviour)',
   client.includes('.aXa_agentActs{') && client.includes('.aXa_agentRow:hover .aXa_agentActs,.aXa_agentActs:focus-within{opacity:1}'))
-check('client: the dropdown taps through to the side panel',
-  client.includes('aXa_agentDetails') && client.includes('openAgentPanel(kind, sessionId)'))
+check('client: the dropdown taps through to the side panel, carrying its rows',
+  client.includes('aXa_agentDetails') && client.includes('openAgentPanel(kind, sessionId, rows)'))
 check('client: agent verb + reason strings localized in en/pl/fr',
-  ['agents.pause', 'agents.cancel', 'agents.why.no-terminate-verb', 'agents.why.owner-not-live'].every((k) => (client.split('"' + k + '":').length - 1) === 3))
+  ['agents.pause', 'agents.cancel', 'agents.why.no-terminate-verb', 'agents.why.no-job-api'].every((k) => (client.split('"' + k + '":').length - 1) === 3))
 
 console.log(failures === 0 ? '\narxa-sidebar selftest: ALL GREEN' : `\narxa-sidebar selftest: ${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)

@@ -250,6 +250,7 @@ window.__ModuleLoader__.load({
       'agents.why.send-message': 'A paused subagent resumes when you send it a message.',
       'agents.why.no-terminate-verb': 'The engine has no way to terminate a subagent — pause is the only stop.',
       'agents.why.jobs-have-no-pause': 'Background jobs cannot be paused — only cancelled.',
+      'agents.why.no-job-api': 'This engine build exposes no way to control a background job — it can only be watched.',
       'agents.why.already-finished': 'This one has already finished.',
       'agents.why.owner-not-live': 'This session is not live, so its jobs cannot be reached.',
       'agents.why.service-unavailable': 'This engine build does not provide that service.',
@@ -326,6 +327,7 @@ window.__ModuleLoader__.load({
       'agents.why.send-message': 'Wstrzymany podagent wznawia się po wysłaniu mu wiadomości.',
       'agents.why.no-terminate-verb': 'Silnik nie potrafi zakończyć podagenta — wstrzymanie to jedyne zatrzymanie.',
       'agents.why.jobs-have-no-pause': 'Zadań w tle nie można wstrzymać — tylko anulować.',
+      'agents.why.no-job-api': 'Ta wersja silnika nie pozwala sterować zadaniem w tle — można je tylko obserwować.',
       'agents.why.already-finished': 'To już się zakończyło.',
       'agents.why.owner-not-live': 'Ta sesja nie jest aktywna, więc jej zadania są nieosiągalne.',
       'agents.why.service-unavailable': 'Ta wersja silnika nie udostępnia tej usługi.',
@@ -402,6 +404,7 @@ window.__ModuleLoader__.load({
       'agents.why.send-message': 'Un sous-agent suspendu reprend lorsque vous lui envoyez un message.',
       'agents.why.no-terminate-verb': 'Le moteur ne sait pas terminer un sous-agent — suspendre est le seul arrêt.',
       'agents.why.jobs-have-no-pause': 'Les tâches en arrière-plan ne se suspendent pas — elles s’annulent.',
+      'agents.why.no-job-api': 'Cette version du moteur n’offre aucun contrôle sur une tâche en arrière-plan — seulement son suivi.',
       'agents.why.already-finished': 'Celle-ci est déjà terminée.',
       'agents.why.owner-not-live': 'Cette session n’est pas active, ses tâches sont donc inaccessibles.',
       'agents.why.service-unavailable': 'Cette version du moteur ne fournit pas ce service.',
@@ -771,7 +774,7 @@ window.__ModuleLoader__.load({
       if (run.conclusion === 'failure' || run.conclusion === 'timed_out') return 'error'
       return 'warning'
     }
-    function InsightPanel({ t, view, sessionId, orgId }) {
+    function InsightPanel({ t, view, sessionId, orgId, given }) {
       const [phase, setPhase] = React.useState('loading')
       const [data, setData] = React.useState(null)
       const [note, setNote] = React.useState('')
@@ -782,8 +785,11 @@ window.__ModuleLoader__.load({
       const load = React.useCallback(() => {
         let live = true
         setPhase('loading')
-        const agentView = view === 'jobs' || view === 'subagents'
-        const action = agentView ? 'agent.list' : 'insight.' + view
+        // Jobs never round-trip: JobView is push-only, so the rows arrive
+        // from the sidebar's store through the open event. Nothing on the host
+        // can enumerate or stop them (no job.* RPC, no jobs on the ApiProxy).
+        if (view === 'jobs') { setData({ jobs: given || [] }); setPhase('ready'); return () => {} }
+        const action = view === 'subagents' ? 'agent.list' : 'insight.' + view
         const arg = view === 'sessions' ? { orgId } : { sessionId }
         postAction(action, arg).then((res) => {
           if (!live) return
@@ -803,7 +809,7 @@ window.__ModuleLoader__.load({
           setPhase('error')
         })
         return () => { live = false }
-      }, [view, sessionId, orgId])
+      }, [view, sessionId, orgId, given])
       React.useEffect(() => load(), [load, tick])
       // Stock grammar (docs/plans/git-card-stock-dock-rebuild.md §4): the
       // report is a ToolDetails card body; metrics are ToolRow IN/OUT
@@ -872,7 +878,6 @@ window.__ModuleLoader__.load({
       // agent.* block for why a subagent pauses and a job cancels.
       if (view === 'jobs' || view === 'subagents') {
         const list = (view === 'jobs' ? d.jobs : d.subagents) || []
-        if (view === 'jobs' && d.jobsReadable === false) return empty(t('agents.why.owner-not-live'))
         if (list.length === 0) return empty(t(view === 'jobs' ? 'agents.jobs.empty' : 'agents.subagents.empty'))
         const verbAction = (row, verb) => {
           const allowed = row.can && row.can[verb] === true
@@ -1031,7 +1036,7 @@ window.__ModuleLoader__.load({
         if (!p) return
         if (p.kind === 'insight') {
           setOpen(true)
-          setState({ phase: 'insight', view: p.view, sessionId: p.sessionId || null, orgId: p.orgId || null })
+          setState({ phase: 'insight', view: p.view, sessionId: p.sessionId || null, orgId: p.orgId || null, rows: p.rows || null })
           return
         }
         if (p.sessionId && p.relPath) {
@@ -1445,7 +1450,7 @@ window.__ModuleLoader__.load({
               h(P.IconEditOutline16, { size: 14 }),
               h('span', { className: 'aXa_av_changePath' }, f.relPath || f)))))
       } else if (state.phase === 'insight') {
-        body = h(InsightPanel, { t, view: state.view, sessionId: state.sessionId, orgId: state.orgId })
+        body = h(InsightPanel, { t, view: state.view, sessionId: state.sessionId, orgId: state.orgId, given: state.rows || null })
       } else if (state.phase === 'loading') {
         body = h('div', { className: 'aXa_av_idle' }, h('div', { className: 'aXa_av_hint' }, t('loading') + ' ' + state.relPath))
       } else if (state.phase === 'error') {

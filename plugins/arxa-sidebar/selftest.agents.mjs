@@ -56,25 +56,16 @@ const children = [
   // A diagnostic candidate is not a controllable row and must be dropped.
   { kind: 'diagnostic', id: 'c-bad', reason: 'corrupt' },
 ]
-const jobSnaps = [
-  { id: 'bash-1', kind: 'bash', label: 'long build', status: 'running', ownerSession: PARENT, startedAt: 1 },
-  { id: 'bash-2', kind: 'bash', label: 'finished build', status: 'completed', ownerSession: PARENT, startedAt: 1, finishedAt: 2 },
-  // Another session's job must never appear on this session's surface.
-  { id: 'bash-9', kind: 'bash', label: 'someone else', status: 'running', ownerSession: 'other', startedAt: 1 },
-]
+const okRes = (rpcId, value) => ({ rpcId, result: { ok: true, value } })
 
 // ---- 1. the full matrix, everything live -----------------------------------
 const interrupts = []
-const kills = []
 const act = mount({
-  agents: { get: (id) => (id === PARENT ? OWNER : undefined) },
-  subagents: {
-    listChildren: async () => children,
-    interrupt: (id, authority) => { interrupts.push([id, authority]) },
-  },
-  jobs: {
-    list: (caller) => (caller === OWNER ? jobSnaps : []),
-    kill: (id, caller, reason) => { kills.push([id, caller, reason]); return 'requested' },
+  apiProxy: {
+    subagents: {
+      list: async (req) => okRes(req.rpcId, { entries: children, parentAvailable: true }),
+      interrupt: async (req) => { interrupts.push(req.payload); return okRes(req.rpcId, { accepted: true }) },
+    },
   },
 })
 
@@ -84,8 +75,8 @@ const sub = Object.fromEntries((rows.subagents || []).map((x) => [x.id, x]))
 const job = Object.fromEntries((rows.jobs || []).map((x) => [x.id, x]))
 
 check('list: diagnostic candidates are not controllable rows', (rows.subagents || []).length === 3 && !sub['c-bad'])
-check('list: only this session\'s jobs are surfaced', (rows.jobs || []).length === 2 && !job['bash-9'], JSON.stringify(rows.jobs))
-check('list: reports the live parent and both services', rows.parentLive === true && rows.services.subagents === true && rows.services.jobs === true && rows.jobsReadable === true)
+check('list: jobs are declared unreachable rather than reported empty', rows.jobsControllable === false && rows.jobsReason === 'no-job-api' && rows.jobsReadable === false)
+check('list: reports the live parent and the subagent service', rows.parentLive === true && rows.services.subagents === true && rows.services.jobs === false)
 
 check('matrix: a running continuable subagent PAUSES (the only live pause)',
   sub['c-run'].can.pause === true && sub['c-run'].can.cancel === false && sub['c-run'].can.resume === false)
@@ -97,24 +88,17 @@ check('matrix: a one-shot child offers nothing, and says why (interrupt is a doc
   sub['c-shot'].can.pause === false && sub['c-shot'].why.pause === 'one-shot' && sub['c-shot'].why.resume === 'one-shot')
 check('matrix: resume is never live — waking a paused child needs a message the human writes',
   Object.values(sub).every((x) => x.can.resume === false) && sub['c-run'].why.resume === 'send-message')
-check('matrix: a running job CANCELS (the only live cancel) and cannot pause',
-  job['bash-1'].can.cancel === true && job['bash-1'].can.pause === false && job['bash-1'].why.pause === 'jobs-have-no-pause')
-check('matrix: a finished job cannot cancel, and says why',
-  job['bash-2'].can.cancel === false && job['bash-2'].why.cancel === 'already-finished')
+check('matrix: no job rows come from the host at all — it has no API to enumerate them',
+  Object.keys(job).length === 0)
 
 // ---- 2. the two live verbs actually reach the runtime -----------------------
 r = await act('agent.pause', { sessionId: PARENT, kind: 'subagent', id: 'c-run' })
-check('pause: interrupts the named child under THIS session\'s human authority',
+check('pause: interrupts the named child, addressed to THIS session as parent',
   r.result.ok === true && interrupts.length === 1
-  && interrupts[0][0] === 'c-run'
-  && interrupts[0][1].kind === 'user' && interrupts[0][1].parentSessionId === PARENT,
+  && interrupts[0].childSessionId === 'c-run'
+  && interrupts[0].parentSessionId === PARENT
+  && interrupts[0].mode === 'continuable',
   JSON.stringify(interrupts))
-
-r = await act('agent.cancel', { sessionId: PARENT, kind: 'job', id: 'bash-1' })
-check('cancel: kills the named job as the OWNER agent (the fence jobs.kill enforces)',
-  r.result.ok === true && r.result.outcome === 'requested'
-  && kills.length === 1 && kills[0][0] === 'bash-1' && kills[0][1] === OWNER,
-  JSON.stringify(kills.map((k) => [k[0], k[1] === OWNER])))
 
 // ---- 3. every refusal is structured, never a thrown error -------------------
 r = await act('agent.resume', { sessionId: PARENT, kind: 'subagent', id: 'c-run' })
@@ -122,33 +106,35 @@ check('resume: refuses with the reason a paused child actually wakes by',
   r.ok === true && r.result.ok === false && r.result.reason === 'send-message')
 r = await act('agent.cancel', { sessionId: PARENT, kind: 'subagent', id: 'c-run' })
 check('cancel on a subagent: refused as no-terminate-verb, not attempted',
-  r.result.ok === false && r.result.reason === 'no-terminate-verb' && kills.length === 1)
+  r.result.ok === false && r.result.reason === 'no-terminate-verb')
+r = await act('agent.cancel', { sessionId: PARENT, kind: 'job', id: 'bash-1' })
+check('cancel on a job: refused as no-job-api — a different gap, a different reason',
+  r.result.ok === false && r.result.reason === 'no-job-api')
 r = await act('agent.pause', { sessionId: PARENT, kind: 'job', id: 'bash-1' })
-check('pause on a job: refused as jobs-have-no-pause, not attempted',
-  r.result.ok === false && r.result.reason === 'jobs-have-no-pause' && interrupts.length === 1)
+check('pause on a job: refused as no-job-api, and never reaches the subagent runtime',
+  r.result.ok === false && r.result.reason === 'no-job-api' && interrupts.length === 1)
 r = await act('agent.list', {})
 check('a missing sessionId is refused loudly, never guessed', r.ok === false && r.error === 'sessionId-required')
 
 // ---- 4. a cold session: jobs unreachable, subagents still listable ----------
 const cold = mount({
-  agents: { get: () => undefined },
-  subagents: { listChildren: async () => children, interrupt: () => {} },
-  jobs: { list: () => jobSnaps, kill: () => 'requested' },
+  apiProxy: {
+    subagents: {
+      list: async (req) => okRes(req.rpcId, { entries: children, parentAvailable: false }),
+      interrupt: async (req) => okRes(req.rpcId, { accepted: true }),
+    },
+  },
 })
 r = await cold('agent.list', { sessionId: PARENT })
-check('cold session: jobs are UNREACHABLE rather than reported empty',
-  r.result.jobsReadable === false && r.result.jobs.length === 0 && r.result.parentLive === false)
-check('cold session: subagents still list — listChildren needs no live Agent',
-  r.result.subagents.length === 3)
-r = await cold('agent.cancel', { sessionId: PARENT, kind: 'job', id: 'bash-1' })
-check('cold session: cancel refuses with owner-not-live instead of throwing',
-  r.ok === true && r.result.ok === false && r.result.reason === 'owner-not-live')
+check('cold parent: subagents still list — the catalog needs no live parent Agent',
+  r.result.subagents.length === 3 && r.result.parentLive === false)
 
 // ---- 5. a profile without the services: degrade, never take the sidebar down -
 // cordis' ReflectService THROWS on an unregistered service ("cannot get
 // property X without inject") rather than reading undefined — optional
 // chaining alone would not survive this, so the handler try/catches. This
-// fake reproduces that exact behaviour.
+// fake reproduces that exact behaviour, which is what a build without an
+// apiProxy would do to this route.
 const throwing = new Proxy({ webServer: null }, {
   get(target, prop) {
     if (prop === 'webServer') return target.webServer
@@ -166,12 +152,12 @@ const bare = (action, arg) => new Promise((res) => {
   queueMicrotask(() => { req._h.data?.(JSON.stringify({ action, arg })); req._h.end?.() })
 })
 r = await bare('agent.list', { sessionId: PARENT })
-check('no services: the surface degrades to empty-with-a-reason, it does not crash',
-  r.ok === true && r.result.services.subagents === false && r.result.services.jobs === false
+check('no apiProxy: the surface degrades to empty-with-a-reason, it does not crash',
+  r.ok === true && r.result.services.subagents === false
   && r.result.subagents.length === 0 && r.result.jobs.length === 0,
   JSON.stringify(r))
 r = await bare('agent.pause', { sessionId: PARENT, kind: 'subagent', id: 'c-run' })
-check('no services: pause refuses as service-unavailable',
+check('no apiProxy: pause refuses as service-unavailable',
   r.result.ok === false && r.result.reason === 'service-unavailable')
 
 console.log(failures === 0 ? '\narxa-sidebar agent-control selftest: ALL GREEN' : `\narxa-sidebar agent-control selftest: ${failures} FAILURE(S)`)

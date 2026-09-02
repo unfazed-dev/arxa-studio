@@ -125,7 +125,9 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   assert.match(t5client, /phase: 'insight', view: p\.view/, 'the consume branch sets the insight phase')
   assert.match(t5client, /\} else if \(state\.phase === 'insight'\) \{\n\s*body = h\(InsightPanel,/,
     'the body renders InsightPanel for the insight phase and the file flow otherwise')
-  assert.match(t5client, /function InsightPanel\(\{ t, view, sessionId, orgId \}\)/, 'InsightPanel exists with the four-prop face')
+  // `given` joined the face when jobs stopped round-tripping: JobView is
+  // push-only, so those rows arrive from the sidebar's store via the event.
+  assert.match(t5client, /function InsightPanel\(\{ t, view, sessionId, orgId, given \}\)/, 'InsightPanel exists with the five-prop face')
   assert.match(t5client, /body: JSON\.stringify\(\{ action, arg \}\)/, 'InsightPanel posts {action,arg} — the same shape the git card uses')
   assert.match(t5client, /const arg = view === 'sessions' \? \{ orgId \} : \{ sessionId \}/,
     'sessions is org-keyed; streak and CI are session-keyed')
@@ -551,11 +553,12 @@ assert.ok(clientSrc.includes("act('ci-rerun', 'card.ci.rerun', { sessionId, runI
 // header dropdown carries, on the full record. agent.* is a SIDEBAR action:
 // a session's children are not a git concern and must not ride the card route.
 assert.ok(clientSrc.includes("const ROUTE_FOR = (action) => (/^agent\\./.test(action) ? SIDEBAR_ROUTE : CARD_ROUTE)"), 'agent.* is routed to the sidebar host, not the card host')
-assert.ok(clientSrc.includes("const action = agentView ? 'agent.list' : 'insight.' + view"), 'the agent views ask agent.list rather than a non-existent insight.jobs')
+assert.ok(clientSrc.includes("const action = view === 'subagents' ? 'agent.list' : 'insight.' + view"), 'subagents ask agent.list rather than a non-existent insight.subagents')
+assert.ok(clientSrc.includes("if (view === 'jobs') { setData({ jobs: given || [] }); setPhase('ready'); return () => {} }"), 'jobs never round-trip: JobView is push-only, the rows ride the open event')
 assert.match(clientSrc, /view === 'jobs' \|\| view === 'subagents'/, 'both agent views render')
 assert.ok(clientSrc.includes("row.can && row.can[verb] === true"), 'panel verbs are gated by the host capability map, never inferred')
 assert.ok(clientSrc.includes("t('agents.why.' + String(why || 'unavailable'))"), 'a disabled panel verb explains itself')
-assert.ok(clientSrc.includes("d.jobsReadable === false"), 'a cold session reads as unreachable, not as "no jobs"')
+assert.equal(clientSrc.split("'agents.why.no-job-api':").length - 1, 3, 'the job-control gap is stated in en/pl/fr')
 assert.ok(clientSrc.includes("if (r && r.ok === false) { setNote(t('agents.why.' + String(r.reason || 'unavailable'))); return }"), 'a refused verb surfaces its reason instead of a silent refresh')
 for (const k of ['agents.pause', 'agents.cancel', 'agents.why.no-terminate-verb', 'insight.title.jobs', 'insight.title.subagents']) {
   assert.equal(clientSrc.split("'" + k + "':").length - 1, 3, k + ' present in en/pl/fr')

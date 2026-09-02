@@ -842,27 +842,53 @@ export function apply(ctx, opts = {}) {
            * the gap is the feature; a button that lies is not.
            */
           if (action.startsWith('agent.')) {
-            // A service the profile did not load THROWS on property access
-            // ("cannot get property X without inject", cordis ReflectService)
-            // rather than reading undefined — optional chaining is not enough
-            // here. A missing service degrades the whole surface to
-            // disabled-with-reason instead of taking the sidebar down with it.
-            const svc = (key) => { try { return ctx[key] ?? null } catch { return null } }
-            const subagents = svc('subagents')
-            const jobs = svc('jobs')
+            /**
+             * TRANSPORT (corrected 2026-09-03 against a live engine).
+             *
+             * `ctx.subagents` and `ctx.jobs` are NOT reachable from a
+             * top-level plugin. Both are composed under the agent scope, so
+             * this context's `reflect.get` resolves neither, and a bare
+             * property read throws cordis' "without inject". Adding them to
+             * this plugin's `inject` would not help — the service is not in
+             * this fiber's store at all — and would make a missing service
+             * stop the whole arxa shell from loading.
+             *
+             * `ctx.apiProxy` IS reachable (plugins/approvals and
+             * plugins/conversation already inject it), and it exposes the
+             * subagent domain over the same code path the browser's RPC uses.
+             * Verified live: `subagent.list` answers while the direct property
+             * read reports nothing (scripts/agent-services-probe.mjs).
+             *
+             * JOBS HAVE NO API. `JobView` is push-only — jobs reach the client
+             * through the event stream (`state.jobsBySession`), and there is
+             * no `job.*` RPC and no jobs field on the ApiProxy. So a job
+             * cannot be cancelled from any plugin surface in this build. The
+             * client lists them from its own store; this host says so plainly
+             * rather than shipping a cancel button that cannot fire.
+             */
+            const rpc = () => ({ rpcId: 'arxa-' + Math.random().toString(36).slice(2) })
+            const proxy = (() => {
+              try {
+                const viaReflect = ctx.reflect?.get?.('apiProxy')
+                if (viaReflect) return viaReflect
+              } catch { /* fall through */ }
+              try { return ctx.apiProxy ?? null } catch { return null }
+            })()
             const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
             if (!sid) return json(res, { ok: false, error: 'sessionId-required', action })
-            // `jobs.list`/`jobs.kill` fence on the OWNER agent: a cold session
-            // has no live Agent, so its jobs are neither listable nor
-            // killable. That is a disabled-with-reason state, not an error.
-            let parent = null
-            try { parent = ctx.agents?.get(sid) ?? null } catch { parent = null }
+            /** Unwrap an RpcResponse; a refusal reads as absence, never a throw. */
+            const value = async (call) => {
+              try {
+                const r = await call
+                return r?.result?.ok === true ? r.result.value : null
+              } catch { return null }
+            }
 
             const subRows = async () => {
-              if (!subagents) return []
-              let children = []
-              try { children = await subagents.listChildren(sid) } catch { return [] }
-              return (children ?? []).filter((c) => c && c.kind === 'child').map((c) => {
+              if (!proxy?.subagents?.list) return { rows: [], parentAvailable: false }
+              const cat = await value(proxy.subagents.list({ ...rpc(), payload: { parentSessionId: sid } }))
+              if (!cat) return { rows: [], parentAvailable: false }
+              const rows = (cat.entries ?? []).filter((c) => c && c.kind === 'child').map((c) => {
                 const continuable = c.mode === 'continuable'
                 const running = c.activity === 'running'
                 return {
@@ -880,71 +906,53 @@ export function apply(ctx, opts = {}) {
                   },
                 }
               })
-            }
-            const jobRows = () => {
-              if (!jobs || !parent) return []
-              let snaps = []
-              try { snaps = jobs.list(parent) ?? [] } catch { return [] }
-              return snaps.filter((j) => j && j.ownerSession === sid).map((j) => {
-                const live = j.status === 'running' || j.status === 'stopping'
-                return {
-                  kind: 'job',
-                  id: j.id,
-                  label: j.label || j.id,
-                  jobKind: j.kind,
-                  status: j.status,
-                  detail: j.detail ?? null,
-                  startedAt: j.startedAt ?? null,
-                  finishedAt: j.finishedAt ?? null,
-                  can: { pause: false, resume: false, cancel: live },
-                  why: {
-                    pause: 'jobs-have-no-pause',
-                    resume: 'jobs-have-no-pause',
-                    ...(live ? {} : { cancel: 'already-finished' }),
-                  },
-                }
-              })
+              return { rows, parentAvailable: cat.parentAvailable === true }
             }
 
             const agentTable = {
-              'agent.list': async () => ({
-                sessionId: sid,
-                parentLive: parent !== null,
-                services: { subagents: subagents !== null, jobs: jobs !== null },
-                subagents: await subRows(),
-                // A cold session's jobs are invisible, not empty — say which.
-                jobs: jobRows(),
-                jobsReadable: Boolean(jobs && parent),
-              }),
-              /** The one live pause. Continuable children only; the runtime
-                * throws UNAUTHORIZED when this session does not own the
-                * target, which is the fence we want. */
+              'agent.list': async () => {
+                const { rows, parentAvailable } = await subRows()
+                return {
+                  sessionId: sid,
+                  parentLive: parentAvailable,
+                  services: { subagents: Boolean(proxy?.subagents?.list), jobs: false },
+                  subagents: rows,
+                  // Stated, not implied: the client lists jobs from its own
+                  // store because no host API can enumerate or stop them.
+                  jobs: [],
+                  jobsReadable: false,
+                  jobsControllable: false,
+                  jobsReason: 'no-job-api',
+                }
+              },
+              /** The one live verb. `interrupt` PRESERVES the Activation and
+                * parks unclaimed inbox work (dsh-subagent index.d.ts:138-152)
+                * — that is a pause, and it is the only one that exists. */
               'agent.pause': async () => {
-                if (arg?.kind !== 'subagent') return { ok: false, reason: 'jobs-have-no-pause' }
-                if (!subagents) return { ok: false, reason: 'service-unavailable' }
+                if (arg?.kind !== 'subagent') return { ok: false, reason: 'no-job-api' }
+                if (!proxy?.subagents?.interrupt) return { ok: false, reason: 'service-unavailable' }
                 const id = arg?.id
                 if (typeof id !== 'string' || id === '') return { ok: false, reason: 'id-required' }
-                subagents.interrupt(id, { kind: 'user', parentSessionId: sid })
+                const out = await value(proxy.subagents.interrupt({
+                  ...rpc(),
+                  payload: { parentSessionId: sid, childSessionId: id, mode: 'continuable' },
+                }))
+                if (!out) return { ok: false, reason: 'refused' }
                 return { ok: true, outcome: 'paused' }
               },
-              /** No resume verb exists. `followup` needs synthesized content
-                * AND a live parent Agent — inventing a message the human did
-                * not write is not a resume, so this refuses and says how a
-                * paused child actually wakes. */
+              /** No resume verb exists. Waking a paused child needs content the
+                * human writes — inventing a message is not a resume. */
               'agent.resume': async () => ({
                 ok: false,
-                reason: arg?.kind === 'job' ? 'jobs-have-no-pause' : 'send-message',
+                reason: arg?.kind === 'job' ? 'no-job-api' : 'send-message',
               }),
-              /** The one live cancel. Jobs only — a subagent has no terminate
-                * verb in the runtime, so refusing is the honest answer. */
-              'agent.cancel': async () => {
-                if (arg?.kind !== 'job') return { ok: false, reason: 'no-terminate-verb' }
-                if (!jobs) return { ok: false, reason: 'service-unavailable' }
-                if (!parent) return { ok: false, reason: 'owner-not-live' }
-                const id = arg?.id
-                if (typeof id !== 'string' || id === '') return { ok: false, reason: 'id-required' }
-                return { ok: true, outcome: jobs.kill(id, parent, 'cancelled from the arxa session header') }
-              },
+              /** Nothing here can cancel. A subagent has no terminate verb in
+                * the runtime; a job has no reachable API at all. Two different
+                * gaps, two different reasons — neither is a button. */
+              'agent.cancel': async () => ({
+                ok: false,
+                reason: arg?.kind === 'job' ? 'no-job-api' : 'no-terminate-verb',
+              }),
             }
             const agentFn = agentTable[action]
             if (!agentFn) return json(res, { ok: false, error: 'unknown-action', action })

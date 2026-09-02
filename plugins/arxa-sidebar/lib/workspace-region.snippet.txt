@@ -615,8 +615,8 @@
 		 * `useSessions` is a framework owner prop of this slot (both stock
 		 * occupants destructure it with no inject face of their own). */
 		const ARXA_AGENT_PANEL = "arxa-av-open";
-		function openAgentPanel(view, sessionId) {
-			try { window.dispatchEvent(new CustomEvent(ARXA_AGENT_PANEL, { detail: { kind: "insight", view: view, sessionId: sessionId } })); } catch { /* no bridge */ }
+		function openAgentPanel(view, sessionId, rows) {
+			try { window.dispatchEvent(new CustomEvent(ARXA_AGENT_PANEL, { detail: { kind: "insight", view: view, sessionId: sessionId, rows: rows || null } })); } catch { /* no bridge */ }
 		}
 		function ArxaEmptyChip({ label, title, onClick }) {
 			return (0, react_jsx_runtime.jsx)("button", {
@@ -664,21 +664,27 @@
 				})
 			});
 		}
-		function ArxaAgentControl({ kind, sessionId, count, t }) {
+		function ArxaAgentControl({ kind, sessionId, count, given, t }) {
 			const [open, setOpen] = (0, react.useState)(false);
 			const [rows, setRows] = (0, react.useState)(null);
 			const [busy, setBusy] = (0, react.useState)(false);
 			const [note, setNote] = (0, react.useState)("");
 			const load = (0, react.useCallback)(() => {
+				/* Jobs never round-trip: `JobView` is PUSH-only, so the client
+				 * store is the only place they exist. There is no job.* RPC and
+				 * no jobs field on the ApiProxy, which is why every verb on a
+				 * job row is refused with `no-job-api` rather than offered. */
+				if (kind === "jobs") { setRows(given || []); setNote(""); return; }
+				/* ORG_POST rejects on ok:false, and the host refuses a missing
+				 * sessionId — without this guard a seat that has not resolved
+				 * its session yet would paint a raw "sessionId-required" note. */
+				if (!sessionId) { setRows([]); setNote(""); return; }
 				ORG_POST("agent.list", { sessionId: sessionId }).then((b) => {
 					const r = (b && b.result) || {};
 					setNote("");
-					/* A cold session's jobs are UNREACHABLE, not absent — the host
-					 * says which, and saying "no jobs" for either would be wrong. */
-					if (kind === "jobs" && r.jobsReadable === false) { setRows([]); setNote(t("agents.why.owner-not-live")); return; }
-					setRows(kind === "jobs" ? (r.jobs || []) : (r.subagents || []));
+					setRows(r.subagents || []);
 				}, (e) => { setNote(String((e && e.message) || e)); setRows([]); });
-			}, [sessionId, kind, t]);
+			}, [sessionId, kind, given]);
 			(0, react.useEffect)(() => { if (open) load(); }, [open, load]);
 			const act = (verb, row) => {
 				setBusy(true);
@@ -718,18 +724,28 @@
 						(0, react_jsx_runtime.jsx)("button", {
 							type: "button",
 							className: "aXa_agentDetails",
-							onClick: () => { setOpen(false); openAgentPanel(kind, sessionId); },
+							onClick: () => { setOpen(false); openAgentPanel(kind, sessionId, rows); },
 							children: t("agents.details")
 						})
 					]
 				}) : null]
 			});
 		}
+		/* A JobView carries no capability map — nothing can act on a job from a
+		 * plugin surface in this build, so every verb is refused with one
+		 * reason. Shaped here so the row grammar matches a subagent row. */
+		function arxaJobRow(j) {
+			return {
+				kind: "job", id: j.id, label: j.label || j.id, status: j.status, detail: j.detail || null,
+				can: { pause: false, resume: false, cancel: false },
+				why: { pause: "no-job-api", resume: "no-job-api", cancel: "no-job-api" }
+			};
+		}
 		function ArxaJobsPlaceholder({ sessionId, useSessions, t }) {
 			const jobs = useSessions((state) => state.jobsBySession?.[sessionId]);
 			const count = jobs ? jobs.length : 0;
 			/* Q4: present at zero as a muted placeholder, a live control above it. */
-			if (count > 0) return (0, react_jsx_runtime.jsx)(ArxaAgentControl, { kind: "jobs", sessionId: sessionId, count: count, t: t });
+			if (count > 0) return (0, react_jsx_runtime.jsx)(ArxaAgentControl, { kind: "jobs", sessionId: sessionId, count: count, given: jobs.map(arxaJobRow), t: t });
 			return (0, react_jsx_runtime.jsx)(ArxaEmptyChip, {
 				label: t("agents.jobs.empty"),
 				title: t("agents.jobs.emptyHint"),
@@ -2362,6 +2378,7 @@
 			"agents.why.send-message": "A paused subagent resumes when you send it a message.",
 			"agents.why.no-terminate-verb": "The engine has no way to terminate a subagent \u2014 pause is the only stop.",
 			"agents.why.jobs-have-no-pause": "Background jobs cannot be paused \u2014 only cancelled.",
+			"agents.why.no-job-api": "This engine build exposes no way to control a background job \u2014 it can only be watched.",
 			"agents.why.already-finished": "This one has already finished.",
 			"agents.why.owner-not-live": "This session is not live, so its jobs cannot be reached.",
 			"agents.why.service-unavailable": "This engine build does not provide that service.",
@@ -2544,6 +2561,7 @@
 			"agents.why.send-message": "Wstrzymany podagent wznawia się po wysłaniu mu wiadomości.",
 			"agents.why.no-terminate-verb": "Silnik nie potrafi zakończyć podagenta \u2014 wstrzymanie to jedyne zatrzymanie.",
 			"agents.why.jobs-have-no-pause": "Zadań w tle nie można wstrzymać \u2014 tylko anulować.",
+			"agents.why.no-job-api": "Ta wersja silnika nie pozwala sterować zadaniem w tle \u2014 można je tylko obserwować.",
 			"agents.why.already-finished": "To już się zakończyło.",
 			"agents.why.owner-not-live": "Ta sesja nie jest aktywna, więc jej zadania są nieosiągalne.",
 			"agents.why.service-unavailable": "Ta wersja silnika nie udostępnia tej usługi.",
@@ -2726,6 +2744,7 @@
 			"agents.why.send-message": "Un sous-agent suspendu reprend lorsque vous lui envoyez un message.",
 			"agents.why.no-terminate-verb": "Le moteur ne sait pas terminer un sous-agent \u2014 suspendre est le seul arrêt.",
 			"agents.why.jobs-have-no-pause": "Les tâches en arrière-plan ne se suspendent pas \u2014 elles s\u2019annulent.",
+			"agents.why.no-job-api": "Cette version du moteur n\u2019offre aucun contrôle sur une tâche en arrière-plan \u2014 seulement son suivi.",
 			"agents.why.already-finished": "Celle-ci est déjà terminée.",
 			"agents.why.owner-not-live": "Cette session n\u2019est pas active, ses tâches sont donc inaccessibles.",
 			"agents.why.service-unavailable": "Cette version du moteur ne fournit pas ce service.",
