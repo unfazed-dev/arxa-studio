@@ -217,10 +217,17 @@ check('Q2: crumb grammar is the stock crumbs/crumbSeg/crumbSep/crumb/crumbCurren
   client.includes('[data-arxa-crumb]{display:block;max-width:220px;color:var(--dsw-alias-label-tertiary)') && client.includes('[data-arxa-crumb][data-current]{color:var(--dsw-alias-label-primary);font-weight:500}') && client.includes('[data-arxa-crumb-sep]{color:var(--dsw-alias-label-caption)'))
 check('Q4: the crumb takes the free width; session + worktree segments never shrink',
   client.includes('[data-arxa-crumbs]{flex:1 1 auto;min-width:0') && client.includes('[data-arxa-crumb-seg][data-keep]{flex-shrink:0}'))
-check('Q5 (revised): the preset chip is pushed to the composer top-right — rule targets the CHIP (the agentPreset wrapper is display:contents, so the old :last-child margin was a no-op), bound state only',
-  client.includes(".wSkVaW_composerStack:not([data-arxa-empty]) .wSkVaW_heroWorkspaceRow>[data-slot='conversation.hero.agentPreset']>*{margin-left:auto;margin-right:16px}")
-  && !client.includes('.wSkVaW_heroWorkspaceRow>:last-child{margin-left:auto')
-  && !client.includes('ArxaPresetCorner'))
+check('Q5 (corner, 2026-09-03): the preset chip lives INSIDE the composer card top-right — ArxaPresetCorner re-renders the stock seat entry on conversation.input.overlay (locale settings.agentPreset), the hero-row copy is hidden in EVERY state, no hero-row margin rule survives',
+  client.includes('function ArxaPresetCorner({ slots, t })')
+  && client.includes('name: "conversation.input.overlay"') && client.includes('id: "arxa-preset-corner"') && client.includes('locale: "settings.agentPreset"')
+  && client.includes('slots.entriesOfSlot(PRESET_SEAT_KEY)[0]')
+  && client.includes("[data-slot='conversation.hero.agentPreset']{display:none!important}")
+  && client.includes('[data-arxa-preset-corner]{position:absolute;top:10px;right:14px;z-index:2}')
+  && client.includes('.uV2eYG_root:not(.uV2eYG_hero) [data-arxa-preset-corner]{display:none}')
+  && client.includes('padding-right:var(--arxa-preset-inset,120px)')
+  && !client.includes("[data-arxa-empty] [data-slot='conversation.hero.agentPreset']")
+  && !client.includes('.wSkVaW_heroWorkspaceRow>[data-slot=')
+  && !client.includes('.wSkVaW_heroWorkspaceRow>:last-child{margin-left:auto'))
 check('Q5 (revised): the hero row crumb is rendered once — bound hero returns a hidden anchor, the composer left zone owns the crumb',
   client.includes('"data-arxa-hero-anchor": ""') && !client.includes('return arxaCrumbNav(t, org, current, ref);'))
 check('Q3 guard: the boot resume decision is made ONCE the org list settled — no-candidate branches set resumeTried, so a row created later via "+" is never opened with dropIfEmpty',

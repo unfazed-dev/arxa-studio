@@ -552,6 +552,75 @@
 			if (current === void 0 || current === null) return null;
 			return arxaCrumbNav(t, org, current, null);
 		}
+		// Preset chip in the card's top-right corner (2026-09-03). The stock
+		// seat registers on conversation.hero.agentPreset — the hero ROW, above
+		// the card. The only in-card mount is conversation.input.overlay (the
+		// card-top anchor), and slot components get no renderSlot, so this
+		// renders the stock entry itself: entriesOfSlot → { component, inject },
+		// props built with the renderer's grammar (inject face `hooks:{x}` →
+		// `useX` snapshot-selector hook; `t` bound to settings.agentPreset via
+		// this entry's own locale declaration). Subscribes to the key so a
+		// late-loading agent-preset plugin still lands. The hero-row copy is
+		// CSS-hidden; both instances share one seat store.
+		const PRESET_SEAT_KEY = "conversation.hero.agentPreset";
+		const seatHookCache = new WeakMap();
+		function seatHook(source) {
+			let hook = seatHookCache.get(source);
+			if (hook === void 0) {
+				const subscribe = (fn) => source.subscribe(fn);
+				const get = () => source.getSnapshot();
+				// Identity selectors only (the seat passes `(s) => s`); a deriving
+				// selector would need the with-selector shim to avoid re-render loops.
+				hook = (sel) => {
+					const read = sel ? () => sel(get()) : get;
+					return (0, react.useSyncExternalStore)(subscribe, read, read);
+				};
+				seatHookCache.set(source, hook);
+			}
+			return hook;
+		}
+		const seatPropsCache = new WeakMap();
+		function seatProps(entry) {
+			let props = seatPropsCache.get(entry);
+			if (props === void 0) {
+				const face = typeof entry.inject === "function" ? entry.inject() ?? {} : {};
+				const { hooks, ...rest } = face;
+				props = { ...rest };
+				for (const [name, source] of Object.entries(hooks ?? {})) {
+					props[`use${name[0]?.toUpperCase() ?? ""}${name.slice(1)}`] = seatHook(source);
+				}
+				seatPropsCache.set(entry, props);
+			}
+			return props;
+		}
+		function ArxaPresetCorner({ slots, t }) {
+			const subscribe = (0, react.useCallback)((fn) => slots.subscribe(PRESET_SEAT_KEY, fn), [slots]);
+			const read = (0, react.useCallback)(() => slots.entriesOfSlot(PRESET_SEAT_KEY)[0], [slots]);
+			const entry = (0, react.useSyncExternalStore)(subscribe, read, read);
+			const ref = (0, react.useRef)(null);
+			// Publish the chip's width to the card so the text layers pad right
+			// of it (see the [data-arxa-preset-corner] CSS).
+			(0, react.useLayoutEffect)(() => {
+				const el = ref.current;
+				const card = el?.closest("[data-composer-card]");
+				if (!el || !card) return;
+				const publish = () => card.style.setProperty("--arxa-preset-inset", `${Math.ceil(el.getBoundingClientRect().width) + 28}px`);
+				publish();
+				const ro = new ResizeObserver(publish);
+				ro.observe(el);
+				return () => {
+					ro.disconnect();
+					card.style.removeProperty("--arxa-preset-inset");
+				};
+			}, [entry]);
+			if (entry === void 0 || typeof entry.component !== "function") return null;
+			const Seat = entry.component;
+			return (0, react_jsx_runtime.jsx)("div", {
+				ref,
+				"data-arxa-preset-corner": true,
+				children: (0, react_jsx_runtime.jsx)(Seat, { ...seatProps(entry), t })
+			});
+		}
 		// Empty-state CSS (2026-08-30): inside a marked stack the text
 		// composer is gone — the data-slot anchor is the framework outlet
 		// wrapper (stable), unlike hashed module classes.
@@ -563,7 +632,10 @@
 				// Q2: the stock workspace picker button is gone from the hero row in
 				// every state — the org model owns where sessions live.
 				+ ".wSkVaW_heroWorkspaceRow>button{display:none!important}"
-				+ "[data-arxa-empty] [data-slot='conversation.hero.agentPreset']{display:none!important}"
+				// Q5 (revised 2026-09-03, round 3): the stock seat on the hero row is
+				// hidden in EVERY state — ArxaPresetCorner re-renders the same entry
+				// inside the composer card (conversation.input.overlay) instead.
+				+ "[data-slot='conversation.hero.agentPreset']{display:none!important}"
 				+ "[data-arxa-empty] [data-arxa-hero-guide]{text-align:center;max-width:560px;margin:12px auto 0;font-size:13px;opacity:.78;line-height:1.7}"
 				// Q2/Q4 cordis crumb (stock crumbs/crumbSeg/crumbSep/crumb/crumbCurrent
 				// grammar, copied verbatim minus the click affordance): the crumb
@@ -577,14 +649,18 @@
 				+ "[data-arxa-crumbs]>[data-arxa-crumb-seg]:first-child [data-arxa-crumb]{padding-left:0}"
 				+ "[data-arxa-crumb][data-current]{color:var(--dsw-alias-label-primary);font-weight:500}"
 				+ "[data-arxa-crumb-sep]{color:var(--dsw-alias-label-caption);font-size:14px;line-height:20px}"
-				// Q5 (revised 2026-09-03): the preset chip sits at the composer's
-				// top-right. dsh renders the agentPreset slot wrapper display:contents,
-				// so a margin on the wrapper (the old :last-child rule) was a no-op and
-				// the chip stayed left — push the CHIP, the wrapper's child. The 16px
-				// inset mirrors the card's own inset inside the composer stack (780px
-				// card centered in 812px). Bound state only: the empty state centers
-				// the guide copy in this same row.
-				+ ".wSkVaW_composerStack:not([data-arxa-empty]) .wSkVaW_heroWorkspaceRow>[data-slot='conversation.hero.agentPreset']>*{margin-left:auto;margin-right:16px}";
+				// Q5 corner (2026-09-03): the chip sits INSIDE the card, top-right.
+				// The card's overlay anchor is a height:0 absolute strip at the card
+				// top (uV2eYG_overlayAnchor), so the corner positions itself; z-index
+				// lifts it above the card's absolutely-positioned textarea (later in
+				// DOM, would otherwise paint over the chip and eat its clicks). Hero
+				// only — stock drops the chip once a conversation exists. The text
+				// trio (input/mirror/backdrop share one box) pads right of the chip
+				// by the width the corner publishes; equal padding keeps the mirror's
+				// wrapping in sync with the textarea's.
+				+ "[data-arxa-preset-corner]{position:absolute;top:10px;right:14px;z-index:2}"
+				+ ".uV2eYG_root:not(.uV2eYG_hero) [data-arxa-preset-corner]{display:none}"
+				+ ".uV2eYG_hero [data-composer-card] :is(.uV2eYG_input,.uV2eYG_mirror,.uV2eYG_backdrop){box-sizing:border-box;padding-right:var(--arxa-preset-inset,120px)}";
 			document.head.appendChild(tag);
 		}
 		/** Parse "<orgId>|<wsPath>" composite ids. */
