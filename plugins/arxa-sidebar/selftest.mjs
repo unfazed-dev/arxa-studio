@@ -684,9 +684,34 @@ check('client: actions ride the sidebar route and reload the list after one land
   client.includes('ORG_POST("agent.list"') && client.includes('ORG_POST("agent." + verb'))
 check('client: a host refusal (ok:false) surfaces its reason instead of a silent refresh',
   client.includes('if (r && r.ok === false) setNote(t("agents.why." + String(r.reason || "unavailable")))'))
-check('client: jobs come from the client store — no host API can enumerate or stop them',
-  client.includes('function arxaJobRow(') && client.includes('why: { pause: "no-job-api", resume: "no-job-api", cancel: "no-job-api" }')
-  && client.includes('const rows = isJobs ? (given || []) : fetched'))
+// Jobs are DISPLAYED from the client store (the push is the only live feed)
+// but ACTED ON through arxa's host route — the registry is a host service and
+// no `job.*` RPC exists. Both halves are pinned: a job row that starts riding
+// the agent plane would 404, and a display that starts polling would fight the
+// push it already gets for free.
+check('client: job rows are listed from the pushed store, never fetched',
+  client.includes('function arxaJobRow(') && client.includes('const rows = isJobs ? (given || []) : fetched'))
+check('client: a job cancel goes to the HOST route, not the agent plane',
+  client.includes('fetch("/__arxa/jobs/action"') && client.includes('action: "jobs." + verb'))
+// Only `running` arms the button. `stopping` is still live but a cancel is
+// already in flight; arming it again invites a click that changes nothing.
+check('client: only a RUNNING job offers cancel, and stopping says why',
+  client.includes('cancel: j.status === "running"')
+  && client.includes('j.status === "stopping" ? "stopping"'))
+check('client: pause is refused with the job-shaped reason, not the stale no-job-api',
+  client.includes('pause: "jobs-have-no-pause"') && !client.includes('cancel: "no-job-api"'))
+// The registry pushes `session/jobs` on every change (measured ~154ms from
+// cancel to the killed frame). Re-fetching after a job action would race that
+// push and could paint an older list.
+check('client: a job action does NOT reload — the push repaints it',
+  /row\.kind === "job"[\s\S]{0,1200}?setNote\(""\);\s*\}, \(e\) =>/.test(client))
+// Every reason the route can return must render as words, in every language.
+// Count DEFINITIONS (`"key": "text"`), not mentions — `already-finished` is
+// also named at its call site in act(), and counting that made this read 4.
+for (const reason of ['stopping', 'not-yours', 'gone', 'registry-refused', 'already-finished', 'jobs-have-no-pause']) {
+  const n = (client.match(new RegExp('"agents\\.why\\.' + reason + '"\\s*:\\s*"', 'g')) ?? []).length
+  check(`locale: agents.why.${reason} is defined in all 3 dictionaries (found ${n})`, n === 3)
+}
 // `given` is a fresh array on every store push. Writing it into state would
 // re-render, re-allocate and write again for as long as the menu sat open over
 // a live job — a loop, not churn. Job rows must stay OUT of state, and `load`

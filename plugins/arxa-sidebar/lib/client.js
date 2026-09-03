@@ -3453,6 +3453,34 @@ window.__ModuleLoader__.load({
 			(0, react.useEffect)(() => { if (open) load(); }, [open, load]);
 			const act = (verb, row) => {
 				setBusy(true);
+				/* A JOB is not on the agent plane. Subagent verbs go through
+				 * ctx.apiProxy (`agent.*` on the sidebar route); the job
+				 * registry is a HOST service that arxa-jobs owns, so a job row
+				 * is dispatched to its own route.
+				 *
+				 * Deliberately no `load()` afterwards: jobs never round-trip
+				 * into state here (see the note above `rows`). The registry
+				 * pushes `session/jobs` on every change, `given` arrives fresh,
+				 * and the menu repaints itself — measured at ~154ms from cancel
+				 * to the killed frame (scripts/jobs-push-proof.mjs). Re-fetching
+				 * would race that push and could paint an older list. */
+				if (row.kind === "job") {
+					fetch("/__arxa/jobs/action", {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({ action: "jobs." + verb, arg: { sessionId: sessionId, jobId: row.id } })
+					}).then((res) => res.json()).then((b) => {
+						setBusy(false);
+						const r = b && b.result;
+						/* `already-finished` is an outcome, not a failure: the job
+						 * ended between render and click. Say so plainly rather
+						 * than showing it as an error. */
+						if (!r || r.ok === false) setNote(t("agents.why." + String((r && r.reason) || "unavailable")));
+						else if (r.outcome === "already-finished") setNote(t("agents.why.already-finished"));
+						else setNote("");
+					}, (e) => { setBusy(false); setNote(String((e && e.message) || e)); });
+					return;
+				}
 				ORG_POST("agent." + verb, { sessionId: sessionId, kind: row.kind, id: row.id }).then((b) => {
 					setBusy(false);
 					const r = b && b.result;
@@ -3496,14 +3524,30 @@ window.__ModuleLoader__.load({
 				}) : null]
 			});
 		}
-		/* A JobView carries no capability map — nothing can act on a job from a
-		 * plugin surface in this build, so every verb is refused with one
-		 * reason. Shaped here so the row grammar matches a subagent row. */
+		/* A JobView carries no capability map, so the row mints one. Shaped to
+		 * match a subagent row's grammar so one menu renders both.
+		 *
+		 * Cancel is REAL now (plugins/arxa-jobs). The registry is a host
+		 * service, so the client cannot reach it — but arxa's host half can,
+		 * and `act()` below routes a job row to /__arxa/jobs/action instead of
+		 * the agent plane. Proven end to end by scripts/jobs-push-proof.mjs:
+		 * the cancel lands, and the registry's own push repaints this menu.
+		 *
+		 * `stopping` deliberately does NOT offer cancel. It is still live, but
+		 * a cancel is already in flight — arming the button again would invite
+		 * a second click that changes nothing and reads as a control that
+		 * ignored you. Pause stays refused: the job status union has no paused
+		 * member, so there is nothing to pause with. */
 		function arxaJobRow(j) {
+			var live = j.status === "running" || j.status === "stopping";
 			return {
 				kind: "job", id: j.id, label: j.label || j.id, status: j.status, detail: j.detail || null,
-				can: { pause: false, resume: false, cancel: false },
-				why: { pause: "no-job-api", resume: "no-job-api", cancel: "no-job-api" }
+				can: { pause: false, resume: false, cancel: j.status === "running" },
+				why: {
+					pause: "jobs-have-no-pause",
+					resume: "jobs-have-no-pause",
+					cancel: j.status === "stopping" ? "stopping" : live ? "" : "already-finished"
+				}
 			};
 		}
 		function ArxaJobsPlaceholder({ sessionId, useSessions, t }) {
@@ -5144,6 +5188,10 @@ window.__ModuleLoader__.load({
 			"agents.why.no-terminate-verb": "The engine has no way to terminate a subagent \u2014 pause is the only stop.",
 			"agents.why.jobs-have-no-pause": "Background jobs cannot be paused \u2014 only cancelled.",
 			"agents.why.no-job-api": "This engine build exposes no way to control a background job \u2014 it can only be watched.",
+			"agents.why.stopping": "This one is already being cancelled \u2014 give it a moment to settle.",
+			"agents.why.not-yours": "This job belongs to another session.",
+			"agents.why.gone": "This job is no longer in the registry.",
+			"agents.why.registry-refused": "The engine refused the request. Nothing was changed.",
 			"agents.why.already-finished": "This one has already finished.",
 			"agents.why.owner-not-live": "This session is not live, so its jobs cannot be reached.",
 			"agents.why.service-unavailable": "This engine build does not provide that service.",
@@ -5327,6 +5375,10 @@ window.__ModuleLoader__.load({
 			"agents.why.no-terminate-verb": "Silnik nie potrafi zakończyć podagenta \u2014 wstrzymanie to jedyne zatrzymanie.",
 			"agents.why.jobs-have-no-pause": "Zadań w tle nie można wstrzymać \u2014 tylko anulować.",
 			"agents.why.no-job-api": "Ta wersja silnika nie pozwala sterować zadaniem w tle \u2014 można je tylko obserwować.",
+			"agents.why.stopping": "To zadanie jest już anulowane \u2014 daj mu chwilę na zako\u0144czenie.",
+			"agents.why.not-yours": "To zadanie nale\u017cy do innej sesji.",
+			"agents.why.gone": "Tego zadania nie ma ju\u017c w rejestrze.",
+			"agents.why.registry-refused": "Silnik odrzuci\u0142 \u017c\u0105danie. Nic nie zosta\u0142o zmienione.",
 			"agents.why.already-finished": "To już się zakończyło.",
 			"agents.why.owner-not-live": "Ta sesja nie jest aktywna, więc jej zadania są nieosiągalne.",
 			"agents.why.service-unavailable": "Ta wersja silnika nie udostępnia tej usługi.",
@@ -5510,6 +5562,10 @@ window.__ModuleLoader__.load({
 			"agents.why.no-terminate-verb": "Le moteur ne sait pas terminer un sous-agent \u2014 suspendre est le seul arrêt.",
 			"agents.why.jobs-have-no-pause": "Les tâches en arrière-plan ne se suspendent pas \u2014 elles s\u2019annulent.",
 			"agents.why.no-job-api": "Cette version du moteur n\u2019offre aucun contrôle sur une tâche en arrière-plan \u2014 seulement son suivi.",
+			"agents.why.stopping": "Celle-ci est d\u00e9j\u00e0 en cours d\u2019annulation \u2014 laissez-lui un instant.",
+			"agents.why.not-yours": "Cette t\u00e2che appartient \u00e0 une autre session.",
+			"agents.why.gone": "Cette t\u00e2che n\u2019est plus dans le registre.",
+			"agents.why.registry-refused": "Le moteur a refus\u00e9 la demande. Rien n\u2019a \u00e9t\u00e9 modifi\u00e9.",
 			"agents.why.already-finished": "Celle-ci est déjà terminée.",
 			"agents.why.owner-not-live": "Cette session n\u2019est pas active, ses tâches sont donc inaccessibles.",
 			"agents.why.service-unavailable": "Cette version du moteur ne fournit pas ce service.",
