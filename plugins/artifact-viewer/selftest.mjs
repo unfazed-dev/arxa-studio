@@ -163,10 +163,20 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   assert.match(t5client, /className: 'aXa_av_insightInput'/, 'the rename field is a real input in the row')
   assert.match(t5client, /if \(state\.phase === 'insight'\) \{ setState\(\(st\) => \(\{ \.\.\.st, sessionId: id \}\)\); return \}/,
     'a session switch re-points an open insight panel instead of closing the column')
-  for (const key of ['insight.title.streak', 'insight.title.ci', 'insight.title.sessions', 'insight.loading',
+  // `insight.title.ci` is deliberately absent: D4 retired the standalone CI
+  // view and the review surface absorbed it. The `insight.ci.*` ROW strings
+  // stay — the CI group inside the review view still renders those buttons.
+  for (const key of ['insight.title.streak', 'insight.title.review', 'insight.title.sessions', 'insight.loading',
     'insight.unavailable', 'insight.streak.current', 'insight.streak.longest', 'insight.streak.empty', 'insight.streak.days',
-    'insight.ci.open', 'insight.ci.empty', 'insight.sessions.open', 'insight.sessions.rename',
-    'insight.sessions.archive', 'insight.sessions.empty', 'insight.seatRequired']) {
+    'insight.ci.open', 'insight.ci.rerun', 'insight.ci.cancel', 'insight.sessions.open', 'insight.sessions.rename',
+    'insight.sessions.archive', 'insight.sessions.empty', 'insight.seatRequired',
+    // the review surface (D1-D7)
+    'insight.review.needs', 'insight.review.reviews', 'insight.review.threads', 'insight.review.comments',
+    'insight.review.issues', 'insight.review.commits', 'insight.review.ci', 'insight.review.empty',
+    'insight.review.nopr', 'insight.review.refresh', 'insight.review.reply', 'insight.review.resolve',
+    'insight.review.unresolve', 'insight.review.resolved', 'insight.review.outdated', 'insight.review.bots',
+    'insight.review.openPr', 'insight.review.changes-requested', 'insight.review.unresolved-thread',
+    'insight.review.mention', 'insight.review.ci-failed']) {
     const n = (t5client.match(new RegExp("'" + key.replace(/\./g, '\\.') + "':", 'g')) || []).length
     assert.equal(n, 3, 'insight string "' + key + '" is in all three dicts (en/pl/fr), found ' + n)
   }

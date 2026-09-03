@@ -236,7 +236,29 @@ window.__ModuleLoader__.load({
       'saved.wipPending': 'Saved (WIP commit pending: {warning})',
       'saved.committed': 'Saved · WIP committed to {session}',
       'insight.title.streak': 'Commit streak',
-      'insight.title.ci': 'CI runs',
+      'insight.title.review': 'Review',
+      'insight.review.needs': 'Needs you',
+      'insight.review.reviews': 'Reviews',
+      'insight.review.threads': 'Threads',
+      'insight.review.comments': 'Comments',
+      'insight.review.issues': 'Issues',
+      'insight.review.commits': 'Commit notes',
+      'insight.review.ci': 'CI',
+      'insight.review.empty': 'Nothing on this pull request yet.',
+      'insight.review.nopr': 'No pull request yet — it opens on this session\u2019s first push.',
+      'insight.review.refresh': 'Refresh',
+      'insight.review.reply': 'Reply',
+      'insight.review.send': 'Send',
+      'insight.review.resolve': 'Resolve',
+      'insight.review.unresolve': 'Reopen',
+      'insight.review.resolved': 'Resolved',
+      'insight.review.outdated': 'Outdated',
+      'insight.review.bots': 'Show bot comments',
+      'insight.review.openPr': 'Open on GitHub',
+      'insight.review.changes-requested': 'asked for changes',
+      'insight.review.unresolved-thread': 'unresolved',
+      'insight.review.mention': 'mentioned you',
+      'insight.review.ci-failed': 'CI failed',
       'insight.title.sessions': 'Sessions',
       'insight.title.jobs': 'Background jobs',
       'insight.title.subagents': 'Subagents',
@@ -313,7 +335,29 @@ window.__ModuleLoader__.load({
       'saved.committed': 'Zapisano · WIP zacommitowano do {session}',
       // TODO native review (conformance decision 4): machine-drafted.
       'insight.title.streak': 'Passa commitów',
-      'insight.title.ci': 'Przebiegi CI',
+      'insight.title.review': 'Recenzja',
+      'insight.review.needs': 'Wymaga Ciebie',
+      'insight.review.reviews': 'Recenzje',
+      'insight.review.threads': 'Wątki',
+      'insight.review.comments': 'Komentarze',
+      'insight.review.issues': 'Zgłoszenia',
+      'insight.review.commits': 'Notatki do commitów',
+      'insight.review.ci': 'CI',
+      'insight.review.empty': 'Nic jeszcze w tym pull requeście.',
+      'insight.review.nopr': 'Brak pull requesta — otworzy się przy pierwszym pushu tej sesji.',
+      'insight.review.refresh': 'Odśwież',
+      'insight.review.reply': 'Odpowiedz',
+      'insight.review.send': 'Wyślij',
+      'insight.review.resolve': 'Rozwiąż',
+      'insight.review.unresolve': 'Otwórz ponownie',
+      'insight.review.resolved': 'Rozwiązany',
+      'insight.review.outdated': 'Nieaktualny',
+      'insight.review.bots': 'Pokaż komentarze botów',
+      'insight.review.openPr': 'Otwórz na GitHubie',
+      'insight.review.changes-requested': 'poprosił o zmiany',
+      'insight.review.unresolved-thread': 'nierozwiązany',
+      'insight.review.mention': 'wspomniał o Tobie',
+      'insight.review.ci-failed': 'CI nie przeszło',
       'insight.title.sessions': 'Sesje',
       'insight.title.jobs': 'Zadania w tle',
       'insight.title.subagents': 'Podagenci',
@@ -390,7 +434,29 @@ window.__ModuleLoader__.load({
       'saved.committed': 'Enregistré · WIP commité dans {session}',
       // TODO native review (conformance decision 4): machine-drafted.
       'insight.title.streak': 'Série de commits',
-      'insight.title.ci': 'Exécutions CI',
+      'insight.title.review': 'Revue',
+      'insight.review.needs': 'Requiert votre attention',
+      'insight.review.reviews': 'Revues',
+      'insight.review.threads': 'Fils',
+      'insight.review.comments': 'Commentaires',
+      'insight.review.issues': 'Tickets',
+      'insight.review.commits': 'Notes de commit',
+      'insight.review.ci': 'CI',
+      'insight.review.empty': 'Rien encore sur cette pull request.',
+      'insight.review.nopr': 'Pas encore de pull request — elle s\u2019ouvre au premier push de cette session.',
+      'insight.review.refresh': 'Actualiser',
+      'insight.review.reply': 'Répondre',
+      'insight.review.send': 'Envoyer',
+      'insight.review.resolve': 'Résoudre',
+      'insight.review.unresolve': 'Rouvrir',
+      'insight.review.resolved': 'Résolu',
+      'insight.review.outdated': 'Obsolète',
+      'insight.review.bots': 'Afficher les commentaires des bots',
+      'insight.review.openPr': 'Ouvrir sur GitHub',
+      'insight.review.changes-requested': 'a demandé des modifications',
+      'insight.review.unresolved-thread': 'non résolu',
+      'insight.review.mention': 'vous a mentionné',
+      'insight.review.ci-failed': 'CI en échec',
       'insight.title.sessions': 'Sessions',
       'insight.title.jobs': 'Tâches en arrière-plan',
       'insight.title.subagents': 'Sous-agents',
@@ -782,6 +848,12 @@ window.__ModuleLoader__.load({
       const [tick, setTick] = React.useState(0)
       const [renaming, setRenaming] = React.useState(null)
       const [draft, setDraft] = React.useState('')
+      // D1/D3: the reply box is per-thread and opens on demand — a permanently
+      // mounted textarea on every row turns the panel into a form. `replyTo`
+      // holds the key of the one open box ('pr' or a thread id).
+      const [replyTo, setReplyTo] = React.useState(null)
+      const [replyText, setReplyText] = React.useState('')
+      const [showBots, setShowBots] = React.useState(false)
       const load = React.useCallback(() => {
         let live = true
         setPhase('loading')
@@ -899,19 +971,102 @@ window.__ModuleLoader__.load({
             [row0.mode || row0.jobKind, row0.status || row0.activity, row0.detail].filter(Boolean).join(' · '),
             h(React.Fragment, null, ['pause', 'resume', 'cancel'].map((v) => verbAction(row0, v)))))))
       }
-      if (view === 'ci') {
-        const runs = d.runs || []
-        if (runs.length === 0) return empty(t('insight.ci.empty'))
-        // Q8: the card's run control, mirrored per row. Every run here is
-        // individually addressable, where the card only reaches the newest —
-        // that is the whole reason the panel carries the buttons too. Re-run
-        // waits for the run to finish, cancel waits for it to be live, so the
-        // pair is never both-enabled on one row.
+      // ---- the review surface (D1-D7) ------------------------------------
+      // Replaces the retired standalone `ci` view: its per-run controls live
+      // in the CI group at the bottom, so nothing that was reachable stopped
+      // being reachable. The CARD header only ever reaches the newest run —
+      // per-run re-run/cancel exists only here, which is why these buttons
+      // had to move rather than be dropped with the view.
+      if (view === 'review') {
+        if (d.reason === 'no-pr' || !d.pr) return empty(t('insight.review.nopr'))
+        const rt = (s2) => t('insight.review.' + s2)
+        const when = (iso) => (iso ? String(iso).slice(0, 10) : '')
+        const line = (x) => String(x.body || '').split('\n').find((l) => l.trim() !== '') || ''
+        const visible = (list) => (showBots ? list : list.filter((c) => c.bot !== true))
+        const send = (key, arg) => {
+          const text = replyText.trim()
+          if (text === '') return
+          setReplyText(''); setReplyTo(null)
+          act(key, 'insight.reply', { sessionId, number: d.pr.number, text, ...arg })
+        }
+        // One box, moved between rows. Enter sends, Escape abandons — the same
+        // contract as the sidebar's wake box, so the two never teach different
+        // habits for the same gesture.
+        const replyBox = (key, arg) => (replyTo !== key ? null : h('input', {
+          className: 'aXa_av_insightInput', autoFocus: true, value: replyText,
+          placeholder: rt('reply'),
+          onChange: (e) => setReplyText(e.target.value),
+          onKeyDown: (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); send(key, arg) }
+            if (e.key === 'Escape') { e.preventDefault(); setReplyTo(null); setReplyText('') }
+          },
+        }))
+        const replyBtn = (key) => trailing(rt('reply'), () => { setReplyTo(replyTo === key ? null : key); setReplyText('') }, false)
+        const section = (key, label, children) => (children.length === 0 ? null
+          : h(React.Fragment, { key }, ioSection(key + '-h', label, String(children.length)), children))
+
+        const needs = d.needs || []
+        const threads = d.threads || []
+        const runs = d.ci || []
         return root(h('div', { className: 'aXa_av_scroll' },
           note && h('div', { className: 'aXa_av_note', 'data-tone': 'error' }, note),
-          runs.map((run) => {
+          // Header: what this is, and the two things you always want — a manual
+          // refresh (D5 caches for 60s) and the way out to GitHub.
+          h('div', { className: I.ioCard },
+            ioSection('pr', '#' + d.pr.number, String(d.pr.title || '')),
+            divider('dh'),
+            ioSection('acts', '',
+              h(React.Fragment, null,
+                trailing(rt('refresh'), () => { setTick((n) => n + 1) }, false),
+                trailing(rt('bots'), () => setShowBots(!showBots), false),
+                d.pr.url ? h('a', { className: I.summarySuffix, href: d.pr.url, target: '_blank', rel: 'noreferrer' }, rt('openPr')) : null))),
+          // D3: the band. Everything here is something a person must act on.
+          needs.length === 0 ? null : h(React.Fragment, null,
+            ioSection('needs-h', rt('needs'), String(needs.length)),
+            needs.map((n, i) => row('n' + i,
+              h(P.StateDot, { state: n.kind === 'ci-failed' || n.kind === 'changes-requested' ? 'error' : 'warning' }),
+              rt(n.kind),
+              [n.by, n.path ? n.path + (n.line ? ':' + n.line : '') : null, n.job,
+                (n.steps || []).map((x) => x.name).join(', ')].filter(Boolean).join(' · '),
+              n.url ? h('a', { className: I.summarySuffix, href: n.url, target: '_blank', rel: 'noreferrer' }, t('insight.ci.open')) : null))),
+          // D3: grouped below, each chronological as the host returned it.
+          section('reviews', rt('reviews'), visible(d.reviews || []).map((r2) => row('rv' + r2.id,
+            h(P.StateDot, { state: r2.state === 'APPROVED' ? 'done' : r2.state === 'CHANGES_REQUESTED' ? 'error' : 'warning' }),
+            String(r2.login || ''),
+            [String(r2.state || '').toLowerCase(), when(r2.createdAt), line(r2)].filter(Boolean).join(' · '),
+            r2.url ? h('a', { className: I.summarySuffix, href: r2.url, target: '_blank', rel: 'noreferrer' }, t('insight.ci.open')) : null))),
+          section('threads', rt('threads'), threads.map((th) => h(React.Fragment, { key: 'th' + th.id },
+            row('t' + th.id,
+              h(P.StateDot, { state: th.resolved ? 'done' : th.outdated ? 'warning' : 'error' }),
+              String(th.path || '') + (th.line ? ':' + th.line : ''),
+              [th.resolved ? rt('resolved') : null, th.outdated ? rt('outdated') : null,
+                line(th.comments[0] || {})].filter(Boolean).join(' · '),
+              h(React.Fragment, null,
+                th.replyTo ? replyBtn(th.id) : null,
+                trailing(th.resolved ? rt('unresolve') : rt('resolve'),
+                  () => act('res' + th.id, 'insight.resolve', { sessionId, threadId: th.id, resolved: !th.resolved }), false))),
+            replyBox(th.id, { commentId: th.replyTo })))),
+          section('comments', rt('comments'), visible(d.comments || []).map((c) => row('c' + c.id,
+            h(P.StateDot, { state: 'ongoing' }), String(c.login || ''),
+            [when(c.createdAt), line(c)].filter(Boolean).join(' · '),
+            c.url ? h('a', { className: I.summarySuffix, href: c.url, target: '_blank', rel: 'noreferrer' }, t('insight.ci.open')) : null))),
+          // A bare reply to the PR itself — the one box that is always offered.
+          h(React.Fragment, null,
+            ioSection('reply-h', '', replyBtn('pr')),
+            replyBox('pr', {})),
+          section('issues', rt('issues'), (d.issues || []).map((i2) => row('i' + i2.number,
+            h(P.StateDot, { state: i2.state === 'CLOSED' ? 'done' : 'ongoing' }),
+            '#' + i2.number + ' ' + String(i2.title || ''),
+            String((i2.comments || []).length) + ' · ' + String(i2.state || '').toLowerCase(),
+            i2.url ? h('a', { className: I.summarySuffix, href: i2.url, target: '_blank', rel: 'noreferrer' }, t('insight.ci.open')) : null))),
+          section('commits', rt('commits'), visible(d.commitNotes || []).map((c) => row('cn' + c.id,
+            h(P.StateDot, { state: 'ongoing' }),
+            String(c.oid || '').slice(0, 7) + ' ' + String(c.headline || ''),
+            [c.login, line(c)].filter(Boolean).join(' · '),
+            c.url ? h('a', { className: I.summarySuffix, href: c.url, target: '_blank', rel: 'noreferrer' }, t('insight.ci.open')) : null))),
+          section('ci', rt('ci'), runs.map((run) => {
             const live = run.status !== 'completed'
-            return row(run.id,
+            return row('run' + run.id,
               h(P.StateDot, { state: ciState(run) }),
               run.name || String(run.id),
               String(run.conclusion || run.status || '') + (run.headSha ? ' · ' + String(run.headSha).slice(0, 7) : ''),
@@ -919,7 +1074,9 @@ window.__ModuleLoader__.load({
                 trailing(t('insight.ci.rerun'), () => act('ci-rerun', 'card.ci.rerun', { sessionId, runId: run.id }), live),
                 trailing(t('insight.ci.cancel'), () => act('ci-cancel', 'card.ci.cancel', { sessionId, runId: run.id }), !live),
                 run.url ? h('a', { className: I.summarySuffix, href: run.url, target: '_blank', rel: 'noreferrer' }, t('insight.ci.open')) : null))
-          })))
+          })),
+          needs.length === 0 && threads.length === 0 && (d.comments || []).length === 0 && (d.reviews || []).length === 0
+            ? h('div', { className: I.empty }, rt('empty')) : null))
       }
       // sessions
       const rows = d.rows || []

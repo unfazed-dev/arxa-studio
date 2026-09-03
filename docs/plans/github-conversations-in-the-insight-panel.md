@@ -62,6 +62,13 @@ territory — see D3.
 ## Decisions
 
 ### D1 — Read, reply, AND resolve
+
+*Naming note from the build:* the write verbs are `insight.reply` / `insight.resolve`,
+not `review.*`. The action PREFIX is the route — the card selftest dispatches
+`/^(card|insight|version)\./` to this host and everything else to the sidebar's, while
+the viewer's own router sends everything but `agent.*` here. A `review.*` verb worked
+through one router and 404'd through the other; `insight.*` is the prefix both already
+agree on.
 The panel is not a viewer. It reads threads, posts replies, and marks review
 threads resolved/unresolved. Rationale: "do as much as possible inside arxa
 studio" fails the moment answering a reviewer means opening github.com.
@@ -94,13 +101,15 @@ and that is the same duplicate-surface clash that produced the
 Cost: `insight.ci`'s handler and its selftest assertions get rewritten, not deleted —
 the fetch logic moves, the tests move with it.
 
-**No verb is orphaned by this.** Checked before deciding: the CI *controls* live on
-the card header, not in the panel — `ci-rerun` / `ci-cancel` / `ci-open` at
-`arxa-git-card/lib/client.js:511-513`, gated on `latestRun`, calling `card.ci.rerun`
-(`index.js:592`) and `card.ci.cancel` (:596) through `ciTarget()` (:127). The
-`insight-ci` button at `client.js:521` is a separate, read-only view. Retiring the
-view removes a reader, never a verb. `card.runner.wake` (:748) is likewise on the
-card (`client.js:445`) and untouched.
+**Half-wrong when written; corrected during the build.** The card header does carry
+`ci-rerun` / `ci-cancel` / `ci-open` (`arxa-git-card/lib/client.js:511-513`), but the
+retired VIEW carried its own per-run pair as well, and those were not duplicates: the
+card header only ever reaches the NEWEST run, while the view made every run in the
+list individually addressable. Retiring the view as originally written would have
+orphaned per-run control. The buttons were therefore MOVED into the review view's
+`ci` group rather than dropped — same `card.ci.rerun` / `card.ci.cancel` actions,
+same enable/disable pairing. `card.runner.wake` (:748) is on the card
+(`client.js:445`) and genuinely untouched.
 
 ### D5 — Fetch on open, cache 60 s, manual refresh
 Matches the D101 convention `insight.streak` and `insight.ci` already use
@@ -160,11 +169,13 @@ export must never break the whole card"* (`arxa-git-card/lib/index.js:757`).
    `commitCommentsApi()`, `runJobsApi()`; `resolveThreadApi()` /
    `unresolveThreadApi()` over GraphQL.
 2. `github-link/lib/index.js` — `withRefresh` wrappers + re-exports.
-3. `arxa-git-card/lib/index.js` — `insight.review` handler (fan-out under
-   `Promise.allSettled` so one 404 — no linked issues, no commit comments — cannot
-   blank the panel; ~7 REST endpoints plus one GraphQL call, so the FIRST open is
-   slow and the 60 s cache only helps repeat opens + 60 s cache
-   + ranking), `review.reply`, `review.resolve`; retire `insight.ci`; auto-open
+3. `arxa-git-card/lib/index.js` — `insight.review` handler. The fan-out came out at
+   THREE calls, not the ~7 estimated: one GraphQL query returns comments, reviews,
+   review threads, linked issues and commit notes together, then one REST call for the
+   branch's workflow runs and one for the newest run's jobs. Under `Promise.allSettled`
+   so a repo with no linked issues, no commit comments or no Actions renders instead of
+   blanking. Plus the 60 s cache
+   + ranking), `insight.reply`, `insight.resolve`; retire `insight.ci`; auto-open
    on first push in the push path.
 4. `arxa-git-card/lib/client.js` — swap the CI button for the Review button,
    locale keys ×3.
