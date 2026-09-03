@@ -56,7 +56,7 @@ import path from 'node:path'
 import { ensureGit } from './probe.js'
 import { runGit, STAGE_IDENTITY } from './run.js'
 import { wipCommit, stageBoundarySquash, STAGE_BASE_REF } from './commits.js'
-import { getOrigin } from './repos.js'
+import { getOrigin, excludeArxaDir } from './repos.js'
 import { projectRepos } from './routing.js'
 
 /**
@@ -375,13 +375,10 @@ export function rekeySessionsProject(repoPath, oldSlug, newSlug, env = process.e
 
 /** Ensure `.arxa/` never enters any worktree's `add -A` (exclude lives in the common dir). */
 function ensureExcluded(repoPath, env) {
-  const info = path.join(gitCommonDir(repoPath, env), 'info')
-  const exclude = path.join(info, 'exclude')
-  const line = '/.arxa/'
-  const current = fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : ''
-  if (current.split('\n').includes(line)) return
-  fs.mkdirSync(info, { recursive: true })
-  fs.writeFileSync(exclude, current + (current.endsWith('\n') || current === '' ? '' : '\n') + line + '\n')
+  // Same rule, one implementation (repos.js). initRepo applies it at `git
+  // init` so nothing under .arxa/ is ever added in the first place; this call
+  // heals repos that predate that, and covers a worktree's common dir.
+  excludeArxaDir(gitCommonDir(repoPath, env))
 }
 
 /**

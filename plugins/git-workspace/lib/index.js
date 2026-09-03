@@ -81,6 +81,7 @@ export {
   worktreeHealth,
 } from './sessions.js'
 export {
+  listWorktreeDirs,
   parseWorktreePorcelain,
   reconcileWorktrees,
   repairWorktrees,

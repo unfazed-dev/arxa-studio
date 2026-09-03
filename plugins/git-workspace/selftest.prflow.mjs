@@ -301,12 +301,14 @@ try {
   {
     const firstParentBefore = Number(g(repoPath, ['rev-list', '--count', '--first-parent', 'main']))
     const mergesBefore = Number(g(repoPath, ['rev-list', '--count', '--merges', '--first-parent', 'main']))
+    const branches = []
     for (let i = 0; i < 10; i++) {
       const id = `p${i}`
       const subject = `feat(p${i}): pressure session ${i}`
-      work(id, { [`p${i}.txt`]: `session ${i} line one\n` })
+      const s = work(id, { [`p${i}.txt`]: `session ${i} line one\n` })
+      branches.push(s.branch)
       // a second edit so there is a real wip run to collapse
-      const wt = path.join(repoPath, '.arxa/worktrees', id)
+      const wt = s.worktree
       fs.appendFileSync(path.join(wt, `p${i}.txt`), 'line two\n')
       wipCommit(wt, { message: 'more' })
 
@@ -333,7 +335,7 @@ try {
       'pressure: all 10 collapsed commits are on main, one each')
 
     const mergedBranches = g(repoPath, ['branch', '--merged', 'main', '--format=%(refname:short)']).split('\n')
-    ok([...Array(10).keys()].every((i) => mergedBranches.includes(`arxa/session/p${i}`)),
+    ok([...Array(10).keys()].every((i) => mergedBranches.includes(branches[i])),
       'pressure: `branch --merged main` lists all 10 session branches (D107)')
   }
 

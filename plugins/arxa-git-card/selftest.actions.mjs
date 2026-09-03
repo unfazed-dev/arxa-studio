@@ -222,17 +222,24 @@ async function patchProjectManifest(projPath, patch) {
 {
   const org = await makeOrg('Seat Co')
   const sid = await makeSession(org)
-  const dshId = 'arxa-' + sid
+  // Session identity is now the relative disk path (2026-09-03), e.g.
+  // 'Seat-Co/notes/note-wt-260903-001'. The dsh conversation key flattens
+  // it — 'arxa-' + every non-empty segment joined by '-' — matching both
+  // git-workspace's dshSessionKey and the shell's inlined `wanted` (pinned
+  // literally here, not via gw.dshSessionKey, so a drift in either
+  // algorithm still shows up as a fixture that no longer resembles what
+  // the shell actually stores).
+  const dshId = 'arxa-' + sid.split('/').filter(Boolean).join('-')
   gw.annotateSession(org.path, sid, { dshSessionId: dshId })
 
   let r = await act('card.status', { sessionId: sid })
   check('card.status: bare registry id resolves the session seat',
-    r.ok === true && r.result.seat && r.result.seat.kind === 'session' && r.result.seat.branch === 'arxa/session/' + sid,
+    r.ok === true && r.result.seat && r.result.seat.kind === 'session' && r.result.seat.branch === 'arxa/' + sid,
     JSON.stringify(r).slice(0, 300))
 
   r = await act('card.status', { sessionId: dshId })
   check('card.status: dsh conversation id (dshSessionId) resolves the same seat',
-    r.ok === true && r.result.seat && r.result.seat.kind === 'session' && r.result.seat.branch === 'arxa/session/' + sid,
+    r.ok === true && r.result.seat && r.result.seat.kind === 'session' && r.result.seat.branch === 'arxa/' + sid,
     JSON.stringify(r).slice(0, 300))
 
   r = await act('card.status', { sessionId: 'arxa-s-nope' })

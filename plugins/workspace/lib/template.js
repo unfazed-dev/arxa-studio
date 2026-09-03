@@ -326,6 +326,14 @@ export const TEMPLATES = Object.freeze({
         // needs Flutter/Dart + Node + OS coverage PROJECT_GITIGNORE doesn't
         // carry — see gitignore.js. v2/v3 above stay on PROJECT_GITIGNORE.
         { path: '.gitignore', content: () => PROJECT_GITIGNORE_V4 },
+        // Q13: the SDK pin the project gate honours. fvm resolves .fvmrc by
+        // walking up, so one pin here governs every target beneath it.
+        // Declines (null) when no Flutter is installed — see
+        // detectFlutterVersion in scaffold.js.
+        {
+          path: '.fvmrc',
+          content: (ctx) => (ctx.flutterVersion ? JSON.stringify({ flutter: ctx.flutterVersion }, null, 2) + '\n' : null),
+        },
       ]),
     }),
   }),

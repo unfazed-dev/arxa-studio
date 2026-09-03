@@ -127,12 +127,24 @@ ok('resolveSessionRepo refuses a project that does not exist', () => {
 // ---- (b) the discriminator -------------------------------------------------
 
 const projSession = openSession(alpha, {
+  id: 'ORG/projects/alpha/design/design-001',
   name: 'design-001', project: 'alpha', workspace: 'projects/alpha/design',
 })
 
 ok('(b) a project-scoped session worktree resolves to the PROJECT .git — B2 fixed', () => {
   assert.equal(commonDir(projSession.worktree), fs.realpathSync(path.join(alpha, '.git')))
   assert.notEqual(commonDir(projSession.worktree), fs.realpathSync(path.join(org, '.git')))
+})
+
+ok('(b) a multi-segment session id nests the full path under `.arxa/worktrees`, not just the leaf', () => {
+  assert.equal(
+    projSession.worktree,
+    path.join(alpha, '.arxa', 'worktrees', ...projSession.id.split('/')),
+  )
+  assert.ok(
+    fs.existsSync(path.join(alpha, '.arxa', 'worktrees', 'ORG', 'projects', 'alpha', 'design')),
+    'intermediate path segments were created, not just the leaf directory',
+  )
 })
 
 ok('(b) the project session commit lands in PROJECT history, not org history', () => {
@@ -147,7 +159,7 @@ ok('(b) the project session commit lands in PROJECT history, not org history', (
 
 // ---- (c) org-scoped is unchanged -------------------------------------------
 
-const orgSession = openSession(org, { name: 'note-001', project: null, workspace: 'notes' })
+const orgSession = openSession(org, { id: 'ORG/notes/note-001', name: 'note-001', project: null, workspace: 'notes' })
 
 ok('(c) an org-scoped session still resolves to the ORG .git', () => {
   assert.equal(commonDir(orgSession.worktree), fs.realpathSync(path.join(org, '.git')))
@@ -178,6 +190,7 @@ ok('(d) a project directory with no repo/HEAD refuses with the pending message',
 // ---- (e) aggregation -------------------------------------------------------
 
 const betaSession = openSession(beta, {
+  id: 'ORG/projects/beta/design/design-001',
   name: 'design-001', project: 'beta', workspace: 'projects/beta/design',
 })
 
@@ -253,7 +266,7 @@ ok('pressure: 20 sessions across 4 repos aggregate with unique ids in <2s', () =
       const r = repos[i % repos.length]
       const route = resolveSessionRepo(o, r.ws)
       assert.equal(route.repoPath, r.repoPath)
-      openSession(route.repoPath, { name: `s${i}`, project: r.slug, workspace: r.ws })
+      openSession(route.repoPath, { id: `ORG/${r.ws}/s${i}`, name: `s${i}`, project: r.slug, workspace: r.ws })
     }
     const t0 = process.hrtime.bigint()
     const all = parkedSessions(o)

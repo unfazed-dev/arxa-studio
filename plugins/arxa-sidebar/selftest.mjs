@@ -250,15 +250,32 @@ check('Q6: opening/resuming a session reveals its row — ancestors expanded (ne
 
   // ---- session-naming-agent-controls-and-cicd-card, stage 1 (2026-09-03) ----
   const sessionsSrc = readFileSync(new URL('../git-workspace/lib/sessions.js', import.meta.url), 'utf8')
-  check('S1/Q2: the readable session id is minted from the workspace context, counter per workspace per day, with a taken-set skip',
-    sessionsSrc.includes('export function nextSessionId(sessions, workspace, now = new Date())')
-      && sessionsSrc.includes("const base = prefix + '-wt-' + stamp")
+  // Session identity was rewritten to a relative disk path (2026-09-03):
+  // `nextSessionId` (bare leaf) is gone, superseded by `mintSessionPath`
+  // (`<org folder>/<workspace key>/<word>-wt-<stamp>-<NNN>`).
+  check('S1/Q2: the readable session id is minted from the workspace context, counter per path per day across words, with a taken-set skip',
+    sessionsSrc.includes('export function mintSessionPath({ org, workspace, name, sessions, now = new Date() } = {}) {')
+      && sessionsSrc.includes('const base = `${dir}/${word}-wt-${stamp}`')
       && sessionsSrc.includes('while (taken.has(base') && sessionsSrc.includes('taken.add(s.id)'))
+  // Pinned as one contiguous block (not three independent .includes()) so a
+  // refactor that moves `sessions: allSessions(...)` out of the
+  // mintSessionPath({...}) call — leaving the substrings present elsewhere
+  // in the file but the cross-registry wiring actually severed — still fails.
   check('S1/Q2: the mint reads the CROSS-REGISTRY aggregate — the id becomes the dsh session id, so uniqueness must span every repo',
-    lifecycle.includes('nextSessionId(allSessions(resolved, env), ws)'))
-  check('S1/Q3: when the caller names nothing, the registry name DEFAULTS TO THE ID (one display name everywhere)',
-    lifecycle.includes("const title = typeof name === 'string' && name.trim() !== '' ? name.trim() : sid")
-      && lifecycle.includes('openSession(repoPath, { id: sid, name: title,'))
+    lifecycle.includes(`const sid = mintSessionPath({
+            org: path.basename(resolved),
+            workspace: ws,
+            name,
+            sessions: allSessions(resolved, env),
+          })`))
+  // Q9 supersedes Q3: the registry name now defaults to the LEAF of the id,
+  // not the whole path — the breadcrumb already carries the folders, so a
+  // row would otherwise read them twice. lifecycle.js passes the caller's
+  // name through as `undefined` when empty; sessions.js's openSession does
+  // the actual leaf default.
+  check('S1/Q3->Q9: when the caller names nothing, the registry name DEFAULTS TO THE LEAF of the id (one display name everywhere)',
+    lifecycle.includes("name: typeof name === 'string' && name.trim() !== '' ? name.trim() : undefined,")
+      && sessionsSrc.includes('name: name || sessionLeaf(id),'))
   check('S1/Q3: the crumb collapses the duplicate tail — the session segment appears only once a rename diverges it from the worktree id',
     client.includes('if (!wt || nm !== wt) out.push({') && client.includes('const nm = row.name || row.id;'))
   check('S1/item1: the resolved preset id rides on meta so it lands in the session HEADER and the stock AgentPresetLabel lights up',

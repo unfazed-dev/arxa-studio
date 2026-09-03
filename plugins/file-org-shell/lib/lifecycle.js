@@ -81,6 +81,7 @@ import {
   openSession,
   annotateSession,
   mintSessionPath,
+  listWorktreeDirs,
   reviveSession,
   dropSession,
   archiveSession as archiveSessionBranch,
@@ -1483,9 +1484,23 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       // needs an explicit repair (bare 'worktree repair' fatals on the
       // first stale gitdir). Best-effort; prune is FORBIDDEN (D40).
       try {
+        // Walk to the REAL checkouts. A session identity is a path now, so the
+        // top-level entry under the worktrees root is an intermediate folder
+        // (the org segment) and repairing it is a silent no-op — the actual
+        // checkout sits two or more levels down, keeping a gitlink that still
+        // points at the pre-rename path. listWorktreeDirs recurses to the
+        // directories that are genuinely worktrees.
+        // A worktree is repaired by the repo that OWNS it, and a project
+        // session's checkout lives under the org root while belonging to the
+        // project repo (Q3a). Its identity path says which: `<org>/projects/
+        // <slug>/…` is the project's, anything else is the org's.
         const wtRoot = path.join(newPath, '.arxa', 'worktrees')
-        for (const entry of fs.existsSync(wtRoot) ? fs.readdirSync(wtRoot) : []) {
-          runGit(['worktree', 'repair', path.join(wtRoot, entry)], { cwd: newPath, env, allowFail: true })
+        for (const rel of listWorktreeDirs(wtRoot)) {
+          const seg = rel.split('/')
+          const owner = seg[1] === 'projects' && seg[2]
+            ? path.join(newPath, 'projects', seg[2])
+            : newPath
+          runGit(['worktree', 'repair', path.join(wtRoot, ...seg)], { cwd: owner, env, allowFail: true })
         }
       } catch {
         /* repair is best-effort; nothing is ever pruned (D40) */

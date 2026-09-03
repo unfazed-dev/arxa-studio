@@ -47,8 +47,32 @@ export function isRepo(dir, env = process.env) {
   return fs.realpathSync(top) === fs.realpathSync(dir)
 }
 
+/** The one line that keeps arxa's own runtime state out of the user's history. */
+export const ARXA_EXCLUDE_LINE = '/.arxa/'
+
+/**
+ * Add `/.arxa/` to a git dir's info/exclude, idempotently.
+ *
+ * `.arxa/` is arxa's runtime state — the per-org process lock (a pid!), the
+ * worktree checkouts, the snapshot marker. None of it belongs in a user's
+ * history, and the lock in particular is rewritten on every open, so a
+ * committed one makes the tree permanently dirty and conflicts across
+ * machines. Excluding only helps files that are not ALREADY tracked, which is
+ * why this has to run before the first `git add`, not at first session.
+ */
+export function excludeArxaDir(gitDir) {
+  const exclude = path.join(gitDir, 'info', 'exclude')
+  const current = fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : ''
+  if (current.split('\n').includes(ARXA_EXCLUDE_LINE)) return
+  fs.mkdirSync(path.join(gitDir, 'info'), { recursive: true })
+  fs.writeFileSync(exclude, current + (current.endsWith('\n') || current === '' ? '' : '\n') + ARXA_EXCLUDE_LINE + '\n')
+}
+
 function initRepo(dir, env) {
   runGit(['init'], { cwd: dir, env })
+  // Before ANY `git add`: a fresh `git init` puts the git dir at <dir>/.git,
+  // so no common-dir lookup is needed here.
+  try { excludeArxaDir(path.join(dir, '.git')) } catch { /* exclusion is best-effort */ }
 }
 
 /**

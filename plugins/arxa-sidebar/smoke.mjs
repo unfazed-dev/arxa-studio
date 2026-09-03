@@ -96,10 +96,15 @@ check('org-level creation refused (v2)', r.ok === false && r.error === 'unknown-
 r = await act('workspace.new-session', { orgId: acme.id, workspace: 'notes' })
 check('workspace.new-session ok', r.ok === true, r.error)
 s = await state()
-const SESSION_ID = /^[a-z0-9-]+-wt-\d{6}-\d{3}$/
-check('session row served on its org with workspace + auto-name', s.orgs[0].sessions.length === 1 && s.orgs[0].sessions[0].state === 'open'
-  && s.orgs[0].sessions[0].workspace === 'notes' && SESSION_ID.test(s.orgs[0].sessions[0].id)
-  && s.orgs[0].sessions[0].name === s.orgs[0].sessions[0].id,
+// The id IS the relative disk path (2026-09-03): <org folder>/<workspace>/<leaf>.
+// The row LABEL is the leaf alone — the breadcrumb already carries the folders
+// (Q9), so a row does not repeat them.
+const SESSION_ID = /^[^/]+\/notes\/[a-z0-9-]+-wt-\d{6}-\d{3}$/
+const row = s.orgs[0].sessions[0]
+check('session row served on its org with workspace + leaf label', s.orgs[0].sessions.length === 1 && row.state === 'open'
+  && row.workspace === 'notes' && SESSION_ID.test(row.id)
+  && row.name === row.id.split('/').pop()
+  && row.id.startsWith(path.basename(orgPath) + '/'),
   JSON.stringify(s.orgs[0].sessions))
 
 // park it, then open it back through the rows action
@@ -199,7 +204,16 @@ check('rows-c: tree face — five docks, notes a workspace, fixed containers',
   && rcTree.projects.length === 0,
   JSON.stringify(rcTree))
 r = await act('workspace.new-session', { orgId: rc.id, workspace: 'notes' })
-check('rows-c: dock session ok (auto-named, workspace-scoped)', r.ok === true && r.result?.name === r.result?.id && /^note-wt-\d{6}-\d{3}$/.test(r.result?.id ?? '') && r.result?.workspace === 'notes' && r.result?.project === null, JSON.stringify(r))
+// One string, three surfaces: the id IS the relative disk path, the branch is
+// it under `arxa/`, the worktree is it under the org's `.arxa/worktrees/`, and
+// the row label is its leaf. Asserting them together is what would have caught
+// the `arxa/session/s-mtkul0al-7uwie9` drift.
+check('rows-c: dock session ok (path identity, leaf label, workspace-scoped)',
+  r.ok === true && /^[^/]+\/notes\/note-wt-\d{6}-\d{3}$/.test(r.result?.id ?? '')
+  && r.result?.name === r.result?.id.split('/').pop()
+  && r.result?.branch === 'arxa/' + r.result?.id
+  && r.result?.worktree.endsWith('/.arxa/worktrees/' + r.result?.id)
+  && r.result?.workspace === 'notes' && r.result?.project === null, JSON.stringify(r))
 const rcPath = rc.path
 const rcProj = ws.scaffoldProject(rcPath, 'rocket')
 if (rcProj?.path) gitws.initProjectRepo(rcProj.path)
@@ -210,7 +224,16 @@ check('rows-c: project served with its 10 fixed containers',
   rcTree2.projects.length === 1 && rcTree2.projects[0].containers.length === 10,
   JSON.stringify(rcTree2.projects))
 r = await act('workspace.new-session', { orgId: rc.id, workspace: 'projects/rocket/02-design' })
-check('rows-c: project-container session ok (slug-scoped + auto-name)', r.ok === true && r.result?.project === 'rocket' && r.result?.workspace === 'projects/rocket/02-design' && /^02-design-wt-\d{6}-\d{3}$/.test(r.result?.id ?? '') && r.result?.name === r.result?.id, JSON.stringify(r))
+// A project session's identity mirrors disk exactly — `projects/` kept, the
+// numeric container kept — and its CHECKOUT sits under the ORG's single
+// worktrees root even though its branch and registry live in the project repo.
+check('rows-c: project-container session ok (full path identity)',
+  r.ok === true && r.result?.project === 'rocket'
+  && r.result?.workspace === 'projects/rocket/02-design'
+  && /^[^/]+\/projects\/rocket\/02-design\/02-design-wt-\d{6}-\d{3}$/.test(r.result?.id ?? '')
+  && r.result?.name === r.result?.id.split('/').pop()
+  && r.result?.branch === 'arxa/' + r.result?.id
+  && r.result?.worktree.endsWith('/.arxa/worktrees/' + r.result?.id), JSON.stringify(r))
 s = await state()
 const rcSessions = s.orgs.find((o) => o.open).sessions
 check('rows-c: both sessions registered under their workspaces with real timestamps',

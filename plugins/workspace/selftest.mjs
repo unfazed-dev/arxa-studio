@@ -668,6 +668,31 @@ try {
     assert.throws(() => softDelete(workspaceRoot, path.join(workspaceRoot, '.arxa')), TrashError)
     assert.throws(() => softDelete(workspaceRoot, trashRoot(workspaceRoot)), TrashError)
   })
+  // Q13: the SDK pin the project gate reads. Driven through the template's own
+  // content function rather than a real scaffold, so the assertion does not
+  // depend on whether THIS machine has Flutter installed.
+  check('project template: .fvmrc pins a real version, and is absent when there is none', () => {
+    const entry = getTemplate().project.files.find((f) => f.path === '.fvmrc')
+    assert.ok(entry, 'the v4 project template carries an .fvmrc entry')
+    assert.deepEqual(JSON.parse(entry.content({ flutterVersion: '3.47.2' })), { flutter: '3.47.2' })
+    // No Flutter → NO FILE. A placeholder pin ("stable", or an invented
+    // version) would red every target through --enforce-lockfile and the
+    // fvm resolve, which is strictly worse than having no pin at all.
+    assert.equal(entry.content({ flutterVersion: null }), null)
+    assert.equal(entry.content({}), null)
+  })
+
+  check('scaffold: a declining content function writes no file at all', () => {
+    const org = scaffoldOrg(fs.mkdtempSync(path.join(tmp, 'fvm-org-')), 'Fvm Org')
+    const proj = scaffoldProject(org.path, 'Pinned')
+    // Whether .fvmrc exists here depends on the machine; what must ALWAYS hold
+    // is that it is never written empty or with a bogus version.
+    const f = path.join(proj.path, '.fvmrc')
+    if (fs.existsSync(f)) {
+      assert.match(JSON.parse(fs.readFileSync(f, 'utf8')).flutter, /^\d+\.\d+\.\d+/)
+    }
+    assert.ok(fs.existsSync(path.join(proj.path, 'AGENTS.md')), 'the other template files still land')
+  })
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true })
 }

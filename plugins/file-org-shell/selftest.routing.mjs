@@ -18,7 +18,7 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { createOrgLifecycle } from './lib/index.js'
-import { runGit, listSessions, parkedSessions, RoutingRefusedError } from '../git-workspace/lib/index.js'
+import { runGit, listSessions, parkedSessions, RoutingRefusedError, sessionLeaf } from '../git-workspace/lib/index.js'
 
 let passed = 0
 function ok(cond, label) {
@@ -74,8 +74,9 @@ try {
     'B2 FIXED: it is NOT the org repo (the old silent fallback)',
   )
   ok(
-    ps.worktree.startsWith(fs.realpathSync(proj.path)) || ps.worktree.startsWith(proj.path),
-    'the worktree directory itself lives under the project',
+    ps.worktree === path.join(org.path, '.arxa', 'worktrees', ps.id) ||
+      ps.worktree === path.join(fs.realpathSync(org.path), '.arxa', 'worktrees', ps.id),
+    "the worktree directory itself lives under the ORG's .arxa/worktrees root, at the identity path — only the branch and registry stay in the project repo (Q2/D72 path-identity rewrite)",
   )
 
   // The registry is repo-local (D38): the row lands in the project's registry.
@@ -158,24 +159,29 @@ try {
   const aAuto2 = await h.newSession(undefined, 'projects/alpha/notes')
   const ps2 = await h.newSession(undefined, 'projects/beta/notes')
   const seq = (id) => Number(/-(\d+)$/.exec(id)[1])
+  // Q2 (2026-09-03): the id is now the full `<org>/<workspace>/<leaf>` disk
+  // path, not a bare leaf — check the leaf shape and the container prefix
+  // (org folder + workspace string) separately.
+  const leafOk = (id) => new RegExp(`^note-wt-${ymd()}-\\d{3}$`).test(sessionLeaf(id))
   ok(
-    new RegExp(`^note-wt-${ymd()}-\\d{3}$`).test(aAuto1.id) &&
-      new RegExp(`^note-wt-${ymd()}-\\d{3}$`).test(aAuto2.id) &&
+    aAuto1.id.startsWith(`${org.slug}/projects/alpha/notes/`) &&
+      aAuto2.id.startsWith(`${org.slug}/projects/alpha/notes/`) &&
+      leafOk(aAuto1.id) && leafOk(aAuto2.id) &&
       seq(aAuto2.id) === seq(aAuto1.id) + 1,
     `alpha's two sessions ascend consecutively within its own container (${aAuto1.id}, ${aAuto2.id})`,
   )
-  // D98's per-repo counters do NOT survive Q2/Q3, and the reason is
-  // load-bearing: the id is now the dsh session id (`arxa-<id>`), and dsh
-  // keeps ONE session store for the whole app — two projects minting the same
-  // readable id would put two arxa sessions on one conversation. So the mint
-  // reads the cross-registry aggregate and skips ids already taken anywhere.
-  // beta's first does NOT restart at -001: the org and alpha already hold
-  // numbers in today's shared namespace, so beta takes the next free one.
-  // Numbering inside a container is still natural; the namespace is shared.
-  // That is the deliberate price of readable ids.
+  // D98's per-repo counters are superseded by Q2/Q3's per-CONTAINER counter,
+  // not by a shared global one: mintSessionPath anchors its counter regex to
+  // `<org>/<workspace>` (sessions.js dir/base), so beta's `notes` container
+  // counts on its own, independent of alpha's. Global uniqueness no longer
+  // needs a shared numeric namespace at all — the full `<org>/<workspace>/`
+  // prefix baked into every id makes two containers' ids structurally
+  // distinct even when both restart at -001. That is the deliberate payoff
+  // of readable, path-shaped ids: beta's first session DOES restart at -001.
+  // (parkedSessions below still proves global uniqueness, via the aggregate.)
   ok(
-    new RegExp(`^note-wt-${ymd()}-\\d{3}$`).test(ps2.id) && seq(ps2.id) > seq(aAuto2.id),
-    `the day-namespace is shared so ids stay globally unique (${ps2.id})`,
+    ps2.id.startsWith(`${org.slug}/projects/beta/notes/`) && leafOk(ps2.id) && seq(ps2.id) === 1,
+    `beta's own container starts its own count at -001, independent of alpha's (${ps2.id})`,
   )
   ok(
     commonDir(ps2.worktree) === fs.realpathSync(path.join(proj2.path, '.git')),

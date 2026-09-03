@@ -118,7 +118,14 @@ function listGitWorktrees(repoPath, env) {
  * reported at its own depth rather than blamed on the container above it).
  * Depth-independent, so a pre-path flat layout still reads correctly.
  */
-function listDirEntries(worktreesDir) {
+/**
+ * Every real worktree directory under a worktrees root, as paths relative to
+ * it. Recurses, because a session identity is a PATH now: the top-level entry
+ * is an intermediate folder (the org segment), never a checkout. Stops at a
+ * directory holding `.git` (a real worktree) or holding no child directories
+ * (a stray leaf), so it is depth-independent.
+ */
+export function listWorktreeDirs(worktreesDir) {
   if (!fs.existsSync(worktreesDir)) return []
   const out = []
   const walk = (rel) => {
@@ -153,7 +160,7 @@ export function reconcileWorktrees(repoPath, { env = process.env, worktreesDir }
   const dir = worktreesDir || path.join(repoPath, SESSIONS_DIR)
   const sessions = listSessions(repoPath, env)
   const gitWorktrees = listGitWorktrees(repoPath, env)
-  const dirNames = listDirEntries(dir)
+  const dirNames = listWorktreeDirs(dir)
 
   const gitByPath = new Map()
   for (const w of gitWorktrees) gitByPath.set(resolvePath(w.path), w)
