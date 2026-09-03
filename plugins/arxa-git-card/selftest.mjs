@@ -30,7 +30,7 @@ check('seam: sidebar no longer owns any card.* / insight.* / version.mint action
 check('seam: card host reads the published object first, imports as fallback',
   hostSrc().includes("Symbol.for('arxa.sidebar.host')") && hostSrc().includes("import('arxa-sidebar')") && hostSrc().includes('../../arxa-sidebar/lib/index.js'))
 check('seam: card host serves POST /__arxa/git-card/action and dispatches every action it registers',
-  hostSrc().includes("path: '/__arxa/git-card/action'") && ['card.status', 'card.commit.draft', 'card.commit', 'card.push', 'card.pr.create', 'card.pr.status', 'card.pr.comment', 'card.pr.merge', 'version.mint', 'card.runner.wake', 'insight.streak', 'insight.ci', 'insight.sessions', 'card.integrate', 'card.integrate.finish'].every((a) => hostSrc().includes("'" + a + "': async")))
+  hostSrc().includes("path: '/__arxa/git-card/action'") && ['card.status', 'card.commit.draft', 'card.commit', 'card.push', 'card.pr.create', 'card.pr.status', 'card.pr.comment', 'card.pr.merge', 'version.mint', 'card.runner.wake', 'insight.streak', 'insight.review', 'insight.sessions', 'insight.reply', 'insight.resolve', 'card.integrate', 'card.integrate.finish'].every((a) => hostSrc().includes("'" + a + "': async")))
 
 // ---- engine rules (moved verbatim from arxa-sidebar/selftest.mjs) ---------
 check('card: engine exposes the six card actions (S3)', ['card.status', 'card.commit.draft', 'card.commit', 'card.push', 'card.pr.create', 'card.pr.status'].every((a) => hostSrc().includes("'" + a + "'")))

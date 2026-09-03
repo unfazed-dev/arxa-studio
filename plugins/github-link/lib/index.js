@@ -10,13 +10,13 @@
  */
 
 import { getClientId, defaultApiBase, defaultTokenBase, linkViaBrowser, linkViaDevice, createPrivateRepoApi, renameRepoApi, repoNameAvailableApi, deleteRepoApi, refreshAccessToken, SCOPES, SHIPPED_CLIENT_ID, defaultOpen } from './auth.js'
-import { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prCommentApi, prUpdateApi, prStateApi,prChecksApi, workflowRunsApi, rerunRunApi, cancelRunApi } from './frame.js'
+import { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prCommentApi, prUpdateApi, prStateApi,prChecksApi, workflowRunsApi, rerunRunApi, cancelRunApi, prConversationApi, setThreadResolvedApi, prThreadReplyApi, runJobsApi } from './frame.js'
 import { ensureRunner } from './runner.js'
 import { createKeyring } from './keyring.js'
 import { readState, writeState, clearState } from './state.js'
 
 export { SCOPES, createPkcePair, pkceChallenge, getClientId, loadClientId, linkViaBrowser, linkViaDevice, createPrivateRepoApi, renameRepoApi, repoNameAvailableApi } from './auth.js'
-export { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prCommentApi, prUpdateApi, prStateApi,prChecksApi, workflowRunsApi, rerunRunApi, cancelRunApi } from './frame.js'
+export { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prCommentApi, prUpdateApi, prStateApi,prChecksApi, workflowRunsApi, rerunRunApi, cancelRunApi, prConversationApi, setThreadResolvedApi, prThreadReplyApi, runJobsApi } from './frame.js'
 export { ensureRunner, runnerExists } from './runner.js'
 export { createKeyring, KEYCHAIN_SERVICE, SECURITY_PATH } from './keyring.js'
 export { readState, writeState, clearState, statePath, arxaHome } from './state.js'
@@ -364,6 +364,25 @@ export function createGithubLink({
     return withRefresh((t) => workflowRunsApi({ owner, name, branch, perPage, accessToken: t, fetch, apiBase }))
   }
 
+  /** The conversation on one PR — comments, reviews, review threads, linked
+   *  issues and commit notes in ONE GraphQL round trip. See frame.js for why
+   *  this surface is GraphQL while its neighbours are REST. */
+  function prConversation({ owner, name, number } = {}) {
+    return withRefresh((t) => prConversationApi({ owner, name, number, accessToken: t, fetch, apiBase }))
+  }
+  /** Resolve / unresolve a review thread (GraphQL-only capability). */
+  function setThreadResolved({ threadId, resolved } = {}) {
+    return withRefresh((t) => setThreadResolvedApi({ threadId, resolved, accessToken: t, fetch, apiBase }))
+  }
+  /** Reply inside a review thread, addressed to its first comment's numeric id. */
+  function prThreadReply({ owner, name, number, commentId, body } = {}) {
+    return withRefresh((t) => prThreadReplyApi({ owner, name, number, commentId, body, accessToken: t, fetch, apiBase }))
+  }
+  /** Jobs + failed step names for one workflow run. */
+  function runJobs({ owner, name, runId } = {}) {
+    return withRefresh((t) => runJobsApi({ owner, name, runId, accessToken: t, fetch, apiBase }))
+  }
+
   /** Latest device-flow code for the UI (null until a link() starts one). */
   function deviceCode() {
     return lastDeviceCode
@@ -392,6 +411,10 @@ export function createGithubLink({
     rerunRun,
     cancelRun,
     workflowRuns,
+    prConversation,
+    setThreadResolved,
+    prThreadReply,
+    runJobs,
     deviceCode,
   }
 }

@@ -4,8 +4,10 @@
  * The Git card's engine actions, MOVED verbatim out of arxa-sidebar's action
  * table (2026-09-02): card.status / card.commit.draft / card.commit /
  * card.push / card.pr.create / card.pr.status / card.pr.merge /
- * version.mint / card.runner.wake / insight.streak / insight.ci /
- * insight.sessions. One route on the same webServer pattern:
+ * version.mint / card.runner.wake / insight.streak / insight.review /
+ * insight.sessions, plus insight.reply / insight.resolve. (`insight.ci` was
+ * RETIRED by D4 — the review surface absorbed it; see that handler.)
+ * One route on the same webServer pattern:
  *
  *   POST /__arxa/git-card/action  body { action, arg }
  *     → { ok: true, action, result } | { ok: false, error, action? }
@@ -51,6 +53,119 @@ async function importPrflow() {
     prflowCache = await import(new URL('../../git-workspace/lib/prflow.js', import.meta.url).href)
   }
   return prflowCache
+}
+
+/* ---------------------------------------------------------------------------
+ * The review surface (docs/plans/github-conversations-in-the-insight-panel.md)
+ * ------------------------------------------------------------------------- */
+
+/** D7: every comment the panel posts carries this, and only this, to say which
+  * session wrote it. An HTML comment is invisible on github.com, so a reviewer
+  * reads the human's words with no tooling chrome, while arxa can still thread
+  * a comment back to its session — the same job the visible `Arxa-Session:`
+  * trailer does on commits (git-workspace/lib/ledger.js). Authorship is NOT
+  * disguised: the comment posts as the linked user, because the linked user
+  * typed it. */
+// The id class must allow `-`: every session id is hyphenated
+// (`arxa-note-wt-260903-001`). An earlier `[^\s>-]+` here excluded it and
+// silently matched nothing — caught by the selftest, not by reading.
+const MARKER_RE = /\n*<!--\s*arxa-session:\s*([^\s>]+)\s*-->\s*$/
+const sessionMarker = (sid) => '<!-- arxa-session: ' + sid + ' -->'
+/** Strip the marker for display and report the session it named. */
+export function readMarker(body) {
+  const text = typeof body === 'string' ? body : ''
+  const m = MARKER_RE.exec(text)
+  return { body: m ? text.slice(0, m.index) : text, session: m ? m[1] : null }
+}
+
+const EMPTY_REVIEW = Object.freeze({
+  pr: null, needs: [], reviews: [], threads: [], comments: [], issues: [], commitNotes: [], ci: [],
+})
+
+/** D5: fetch on open, reuse for 60s, manual refresh bypasses. Module scope and
+  * deliberately unbounded in age but bounded in size — D101's rule is live from
+  * the provider, never a persisted index. A write invalidates its own session's
+  * entry so the repaint after a reply shows the reply. */
+const REVIEW_TTL_MS = 60_000
+const reviewCache = new Map()
+function invalidateReview(sid) { reviewCache.delete(sid) }
+
+/** D3: what earns the top band. Everything here is something a person must act
+  * on; everything else is history and falls through to its group. */
+function needsYou(conv, ci, login) {
+  const out = []
+  const mention = login ? new RegExp('(^|[^\\w])@' + login.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i') : null
+  for (const r of conv.reviews) {
+    if (r.state === 'CHANGES_REQUESTED') out.push({ kind: 'changes-requested', by: r.login, url: r.url, at: r.createdAt })
+  }
+  for (const t of conv.threads) {
+    if (!t.resolved && !t.outdated) {
+      out.push({ kind: 'unresolved-thread', threadId: t.id, path: t.path, line: t.line, by: t.comments[0]?.login ?? null, url: t.comments[0]?.url ?? null, at: t.comments[0]?.createdAt ?? null })
+    }
+  }
+  if (mention) {
+    const every = [...conv.comments, ...conv.threads.flatMap((t) => t.comments), ...conv.issues.flatMap((i) => i.comments), ...conv.commitNotes]
+    for (const c of every) {
+      // Never flag the user's own words back at them.
+      if (c.login !== login && mention.test(c.body)) out.push({ kind: 'mention', by: c.login, url: c.url, at: c.createdAt })
+    }
+  }
+  for (const run of ci) {
+    for (const j of run.jobs ?? []) {
+      if (j.conclusion === 'failure') out.push({ kind: 'ci-failed', job: j.name, steps: j.failedSteps, url: j.url, at: run.createdAt })
+    }
+  }
+  // Newest first inside the band; a null stamp sorts last rather than throwing.
+  return out.sort((a, b) => String(b.at ?? '').localeCompare(String(a.at ?? '')))
+}
+
+/** The whole surface for one session: one GraphQL call for the conversation,
+  * one REST call for the runs, one more for the newest run's jobs. Every leg is
+  * allSettled — an org with no linked issues, no commit comments or no Actions
+  * must render, not blank (plan: Degradation). */
+async function reviewFor({ g, gw, owner, name, branch, sid, fresh }) {
+  const hit = reviewCache.get(sid)
+  if (!fresh && hit && Date.now() - hit.at < REVIEW_TTL_MS) return hit.value
+  const prs = await g.prListForHead(owner, name, branch, 'all').catch(() => [])
+  const pr = Array.isArray(prs) ? (prs.find((p) => p.state === 'open') ?? prs[0]) : null
+  if (!pr) {
+    // Not an error: the session simply has no PR yet. The panel renders the
+    // empty state that carries Create PR (D6 opens one on first push anyway).
+    const value = { ...EMPTY_REVIEW, reason: 'no-pr' }
+    reviewCache.set(sid, { at: Date.now(), value })
+    return value
+  }
+  const [conv, runs, who] = await Promise.allSettled([
+    g.prConversation({ owner, name, number: pr.number }),
+    typeof g.workflowRuns === 'function' ? g.workflowRuns({ owner, name, branch, perPage: 10 }) : Promise.resolve({ runs: [] }),
+    typeof g.status === 'function' ? g.status() : Promise.resolve(null),
+  ])
+  const conversation = conv.status === 'fulfilled' && conv.value ? conv.value : { comments: [], reviews: [], threads: [], issues: [], commitNotes: [], number: pr.number, url: pr.html_url ?? null, title: null, state: null }
+  const runList = (runs.status === 'fulfilled' ? runs.value?.runs : null) ?? []
+  const login = (who.status === 'fulfilled' ? who.value?.login : null) ?? null
+  // Only the newest run's jobs: older runs' step detail is history nobody acts
+  // on, and each one is another request against the same rate limit.
+  const newest = runList[0]
+  const jobs = newest && typeof g.runJobs === 'function'
+    ? await g.runJobs({ owner, name, runId: newest.id }).then((r) => r?.jobs ?? [], () => [])
+    : []
+  const ci = runList.map((r, i) => ({ ...r, jobs: i === 0 ? jobs : [] }))
+  // D7: the marker is bookkeeping, never something a reader should see.
+  const clean = (c) => { const { body, session } = readMarker(c.body); return { ...c, body, session } }
+  const value = {
+    pr: { number: conversation.number ?? pr.number, url: conversation.url ?? pr.html_url ?? null, title: conversation.title ?? pr.title ?? null, state: conversation.state ?? pr.state ?? null },
+    login,
+    reviews: conversation.reviews.map(clean),
+    threads: conversation.threads.map((t) => ({ ...t, comments: t.comments.map(clean) })),
+    comments: conversation.comments.map(clean),
+    issues: conversation.issues.map((i) => ({ ...i, comments: i.comments.map(clean) })),
+    commitNotes: conversation.commitNotes.map(clean),
+    ci,
+    needs: needsYou(conversation, ci, login),
+    degraded: conv.status === 'rejected' ? 'conversation' : runs.status === 'rejected' ? 'ci' : null,
+  }
+  reviewCache.set(sid, { at: Date.now(), value })
+  return value
 }
 
 export function apply(ctx) {
@@ -170,7 +285,13 @@ export function apply(ctx) {
                 out = gw.runGit(['push', '-u', urlFor(fresh), s.branch], pushOpts)
               } catch { /* refresh unavailable — fall through to the failure */ }
             }
-            return out !== null ? { ok: true, branch: s.branch } : fail('push-failed')
+            if (out === null) return fail('push-failed')
+            // D6: the push landed, so the branch exists on the remote and a PR
+            // can reference it. Best-effort by construction — a refused PR is
+            // reported alongside a push that genuinely succeeded, never raised
+            // as a push failure.
+            const opened = await autoOpenPr(gw, cur, sid)
+            return { ok: true, branch: s.branch, pr: opened.ok ? opened.pr : null, prReason: opened.ok ? null : opened.reason }
           }
 
           /**
@@ -184,6 +305,73 @@ export function apply(ctx) {
            * complete history locally (CLAUDE.md: no feature may REQUIRE the
            * remote to work).
            */
+          /**
+           * Build and file the session's PR. ONE place does this, called by the
+           * manual `card.pr.create` and by the D6 auto-open below — two code
+           * paths producing subtly different PRs (a body without the ledger
+           * fence, say) is exactly the drift this plan set out to remove.
+           *
+           * `title` must be conventional because it BECOMES the squash-merge
+           * subject (Q7/Q8), and file-pr rule 1 is dedupe: an existing PR for
+           * this head is returned, never duplicated. No `draft` — the recorded
+           * t3ci rule is "no drafts" (git-card-sessions-worktree-rewire.md:585);
+           * the ledger fenced into the body is what declares the stage instead,
+           * and index.js re-renders it at every transition.
+           */
+          const openPr = async (gw, g, cur, s, sid, { title, problem, fix, model, effort }) => {
+            const manifest = await repoFor(s)
+            if (!gw.SUBJECT_RE.test(title)) throw new Error('title-not-conventional: the PR title becomes the squash-merge subject (Q7/Q8)')
+            const attribution = '— written by ' + String(model ?? 'the session model') + ' in arxa studio'
+            const actor = await authorLogin(s.repoPath ?? cur.path)
+            const collaborator = gw.agentCollaborator(model, effort)
+            // The ledger is fenced into the body at creation so every later
+            // stage can rewrite that block in place instead of appending.
+            const ledgerTable = gw.renderLedger(gw.readLedger(s.repoPath ?? cur.path, sid), { sessionId: sid, container: s.workspace, next: 'review' })
+            const body = gw.withLedger(
+              [String(problem ?? ''), String(fix ?? ''), attribution].filter((x) => x !== '').join('\n\n'),
+              ledgerTable,
+            )
+            // file-pr rule 1: dedupe — update, never duplicate.
+            const existing = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
+            if (Array.isArray(existing) && existing.length > 0) return { ok: true, existing: true, pr: { number: existing[0].number, url: existing[0].html_url } }
+            const pr = await g.prCreate(manifest.repoOwner, manifest.repoName, { title, body, head: s.branch, base: 'main' })
+            await noteStage(s.repoPath ?? cur.path, sid, { stage: 'review', author: actor, collaborator, detail: 'PR #' + pr.number + ' opened' }, { next: 'a human reviewer' })
+            return { ok: true, pr: { number: pr.number, url: pr.html_url } }
+          }
+
+          /**
+           * D6 — the session's PR opens on its FIRST push, not on demand.
+           *
+           * Called from the tail of pushSessionBranch and ONLY after it reports
+           * ok:true, so the auth-retry path never reaches GitHub twice (that
+           * path has a measured six-minute freeze on a rejected token). The
+           * dedupe inside openPr makes it once-per-session: every later push
+           * finds the PR and returns it untouched.
+           *
+           * The title is the branch's newest commit subject — the same string
+           * that would become the squash subject anyway. A non-conventional
+           * subject is NOT an error here: it means this session is not ready to
+           * be titled automatically, so the auto-open declines and the card's
+           * Create PR button stays the way in. Nothing this function does may
+           * fail a push; the caller swallows the reason into the push result.
+           */
+          const autoOpenPr = async (gw, cur, sid) => {
+            const g = await getGithub().catch(() => null)
+            if (!g) return { ok: false, reason: 'unlinked' }
+            const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+            if (!s) return { ok: false, reason: 'session-not-found' }
+            const repoPath = s.repoPath ?? cur.path
+            let subject = ''
+            try {
+              subject = String(gw.runGit(['log', '-1', '--pretty=%s', s.branch], { cwd: repoPath, allowFail: true }) ?? '').trim()
+            } catch { return { ok: false, reason: 'no-commits' } }
+            if (subject === '') return { ok: false, reason: 'no-commits' }
+            if (!gw.SUBJECT_RE.test(subject)) return { ok: false, reason: 'title-not-conventional' }
+            try {
+              return await openPr(gw, g, cur, s, sid, { title: subject, problem: '', fix: '' })
+            } catch (err) { return { ok: false, reason: String(err?.message ?? err).slice(0, 120) } }
+          }
+
           /**
            * The GitHub repo a session's pull request belongs to.
            *
@@ -523,25 +711,10 @@ export function apply(ctx) {
               // (the org registry had no such id, so it threw). Keep it loud
               // rather than silently filing an org-scoped PR for project work —
               // choosing the right manifest is Phase 2 (D102/D107).
-              const manifest = await repoFor(s)
-              const title = String(arg?.title ?? '').trim()
-              if (!gw.SUBJECT_RE.test(title)) throw new Error('title-not-conventional: the PR title becomes the squash-merge subject (Q7/Q8)')
-              const attribution = '— written by ' + String(arg?.model ?? 'the session model') + ' in arxa studio'
-              const actor = await authorLogin(s.repoPath ?? cur.path)
-              const collaborator = gw.agentCollaborator(arg?.model, arg?.effort)
-              // The ledger is fenced into the body at creation so every later
-              // stage can rewrite that block in place instead of appending.
-              const ledgerTable = gw.renderLedger(gw.readLedger(s.repoPath ?? cur.path, sid), { sessionId: sid, container: s.workspace, next: 'review' })
-              const body = gw.withLedger(
-                [String(arg?.problem ?? ''), String(arg?.fix ?? ''), attribution].filter((x) => x !== '').join('\n\n'),
-                ledgerTable,
-              )
-              // file-pr rule 1: dedupe — update, never duplicate.
-              const existing = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
-              if (Array.isArray(existing) && existing.length > 0) return { ok: true, existing: true, pr: { number: existing[0].number, url: existing[0].html_url } }
-              const pr = await g.prCreate(manifest.repoOwner, manifest.repoName, { title, body, head: s.branch, base: 'main' })
-              await noteStage(s.repoPath ?? cur.path, sid, { stage: 'review', author: actor, collaborator, detail: 'PR #' + pr.number + ' opened' }, { next: 'a human reviewer' })
-              return { ok: true, pr: { number: pr.number, url: pr.html_url } }
+              return openPr(gw, g, cur, s, sid, {
+                title: String(arg?.title ?? '').trim(),
+                problem: arg?.problem, fix: arg?.fix, model: arg?.model, effort: arg?.effort,
+              })
             },
             'card.pr.status': async () => {
               const gw = await importGitWorkspace()
@@ -769,18 +942,80 @@ export function apply(ctx) {
               const repoPath = s.repoPath ?? cur.path
               return gw.commitDays(repoPath, { since: '90 days', env: process.env })
             },
-            'insight.ci': async () => {
+            /** D4: the review surface ABSORBED the retired `insight.ci` view.
+              * There is no `insight.ci` action any more — its workflow-run read
+              * lives in the `ci` group below, so two surfaces can never disagree
+              * about the same runs. The CI *verbs* were never here: `ci-rerun` /
+              * `ci-cancel` / `ci-open` sit on the card header
+              * (`client.js:511-513` → `card.ci.rerun` / `card.ci.cancel`), so
+              * retiring the view removed a reader and no verb. */
+            'insight.review': async () => {
               const gw = await importGitWorkspace()
               const g = await getGithub().catch(() => null)
               const cur = handle()
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
-              if (!sid) throw new Error('insight.ci serves session seats')
+              if (!sid) throw new Error('insight.review serves session seats')
               const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
               if (!s) throw new Error('session-not-found: ' + sid)
-              if (!g || typeof g.workflowRuns !== 'function') return { runs: [], reason: 'unavailable' }
+              if (!g || typeof g.prConversation !== 'function') return { ...EMPTY_REVIEW, reason: 'unavailable' }
               const manifest = await repoFor(s).catch(() => null)
-              if (!manifest) return { runs: [], reason: 'unavailable' }
-              return g.workflowRuns({ owner: manifest.repoOwner, name: manifest.repoName, branch: s.branch, perPage: 20 })
+              if (!manifest?.repoOwner || !manifest?.repoName) return { ...EMPTY_REVIEW, reason: 'unavailable' }
+              return reviewFor({ g, gw, owner: manifest.repoOwner, name: manifest.repoName, branch: s.branch, sid, fresh: arg?.fresh === true })
+            },
+            /** D1 + D3: the human's own words, never the card's.
+              *
+              * Named `insight.*`, not `review.*`, because the action PREFIX is
+              * the route: the selftest harness dispatches
+              * /^(card|insight|version)\./ to this host and everything else to
+              * the sidebar's. The viewer's own router disagrees (it sends all
+              * but `agent.*` here), and a verb that only works through one of
+              * two routers is a bug waiting for whichever caller comes second. Both write
+              * verbs refuse rather than guess, and the panel repaints from the
+              * refetch they force — a reply that appears without having landed
+              * is worse than a slow one. */
+            'insight.reply': async () => {
+              const g = await getGithub().catch(() => null)
+              if (!g) return { ok: false, reason: 'unlinked' }
+              const gw = await importGitWorkspace()
+              const cur = handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (!sid) return { ok: false, reason: 'session-required' }
+              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              if (!s) return { ok: false, reason: 'session-not-found' }
+              const text = typeof arg?.text === 'string' ? arg.text.trim() : ''
+              if (text === '') return { ok: false, reason: 'message-required' }
+              const manifest = await repoFor(s).catch(() => null)
+              if (!manifest?.repoOwner || !manifest?.repoName) return { ok: false, reason: 'unlinked' }
+              const number = Number(arg?.number)
+              if (!Number.isFinite(number)) return { ok: false, reason: 'pr-required' }
+              const body = text + '\n\n' + sessionMarker(sid)
+              const owner = manifest.repoOwner
+              const name = manifest.repoName
+              let out
+              try {
+                // A thread reply is addressed to the thread's FIRST comment;
+                // a bare PR comment has no parent. Two endpoints, one verb.
+                // NB the two call shapes differ — `prComment` takes owner/name
+                // POSITIONALLY (github-link/lib/index.js:349) while the newer
+                // `prThreadReply` is a single options object.
+                out = arg?.commentId
+                  ? await g.prThreadReply({ owner, name, number, commentId: arg.commentId, body })
+                  : await g.prComment(owner, name, { number, body })
+              } catch (err) { return { ok: false, reason: String(err?.message ?? err).slice(0, 160) } }
+              invalidateReview(sid)
+              return { ok: true, id: out?.id ?? null, url: out?.url ?? null }
+            },
+            'insight.resolve': async () => {
+              const g = await getGithub().catch(() => null)
+              if (!g || typeof g.setThreadResolved !== 'function') return { ok: false, reason: 'unlinked' }
+              const threadId = typeof arg?.threadId === 'string' && arg.threadId !== '' ? arg.threadId : null
+              if (!threadId) return { ok: false, reason: 'thread-required' }
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              let out
+              try { out = await g.setThreadResolved({ threadId, resolved: arg?.resolved !== false }) }
+              catch (err) { return { ok: false, reason: String(err?.message ?? err).slice(0, 160) } }
+              if (sid) invalidateReview(sid)
+              return { ok: true, resolved: out?.resolved === true }
             },
             'insight.sessions': async () => {
               const gw = await importGitWorkspace()

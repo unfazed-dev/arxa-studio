@@ -193,19 +193,127 @@ async function patchProjectManifest(projPath, patch) {
       JSON.stringify(r))
   }
 
-  // insight.ci: fakeGh has no workflowRuns yet — unavailable shape.
+  // ---- insight.review (D4: this ABSORBED the retired insight.ci) ----------
+  // The old action is gone on purpose. Pin its absence, so a future edit that
+  // quietly reinstates it re-creates the two-surfaces-disagree bug D4 removed.
   r = await act('insight.ci', { sessionId: sid })
-  check('insight.ci: missing workflowRuns export — unavailable shape',
-    r.ok === true && r.result.reason === 'unavailable' && Array.isArray(r.result.runs) && r.result.runs.length === 0,
+  check('insight.ci is RETIRED — the review view owns CI now (D4)',
+    r.ok === false && r.error === 'unknown-action', JSON.stringify(r))
+
+  // No prConversation on the fake → the documented unavailable shape, never a throw.
+  r = await act('insight.review', { sessionId: sid })
+  check('insight.review: missing prConversation export — unavailable shape, card survives',
+    r.ok === true && r.result.reason === 'unavailable' &&
+    Array.isArray(r.result.threads) && r.result.threads.length === 0 &&
+    Array.isArray(r.result.needs) && r.result.needs.length === 0,
     JSON.stringify(r))
 
-  // insight.ci: now with a fake workflowRuns + a published manifest — real shape.
   await patchManifest(org.path, { repoOwner: 'acme', repoName: 'widgets', localOnly: false })
-  fakeGh.workflowRuns = async ({ owner, name, branch, perPage }) => ([{ id: 1, owner, name, branch, perPage, status: 'completed', conclusion: 'success' }])
-  r = await act('insight.ci', { sessionId: sid })
-  check('insight.ci: workflowRuns present — real shape served',
-    r.ok === true && Array.isArray(r.result) && r.result.length === 1 && r.result[0].owner === 'acme',
-    JSON.stringify(r))
+  fakeGh.workflowRuns = async ({ owner, name, branch, perPage }) => ({ runs: [{ id: 1, owner, name, branch, perPage, status: 'completed', conclusion: 'failure', createdAt: '2026-09-03T10:00:00Z' }] })
+
+  // A session with no PR is NOT an error — it is the empty state that carries
+  // the Create PR button (plan: Degradation).
+  fakeGh.prListForHead = async () => []
+  fakeGh.prConversation = async () => { throw new Error('should not be reached without a PR') }
+  r = await act('insight.review', { sessionId: sid, fresh: true })
+  check('insight.review: no PR yet is an empty state, not an error',
+    r.ok === true && r.result.reason === 'no-pr' && r.result.pr === null, JSON.stringify(r))
+
+  // The real shape: ranking is what this view exists for, so assert the BAND,
+  // not just that data arrived.
+  fakeGh.prListForHead = async () => ([{ number: 7, state: 'open', html_url: 'https://gh/pr/7', title: 'feat: x' }])
+  fakeGh.status = async () => ({ login: 'evan-dev' })
+  fakeGh.runJobs = async () => ({ jobs: [{ id: 9, name: 'test', conclusion: 'failure', failedSteps: [{ name: 'flutter test', number: 4 }] }] })
+  fakeGh.prConversation = async ({ number }) => ({
+    number, url: 'https://gh/pr/7', title: 'feat: x', state: 'OPEN',
+    comments: [
+      { id: 'c1', url: 'u1', body: 'nice work', createdAt: '2026-09-03T09:00:00Z', login: 'someone', bot: false },
+      { id: 'c2', url: 'u2', body: 'cc @evan-dev take a look', createdAt: '2026-09-03T09:30:00Z', login: 'someone', bot: false },
+      { id: 'c3', url: 'u3', body: 'my own note @evan-dev', createdAt: '2026-09-03T09:40:00Z', login: 'evan-dev', bot: false },
+      { id: 'c4', url: 'u4', body: 'replied\n\n<!-- arxa-session: ' + sid + ' -->', createdAt: '2026-09-03T09:50:00Z', login: 'evan-dev', bot: false },
+    ],
+    reviews: [
+      { id: 'r1', url: 'ur1', body: 'please fix', state: 'CHANGES_REQUESTED', createdAt: '2026-09-03T08:00:00Z', login: 'reviewer', bot: false },
+      { id: 'r2', url: 'ur2', body: 'ok', state: 'COMMENTED', createdAt: '2026-09-03T08:10:00Z', login: 'bot-x', bot: true },
+    ],
+    threads: [
+      { id: 'T1', resolved: false, outdated: false, path: 'a.dart', line: 3, replyTo: 111, comments: [{ id: 'tc1', url: 'ut1', body: 'why this?', createdAt: '2026-09-03T07:00:00Z', login: 'reviewer', bot: false }] },
+      { id: 'T2', resolved: true, outdated: false, path: 'b.dart', line: 9, replyTo: 222, comments: [{ id: 'tc2', url: 'ut2', body: 'done', createdAt: '2026-09-03T07:10:00Z', login: 'reviewer', bot: false }] },
+      { id: 'T3', resolved: false, outdated: true, path: 'c.dart', line: 1, replyTo: 333, comments: [{ id: 'tc3', url: 'ut3', body: 'stale', createdAt: '2026-09-03T07:20:00Z', login: 'reviewer', bot: false }] },
+    ],
+    issues: [{ number: 12, title: 'the bug', url: 'ui', state: 'OPEN', comments: [] }],
+    commitNotes: [],
+  })
+  r = await act('insight.review', { sessionId: sid, fresh: true })
+  const d = r.result
+  check('insight.review: serves the PR and every group D2 named',
+    r.ok === true && d.pr.number === 7 && d.reviews.length === 2 && d.threads.length === 3 &&
+    d.comments.length === 4 && d.issues.length === 1 && d.ci.length === 1, JSON.stringify(r).slice(0, 300))
+  check('needs-you: a CHANGES_REQUESTED review is in the band',
+    d.needs.some((x) => x.kind === 'changes-requested' && x.by === 'reviewer'), JSON.stringify(d.needs))
+  check('needs-you: an UNRESOLVED thread is in the band; a resolved one is not',
+    d.needs.some((x) => x.kind === 'unresolved-thread' && x.threadId === 'T1') &&
+    !d.needs.some((x) => x.threadId === 'T2'), JSON.stringify(d.needs))
+  check('needs-you: an OUTDATED unresolved thread stays out — the line it marked is gone',
+    !d.needs.some((x) => x.threadId === 'T3'), JSON.stringify(d.needs))
+  check('needs-you: a mention of the linked login is in the band',
+    d.needs.some((x) => x.kind === 'mention' && x.url === 'u2'), JSON.stringify(d.needs))
+  check('needs-you: the user\'s OWN mention is never flagged back at them',
+    !d.needs.some((x) => x.url === 'u3'), JSON.stringify(d.needs))
+  check('needs-you: a failing CI step is in the band, named',
+    d.needs.some((x) => x.kind === 'ci-failed' && x.job === 'test' && x.steps[0].name === 'flutter test'),
+    JSON.stringify(d.needs))
+  check('needs-you: sorted newest first',
+    d.needs.map((x) => String(x.at ?? '')).every((v, i, a) => i === 0 || a[i - 1] >= v), JSON.stringify(d.needs.map((x) => x.at)))
+  // D7: the marker is bookkeeping. A reader must never see it, and the session
+  // it names must survive as structured data.
+  const own = d.comments.find((c) => c.id === 'c4')
+  check('D7: the session marker is stripped from the rendered body and kept as a field',
+    own.body === 'replied' && own.session === sid, JSON.stringify(own))
+  check('D7: a comment with no marker reports no session',
+    d.comments.find((c) => c.id === 'c1').session === null)
+  check('bots are labelled so the panel can collapse them',
+    d.reviews.find((x) => x.id === 'r2').bot === true && d.reviews.find((x) => x.id === 'r1').bot === false)
+  // D5: 60s cache. A second call without `fresh` must not re-hit the provider.
+  let hits = 0
+  const prev = fakeGh.prConversation
+  fakeGh.prConversation = async (a) => { hits++; return prev(a) }
+  await act('insight.review', { sessionId: sid })
+  check('D5: a second open inside 60s is served from cache, not the provider', hits === 0, 'hits=' + hits)
+  await act('insight.review', { sessionId: sid, fresh: true })
+  check('D5: an explicit refresh bypasses the cache', hits === 1, 'hits=' + hits)
+
+  // ---- the write verbs (D1) ------------------------------------------------
+  const posted = []
+  fakeGh.prComment = async (owner, name, a) => { posted.push({ kind: 'pr', owner, name, ...a }); return { id: 1, url: 'https://gh/c/1' } }
+  fakeGh.prThreadReply = async (a) => { posted.push({ kind: 'thread', ...a }); return { id: 2, url: 'https://gh/c/2' } }
+  fakeGh.setThreadResolved = async ({ threadId, resolved }) => ({ id: threadId, resolved })
+
+  r = await act('insight.reply', { sessionId: sid, number: 7, text: 'on it' })
+  check('insight.reply: a bare PR comment goes to prComment, marked with the session (D7)',
+    r.ok === true && r.result.ok === true && posted.length === 1 && posted[0].kind === 'pr' &&
+    posted[0].body === 'on it\n\n<!-- arxa-session: ' + sid + ' -->', JSON.stringify(posted[0]))
+  r = await act('insight.reply', { sessionId: sid, number: 7, commentId: 111, text: 'because of X' })
+  check('insight.reply: a thread reply is addressed to the thread\'s first comment id',
+    r.ok === true && posted[1].kind === 'thread' && posted[1].commentId === 111 &&
+    posted[1].body.startsWith('because of X'), JSON.stringify(posted[1]))
+  r = await act('insight.reply', { sessionId: sid, number: 7, text: '   ' })
+  check('insight.reply: an empty message is refused BEFORE GitHub is touched',
+    r.result.ok === false && r.result.reason === 'message-required' && posted.length === 2, JSON.stringify(r))
+  r = await act('insight.reply', { sessionId: sid, text: 'no pr number' })
+  check('insight.reply: a missing PR number is refused, never guessed',
+    r.result.ok === false && r.result.reason === 'pr-required', JSON.stringify(r))
+  r = await act('insight.resolve', { sessionId: sid, threadId: 'T1' })
+  check('insight.resolve: marks the thread resolved', r.result.ok === true && r.result.resolved === true, JSON.stringify(r))
+  r = await act('insight.resolve', { sessionId: sid, threadId: 'T1', resolved: false })
+  check('insight.resolve: unresolve is the same verb, not a second action',
+    r.result.ok === true && r.result.resolved === false, JSON.stringify(r))
+  r = await act('insight.resolve', { sessionId: sid })
+  check('insight.resolve: a missing thread id is refused', r.result.ok === false && r.result.reason === 'thread-required', JSON.stringify(r))
+  // A write must drop its own cache entry, or the repaint shows the old thread.
+  hits = 0
+  await act('insight.review', { sessionId: sid })
+  check('a write invalidates the cache so the repaint shows the reply', hits === 1, 'hits=' + hits)
 
   r = await act('insight.sessions', { orgId: org.id })
   check('insight.sessions: rows include the created session',

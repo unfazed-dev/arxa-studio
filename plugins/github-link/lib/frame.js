@@ -401,3 +401,209 @@ export async function latestRunnerTarballApi({ accessToken, fetch, apiBase }) {
   if (!asset) throw new Error('github-link: no osx-arm64 runner asset in the latest release')
   return { url: asset.browser_download_url, version: rel.tag_name }
 }
+
+// ---------------------------------------------------------------------------
+// The conversation surface (docs/plans/github-conversations-in-the-insight-panel.md)
+//
+// WHY GRAPHQL AT ALL, when every neighbour above is REST: thread RESOLUTION is
+// not in the REST API. Verified against the published schema
+// (https://docs.github.com/public/fpt/schema.docs.graphql, 2026-09-03):
+// `PullRequestReviewThread.isResolved: Boolean!` and the mutations
+// `resolveReviewThread` / `unresolveReviewThread` exist there and nowhere else.
+// D1 put resolve in scope, so one GraphQL transport is the floor.
+//
+// Having paid for it, the READ collapses into it too. The alternative was five
+// REST round trips (issue comments, reviews, review comments, linked issues,
+// commit comments) fanned out per panel open; this is one request. That is not
+// premature optimisation — D2's scope is wide and D5 caches for only 60s, so
+// the first open is the cost that shows.
+//
+// The existing `repo` scope already authorises GraphQL (auth.js:29) — nobody
+// re-links. The API version header stays `2022-11-28` to match the thirteen
+// REST helpers above; GraphQL ignores it.
+// ---------------------------------------------------------------------------
+
+/** POST /graphql. Mirrors the REST helpers' header/error shape, with one extra
+ * failure mode they do not have: GraphQL answers 200 OK and puts errors in the
+ * BODY, so a `data`-only check would silently render an empty panel on a
+ * permission error. Both are surfaced. */
+export async function graphqlApi({ query, variables, accessToken, fetch, apiBase }) {
+  const res = await fetch(new URL('/graphql', apiBase), {
+    method: 'POST',
+    headers: {
+      accept: 'application/vnd.github+json',
+      authorization: 'Bearer ' + accessToken,
+      'content-type': 'application/json',
+      'user-agent': 'arxa-studio',
+    },
+    body: JSON.stringify({ query, variables }),
+  })
+  if (!res.ok) throw new Error('github-link: graphql failed (' + res.status + ')')
+  const out = await res.json().catch(() => ({}))
+  if (Array.isArray(out.errors) && out.errors.length > 0) {
+    throw new Error('github-link: graphql error — ' + String(out.errors[0]?.message ?? 'unknown').slice(0, 160))
+  }
+  return out.data ?? {}
+}
+
+/** One query, every surface D2 named. `author` is nullable throughout (a
+ * deleted account), and `__typename` on the Actor union is how a Bot is known —
+ * authoritative, unlike sniffing for a `[bot]` login suffix. `databaseId` on a
+ * review comment is the numeric id the REST reply endpoint needs; the node `id`
+ * is what the resolve mutation needs. Both are carried because the panel does
+ * both. */
+const CONVERSATION_QUERY = `
+query($owner:String!, $name:String!, $number:Int!) {
+  repository(owner:$owner, name:$name) {
+    pullRequest(number:$number) {
+      number url title state
+      comments(last:50) { nodes { id url body createdAt author { login __typename } } }
+      reviews(last:20) { nodes { id url body state createdAt author { login __typename } } }
+      reviewThreads(last:50) { nodes {
+        id isResolved isOutdated path line
+        comments(first:20) { nodes { id databaseId url body createdAt author { login __typename } } }
+      } }
+      closingIssuesReferences(first:10) { nodes {
+        number title url state
+        comments(last:20) { nodes { id url body createdAt author { login __typename } } }
+      } }
+      commits(last:20) { nodes { commit {
+        oid messageHeadline
+        comments(last:10) { nodes { id url body createdAt author { login __typename } } }
+      } } }
+    }
+  }
+}`
+
+const actor = (a) => ({ login: a?.login ?? null, bot: a?.__typename === 'Bot' })
+const note = (c) => ({
+  id: c?.id ?? null,
+  url: c?.url ?? null,
+  body: typeof c?.body === 'string' ? c.body : '',
+  createdAt: c?.createdAt ?? null,
+  ...actor(c?.author),
+})
+
+/**
+ * Everything attached to one PR, flattened for the panel (D2).
+ * @returns {{ number, url, title, state, comments, reviews, threads, issues, commitNotes }}
+ */
+export async function prConversationApi({ owner, name, number, accessToken, fetch, apiBase }) {
+  const data = await graphqlApi({
+    query: CONVERSATION_QUERY,
+    variables: { owner, name, number: Number(number) },
+    accessToken, fetch, apiBase,
+  })
+  const pr = data?.repository?.pullRequest
+  // A number that does not resolve is not an error worth blanking the card for
+  // — the caller renders the 'no PR yet' empty state (plan: Degradation).
+  if (!pr) return { number: null, url: null, title: null, state: null, comments: [], reviews: [], threads: [], issues: [], commitNotes: [] }
+  const nodes = (x) => (Array.isArray(x?.nodes) ? x.nodes.filter(Boolean) : [])
+  return {
+    number: pr.number ?? null,
+    url: pr.url ?? null,
+    title: pr.title ?? null,
+    state: pr.state ?? null,
+    comments: nodes(pr.comments).map(note),
+    reviews: nodes(pr.reviews).map((r) => ({ ...note(r), state: r.state ?? null })),
+    threads: nodes(pr.reviewThreads).map((t) => ({
+      id: t.id ?? null,
+      resolved: t.isResolved === true,
+      outdated: t.isOutdated === true,
+      path: t.path ?? null,
+      line: t.line ?? null,
+      // The FIRST comment carries the numeric id every reply in this thread
+      // must be addressed to — GitHub threads a reply by its parent comment,
+      // not by the thread node.
+      replyTo: nodes(t.comments)[0]?.databaseId ?? null,
+      comments: nodes(t.comments).map(note),
+    })),
+    issues: nodes(pr.closingIssuesReferences).map((i) => ({
+      number: i.number ?? null,
+      title: i.title ?? null,
+      url: i.url ?? null,
+      state: i.state ?? null,
+      comments: nodes(i.comments).map(note),
+    })),
+    commitNotes: nodes(pr.commits).flatMap((c) => nodes(c.commit?.comments).map((x) => ({
+      ...note(x),
+      oid: c.commit?.oid ?? null,
+      headline: c.commit?.messageHeadline ?? null,
+    }))),
+  }
+}
+
+/** Mark a review thread resolved / unresolved. GraphQL-only; see the block
+ * comment above for why. */
+export async function setThreadResolvedApi({ threadId, resolved, accessToken, fetch, apiBase }) {
+  const verb = resolved ? 'resolveReviewThread' : 'unresolveReviewThread'
+  const data = await graphqlApi({
+    query: 'mutation($id:ID!){ ' + verb + '(input:{threadId:$id}){ thread { id isResolved } } }',
+    variables: { id: threadId },
+    accessToken, fetch, apiBase,
+  })
+  const t = data?.[verb]?.thread
+  return { id: t?.id ?? threadId, resolved: t?.isResolved === true }
+}
+
+/**
+ * Reply inside a review thread.
+ * POST /repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies
+ * https://docs.github.com/en/rest/pulls/comments#create-a-reply-for-a-review-comment
+ *
+ * REST, not GraphQL: `addPullRequestReviewThreadReply` needs a review id the
+ * panel does not hold, while this one needs only the parent comment's numeric
+ * id, which `prConversationApi` already carries as `replyTo`.
+ */
+export async function prThreadReplyApi({ owner, name, number, commentId, body, accessToken, fetch, apiBase }) {
+  if (typeof body !== 'string' || body.trim() === '') throw new Error('github-link: reply body is required')
+  const res = await fetch(new URL('/repos/' + owner + '/' + name + '/pulls/' + number + '/comments/' + commentId + '/replies', apiBase), {
+    method: 'POST',
+    headers: {
+      accept: 'application/vnd.github+json',
+      authorization: 'Bearer ' + accessToken,
+      'content-type': 'application/json',
+      'user-agent': 'arxa-studio',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+    body: JSON.stringify({ body }),
+  })
+  if (!res.ok) throw new Error('github-link: thread reply failed (' + res.status + ')')
+  const out = await res.json().catch(() => ({}))
+  return { id: out.id ?? null, url: out.html_url ?? null }
+}
+
+/**
+ * The jobs of one workflow run, with their steps — D2's "failing CI step
+ * output" without downloading a log archive.
+ * GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs
+ * https://docs.github.com/en/rest/actions/workflow-jobs
+ *
+ * Deliberately NOT the /logs endpoint: that 302s to a short-lived signed blob
+ * of the whole run's text. The step list already names WHICH step failed, which
+ * is the thing the panel ranks on; the log stays one click away on GitHub.
+ */
+export async function runJobsApi({ owner, name, runId, accessToken, fetch, apiBase }) {
+  const res = await fetch(new URL('/repos/' + owner + '/' + name + '/actions/runs/' + runId + '/jobs', apiBase), {
+    headers: {
+      accept: 'application/vnd.github+json',
+      authorization: 'Bearer ' + accessToken,
+      'user-agent': 'arxa-studio',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  })
+  if (!res.ok) throw new Error('github-link: run jobs failed (' + res.status + ')')
+  const body = await res.json()
+  const jobs = (body.jobs ?? []).map((j) => ({
+    id: j.id,
+    name: j.name,
+    status: j.status,
+    conclusion: j.conclusion ?? null,
+    url: j.html_url ?? null,
+    asleep: j.status === 'queued',
+    failedSteps: (j.steps ?? [])
+      .filter((s) => s.conclusion === 'failure')
+      .map((s) => ({ name: s.name, number: s.number })),
+  }))
+  return { jobs }
+}
