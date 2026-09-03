@@ -202,3 +202,60 @@ export must never break the whole card"* (`arxa-git-card/lib/index.js:757`).
   **Note the two `frame.js` files** — `plugins/github-link/lib/frame.js` is the GitHub
   REST module (`:31` there is `protectionApi`) and has nothing to do with fvm. An
   earlier draft of this plan cited the wrong one.
+
+## Live verification (2026-09-03, dev engine on 7897)
+
+Offline greens were not treated as proof — the `endedAt` bug earlier the same day
+passed 23 assertions and a fence gate while being wrong.
+
+**Proven live:**
+- `insight.ci` returns `unknown-action` on the running engine — genuinely retired.
+- `insight.review` and `insight.resolve` reach their handlers and return the
+  documented structured refusals (`serves session seats`, `thread-required`).
+- `prConversationApi` ran against **real GitHub PRs** (`unfazed-dev/RESTO#5`,
+  `unfazed-dev/kitchen-project#6`) and returned arxa's own stage comments — the
+  content that until now only existed on github.com. The GraphQL query, its
+  field names and the flattening are correct against the live API.
+- In a real headless browser (`arxa lens eval`, the documented `arxa-av-open`
+  event): the panel mounts, `data-arxa-insight="review"`, the title resolves to
+  "Review", and an unlinked org renders *"Not available for this repository."* —
+  the CLAUDE.md degradation rule, observed rather than asserted.
+- 40+ new offline assertions in `arxa-git-card/selftest.actions.mjs` covering the
+  ranking band, the marker, the cache and both write verbs. Full CI ALL GREEN
+  (37 suites).
+
+**NOT yet proven live, and why:**
+- **Review threads, reply and resolve against a real thread.** No PR on this
+  account has a review thread, and creating one means writing to the operator's
+  real GitHub. Schema-verified and unit-tested; not exercised end to end.
+- **A populated panel.** Needs a linked org + session + PR at once. The only
+  linked org with PRs (RESTO) had its worktree removed earlier, and the seated
+  org (LensCo) is local-only — which is why the degradation path is what
+  rendered.
+- **D6 auto-open on first push.** The code path is tested offline; firing it for
+  real opens a PR on a real repository.
+
+All three close with one authorised live smoke: create a session in a linked org,
+commit, push (D6 fires), review it, reply and resolve.
+
+## Repair made to boot the dev engine (not caused by this work)
+
+The engine refused to start: *"workspace domain is inconsistent: session
+`arxa-note-wt-260903-001` is accounted by both workspace `e32d25da…` and
+`563887a8…`"*. Two org trees — `/Volumes/business_ssd/RESTO` and
+`/Volumes/business_ssd/TESTO` — had each minted the SAME session id on the same
+day. RESTO's worktree was deleted earlier in the day, leaving a dead registry row
+that collided with TESTO's live one.
+
+Repair (backup first, to `scratchpad/workspace.json.bak`): removed the row whose
+`path` no longer exists on disk, and then the orphaned id left behind in
+`global.workspaceIds` — the second failure the first fix exposed. Both edits
+refused to touch any row whose directory still existed.
+
+**This is a real product bug, not just bad data.** `dsh-workspace` requires
+session ids to be globally unique, but arxa mints them per workspace per day
+(`nextSessionId`). Two organisations working on the same day therefore produce a
+colliding id, and the collision is not detected at mint — it is detected at BOOT,
+where it takes the whole engine down and cannot be cleared from inside the
+product. Belongs with the session-naming work in
+`docs/plans/session-path-identity-and-cicd-smoke.md`.
