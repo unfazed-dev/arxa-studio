@@ -51,6 +51,25 @@ export function createDshBridge(faces = {}) {
     }
   }
 
+  /**
+   * Q1 follow-up (2026-09-03): pin an existing dsh session's header title to
+   * the registry name (resume + rename). Spawn pins at birth; sessions born
+   * earlier kept dsh's auto title on reopen. Best-effort — {ok:false} when
+   * dsh is unavailable or the session is not live in-process.
+   */
+  async function retitle(id, name) {
+    if (typeof f.retitle !== 'function') return { ok: false, reason: 'dsh-unavailable' }
+    if (typeof id !== 'string' || id === '' || typeof name !== 'string' || name.trim() === '') {
+      return { ok: false, reason: 'dsh-unavailable' }
+    }
+    try {
+      const out = await f.retitle(id, name)
+      return out && typeof out === 'object' ? out : { ok: true }
+    } catch (err) {
+      return { ok: false, reason: 'dsh-unavailable', error: String(err?.message ?? err) }
+    }
+  }
+
   /** dsh's live session rows: [{ id, displayTitle?, running?, pendingInteraction? }]. */
   async function list() {
     if (typeof f.list !== 'function') return []
@@ -97,7 +116,7 @@ export function createDshBridge(faces = {}) {
     }
   }
 
-  return { spawn, attach, list, archive, hasUserMessage }
+  return { spawn, attach, retitle, list, archive, hasUserMessage }
 }
 
 /**

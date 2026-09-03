@@ -154,6 +154,13 @@ export function createGithubBridge(faces = {}) {
     try { return { ok: true, checks: await f.prChecks(owner, name, ref) } }
     catch (err) { return { ok: false, reason: 'pr-checks-failed', error: String(err?.message ?? err) } }
   }
+  /** Stage comment on a PR (2026-09-03) — the card's evidence trail. Same
+    * degrade shape as the other PR faces: never throws. */
+  async function prComment(owner, name, fields) {
+    if (typeof f.prComment !== 'function') return { ok: false, reason: 'github-unavailable' }
+    try { return { ok: true, comment: await f.prComment(owner, name, fields) } }
+    catch (err) { return { ok: false, reason: 'pr-comment-failed', error: String(err?.message ?? err) } }
+  }
 
   /** → { ok:true, login, token } | { ok:false, reason } — throw-proof
     * (D73): the push half needs HTTPS credentials; an unavailable face
@@ -172,7 +179,7 @@ export function createGithubBridge(faces = {}) {
     }
   }
 
-  return { status, createPrivateRepo, renameRepo, repoNameTaken, deleteRepo, wireFrame, ensureRunner, prCreate, prListForHead, prSquashMerge, prMerge, prState, prChecks, gitCredentials }
+  return { status, createPrivateRepo, renameRepo, repoNameTaken, deleteRepo, wireFrame, ensureRunner, prCreate, prComment,prListForHead, prSquashMerge, prMerge, prState, prChecks, gitCredentials }
 }
 
 /**

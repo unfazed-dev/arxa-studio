@@ -81,7 +81,17 @@ export async function prCreateApi({ owner, name, title, body, head, base = 'main
     },
     body: JSON.stringify({ title, body, head, base, draft: false }),
   })
-  if (!res.ok) throw new Error('github-link: PR create failed (' + res.status + ')')
+  if (!res.ok) {
+    // Surface GitHub's own reason (e.g. "No commits between main and <head>")
+    // — the bare status hid the 2026-09-03 RESTO smoke failure for an hour.
+    let detail = ''
+    try {
+      const j = await res.json()
+      const errs = Array.isArray(j.errors) ? j.errors.map((e) => e?.message ?? e?.code).filter(Boolean).join('; ') : ''
+      detail = [j.message, errs].filter(Boolean).join(': ')
+    } catch { /* non-JSON body — status alone */ }
+    throw new Error('github-link: PR create failed (' + res.status + (detail ? ': ' + detail : '') + ')')
+  }
   return res.json()
 }
 
@@ -144,6 +154,34 @@ export async function prMergeApi({ owner, name, number, sha, subject, message, a
   if (!res.ok) throw new Error('github-link: PR merge failed (' + res.status + ')')
   const out = await res.json().catch(() => ({}))
   return { merged: out.merged === true, sha: out.sha ?? null, message: out.message ?? '' }
+}
+
+/**
+ * Post a stage comment on a PR (2026-09-03, RESTO 3-PR smoke). PRs are
+ * issues for comment purposes — "Create an issue comment",
+ * POST /repos/{owner}/{repo}/issues/{issue_number}/comments:
+ * https://docs.github.com/en/rest/issues/comments#create-an-issue-comment
+ * The card posts one per arxa stage (commit / ci / merge / cleanup) so the
+ * PR's comment trail is the engine's own evidence of what happened.
+ *
+ * @returns {{ id: number|null, url: string|null }}
+ */
+export async function prCommentApi({ owner, name, number, body, accessToken, fetch, apiBase }) {
+  if (typeof body !== 'string' || body.trim() === '') throw new Error('github-link: PR comment body is required')
+  const res = await fetch(new URL('/repos/' + owner + '/' + name + '/issues/' + number + '/comments', apiBase), {
+    method: 'POST',
+    headers: {
+      accept: 'application/vnd.github+json',
+      authorization: 'Bearer ' + accessToken,
+      'content-type': 'application/json',
+      'user-agent': 'arxa-studio',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+    body: JSON.stringify({ body }),
+  })
+  if (!res.ok) throw new Error('github-link: PR comment failed (' + res.status + ')')
+  const out = await res.json().catch(() => ({}))
+  return { id: out.id ?? null, url: out.html_url ?? null }
 }
 
 /**

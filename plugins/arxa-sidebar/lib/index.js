@@ -159,6 +159,55 @@ export function apply(ctx, opts = {}) {
     try {
       const sessions = ctx.sessions
       if (!sessions || typeof sessions.create !== 'function') return {}
+      // Q1 (2026-09-03): pin a dsh session's header title to the arxa registry
+      // name. Untouched, dsh generates a title from the first few words of the
+      // opening message, so the header disagreed with both the sidebar row and
+      // the breadcrumb tail. rename() appends source:{kind:'user'}, which
+      // supersedes in-flight automatic generation AND stops later messages
+      // scheduling any — a pin, not just a first value. It needs the EXACT
+      // live Session (it identity-checks against the store), so callers pass
+      // sessions.get(id); a session not loaded in-process is a no-op (the
+      // next resume re-pins it). Shared by spawn (birth) and retitle
+      // (resume/rename — sessions born before the pin existed kept dsh's
+      // auto title on reopen, seen live 2026-09-03 on note-002).
+      const pinTitleTo = (live, name) => {
+        try {
+          const svc = ctx.sessionTitle
+          if (process.env.ARXA_DEBUG_TITLE) console.error('[pinTitle] live=' + !!live + ' svc=' + !!svc + ' rename=' + (typeof svc?.rename) + ' name=' + JSON.stringify(name))
+          if (!live || !svc || typeof svc.rename !== 'function') return false
+          if (typeof name !== 'string' || name.trim() === '') return false
+          svc.rename(live, name)
+          if (process.env.ARXA_DEBUG_TITLE) console.error('[pinTitle] renamed ok')
+          return true
+        } catch (err) {
+          if (process.env.ARXA_DEBUG_TITLE) console.error('[pinTitle] threw: ' + String(err?.message ?? err))
+          return false /* title is presentation — never fails the caller */
+        }
+      }
+      // Deferred pins (measured 2026-09-03 on the s2 engine): at boot the
+      // sidebar's session.open → resumeSession → retitle runs BEFORE the
+      // client loads the conversation, so sessions.get(id) is undefined and
+      // an immediate pin has nothing to rename. Park the name; the store
+      // announces "session/created" when the session enters (create AND
+      // restore both go through prepare → enter → announce), and the pin
+      // lands then — one tick later, outside the store's announce phase so
+      // the title append never races the announcing entry.
+      const pendingTitles = new Map()
+      if (typeof ctx.on === 'function') {
+        try {
+          ctx.on('session/created', (session) => {
+            const id = session && typeof session.id === 'string' ? session.id : undefined
+            if (id === undefined || !pendingTitles.has(id)) return
+            const name = pendingTitles.get(id)
+            pendingTitles.delete(id)
+            if (process.env.ARXA_DEBUG_TITLE) console.error('[pinTitle] session/created fired for parked ' + id)
+            setTimeout(() => {
+              const live = typeof sessions.get === 'function' ? sessions.get(id) : undefined
+              pinTitleTo(live ?? session, name)
+            }, 0)
+          })
+        } catch { /* listener is best-effort — retitle still pins live sessions */ }
+      }
       const faces = {
         // D93 root-cause fix (2026-08-31): a dsh session whose cwd matches no
         // workspace is born into the engine's GLOBAL archivedSessionIds — and
@@ -183,28 +232,10 @@ export function apply(ctx, opts = {}) {
           //    agent loop — prompting works from the first message.
           const wanted = typeof arxaId === 'string' && arxaId.trim() !== '' ? `arxa-${arxaId}` : undefined
           const agents = ctx.agents
-          // Q1 (2026-09-03): pin the header title to the worktree name.
-          // Untouched, dsh generates a title from the first few words of the
-          // opening message, so the header disagreed with both the sidebar row
-          // and the breadcrumb tail. rename() appends source:{kind:'user'},
-          // which supersedes in-flight automatic generation AND stops later
-          // messages scheduling any — a pin, not just a first value. It needs
-          // the EXACT live Session (it identity-checks against the store), so
-          // it runs here rather than through the id. `name` is the registry
-          // name, which Q3 defaults to the id and a rename diverges.
-          const pinTitle = (live) => {
-            try {
-              const svc = ctx.sessionTitle
-              if (process.env.ARXA_DEBUG_TITLE) console.error('[pinTitle] live=' + !!live + ' svc=' + !!svc + ' rename=' + (typeof svc?.rename) + ' name=' + JSON.stringify(name))
-              if (!live || !svc || typeof svc.rename !== 'function') return
-              if (typeof name !== 'string' || name.trim() === '') return
-              svc.rename(live, name)
-              if (process.env.ARXA_DEBUG_TITLE) console.error('[pinTitle] renamed ok')
-            } catch (err) {
-              if (process.env.ARXA_DEBUG_TITLE) console.error('[pinTitle] threw: ' + String(err?.message ?? err))
-              /* title is presentation — a spawn never fails on it */
-            }
-          }
+          // Q1 (2026-09-03): pin the header title to the worktree name at
+          // birth (see pinTitleTo). `name` is the registry name, which Q3
+          // defaults to the id and a rename diverges.
+          const pinTitle = (live) => { pinTitleTo(live, name) }
           if (agents && typeof agents.create === 'function') {
             try {
               let setup
@@ -294,6 +325,19 @@ export function apply(ctx, opts = {}) {
       }
       if (typeof sessions.get === 'function') {
         faces.attach = async (id) => ({ ok: !!sessions.get(id) })
+        // Q1 follow-up (2026-09-03): re-pin on resume/rename. Sessions born
+        // before the spawn pin existed (or renamed since) otherwise keep dsh's
+        // auto-generated title in the header. A session not live in-process
+        // is parked in pendingTitles and pinned on "session/created" when
+        // the client loads it — {ok:true, deferred:true}; never an error.
+        faces.retitle = async (id, name) => {
+          if (typeof name !== 'string' || name.trim() === '') return { ok: false, reason: 'name-required' }
+          const live = sessions.get(id)
+          if (live) return { ok: pinTitleTo(live, name) }
+          pendingTitles.set(id, name)
+          if (process.env.ARXA_DEBUG_TITLE) console.error('[pinTitle] parked ' + id + ' → "' + name + '" (not live yet)')
+          return { ok: true, deferred: true }
+        }
       }
       // Q3 empty-session probe (2026-09-02): has a user message ever landed
       // in this dsh session? Live store first (Session.events); a session

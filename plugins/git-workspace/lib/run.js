@@ -56,9 +56,16 @@ const PINNED = [
  * exit (after `ensureGit` has vouched that git exists at all).
  *
  * @param {string[]} args
- * @param {{ cwd: string, identity?: {name:string,email:string}, env?: object, allowFail?: boolean }} opts
+ * `timeout` (ms) bounds the child — network verbs (push/fetch) MUST pass one:
+ * runGit is synchronous, so a git that sits on a credential prompt or a dead
+ * socket freezes the whole engine event loop (2026-09-03, RESTO smoke: a
+ * `push` with a rejected token waited on the launcher's TTY for 6 minutes and
+ * every HTTP route timed out with it). The same callers set
+ * GIT_TERMINAL_PROMPT=0 so a bad token fails as text instead of prompting.
+ *
+ * @param {{ cwd: string, identity?: {name:string,email:string}, env?: object, allowFail?: boolean, timeout?: number }} opts
  */
-export function runGit(args, { cwd, identity = STAGE_IDENTITY, env = process.env, allowFail = false } = {}) {
+export function runGit(args, { cwd, identity = STAGE_IDENTITY, env = process.env, allowFail = false, timeout } = {}) {
   ensureGit(env)
   // Global config is nulled above, which also disables any user
   // safe.directory allowlist — on mounted volumes git can then refuse
@@ -72,6 +79,7 @@ export function runGit(args, { cwd, identity = STAGE_IDENTITY, env = process.env
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 64 * 1024 * 1024,
+      ...(Number.isFinite(timeout) && timeout > 0 ? { timeout, killSignal: 'SIGKILL' } : {}),
     }).trim()
   } catch (err) {
     if (allowFail) return null

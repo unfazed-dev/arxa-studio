@@ -10,13 +10,13 @@
  */
 
 import { getClientId, defaultApiBase, defaultTokenBase, linkViaBrowser, linkViaDevice, createPrivateRepoApi, renameRepoApi, repoNameAvailableApi, deleteRepoApi, refreshAccessToken, SCOPES, SHIPPED_CLIENT_ID, defaultOpen } from './auth.js'
-import { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prStateApi, prChecksApi, workflowRunsApi, rerunRunApi, cancelRunApi } from './frame.js'
+import { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prCommentApi, prStateApi,prChecksApi, workflowRunsApi, rerunRunApi, cancelRunApi } from './frame.js'
 import { ensureRunner } from './runner.js'
 import { createKeyring } from './keyring.js'
 import { readState, writeState, clearState } from './state.js'
 
 export { SCOPES, createPkcePair, pkceChallenge, getClientId, loadClientId, linkViaBrowser, linkViaDevice, createPrivateRepoApi, renameRepoApi, repoNameAvailableApi } from './auth.js'
-export { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prStateApi, prChecksApi, workflowRunsApi, rerunRunApi, cancelRunApi } from './frame.js'
+export { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prCommentApi, prStateApi,prChecksApi, workflowRunsApi, rerunRunApi, cancelRunApi } from './frame.js'
 export { ensureRunner, runnerExists } from './runner.js'
 export { createKeyring, KEYCHAIN_SERVICE, SECURITY_PATH } from './keyring.js'
 export { readState, writeState, clearState, statePath, arxaHome } from './state.js'
@@ -184,7 +184,22 @@ export function createGithubLink({
       throw new Error('github-link: token expired and no refresh token stored — sign in again (D76)')
     }
     const clientId = getClientId(env) ?? SHIPPED_CLIENT_ID
-    const fresh = await refreshAccessToken({ clientId, refreshToken: storedRefresh, fetch, tokenBase })
+    let fresh
+    try {
+      fresh = await refreshAccessToken({ clientId, refreshToken: storedRefresh, fetch, tokenBase })
+    } catch (err) {
+      // Refresh is dead (rotated-away refresh token, client-id mismatch,
+      // revoked grant). Found 2026-09-03 on the RESTO smoke: every push and
+      // PR failed with the raw "incorrect_client_credentials" and nothing
+      // told the user to re-link. Flag the state (status() surfaces it, the
+      // link button clears it) and say plainly what to do.
+      writeState({ ...state, relinkRequired: true, relinkReason: String(err?.message ?? err).slice(0, 160) }, env)
+      throw new Error(
+        'github-link: GitHub session expired and could not be refreshed (' +
+        String(err?.message ?? err).replace(/^github-link:\s*/, '') +
+        ') — re-link GitHub from Settings'
+      )
+    }
     await ring.setSecret(state.login, fresh.accessToken)
     if (fresh.refreshToken) await ring.setSecret(state.login + REFRESH_SUFFIX, fresh.refreshToken)
     const accessExpiresAt = fresh.expiresInSeconds
@@ -324,6 +339,10 @@ export function createGithubLink({
   function prChecks(owner, name, ref) {
     return withRefresh((t) => prChecksApi({ owner, name, ref, accessToken: t, fetch, apiBase }))
   }
+  /** Stage comment on a PR (2026-09-03) — { id, url }. */
+  function prComment(owner, name, { number, body } = {}) {
+    return withRefresh((t) => prCommentApi({ owner, name, number, body, accessToken: t, fetch, apiBase }))
+  }
   /** Q8: re-run a workflow run (optionally only its failed jobs). */
   function rerunRun({ owner, name, runId, failedOnly } = {}) {
     return withRefresh((t) => rerunRunApi({ owner, name, runId, failedOnly, accessToken: t, fetch, apiBase }))
@@ -360,6 +379,7 @@ export function createGithubLink({
     prListForHead,
     prSquashMerge,
     prMerge,
+    prComment,
     prState,
     prChecks,
     rerunRun,

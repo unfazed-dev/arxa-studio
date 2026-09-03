@@ -373,9 +373,26 @@ try {
         // No `head` object at all — the flattening must not throw.
         return { ok: true, status: 200, json: async () => ({ number: 8, state: 'open', merged: false }) }
       }
+      if (u.endsWith('/issues/7/comments') && opts.method === 'POST') {
+        return { ok: true, status: 201, json: async () => ({ id: 4242, html_url: 'https://github.com/octocat/framed/pull/7#issuecomment-4242' }) }
+      }
       return { ok: false, status: 404, json: async () => ({ message: 'no route: ' + u }) }
     }
     const pbase = { owner: 'octocat', name: 'framed', accessToken: 't', fetch: prFetch, apiBase: 'https://api.github.com' }
+
+    // ---- stage comments (2026-09-03) — PRs are issues for comment purposes
+    {
+      const { prCommentApi } = await import('./lib/index.js')
+      const c = await prCommentApi({ ...pbase, number: 7, body: '**arxa · ci**\n\ngreen' })
+      const creq = seen.at(-1)
+      ok(creq.method === 'POST' && creq.url === 'https://api.github.com/repos/octocat/framed/issues/7/comments',
+        'frame: prCommentApi POSTs the documented issue-comments endpoint (PRs are issues)')
+      ok(creq.body.body === '**arxa · ci**\n\ngreen', 'frame: prCommentApi sends the body verbatim')
+      ok(c.id === 4242 && c.url.endsWith('#issuecomment-4242'), 'frame: prCommentApi returns { id, url }')
+      await assert.rejects(() => prCommentApi({ ...pbase, number: 7, body: '   ' }), /body is required/)
+      passed++
+      console.log('  ✓ frame: prCommentApi refuses an empty body before touching the network')
+    }
 
     const merged = await prMergeApi({ ...pbase, number: 7, sha: 'headsha1', subject: 'feat(core): the thing' })
     const req = seen.at(-1)
