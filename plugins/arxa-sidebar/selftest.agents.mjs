@@ -60,11 +60,13 @@ const okRes = (rpcId, value) => ({ rpcId, result: { ok: true, value } })
 
 // ---- 1. the full matrix, everything live -----------------------------------
 const interrupts = []
+const prompts = []
 const act = mount({
   apiProxy: {
     subagents: {
       list: async (req) => okRes(req.rpcId, { entries: children, parentAvailable: true }),
       interrupt: async (req) => { interrupts.push(req.payload); return okRes(req.rpcId, { accepted: true }) },
+      prompt: async (req) => { prompts.push(req.payload); return okRes(req.rpcId, { accepted: true }) },
     },
   },
 })
@@ -107,12 +109,53 @@ check('resume: refuses with the reason a paused child actually wakes by',
 r = await act('agent.cancel', { sessionId: PARENT, kind: 'subagent', id: 'c-run' })
 check('cancel on a subagent: refused as no-terminate-verb, not attempted',
   r.result.ok === false && r.result.reason === 'no-terminate-verb')
+// A job cancel is no longer a GAP — it is a different PLANE. The registry is a
+// host service that plugins/arxa-jobs owns, so the client dispatches job rows to
+// /__arxa/jobs/action and one arriving here means the routing broke. The reason
+// says that rather than repeating the retired "no-job-api", which would now
+// describe the product wrongly.
 r = await act('agent.cancel', { sessionId: PARENT, kind: 'job', id: 'bash-1' })
-check('cancel on a job: refused as no-job-api — a different gap, a different reason',
-  r.result.ok === false && r.result.reason === 'no-job-api')
+check('cancel on a job: refused as wrong-plane — jobs are cancelled by arxa-jobs, not here',
+  r.result.ok === false && r.result.reason === 'wrong-plane')
 r = await act('agent.pause', { sessionId: PARENT, kind: 'job', id: 'bash-1' })
 check('pause on a job: refused as no-job-api, and never reaches the subagent runtime',
   r.result.ok === false && r.result.reason === 'no-job-api' && interrupts.length === 1)
+
+// ---- THE WAKE (D3) ---------------------------------------------------------
+// `subagent.prompt` is the sanctioned way to reach a paused child: its contract
+// delivers human content to a continuable child, and `agent.pause` above parks
+// the inbox rather than ending the Activation. There is no content-free resume
+// verb and there never will be, so this carries the human's words or refuses.
+r = await act('agent.wake', { sessionId: PARENT, kind: 'subagent', id: 'c-run', text: 'carry on with the survey' })
+check('wake: delivers the human\'s words to the named child, addressed to THIS parent',
+  r.result.ok === true && r.result.outcome === 'woken' && prompts.length === 1
+  && prompts[0].childSessionId === 'c-run' && prompts[0].parentSessionId === PARENT
+  && prompts[0].mode === 'continuable'
+  && JSON.stringify(prompts[0].content) === JSON.stringify([{ type: 'text', text: 'carry on with the survey' }]),
+  JSON.stringify(prompts[0] ?? null))
+// An empty wake would spend a turn delivering nothing.
+r = await act('agent.wake', { sessionId: PARENT, kind: 'subagent', id: 'c-run', text: '   ' })
+check('wake: an empty message is refused BEFORE the runtime is touched',
+  r.result.ok === false && r.result.reason === 'message-required' && prompts.length === 1)
+r = await act('agent.wake', { sessionId: PARENT, kind: 'job', id: 'bash-1' })
+check('wake: a job is not a subagent — refused without reaching the runtime',
+  r.result.ok === false && r.result.reason === 'subagents-only' && prompts.length === 1)
+// Only a continuable child is addressable: subagent.prompt's address type is
+// Extract<SubagentAddress, { mode: 'continuable' }>, so the row must not offer
+// a box for a one-shot child.
+check('wake: a CONTINUABLE child offers the box; a one-shot one explains why not',
+  sub['c-run'].can.wake === true && sub['c-shot'].can.wake === false
+  && sub['c-shot'].why.wake === 'one-shot',
+  JSON.stringify({ run: sub['c-run'].can, shot: sub['c-shot'].can, why: sub['c-shot'].why.wake }))
+// Deliberately NOT gated on activity: waking a child that is paused/idle is the
+// whole point. `c-cold` is continuable but inactive — it can be woken and it
+// cannot be paused, and those two are independent.
+check('wake: an INACTIVE continuable child is still wakeable (pause is what needs running)',
+  sub['c-cold'].can.wake === true && sub['c-cold'].can.pause === false
+  && sub['c-cold'].why.pause === 'not-running',
+  JSON.stringify(sub['c-cold'].can))
+check('wake: resume stays refused forever — it would have to invent the message',
+  sub['c-run'].can.resume === false && sub['c-run'].why.resume === 'send-message')
 r = await act('agent.list', {})
 check('a missing sessionId is refused loudly, never guessed', r.ok === false && r.error === 'sessionId-required')
 

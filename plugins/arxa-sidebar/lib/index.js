@@ -964,11 +964,24 @@ export function apply(ctx, opts = {}) {
                   mode: c.mode,
                   activity: c.activity,
                   hasChildren: c.hasChildren === true,
-                  can: { pause: continuable && running, resume: false, cancel: false },
+                  /* `wake` is the D3 control and it is NOT a verb button: it
+                   * opens a message box, because `subagent.prompt` carries the
+                   * human's words. Only a CONTINUABLE child is addressable —
+                   * the RPC's own address type is
+                   * `Extract<SubagentAddress, { mode: 'continuable' }>`, so a
+                   * one-shot child cannot be woken by anything, and the row
+                   * says so rather than offering a box that would be refused.
+                   *
+                   * Deliberately not gated on `running`: waking a child that is
+                   * paused is the whole point, and one that is still running
+                   * queues the message on its parked FIFO. `resume` stays false
+                   * forever — there is no content-free resume verb. */
+                  can: { pause: continuable && running, resume: false, cancel: false, wake: continuable },
                   why: {
                     ...(continuable && running ? {} : { pause: continuable ? 'not-running' : 'one-shot' }),
                     resume: continuable ? 'send-message' : 'one-shot',
                     cancel: 'no-terminate-verb',
+                    ...(continuable ? {} : { wake: 'one-shot' }),
                   },
                 }
               })
@@ -1006,18 +1019,58 @@ export function apply(ctx, opts = {}) {
                 if (!out) return { ok: false, reason: 'refused' }
                 return { ok: true, outcome: 'paused' }
               },
-              /** No resume verb exists. Waking a paused child needs content the
-                * human writes — inventing a message is not a resume. */
+              /** Still no resume verb, and there never will be a content-free
+                * one: waking a paused child needs words the human writes, and
+                * inventing them is not a resume. The refusal now points at the
+                * control that DOES exist — `agent.wake` below — instead of
+                * naming a dead end. */
               'agent.resume': async () => ({
                 ok: false,
-                reason: arg?.kind === 'job' ? 'no-job-api' : 'send-message',
+                reason: arg?.kind === 'job' ? 'jobs-have-no-pause' : 'send-message',
               }),
-              /** Nothing here can cancel. A subagent has no terminate verb in
-                * the runtime; a job has no reachable API at all. Two different
-                * gaps, two different reasons — neither is a button. */
+              /** THE WAKE (D3). `subagent.prompt` is dsh's own sanctioned way to
+                * reach a paused child: its contract says it "delivers human
+                * content to a continuable child", and a pause made by
+                * `agent.pause` above parks the inbox rather than ending the
+                * Activation — so this resumes the parked FIFO queue with the
+                * human's message at the front.
+                *
+                * `mode: 'continuable'` is not optional decoration: the address
+                * type is `Extract<SubagentAddress, { mode: 'continuable' }>`, so
+                * a one-shot child is not addressable here at all. That is the
+                * runtime refusing to wake something that cannot be woken, which
+                * is exactly the distinction the row's capability map draws. */
+              'agent.wake': async () => {
+                if (arg?.kind !== 'subagent') return { ok: false, reason: 'subagents-only' }
+                if (!proxy?.subagents?.prompt) return { ok: false, reason: 'service-unavailable' }
+                const id = arg?.id
+                if (typeof id !== 'string' || id === '') return { ok: false, reason: 'id-required' }
+                const text = typeof arg?.text === 'string' ? arg.text.trim() : ''
+                // An empty wake would deliver nothing and still count as a turn.
+                if (text === '') return { ok: false, reason: 'message-required' }
+                const out = await value(proxy.subagents.prompt({
+                  ...rpc(),
+                  payload: {
+                    parentSessionId: sid,
+                    childSessionId: id,
+                    mode: 'continuable',
+                    content: [{ type: 'text', text }],
+                  },
+                }))
+                if (!out) return { ok: false, reason: 'refused' }
+                return { ok: true, outcome: 'woken' }
+              },
+              /** Cancel is still refused HERE, and the two reasons are now
+                * different in a way that matters. A subagent genuinely has no
+                * terminate verb in the runtime. A job HAS one — but it lives on
+                * the host registry that `plugins/arxa-jobs` owns, not on the
+                * agent plane this route reaches, so a job row is dispatched to
+                * /__arxa/jobs/action by the client and never arrives here. If
+                * one ever does, it is a routing bug, and this says so rather
+                * than repeating the retired "no-job-api". */
               'agent.cancel': async () => ({
                 ok: false,
-                reason: arg?.kind === 'job' ? 'no-job-api' : 'no-terminate-verb',
+                reason: arg?.kind === 'job' ? 'wrong-plane' : 'no-terminate-verb',
               }),
             }
             const agentFn = agentTable[action]

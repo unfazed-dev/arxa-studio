@@ -644,10 +644,16 @@
 		 * untouched — they list, this controls. `header.actions` is a kind:list
 		 * slot with replaceRisk:none, so adding here removes nothing. */
 		const ARXA_AGENT_VERBS = ["pause", "resume", "cancel"];
-		function ArxaAgentRowActions({ row, t, busy, onAct }) {
-			return (0, react_jsx_runtime.jsx)("span", {
+		/* `busyId` is the id of the ONE row with a request in flight, not a
+		 * whole-menu boolean. With two live jobs the boolean greyed out both
+		 * rows' buttons while one was cancelling — the menu reporting that it
+		 * was busy with work it was not doing. Same class of small lie as a
+		 * clock still ticking on a dead job. */
+		function ArxaAgentRowActions({ row, t, busyId, onAct, onWake }) {
+			const busy = busyId === row.id;
+			return (0, react_jsx_runtime.jsxs)("span", {
 				className: "aXa_agentActs",
-				children: ARXA_AGENT_VERBS.map((verb) => {
+				children: [ARXA_AGENT_VERBS.map((verb) => {
 					const allowed = row.can && row.can[verb] === true;
 					const why = row.why && row.why[verb];
 					return (0, react_jsx_runtime.jsx)("button", {
@@ -661,13 +667,32 @@
 						onClick: () => onAct(verb, row),
 						children: t("agents." + verb)
 					}, verb);
-				})
+				}),
+				/* THE WAKE (D3). Only a continuable subagent can be woken, and
+				 * only with words the human writes — so this is a box, not a
+				 * verb button. It sits beside the refused `resume`, which
+				 * explains WHY there is a box here instead. */
+				row.kind === "subagent" && row.can && row.can.wake === true
+					? (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: "aXa_agentAct",
+						"data-verb": "wake",
+						disabled: busy,
+						title: t("agents.wakeHint"),
+						onClick: () => onWake(row),
+						children: t("agents.wake")
+					}, "wake")
+					: null]
 			});
 		}
 		function ArxaAgentControl({ kind, sessionId, count, given, t }) {
 			const [open, setOpen] = (0, react.useState)(false);
 			const [fetched, setFetched] = (0, react.useState)(null);
-			const [busy, setBusy] = (0, react.useState)(false);
+			/* id of the ONE row with a request in flight — see ArxaAgentRowActions. */
+			const [busyId, setBusyId] = (0, react.useState)(null);
+			/* The row whose wake box is open, and its draft. */
+			const [wakeRow, setWakeRow] = (0, react.useState)(null);
+			const [wakeText, setWakeText] = (0, react.useState)("");
 			const [note, setNote] = (0, react.useState)("");
 			/* Jobs never round-trip and never enter state: `JobView` is PUSH-only,
 			 * so the store rows handed down are already the truth. Routing them
@@ -701,8 +726,21 @@
 				const h = setInterval(() => setTick((v) => v + 1), 1000);
 				return () => clearInterval(h);
 			}, [open, anyLive]);
+			/* Waking is not a verb — it carries the human's words — so it has its
+			 * own dispatcher rather than riding `act`. On success the box closes
+			 * and the list reloads: unlike a job, a subagent's state does NOT
+			 * arrive by push, so this is the one place a reload is right. */
+			const wake = (row, text) => {
+				setBusyId(row.id);
+				ORG_POST("agent.wake", { sessionId: sessionId, kind: row.kind, id: row.id, text: text }).then((b) => {
+					setBusyId(null);
+					const r = b && b.result;
+					if (r && r.ok === false) { setNote(t("agents.why." + String(r.reason || "unavailable"))); return; }
+					setWakeRow(null); setWakeText(""); setNote(""); load();
+				}, (e) => { setBusyId(null); setNote(String((e && e.message) || e)); });
+			};
 			const act = (verb, row) => {
-				setBusy(true);
+				setBusyId(row.id);
 				/* A JOB is not on the agent plane. Subagent verbs go through
 				 * ctx.apiProxy (`agent.*` on the sidebar route); the job
 				 * registry is a HOST service that arxa-jobs owns, so a job row
@@ -720,7 +758,7 @@
 						headers: { "content-type": "application/json" },
 						body: JSON.stringify({ action: "jobs." + verb, arg: { sessionId: sessionId, jobId: row.id } })
 					}).then((res) => res.json()).then((b) => {
-						setBusy(false);
+						setBusyId(null);
 						const r = b && b.result;
 						/* `already-finished` is an outcome, not a failure: the job
 						 * ended between render and click. Say so plainly rather
@@ -728,15 +766,15 @@
 						if (!r || r.ok === false) setNote(t("agents.why." + String((r && r.reason) || "unavailable")));
 						else if (r.outcome === "already-finished") setNote(t("agents.why.already-finished"));
 						else setNote("");
-					}, (e) => { setBusy(false); setNote(String((e && e.message) || e)); });
+					}, (e) => { setBusyId(null); setNote(String((e && e.message) || e)); });
 					return;
 				}
 				ORG_POST("agent." + verb, { sessionId: sessionId, kind: row.kind, id: row.id }).then((b) => {
-					setBusy(false);
+					setBusyId(null);
 					const r = b && b.result;
 					if (r && r.ok === false) setNote(t("agents.why." + String(r.reason || "unavailable")));
 					else load();
-				}, (e) => { setBusy(false); setNote(String((e && e.message) || e)); });
+				}, (e) => { setBusyId(null); setNote(String((e && e.message) || e)); });
 			};
 			return (0, react_jsx_runtime.jsxs)("span", {
 				className: "aXa_agentWrap",
@@ -768,7 +806,30 @@
 									className: "aXa_agentState",
 									children: arxaElapsed(row.startedAt, row.finishedAt, row.status)
 								}) : null,
-								(0, react_jsx_runtime.jsx)(ArxaAgentRowActions, { row: row, t: t, busy: busy, onAct: act })
+								(0, react_jsx_runtime.jsx)(ArxaAgentRowActions, { row: row, t: t, busyId: busyId, onAct: act, onWake: (r) => { setWakeRow(r.id); setWakeText(""); setNote(""); } }),
+								/* The wake box. Present only for the row whose Wake was
+								 * clicked, because a message goes to ONE child. Enter
+								 * sends, Escape closes — the same grammar as the stock
+								 * inline editor the git card reuses, so there is no new
+								 * interaction to learn. */
+								wakeRow === row.id ? (0, react_jsx_runtime.jsx)("input", {
+									className: "aXa_agentWake",
+									type: "text",
+									autoFocus: true,
+									value: wakeText,
+									placeholder: t("agents.wakePlaceholder"),
+									disabled: busyId === row.id,
+									onChange: (e) => setWakeText(e.target.value),
+									onKeyDown: (e) => {
+										if (e.key === "Escape") { setWakeRow(null); setWakeText(""); return; }
+										if (e.key !== "Enter") return;
+										/* An empty wake would spend a turn delivering nothing —
+										 * the host refuses it too (`message-required`); this
+										 * just avoids the round trip. */
+										if (wakeText.trim() === "") return;
+										wake(row, wakeText);
+									}
+								}) : null
 							]
 						}, row.id)),
 						(0, react_jsx_runtime.jsx)("button", {
@@ -936,7 +997,7 @@
 				+ ".aXa_agentLabel{flex:1;overflow:hidden;text-overflow:ellipsis}"
 				+ ".aXa_agentState{flex:none;color:var(--dsw-alias-label-caption)}"
 				+ ".aXa_agentActs{flex:none;display:inline-flex;gap:2px;opacity:0;transition:opacity .12s}"
-				+ ".aXa_agentRow:hover .aXa_agentActs,.aXa_agentActs:focus-within{opacity:1}"
+				+ ".aXa_agentRow:hover .aXa_agentActs,.aXa_agentActs:focus-within{opacity:1}.aXa_agentWake{min-width:150px;flex:1 1 auto;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-fill-secondary);border:1px solid var(--dsw-alias-border-secondary);border-radius:5px;margin-left:4px;padding:2px 6px;font-size:11px;line-height:16px}.aXa_agentWake:disabled{opacity:.6}"
 				+ ".aXa_agentAct{background:none;border:0;padding:1px 5px;border-radius:5px;font:inherit;font-size:11px;color:var(--dsw-alias-label-tertiary);cursor:pointer;text-transform:capitalize}"
 				+ ".aXa_agentAct:hover:not(:disabled){color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3)}"
 				+ ".aXa_agentAct:disabled{opacity:.38;cursor:not-allowed}"
@@ -2470,6 +2531,14 @@
 			"agents.why.not-yours": "This job belongs to another session.",
 			"agents.why.gone": "This job is no longer in the registry.",
 			"agents.why.registry-refused": "The engine refused the request. Nothing was changed.",
+			"agents.wake": "Wake",
+			"agents.wakeHint": "Send this subagent a message to wake it",
+			"agents.wakePlaceholder": "Message to wake it with\u2026",
+			"agents.why.subagents-only": "Only a subagent can be woken this way.",
+			"agents.why.message-required": "Write a message first \u2014 an empty wake would spend a turn saying nothing.",
+			"agents.why.wrong-plane": "A background job is cancelled from its own control, not here.",
+			"agents.why.refused": "The engine refused it. Nothing changed.",
+			"agents.why.id-required": "That row is missing its id.",
 			"agents.why.already-finished": "This one has already finished.",
 			"agents.why.owner-not-live": "This session is not live, so its jobs cannot be reached.",
 			"agents.why.service-unavailable": "This engine build does not provide that service.",
@@ -2657,6 +2726,14 @@
 			"agents.why.not-yours": "To zadanie nale\u017cy do innej sesji.",
 			"agents.why.gone": "Tego zadania nie ma ju\u017c w rejestrze.",
 			"agents.why.registry-refused": "Silnik odrzuci\u0142 \u017c\u0105danie. Nic nie zosta\u0142o zmienione.",
+			"agents.wake": "Obud\u017a",
+			"agents.wakeHint": "Wy\u015blij podagentowi wiadomo\u015b\u0107, aby go obudzi\u0107",
+			"agents.wakePlaceholder": "Wiadomo\u015b\u0107 na pobudk\u0119\u2026",
+			"agents.why.subagents-only": "W ten spos\u00f3b mo\u017cna obudzi\u0107 tylko podagenta.",
+			"agents.why.message-required": "Najpierw napisz wiadomo\u015b\u0107 \u2014 pusta pobudka zmarnuje tur\u0119.",
+			"agents.why.wrong-plane": "Zadanie w tle anuluje si\u0119 z jego w\u0142asnej kontrolki, nie st\u0105d.",
+			"agents.why.refused": "Silnik odm\u00f3wi\u0142. Nic si\u0119 nie zmieni\u0142o.",
+			"agents.why.id-required": "Ten wiersz nie ma identyfikatora.",
 			"agents.why.already-finished": "To już się zakończyło.",
 			"agents.why.owner-not-live": "Ta sesja nie jest aktywna, więc jej zadania są nieosiągalne.",
 			"agents.why.service-unavailable": "Ta wersja silnika nie udostępnia tej usługi.",
@@ -2844,6 +2921,14 @@
 			"agents.why.not-yours": "Cette t\u00e2che appartient \u00e0 une autre session.",
 			"agents.why.gone": "Cette t\u00e2che n\u2019est plus dans le registre.",
 			"agents.why.registry-refused": "Le moteur a refus\u00e9 la demande. Rien n\u2019a \u00e9t\u00e9 modifi\u00e9.",
+			"agents.wake": "R\u00e9veiller",
+			"agents.wakeHint": "Envoyer un message \u00e0 ce sous-agent pour le r\u00e9veiller",
+			"agents.wakePlaceholder": "Message pour le r\u00e9veiller\u2026",
+			"agents.why.subagents-only": "Seul un sous-agent se r\u00e9veille ainsi.",
+			"agents.why.message-required": "\u00c9crivez d\u2019abord un message \u2014 un r\u00e9veil vide gaspillerait un tour.",
+			"agents.why.wrong-plane": "Une t\u00e2che en arri\u00e8re-plan s\u2019annule depuis son propre contr\u00f4le, pas ici.",
+			"agents.why.refused": "Le moteur a refus\u00e9. Rien n\u2019a chang\u00e9.",
+			"agents.why.id-required": "Cette ligne n\u2019a pas d\u2019identifiant.",
 			"agents.why.already-finished": "Celle-ci est déjà terminée.",
 			"agents.why.owner-not-live": "Cette session n\u2019est pas active, ses tâches sont donc inaccessibles.",
 			"agents.why.service-unavailable": "Cette version du moteur ne fournit pas ce service.",

@@ -713,6 +713,30 @@ check('client: the row shows elapsed, and a settled job with no end stamp shows 
   && client.includes('if (!startedAt || !end) return "";'))
 check('client: a live job\'s elapsed ticks, and the timer stops when nothing is live',
   client.includes('if (!open || !anyLive) return;') && client.includes('clearInterval(h)'))
+// A whole-menu `busy` boolean greyed out BOTH rows' buttons while one was
+// cancelling — the menu reporting it was busy with work it was not doing.
+check('client: busy is keyed to the ONE row acting, not the whole menu',
+  client.includes('const busy = busyId === row.id;') && !/ArxaAgentRowActions[^)]*busy: busy\b/.test(client))
+// THE WAKE (D3). There is no content-free resume verb, so waking is a box that
+// carries the human's words, not a verb button.
+check('client: the wake box exists and only for a row the host marked wakeable',
+  client.includes('row.can.wake === true') && client.includes('wakeRow === row.id')
+  && client.includes('className: "aXa_agentWake"'))
+check('client: wake sends the typed message through the sidebar route',
+  client.includes('ORG_POST("agent.wake"') && client.includes('text: text'))
+check('client: Enter sends the wake, Escape closes it, and an empty one never leaves the browser',
+  client.includes('if (e.key === "Escape")') && client.includes('if (wakeText.trim() === "") return;'))
+// Unlike a job, a subagent's state does NOT arrive by push — so this is the one
+// place a reload after acting is correct.
+check('client: a successful wake reloads the list (subagent state is not pushed)',
+  /setWakeRow\(null\); setWakeText\(""\); setNote\(""\); load\(\);/.test(client))
+for (const reason of ['subagents-only', 'message-required', 'wrong-plane']) {
+  const n = (client.match(new RegExp('"agents\\.why\\.' + reason + '"\\s*:\\s*"', 'g')) ?? []).length
+  check(`locale: agents.why.${reason} is defined in all 3 dictionaries (found ${n})`, n === 3)
+}
+check('locale: the wake control itself is translated in all 3 dictionaries',
+  (client.match(/"agents\.wake"\s*:\s*"/g) ?? []).length === 3
+  && (client.match(/"agents\.wakePlaceholder"\s*:\s*"/g) ?? []).length === 3)
 // Only `running` arms the button. `stopping` is still live but a cancel is
 // already in flight; arming it again invites a click that changes nothing.
 check('client: only a RUNNING job offers cancel, and stopping says why',
