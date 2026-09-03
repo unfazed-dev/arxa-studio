@@ -1,7 +1,7 @@
 # Job controls and background-agent insights
 
-Status: **grilling in progress 2026-09-03.** Facts below are verified; the
-decisions are not taken yet. Nothing is implemented.
+Status: **grilled 2026-09-03, awaiting build approval.** Facts verified live,
+decisions D1-D5 taken below. Nothing is implemented.
 
 ## Why this exists
 
@@ -137,15 +137,42 @@ whether jobs are controllable, despite the file being named a probe and the
 check being worded as a finding about this build. Nothing in the suite would
 fail if jobs became controllable tomorrow.
 
-## Open decisions — to be grilled, one at a time
+## Decisions (grilled 2026-09-03)
 
-1. Should arxa drive `ctx.jobs` directly from the host, given the fence is an
-   id comparison rather than an authorization boundary?
-2. If yes: which verbs — list only, or list + kill?
-3. What is the honest label for a subagent that can be interrupted but never
-   terminated or resumed?
-4. Do background agents/jobs get an insight view, and what does it show?
-5. What must be true for any of it to be testable without a live model turn?
+| # | Decision | Chosen |
+|---|---|---|
+| D1 | Drive `ctx.jobs` from the host | **Yes.** arxa is the host UI acting for the human, who owns every session in their own app. The `.id` fence exists to stop agent A touching agent B's jobs, not to stop the human's own window. Passing `{ id: sessionId }` is use, not circumvention. |
+| D2 | Guard the undocumented seam | **CI gate + runtime degrade.** A selftest reads the installed `dsh-jobs-local` and asserts the fence is still the `.id` comparison, so a dsh upgrade is a loud RED naming the file. At runtime every registry call is wrapped; a throw falls back to today's honest `no-job-api` refusal. A user on a newer dsh gets a disabled button with a reason, never a crash. |
+| D3 | Subagent control surface | **Pause + a real wake box; Cancel stays refused.** Pause keeps `subagent.interrupt`. The dead Resume button becomes a message box sending through `subagent.prompt`, whose contract is "delivers human content to a continuable child" — asking the human for the words is not inventing them. Cancel stays disabled with `no-terminate-verb`, because none exists anywhere in the build. Closes gap 2. |
+| D4 | Background-work insight | **Live rows with real status + Cancel.** The jobs view round-trips to the host like subagents already do — real kind, label, status, elapsed, owner from the registry, refreshed on `onJobsChanged`. No new storage: a persisted history was considered and dropped, because `dsh-jobs-local` is in-memory only and a history would mean arxa owning a new on-disk log, its growth and its pruning. |
+| D5 | How it is proven | **Offline selftest + one live cancel.** A selftest drives the real handler against a fake registry for the logic and every refusal path, plus the D2 gate. Then one live run: prompt a session to start a background `sleep`, watch it appear in the card, cancel it from the button, confirm it died. |
+
+### Consequences taken without a separate question
+
+- **The wake box lives in the side panel only.** The previous grill established
+  three subagent surfaces (side panel, dropdown row, hover). A text input
+  cannot sensibly sit on a hover affordance or inside a dropdown row, so the
+  other two keep Pause and a link into the panel.
+- **`subagent.prompt` is continuable-only** (`Extract<SubagentAddress, {mode:
+  'continuable'}>`). A one-shot child gets no wake box and keeps a stated
+  reason, matching how Pause already distinguishes the two.
+- **The jobs view stops reading the client store.** D4 makes it round-trip, so
+  `state.jobsBySession` is no longer its source. The push event stays useful as
+  a refresh trigger.
+- **No database.** Nothing here touches Supabase or needs one, so the CLAUDE.md
+  local-only contract is satisfied by construction rather than by a fallback.
+- **The `no-job-api` refusal is kept, not deleted.** It becomes the degrade
+  path (D2) rather than the permanent answer, so the honest-refusal shape that
+  `scripts/agent-services-probe.mjs` pins stays meaningful.
+
+### Correction owed to the record
+
+`plugins/arxa-sidebar/lib/index.js:895-919` states both services are
+unreachable and that jobs "cannot be cancelled from any plugin surface in this
+build". That comment must be rewritten when this lands — it is the source the
+gap note was drawn from, and it is wrong on the reachability claim while right
+on the RPC claim. `scripts/agent-services-probe.mjs` must also gain a check
+that actually probes rather than asserting a hardcoded literal.
 
 ## Not yet done
 
