@@ -204,3 +204,16 @@ no code execution. And a third: arxa's own context via
 - With `ANTHROPIC_API_KEY` exported in the parent shell, the child still
   reports `apiKeySource: "none"` (env scrub works).
 - Settings > Models never lists "Anthropic (Claude Pro/Max)" from pi-ai.
+
+## Decisions locked in the grill (2026-09-03)
+
+| # | Decision |
+|---|---|
+| D1 | Real Claude Code binary only. No in-app Claude sign-in. pi-ai's Anthropic OAuth flow hidden from arxa's login list + CI guard that it never reappears. |
+| D2 | Claude Code is a session engine, not a model: wrapped behind a dsh `AgentFactory` (`ctx.agents.setFactory`) that translates SDK messages into the dsh session log so stock UI/persistence render unchanged. |
+| D3 | `@anthropic-ai/claude-agent-sdk` pinned exact. Prefer user's `claude` on PATH, else bundled binary. Zero UI/UX change: stock model picker, `session.models` / `session.selectModel`. |
+| D4 | Cross-engine switch mid-session blocked with a reason via `routable`; free switching among Claude models; opt-in hot swap with handoff summary (phase 2). |
+| D5 | Three lock layers: arxa sandbox around the child (extra writable root `~/.claude/projects`, spiked green on macOS Seatbelt + Linux bwrap); Claude Code knobs set by arxa (cwd, disallowedTools, `--restricted`, never bypassPermissions); `canUseTool` bridged to dsh approval. |
+| D6 | Not-signed-in = T3-style state: copyable `claude auth login` command, periodic probe (`claude --version`, `claude auth status`), email + tier badge, "Check again". arxa never starts login. Fable labelled by tier (Pro: usage credits; Max: included, 50% cap). |
+| D7 | Claude Code is intelligence only. `settingSources: []` (no `~/.claude` settings/hooks/plugins/MCP, no `CLAUDE.md`). No Claude Code preset prompt: arxa's own system prompt + org context chain, same as every other model. arxa perks (`gen_ui`, gates, delegate, approval) bridged in via the SDK in-process MCP server, phase 1. Hidden transcript under `~/.claude/projects` kept only for resume. |
+| D8 | Keep Claude's built-in Read/Write/Edit/Bash/Grep/Glob inside arxa's sandbox + approval bridge. Subagent, skills and plugin *mechanisms* stay available, but they resolve arxa's catalogue, never Claude's `~/.claude` conventions or instructions. |
