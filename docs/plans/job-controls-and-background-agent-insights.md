@@ -1,7 +1,9 @@
 # Job controls and background-agent insights
 
-Status: **grilled 2026-09-03, awaiting build approval.** Facts verified live,
-decisions D1-D5 taken below. Nothing is implemented.
+Status: **host half LANDED and proven live 2026-09-03.** D1, D2 and D5's first
+assertion are done: `plugins/arxa-jobs` lists and cancels a real background job
+through `ctx.get('jobs')`, and the cancel killed the actual OS process. The UI
+(D4's rows in the chip) and D3's subagent wake box are NOT built yet.
 
 ## Why this exists
 
@@ -196,9 +198,85 @@ gap note was drawn from, and it is wrong on the reachability claim while right
 on the RPC claim. `scripts/agent-services-probe.mjs` must also gain a check
 that actually probes rather than asserting a hardcoded literal.
 
+## Live proof — 2026-09-03, engine on 7897
+
+Not a probe this time: the real route, a real job, a real process.
+
+A session was created (`session.create`, preset `arxa`) and prompted once, with
+the only instruction being to run `sleep 400` in the background. Then, through
+`POST /__arxa/jobs/action`:
+
+```
+jobs.list  { sessionId }  ->  rows: [{
+  id: "bash-1", kind: "bash", label: "sleep 400", status: "running",
+  ownerSession: "session-6d8d63eb-…", elapsedMs: 3040, live: true, canCancel: true }]
+```
+
+**The registry answered for a caller arxa minted itself** (`{ id: sessionId }`),
+and `ownerSession` came back equal to that id — so the `.id` fence matches the
+way `scripts/jobs-fence-check.mjs` asserts it does. This is the assertion D5
+demanded before any UI was built, and it is the one the earlier note got wrong
+by inference.
+
+The fence also held against a caller who does not own the job:
+
+```
+jobs.cancel { sessionId: "someone-elses-session", jobId: "bash-1" }  ->  not-yours
+jobs.list   { sessionId: "someone-elses-session" }                   ->  0 rows
+```
+
+And the cancel is real, not cosmetic:
+
+```
+OS `pgrep -f 'sleep 400'` before        1
+jobs.cancel { sessionId, jobId }   ->   requested       (status: stopping)
+  +2s                                   status: killed  live: false
+OS `pgrep -f 'sleep 400'` after         0
+jobs.cancel again                  ->   already-finished (ok, not an error)
+```
+
+`requested → stopping → killed` is reported honestly at each step: arxa never
+claims "cancelled" while the producer is still settling.
+
+## What landed
+
+- `plugins/arxa-jobs/lib/index.js` — host half. `jobs.list` / `jobs.cancel` over
+  `POST /__arxa/jobs/action`, reading the registry with `ctx.get('jobs')`. Every
+  call wrapped; a missing service, a tightened fence and a broken call all
+  degrade to the same `no-job-api` refusal (D2).
+- `profile/cordis.patch.yml` — mounts it host-plane. The stock
+  `dsh-client-ui-jobs` row is deliberately LEFT mounted: it is dsh's patch, not
+  arxa's, and replacing it would make arxa diverge from stock on every upgrade.
+- `scripts/jobs-fence-check.mjs` — the D2 CI gate, wired into `ci.mjs`. Proven
+  to bite: hardening the installed fence with a `scopeOf()` check turned it RED,
+  and restoring the file turned it green again.
+- `plugins/arxa-jobs/selftest.mjs` — 23 assertions, offline, against a fake
+  carrying the real fence. Covers elapsed-freezes-on-finish, the fence, all four
+  refusal reasons, and a ctx that throws on the bare `ctx.jobs` read.
+- `bin/arxa-studio.mjs` — `PROFILE_PLUGINS` row, so the packed desktop build
+  cannot ship without it (the drift regression that broke a release before).
+
+### The documented-API finding
+
+dsh's own `cordis-plugin-development` skill, under "Access Services", says:
+*"Read optional capabilities with `ctx.get(name)` by default and handle their
+absence… Declare `inject` only when a Service is a hard dependency."* So
+`ctx.get('jobs')` is not a loophole arxa found — it is the sanctioned way to
+read an optional service, and the bare `ctx.jobs` that throws is the Guard doing
+its job. This strengthens D1 from "permitted" to "documented", and confirms the
+sidebar comment was wrong about the API as well as about the scope.
+
 ## Not yet done
 
-- Nothing implemented.
-- No live background job has been observed through the host registry — the
-  probe ran against an empty registry. A run with a real `run_in_background`
-  job is required before any list/kill claim is called verified.
+- **D4's UI.** The chip still renders from the client store and shows no status,
+  no elapsed and no Cancel. The host half it needs now exists and is proven.
+- **D3's wake box.** `subagent.prompt` is confirmed as the sanctioned wake, but
+  nothing is wired.
+- **The stale comment.** `plugins/arxa-sidebar/lib/index.js:895-919` still says
+  jobs "cannot be cancelled from any plugin surface in this build". It is now
+  demonstrably false and must be rewritten when D4 lands.
+- **`scripts/agent-services-probe.mjs`** still asserts the hardcoded
+  `services.jobs === false`. That literal is now wrong about the product and
+  will need to move with the UI.
+- **Housekeeping.** The live proof left one scratch session on the 7897 engine
+  (`session-6d8d63eb-…`) whose only content is the `sleep 400` prompt.

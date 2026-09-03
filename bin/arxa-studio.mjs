@@ -133,6 +133,7 @@ const sidebarDir = resolve(here, '..', 'plugins', 'arxa-sidebar')
 // host half serves /__arxa/git-card/action over the sidebar's org shell;
 // browser half is the conversation.input.dock card in stock QueueDock grammar.
 const gitCardDir = resolve(here, '..', 'plugins', 'arxa-git-card')
+const jobsDir = resolve(here, '..', 'plugins', 'arxa-jobs')
 // Approvals loop (grill D60–D68): approvals doors new pendings through the
 // push-doorbell library by bare-name-then-relative import probe (the sidebar
 // importShell pattern) — both dirs ride the flat copies below so the probe
@@ -184,6 +185,7 @@ const PROFILE_PLUGINS = [
   ['arxa-pairing', pairingDir],
   ['arxa-sidebar', sidebarDir],
   ['arxa-git-card', gitCardDir],
+  ['arxa-jobs', jobsDir],
   ['arxa-file-org-shell', fileOrgShellDir],
   ['arxa-github-link', githubLinkDir],
   ['arxa-artifact-viewer', artifactViewerDir],
