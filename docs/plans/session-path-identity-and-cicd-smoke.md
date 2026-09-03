@@ -194,7 +194,49 @@ xlaude / Claude Code worktrees pick name = branch = dir once at creation.
        "pending" rows.
      - Covered by `git-workspace/selftest.ledger.mjs` (6 checks).
 
-4. **Smoke tiers 2 and 3** (Q12) — NOT STARTED. Two things to carry in:
+4. **Smoke tier 2** (Q12) — **DONE, green end to end.**
+   `RESTO/projects/kitchen-project/06-build/menu-availability-wt-260903-001`
+   → PR **unfazed-dev/kitchen-project#1**, merged `c721398`, branch deleted.
+   - `newProject` scaffolded the project, published the repo, registered its own
+     self-hosted runner (`arxa-unfazed-dev-kitchen-project`, online) and wired
+     the frame — `.fvmrc`, `check.sh` and `ci.yml` all tracked in the project repo.
+   - The feature is real: a `Menu`/`Dish` model with availability, seasonal-first
+     ordering and coverage, under 5 tests.
+   - **The deliberate RED was caught LOCALLY and never reached CI** — which is
+     the design (D107), not a shortfall of the plan's "first push deliberately
+     RED". A red gate never pushes, so a broken branch never burns runner time
+     and never opens an unmergeable PR. Both faults were proven to red
+     *separately*, because the analyzer runs first and check.sh stops there:
+     the unused local reds via `--fatal-warnings`, and the wrong expectation
+     reds via `flutter test` (`+4 -1`) once the analyzer is clean.
+   - CI then ran green on the project's own runner, for both the pull_request
+     and the branch push.
+   - The PR body carries the live ledger with both clocks; the four trailers
+     (`Arxa-Session`, `Arxa-Container`, `Arxa-Actor`, `Co-authored-by: Claude
+     Opus 5`) are on the merged commit and parse as real git trailers.
+
+4b. **Two bugs tier 2 exposed, both fixed**
+   - **Project sessions could not open a PR at all** — four handlers refused
+     with `project-session-pr-pending: PR flow for project repos lands in Phase
+     2`. The plumbing underneath was already repo-agnostic; only the LOOKUP was
+     wrong (every handler read the ORG manifest). One resolver (`repoFor`) that
+     follows the session's own repo replaced the guards, and `card.ci.rerun` /
+     `cancel` / `insight.ci` now target the session's repo too. Caught by the
+     sidebar selftest when the first attempt removed a guard without wiring its
+     replacement — run control would have acted on the org repo.
+   - **A merged session's remote branch was kept forever.** Cleanup asked
+     "is the branch TIP merged into main?", but after a merge the tip is
+     routinely a WIP auto-save (the watcher, or archive's own snapshot) which by
+     definition is not in main. It answered "unmerged" for a session that had
+     just merged cleanly. Now asks it of the newest NON-WIP commit
+     (`reviewedTip`, git-workspace/lib/commits.js) — verified on the real branch:
+     old question said unmerged, new says merged, and a genuinely unmerged
+     commit still correctly says no.
+
+5. **Smoke tier 3** (Q12) — NOT STARTED: two parallel sessions on one file,
+   `strict` forcing the second to rebase after the first merges, a two-repo
+   linked feature, a run cancelled by `concurrency`, and a retro-CI replay.
+   Two things to carry in:
    - Tier 2 must **commit `pubspec.lock`** explicitly. The gate itself writes
      the lock on its first run, so a target scaffolded and committed before
      any `check.sh` run reaches CI without one — and `--enforce-lockfile`,
