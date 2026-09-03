@@ -43,6 +43,7 @@ export {
   writeOrgStampVersion,
   checkOrgStamp,
 } from './stamp.js'
+export { PROJECT_GITIGNORE, PROJECT_GITIGNORE_V4, TARGET_BUILD_LINES, ensureProjectGitignore, ensureGeneratedIgnored } from './gitignore.js'
 export { MigrationError, MIGRATIONS, migrationChain, migrateOrg, openOrg } from './migrate.js'
 export { OrgLockedError, acquireOrgLock, withOrgLock } from './lock.js'
 export {

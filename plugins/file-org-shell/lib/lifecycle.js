@@ -54,6 +54,7 @@ import {
   readRecents,
   removeRecent,
   CATEGORIES,
+  ensureGeneratedIgnored,
 } from '../../workspace/lib/index.js'
 import {
   openBackend,
@@ -390,6 +391,11 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       // called upgrade before, so RESTO kept a pre-Q7 ci.yml forever.
       const wrote = writeFrameFiles(repoPath, kind, { includeCiYml: true, upgrade: true })
       if (kind === 'org') ensureFrameUnignored(repoPath)
+      // A project scaffolded before TARGET_BUILD_LINES existed keeps its old
+      // .gitignore forever (ensureProjectGitignore never overwrites), so the
+      // patch has to happen on a path every published project passes through.
+      // This is that path — it already re-applies the frame every time.
+      if (kind === 'project') ensureGeneratedIgnored(repoPath)
       runGit(['add', '--', '.gitignore', 'check.sh', '.github'], { cwd: repoPath, allowFail: true })
       if (!frameTracked()) {
         throw new Error('frame-files-untracked: check.sh/.github are ignored by .gitignore, the frame cannot reach GitHub')

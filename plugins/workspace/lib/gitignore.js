@@ -64,6 +64,38 @@ export const PROJECT_GITIGNORE = [
   '',
 ].join('\n')
 
+/**
+ * A target's own `build/` output, at any depth EXCEPT the project root.
+ *
+ * The platform-scoped rules below (`**\/ios/build/`, `**\/macos/build/`, …)
+ * only cover a target whose folder is NAMED after a platform. The gate
+ * finds targets by their stack marker, not by folder name (check.sh walks
+ * to every `pubspec.yaml`/`package.json`), so a target called anything
+ * else — `backoffice`, `admin`, a website-track `landing` — kept its build
+ * output tracked. Measured on RESTO/kitchen-project after the tier-2
+ * smoke: 46 MB of `unit_test_assets/`, `NOTICES.Z`, shaders and
+ * `.cache.dill.track.dill` committed to the user's repo, re-churned by
+ * every gate run and carried into every PR by the WIP watcher.
+ *
+ * The gate had it right all along and the ignore disagreed: check.sh
+ * PRUNES `-name build` when walking for targets, i.e. arxa already treats
+ * a nested `build` as generated. This makes git agree.
+ *
+ * The exception is the whole point. Template v2's managed container was
+ * named literally `build` at the project ROOT (v3 renamed it `06-build`),
+ * and the SAFETY note at the top of this file forbids ever swallowing it.
+ * `!/build/` is anchored to the root, so the v2 container is re-included
+ * while every nested one stays ignored — verified empirically, not
+ * reasoned about, in selftest.gitignore.mjs.
+ */
+export const TARGET_BUILD_LINES = Object.freeze([
+  '# A target\'s own build output, at any depth — the gate already prunes',
+  '# `-name build` when it walks for targets. The negation keeps template',
+  '# v2\'s managed root container (SAFETY note, top of gitignore.js).',
+  '**/build/',
+  '!/build/',
+])
+
 /** v4 content (D110): everything PROJECT_GITIGNORE covers, plus the OS/
  * editor, Node-framework, and Flutter/Dart sections the v4 application
  * track (ios/android/macos/windows/linux/web) needs. Written by template
@@ -120,6 +152,8 @@ export const PROJECT_GITIGNORE_V4 = [
   '**/linux/build/',
   '**/web/build/',
   '',
+  ...TARGET_BUILD_LINES,
+  '',
 ].join('\n')
 
 /**
@@ -137,4 +171,38 @@ export function ensureProjectGitignore(projectPath, content = PROJECT_GITIGNORE_
   if (fs.existsSync(target)) return false
   fs.writeFileSync(target, content)
   return true
+}
+
+/**
+ * Append TARGET_BUILD_LINES to an EXISTING project `.gitignore` that
+ * predates them. Idempotent.
+ *
+ * Without this the fix reaches nobody who needs it: `ensureProjectGitignore`
+ * is deliberately write-only-when-absent, so every project scaffolded
+ * before today keeps its old file forever — and those are exactly the
+ * projects already committing build output. Same shape and same reason as
+ * repos.js's `ensureFrameUnignored`.
+ *
+ * Appending is safe where rewriting would not be: these two lines are
+ * self-contained (a plain ignore plus a root-anchored negation), so they
+ * cannot change the meaning of any rule above them, and a human's own
+ * edits are left untouched.
+ *
+ * Ignoring a path does NOT untrack what is already committed — git keeps
+ * honouring the index. A project that already committed its build output
+ * needs `git rm -r --cached <dir>` as well; this function only stops the
+ * bleeding.
+ *
+ * @returns {{ changed: boolean, reason?: string }}
+ */
+export function ensureGeneratedIgnored(projectPath) {
+  const file = path.join(projectPath, '.gitignore')
+  let text
+  try { text = fs.readFileSync(file, 'utf8') } catch { return { changed: false, reason: 'no-gitignore' } }
+  const lines = text.split('\n')
+  const missing = TARGET_BUILD_LINES.filter((l) => !lines.includes(l))
+  if (missing.length === 0) return { changed: false, reason: 'already' }
+  const body = text.endsWith('\n') ? text : text + '\n'
+  fs.writeFileSync(file, body + missing.join('\n') + '\n')
+  return { changed: true }
 }
