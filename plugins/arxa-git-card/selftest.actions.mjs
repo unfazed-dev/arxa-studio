@@ -297,6 +297,31 @@ async function patchProjectManifest(projPath, patch) {
   check('Q14: the record is a REGISTRY fact, readable with no network at all',
     gw.readLedger(repoPath, sid).map((e) => e.stage).join(',') === 'committed,checks',
     JSON.stringify(gw.readLedger(repoPath, sid).map((e) => e.stage)))
+
+  // A PROJECT session's registry lives in the PROJECT repo, not the org. If
+  // the lookup noteStage uses did not aggregate across both, every project
+  // session — which is all of tiers 2 and 3 — would record locally and then
+  // silently fail to publish, because a failed publish is swallowed by design.
+  const projPath = ws.scaffoldProject(repoPath, 'kitchen').path
+  gw.initProjectRepo(projPath)
+  const pmade = await act('workspace.new-session', { workspace: 'projects/kitchen/02-design' })
+  const psid = pmade.result?.id
+  const prow = gw.parkedSessions(repoPath).find((x) => x.id === psid)
+  check('Q14: a project session is visible from the ORG path, with the fields the ledger publishes',
+    !!prow && prow.repoPath === projPath && prow.workspace === 'projects/kitchen/02-design' && typeof prow.branch === 'string',
+    JSON.stringify({ found: !!prow, repoPath: prow?.repoPath, expected: projPath, workspace: prow?.workspace }))
+
+  gw.recordStage(prow.repoPath, psid, { stage: 'committed', actor: 'Evan', sha: 'facefeed99' })
+  // Readable through EITHER path. The write half resolves the owning repo, so
+  // the read half must too: if reading through the org came back empty,
+  // recordStage would append to nothing and reset the ledger every call.
+  check('Q14: its ledger reads the same through the project path and the org path',
+    gw.readLedger(prow.repoPath, psid).length === 1 && gw.readLedger(repoPath, psid).length === 1,
+    JSON.stringify({ viaProject: gw.readLedger(prow.repoPath, psid).length, viaOrg: gw.readLedger(repoPath, psid).length }))
+  gw.recordStage(repoPath, psid, { stage: 'checks', actor: 'github actions', result: 'green' })
+  check('Q14: recording through the ORG path appends rather than resetting',
+    gw.readLedger(prow.repoPath, psid).map((e) => e.stage).join(',') === 'committed,checks',
+    JSON.stringify(gw.readLedger(prow.repoPath, psid).map((e) => e.stage)))
 }
 
 console.log(failures === 0 ? '\narxa-git-card selftest.actions: ALL GREEN' : `\narxa-git-card selftest.actions: ${failures} FAILURE(S)`)

@@ -18,7 +18,7 @@
 // Commit trailers carry the same identity into git itself, where it survives
 // GitHub entirely.
 
-import { annotateSession, listSessions } from './sessions.js'
+import { annotateSession, listSessions, sessionRepoFor } from './sessions.js'
 
 /** Stages, in the order a session passes through them. */
 export const STAGES = Object.freeze([
@@ -61,9 +61,17 @@ export function agentCoAuthor(model) {
   return `${name} <${slug || 'agent'}@arxa.invalid>`
 }
 
-/** The ledger rows recorded for a session, oldest first. */
+/**
+ * The ledger rows recorded for a session, oldest first.
+ *
+ * Takes the D98 repo-discovery preamble, because a PROJECT session's registry
+ * lives in the project repo while callers naturally hold the org path. Without
+ * it, reading through the org found nothing and `recordStage` — which appends
+ * to what it reads but WRITES through `annotateSession`, which does resolve —
+ * would silently reset the ledger to a single row on every call.
+ */
 export function readLedger(repoPath, id, env = process.env) {
-  const s = listSessions(repoPath, env).find((x) => x.id === id)
+  const s = listSessions(sessionRepoFor(repoPath, id, env), env).find((x) => x.id === id)
   return Array.isArray(s?.ledger) ? s.ledger : []
 }
 
