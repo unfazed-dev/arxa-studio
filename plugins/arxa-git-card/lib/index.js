@@ -613,6 +613,11 @@ export function apply(ctx) {
                   detail: 'PR #' + pr.number + ' merged with --no-ff onto the reviewed sha',
                 }, { next: 'archive the session' })
               }
+              if (!result.merged) {
+                // Same vocabulary as the `checks-*` and `no-pr` refusals above:
+                // a conflict is a "not yet, and here is why", not an error.
+                return { ok: false, merged: false, reason: result.reason ?? 'not-merged', message: result.message ?? '' }
+              }
               return { ok: true, merged: result.merged, mergeSha: result.mergeSha, reconcile: result.reconcile }
             },
             /** D116: human-initiated "publish to client" — mint the next

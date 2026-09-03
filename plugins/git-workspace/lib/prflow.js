@@ -253,7 +253,11 @@ export async function mergeSessionPr(repoPath, id, {
   if (!sha) throw new TypeError('mergeSessionPr: the reviewed sha is required — an unpinned merge can land unreviewed work')
   const result = await api.prMerge(owner, name, { number, sha, subject, message })
   if (!result || result.merged !== true) {
-    return { merged: false, mergeSha: result?.sha ?? null, localMainSha: null, reconcile: { reason: 'not-merged' } }
+    // Keep the API's own reason when it gave one ('not-mergeable' = GitHub
+    // says this branch conflicts with main). Flattening every refusal to
+    // 'not-merged' told the caller nothing it could act on.
+    const reason = result?.reason ?? 'not-merged'
+    return { merged: false, mergeSha: result?.sha ?? null, localMainSha: null, reason, message: result?.message ?? '', reconcile: { reason } }
   }
   const reconcile = reconcileLocalMain(repoPath, { env, origin })
   return { merged: true, mergeSha: result.sha ?? null, localMainSha: reconcile.localMainSha, reconcile }

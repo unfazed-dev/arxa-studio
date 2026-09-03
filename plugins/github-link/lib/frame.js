@@ -156,6 +156,18 @@ export async function prMergeApi({ owner, name, number, sha, subject, message, a
   // 409 is the head-moved guard firing — name it, do not swallow it as a
   // generic failure: the caller must re-ready and re-review, not retry.
   if (res.status === 409) throw new Error('github-link: PR merge refused — the head moved since review (409)')
+  // 405 is GitHub's "Pull Request is not mergeable" — in practice a conflict
+  // with the base branch (also draft, or blocked). It is an ordinary,
+  // actionable state, not a crash: another session landed first and this
+  // branch has to take main in before it can go. Returning a named reason
+  // rather than throwing keeps it in the same vocabulary the caller already
+  // uses for "not yet" (`checks-red`, `no-pr`) — measured 2026-09-03 on
+  // kitchen-project #3, where it surfaced to the user as the bare string
+  // "PR merge failed (405)".
+  if (res.status === 405) {
+    const out = await res.json().catch(() => ({}))
+    return { merged: false, sha: null, message: out.message ?? '', reason: 'not-mergeable' }
+  }
   if (!res.ok) throw new Error('github-link: PR merge failed (' + res.status + ')')
   const out = await res.json().catch(() => ({}))
   return { merged: out.merged === true, sha: out.sha ?? null, message: out.message ?? '' }

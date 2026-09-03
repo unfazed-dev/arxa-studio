@@ -366,6 +366,11 @@ try {
       if (u.endsWith('/pulls/9/merge')) {
         return { ok: false, status: 409, json: async () => ({ message: 'Head branch was modified. Review and try the merge again.' }) }
       }
+      if (u.endsWith('/pulls/10/merge')) {
+        // GitHub's real reply when another session landed first and this
+        // branch now conflicts (measured on kitchen-project #3, 2026-09-03).
+        return { ok: false, status: 405, json: async () => ({ message: 'Pull Request has merge conflicts' }) }
+      }
       if (u.endsWith('/pulls/7')) {
         return { ok: true, status: 200, json: async () => ({ number: 7, state: 'closed', merged: true, mergeable_state: 'unknown', head: { ref: 'arxa/session/s1', sha: 'headsha1' } }) }
       }
@@ -409,6 +414,15 @@ try {
     await assert.rejects(() => prMergeApi({ ...pbase, number: 9, sha: 'stale' }), /head moved since review \(409\)/)
     passed++
     console.log('  ✓ frame: prMergeApi names the 409 head-moved refusal specifically')
+
+    // 405 is "not mergeable" — an ordinary, actionable state (a parallel
+    // session landed first), so it must come back as a REASON the caller can
+    // show, not as an exception carrying a bare HTTP status. It surfaced to
+    // the user as "PR merge failed (405)" until 2026-09-03.
+    const conflicted = await prMergeApi({ ...pbase, number: 10, sha: 'headsha2' })
+    ok(conflicted.merged === false, 'frame: a 405 merge does not report itself merged')
+    ok(conflicted.reason === 'not-mergeable', 'frame: prMergeApi names the 405 conflict refusal instead of throwing an HTTP status')
+    ok(/merge conflicts/.test(conflicted.message), 'frame: prMergeApi keeps GitHub\'s own explanation for the user')
 
     const st = await prStateApi({ ...pbase, number: 7 })
     ok(seen.at(-1).method === 'GET' && seen.at(-1).url === 'https://api.github.com/repos/octocat/framed/pulls/7',
