@@ -35,6 +35,10 @@ const suites = readdirSync(pluginsDir, { withFileTypes: true })
     return out
   })
 suites.push([root, 'scripts', 'preset-check.mjs'])
+// The CI/CD stress harness (identity collision, concurrency, partial
+// failure). Offline and deterministic — the LIVE variant is cicd-smoke.mjs,
+// which needs a real engine and real GitHub and is hand-run only.
+suites.push([root, 'scripts', 'cicd-stress.mjs'])
 // arxa-jobs reads an UNDOCUMENTED shape out of the installed dsh (the job
 // registry's `.id` fence). Its selftest runs against a faithful fake, so this
 // gate is the half that notices when the real thing moves.

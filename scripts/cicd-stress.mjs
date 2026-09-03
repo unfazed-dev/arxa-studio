@@ -190,49 +190,87 @@ process.stdout.write(mintSessionPath({ org: path.basename(orgPath), workspace: '
 // ===========================================================================
 console.log('\n=== S3  partial failure: push lands, PR open fails ===')
 {
-  const host = await import(P('arxa-git-card', 'lib', 'index.js'))
+  // The REAL two-host harness (same shape as arxa-git-card/selftest.actions.mjs):
+  // real org, real git session, real push to a real local bare remote. Only
+  // GitHub itself is faked — which is exactly the boundary that fails here.
+  const s3home = tmp('s3home')
+  const s3ws = tmp('s3ws')
+  process.env.ARXA_HOME = s3home
+  const shell = await import(P('file-org-shell', 'lib', 'index.js'))
+  shell.saveWorkspaceRoot(s3ws)
   const routes = {}
-  const calls = { push: 0, prCreate: 0 }
+  const reg = { webServer: { register: (r) => { routes[r.path] = r.handler } } }
+  const calls = { prCreate: 0 }
   let prFails = true
-
-  const gw = {
-    status: async () => ({ ok: true, branch: 'arxa/session/s1', dirty: false }),
-    commit: async () => ({ ok: true }),
-    push: async () => { calls.push++; return { ok: true, branch: 'arxa/session/s1' } },
-    sessions: () => [{ id: 's1', branch: 'arxa/session/s1', name: 'note' }],
-  }
-  const github = {
+  const fakeGh = {
     status: async () => ({ ok: true, linked: true, login: 'tester' }),
+    // The push embeds credentials into the origin URL. The origin here is a
+    // local bare repo, so urlFor() leaves it untouched and the push is real.
+    gitCredentials: async () => ({ login: 'tester', token: 'x' }),
+    prUpdate: async () => ({}),
+    prComment: async () => ({}),
     prListForHead: async () => [],
+    prChecks: async () => ({ state: 'unknown', asleep: false, runs: [] }),
     prCreate: async () => {
       calls.prCreate++
-      if (prFails) throw new Error('HTTP 422: no commits between master and arxa/session/s1')
-      return { number: 7, url: 'https://github.com/o/r/pull/7' }
+      // The real 422 GitHub returns when the head branch is not yet visible.
+      if (prFails) throw new Error('HTTP 422: no commits between master and the head branch')
+      return { number: 7, url: 'https://github.com/acme/widgets/pull/7', html_url: 'https://github.com/acme/widgets/pull/7' }
     },
   }
-  const ctx = { webServer: { register: (r) => { routes[r.path] = r.handler } } }
-  host.apply(ctx, { github, gitWorkspace: gw })
-  const act = (action, arg) => new Promise((res) => {
-    const req = { url: '/__arxa/git-card/action', method: 'POST', _h: {}, on(e, f) { this._h[e] = f } }
-    routes['/__arxa/git-card/action'](req, { writeHead() {}, end: (s) => res(JSON.parse(s)) })
-    queueMicrotask(() => { req._h.data?.(JSON.stringify({ action, arg })); req._h.end?.() })
+  const sidebar = await import(P('arxa-sidebar', 'lib', 'index.js'))
+  const card = await import(P('arxa-git-card', 'lib', 'index.js'))
+  sidebar.apply(reg, { github: fakeGh })
+  card.apply(reg)
+  const call = (p, body) => new Promise((res) => {
+    const req = { url: p, method: 'POST', _h: {}, on(e, fn) { this._h[e] = fn } }
+    routes[p](req, { writeHead() {}, end: (s) => res(JSON.parse(s)) })
+    queueMicrotask(() => { req._h.data?.(JSON.stringify(body)); req._h.end?.() })
   })
+  const act = (action, arg) => call(
+    /^(card|insight|version)\./.test(action) ? '/__arxa/git-card/action' : '/__arxa/sidebar/action',
+    { action, arg })
 
-  const first = await act('card.push', { sessionId: 's1' })
+  const created = await act('org.create', { name: 'Partial Co', link: false })
+  check('S3 fixture: org created', created.ok === true, JSON.stringify(created).slice(0, 160))
+  const state = await call('/__arxa/sidebar/state', {})
+  const org = state.orgs.find((o) => o.open)
+  const sess = await act('workspace.new-session', { orgId: org.id, workspace: 'notes' })
+  check('S3 fixture: a real session with a real branch exists', sess.ok === true, JSON.stringify(sess).slice(0, 200))
+  const sid = sess.result?.id
+
+  // Make the org look published, and give it a REAL remote so the push half
+  // genuinely succeeds — the whole point is that push works and PR does not.
+  const bare = tmp('remote')
+  spawnSync('git', ['init', '--bare', '-b', 'master', bare], { encoding: 'utf8' })
+  spawnSync('git', ['-C', org.path, 'remote', 'add', 'origin', bare], { encoding: 'utf8' })
+  const manifest = path.join(org.path, 'org.json')
+  fs.writeFileSync(manifest, JSON.stringify({
+    ...JSON.parse(fs.readFileSync(manifest, 'utf8')),
+    repoOwner: 'acme', repoName: 'widgets', localOnly: false,
+  }, null, 2))
+
+  const first = await act('card.push', { sessionId: sid })
   const body = first.result ?? first
-  check('the push itself is still reported as having SUCCEEDED', body?.ok === true, JSON.stringify(first).slice(0, 200))
-  check('the failed PR is surfaced with a reason, never swallowed',
-    body?.pr === null && typeof body?.prReason === 'string' && body.prReason !== '',
-    JSON.stringify(body).slice(0, 200))
-  check('the push was attempted exactly once — no retry storm', calls.push === 1)
+  check('the push itself is still reported as having SUCCEEDED',
+    first.ok === true && body?.ok === true, JSON.stringify(first).slice(0, 240))
+  check('the failed PR is surfaced with a reason, never silently swallowed',
+    body?.pr === null || body?.pr === undefined
+      ? typeof body?.prReason === 'string' && body.prReason !== ''
+      : false,
+    JSON.stringify(body).slice(0, 240))
+  check('the PR open was actually attempted', calls.prCreate >= 1, 'prCreate calls: ' + calls.prCreate)
 
-  // The retry: the branch is already pushed, so a second attempt must open the
-  // PR without a second push being required for correctness.
+  // The retry. The branch is already on the remote, so this must open the PR
+  // rather than wedge on "already pushed" or need the work redone.
   prFails = false
-  const second = await act('card.push', { sessionId: 's1' })
+  const before = calls.prCreate
+  const second = await act('card.push', { sessionId: sid })
   const body2 = second.result ?? second
-  check('a retry after the outage opens the PR', body2?.pr?.number === 7, JSON.stringify(body2).slice(0, 200))
-  check('the PR creation was retried, not skipped as already-done', calls.prCreate === 2)
+  check('a retry after the outage opens the PR',
+    Boolean(body2?.pr) && body2.pr.number === 7, JSON.stringify(body2).slice(0, 240))
+  check('the retry re-attempted PR creation rather than assuming it was done',
+    calls.prCreate === before + 1, 'prCreate calls: ' + calls.prCreate)
 }
 
 console.log(failures === 0 ? '\ncicd stress: ALL GREEN' : `\ncicd stress: ${failures} FAILURE(S)`)
