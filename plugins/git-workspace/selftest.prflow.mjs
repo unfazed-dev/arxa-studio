@@ -215,7 +215,15 @@ try {
     ok(g(repoPath, ['log', '-1', '--format=%s', r.branch]) === subject, 'green: the subject is the human subject, verbatim')
     const full = g(repoPath, ['log', '-1', '--format=%B', r.branch])
     ok(full.includes('Co-worked in arxa studio.'), 'green: the attribution rides in the commit body')
-    ok(full.trimEnd().endsWith(stageTrailer('g1')), 'green: Arxa-Stage trailer is the last paragraph')
+    // Q14: the trailer BLOCK closes the message, and the point of it closing
+    // the message is that git parses it. Assert that with git itself rather
+    // than by string position — `Arxa-Session:` is no longer the final line
+    // now that container/actor/co-author follow it, but every one of them
+    // still has to come back as a real trailer.
+    ok(full.trimEnd().endsWith(stageTrailer('g1')) === false, 'green: the trailer block extends past Arxa-Session')
+    const trailers = g(repoPath, ['log', '-1', '--format=%(trailers:only,unfold)', r.branch])
+    ok(trailers.includes(stageTrailer('g1')), 'green: Arxa-Session parses as a real git trailer')
+    ok(/^Arxa-Session: /m.test(trailers), 'green: the session identity is a trailer key, not prose')
     ok(g(repoPath, ['log', `main..${r.branch}`, '--format=%s']).split('\n').every((s) => !s.startsWith('wip:')),
       'green: no wip: checkpoint survives the collapse')
 

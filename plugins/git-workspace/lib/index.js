@@ -81,6 +81,9 @@ export {
   worktreeHealth,
 } from './sessions.js'
 export {
+  STAGES, sessionTrailers, agentCoAuthor, readLedger, recordStage, renderLedger, withLedger,
+} from './ledger.js'
+export {
   listWorktreeDirs,
   parseWorktreePorcelain,
   reconcileWorktrees,

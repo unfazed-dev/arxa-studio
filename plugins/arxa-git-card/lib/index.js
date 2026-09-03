@@ -170,6 +170,51 @@ export function apply(ctx) {
             return out !== null ? { ok: true, branch: s.branch } : fail('push-failed')
           }
 
+          /**
+           * Record one stage of the session's life, then publish that record.
+           *
+           * Q14. Order matters: the REGISTRY write comes first and is the
+           * thing that must not fail, because it is the record. The GitHub
+           * half — refreshing the ledger table in the PR body and posting the
+           * stage comment — is a rendering of it and is best-effort, so an
+           * offline org, an unlinked repo, or a dead token still keeps a
+           * complete history locally (CLAUDE.md: no feature may REQUIRE the
+           * remote to work).
+           */
+          const noteStage = async (repoPath, sid, entry, { next } = {}) => {
+            const gw = await importGitWorkspace()
+            let ledger
+            try {
+              ledger = gw.recordStage(repoPath, sid, entry)
+            } catch {
+              return { recorded: false } // unknown session — never fail the caller's action
+            }
+            const published = await (async () => {
+              try {
+                const g = await getGithub().catch(() => null)
+                if (!g) return false
+                const cur = handle()
+                const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+                if (!s) return false
+                let manifest = {}
+                try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch { return false }
+                if (!manifest.repoOwner || !manifest.repoName) return false
+                const prs = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch, 'all').catch(() => [])
+                if (!Array.isArray(prs) || prs.length === 0) return false
+                const pr = prs.find((p) => p.state === 'open') ?? prs[0]
+                const table = gw.renderLedger(ledger, { sessionId: sid, container: s.workspace, next })
+                await g.prUpdate(manifest.repoOwner, manifest.repoName, pr.number, { body: gw.withLedger(pr.body, table) }).catch(() => null)
+                const detail = entry?.detail ? String(entry.detail) : ''
+                const line = ['**arxa · ' + entry.stage + '**',
+                  [entry.actor ? '_' + entry.actor + '_' : null, entry.result, entry.sha ? '`' + String(entry.sha).slice(0, 7) + '`' : null]
+                    .filter(Boolean).join(' · '), detail].filter((x) => x !== '' && x !== null).join('\n\n')
+                await g.prComment(manifest.repoOwner, manifest.repoName, { number: pr.number, body: line }).catch(() => null)
+                return true
+              } catch { return false }
+            })()
+            return { recorded: true, published, stages: ledger.length }
+          }
+
           const table = {
             // ---- Part B S3: composer git card engine actions (Q1/Q2/Q6/
             // Q7/Q10 — docs/plans/git-card-part-b-grill.md). The card is
@@ -300,12 +345,24 @@ export function apply(ctx) {
                   // already held the commit: "No commits between main and
                   // arxa/<identity>" (RESTO #1-#3, 2026-09-03 smoke).
                   const { readySession } = await importPrflow()
-                  const attribution = '— written by ' + String(arg?.model ?? 'the session model') + ' in arxa studio'
-                  const r = readySession(repoPath, sid, { subject, attribution, origin: pushUrl })
+                  const model = String(arg?.model ?? 'the session model')
+                  const actor = String(arg?.actor ?? model)
+                  const attribution = '— written by ' + model + ' in arxa studio'
+                  // Q14: the actor and the co-author ride the commit itself, so
+                  // the record survives without GitHub, the PR, or this tool.
+                  const r = readySession(repoPath, sid, {
+                    subject, attribution, actor, coAuthor: gw.agentCoAuthor(model), origin: pushUrl,
+                  })
                   if (r.reason === 'gate-red') {
                     // Same promise as the local boundary (D40): red parks, nothing is lost.
                     const parked = gw.parkSession(repoPath, sid, 'gate-red')
+                    await noteStage(repoPath, sid, { stage: 'gate', actor, result: 'red', sha: r.sha, detail: 'parked — nothing is lost, the collapsed commit stays on the branch' }, { next: actor + ' — fix the gate and re-commit' })
                     return { squashed: r.collapsed, sha: r.sha, gate: r.gate, merged: false, parked: true, session: parked, shape: 'prflow' }
+                  }
+                  if (r.sha) {
+                    await noteStage(repoPath, sid, { stage: 'committed', actor, sha: r.sha, detail: subject })
+                    await noteStage(repoPath, sid, { stage: 'gate', actor, result: r.gate?.green ? 'green' : 'skipped', sha: r.sha })
+                    if (r.push?.pushed) await noteStage(repoPath, sid, { stage: 'pushed', actor, sha: r.sha, detail: r.branch }, { next: 'CI on ' + r.branch })
                   }
                   return {
                     squashed: r.collapsed, sha: r.sha, gate: r.gate, merged: false, parked: false,
@@ -386,11 +443,19 @@ export function apply(ctx) {
               const title = String(arg?.title ?? '').trim()
               if (!gw.SUBJECT_RE.test(title)) throw new Error('title-not-conventional: the PR title becomes the squash-merge subject (Q7/Q8)')
               const attribution = '— written by ' + String(arg?.model ?? 'the session model') + ' in arxa studio'
-              const body = [String(arg?.problem ?? ''), String(arg?.fix ?? ''), attribution].filter((x) => x !== '').join('\n\n')
+              const actor = String(arg?.actor ?? arg?.model ?? 'the session model')
+              // The ledger is fenced into the body at creation so every later
+              // stage can rewrite that block in place instead of appending.
+              const ledgerTable = gw.renderLedger(gw.readLedger(s.repoPath ?? cur.path, sid), { sessionId: sid, container: s.workspace, next: 'review' })
+              const body = gw.withLedger(
+                [String(arg?.problem ?? ''), String(arg?.fix ?? ''), attribution].filter((x) => x !== '').join('\n\n'),
+                ledgerTable,
+              )
               // file-pr rule 1: dedupe — update, never duplicate.
               const existing = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
               if (Array.isArray(existing) && existing.length > 0) return { ok: true, existing: true, pr: { number: existing[0].number, url: existing[0].html_url } }
               const pr = await g.prCreate(manifest.repoOwner, manifest.repoName, { title, body, head: s.branch, base: 'main' })
+              await noteStage(s.repoPath ?? cur.path, sid, { stage: 'review', actor, detail: 'PR #' + pr.number + ' opened' }, { next: 'a human reviewer' })
               return { ok: true, pr: { number: pr.number, url: pr.html_url } }
             },
             'card.pr.status': async () => {
@@ -425,6 +490,19 @@ export function apply(ctx) {
               }
               const pr = prs[0]
               const checks = await g.prChecks(manifest.repoOwner, manifest.repoName, pr.head?.sha ?? s.branch).catch(() => noChecks)
+              // Record a SETTLED result only, and only when it differs from the
+              // last one recorded. card.pr.status is polled — every 15s in the
+              // smoke — so recording each call would bury the ledger under
+              // forty identical "pending" rows and post forty comments.
+              if (checks?.state === 'green' || checks?.state === 'red') {
+                const gwl = await importGitWorkspace()
+                const seen = gwl.readLedger(s.repoPath ?? cur.path, sid).filter((e) => e.stage === 'checks')
+                if (seen[seen.length - 1]?.result !== checks.state) {
+                  await noteStage(s.repoPath ?? cur.path, sid, {
+                    stage: 'checks', actor: 'github actions', result: checks.state, sha: pr.head?.sha ?? null,
+                  }, { next: checks.state === 'green' ? 'merge when reviewed' : 'fix the failing check' })
+                }
+              }
               return { ok: true, pr: { number: pr.number, url: pr.html_url, state: pr.state }, checks, runs: await runsFor(), branch: s.branch }
             },
             /** Q8: run control from the card. Both take the run id the status
@@ -511,6 +589,12 @@ export function apply(ctx) {
                 api: { prMerge: g.prMerge },
                 origin,
               })
+              if (result.merged) {
+                await noteStage(repoPath, sid, {
+                  stage: 'merged', actor: String(arg?.actor ?? 'arxa studio'), sha: result.mergeSha,
+                  detail: 'PR #' + pr.number + ' merged with --no-ff onto the reviewed sha',
+                }, { next: 'archive the session' })
+              }
               return { ok: true, merged: result.merged, mergeSha: result.mergeSha, reconcile: result.reconcile }
             },
             /** D116: human-initiated "publish to client" — mint the next

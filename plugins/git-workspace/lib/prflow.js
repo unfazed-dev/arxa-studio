@@ -36,6 +36,7 @@ import { stageBoundarySquash, isDirty } from './commits.js'
 import { listSessions, runGate, SESSION_BRANCH_PREFIX, SESSION_BASE_PREFIX } from './sessions.js'
 import { getOrigin, fetchRepo, ffMergeMain, mainSyncState } from './repos.js'
 import { SUBJECT_RE } from './frame.js'
+import { sessionTrailers } from './ledger.js'
 
 /**
  * Per-session ref holding the base the PR collapse commits against — the
@@ -47,9 +48,16 @@ import { SUBJECT_RE } from './frame.js'
  */
 export const PRFLOW_BASE_PREFIX = 'refs/arxa/prflow-base/'
 
-/** The `Arxa-Stage:` trailer that marks a collapsed session commit. */
+/**
+ * The trailer that marks a collapsed session commit.
+ *
+ * Q14: `Arxa-Session:` replaces `Arxa-Stage: session <id>`. The old key was
+ * doing three jobs — session, org boundary, version mint — so reading it back
+ * told you nothing without also parsing its value. Nothing consumed it
+ * (verified 2026-09-03), so the rename costs nothing.
+ */
 export function stageTrailer(id) {
-  return `Arxa-Stage: session ${id}`
+  return `Arxa-Session: ${id}`
 }
 
 function session(repoPath, id, env) {
@@ -65,10 +73,13 @@ function session(repoPath, id, env) {
  * `squash_merge_commit_message: 'PR_BODY'` workaround is dead with the
  * squash merge that needed it.
  */
-export function collapseMessage(id, { attribution } = {}) {
+export function collapseMessage(id, { attribution, container, actor, coAuthor } = {}) {
   const lines = []
   if (attribution) lines.push(attribution, '')
-  lines.push(stageTrailer(id))
+  // One trailer paragraph: identity (session + container) and attribution
+  // (actor + co-author) travel with the commit into git, where they survive
+  // GitHub, the PR, and this tool entirely.
+  lines.push(sessionTrailers({ id, container, actor, coAuthor }))
   return lines.join('\n')
 }
 
@@ -88,7 +99,7 @@ export function collapseMessage(id, { attribution } = {}) {
  * @returns {{ sha: string|null, pushed: boolean, gate: object, branch: string,
  *             collapsed: boolean, reason?: string, origin?: string|null }}
  */
-export function readySession(repoPath, id, { subject, attribution, env = process.env, gate = runGate, origin } = {}) {
+export function readySession(repoPath, id, { subject, attribution, actor, coAuthor, env = process.env, gate = runGate, origin } = {}) {
   const s = session(repoPath, id, env)
   if (s.state !== 'open') {
     throw new Error(`session "${id}" is ${s.state} — revive it before readying a PR`)
@@ -132,7 +143,8 @@ export function readySession(repoPath, id, { subject, attribution, env = process
     runGit(['update-ref', baseRef, mergeBase], { cwd: s.worktree, env })
     const squash = stageBoundarySquash(s.worktree, {
       message: subject,
-      trailer: collapseMessage(id, { attribution }),
+      // The session row knows its own container; the caller supplies who acted.
+      trailer: collapseMessage(id, { attribution, container: s.workspace, actor, coAuthor }),
       env,
       baseRef,
     })

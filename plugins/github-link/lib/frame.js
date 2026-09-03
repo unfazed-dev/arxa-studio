@@ -171,6 +171,31 @@ export async function prMergeApi({ owner, name, number, sha, subject, message, a
  *
  * @returns {{ id: number|null, url: string|null }}
  */
+/**
+ * Rewrite a pull request's body (Q14 ledger refresh).
+ *
+ * PATCH, not POST: the ledger is re-rendered at every stage, and appending a
+ * fresh copy as a comment each time would bury the conversation under nine
+ * near-identical tables by the time the PR merges.
+ */
+export async function prUpdateApi({ owner, name, number, body, accessToken, fetch, apiBase }) {
+  if (typeof body !== 'string') throw new Error('github-link: PR body must be a string')
+  const res = await fetch(new URL('/repos/' + owner + '/' + name + '/pulls/' + number, apiBase), {
+    method: 'PATCH',
+    headers: {
+      accept: 'application/vnd.github+json',
+      authorization: 'Bearer ' + accessToken,
+      'content-type': 'application/json',
+      'user-agent': 'arxa-studio',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+    body: JSON.stringify({ body }),
+  })
+  if (!res.ok) throw new Error('github-link: PR update failed (' + res.status + ')')
+  const out = await res.json().catch(() => ({}))
+  return { number: out.number ?? number, url: out.html_url ?? null }
+}
+
 export async function prCommentApi({ owner, name, number, body, accessToken, fetch, apiBase }) {
   if (typeof body !== 'string' || body.trim() === '') throw new Error('github-link: PR comment body is required')
   const res = await fetch(new URL('/repos/' + owner + '/' + name + '/issues/' + number + '/comments', apiBase), {

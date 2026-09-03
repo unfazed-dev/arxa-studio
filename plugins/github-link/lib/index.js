@@ -10,13 +10,13 @@
  */
 
 import { getClientId, defaultApiBase, defaultTokenBase, linkViaBrowser, linkViaDevice, createPrivateRepoApi, renameRepoApi, repoNameAvailableApi, deleteRepoApi, refreshAccessToken, SCOPES, SHIPPED_CLIENT_ID, defaultOpen } from './auth.js'
-import { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prCommentApi, prStateApi,prChecksApi, workflowRunsApi, rerunRunApi, cancelRunApi } from './frame.js'
+import { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prCommentApi, prUpdateApi, prStateApi,prChecksApi, workflowRunsApi, rerunRunApi, cancelRunApi } from './frame.js'
 import { ensureRunner } from './runner.js'
 import { createKeyring } from './keyring.js'
 import { readState, writeState, clearState } from './state.js'
 
 export { SCOPES, createPkcePair, pkceChallenge, getClientId, loadClientId, linkViaBrowser, linkViaDevice, createPrivateRepoApi, renameRepoApi, repoNameAvailableApi } from './auth.js'
-export { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prCommentApi, prStateApi,prChecksApi, workflowRunsApi, rerunRunApi, cancelRunApi } from './frame.js'
+export { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prCommentApi, prUpdateApi, prStateApi,prChecksApi, workflowRunsApi, rerunRunApi, cancelRunApi } from './frame.js'
 export { ensureRunner, runnerExists } from './runner.js'
 export { createKeyring, KEYCHAIN_SERVICE, SECURITY_PATH } from './keyring.js'
 export { readState, writeState, clearState, statePath, arxaHome } from './state.js'
@@ -342,6 +342,10 @@ export function createGithubLink({
     return withRefresh((t) => prChecksApi({ owner, name, ref, accessToken: t, fetch, apiBase }))
   }
   /** Stage comment on a PR (2026-09-03) — { id, url }. */
+  /** Rewrite a PR's body — the ledger table is re-rendered at each stage. */
+  function prUpdate(owner, name, number, { body } = {}) {
+    return withRefresh((t) => prUpdateApi({ owner, name, number, body, accessToken: t, fetch, apiBase }))
+  }
   function prComment(owner, name, { number, body } = {}) {
     return withRefresh((t) => prCommentApi({ owner, name, number, body, accessToken: t, fetch, apiBase }))
   }
@@ -382,6 +386,7 @@ export function createGithubLink({
     prSquashMerge,
     prMerge,
     prComment,
+    prUpdate,
     prState,
     prChecks,
     rerunRun,

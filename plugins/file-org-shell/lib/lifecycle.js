@@ -82,6 +82,7 @@ import {
   annotateSession,
   mintSessionPath,
   listWorktreeDirs,
+  recordStage,
   reviveSession,
   dropSession,
   archiveSession as archiveSessionBranch,
@@ -1333,6 +1334,15 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           // D98: aggregate lookup — a project session's row is not in the org
           // registry, and an undefined row here silently skipped dsh archive.
           const row = allSessions(resolved, env).find((s) => s.id === id)
+          // Q14: record the closing stages BEFORE the worktree goes. The
+          // registry is the record and needs no network, so an offline org
+          // keeps a complete history and simply has nowhere to publish it.
+          try {
+            recordStage(row?.repoPath ?? resolved, id, {
+              stage: 'archived', actor: String(opts?.actor ?? 'arxa studio'),
+              detail: 'worktree pruned, branch kept (D39: archive is never delete)',
+            }, env)
+          } catch { /* the archive itself must never fail on its own bookkeeping */ }
           const out = archiveSessionBranch(resolved, id, env)
           // Remote branch (cleanup stage, 2026-09-03 smoke): a session whose
           // branch is already merged into main has nothing left on GitHub —
@@ -1341,6 +1351,13 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           // it is kept unless the caller says `dropRemote` (close-without-
           // merge path). Local branch is always kept (D39: archive ≠ delete).
           out.remoteBranch = await dropRemoteSessionBranch(resolved, row, opts).catch((err) => 'failed: ' + String(err?.message ?? err))
+          try {
+            recordStage(row?.repoPath ?? resolved, id, {
+              stage: 'cleaned', actor: String(opts?.actor ?? 'arxa studio'),
+              result: String(out.remoteBranch ?? 'kept').startsWith('failed') ? 'failed' : 'ok',
+              detail: 'remote branch: ' + String(out.remoteBranch ?? 'kept'),
+            }, env)
+          } catch { /* bookkeeping never fails the cleanup */ }
           // Feed dsh's archivedSessionIds set (D39 contract): the archived
           // session vanishes from dsh active views; its transcript persists
           // dsh-side. Best-effort.
