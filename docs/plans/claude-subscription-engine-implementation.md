@@ -19,7 +19,7 @@
 | D5 | Confinement is applied through the SDK's `spawnClaudeCodeProcess` hook, not by wrapping the CLI ourselves. | The SDK exposes the spawn (`sdk.d.ts` Options `spawnClaudeCodeProcess?: (options: SpawnOptions) => SpawnedProcess`), so `ctx.sandbox.confine([command, ...args], policy)` wraps exactly what the SDK would have run. |
 | D6 | The "not signed in" state lives in dsh's **stock login surface** (`ctx.authorization.registerFlow`) instead of a new status card. | Zero new UI. The flow's `run()` shows the command, polls until signed in, then commits email + tier as a credential record. Same place users log into every other provider. |
 | D9 | Ineligible models are shown with the reason in their `description` and refused at `stream()` time. |
-| D10 | Rate limits are shown in the UI in phase 1: a small usage pill in the composer row beside the model name (Task 13), fed by the SDK's `rate_limit_event`. | The user asked for it; the stock `conversation.input.right` slot and the plugin RPC channel make it a one-file client half. | The picker's `routable` flag is computed inside `dsh-host-apiproxy`; there is no per-model hook. Description text is the only stock per-model surface. |
+| D10 | Rate limits are shown in the UI in phase 1: a small usage pill in the composer row beside the model name (Task 13), fed by the SDK's `rate_limit_event`. | The user asked for it; the stock `conversation.input.right` slot and the plugin RPC channel make it a one-file client half. |
 
 ## Global Constraints
 
