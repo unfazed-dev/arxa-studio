@@ -276,8 +276,10 @@ export function createGithubLink({
     return { login: state.login, token: accessToken }
   }
 
-  /** Wire the CI frame on a published repo (Part B S1): squash-only repo
-   *  settings + branch protection (strict, frame-check required). The
+  /** Wire the CI frame on a published repo (Part B S1): merge-commit-only
+   *  repo settings + branch protection (strict, frame-check required). Both
+   *  calls are idempotent — callers re-apply on every heal so a changed
+   *  payload reaches repos wired under an older one. The
    *  measured free-plan 403 (S0 V1) is NOT an error — returned as
    *  protection:'plan-limited'; the card enforces gates client-side
    *  regardless (Q2). Payloads come from git-workspace/lib/frame.js. */
@@ -320,8 +322,8 @@ export function createGithubLink({
   function prCreate(owner, name, { title, body, head, base }) {
     return withRefresh((t) => prCreateApi({ owner, name, title, body, head, base, accessToken: t, fetch, apiBase }))
   }
-  function prListForHead(owner, name, head) {
-    return withRefresh((t) => prListForHeadApi({ owner, name, head, accessToken: t, fetch, apiBase }))
+  function prListForHead(owner, name, head, state = 'open') {
+    return withRefresh((t) => prListForHeadApi({ owner, name, head, state, accessToken: t, fetch, apiBase }))
   }
   /** DEPRECATED (D107) — see frame.js. No callers; use prMerge. */
   function prSquashMerge(owner, name, number) {

@@ -95,9 +95,14 @@ export async function prCreateApi({ owner, name, title, body, head, base = 'main
   return res.json()
 }
 
-/** List PRs for a head branch (dedupe before creating — file-pr rule 1). */
-export async function prListForHeadApi({ owner, name, head, accessToken, fetch, apiBase }) {
-  const res = await fetch(new URL('/repos/' + owner + '/' + name + '/pulls?head=' + owner + ':' + head + '&state=open', apiBase), {
+/**
+ * List PRs for a head branch (dedupe before creating — file-pr rule 1).
+ * `state` defaults to 'open' (create-time dedupe must ignore merged/closed
+ * PRs); stage comments after merge/close pass 'all' so the trail still
+ * lands on the PR the session actually shipped through. Newest first.
+ */
+export async function prListForHeadApi({ owner, name, head, accessToken, fetch, apiBase, state = 'open' }) {
+  const res = await fetch(new URL('/repos/' + owner + '/' + name + '/pulls?head=' + owner + ':' + head + '&state=' + state + '&sort=created&direction=desc', apiBase), {
     headers: {
       accept: 'application/vnd.github+json',
       authorization: 'Bearer ' + accessToken,
