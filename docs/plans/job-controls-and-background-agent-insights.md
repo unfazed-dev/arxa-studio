@@ -356,18 +356,50 @@ The stock chip was the only surface showing a duration, so the arxa row **gained
 elapsed** rather than losing it — same freeze rule as the host row, ticking once
 a second only while the menu is open over a live job.
 
+## Seen working — the last gap closed
+
+The populated chip had been proven at the route level but never *watched*. Now
+it has been, by driving the real UI with the lens against a real background job:
+
+```
+header                 Jobs · 1          (ONE chip — the stock one is gone)
+menu, before           sleep 400 | running | 1m 7s | Pause | Resume | Cancel
+buttons                pause:disabled  resume:disabled  cancel:ENABLED
+click Cancel
+menu, +400ms           sleep 400 | killed  | 1m 7s
+OS                     `sleep 400` process gone
+```
+
+Three things this shows that nothing else could: the header carries exactly one
+job chip, the elapsed **froze at 1m 7s** instead of ticking on (the `finishedAt`
+fix, on screen), and the push repainted the open menu in **400ms** without a
+refetch.
+
+## D3 landed — the wake box
+
+`agent.resume` refused with `send-message`, which was right and also a dead end:
+there is no content-free resume verb and there never will be. The refusal now
+points at a control that exists.
+
+- **`agent.wake`** (host) calls `subagent.prompt` — dsh's own "delivers human
+  content to a continuable child". Its address type is
+  `Extract<SubagentAddress, { mode: 'continuable' }>`, so a one-shot child is
+  not addressable at all; the row says `one-shot` rather than offering a box
+  that would be refused.
+- **Not gated on `running`.** Waking a paused child is the point. `pause` needs
+  running; `wake` does not. Pinned by `c-cold` in the agent selftest.
+- **A box, not a button** — Enter sends, Escape closes. An empty wake is refused
+  in the browser and again on the host (`message-required`): it would spend a
+  turn delivering nothing.
+- **`agent.cancel` on a job** now refuses with `wrong-plane`, not the retired
+  `no-job-api`. A job cancel is not a gap any more — it is a different plane,
+  and one arriving here means the client's routing broke.
+
 ## Not yet done
 
-- **D3's wake box.** `subagent.prompt` is confirmed as the sanctioned wake, but
-  nothing is wired.
-- **`busy` is per-menu, not per-row.** With two live jobs, cancelling one greys
-  out both rows' buttons. Same class as the ticking clock; key it by row id.
-- **The populated chip has never been SEEN.** Everything above is proven at the
-  route level (live, twice, with the repaint push) and asserted at the source
-  level, but no screenshot shows the button rendered: arxa's sidebar is
-  org-based, so a scratch workspace never appears in it and the browser could
-  not be driven onto a session holding a job. Only the empty branch is
-  photographed. Worth one manual look next time a real background job runs.
+- **Nothing outstanding on jobs or subagent controls.** The remaining known
+  rough edge is cosmetic: `2 subagents ⌄` beside `No subagents` (total vs live)
+  reads as a contradiction, noted above.
 
 ### Closed since the last revision
 
