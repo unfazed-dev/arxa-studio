@@ -64,9 +64,32 @@ const d = r.result
 // empty forever and only this check would say so.
 check('the subagent domain resolves from the sidebar host', d.services.subagents === true,
   'subagent API did not resolve — the chip would render empty forever')
-check('jobs are honestly declared uncontrollable (no job.* RPC exists in this build)',
+// The SIDEBAR still declares jobs uncontrollable, and that is correct about
+// THIS surface: it reaches the agent plane through ctx.apiProxy, and there is
+// no `job.*` RPC to reach. It is no longer correct about the product — the job
+// registry is a HOST service and `plugins/arxa-jobs` controls it from there.
+// Both halves are pinned so the two surfaces can never drift into agreeing
+// wrongly: a sidebar that starts claiming a cancel it cannot perform is a
+// button that lies, and an arxa-jobs route that stops answering is a control
+// that vanished.
+check('the sidebar surface still declares jobs uncontrollable FROM ITSELF (no job.* RPC on the agent plane)',
   d.services.jobs === false && d.jobsControllable === false && d.jobsReason === 'no-job-api',
   JSON.stringify({ services: d.services, jobsControllable: d.jobsControllable, jobsReason: d.jobsReason }))
+
+// …while arxa-jobs, on the host plane, does control them. Skipped rather than
+// failed when the route is absent: this probe is also pointed at older engines.
+const jr = await fetch(BASE + '/__arxa/jobs/action', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ action: 'jobs.list', arg: { sessionId: sid } }),
+}).then((x) => x.json()).catch(() => null)
+if (jr === null || jr.error === 'unknown-action' || jr.ok !== true) {
+  console.log('note  no /__arxa/jobs/action on this engine — arxa-jobs is not mounted here; skipped')
+} else {
+  check('arxa-jobs answers on the host plane, where the registry actually lives',
+    jr.result?.ok === true && jr.result.controllable === true && Array.isArray(jr.result.rows),
+    JSON.stringify(jr.result))
+}
 
 check('listChildren returned an array of controllable rows', Array.isArray(d.subagents), JSON.stringify(d.subagents))
 check('every subagent row carries the capability map the UI gates on',

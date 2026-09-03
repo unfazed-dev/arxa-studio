@@ -894,28 +894,43 @@ export function apply(ctx, opts = {}) {
            */
           if (action.startsWith('agent.')) {
             /**
-             * TRANSPORT (corrected 2026-09-03 against a live engine).
+             * TRANSPORT (re-corrected 2026-09-03 against a live engine —
+             * the earlier note here was wrong about jobs; see below).
              *
-             * `ctx.subagents` and `ctx.jobs` are NOT reachable from a
-             * top-level plugin. Both are composed under the agent scope, so
-             * this context's `reflect.get` resolves neither, and a bare
-             * property read throws cordis' "without inject". Adding them to
-             * this plugin's `inject` would not help — the service is not in
-             * this fiber's store at all — and would make a missing service
-             * stop the whole arxa shell from loading.
+             * SUBAGENTS: `ctx.subagents` is not reachable from a top-level
+             * plugin. It is composed under the agent scope, so this context's
+             * `reflect.get` does not resolve it and a bare property read
+             * throws cordis' "without inject". Adding it to this plugin's
+             * `inject` would not help — the service is not in this fiber's
+             * store at all — and would make a missing service stop the whole
+             * arxa shell from loading. `ctx.apiProxy` IS reachable (approvals
+             * and conversation already inject it) and exposes the subagent
+             * domain over the same code path the browser's RPC uses. Verified
+             * live: `subagent.list` answers while the direct property read
+             * reports nothing (scripts/agent-services-probe.mjs).
              *
-             * `ctx.apiProxy` IS reachable (plugins/approvals and
-             * plugins/conversation already inject it), and it exposes the
-             * subagent domain over the same code path the browser's RPC uses.
-             * Verified live: `subagent.list` answers while the direct property
-             * read reports nothing (scripts/agent-services-probe.mjs).
+             * JOBS ARE DIFFERENT, and the previous version of this comment
+             * generalised the subagent result to them without probing them
+             * separately. That was wrong. The job REGISTRY is a HOST service —
+             * `dsh-jobs-local` is loaded by dsh-base/cordis.patch.yml:69,
+             * beside `agent` and `settings` — so a top-level plugin reaches it
+             * with `ctx.get('jobs')`, which is dsh's own documented way to
+             * read an optional capability. What IS true is narrower: there is
+             * no `job.*` RPC and no jobs field on the ApiProxy, so no CLIENT
+             * can stop a job. The host can.
              *
-             * JOBS HAVE NO API. `JobView` is push-only — jobs reach the client
-             * through the event stream (`state.jobsBySession`), and there is
-             * no `job.*` RPC and no jobs field on the ApiProxy. So a job
-             * cannot be cancelled from any plugin surface in this build. The
-             * client lists them from its own store; this host says so plainly
-             * rather than shipping a cancel button that cannot fire.
+             * `plugins/arxa-jobs` does exactly that, and its cancel reaches
+             * the browser: `dsh-jobs-local.kill()` calls
+             * `notifyChanged(job.owner)` (:207) and dsh-host-apiproxy
+             * subscribes `jobs.onJobsChanged` to push a `session/jobs` frame
+             * addressed to `owner.id` (:3589). Proven live over the client's
+             * own ws /api/events.mux — `stopping` then `killed` arrived 166ms
+             * after an arxa-initiated cancel (scripts/jobs-push-proof.mjs).
+             *
+             * This sidebar surface is still read-only about jobs; the cancel
+             * lives in arxa-jobs. Keep the two consistent — if this ever grows
+             * a job control, route it through arxa-jobs rather than a second
+             * path to the same registry.
              */
             const rpc = () => ({ rpcId: 'arxa-' + Math.random().toString(36).slice(2) })
             const proxy = (() => {

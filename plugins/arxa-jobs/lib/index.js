@@ -79,9 +79,17 @@ export function callerFor(sessionId) {
 export function jobRow(snapshot, now = Date.now()) {
   if (!snapshot || typeof snapshot !== 'object') return null
   const startedAt = Number(snapshot.startedAt)
-  const endedAt = Number(snapshot.endedAt)
+  // The end field is `finishedAt` — `dsh-jobs-local.snapshot()` spreads
+  // `job.finishedAt` (set at :370 when a job settles) and JobView declares
+  // `finishedAt?: number`. An earlier version of this function read `endedAt`,
+  // a name that exists nowhere in dsh; it always came back undefined, so a
+  // DEAD job's elapsed fell through to `now` and ticked upward forever. The
+  // offline selftest missed it because its fake used the same wrong name —
+  // which is exactly why scripts/jobs-push-proof.mjs runs against the real
+  // registry, and why the field name is now pinned in jobs-fence-check.mjs.
+  const finishedAt = Number(snapshot.finishedAt)
   const started = Number.isFinite(startedAt) ? startedAt : null
-  const ended = Number.isFinite(endedAt) ? endedAt : null
+  const finished = Number.isFinite(finishedAt) ? finishedAt : null
   const live = isLive(snapshot)
   return {
     id: String(snapshot.id ?? ''),
@@ -91,10 +99,16 @@ export function jobRow(snapshot, now = Date.now()) {
     detail: snapshot.detail === undefined ? null : String(snapshot.detail),
     ownerSession: snapshot.ownerSession === undefined ? null : String(snapshot.ownerSession),
     startedAt: started,
-    endedAt: ended,
+    finishedAt: finished,
     // Elapsed is computed HERE rather than in the browser so a row is
     // meaningful in a log, a test, and a screenshot — not only on screen.
-    elapsedMs: started === null ? null : Math.max(0, (live ? now : ended ?? now) - started),
+    // A settled job whose end time we do not have reports null, not a growing
+    // number: "unknown" renders as blank, whereas a ticking clock on a dead
+    // job is the UI asserting something false.
+    elapsedMs: started === null ? null
+      : live ? Math.max(0, now - started)
+      : finished === null ? null
+      : Math.max(0, finished - started),
     live,
     // Only a live job can be cancelled. A terminal one is not an error to
     // cancel — the registry answers `already-finished` — but offering the

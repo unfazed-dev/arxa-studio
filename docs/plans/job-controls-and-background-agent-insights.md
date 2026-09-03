@@ -266,17 +266,80 @@ read an optional service, and the bare `ctx.jobs` that throws is the Guard doing
 its job. This strengthens D1 from "permitted" to "documented", and confirms the
 sidebar comment was wrong about the API as well as about the scope.
 
+## The push proof — 2026-09-03, the gap the other tests could not reach
+
+Every test written before this one was host-side. `JobView` is push-only, so
+"the registry says killed" and "the human's screen says killed" are different
+claims, and only the first had been checked. If `kill()` did not notify, an
+arxa cancel would leave a **stale row on screen** — a user-visible bug that the
+27 offline assertions and the fence gate are both structurally unable to catch.
+
+The chain, read in the installed dsh:
+
+| step | file | what it does |
+|---|---|---|
+| 1 | `dsh-jobs-local/lib/index.js:207` | `kill()` calls `notifyChanged(job.owner)` |
+| 2 | `dsh-host-apiproxy/lib/index.js:3589` | subscribes `jobs.onJobsChanged`, pushes a `session/jobs` frame to `owner.id` |
+
+Step 1 is handed the job's **stored** owner — a real Agent — not arxa's
+synthetic `{ id }` caller. That is why a cancel made on the human's behalf still
+addresses the right session.
+
+Proven live by `scripts/jobs-push-proof.mjs`, which subscribes to the browser's
+own channel (`ws /api/events.mux`, found after `readSse` turned out to be a
+different transport and a bare GET answered `426 Upgrade Required`):
+
+```
+the channel announced the RUNNING job          bash-1:running
+arxa cancel (host registry, synthetic caller)  requested
+  << [bash-1:stopping]        \ two frames, 154ms after the cancel
+  << [bash-1:killed]          /
+second cancel                                  already-finished
+```
+
+It is **not in CI**: it needs a live engine and spends one real model call to
+make a genuine background job. It creates its own scratch session, so no real
+work is touched, and cancelling the job is both the test and the cleanup.
+
+### The bug this caught
+
+The live row read `endedAt`. **dsh has no such field** — the registry emits
+`finishedAt` (`snapshot()`:328, set at :370; `JobView.finishedAt?`). So the read
+was always `undefined`, a settled job fell through to `now`, and **a dead job's
+elapsed time ticked upward forever** on screen.
+
+The offline selftest passed the whole time, because its fake used the same
+invented name. A fake is only worth what pins it to the real thing. Fixed in
+three places, deliberately:
+
+- `jobRow` reads `finishedAt`, and a settled job with no end stamp now reports
+  elapsed `null` — blank renders as "unknown", a running clock asserts a lie.
+- The selftest's fake uses dsh's real field names and covers the no-stamp case.
+- `jobs-fence-check.mjs` now pins the snapshot field names, so a rename turns CI
+  red instead of silently un-freezing the clock. Negative control: renaming
+  `finishedAt` in the installed dsh made it FAIL, restoring made it pass.
+
 ## Not yet done
 
 - **D4's UI.** The chip still renders from the client store and shows no status,
-  no elapsed and no Cancel. The host half it needs now exists and is proven.
+  no elapsed and no Cancel. The host half it needs now exists and is proven —
+  including that its cancel repaints the browser.
 - **D3's wake box.** `subagent.prompt` is confirmed as the sanctioned wake, but
   nothing is wired.
-- **The stale comment.** `plugins/arxa-sidebar/lib/index.js:895-919` still says
-  jobs "cannot be cancelled from any plugin surface in this build". It is now
-  demonstrably false and must be rewritten when D4 lands.
-- **`scripts/agent-services-probe.mjs`** still asserts the hardcoded
-  `services.jobs === false`. That literal is now wrong about the product and
-  will need to move with the UI.
-- **Housekeeping.** The live proof left one scratch session on the 7897 engine
-  (`session-6d8d63eb-…`) whose only content is the `sleep 400` prompt.
+
+### Closed since the last revision
+
+- **The stale comment** at `plugins/arxa-sidebar/lib/index.js` is rewritten. It
+  had generalised a true subagent result to jobs without probing them, and said
+  jobs "cannot be cancelled from any plugin surface in this build".
+- **`scripts/agent-services-probe.mjs`** now pins BOTH surfaces: the sidebar
+  still declares jobs uncontrollable *from itself* (true — no `job.*` RPC on the
+  agent plane), while arxa-jobs answers on the host plane. It skips the second
+  check on engines without the route, so it still runs against older builds.
+
+## A UI observation, not a defect
+
+The live header shows `2 subagents ⌄` beside `No subagents`. Both are correct —
+the first counts every subagent the session has ever had, the second counts live
+ones — but read together they look like a contradiction. Worth a wording pass
+whenever the header is next touched; nothing is wrong underneath.

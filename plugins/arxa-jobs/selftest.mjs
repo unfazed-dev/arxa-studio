@@ -58,7 +58,13 @@ const THEIRS = { id: 'sess-b' }
 const JOBS = [
   { id: 'bash-1', kind: 'bash', label: 'npm test', status: 'running', owner: MINE, startedAt: T0 },
   { id: 'subagent-1', kind: 'subagent', label: 'survey the plans', status: 'running', owner: MINE, startedAt: T0 - 5000 },
-  { id: 'bash-2', kind: 'bash', label: 'done already', status: 'completed', owner: MINE, startedAt: T0 - 9000, endedAt: T0 - 4000 },
+  // `finishedAt` is dsh's real field name (dsh-jobs-local snapshot():328,
+  // JobView.finishedAt?). This fake once said `endedAt` — a name that exists
+  // nowhere in dsh — and the suite went green against a fiction while the
+  // shipped row ticked a dead job's clock upward forever. Field names in this
+  // fake are contract; jobs-fence-check.mjs pins them against the real thing.
+  { id: 'bash-2', kind: 'bash', label: 'done already', status: 'completed', owner: MINE, startedAt: T0 - 9000, finishedAt: T0 - 4000 },
+  { id: 'bash-5', kind: 'bash', label: 'settled, no end stamp', status: 'killed', owner: MINE, startedAt: T0 - 9000 },
   { id: 'bash-3', kind: 'bash', label: 'someone else', status: 'running', owner: THEIRS, startedAt: T0 },
   { id: 'bash-4', kind: 'bash', label: 'unowned', status: 'running', startedAt: T0 },
 ]
@@ -71,6 +77,15 @@ console.log('\n— a row says what is true of a job —')
   const done = jobRow(JOBS[2], T0 + 60_000)
   ok(done.elapsedMs === 5000, `a finished job's elapsed FREEZES at its end (${done.elapsedMs}ms, not 69000)`)
   ok(done.canCancel === false, 'and it offers no cancel — the button would be a lie')
+  ok(done.finishedAt === T0 - 4000, "the row carries dsh's own field name, finishedAt")
+  // THE REGRESSION. Reading a field dsh does not have (`endedAt`) made this
+  // fall through to `now`, so a killed job's clock ran forever on screen.
+  const noStamp = jobRow(JOBS[3], T0 + 60_000)
+  ok(noStamp.elapsedMs === null,
+    `a settled job with no end stamp reports elapsed null, never a growing number (${noStamp.elapsedMs})`)
+  ok(noStamp.live === false && noStamp.canCancel === false, 'and it is neither live nor cancellable')
+  ok(jobRow({ status: 'running', startedAt: T0 }, T0 + 7000).elapsedMs === 7000,
+    'a LIVE job still runs to now')
   ok(isLive({ status: 'stopping' }) === true, "'stopping' still counts as live — the producer has not settled")
   ok(jobRow(null) === null, 'a junk snapshot projects to null rather than a half-row')
 }

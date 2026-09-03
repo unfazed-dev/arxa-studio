@@ -65,6 +65,28 @@ ok('kill(id, caller, reason) still asserts access',
   /kill\s*\(\s*id\s*,\s*caller\s*,\s*reason\s*\)\s*\{[\s\S]{0,200}?assertAccess\s*\(\s*job\s*,\s*caller\s*\)/.test(src),
   '')
 
+// 3b. THE SNAPSHOT FIELD NAMES arxa reads off each row.
+//
+//     This check exists because its absence already cost something. `jobRow`
+//     read `snapshot.endedAt` — a name dsh has never used — so it was always
+//     undefined, and a DEAD job's elapsed time fell through to `now` and ticked
+//     upward forever on screen. The offline selftest passed the whole time,
+//     because its fake registry used the same invented name. A fake is only
+//     worth what pins it to the real thing; this is that pin.
+//
+//     Caught live by scripts/jobs-push-proof.mjs, which reads the real registry.
+const snap = src.match(/snapshot\s*\(\s*job\s*\)\s*\{([\s\S]{0,600}?)\n\t\}/)
+ok('snapshot(job) still exists', snap !== null)
+if (snap) {
+  const body = snap[1]
+  ok('…and still emits `startedAt`', /startedAt\s*:/.test(body))
+  ok('…and still names the end stamp `finishedAt` (NOT endedAt)',
+    /finishedAt/.test(body) && !/\bendedAt\b/.test(body),
+    'jobRow reads finishedAt; a rename here silently un-freezes a dead job\'s clock')
+  ok('…and still emits `status` and `ownerSession`',
+    /status\s*:/.test(body) && /ownerSession/.test(body))
+}
+
 // 4. Agent.id is the session id. If this became `sessionId`, `{ id }` would
 //    match nothing and every list would come back empty.
 if (existsSync(AGENT_TYPES)) {
