@@ -166,10 +166,43 @@ xlaude / Claude Code worktrees pick name = branch = dir once at creation.
    - **Correction:** v4's version note already *claimed* these checks. It
      shipped without them; the note was written from this plan rather than
      from the code. v4's comment now says only what v4 did.
-   - OPEN — Q14 follow-up records: ledger renderer, `Arxa-Session:` /
-     `Arxa-Container:` / `Arxa-Actor:` / `Co-authored-by:` trailers, and
-     product-posted stage comments. Today only the manual `card.pr.comment`
-     exists and the tier-1 ledger came from the driver script.
+   - DONE (`bd87efa`) — Q14 follow-up records, in `git-workspace/lib/ledger.js`:
+     - **Trailers** on the collapsed commit: `Arxa-Session:`,
+       `Arxa-Container:`, `Arxa-Actor:`, `Co-authored-by:`. `Arxa-Stage:` is
+       retired for sessions — it was doing three unrelated jobs (session, org
+       boundary, version mint), so reading it told you nothing without also
+       parsing its value. **Correction to Q14 as written:** the plan said that
+       trailer was "parsed by sweep". Nothing parses it — the only reference in
+       the tree is a comment noting the format suits `interpret-trailers` — so
+       the rename broke no reader. A bare model name is given a stable
+       `<slug>@arxa.invalid` address, because GitHub silently drops a
+       co-author without one.
+     - **Ledger** on the session registry row: `recordStage` appends, and a
+       re-run APPENDS rather than replaces, so "red, then green after a fix"
+       survives as history. The registry is authoritative and needs no
+       network — an offline org keeps the whole record and simply has nowhere
+       to publish it.
+     - **PR body** carries the rendered table between `<!-- arxa:ledger -->`
+       fences, rewritten in place at each stage (new `prUpdate` PATCH face on
+       github-link). Fenced so a reviewer's prose above and below survives, and
+       so nine stages leave one table rather than nine.
+     - **Stage comments posted by the PRODUCT**, from `card.commit`,
+       `card.pr.create`, `card.pr.status`, `card.pr.merge` and
+       `archiveSession` — not by a driver script. `checks` records only a
+       SETTLED state, and only on change: the status action is polled every
+       15s, so recording each call would bury the ledger under forty identical
+       "pending" rows.
+     - Covered by `git-workspace/selftest.ledger.mjs` (6 checks).
+
+4. **Smoke tiers 2 and 3** (Q12) — NOT STARTED. Two things to carry in:
+   - Tier 2 must **commit `pubspec.lock`** explicitly. The gate itself writes
+     the lock on its first run, so a target scaffolded and committed before
+     any `check.sh` run reaches CI without one — and `--enforce-lockfile`,
+     guarded on the lock existing, would never fire on GitHub. The
+     enforcement would look proven while never having run.
+   - Tier 2 scaffolds `kitchen-project` itself (RESTO's `projects/` holds only
+     `.gitkeep`), so it picks up the `.fvmrc` pin from the scaffold. There is
+     nothing to backfill.
 
 3b. **Bugs found and fixed while getting the suite green** (all in `7ca2f72`)
    - `renameOrg` repaired only the TOP-LEVEL entries under `.arxa/worktrees`.
@@ -186,9 +219,8 @@ xlaude / Claude Code worktrees pick name = branch = dir once at creation.
      permanently dirty. Exclusion moved to `git init`, before anything can be
      added. (RESTO escaped this only because its whitelist `.gitignore`
      happened to cover it.)
-4. **Smoke tiers** (Q12): new driver `/tmp/arxa-s2/resto-tiers.mjs` using only
-   product actions; report per tier with PR URLs, ledger screenshots, and the
-   on-disk/GitHub cleanup evidence.
+   Driver: `/tmp/arxa-s2/resto-tiers.mjs`, product actions only; report per
+   tier with PR URLs and the on-disk/GitHub cleanup evidence.
 
 ## 4. Verification
 
