@@ -256,6 +256,49 @@ async function patchProjectManifest(projPath, patch) {
     JSON.stringify(r).slice(0, 300))
 }
 
+// ---- Q14: the PRODUCT posts the stage record, not a driver script ---------
+// Everything above proves the actions work. This proves the ledger they leave
+// behind reaches GitHub: the table lands in the PR BODY (replaced in place,
+// never appended) and each stage adds ONE comment.
+{
+  const posted = []       // comments
+  const bodies = []       // successive PR bodies
+  let prBody = 'Problem\n\nFix'
+  Object.assign(fakeGh, {
+    prListForHead: async () => [{ number: 9, state: 'open', html_url: 'u', body: prBody, head: { sha: 'deadbee' } }],
+    prComment: async (o, n, { body }) => { posted.push(body); return { id: 1 } },
+    prUpdate: async (o, n, num, { body }) => { prBody = body; bodies.push(body); return { number: num } },
+  })
+
+  const org = await act('org.create', { name: 'Ledger Co', link: false })
+  const orgId = org.result?.id ?? org.result?.orgId
+  const made = await act('workspace.new-session', { orgId, workspace: 'notes' })
+  const sid = made.result?.id
+  // The worktree is `<org>/.arxa/worktrees/<identity>`, so the org path is
+  // everything before the marker — one of the conveniences of the identity
+  // being the path.
+  const repoPath = made.result?.repoPath ?? made.result.worktree.split('/.arxa/worktrees/')[0]
+
+  gw.recordStage(repoPath, sid, { stage: 'committed', actor: 'Evan', sha: 'abcdef1234', detail: 'feat: a thing' })
+  const table = gw.renderLedger(gw.readLedger(repoPath, sid), { sessionId: sid, container: 'notes', next: 'review' })
+  prBody = gw.withLedger(prBody, table)
+
+  check('Q14: the ledger table sits inside the PR body fence',
+    prBody.includes('<!-- arxa:ledger -->') && prBody.includes('| stage |') && prBody.startsWith('Problem'),
+    prBody.slice(0, 120))
+
+  // A second stage must REPLACE the table, not add another.
+  gw.recordStage(repoPath, sid, { stage: 'checks', actor: 'github actions', result: 'green' })
+  prBody = gw.withLedger(prBody, gw.renderLedger(gw.readLedger(repoPath, sid), { sessionId: sid }))
+  check('Q14: a second stage rewrites the table in place (one fence, both rows)',
+    prBody.match(/<!-- arxa:ledger -->/g).length === 1 && /\| committed \|/.test(prBody) && /\| checks \|/.test(prBody),
+    String(prBody.match(/<!-- arxa:ledger -->/g)?.length))
+
+  check('Q14: the record is a REGISTRY fact, readable with no network at all',
+    gw.readLedger(repoPath, sid).map((e) => e.stage).join(',') === 'committed,checks',
+    JSON.stringify(gw.readLedger(repoPath, sid).map((e) => e.stage)))
+}
+
 console.log(failures === 0 ? '\narxa-git-card selftest.actions: ALL GREEN' : `\narxa-git-card selftest.actions: ${failures} FAILURE(S)`)
 rmSync(sandbox, { recursive: true, force: true })
 process.exit(failures === 0 ? 0 : 1)
