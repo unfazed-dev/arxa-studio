@@ -238,3 +238,39 @@ correct. The live smoke asserts this directly.
 **arxa's git behaviour is only observable through `runGit`, never through
 bare `git`.** Any future probe that forgets this will re-derive the same
 wrong conclusion.
+
+## 9. Shipped to the desktop app (2026-09-03)
+
+The engine sidecar had been packed at 18:42, **25 commits before** this
+session's work, and the copy installed in `/Applications` was older still.
+None of the fixes above existed in the app a user actually launches.
+
+Rebuilt, in the order `desktop/README.md` documents:
+
+1. `node scripts/pack-sidecar.mjs` → `arxa/desktop/src-tauri/binaries/
+   arxa-studio-aarch64-apple-darwin`, 142.1 MB, payload sha12 `1bcac758eac7`.
+2. `npx @tauri-apps/cli@2.11.4 build` with `APPLE_SIGNING_IDENTITY` (Developer
+   ID Application, team 43GNRCGQXQ) and `TAURI_SIGNING_PRIVATE_KEY` → `.app`,
+   `.dmg`, updater `.tar.gz` + `.sig`.
+3. `ditto` into `/Applications`, both binaries hash-verified against the build.
+
+**Proven, not assumed.** `bin/` is packed from an EXPLICIT allow-list, and the
+pack script's own header records that a file present in deps but missing from
+that list fails SILENTLY — the sidecar extracts, then dies before binding its
+port. So the boot preflight was exercised inside the shipped binary: a store
+carrying the exact duplicate-session shape was healed, backed up and logged by
+the packed sidecar. Re-run afterwards against the **signed** binary too, since
+codesigning rewrites the Mach-O and this sidecar carries its payload inside
+itself — signing does not break the self-extraction.
+
+**Still open, needs credentials this session does not have:** notarization.
+The app is Developer ID *signed* but not *notarized*, so `spctl` reports
+"Unnotarized Developer ID". Harmless locally (no quarantine attribute on a
+locally built app); it would block a DOWNLOADED copy. Closing it needs
+`xcrun notarytool store-credentials` with an Apple ID + app-specific password
+— no such keychain profile exists on this machine today.
+
+Two build-side bugs fixed in the arxa repo while here: the README documented
+`TAURI_SIGNING_PRIVATE_KEY_PATH` (the CLI ignores it and fails on the LAST
+line, after both bundles are written, so it reads as success) — `34c523cd`;
+and a needless `mut` warning in `desktop/src-tauri/src/lib.rs` — `a19e3d86`.

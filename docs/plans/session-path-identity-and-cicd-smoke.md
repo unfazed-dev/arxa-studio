@@ -145,7 +145,12 @@ xlaude / Claude Code worktrees pick name = branch = dir once at creation.
 2. **Wipe** (Q10): stop engine; per org remove worktrees, delete local +
    remote `arxa/session/*` branches (closes the 2 PRs), clear registries, remove
    dsh conversation dirs for those ids; verify empty on disk and GitHub.
-3. **Project CI + follow-ups** (Q13/Q14) — *CI half LANDED (`7ca2f72`), records half OPEN*
+3. **Project CI + follow-ups** (Q13/Q14) — *BOTH halves LANDED*
+   (CI half `7ca2f72`; records half shipped as the stage ledger —
+   `plugins/git-workspace/lib/ledger.js`, exported from `lib/index.js:85` as
+   `readLedger`/`recordStage`/`renderLedger`/`withLedger`, gated by
+   `selftest.ledger.mjs`, and fenced into every PR body by the git card's
+   `openPr`. Verified 2026-09-03.)
    - DONE — frame **v5** `projectCheckSh`: `pub get --enforce-lockfile`,
      `analyze --fatal-warnings`, SDK pinned through `fvm`. All three GUARDED —
      no lockfile, no `.fvmrc`, no toolchain and no target each stay green;
