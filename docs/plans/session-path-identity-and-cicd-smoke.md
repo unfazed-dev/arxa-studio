@@ -145,9 +145,47 @@ xlaude / Claude Code worktrees pick name = branch = dir once at creation.
 2. **Wipe** (Q10): stop engine; per org remove worktrees, delete local +
    remote `arxa/session/*` branches (closes the 2 PRs), clear registries, remove
    dsh conversation dirs for those ids; verify empty on disk and GitHub.
-3. **Project CI + follow-ups** (Q13/Q14): frame v4 `projectCheckSh` Flutter
-   branch; `.fvmrc` in project scaffold; ledger renderer + trailers + product
-   stage comments in git-card/prflow.
+3. **Project CI + follow-ups** (Q13/Q14) — *CI half LANDED (`7ca2f72`), records half OPEN*
+   - DONE — frame **v5** `projectCheckSh`: `pub get --enforce-lockfile`,
+     `analyze --fatal-warnings`, SDK pinned through `fvm`. All three GUARDED —
+     no lockfile, no `.fvmrc`, no toolchain and no target each stay green;
+     absence is never a failure (CLAUDE.md: distributed software, and a gate
+     that reds on a missing optional file is a gate users switch off).
+     Verified against a real Flutter target, 7/7 cases: clean→green, analyzer
+     warning→red, dep missing from the lock→red, failing test→red, and the
+     three absence cases→green.
+   - DONE — `.fvmrc` in the project scaffold, pinned to the **detected**
+     Flutter version; no Flutter installed writes NO file (a template content
+     function may now return null to decline). "stable" was rejected as a pin:
+     it moves, which is the opposite of what the pin is for.
+   - **A v5, not an edit to v4, and that is the load-bearing part.**
+     `writeFrameFiles` keeps any file whose stamp already reads
+     `FRAME_VERSION` (`!upgrade || state === 'current'`), so editing v4's body
+     in place would have reached new repos only and left every existing one —
+     RESTO included, which had just healed to v4 — silently on the old gate.
+   - **Correction:** v4's version note already *claimed* these checks. It
+     shipped without them; the note was written from this plan rather than
+     from the code. v4's comment now says only what v4 did.
+   - OPEN — Q14 follow-up records: ledger renderer, `Arxa-Session:` /
+     `Arxa-Container:` / `Arxa-Actor:` / `Co-authored-by:` trailers, and
+     product-posted stage comments. Today only the manual `card.pr.comment`
+     exists and the tier-1 ledger came from the driver script.
+
+3b. **Bugs found and fixed while getting the suite green** (all in `7ca2f72`)
+   - `renameOrg` repaired only the TOP-LEVEL entries under `.arxa/worktrees`.
+     Under path identity that entry is an intermediate folder (the org
+     segment), never a checkout, so every worktree kept a gitlink pointing at
+     the pre-rename path and the next `git add` died with `fatal: not a git
+     repository`. Now walks to the real checkouts (`listWorktreeDirs`, the
+     same recursive walker reconcile.js already used — exported rather than
+     copied) and repairs each from the repo that OWNS it, which for a project
+     session is the project repo, not the org.
+   - `.arxa/` was excluded from git only at first `openSession`. An org that
+     never opened a session committed `.arxa/locks/<slug>.lock` — a pid, and
+     rewritten on every open — into the user's history, leaving the tree
+     permanently dirty. Exclusion moved to `git init`, before anything can be
+     added. (RESTO escaped this only because its whitelist `.gitignore`
+     happened to cover it.)
 4. **Smoke tiers** (Q12): new driver `/tmp/arxa-s2/resto-tiers.mjs` using only
    product actions; report per tier with PR URLs, ledger screenshots, and the
    on-disk/GitHub cleanup evidence.
