@@ -455,6 +455,11 @@ still open, restated against the corrected capability map.
    (`arxa-git-card/lib/index.js:475`). So the path ran on a real repo. The smoke
    driver never read `out.pushed` back, so the push happened but its result is
    unverified. One assertion on the next run closes this properly.
+   **Narrowed 2026-09-03:** `scripts/cicd-smoke.mjs:157-159` now asserts the
+   EXPLICIT `card.push` return live and confirms the branch on the remote, so
+   pushing itself is proven. What is still unasserted is only the *advisory*
+   push folded into `card.commit` at the stage boundary — read `out.pushed`
+   there and this closes.
 6. **CLOSED (2026-09-03) — GitHub has been written to.** The card smoke pushed
    session branches, opened PRs #5 and #6 on `kitchen-project` and merged both;
    `origin/main` carries `ab496bd`, `7e1d36f`, `8090d13`. The auth-retry and

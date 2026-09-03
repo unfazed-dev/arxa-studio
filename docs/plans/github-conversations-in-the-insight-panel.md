@@ -184,12 +184,14 @@ export must never break the whole card"* (`arxa-git-card/lib/index.js:757`).
 6. Selftests: extend `arxa-git-card/selftest.actions.mjs` section E (rewrite the
    `insight.ci` assertions), add ranking and marker-strip assertions.
 
-## Carried from the previous grill (not built yet)
+## Carried from the previous grill
 
-- **Card ledger strip** — condensed strip on the git card (last stage, result,
-  next owner) with a link out; the full ledger table stays on the GitHub PR.
-- **`scripts/cicd-smoke.mjs`** — hand-run driver for the smoke tiers, shaped like
-  `scripts/jobs-push-proof.mjs`: live engine + GitHub required, never in CI.
+- **Card ledger strip** — STILL NOT BUILT. Condensed strip on the git card (last
+  stage, result, next owner) with a link out; the full ledger table stays on the
+  GitHub PR.
+- **`scripts/cicd-smoke.mjs`** — BUILT 2026-09-03 (`bbdb561`, extended `979a50d`
+  and `a39eebd`). Hand-run driver, live engine + GitHub required, never in CI;
+  creates and deletes its own throwaway private repo. 26 checks.
 
 ## Stale lines to fix in `docs/plans/session-path-identity-and-cicd-smoke.md`
 
@@ -224,7 +226,7 @@ passed 23 assertions and a fence gate while being wrong.
   ranking band, the marker, the cache and both write verbs. Full CI ALL GREEN
   (37 suites).
 
-**NOT yet proven live, and why:**
+**NOT yet proven live, and why (as written 2026-09-03 — now CLOSED, see below):**
 - **Review threads, reply and resolve against a real thread.** No PR on this
   account has a review thread, and creating one means writing to the operator's
   real GitHub. Schema-verified and unit-tested; not exercised end to end.
@@ -237,6 +239,21 @@ passed 23 assertions and a fence gate while being wrong.
 
 All three close with one authorised live smoke: create a session in a linked org,
 commit, push (D6 fires), review it, reply and resolve.
+
+### CLOSED 2026-09-03 — the authorised live smoke ran
+
+`scripts/cicd-smoke.mjs`, 26 checks ALL GREEN against real github.com in a
+throwaway private repo created and deleted by the run. Each result was confirmed
+on GitHub afterwards rather than trusting arxa's own response:
+
+- **D6 auto-open** — the first push opened a real PR with no second click.
+- **Live conversation READ** — `insight.review` against a real PR.
+- **`insight.reply`** — the reply is really on the PR.
+- **`insight.resolve`** — the thread is really resolved (verified by GraphQL).
+- **Populated panel** — the same run supplied the linked org + session + PR the
+  earlier attempt could not assemble.
+
+Full record: `docs/plans/session-id-collision-and-cicd-stress.md` §6.
 
 ## Repair made to boot the dev engine (not caused by this work)
 
