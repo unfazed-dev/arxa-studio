@@ -144,7 +144,7 @@ if (!orgRow || !orgRow.path) fail('S5: org row without path')
 }
 await new Promise((r) => setTimeout(r, 6000)) // S2 watcher: out-of-band edit -> wip commit
 const st1 = await post('card.status', { sessionId: sid })
-if (!st1.ok || !st1.result || !String(st1.result.seat.branch).startsWith('arxa/session/')) fail('S5: card.status seat wrong: ' + JSON.stringify(st1).slice(0, 300))
+if (!st1.ok || !st1.result || !String(st1.result.seat.branch).startsWith('arxa/')) fail('S5: card.status seat wrong: ' + JSON.stringify(st1).slice(0, 300))
 if (!(st1.result.wipRun >= 1)) fail('S5: watcher did not land a wip commit before status (wipRun=' + st1.result.wipRun + ')')
 const badC = await post('card.commit', { sessionId: sid, subject: 'nope not conventional' })
 if (badC.ok !== false || !String(badC.error || '').includes('subject-not-conventional')) fail('S5: non-conventional subject was not refused: ' + JSON.stringify(badC).slice(0, 200))

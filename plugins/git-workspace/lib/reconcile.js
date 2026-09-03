@@ -106,11 +106,32 @@ function listGitWorktrees(repoPath, env) {
   return parseWorktreePorcelain(out || '')
 }
 
+/**
+ * Session directories under `.arxa/worktrees`, as paths RELATIVE to that root.
+ *
+ * The identity is a path now (`RESTO/notes/note-wt-260903-001`), so a flat
+ * readdir would return the container `RESTO` and report it as one orphan
+ * standing in for every session below it. Recurse instead, and stop at a
+ * directory that either carries a `.git` entry (git worktrees carry a `.git`
+ * FILE pointing at the common dir — that is a real worktree at whatever depth
+ * the identity put it) or has no child directories at all (a stray leaf,
+ * reported at its own depth rather than blamed on the container above it).
+ * Depth-independent, so a pre-path flat layout still reads correctly.
+ */
 function listDirEntries(worktreesDir) {
   if (!fs.existsSync(worktreesDir)) return []
-  return fs.readdirSync(worktreesDir, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
-    .map((e) => e.name)
+  const out = []
+  const walk = (rel) => {
+    const abs = rel === '' ? worktreesDir : path.join(worktreesDir, rel)
+    let entries
+    try { entries = fs.readdirSync(abs, { withFileTypes: true }) } catch { return }
+    if (rel !== '' && entries.some((e) => e.name === '.git')) { out.push(rel); return }
+    const dirs = entries.filter((e) => e.isDirectory() && e.name !== '.git')
+    if (rel !== '' && dirs.length === 0) { out.push(rel); return }
+    for (const d of dirs) walk(rel === '' ? d.name : rel + '/' + d.name)
+  }
+  walk('')
+  return out
 }
 
 function branchName(ref) {

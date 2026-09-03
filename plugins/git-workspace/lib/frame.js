@@ -23,7 +23,11 @@ import path from 'node:path'
  * session branch pushed at its stage boundary is actually CHECKED on GitHub.
  * Before this a session-branch push fired no workflow at all — the trigger was
  * main-only — so "push the branch" would have been a backup, not CI. */
-export const FRAME_VERSION = 3
+/* v4 (2026-09-03, path identity): session branches are `arxa/<org>/<workspace>/
+ * <leaf>` now, so the push trigger widens from `arxa/session/**` to `arxa/**`.
+ * Project targets also gain the t3ci reproducibility checks — pinned SDK,
+ * `--enforce-lockfile`, `analyze --fatal-warnings` — see projectCheckSh. */
+export const FRAME_VERSION = 4
 
 const STAMP_RE = /^# arxa-frame: v(\d+) ([0-9a-f]{16})$/m
 const STAMP_LINE_RE = /^# arxa-frame: v\d+ [0-9a-f]{16}\n/m
@@ -235,7 +239,7 @@ export function ciYml() {
     // same gate re-run on the runner against what actually landed. The local
     // gate stays authoritative for the merge, so an offline or local-only org
     // is unaffected (a local-only org gets no ci.yml at all).
-    "    branches: [main, 'arxa/session/**']",
+    "    branches: [main, 'arxa/**']",
     '  pull_request:',
     'concurrency:',
     '  group: ci-@@EXPR@@',
@@ -280,7 +284,6 @@ export function protectionPayload() {
   }
 }
 
-/** Repo settings payload (Q8): squash-only, locked structurally. */
 /**
  * Repo merge settings (D107, flipped 2026-09-02 after the gate was proven).
  *

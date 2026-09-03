@@ -257,7 +257,7 @@ export function initOrgRepo(orgPath, env = process.env, { deferSnapshot = false,
 
 /**
  * Push the repo's PRIMARY branch to `url` (D73 publish half). Session
- * branches (`arxa/session/*`) are local working state — they never publish;
+ * branches (`arxa/**`) are local working state — they never publish;
  * when HEAD sits on one (a session is open), the primary branch resolves
  * main → master instead. The URL carries its own credentials when GitHub
  * (token embedded by the caller, NEVER persisted — it rides this one
@@ -271,7 +271,7 @@ export function pushRepo(dir, url, env = process.env) {
     throw new TypeError('pushRepo: url must be a non-empty string')
   }
   let ref = runGit(['symbolic-ref', '--short', 'HEAD'], { cwd: dir, env, allowFail: true })
-  if (!ref || ref.startsWith('arxa/session/')) {
+  if (!ref || ref.startsWith('arxa/')) {
     ref = runGit(['show-ref', '--verify', '--hash', 'refs/heads/main'], { cwd: dir, env, allowFail: true }) !== null
       ? 'main'
       : 'master'

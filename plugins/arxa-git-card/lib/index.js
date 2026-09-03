@@ -99,7 +99,7 @@ export function apply(ctx) {
            * Publish a session's branch to its OWN repo's remote.
            *
            * D98: push the repo that actually HOLDS this branch. A project
-           * session's `arxa/session/<id>` exists only in the project repo and
+           * session's `arxa/<identity>` exists only in the project repo and
            * its origin is the project's remote — pushing it from the org would
            * push a ref that is not there, to the wrong remote.
            *
@@ -298,7 +298,7 @@ export function apply(ctx) {
                   // The old shape ran the local boundary here — ff-merge to main
                   // AND push main — so every PR opened against a main that
                   // already held the commit: "No commits between main and
-                  // arxa/session/<id>" (RESTO #1-#3, 2026-09-03 smoke).
+                  // arxa/<identity>" (RESTO #1-#3, 2026-09-03 smoke).
                   const { readySession } = await importPrflow()
                   const attribution = '— written by ' + String(arg?.model ?? 'the session model') + ' in arxa studio'
                   const r = readySession(repoPath, sid, { subject, attribution, origin: pushUrl })
@@ -318,7 +318,7 @@ export function apply(ctx) {
                 const out = gw.sessionStageBoundary(cur.path, sid, { message: subject, pushUrl })
                 // Q6/Q7 (2026-09-03): a GREEN boundary publishes the session
                 // branch, which is what makes frame-check run against it on
-                // GitHub (ci.yml v3 watches arxa/session/**). A red boundary
+                // GitHub (ci.yml v4 watches arxa/**). A red boundary
                 // parked the work — there is nothing to check, so nothing is
                 // pushed. The push is ADVISORY: it never fails the commit, and
                 // it never runs for an unlinked or local-only repo, so an
@@ -410,7 +410,7 @@ export function apply(ctx) {
               if (!manifest.repoOwner || !manifest.repoName) throw new Error('org-not-published')
               const prs = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
               // Q8 (2026-09-03): checks are read for the BRANCH whether or not
-              // a PR exists. Since ci.yml v3 watches arxa/session/**, a stage
+              // a PR exists. Since ci.yml v4 watches arxa/**, a stage
               // boundary push runs frame-check with no PR attached — the card
               // used to read checks only through the PR head, so that run was
               // invisible and the card looked like nothing was happening.
@@ -457,9 +457,12 @@ export function apply(ctx) {
               if (stage === '') throw new Error('stage-required')
               let number = Number.isInteger(arg?.number) ? arg.number : null
               if (number === null) {
-                const prs = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
+                // Stage comments outlive the PR's open state: the 'merge' and
+                // 'cleanup' stages land after the PR is merged/closed, so look
+                // across all states and prefer open, then the newest.
+                const prs = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch, 'all').catch(() => [])
                 if (!Array.isArray(prs) || prs.length === 0) return { ok: false, reason: 'no-pr' }
-                number = prs[0].number
+                number = (prs.find((p) => p.state === 'open') ?? prs[0]).number
               }
               const detail = arg?.detail === undefined ? '' : (typeof arg.detail === 'string' ? arg.detail : '```json\n' + JSON.stringify(arg.detail, null, 2) + '\n```')
               const body = ['**arxa · ' + stage + '**', detail].filter((x) => x !== '').join('\n\n')

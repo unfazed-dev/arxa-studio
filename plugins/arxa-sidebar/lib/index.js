@@ -230,7 +230,14 @@ export function apply(ctx, opts = {}) {
           //    session while it is live"). Going through ctx.agents.create()
           //    uses the engine's real factory so the session is born WITH its
           //    agent loop — prompting works from the first message.
-          const wanted = typeof arxaId === 'string' && arxaId.trim() !== '' ? `arxa-${arxaId}` : undefined
+          // dsh stores a conversation as a DIRECTORY named by its id, so the
+          // path identity's `/` cannot survive the trip (Q3, 2026-09-03):
+          // `RESTO/notes/note-wt-260903-001` → `arxa-RESTO-notes-note-wt-260903-001`.
+          // Canonical helper: git-workspace `dshSessionKey` — inlined here
+          // because this package stays zero-dep by convention.
+          const wanted = typeof arxaId === 'string' && arxaId.trim() !== ''
+            ? 'arxa-' + arxaId.split('/').filter(Boolean).join('-')
+            : undefined
           const agents = ctx.agents
           // Q1 (2026-09-03): pin the header title to the worktree name at
           // birth (see pinTitleTo). `name` is the registry name, which Q3
@@ -1196,7 +1203,9 @@ export function apply(ctx, opts = {}) {
             },
             'session.archive': async () => {
               const cur = await ensureOpen(arg?.orgId)
-              return cur.archiveSession(arg?.sessionId)
+              // dropRemote: close-without-merge cleanup — the caller asserts the
+              // PR is closed, so the unmerged remote branch may go too.
+              return cur.archiveSession(arg?.sessionId, { dropRemote: arg?.dropRemote === true })
             },
             'trash.restore': () => handle().restoreTrash(arg?.entryId ?? null),
             // 'ci.run' reserved for Phase D3 — deliberately absent.
