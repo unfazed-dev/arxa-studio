@@ -255,8 +255,13 @@ xlaude / Claude Code worktrees pick name = branch = dir once at creation.
      via `prUpdate`, written ABOVE the `<!-- arxa:ledger -->` fence.
      Re-checked after both merged: the cross-link survived every ledger
      rewrite, and the ledger is still live in both bodies.
-   - **Retro-CI replay** (t3ci `05-retro-ci.sh` technique): 4/4 feature
-     commits on kitchen main still pass today's gate, each in its own
+   - **Retro-CI replay** (t3ci `05-retro-ci.sh` technique): 4/4 FEATURE
+     commits on kitchen main pass — that is the four `feat(`/`fix(` merges,
+     not all of main. Each commit is checked out at its own sha and runs the
+     `check.sh` THAT SHA CARRIES, which is the right question ("does history
+     still hold") but is not a fixed-script comparison. `3acfcb1`, the
+     untrack commit, is outside the subject filter and was not replayed.
+     Each ran in its own
      `git worktree --detach`, removed on the way out via an exit trap.
      Note for whoever writes the next one: under D107 a feature lands on
      main AS A MERGE COMMIT carrying the feature's subject, so
@@ -286,6 +291,19 @@ xlaude / Claude Code worktrees pick name = branch = dir once at creation.
      without it the fix reached nobody), wired where `ensureFrameUnignored`
      already runs. Existing tracked output needed `git rm -r --cached` too —
      an ignore alone does not untrack.
+     **Scope: PROJECT repos only, deliberately.** The org repo tracks zero
+     build files today (`git ls-files | grep '/build/'` → 0), but that is
+     because no target has ever lived there, NOT because its ignore covers
+     it: the org uses a `/*` whitelist, and `!/notes/` re-includes everything
+     beneath it — reproduced in a throwaway repo, where `notes/app/build/…`
+     was staged. It stays latent because the ORG gate never probes for
+     targets at all (`orgCheckSh` checks org.json, top-level dock names and
+     stray locks — there is no walk to `pubspec.yaml`/`package.json`, unlike
+     `projectCheckSh`). Targets live in projects by design, so the fix is
+     project-scoped to match. If org-hosted targets ever become supported,
+     the org ignore needs `**/build/` — WITHOUT the `!/build/` negation,
+     which exists only to protect template v2's managed project container
+     and would wrongly re-include a root `build/` the whitelist excludes.
    - **A merged session left its remote-tracking mirror behind forever.**
      `push --delete` DOES prune `refs/remotes/origin/<branch>` — but only
      when given a remote NAME. `dropRemoteSessionBranch` deletes via a
@@ -316,6 +334,15 @@ xlaude / Claude Code worktrees pick name = branch = dir once at creation.
      product picks up correctly AFTER the rebase; it just cannot get there.
      Whoever picks this up: the driver at `/tmp/arxa-s2/tier3-remote-c.mjs`
      brackets the manual half with `--- MANUAL ---` markers.
+   - **Nothing untracks build output that is already committed.**
+     `ensureGeneratedIgnored` stops the bleeding; it cannot undo it, because
+     git keeps honouring the index no matter what `.gitignore` says. The
+     46 MB in kitchen-project came out because I ran
+     `git rm -r --cached 06-build/application/backoffice/build` by hand.
+     Every existing arxa project carrying committed build output stays
+     exactly as heavy after the patch lands. A one-shot repair — untrack
+     what the new rules now ignore, in the same place the patch runs — is
+     the missing half, and is NOT written.
 
 3b. **Bugs found and fixed while getting the suite green** (all in `7ca2f72`)
    - `renameOrg` repaired only the TOP-LEVEL entries under `.arxa/worktrees`.
