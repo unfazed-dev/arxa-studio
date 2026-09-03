@@ -102,7 +102,7 @@ import {
   ffMergeMain,
 } from '../../git-workspace/lib/index.js'
 import { runGit } from '../../git-workspace/lib/index.js'
-import { arxaHome } from '../../workspace/lib/root.js'
+import { arxaHome, readOrgNames, rememberOrgName } from '../../workspace/lib/root.js'
 import { getTemplate, TEMPLATE_VERSION } from '../../workspace/lib/template.js'
 import { refreshAccountMirror, ensureAccountExcluded } from '../../account-mirror/lib/index.js'
 import { claimMaterializer, materialize, readEdits } from '../../cairn-rail/lib/index.js'
@@ -757,14 +757,34 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
    * are case-sensitive while macOS folders are not, which makes `resto` vs
    * `RESTO` the same folder but two different branches — refuse both shapes.
    */
-  function assertOrgFolderNameFree(candidatePath) {
+  function assertOrgFolderNameFree(candidatePath, selfPath) {
     const resolved = path.resolve(candidatePath)
     const wanted = path.basename(resolved).toLowerCase()
-    for (const o of listOrgs()) {
-      if (path.resolve(o.path) === resolved) continue // the same org, re-opened
-      if (path.basename(o.path).toLowerCase() !== wanted) continue
+    // `selfPath` is the org's own CURRENT location, and it exists for the
+    // case-only rename (D80): renaming /a/resto → /a/RESTO gives a candidate
+    // whose resolved string differs from the org's own recents entry, so the
+    // "same org, re-opened" skip below would not fire and the org would
+    // collide with itself. Exclude by where it is now, not by where it is going.
+    const self = selfPath === undefined ? null : path.resolve(selfPath)
+    const claims = [
+      ...listOrgs().map((o) => o.path),
+      // The recents list is capped at RECENTS_CAP, so it is NOT the full set
+      // of orgs that have minted session ids. The ledger is (see readOrgNames).
+      ...Object.values(readOrgNames(env)),
+    ]
+    for (const claimPath of claims) {
+      const claimed = path.resolve(claimPath)
+      if (claimed === resolved) continue // the same org, re-opened
+      if (self !== null && claimed === self) continue // the org renaming itself
+      if (path.basename(claimed).toLowerCase() !== wanted) continue
+      // A ledger entry whose folder is GONE is a name the user is free to
+      // reuse — refusing forever would strand the name after a delete. Any
+      // residue left in the dsh store is healed at boot by the workspace
+      // store preflight (plugins/workspace/lib/store-heal.js), so the
+      // remaining risk is a repaired store, not a dead engine.
+      if (!fs.existsSync(claimed)) continue
       throw new Error(
-        `org-name-taken: "${path.basename(o.path)}" is already an organisation at ${o.path}. ` +
+        `org-name-taken: "${path.basename(claimed)}" is already an organisation at ${claimed}. ` +
         'A session identity begins with the org folder name, so two organisations cannot ' +
         'share one (case-insensitively) — rename this folder before adding it.',
       )
@@ -814,6 +834,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     // Refuse BEFORE the folder enters the registry (Q6). The scaffolded folder
     // is left on disk untouched — renaming it and adding it is the recovery.
     assertOrgFolderNameFree(created.path)
+    rememberOrgName(created.path, env) // claim the folder name for good (H2)
     try {
       touchRecent(created.path, env)
     } catch {
@@ -828,6 +849,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     // Q6: the universal chokepoint — an org that cannot open cannot mint a
     // session, so a colliding folder name can never reach an identity.
     assertOrgFolderNameFree(resolved)
+    rememberOrgName(resolved, env) // claim the folder name for good (H2)
     const slug = orgSlugOf(resolved)
 
     // Reverse-unwind stack: every acquired resource pushes its release;
@@ -1508,6 +1530,12 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     if (!caseOnly && fs.existsSync(newPath)) {
       throw new Error('renameOrg: destination already exists: ' + newPath)
     }
+    // H1 (2026-09-03): the existsSync above only catches a collision in the
+    // SAME directory. Renaming /a/FOO → /a/RESTO while /b/RESTO exists passed
+    // it happily, and both orgs then minted `RESTO/...` session ids — one dsh
+    // conversation key, two orgs, engine dead at next boot. createOrg and
+    // addOrg have always enforced the folder-name invariant; rename never did.
+    assertOrgFolderNameFree(newPath, oldPath)
     // D80: pre-flight the GitHub rename BEFORE the move — a taken name
     // aborts with the org untouched; unverifiable degrades to the net.
     const ghManifest = readManifest(orgManifestPath(oldPath))
@@ -1563,6 +1591,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       } catch { /* recents are advisory */ }
       try {
         touchRecent(newPath, env) // … and record the new one
+        rememberOrgName(newPath, env) // …and claim the new folder name (H1)
       } catch { /* recents are advisory */ }
       indexRenameOrg(newPath, newPath, displayName)
       if (current && current.path === oldPath) {

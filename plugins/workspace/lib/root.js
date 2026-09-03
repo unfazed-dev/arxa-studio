@@ -94,7 +94,53 @@ export function validateWorkspaceRoot(candidate, env = process.env) {
 function writeRecents(orgs, env) {
   const file = rootFilePath(env)
   fs.mkdirSync(path.dirname(file), { recursive: true })
-  fs.writeFileSync(file, JSON.stringify({ orgs }, null, 2) + '\n')
+  // The names ledger must SURVIVE a recents write: recents is capped and
+  // churns, the ledger is neither (see readOrgNames). Omitted entirely when
+  // empty so a fresh install keeps the original { orgs } shape on disk.
+  const names = readOrgNames(env)
+  const payload = Object.keys(names).length > 0 ? { orgs, names } : { orgs }
+  fs.writeFileSync(file, JSON.stringify(payload, null, 2) + '\n')
+}
+
+/**
+ * The org-folder-name ledger: every org folder name ever registered, mapped
+ * to the path that claimed it. Lowercased keys — git refs are case-sensitive
+ * but macOS folders are not, so `resto` and `RESTO` are one name here.
+ *
+ * WHY THIS IS NOT JUST THE RECENTS LIST. A session identity begins with the
+ * org folder name, and that string ends up in a branch, a worktree directory
+ * and a dsh conversation key that lives in ONE store for the whole app. So
+ * org names must be unique across every org that has ever minted a session.
+ * The recents list cannot answer that question: `touchRecent` caps it at
+ * RECENTS_CAP (10), so the eleventh org silently falls out of view while its
+ * sessions persist in the dsh store forever. Measured on this machine
+ * 2026-09-03: 20 workspace records in the dsh store, 5 entries in recents —
+ * the guard could see a quarter of the surface it was protecting.
+ *
+ * The ledger is append-only and never capped. Names are a few bytes each.
+ */
+export function readOrgNames(env = process.env) {
+  const source = rootFilePath(env)
+  if (!fs.existsSync(source)) return {}
+  try {
+    const data = JSON.parse(fs.readFileSync(source, 'utf8'))
+    return data && typeof data.names === 'object' && data.names !== null ? data.names : {}
+  } catch {
+    return {} // a torn ledger degrades to "nothing recorded", never a throw
+  }
+}
+
+/** Record an org folder name as claimed by this path (idempotent). */
+export function rememberOrgName(orgPath, env = process.env) {
+  const resolved = path.resolve(orgPath)
+  const key = path.basename(resolved).toLowerCase()
+  const names = readOrgNames(env)
+  if (names[key] === resolved) return resolved
+  names[key] = resolved
+  const file = rootFilePath(env)
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, JSON.stringify({ orgs: readRecents(env), names }, null, 2) + '\n')
+  return resolved
 }
 
 /**
