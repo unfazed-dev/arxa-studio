@@ -112,9 +112,7 @@ export function apply(ctx) {
            * `org-not-published` the PR handlers use, so the card's error
            * vocabulary stays one word wide. */
           const orgRepoFor = async (cur) => {
-            let manifest = {}
-            try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
-            if (!manifest.repoOwner || !manifest.repoName) throw new Error('org-not-published')
+              const manifest = await repoFor(s)
             return { owner: manifest.repoOwner, name: manifest.repoName }
           }
 
@@ -131,9 +129,14 @@ export function apply(ctx) {
             if (runId === undefined || runId === null || runId === '') throw new Error('runId-required')
             const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
             if (sid) {
+              // A run belongs to the repo the SESSION lives in. Re-running or
+              // cancelling against the org for a project seat would act on a
+              // different repository's runs entirely.
               const gw = await importGitWorkspace()
               const s = gw.parkedSessions(handle().path).find((x) => x.id === sid)
-              if (s && s.origin === 'project') throw new Error('project-session-pr-pending: run control for project repos lands in Phase 2')
+              if (!s) throw new Error('session-not-found: ' + sid)
+              const m = await repoFor(s)
+              return { g, owner: m.repoOwner, name: m.repoName, runId }
             }
             const { owner, name } = await orgRepoFor(handle())
             return { g, owner, name, runId }
@@ -181,6 +184,31 @@ export function apply(ctx) {
            * complete history locally (CLAUDE.md: no feature may REQUIRE the
            * remote to work).
            */
+          /**
+           * The GitHub repo a session's pull request belongs to.
+           *
+           * A PROJECT session's branch exists only in the project repo, and
+           * that repo is where its ci.yml and its runner are wired — so its PR,
+           * checks, comments and merge all belong there, not on the org. Every
+           * caller used to read the ORG manifest unconditionally, which is why
+           * project sessions were fenced off behind `project-session-pr-pending`
+           * instead of simply working: the plumbing below is repo-agnostic, only
+           * the lookup was wrong.
+           */
+          const repoFor = async (s) => {
+            const fsm = await import('node:fs')
+            const isProject = s?.origin === 'project' && typeof s?.repoPath === 'string'
+            const file = isProject ? s.repoPath + '/project.json' : handle().path + '/org.json'
+            let m = {}
+            try { m = JSON.parse(fsm.readFileSync(file, 'utf8')) } catch { /* unreadable — fails just below */ }
+            if (!m.repoOwner || !m.repoName) {
+              throw new Error(isProject
+                ? 'project-not-published: this project has no GitHub repo yet'
+                : 'org-not-published')
+            }
+            return m
+          }
+
           const noteStage = async (repoPath, sid, entry, { next } = {}) => {
             const gw = await importGitWorkspace()
             let ledger
@@ -196,9 +224,10 @@ export function apply(ctx) {
                 const cur = handle()
                 const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
                 if (!s) return false
-                let manifest = {}
-                try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch { return false }
-                if (!manifest.repoOwner || !manifest.repoName) return false
+                // Follows the SESSION's repo: a project session's PR lives in
+                // the project, so its ledger must be published there too.
+                const manifest = await repoFor(s).catch(() => null)
+                if (!manifest) return false
                 const prs = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch, 'all').catch(() => [])
                 if (!Array.isArray(prs) || prs.length === 0) return false
                 const pr = prs.find((p) => p.state === 'open') ?? prs[0]
@@ -436,10 +465,7 @@ export function apply(ctx) {
               // (the org registry had no such id, so it threw). Keep it loud
               // rather than silently filing an org-scoped PR for project work —
               // choosing the right manifest is Phase 2 (D102/D107).
-              if (s.origin === 'project') throw new Error('project-session-pr-pending: PR flow for project repos lands in Phase 2')
-              let manifest = {}
-              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
-              if (!manifest.repoOwner || !manifest.repoName) throw new Error('org-not-published')
+              const manifest = await repoFor(s)
               const title = String(arg?.title ?? '').trim()
               if (!gw.SUBJECT_RE.test(title)) throw new Error('title-not-conventional: the PR title becomes the squash-merge subject (Q7/Q8)')
               const attribution = '— written by ' + String(arg?.model ?? 'the session model') + ' in arxa studio'
@@ -469,10 +495,7 @@ export function apply(ctx) {
               if (!s) throw new Error('session-not-found: ' + sid)
               // D98: same as card.pr.create — the org manifest is the wrong
               // source for a project session's PR. Loud, not silently wrong.
-              if (s.origin === 'project') throw new Error('project-session-pr-pending: PR flow for project repos lands in Phase 2')
-              let manifest = {}
-              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
-              if (!manifest.repoOwner || !manifest.repoName) throw new Error('org-not-published')
+              const manifest = await repoFor(s)
               const prs = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
               // Q8 (2026-09-03): checks are read for the BRANCH whether or not
               // a PR exists. Since ci.yml v4 watches arxa/**, a stage
@@ -528,9 +551,7 @@ export function apply(ctx) {
               if (!sid) throw new Error('card.pr.comment serves session seats')
               const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
               if (!s) throw new Error('session-not-found: ' + sid)
-              let manifest = {}
-              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch { /* unreadable — fails below as org-not-published */ }
-              if (!manifest.repoOwner || !manifest.repoName) throw new Error('org-not-published')
+              const manifest = await repoFor(s)
               const stage = String(arg?.stage ?? '').trim()
               if (stage === '') throw new Error('stage-required')
               let number = Number.isInteger(arg?.number) ? arg.number : null
@@ -559,10 +580,7 @@ export function apply(ctx) {
               if (!sid) throw new Error('card.pr.merge serves session seats')
               const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
               if (!s) throw new Error('session-not-found: ' + sid)
-              if (s.origin === 'project') throw new Error('project-session-pr-pending: PR flow for project repos lands in Phase 2')
-              let manifest = {}
-              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
-              if (!manifest.repoOwner || !manifest.repoName) throw new Error('org-not-published')
+              const manifest = await repoFor(s)
               const prs = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
               if (!Array.isArray(prs) || prs.length === 0) return { ok: false, reason: 'no-pr' }
               const pr = prs[0]
@@ -649,9 +667,8 @@ export function apply(ctx) {
               const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
               if (!s) throw new Error('session-not-found: ' + sid)
               if (!g || typeof g.workflowRuns !== 'function') return { runs: [], reason: 'unavailable' }
-              let manifest = {}
-              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
-              if (!manifest.repoOwner || !manifest.repoName) return { runs: [], reason: 'unavailable' }
+              const manifest = await repoFor(s).catch(() => null)
+              if (!manifest) return { runs: [], reason: 'unavailable' }
               return g.workflowRuns({ owner: manifest.repoOwner, name: manifest.repoName, branch: s.branch, perPage: 20 })
             },
             'insight.sessions': async () => {

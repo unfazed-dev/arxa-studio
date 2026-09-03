@@ -310,13 +310,21 @@ check('Q6: opening/resuming a session reveals its row — ancestors expanded (ne
     card.includes("const checks = await g.prChecks(manifest.repoOwner, manifest.repoName, s.branch)")
       && card.includes("'card.ci.rerun'") && card.includes("'card.ci.cancel'")
       && card.includes('g.rerunRun({ owner, name, runId') && card.includes('g.cancelRun({ owner, name, runId })'))
-  // A project session's runs live in the PROJECT repo; reading the org manifest
-  // would re-run or cancel in the wrong repository, which is why every
-  // neighbouring PR handler refuses a project seat.
-  check('S3/Q8: run control refuses a project seat instead of acting on the org repo',
+  // A project session's runs live in the PROJECT repo. This used to be handled
+  // by REFUSING a project seat; it is now handled by targeting the right
+  // repository, which is what the refusal was standing in for. The invariant
+  // is unchanged and still the thing under test: a project seat must never act
+  // on the org repo.
+  check('S3/Q8: run control targets the SESSION`s repo, so a project seat never acts on the org',
     card.includes('const ciTarget = async () =>')
-      && card.includes("if (s && s.origin === 'project') throw new Error('project-session-pr-pending: run control for project repos lands in Phase 2')")
-      && !card.includes('const { owner, name } = await orgRepoFor(handle())\n              const runId = arg?.runId'))
+      && card.includes('const m = await repoFor(s)')
+      && card.includes('return { g, owner: m.repoOwner, name: m.repoName, runId }')
+      && !card.includes('project-session-pr-pending: run control'))
+  check('S3/Q8: the PR handlers resolve the repo from the session, not from org.json',
+    card.includes('const repoFor = async (s) =>')
+      && card.includes("s?.origin === 'project' && typeof s?.repoPath === 'string'")
+      && card.includes("s.repoPath + '/project.json'")
+      && !card.includes('project-session-pr-pending: PR flow'))
   // The clear commit is made AFTER the ahead/behind read, so nothing upstream
   // pushes it — leaving it would swap a stale error for a repo permanently 1
   // ahead, the exact symptom being fixed.
