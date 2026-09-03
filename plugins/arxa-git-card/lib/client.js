@@ -65,6 +65,9 @@ window.__ModuleLoader__.load({
       'git.untracked': '{n} untracked',
       'git.ahead': '{n} ahead',
       'git.behind': '{n} behind',
+      'git.conflicts': 'conflicts',
+      'git.integrate': 'Integrate main',
+      'git.integrate.finish': 'Finish integrating',
       'git.wip': '{n} wip',
       'git.health.missing': 'worktree missing',
       'git.health.detached': 'worktree detached',
@@ -126,6 +129,9 @@ window.__ModuleLoader__.load({
       'git.untracked': '{n} nieśledzonych',
       'git.ahead': '{n} do przodu',
       'git.behind': '{n} w tyle',
+      'git.conflicts': 'konflikty',
+      'git.integrate': 'Scal main',
+      'git.integrate.finish': 'Dokończ scalanie',
       'git.wip': '{n} wip',
       'git.health.missing': 'brak drzewa roboczego',
       'git.health.detached': 'drzewo robocze odłączone',
@@ -188,6 +194,9 @@ window.__ModuleLoader__.load({
       'git.untracked': '{n} non suivis',
       'git.ahead': '{n} en avance',
       'git.behind': '{n} en retard',
+      'git.conflicts': 'conflits',
+      'git.integrate': 'Intégrer main',
+      'git.integrate.finish': "Terminer l'intégration",
       'git.wip': '{n} wip',
       'git.health.missing': 'arbre de travail manquant',
       'git.health.detached': 'arbre de travail détaché',
@@ -341,6 +350,9 @@ window.__ModuleLoader__.load({
         if (status.aheadBehind.ahead) detailParts.push(t('git.ahead', { n: status.aheadBehind.ahead }))
         if (status.aheadBehind.behind) detailParts.push(t('git.behind', { n: status.aheadBehind.behind }))
       }
+      // `conflicts === true` only. A null means the probe could not run, and
+      // "we did not check" must not render as "there is no conflict".
+      if (status.integrate && status.integrate.conflicts === true) detailParts.push(t('git.conflicts'))
       if (status.wipRun) detailParts.push(t('git.wip', { n: status.wipRun }))
       if (status.chip) detailParts.push(String(status.chip))
       // Frame health + runner + main gate ride the same readout (old status
@@ -508,6 +520,18 @@ window.__ModuleLoader__.load({
             sessionSeat ? action('insight-streak', t('git.insight.streak'), Icon('IconChecklistOutline14', 'IconInspectOutline12', 14), { onClick: () => openInsight('streak') }) : null,
             sessionSeat ? action('insight-ci', t('git.insight.ci'), Icon('IconQueueOutline14', 'IconInspectOutline12', 14), { onClick: () => openInsight('ci') }) : null,
             sessionSeat ? action('insight-sessions', t('git.insight.sessions'), Icon('IconBrowseOutline16', 'IconInspectOutline12', 14), { onClick: () => openInsight('sessions') }) : null,
+            // Integrate sits with the "{n} behind" it answers. Mid-merge it becomes
+            // Finish, so the card offers exactly one next move rather than a button
+            // that would start a merge already in progress.
+            sessionSeat && status.integrate && status.integrate.integrating
+              ? action('integrate-finish', t('git.integrate.finish'), Icon('IconCheckOutline16', 'IconCheckOutline16', 14), {
+                onClick: () => run('integrate', async () => { await post('card.integrate.finish', seatArg()); load() }),
+              })
+              : (sessionSeat && status.integrate && status.integrate.behind > 0
+                ? action('integrate', t('git.integrate'), Icon('IconRefreshOutline16', 'IconRefreshOutline16', 14), {
+                  onClick: () => run('integrate', async () => { await post('card.integrate', seatArg()); load() }),
+                })
+                : null),
           ])))
       // 2. Commit — a stage boundary squashes the WIP run above the session
       // base (gw.sessionStageBoundary), so a clean tree with WIP commits is

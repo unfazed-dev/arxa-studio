@@ -22,7 +22,7 @@ import { annotateSession, listSessions, sessionRepoFor } from './sessions.js'
 
 /** Stages, in the order a session passes through them. */
 export const STAGES = Object.freeze([
-  'opened', 'committed', 'pushed', 'checks', 'gate', 'review', 'merged', 'archived', 'cleaned',
+  'opened', 'integrated', 'committed', 'pushed', 'checks', 'gate', 'review', 'merged', 'archived', 'cleaned',
 ])
 
 const pad = (n) => String(n).padStart(2, '0')
@@ -65,30 +65,45 @@ export function stageTime(now = new Date()) {
  * comment noting the FORMAT suits `git interpret-trailers`), so the rename
  * breaks no reader.
  *
- * `Co-authored-by:` is the one line here GitHub itself understands — it puts
- * the agent on the commit's contributor list, which is the honest record when
- * a model wrote the diff.
+ * `Arxa-Author:` replaces `Arxa-Actor:` and `Arxa-Collaborator:` replaces
+ * `Co-authored-by:` (grilled 2026-09-03). Everything here happens inside arxa,
+ * so the namespace is uniform. The same paragraph above records that nothing
+ * in the tree parses these keys, so the rename breaks no reader.
+ *
+ * KNOWN COST, accepted deliberately: `Co-authored-by:` is the one line GitHub
+ * itself parses, so dropping it takes the model off the commit's contributor
+ * list. Raised before the decision; the decision stands. Anything that wants
+ * model attribution reads `Arxa-Collaborator:` instead.
+ *
+ * `actor` is still accepted as an alias for `author` so a call site mid-
+ * migration keeps working rather than silently dropping the identity.
  */
-export function sessionTrailers({ id, container, actor, coAuthor } = {}) {
+export function sessionTrailers({ id, container, author, actor, collaborator } = {}) {
   const out = [`Arxa-Session: ${id}`]
   if (container) out.push(`Arxa-Container: ${container}`)
-  if (actor) out.push(`Arxa-Actor: ${actor}`)
-  if (coAuthor) out.push(`Co-authored-by: ${coAuthor}`)
+  const who = author ?? actor
+  if (who) out.push(`Arxa-Author: ${who}`)
+  if (collaborator) out.push(`Arxa-Collaborator: ${collaborator}`)
   return out.join('\n')
 }
 
 /**
- * An agent identity as a `Co-authored-by:` value. GitHub needs `Name <email>`;
- * a bare model name is silently dropped from the contributor list, so a made-up
- * but STABLE noreply address is better than none — it groups every commit the
- * same agent co-authored instead of scattering them.
+ * An agent identity as an `Arxa-Collaborator:` value: `<model>@(<effort>)`.
+ *
+ * The effort half is NOT optional in the rendered string. A model named with
+ * no effort recorded renders `@(unspecified)` rather than a level nobody
+ * supplied — same rule the card applies to counts it did not measure
+ * (arxa-git-card/lib/index.js:305: "zero is a claim, and it would be a lie").
+ * `unspecified` is also greppable, so "which commits predate effort tracking"
+ * stays answerable.
  */
-export function agentCoAuthor(model) {
+export const EFFORT_UNSPECIFIED = 'unspecified'
+
+export function agentCollaborator(model, effort) {
   const name = String(model ?? '').trim()
   if (name === '') return null
-  if (/<[^>]+>/.test(name)) return name // already Name <email>
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-  return `${name} <${slug || 'agent'}@arxa.invalid>`
+  const level = String(effort ?? '').trim() || EFFORT_UNSPECIFIED
+  return `${name}@(${level})`
 }
 
 /**
@@ -118,7 +133,11 @@ export function recordStage(repoPath, id, entry, env = process.env) {
   const t = stageTime(entry?.now instanceof Date ? entry.now : new Date())
   const row = {
     stage,
-    actor: entry?.actor ? String(entry.actor) : null,
+    // `author` is a GITHUB USERNAME, never a display name (grilled
+    // 2026-09-03) — `unfazed-dev`, not `Evan F Pierre Louis`. `actor` is
+    // accepted as an alias so a caller mid-migration still records someone.
+    author: entry?.author ? String(entry.author) : (entry?.actor ? String(entry.actor) : null),
+    collaborator: entry?.collaborator ? String(entry.collaborator) : null,
     result: entry?.result ? String(entry.result) : 'ok',
     sha: entry?.sha ? String(entry.sha).slice(0, 7) : null,
     detail: entry?.detail ? String(entry.detail) : null,
@@ -151,6 +170,48 @@ export function readableTime(row) {
 }
 
 /**
+ * Who a row credits. Rows written before the rename carry `actor`, so both are
+ * read — otherwise every table published before 2026-09-03 would render its
+ * author column as em-dashes.
+ */
+export function rowAuthor(row) {
+  return row?.author ?? row?.actor ?? null
+}
+
+/**
+ * One stage as a PR comment. THE single builder — the automatic publish path
+ * and the manual `card.pr.comment` action both call this, so a hand-triggered
+ * comment cannot look different from an automatic one for the same stage
+ * (they diverged before 2026-09-03: the manual path emitted stage + detail
+ * only, dropping author, result and sha).
+ *
+ * Takes a RECORDED ROW, never the raw entry handed to `recordStage`. That is
+ * deliberate: `recordStage` defaults an absent result to 'ok', and the old
+ * builder read the raw entry, so the table said `ok` while the comment said
+ * nothing at all.
+ *
+ * The time line is the reason this exists at all. GitHub stamps a comment with
+ * its own posting time and renders it in the READER's zone — the exact lie the
+ * `stageTime` docblock above refuses to tell. So the recorded instant travels
+ * in the body: UTC, then the clock on the machine that did the work.
+ */
+export function stageComment(row) {
+  const who = [
+    rowAuthor(row) ? '_' + rowAuthor(row) + '_' : null,
+    row?.result ? String(row.result) : null,
+    row?.sha ? '`' + String(row.sha).slice(0, 7) + '`' : null,
+  ].filter(Boolean).join(' · ')
+  const when = readableTime(row)
+  return [
+    '**arxa · ' + String(row?.stage ?? '') + '**',
+    who,
+    row?.collaborator ? 'Collaborator: ' + row.collaborator : null,
+    when ? '_' + when + '_' : null,
+    row?.detail ? String(row.detail) : null,
+  ].filter((x) => x !== null && x !== '').join('\n\n')
+}
+
+/**
  * The ledger as a markdown table, plus a `Next:` line naming who picks it up.
  *
  * Rendered fresh from the registry at every stage rather than appended to in
@@ -161,16 +222,16 @@ export function renderLedger(ledger, { sessionId, container, next } = {}) {
   const out = ['### Stage ledger', '']
   if (sessionId) out.push(`**Session** \`${sessionId}\`` + (container ? ` · **Container** \`${container}\`` : ''), '')
   out.push(
-    '| stage | actor | result | sha | when (UTC) | when (readable) | detail |',
-    '|---|---|---|---|---|---|---|',
+    '| stage | author | collaborator | result | sha | when (UTC) | when (readable) | detail |',
+    '|---|---|---|---|---|---|---|---|',
   )
   for (const r of rows) {
     out.push(
-      `| ${cell(r.stage)} | ${cell(r.actor)} | ${cell(r.result)} | ${r.sha ? '`' + r.sha + '`' : '—'} ` +
-      `| ${cell(r.at)} | ${cell(readableTime(r))} | ${cell(r.detail)} |`,
+      `| ${cell(r.stage)} | ${cell(rowAuthor(r))} | ${cell(r.collaborator)} | ${cell(r.result)} ` +
+      `| ${r.sha ? '`' + r.sha + '`' : '—'} | ${cell(r.at)} | ${cell(readableTime(r))} | ${cell(r.detail)} |`,
     )
   }
-  if (rows.length === 0) out.push('| _no stages recorded yet_ |  |  |  |  |  |  |')
+  if (rows.length === 0) out.push('| _no stages recorded yet_ |  |  |  |  |  |  |  |')
   out.push('', `**Next:** ${next ?? 'awaiting review'}`)
   return out.join('\n')
 }

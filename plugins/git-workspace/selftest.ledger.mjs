@@ -9,7 +9,8 @@ import os from 'node:os'
 import path from 'node:path'
 import {
   initOrgRepo, openSession, wipCommit,
-  sessionTrailers, agentCoAuthor, readLedger, recordStage, renderLedger, withLedger, STAGES,
+  sessionTrailers, agentCollaborator, readLedger, recordStage, renderLedger, withLedger, STAGES,
+  stageComment, rowAuthor,
   stageTime, readableTime,
 } from './lib/index.js'
 
@@ -20,23 +21,49 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-ledger-'))
 process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
 
 ok('trailers: identity and attribution, each optional but the session always present', () => {
-  const t = sessionTrailers({ id: 'RESTO/notes/note-wt-260903-001', container: 'notes', actor: 'Evan', coAuthor: 'M <m@x.invalid>' })
+  const t = sessionTrailers({ id: 'RESTO/notes/note-wt-260903-001', container: 'notes', author: 'unfazed-dev', collaborator: 'Claude Opus 5@(high)' })
   assert.equal(t.split('\n')[0], 'Arxa-Session: RESTO/notes/note-wt-260903-001')
   assert.ok(t.includes('Arxa-Container: notes'))
-  assert.ok(t.includes('Arxa-Actor: Evan'))
-  assert.ok(t.includes('Co-authored-by: M <m@x.invalid>'))
+  assert.ok(t.includes('Arxa-Author: unfazed-dev'))
+  assert.ok(t.includes('Arxa-Collaborator: Claude Opus 5@(high)'))
+  assert.ok(!/Co-authored-by/.test(t), 'Co-authored-by is gone — Arxa-Collaborator replaced it')
+  // `actor` still works as an alias so a half-migrated caller records someone
+  // rather than silently dropping the identity.
+  assert.ok(sessionTrailers({ id: 'x', actor: 'legacy' }).includes('Arxa-Author: legacy'))
   // Every line is a real trailer key — `git interpret-trailers` needs `Key: value`.
   for (const line of t.split('\n')) assert.match(line, /^[A-Za-z-]+: .+$/)
   assert.equal(sessionTrailers({ id: 'x' }), 'Arxa-Session: x')
 })
 
-ok('trailers: a bare model name becomes a Co-authored-by GitHub will accept', () => {
-  // GitHub silently drops a co-author without an address, so a bare name has
-  // to grow a stable one rather than be passed through and quietly ignored.
-  assert.equal(agentCoAuthor('Claude Opus 5'), 'Claude Opus 5 <claude-opus-5@arxa.invalid>')
-  assert.equal(agentCoAuthor('Al <al@real.com>'), 'Al <al@real.com>', 'a real address is left alone')
-  assert.equal(agentCoAuthor(''), null)
-  assert.equal(agentCoAuthor(null), null)
+ok('collaborator: the effort half always renders, never invented', () => {
+  assert.equal(agentCollaborator('Claude Opus 5', 'high'), 'Claude Opus 5@(high)')
+  // An absent effort renders `unspecified` rather than a level nobody supplied
+  // — and stays greppable, so "which commits predate effort tracking" is still
+  // an answerable question.
+  assert.equal(agentCollaborator('Claude Opus 5'), 'Claude Opus 5@(unspecified)')
+  assert.equal(agentCollaborator('Claude Opus 5', '  '), 'Claude Opus 5@(unspecified)')
+  assert.equal(agentCollaborator(''), null)
+  assert.equal(agentCollaborator(null), null)
+})
+
+ok('rows written before the rename still render their author', () => {
+  // Every ledger published before 2026-09-03 carries `actor`, not `author`.
+  assert.equal(rowAuthor({ actor: 'Evan F Pierre Louis' }), 'Evan F Pierre Louis')
+  assert.equal(rowAuthor({ author: 'unfazed-dev', actor: 'ignored' }), 'unfazed-dev')
+  const table = renderLedger([{ stage: 'merged', actor: 'Evan F Pierre Louis', result: 'ok', at: '2026-09-03T05:45:40Z' }], { sessionId: 's' })
+  assert.ok(table.includes('Evan F Pierre Louis'), 'an old row is not rendered as an em-dash')
+})
+
+ok('stageComment: one builder, carrying the recorded time', () => {
+  const row = { stage: 'committed', author: 'unfazed-dev', collaborator: 'Claude Opus 5@(high)', result: 'ok', sha: 'abcdef1234', detail: 'feat: x', ...stageTime(new Date('2026-09-03T05:44:00Z')) }
+  const body = stageComment(row)
+  assert.ok(body.startsWith('**arxa · committed**'))
+  assert.ok(body.includes('_unfazed-dev_ · ok · `abcdef1`'), 'author, result and sha all present')
+  assert.ok(body.includes('Collaborator: Claude Opus 5@(high)'))
+  // The whole point: GitHub stamps its own posting time in the READER's zone,
+  // so the recorded instant has to travel in the body.
+  assert.ok(/2026-09-03 05:44:00 UTC/.test(body), 'the recorded UTC time is in the comment')
+  assert.ok(body.includes('feat: x'))
 })
 
 ok('ledger: stages append to the registry row and survive re-reads', () => {
@@ -94,7 +121,7 @@ ok('ledger: renders a table with a Next: line, and survives a pipe in the detail
     [{ stage: 'committed', actor: 'Evan | boss', result: 'ok', sha: 'abcdef1', at: '2026-09-03T10:00:00Z', atUtc: '2026-09-03 10:00:00', atLocal: '2026-09-03 12:00:00', tz: 'Europe/Paris', detail: 'a|b' }],
     { sessionId: 'Acme/notes/n-wt-260903-001', container: 'notes', next: 'a human reviewer' },
   )
-  assert.ok(md.includes('| stage | actor | result | sha | when (UTC) | when (readable) | detail |'))
+  assert.ok(md.includes('| stage | author | collaborator | result | sha | when (UTC) | when (readable) | detail |'))
   assert.ok(md.includes('2026-09-03 10:00:00 UTC · 2026-09-03 12:00:00 Europe/Paris'), 'both clocks in one cell')
   // Header, separator and body must agree on the column count or GitHub
   // renders the row as prose instead of a table.
@@ -130,7 +157,7 @@ ok('ledger: the PR-body fence replaces in place and never duplicates', () => {
 })
 
 ok('ledger: STAGES names the whole life of a session, in order', () => {
-  assert.deepEqual([...STAGES], ['opened', 'committed', 'pushed', 'checks', 'gate', 'review', 'merged', 'archived', 'cleaned'])
+  assert.deepEqual([...STAGES], ['opened', 'integrated', 'committed', 'pushed', 'checks', 'gate', 'review', 'merged', 'archived', 'cleaned'])
 })
 
 console.log(`\nledger selftest: ${passed} checks passed`)

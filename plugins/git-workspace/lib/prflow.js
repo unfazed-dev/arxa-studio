@@ -37,6 +37,7 @@ import { listSessions, runGate, SESSION_BRANCH_PREFIX, SESSION_BASE_PREFIX } fro
 import { getOrigin, fetchRepo, ffMergeMain, mainSyncState } from './repos.js'
 import { SUBJECT_RE } from './frame.js'
 import { sessionTrailers } from './ledger.js'
+import { integrateMain, isIntegrating } from './integrate.js'
 
 /**
  * Per-session ref holding the base the PR collapse commits against — the
@@ -73,13 +74,13 @@ function session(repoPath, id, env) {
  * `squash_merge_commit_message: 'PR_BODY'` workaround is dead with the
  * squash merge that needed it.
  */
-export function collapseMessage(id, { attribution, container, actor, coAuthor } = {}) {
+export function collapseMessage(id, { attribution, container, author, actor, collaborator } = {}) {
   const lines = []
   if (attribution) lines.push(attribution, '')
   // One trailer paragraph: identity (session + container) and attribution
-  // (actor + co-author) travel with the commit into git, where they survive
-  // GitHub, the PR, and this tool entirely.
-  lines.push(sessionTrailers({ id, container, actor, coAuthor }))
+  // (author + collaborator) travel with the commit into git, where they
+  // survive GitHub, the PR, and this tool entirely.
+  lines.push(sessionTrailers({ id, container, author, actor, collaborator }))
   return lines.join('\n')
 }
 
@@ -99,7 +100,7 @@ export function collapseMessage(id, { attribution, container, actor, coAuthor } 
  * @returns {{ sha: string|null, pushed: boolean, gate: object, branch: string,
  *             collapsed: boolean, reason?: string, origin?: string|null }}
  */
-export function readySession(repoPath, id, { subject, attribution, actor, coAuthor, env = process.env, gate = runGate, origin } = {}) {
+export function readySession(repoPath, id, { subject, attribution, author, actor, collaborator, env = process.env, gate = runGate, origin, integrate = true } = {}) {
   const s = session(repoPath, id, env)
   if (s.state !== 'open') {
     throw new Error(`session "${id}" is ${s.state} — revive it before readying a PR`)
@@ -110,6 +111,34 @@ export function readySession(repoPath, id, { subject, attribution, actor, coAuth
     throw new TypeError(`readySession: subject must be a conventional commit subject, got ${JSON.stringify(subject)}`)
   }
   if (subject.includes('\n')) throw new TypeError('readySession: subject must be a single line')
+
+  // ---- 0. integrate main FIRST (grilled 2026-09-03) -----------------------
+  // Every commit is therefore gated against current main, which is what
+  // continuous integration actually means — and it happens at a moment the
+  // user started, so nothing is ever rewritten under a working agent.
+  //
+  // The position is load-bearing, not incidental. It must precede the reads
+  // below: integrating changes what `merge-base` is, so `mergeBase`, the
+  // `nothing-to-propose` check and `alreadyCollapsed` all have to see the
+  // post-integrate world. An integrate necessarily makes `alreadyCollapsed`
+  // false and the branch re-collapses onto the new base — correct, because the
+  // branch genuinely has new content in it.
+  //
+  // A conflict returns HERE, before the collapse touches anything: the branch
+  // is left mid-merge for the agent to resolve, and the next call is refused
+  // by the guard above it until that is done.
+  if (isIntegrating(s.worktree, env)) {
+    return { sha: null, pushed: false, gate: { green: false, reason: 'integrating' }, branch: s.branch, collapsed: false, reason: 'integrate-conflict', files: [] }
+  }
+  if (integrate) {
+    const done = integrateMain(s, { author: author ?? actor, collaborator, env, origin })
+    if (done.conflicted) {
+      return {
+        sha: null, pushed: false, gate: { green: false, reason: 'integrating' }, branch: s.branch,
+        collapsed: false, reason: 'integrate-conflict', files: done.files, onto: done.onto,
+      }
+    }
+  }
 
   // ---- 1. collapse to one commit above the merge-base with main -----------
   // Collapse BEFORE gating, same order as sessionStageBoundary: the squash
@@ -144,7 +173,7 @@ export function readySession(repoPath, id, { subject, attribution, actor, coAuth
     const squash = stageBoundarySquash(s.worktree, {
       message: subject,
       // The session row knows its own container; the caller supplies who acted.
-      trailer: collapseMessage(id, { attribution, container: s.workspace, actor, coAuthor }),
+      trailer: collapseMessage(id, { attribution, container: s.workspace, author: author ?? actor, collaborator }),
       env,
       baseRef,
     })

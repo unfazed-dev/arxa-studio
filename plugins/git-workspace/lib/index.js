@@ -82,7 +82,8 @@ export {
   worktreeHealth,
 } from './sessions.js'
 export {
-  STAGES, sessionTrailers, agentCoAuthor, readLedger, recordStage, renderLedger, withLedger, stageTime, readableTime,
+  STAGES, sessionTrailers, agentCollaborator, EFFORT_UNSPECIFIED, readLedger, recordStage, renderLedger, withLedger, stageTime, readableTime,
+  rowAuthor, stageComment,
 } from './ledger.js'
 export {
   listWorktreeDirs,
@@ -123,3 +124,5 @@ export function mintAtStageBoundary(repoPath, { message, name, state, env = proc
   })
   return { ...result, chip: versionChip(repoPath) }
 }
+
+export { mergePreview, integrateMain, finishIntegrate, isIntegrating, conflictMarkerFiles, unmergedPaths } from './integrate.js'

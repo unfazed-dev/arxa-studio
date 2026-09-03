@@ -209,6 +209,26 @@ export function apply(ctx) {
             return m
           }
 
+          /** The acting identity as a GITHUB USERNAME (grilled 2026-09-03) —
+            * `unfazed-dev`, never `Evan F Pierre Louis`. Read from the link's
+            * own persisted login, NOT from org.json's `repoOwner`: on an
+            * org-owned repo the owner is the organisation, not the person
+            * acting.
+            *
+            * Falls back to the machine's user when there is no link at all, so
+            * a local-only org still records who did the work — the CLAUDE.md
+            * contract that every feature keeps full capability without a
+            * remote. */
+          const authorLogin = async (repoPath) => {
+            const g = await getGithub().catch(() => null)
+            const st = g && typeof g.status === 'function' ? await g.status().catch(() => null) : null
+            if (st?.login) return st.login
+            const gw = await importGitWorkspace()
+            const cfg = gw.runGit(['config', 'user.name'], { cwd: repoPath, allowFail: true })
+            if (cfg) return cfg
+            try { return (await import('node:os')).userInfo().username } catch { return 'local' }
+          }
+
           const noteStage = async (repoPath, sid, entry, { next } = {}) => {
             const gw = await importGitWorkspace()
             let ledger
@@ -233,11 +253,13 @@ export function apply(ctx) {
                 const pr = prs.find((p) => p.state === 'open') ?? prs[0]
                 const table = gw.renderLedger(ledger, { sessionId: sid, container: s.workspace, next })
                 await g.prUpdate(manifest.repoOwner, manifest.repoName, pr.number, { body: gw.withLedger(pr.body, table) }).catch(() => null)
-                const detail = entry?.detail ? String(entry.detail) : ''
-                const line = ['**arxa · ' + entry.stage + '**',
-                  [entry.actor ? '_' + entry.actor + '_' : null, entry.result, entry.sha ? '`' + String(entry.sha).slice(0, 7) + '`' : null]
-                    .filter(Boolean).join(' · '), detail].filter((x) => x !== '' && x !== null).join('\n\n')
-                await g.prComment(manifest.repoOwner, manifest.repoName, { number: pr.number, body: line }).catch(() => null)
+                // The RECORDED row, not the entry handed in. `recordStage`
+                // fills an absent result with 'ok' and stamps the time, so
+                // building from the raw entry published a comment that was
+                // missing both — the table said `ok`, the comment said nothing
+                // (observed on RESTO #5, fixed 2026-09-03).
+                const row = ledger[ledger.length - 1]
+                await g.prComment(manifest.repoOwner, manifest.repoName, { number: pr.number, body: gw.stageComment(row) }).catch(() => null)
                 return true
               } catch { return false }
             })()
@@ -291,10 +313,38 @@ export function apply(ctx) {
                 if (line.startsWith('??')) untracked++
                 else { if (x !== ' ' && x !== '?') staged++; if (y !== ' ' && y !== '?') unstaged++ }
               }
+              // The fetch that makes "{n} behind" true (grilled 2026-09-03).
+              // `aheadBehind` below reads `origin/main`, a ref that only moves
+              // on a fetch — and the ONLY fetch in the tree ran after an in-app
+              // merge. So a PR merged on github.com, or from another machine,
+              // left this card claiming 0 behind indefinitely. Reconciling here
+              // also fast-forwards LOCAL main, which the collapse in
+              // `readySession` needs: it computes merge-base against local main.
+              if (health === 'ok' && sessionRow) {
+                const { reconcileLocalMain } = await importPrflow()
+                try { reconcileLocalMain(sessionRow.repoPath ?? cur.path) } catch { /* offline is not an error — the counts below just stay as they were */ }
+              }
               let aheadBehind = null
               if (health === 'ok' && gw.runGit(['rev-parse', '-q', '--verify', 'origin/main'], { cwd: cur.path, allowFail: true }) !== null) {
                 const c = gw.runGit(['rev-list', '--left-right', '--count', 'origin/main...HEAD'], { cwd: repoPath, allowFail: true })
                 if (c) { const [behind, ahead] = c.split(/\s+/).map(Number); aheadBehind = { ahead, behind } }
+              }
+              // Would integrating conflict? Computed in memory, touching no
+              // file — the automatic half of the integrate feature. `conflicts`
+              // comes back null (never false) when git could not answer, and
+              // the card shows no badge rather than a clean one: "we did not
+              // check" and "there is no conflict" are different claims.
+              let integrate = null
+              if (health === 'ok' && sessionRow) {
+                const repo = sessionRow.repoPath ?? cur.path
+                const preview = gw.mergePreview(repo, sessionRow.branch)
+                integrate = {
+                  behind: preview.behind,
+                  conflicts: preview.conflicts,
+                  files: preview.files,
+                  mode: preview.mode,
+                  integrating: gw.isIntegrating(repoPath),
+                }
               }
               let manifest = {}
               try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch { /* unreadable — plain status */ }
@@ -308,6 +358,7 @@ export function apply(ctx) {
                 health,
                 dirty: health === 'ok' ? { staged, unstaged, untracked } : null,
                 aheadBehind,
+                integrate,
                 // wipRun throws outright on a missing worktree, which used to
                 // reject the whole card.status call; the client swallows that
                 // and leaves stale numbers on screen.
@@ -375,23 +426,30 @@ export function apply(ctx) {
                   // arxa/<identity>" (RESTO #1-#3, 2026-09-03 smoke).
                   const { readySession } = await importPrflow()
                   const model = String(arg?.model ?? 'the session model')
-                  const actor = String(arg?.actor ?? model)
+                  const actor = await authorLogin(repoPath)
+                  const collaborator = gw.agentCollaborator(model, arg?.effort)
                   const attribution = '— written by ' + model + ' in arxa studio'
-                  // Q14: the actor and the co-author ride the commit itself, so
-                  // the record survives without GitHub, the PR, or this tool.
+                  // Q14: the author and the collaborator ride the commit itself,
+                  // so the record survives without GitHub, the PR, or this tool.
                   const r = readySession(repoPath, sid, {
-                    subject, attribution, actor, coAuthor: gw.agentCoAuthor(model), origin: pushUrl,
+                    subject, attribution, author: actor, collaborator, origin: pushUrl,
                   })
+                  if (r.reason === 'integrate-conflict') {
+                    // main was brought in first and it conflicted. The merge is
+                    // LEFT OPEN for the agent in that worktree to resolve; the
+                    // branch was neither collapsed nor pushed.
+                    return { squashed: false, sha: null, gate: r.gate, merged: false, conflicted: true, files: r.files ?? [], onto: r.onto ?? null, reason: 'integrate-conflict', shape: 'prflow' }
+                  }
                   if (r.reason === 'gate-red') {
                     // Same promise as the local boundary (D40): red parks, nothing is lost.
                     const parked = gw.parkSession(repoPath, sid, 'gate-red')
-                    await noteStage(repoPath, sid, { stage: 'gate', actor, result: 'red', sha: r.sha, detail: 'parked — nothing is lost, the collapsed commit stays on the branch' }, { next: actor + ' — fix the gate and re-commit' })
+                    await noteStage(repoPath, sid, { stage: 'gate', author: actor, collaborator, result: 'red', sha: r.sha, detail: 'parked — nothing is lost, the collapsed commit stays on the branch' }, { next: actor + ' — fix the gate and re-commit' })
                     return { squashed: r.collapsed, sha: r.sha, gate: r.gate, merged: false, parked: true, session: parked, shape: 'prflow' }
                   }
                   if (r.sha) {
-                    await noteStage(repoPath, sid, { stage: 'committed', actor, sha: r.sha, detail: subject })
-                    await noteStage(repoPath, sid, { stage: 'gate', actor, result: r.gate?.green ? 'green' : 'skipped', sha: r.sha })
-                    if (r.push?.pushed) await noteStage(repoPath, sid, { stage: 'pushed', actor, sha: r.sha, detail: r.branch }, { next: 'CI on ' + r.branch })
+                    await noteStage(repoPath, sid, { stage: 'committed', author: actor, collaborator, sha: r.sha, detail: subject })
+                    await noteStage(repoPath, sid, { stage: 'gate', author: actor, collaborator, result: r.gate?.green ? 'green' : 'skipped', sha: r.sha })
+                    if (r.push?.pushed) await noteStage(repoPath, sid, { stage: 'pushed', author: actor, collaborator, sha: r.sha, detail: r.branch }, { next: 'CI on ' + r.branch })
                   }
                   return {
                     squashed: r.collapsed, sha: r.sha, gate: r.gate, merged: false, parked: false,
@@ -469,7 +527,8 @@ export function apply(ctx) {
               const title = String(arg?.title ?? '').trim()
               if (!gw.SUBJECT_RE.test(title)) throw new Error('title-not-conventional: the PR title becomes the squash-merge subject (Q7/Q8)')
               const attribution = '— written by ' + String(arg?.model ?? 'the session model') + ' in arxa studio'
-              const actor = String(arg?.actor ?? arg?.model ?? 'the session model')
+              const actor = await authorLogin(s.repoPath ?? cur.path)
+              const collaborator = gw.agentCollaborator(arg?.model, arg?.effort)
               // The ledger is fenced into the body at creation so every later
               // stage can rewrite that block in place instead of appending.
               const ledgerTable = gw.renderLedger(gw.readLedger(s.repoPath ?? cur.path, sid), { sessionId: sid, container: s.workspace, next: 'review' })
@@ -481,7 +540,7 @@ export function apply(ctx) {
               const existing = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
               if (Array.isArray(existing) && existing.length > 0) return { ok: true, existing: true, pr: { number: existing[0].number, url: existing[0].html_url } }
               const pr = await g.prCreate(manifest.repoOwner, manifest.repoName, { title, body, head: s.branch, base: 'main' })
-              await noteStage(s.repoPath ?? cur.path, sid, { stage: 'review', actor, detail: 'PR #' + pr.number + ' opened' }, { next: 'a human reviewer' })
+              await noteStage(s.repoPath ?? cur.path, sid, { stage: 'review', author: actor, collaborator, detail: 'PR #' + pr.number + ' opened' }, { next: 'a human reviewer' })
               return { ok: true, pr: { number: pr.number, url: pr.html_url } }
             },
             'card.pr.status': async () => {
@@ -522,7 +581,7 @@ export function apply(ctx) {
                 const seen = gwl.readLedger(s.repoPath ?? cur.path, sid).filter((e) => e.stage === 'checks')
                 if (seen[seen.length - 1]?.result !== checks.state) {
                   await noteStage(s.repoPath ?? cur.path, sid, {
-                    stage: 'checks', actor: 'github actions', result: checks.state, sha: pr.head?.sha ?? null,
+                    stage: 'checks', author: 'github-actions[bot]', result: checks.state, sha: pr.head?.sha ?? null,
                   }, { next: checks.state === 'green' ? 'merge when reviewed' : 'fix the failing check' })
                 }
               }
@@ -537,6 +596,41 @@ export function apply(ctx) {
             'card.ci.cancel': async () => {
               const { g, owner, name, runId } = await ciTarget()
               return g.cancelRun({ owner, name, runId })
+            },
+            /** Bring main into the session's worktree (grilled 2026-09-03).
+              * The MANUAL half — nothing calls this on its own. A conflict is
+              * left open on purpose: the agent working in that worktree is what
+              * resolves it, and aborting would put the user back exactly where
+              * they started. */
+            'card.integrate': async () => {
+              const gw = await importGitWorkspace()
+              const cur = handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (!sid) throw new Error('card.integrate serves session seats')
+              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              if (!s) throw new Error('session-not-found: ' + sid)
+              const repoPath = s.repoPath ?? cur.path
+              return gw.integrateMain(s, {
+                author: await authorLogin(repoPath),
+                collaborator: gw.agentCollaborator(arg?.model, arg?.effort),
+                origin: gw.getOrigin(repoPath) ?? undefined,
+              })
+            },
+            /** Conclude a merge whose conflicts have been resolved. Refuses
+              * while a tracked file still carries a marker — git alone commits
+              * a staged `<<<<<<<` without complaint, and the breakage would
+              * resurface later as a baffling gate failure. */
+            'card.integrate.finish': async () => {
+              const gw = await importGitWorkspace()
+              const cur = handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (!sid) throw new Error('card.integrate.finish serves session seats')
+              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              if (!s) throw new Error('session-not-found: ' + sid)
+              return gw.finishIntegrate(s, {
+                author: await authorLogin(s.repoPath ?? cur.path),
+                collaborator: gw.agentCollaborator(arg?.model, arg?.effort),
+              })
             },
             /** Stage comment on the session's PR (2026-09-03, RESTO 3-PR
               * smoke): `arxa · <stage>` + the engine's own result for that
@@ -564,7 +658,19 @@ export function apply(ctx) {
                 number = (prs.find((p) => p.state === 'open') ?? prs[0]).number
               }
               const detail = arg?.detail === undefined ? '' : (typeof arg.detail === 'string' ? arg.detail : '```json\n' + JSON.stringify(arg.detail, null, 2) + '\n```')
-              const body = ['**arxa · ' + stage + '**', detail].filter((x) => x !== '').join('\n\n')
+              // ONE builder, shared with the automatic path. Before this the
+              // manual action emitted stage + detail only, so a hand-triggered
+              // comment silently lost author, result, sha and the timestamp
+              // that its automatic twin carried.
+              const body = gw.stageComment({
+                stage,
+                author: arg?.author ?? await authorLogin(s.repoPath ?? cur.path),
+                collaborator: gw.agentCollaborator(arg?.model, arg?.effort),
+                result: arg?.result ?? null,
+                sha: arg?.sha ?? null,
+                detail: detail === '' ? null : detail,
+                ...gw.stageTime(),
+              })
               const comment = await g.prComment(manifest.repoOwner, manifest.repoName, { number, body })
               return { ok: true, number, comment }
             },
@@ -609,7 +715,7 @@ export function apply(ctx) {
               })
               if (result.merged) {
                 await noteStage(repoPath, sid, {
-                  stage: 'merged', actor: String(arg?.actor ?? 'arxa studio'), sha: result.mergeSha,
+                  stage: 'merged', author: await authorLogin(s.repoPath ?? cur.path), sha: result.mergeSha,
                   detail: 'PR #' + pr.number + ' merged with --no-ff onto the reviewed sha',
                 }, { next: 'archive the session' })
               }
