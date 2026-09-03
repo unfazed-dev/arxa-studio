@@ -18,7 +18,8 @@
 | D4 | The cross-engine switch **block is dropped**. Switching is free in both directions. | With the mirror-tool design the dsh log already holds Claude's full transcript in stock shape, so any other model can continue it. Switching *into* Claude mid-session gets a plain-text handoff of prior turns (Task 6). This is the "hot swap with handoff" moved from phase 2 into phase 1 because it fell out for free. |
 | D5 | Confinement is applied through the SDK's `spawnClaudeCodeProcess` hook, not by wrapping the CLI ourselves. | The SDK exposes the spawn (`sdk.d.ts` Options `spawnClaudeCodeProcess?: (options: SpawnOptions) => SpawnedProcess`), so `ctx.sandbox.confine([command, ...args], policy)` wraps exactly what the SDK would have run. |
 | D6 | The "not signed in" state lives in dsh's **stock login surface** (`ctx.authorization.registerFlow`) instead of a new status card. | Zero new UI. The flow's `run()` shows the command, polls until signed in, then commits email + tier as a credential record. Same place users log into every other provider. |
-| D9 | Ineligible models are shown with the reason in their `description` and refused at `stream()` time. | The picker's `routable` flag is computed inside `dsh-host-apiproxy`; there is no per-model hook. Description text is the only stock per-model surface. |
+| D9 | Ineligible models are shown with the reason in their `description` and refused at `stream()` time. |
+| D10 | Rate limits are shown in the UI in phase 1: a small usage pill in the composer row beside the model name (Task 13), fed by the SDK's `rate_limit_event`. | The user asked for it; the stock `conversation.input.right` slot and the plugin RPC channel make it a one-file client half. | The picker's `routable` flag is computed inside `dsh-host-apiproxy`; there is no per-model hook. Description text is the only stock per-model surface. |
 
 ## Global Constraints
 
@@ -29,7 +30,7 @@
 - `permissionMode: 'default'` always. Never `bypassPermissions`, never `allowDangerouslySkipPermissions`.
 - arxa never launches `claude auth login`. It only tells the user the command and re-checks.
 - Provider id `claude-code`; display name `Claude Code (your subscription)`.
-- Plugin files are bare ESM under `plugins/claude-code/`, registered by absolute path (same as `plugins/pi-delegate/index.mjs`). No package.json in the plugin dir.
+- Plugin files are bare ESM under `plugins/claude-code/`. Registered by absolute path through Task 12; Task 13 turns the dir into the named package `arxa-claude-code` so its browser half loads.
 - Tests are `plugins/claude-code/selftest.<topic>.mjs`, plain `node:assert/strict`, run with `node <file>`; `scripts/ci.mjs` discovers them automatically.
 - Commit messages: one line, `type: description`, no author trailer (global operator rule).
 - Do not print, log, or commit any OAuth token, email, or `~/.claude` content in tests.
@@ -54,9 +55,13 @@
 | `plugins/claude-code/lib/adapter.js` | `ClaudeCodeAdapter extends LlmAdapter`: `providerInfo`, `listModels`, `resolveModel`, `stream`. |
 | `plugins/claude-code/lib/auth-flow.js` | `claudeAuthFlow(deps)`, `stripOauthMethod(flow)`, `hideAnthropicOauth(authorization)`. |
 | `plugins/claude-code/lib/mirror-tools.js` | `MIRROR_TOOL_NAMES`, `mirrorToolDefinitions(defineTool, pending)`. |
+| `plugins/claude-code/lib/status.js` | Host memory of account + latest rate-limit per session; `formatBadge`. Pure except `Date.now`. |
+| `plugins/claude-code/lib/client.js` | Browser half: usage badge in `conversation.input.right`, polls the `/arxa-claude-code` RPC. |
+| `plugins/claude-code/package.json` | Named package so dsh discovers the client half (`dsh.client`). Added in Task 13. |
 | `plugins/claude-code/selftest.*.mjs` | One selftest per lib file. |
 | `plugins/sandbox/lib/index.js` | `extraWritableRoots(policy)` also honours `policy.extraWritableRoots`. |
-| `profile/cordis.patch.yml` | Host row for `arxa-claude-code`. |
+| `profile/cordis.patch.yml` | Host row for `arxa-claude-code` (by package name from Task 13 on). |
+| `bin/arxa-studio.mjs` | `PROFILE_PLUGINS` + `BY_NAME_PLUGINS` entries (Task 13). |
 | `profile/agent-presets/arxa/agent.cordis.yml` | Agent row for `arxa-claude-code-tools`. |
 | `scripts/claude-code-smoke.mjs` | HAND-RUN live smoke against the real, signed-in `claude`. Never joins `ci.mjs`. |
 | `package.json` | New exact deps. |
@@ -1756,8 +1761,8 @@ Append to `docs/plans/claude-subscription-engine.md`:
 ```markdown
 ## Implementation status
 - Plan: docs/plans/claude-subscription-engine-implementation.md (Tasks 1–12).
-- Shipped: adapter, mirror tools, MCP bridge, approval bridge, sign-in flow, OAuth hide + tripwire, live smoke.
-- Still open: Windows ACL rung unmeasured; Linux token-dependent runs (resume, Bash escape) pending a `claude setup-token`; rate-limit UI (events are logged as `claude-code/rate-limit`, no status line yet); Claude Code `plugins:` loading of arxa skill packs (phase 2).
+- Shipped: adapter, mirror tools, MCP bridge, approval bridge, sign-in flow, OAuth hide + tripwire, live smoke, usage badge.
+- Still open: Windows ACL rung unmeasured; Linux token-dependent runs (resume, Bash escape) pending a `claude setup-token`; Claude Code `plugins:` loading of arxa skill packs (phase 2).
 ```
 
 - [ ] **Step 4: Full CI + commit**
@@ -1766,6 +1771,238 @@ Append to `docs/plans/claude-subscription-engine.md`:
 npm test
 git add scripts/claude-code-smoke.mjs docs/plans/claude-subscription-engine.md
 git commit -m "test: add the hand-run live smoke for the claude-code adapter and record implementation status"
+```
+
+---
+
+### Task 13: Rate-limit badge in the stock composer row (D10 UI)
+
+**Files:**
+- Create: `plugins/claude-code/package.json`
+- Create: `plugins/claude-code/lib/status.js`
+- Create: `plugins/claude-code/lib/client.js`
+- Create: `plugins/claude-code/selftest.status.mjs`
+- Modify: `plugins/claude-code/lib/adapter.js` (call `status.recordRateLimit`)
+- Modify: `plugins/claude-code/index.mjs` (RPC handler)
+- Modify: `bin/arxa-studio.mjs:178-190` (`PROFILE_PLUGINS`) and `:369` (`BY_NAME_PLUGINS`)
+- Modify: `profile/cordis.patch.yml` (the Task 1 row: path → package name)
+
+**Why this shape.** The browser half of a plugin is discovered only through `package.json#dsh.client` + `exports["./client"]`, never from a file-path cordis row (`bin/arxa-studio.mjs:366-369`). So the plugin becomes a named package like `arxa-theme-accent`. The badge registers into `conversation.input.right`, the additive list slot rendered in the composer's trailing row right beside the model name and the stock context-usage pill (`dsh-client-ui-conversation/lib/client.js:4097`, `:7239`). Custom session events cross the wire but no client hook exposes them, so the host keeps the latest rate-limit per session and answers a `/arxa-claude-code` RPC that the badge polls — the same `ctx.connection.rpc.handle` + poll pattern `plugins/gen-ui/lib/index.js:82` and `plugins/theme-accent/lib/client.js:377` already use.
+
+**Interfaces:**
+- `lib/status.js`: `class ClaudeStatus { recordRateLimit(sessionId, info): void; recordAccount(account): void; snapshot(sessionId) → { account: { loggedIn, email?, subscriptionType?, version? }, rateLimit?: { status, utilization?, resetsAt?, rateLimitType? , at: number } } }`, and pure `formatBadge(snapshot, now = Date.now()) → { text, level: 'ok'|'warn'|'limit', title } | undefined`.
+- RPC: channel `/arxa-claude-code`, endpoint `status`, payload `{ sessionId }`, reply `{ ok: true, value: snapshot }`.
+- Slot registration: `ctx.slots.register({ name: 'conversation.input.right', id: 'arxa-claude-code-usage', order: 20, inject: (sessionId) => ({ sessionId }) }, UsageBadge)`.
+
+- [ ] **Step 1: Failing status test**
+
+```js
+import { strict as assert } from 'node:assert'
+import { ClaudeStatus, formatBadge } from './lib/status.js'
+
+let n = 0; const ok = (s) => { n++; console.log(`  ok ${s}`) }
+const st = new ClaudeStatus()
+assert.equal(st.snapshot('s1').rateLimit, undefined); assert.equal(st.snapshot('s1').account.loggedIn, false); ok('empty snapshot')
+st.recordAccount({ loggedIn: true, email: 'e@x', subscriptionType: 'max', version: '2.1.259', models: [] })
+st.recordRateLimit('s1', { status: 'allowed_warning', utilization: 0.9, resetsAt: 1_800_000_000, rateLimitType: 'seven_day' })
+const snap = st.snapshot('s1')
+assert.deepEqual(snap.account, { loggedIn: true, email: 'e@x', subscriptionType: 'max', version: '2.1.259' })
+assert.equal(snap.rateLimit.utilization, 0.9); assert.equal(typeof snap.rateLimit.at, 'number'); ok('records account + per-session limit')
+assert.equal(st.snapshot('other').rateLimit, undefined); ok('per session')
+
+const now = 1_799_990_000 * 1000 // 10 000 s before reset
+const b = formatBadge(snap, now)
+assert.equal(b.level, 'warn'); assert.match(b.text, /^Claude 90% · resets in 2h 46m$/); assert.match(b.title, /max/); assert.match(b.title, /weekly/); ok('warning badge')
+assert.equal(formatBadge({ account: snap.account, rateLimit: { status: 'allowed', utilization: 0.2, at: now } }, now).level, 'ok')
+assert.equal(formatBadge({ account: snap.account, rateLimit: { status: 'allowed', utilization: 0.2, at: now } }, now).text, 'Claude 20%'); ok('ok badge, no reset shown')
+const lim = formatBadge({ account: snap.account, rateLimit: { status: 'rejected', resetsAt: 1_800_000_000, rateLimitType: 'five_hour', at: now } }, now)
+assert.equal(lim.level, 'limit'); assert.equal(lim.text, 'Claude limit reached · resets in 2h 46m'); assert.match(lim.title, /5-hour/); ok('limit badge')
+assert.equal(formatBadge({ account: snap.account }, now), undefined); ok('no event → no badge')
+assert.equal(formatBadge({ account: { loggedIn: false }, rateLimit: snap.rateLimit }, now), undefined); ok('signed out → no badge')
+console.log(`selftest.status: ${n} ok`)
+```
+
+- [ ] **Step 2: Run, expect `ERR_MODULE_NOT_FOUND`**
+
+- [ ] **Step 3: Implement status.js**
+
+```js
+// Host-side memory of what the badge shows. Rate-limit events are per Claude session,
+// which we key by the dsh session id; the account comes from the probe.
+const TYPE_LABEL = { five_hour: '5-hour window', seven_day: 'weekly limit', seven_day_opus: 'weekly Opus limit', seven_day_sonnet: 'weekly Sonnet limit', overage: 'usage credits' }
+
+export class ClaudeStatus {
+  constructor () { this.account = { loggedIn: false }; this.limits = new Map() }
+  recordAccount (a) { this.account = { loggedIn: a.loggedIn, ...(a.email ? { email: a.email } : {}), ...(a.subscriptionType ? { subscriptionType: a.subscriptionType } : {}), ...(a.version ? { version: a.version } : {}) } }
+  recordRateLimit (sessionId, info) { this.limits.set(sessionId, { ...info, at: Date.now() }) }
+  snapshot (sessionId) { const rateLimit = this.limits.get(sessionId); return { account: this.account, ...(rateLimit ? { rateLimit } : {}) } }
+}
+
+const relative = (resetsAt, now) => {
+  const s = Math.max(0, Math.round(resetsAt - now / 1000)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60)
+  return h > 0 ? `${h}h ${m}m` : `${m}m`
+}
+
+export function formatBadge (snapshot, now = Date.now()) {
+  const { account, rateLimit: r } = snapshot
+  if (!r || !account?.loggedIn) return undefined
+  const what = TYPE_LABEL[r.rateLimitType] ?? 'usage'
+  const who = [account.subscriptionType, account.email].filter(Boolean).join(' · ')
+  const reset = r.resetsAt ? ` · resets in ${relative(r.resetsAt, now)}` : ''
+  if (r.status === 'rejected') return { level: 'limit', text: `Claude limit reached${reset}`, title: `Claude ${what} reached (${who})` }
+  const pct = r.utilization === undefined ? undefined : Math.round(r.utilization * 100)
+  const text = pct === undefined ? 'Claude' : `Claude ${pct}%`
+  if (r.status === 'allowed_warning') return { level: 'warn', text: `${text}${reset}`, title: `Claude ${what}: ${pct ?? '?'}% used (${who})` }
+  return { level: 'ok', text, title: `Claude ${what}: ${pct ?? '?'}% used (${who})` }
+}
+```
+
+- [ ] **Step 4: Run, expect `selftest.status: 8 ok`**
+
+- [ ] **Step 5: Feed it from the adapter and answer the RPC**
+
+In `lib/adapter.js`: constructor takes `status` too (`{ query, probe, ctx, binary, env, version, status }`); in `stream()` after `const account = await this.probe.current()` add `this.status.recordAccount(account)`; change the bridge's `onRateLimit` to
+```js
+onRateLimit: (info) => { agent.session.append('claude-code/rate-limit', info); this.status.recordRateLimit(agent.id, info) },
+```
+Extend `selftest.adapter.mjs`: pass `status: new ClaudeStatus()` in `mk()` and, in the "rate limit" style case, assert `status.snapshot('agent-1').rateLimit.status === 'allowed_warning'` after a script containing a `rate_limit_event`.
+
+In `index.mjs`:
+```js
+import { ClaudeStatus } from './lib/status.js'
+const RPC_CHANNEL = '/arxa-claude-code'
+// inside apply():
+const status = new ClaudeStatus()
+const adapter = new ClaudeCodeAdapter({ query, probe, ctx, binary, env, version, status })
+// Child fiber, same as plugins/gen-ui/lib/index.js:82 — pending harmlessly on headless boots.
+ctx.inject(['connection'], (ctx) => ctx.connection.rpc.handle(RPC_CHANNEL, async (endpoint, payload) => {
+  if (endpoint !== 'status') return { ok: false, error: { message: `arxa-claude-code: unknown endpoint ${JSON.stringify(endpoint)}` } }
+  const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId : undefined
+  status.recordAccount(await probe.current())
+  return { ok: true, value: status.snapshot(sessionId) }
+}, { authority: 'loopback' }))
+```
+`authority: 'loopback'` is load-bearing for the same reason gen-ui documents at `plugins/gen-ui/lib/index.js:16-23`.
+
+- [ ] **Step 6: Make the plugin a named package**
+
+`plugins/claude-code/package.json`:
+```json
+{
+  "name": "arxa-claude-code",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Claude models on the user's Claude subscription: dsh LLM adapter over the Claude Agent SDK (host) + usage badge in the composer row (client).",
+  "type": "module",
+  "main": "index.mjs",
+  "exports": {
+    ".": "./index.mjs",
+    "./agent": "./agent.mjs",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": ["@deepseek-ai/dsh-client-runtime", "@deepseek-ai/dsh-client-ui-conversation"],
+      "platform": "web"
+    }
+  },
+  "peerDependencies": { "react": "^18.2.0" }
+}
+```
+`bin/arxa-studio.mjs`: add `const claudeCodeDir = resolve(here, '..', 'plugins', 'claude-code')` next to `genUiDir` (`:124`), add `['arxa-claude-code', claudeCodeDir]` to `PROFILE_PLUGINS`, and `'arxa-claude-code'` to `BY_NAME_PLUGINS`.
+`profile/cordis.patch.yml`: change the Task 1 row to `name: arxa-claude-code` and extend its comment: "By PACKAGE NAME — browser half (usage badge) discovered through package.json dsh.client." The agent-plane row keeps its absolute path (`plugins/claude-code/agent.mjs`); it has no client half.
+
+- [ ] **Step 7: The badge (client.js)**
+
+```js
+/**
+ * arxa-claude-code browser half: a small usage pill in the composer's trailing
+ * row (slot conversation.input.right, beside the model name and dsh's own
+ * context meter). Polls the host's /arxa-claude-code RPC; no session-event
+ * subscription exists client-side (see docs/plans/claude-subscription-engine-
+ * implementation.md Task 13). __ModuleLoader__ factory shape, like gen-ui.
+ */
+window.__ModuleLoader__.load({
+  id: 'arxa-claude-code',
+  factory: (require) => {
+    var module = { exports: {} }
+    var exports = module.exports
+    Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' })
+    const React = require('react')
+    const h = React.createElement
+    const RPC_CHANNEL = '/arxa-claude-code'
+    const POLL_MS = 20_000
+    let hostCtx
+
+    // Duplicated from lib/status.js on purpose: the client bundle is a plain
+    // browser file with no module graph into lib/.
+    const TYPE_LABEL = { five_hour: '5-hour window', seven_day: 'weekly limit', seven_day_opus: 'weekly Opus limit', seven_day_sonnet: 'weekly Sonnet limit', overage: 'usage credits' }
+    const relative = (resetsAt, now) => { const s = Math.max(0, Math.round(resetsAt - now / 1000)); const hh = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60); return hh > 0 ? `${hh}h ${mm}m` : `${mm}m` }
+    function formatBadge (snapshot, now = Date.now()) {
+      const { account, rateLimit: r } = snapshot || {}
+      if (!r || !account || !account.loggedIn) return undefined
+      const what = TYPE_LABEL[r.rateLimitType] || 'usage'
+      const who = [account.subscriptionType, account.email].filter(Boolean).join(' · ')
+      const reset = r.resetsAt ? ` · resets in ${relative(r.resetsAt, now)}` : ''
+      if (r.status === 'rejected') return { level: 'limit', text: `Claude limit reached${reset}`, title: `Claude ${what} reached (${who})` }
+      const pct = r.utilization === undefined ? undefined : Math.round(r.utilization * 100)
+      const text = pct === undefined ? 'Claude' : `Claude ${pct}%`
+      if (r.status === 'allowed_warning') return { level: 'warn', text: `${text}${reset}`, title: `Claude ${what}: ${pct}% used (${who})` }
+      return { level: 'ok', text, title: `Claude ${what}: ${pct}% used (${who})` }
+    }
+
+    const COLOR = { ok: 'var(--dsw-text-muted, #8a8f98)', warn: 'var(--dsw-warning, #d08a00)', limit: 'var(--dsw-danger, #d64545)' }
+
+    function UsageBadge ({ sessionId }) {
+      const [snap, setSnap] = React.useState(undefined)
+      React.useEffect(() => {
+        if (!sessionId || !hostCtx) return
+        let live = true
+        const sync = async () => {
+          try { const res = await hostCtx.connection.rpc.call(RPC_CHANNEL, 'status', { sessionId }); if (live && res && res.ok) setSnap(res.value) } catch { /* host away; keep last */ }
+        }
+        sync()
+        const timer = setInterval(sync, POLL_MS)
+        const onVis = () => { if (!document.hidden) sync() }
+        document.addEventListener('visibilitychange', onVis)
+        return () => { live = false; clearInterval(timer); document.removeEventListener('visibilitychange', onVis) }
+      }, [sessionId])
+      const badge = formatBadge(snap)
+      if (!badge) return null
+      return h('span', {
+        title: badge.title, 'aria-label': badge.title,
+        style: { fontSize: '11px', lineHeight: '18px', padding: '0 6px', borderRadius: '9px', border: `1px solid ${COLOR[badge.level]}`, color: COLOR[badge.level], whiteSpace: 'nowrap' },
+      }, badge.text)
+    }
+
+    function apply (ctx) {
+      hostCtx = ctx
+      ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
+        name: 'conversation.input.right',
+        id: 'arxa-claude-code-usage',
+        order: 20,
+        inject: (sessionId) => ({ sessionId }),
+      }, UsageBadge))
+    }
+    exports.apply = apply
+    exports.inject = ['slots', 'connection']
+    return module.exports
+  },
+})
+```
+If `inject: (sessionId) => …` does not deliver `sessionId` for a list slot (it is proven only for the keyed `conversation.input.model` slot), fall back to reading it from the zone props: log `Object.keys(props)` once, and use `props.session?.id ?? props.sessionId`. Note which one worked in the file header.
+
+- [ ] **Step 8: Boot, run a Claude turn, look at the composer**
+
+Expected: after the first Claude turn that emits a `rate_limit_event`, a small pill "Claude NN%" appears right of the model name; hover shows tier, email and window type; warning state adds "resets in …"; when the limit is hit the pill turns red and the turn's error text explains. No pill for non-Claude sessions or before any event.
+
+- [ ] **Step 9: Run everything, commit**
+
+```bash
+npm test
+git add plugins/claude-code bin/arxa-studio.mjs profile/cordis.patch.yml
+git commit -m "feat: show claude subscription usage as a badge in the composer row"
 ```
 
 ---
@@ -1781,6 +2018,6 @@ git commit -m "test: add the hand-run live smoke for the claude-code adapter and
 - D7 Claude intelligence only: custom system prompt, no settings, arxa tools over MCP (Task 7/9). ✔
 - D8 built-ins kept, rendered via mirror tools (Task 5). Subagent/skill/plugin *tools* stay enabled — nothing disallows them; their frames are hidden as nested (`parent_tool_use_id`). ✔
 - D9 live models + static fallback + tier/version descriptions (Tasks 1, 3, 9). ✔
-- D10 env scrub + `apiKeySource` refusal (Tasks 2, 6), rate-limit events logged, Fable → `fallbackModel: 'opus'` (Task 9), no meter. ✔
+- D10 env scrub + `apiKeySource` refusal (Tasks 2, 6), rate-limit events logged **and shown as the composer usage pill** (Task 13), Fable → `fallbackModel: 'opus'` (Task 9), no separate meter page. ✔
 
-Known ceilings, all marked in code comments or the status section: Windows unmeasured; nested subagent activity not rendered; rate-limit events not yet surfaced in UI; the dsh arxa-gate (`arxa-gate` row, tool names `write/edit/bash`) does not pre-check Claude's built-ins — approval + sandbox are the gates for those.
+Known ceilings, all marked in code comments or the status section: Windows unmeasured; nested subagent activity not rendered; the usage pill is poll-based (20 s) because no client-side session-event hook exists; the dsh arxa-gate (`arxa-gate` row, tool names `write/edit/bash`) does not pre-check Claude's built-ins — approval + sandbox are the gates for those.
