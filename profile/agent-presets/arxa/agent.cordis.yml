@@ -298,6 +298,13 @@
 - id: arxa-pi-delegate
   name: /Volumes/business_ssd/arxa_digital_solutions/arxa-studio/plugins/pi-delegate/index.mjs
 
+# arxa-specific: mirror tools for the claude-code provider (Read/Write/Edit/
+# Bash/… as dsh tools whose execute returns the result Claude Code already
+# produced in its sandboxed child). AGENT-PLANE because it registers tools.
+# Plain composition row (no `insert:`), bare `name` per entryListProblem.
+- id: arxa-claude-code-tools
+  name: /Volumes/business_ssd/arxa_digital_solutions/arxa-studio/plugins/claude-code/agent.mjs
+
 # ── remaining model-facing rows ─────────────────────────────────────────────
 
 - id: tool-ask-user

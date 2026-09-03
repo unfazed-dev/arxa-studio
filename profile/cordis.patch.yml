@@ -359,3 +359,12 @@
 - insert:
   - id: arxa-personalisation
     name: arxa-personalisation
+
+# arxa-specific: Claude models on the user's Claude subscription (docs/plans/
+# claude-subscription-engine-implementation.md). HOST-PLANE: it registers an
+# LLM adapter on ctx.llm and an authorization flow — registry/service rows.
+# The tool half is the agent-plane row arxa-claude-code-tools in
+# profile/agent-presets/arxa/agent.cordis.yml.
+- insert:
+  - id: arxa-claude-code
+    name: /Volumes/business_ssd/arxa_digital_solutions/arxa-studio/plugins/claude-code/index.mjs
