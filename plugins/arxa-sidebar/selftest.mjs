@@ -693,6 +693,26 @@ check('client: job rows are listed from the pushed store, never fetched',
   client.includes('function arxaJobRow(') && client.includes('const rows = isJobs ? (given || []) : fetched'))
 check('client: a job cancel goes to the HOST route, not the agent plane',
   client.includes('fetch("/__arxa/jobs/action"') && client.includes('action: "jobs." + verb'))
+// The header slot is kind:list and ADDITIVE. arxa's chip and dsh's both render
+// from state.jobsBySession once count > 0, so leaving both mounted shows TWO
+// job chips — and only arxa's can act. The stock row is disabled by id in
+// arxa's OWN patch (dsh's file untouched, package byte-identical), the same
+// lever rows 11a/11/11c already use for ui-sidebar / ui-workspace / ui-layout.
+{
+  const patch = readFileSync(join(repo, 'profile/cordis.patch.yml'), 'utf8')
+  check('patch: the stock ui-jobs chip is disabled, so the header shows ONE job chip',
+    /- id: ui-jobs\s*\n\s*disabled: true/.test(patch))
+  check('patch: arxa-jobs is still mounted to serve the route the chip calls',
+    /- id: arxa-jobs\s*\n\s*name: arxa-jobs/.test(patch))
+}
+// Disabling the stock chip removed the only surface showing a duration, so the
+// arxa row gained one. Same freeze rule as the host row: live ticks, settled
+// freezes, settled-without-a-stamp shows nothing rather than a running clock.
+check('client: the row shows elapsed, and a settled job with no end stamp shows none',
+  client.includes('function arxaElapsed(') && client.includes('var end = live ? Date.now() : finishedAt;')
+  && client.includes('if (!startedAt || !end) return "";'))
+check('client: a live job\'s elapsed ticks, and the timer stops when nothing is live',
+  client.includes('if (!open || !anyLive) return;') && client.includes('clearInterval(h)'))
 // Only `running` arms the button. `stopping` is still live but a cancel is
 // already in flight; arming it again invites a click that changes nothing.
 check('client: only a RUNNING job offers cancel, and stopping says why',

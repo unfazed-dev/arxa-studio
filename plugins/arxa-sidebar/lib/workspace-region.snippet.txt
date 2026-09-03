@@ -689,6 +689,18 @@
 				}, (e) => { setNote(String((e && e.message) || e)); setFetched([]); });
 			}, [sessionId, isJobs]);
 			(0, react.useEffect)(() => { if (open) load(); }, [open, load]);
+			/* One 1s tick while the menu is open over a LIVE job, so the elapsed
+			 * column moves. Deliberately not a store write — jobs stay out of
+			 * state (see the note above `rows`); this only re-renders. It stops
+			 * when the menu closes or the last live row settles, so a settled
+			 * list costs nothing. */
+			const anyLive = (rows || []).some((r) => r.status === "running" || r.status === "stopping");
+			const [, setTick] = (0, react.useState)(0);
+			(0, react.useEffect)(() => {
+				if (!open || !anyLive) return;
+				const h = setInterval(() => setTick((v) => v + 1), 1000);
+				return () => clearInterval(h);
+			}, [open, anyLive]);
 			const act = (verb, row) => {
 				setBusy(true);
 				/* A JOB is not on the agent plane. Subagent verbs go through
@@ -749,6 +761,13 @@
 							children: [
 								(0, react_jsx_runtime.jsx)("span", { className: "aXa_agentLabel", title: row.label, children: row.label }),
 								(0, react_jsx_runtime.jsx)("span", { className: "aXa_agentState", children: String(row.status || row.activity || "") }),
+								/* Elapsed, only when the row carries a start. A settled job
+								 * whose end stamp never arrived shows nothing rather than a
+								 * clock that keeps running — same rule the host row follows. */
+								row.startedAt ? (0, react_jsx_runtime.jsx)("span", {
+									className: "aXa_agentState",
+									children: arxaElapsed(row.startedAt, row.finishedAt, row.status)
+								}) : null,
 								(0, react_jsx_runtime.jsx)(ArxaAgentRowActions, { row: row, t: t, busy: busy, onAct: act })
 							]
 						}, row.id)),
@@ -776,10 +795,31 @@
 		 * a second click that changes nothing and reads as a control that
 		 * ignored you. Pause stays refused: the job status union has no paused
 		 * member, so there is nothing to pause with. */
+		/* Elapsed as a short human string. A LIVE job runs to now; a settled one
+		 * freezes at its end stamp; a settled one with no stamp returns "" so the
+		 * row shows nothing rather than a clock still running on dead work. This
+		 * is the same rule as jobRow() in plugins/arxa-jobs — the bug that shipped
+		 * once was reading a field dsh does not have and falling through to now. */
+		function arxaElapsed(startedAt, finishedAt, status) {
+			var live = status === "running" || status === "stopping";
+			var end = live ? Date.now() : finishedAt;
+			if (!startedAt || !end) return "";
+			var s = Math.max(0, Math.round((end - startedAt) / 1000));
+			if (s < 60) return s + "s";
+			var m = Math.floor(s / 60);
+			if (m < 60) return m + "m " + (s % 60) + "s";
+			return Math.floor(m / 60) + "h " + (m % 60) + "m";
+		}
 		function arxaJobRow(j) {
 			var live = j.status === "running" || j.status === "stopping";
 			return {
 				kind: "job", id: j.id, label: j.label || j.id, status: j.status, detail: j.detail || null,
+				/* Carried so the row can show elapsed. The stock chip is disabled in
+				 * arxa's patch (row 11e) and it was the only surface showing a
+				 * duration — dropping it without replacing it would have traded a
+				 * duplicate chip for a less informative one. `finishedAt` is dsh's
+				 * field (JobView), absent while live. */
+				startedAt: j.startedAt || null, finishedAt: j.finishedAt || null,
 				can: { pause: false, resume: false, cancel: j.status === "running" },
 				why: {
 					pause: "jobs-have-no-pause",

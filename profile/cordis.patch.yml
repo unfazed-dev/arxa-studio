@@ -241,12 +241,33 @@
 #      verb, so nothing client-side can stop a job. The registry itself is a
 #      host service (`@deepseek-ai/dsh-jobs-local`, dsh-base row `jobs`), so
 #      this row reaches it with `ctx.get('jobs')` and serves list + cancel over
-#      its own route. The stock row is deliberately LEFT MOUNTED: it is dsh's
-#      patch, not ours, and replacing it would make arxa diverge from stock on
-#      every upgrade. Publishes no service, so it needs no isolate realm.
+#      its own route. Publishes no service, so it needs no isolate realm.
 - insert:
   - id: arxa-jobs
     name: arxa-jobs
+
+# 11b-ter. …and the stock chip comes DOWN (2026-09-03). An earlier note here
+#      said to leave it mounted, reasoning that replacing dsh's row would make
+#      arxa diverge on every upgrade. That reasoning was wrong twice over.
+#
+#      First, it is not what "leaving it" produces. `conversation.session.header
+#      .actions` is kind:list, replaceRisk:none — ADDITIVE. arxa's own chip
+#      (arxa-sidebar's ArxaJobsPlaceholder, order 19) already renders a live
+#      control once `count > 0`, and the stock JobListAction (order 20) renders
+#      from the same `state.jobsBySession`. Both mounted means the header shows
+#      TWO job chips the moment a job runs — and after the cancel wiring, only
+#      one of them can act.
+#
+#      Second, disabling by id IS the sanctioned lever and costs no divergence:
+#      dsh's file is never touched and its package stays byte-identical, exactly
+#      as rows 11a/11/11c already do for ui-sidebar, ui-workspace and ui-layout.
+#      Same revert shape: delete this row to bring the stock chip back.
+#
+#      arxa's chip carries what the stock one showed — status AND elapsed (it
+#      was the only surface with a duration, so the row gained one rather than
+#      losing it) — plus the Cancel the stock chip structurally cannot offer.
+- id: ui-jobs
+  disabled: true
 
 # 11c. The arxa AppFrame (D88-D93, 2026-08-31): the stock three-column frame
 #      + the docked artifact-viewer column (session-bound presence, drag
