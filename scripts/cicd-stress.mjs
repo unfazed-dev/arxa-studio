@@ -227,17 +227,58 @@ console.log('\n=== S3  partial failure: push lands, PR open fails ===')
   const reg = { webServer: { register: (r) => { routes[r.path] = r.handler } } }
   const calls = { prCreate: 0 }
   let prFails = true
+  // A VALIDATING fake, not a permissive one.
+  //
+  // On 2026-09-03 the live smoke caught three call-shape errors in one run —
+  // `message` for `subject`, `body` for `text`, `replyTo` for `commentId` —
+  // and CI had stayed green through all of them, because every fake in the
+  // suite accepted whatever it was handed. A fake that asserts its inputs is
+  // the difference between a green suite and a meaningful one, so each method
+  // below refuses a malformed call the way real GitHub would.
+  const seen = {}
+  const need = (cond, what) => { if (!cond) throw new Error('fake-github: ' + what) }
   const fakeGh = {
     status: async () => ({ ok: true, linked: true, login: 'tester' }),
     // The push embeds credentials into the origin URL. The origin here is a
     // local bare repo, so urlFor() leaves it untouched and the push is real.
     gitCredentials: async () => ({ login: 'tester', token: 'x' }),
     prUpdate: async () => ({}),
-    prComment: async () => ({}),
+    // NB prComment is POSITIONAL (owner, name, {number, body}) while the newer
+    // prThreadReply is a single options object — github-link ships both shapes
+    // and a caller that confuses them must fail here, not in production.
+    prComment: async (o, n, opts) => {
+      need(typeof o === 'string' && o !== '', 'prComment: owner must be positional arg 1')
+      need(typeof n === 'string' && n !== '', 'prComment: name must be positional arg 2')
+      need(Number.isFinite(Number(opts?.number)), 'prComment: number is required')
+      need(typeof opts?.body === 'string' && opts.body.trim() !== '', 'prComment: body is required')
+      seen.prComment = { owner: o, name: n, ...opts }
+      return { id: 1 }
+    },
+    prThreadReply: async (a) => {
+      need(typeof a?.owner === 'string' && a.owner !== '', 'prThreadReply: owner is required')
+      need(typeof a?.name === 'string' && a.name !== '', 'prThreadReply: name is required')
+      need(Number.isFinite(Number(a?.number)), 'prThreadReply: number is required')
+      need(a?.commentId !== undefined && a.commentId !== null, 'prThreadReply: commentId is required')
+      need(typeof a?.body === 'string' && a.body.trim() !== '', 'prThreadReply: body is required')
+      seen.prThreadReply = { ...a }
+      return { id: 2 }
+    },
+    setThreadResolved: async (a) => {
+      need(typeof a?.threadId === 'string' && a.threadId !== '', 'setThreadResolved: threadId is required')
+      need(typeof a?.resolved === 'boolean', 'setThreadResolved: resolved must be a boolean')
+      seen.setThreadResolved = { ...a }
+      return { id: a.threadId, resolved: a.resolved }
+    },
     prListForHead: async () => [],
     prChecks: async () => ({ state: 'unknown', asleep: false, runs: [] }),
-    prCreate: async () => {
+    prCreate: async (o, n, a) => {
       calls.prCreate++
+      need(typeof o === 'string' && o !== '', 'prCreate: owner must be positional arg 1')
+      need(typeof n === 'string' && n !== '', 'prCreate: name must be positional arg 2')
+      need(typeof a?.head === 'string' && a.head !== '', 'prCreate: head branch is required')
+      need(typeof a?.base === 'string' && a.base !== '', 'prCreate: base branch is required')
+      need(typeof a?.title === 'string' && a.title !== '', 'prCreate: title is required')
+      seen.prCreate = { owner: o, name: n, ...a }
       // The real 422 GitHub returns when the head branch is not yet visible.
       if (prFails) throw new Error('HTTP 422: no commits between master and the head branch')
       return { number: 7, url: 'https://github.com/acme/widgets/pull/7', html_url: 'https://github.com/acme/widgets/pull/7' }
@@ -296,6 +337,50 @@ console.log('\n=== S3  partial failure: push lands, PR open fails ===')
     Boolean(body2?.pr) && body2.pr.number === 7, JSON.stringify(body2).slice(0, 240))
   check('the retry re-attempted PR creation rather than assuming it was done',
     calls.prCreate === before + 1, 'prCreate calls: ' + calls.prCreate)
+
+  // ---- the WRITE-VERB CONTRACTS, pinned offline ---------------------------
+  // These are the exact shapes the live smoke found wrong on 2026-09-03. The
+  // handler reads `text` / `number` / `commentId` (index.js:995-1017); an
+  // earlier draft of the smoke sent `body` / `replyTo` and CI never noticed,
+  // because the fakes accepted anything. Now they do not.
+  const replyOk = await act('insight.reply', {
+    sessionId: 's1-does-not-matter', number: 7, commentId: 42, text: 'answered inside arxa',
+  })
+  // The session id above is deliberately unknown: the handler must refuse on
+  // the SESSION before it ever reaches GitHub.
+  check('reply: an unknown session is refused before the service is touched',
+    (replyOk.result ?? replyOk)?.reason === 'session-not-found' && seen.prThreadReply === undefined,
+    JSON.stringify(replyOk).slice(0, 200))
+
+  const realSid = (await act('card.status', { sessionId: sid }))?.result ? sid : sid
+  const threaded = await act('insight.reply', {
+    sessionId: realSid, number: 7, commentId: 42, text: 'answered inside arxa',
+  })
+  check('reply WITH a commentId reaches prThreadReply in its single-object shape',
+    seen.prThreadReply?.commentId === 42
+    && String(seen.prThreadReply?.body ?? '').includes('answered inside arxa')
+    && seen.prThreadReply?.number === 7,
+    JSON.stringify(seen.prThreadReply ?? threaded).slice(0, 240))
+  check('reply carries the hidden session marker so the PR stays attributable',
+    String(seen.prThreadReply?.body ?? '').includes(realSid),
+    String(seen.prThreadReply?.body ?? '').slice(0, 160))
+
+  const bareComment = await act('insight.reply', { sessionId: realSid, number: 7, text: 'a bare pr comment' })
+  check('reply WITHOUT a commentId reaches prComment in its POSITIONAL shape',
+    seen.prComment?.owner === 'acme' && seen.prComment?.name === 'widgets'
+    && String(seen.prComment?.body ?? '').includes('a bare pr comment'),
+    JSON.stringify(seen.prComment ?? bareComment).slice(0, 240))
+
+  const empty = await act('insight.reply', { sessionId: realSid, number: 7, commentId: 42, text: '   ' })
+  check('reply: an empty message is refused before the service, never sent',
+    (empty.result ?? empty)?.reason === 'message-required'
+    && seen.prThreadReply?.body?.includes('a bare pr comment') !== true,
+    JSON.stringify(empty).slice(0, 200))
+
+  const res = await act('insight.resolve', { sessionId: realSid, threadId: 'THREAD_1', resolved: true })
+  check('resolve passes threadId and a BOOLEAN resolved through to the service',
+    seen.setThreadResolved?.threadId === 'THREAD_1' && seen.setThreadResolved?.resolved === true,
+    JSON.stringify(seen.setThreadResolved ?? res).slice(0, 200))
 }
 
 console.log(failures === 0 ? '\ncicd stress: ALL GREEN' : `\ncicd stress: ${failures} FAILURE(S)`)

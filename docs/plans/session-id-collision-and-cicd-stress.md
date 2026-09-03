@@ -172,16 +172,29 @@ one fixed registry all return the same id) documents that the mint is
 deterministic given fixed input; on its own it says nothing about concurrency,
 which is why the write-path test exists alongside it.
 
-**NOT proven — needs the user**
+**PROVEN LIVE (2026-09-03, authorised)** — `scripts/cicd-smoke.mjs --yes`,
+**26 checks ALL GREEN** against real github.com, in a throwaway private repo
+created and deleted by the run.
 
-`scripts/cicd-smoke.mjs --yes` is written and syntax-clean but has NOT been
-run: the sandbox permission classifier refused it, correctly, because it
-creates and deletes a real GitHub repository. It is bounded by construction
-(its own throwaway private repo, deleted in a `finally`, never an existing
-one) and covers the four things no offline suite can reach: D6 auto-open on
-first push, the live conversation READ, `insight.reply`, and
-`insight.resolve` — each confirmed against GitHub afterwards rather than
-trusting arxa's own response.
+Closed, each confirmed on GitHub afterwards rather than trusting arxa's own
+response:
+
+1. **D6 auto-open** — the first push opened a real PR with no second click.
+2. **Live conversation READ** — `insight.review` against a real PR.
+3. **`insight.reply`** — the reply is really on the PR.
+4. **`insight.resolve`** — the thread is really resolved (checked by GraphQL).
+
+Plus the three scenarios in their LIVE form:
+
+- **L2 (two sessions, one org)** — distinct identities, distinct branches,
+  one PR each, and the per-session **dedupe holds**: a later push returns the
+  SAME PR and GitHub still shows two, not three.
+- **L3 (PR-only outage)** — only `repoName` is flipped, so origin and
+  credentials still work and only `prCreate` 404s. The push succeeds, the
+  branch is confirmed on the remote, `prReason` surfaces, and the retry
+  opens the PR the outage denied.
+- **L1 (identity)** stays offline on purpose: org-name refusals need no
+  network and are already proven with removal-verification.
 
 **Not a bug (steelmanned, left alone)**
 
@@ -189,3 +202,39 @@ A refused `createOrg` leaves its scaffolded folder on disk. That is
 deliberate — `lifecycle.js`: "renaming it and adding it is the recovery."
 It did mask H1 in an early draft of S1, which is why the scenario now renames
 into a name held only in another root.
+
+## 7. Contract drift — the gap the live run exposed
+
+The first live run failed on THREE call-shape errors, all in the smoke's own
+calls, none caught by CI: `message` for `subject` (`card.commit`), and
+`body`/`replyTo` for `text`/`commentId` (`insight.reply`). CI stayed
+green through all of them because **every fake in the suite accepted whatever
+it was handed**.
+
+Fixed by making `scripts/cicd-stress.mjs`'s fake GitHub **validate its
+inputs** the way the real API does — `prCreate` refuses a missing
+head/base/title, `prThreadReply` refuses a missing commentId/body,
+`prComment` refuses anything but its POSITIONAL owner/name shape (the two
+differ, and github-link ships both). Six new checks then pin the write-verb
+contracts offline, including that the hidden session marker rides the reply
+body and that an empty message is refused before the service is touched.
+
+Verified by drift: renaming the handler's `arg.text` to `arg.body` turns
+the reply checks red.
+
+The CLIENT half was checked by reading and is correct today:
+`artifact-viewer/lib/client.js:997` sends
+`{ sessionId, number, text, ...arg }` and `:1055` supplies
+`{ commentId: th.replyTo }` — exactly what `index.js:995-1017` reads.
+
+## 8. A correction worth keeping
+
+Mid-investigation this plan briefly claimed `base: 'main'` in `openPr` was
+a bug, because a bare `git init` in /tmp produced `master`. That probe was
+invalid: `git-workspace/lib/run.js` PINS `init.defaultBranch=main` on
+every arxa git call, so arxa's org repos are on `main` and the base is
+correct. The live smoke asserts this directly.
+
+**arxa's git behaviour is only observable through `runGit`, never through
+bare `git`.** Any future probe that forgets this will re-derive the same
+wrong conclusion.
