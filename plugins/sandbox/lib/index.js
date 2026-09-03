@@ -271,13 +271,20 @@ export default class ArxaSandboxProvider extends LocalSandboxProvider {
    * The roots this provider adds BEYOND dsh's own `writableRoots(policy)` —
    * empty for every mode but `workspace-write`, and never a root dsh already
    * grants.
-   * @param {object} policy - the resolved per-call file-effect policy.
+   * @param {object} policy - the resolved per-call file-effect policy, optionally
+   *   carrying `extraWritableRoots` — a per-call grant a caller attaches (e.g.
+   *   claude-code's `~/.claude/projects`).
    * @returns {string[]} the additional canonical roots.
    */
   extraWritableRoots (policy) {
     if (policy.mode !== 'workspace-write') return []
     const already = new Set(writableRoots(policy))
-    return this.toolchainRoots().filter((root) => !already.has(root))
+    // Per-call grants a caller attaches to the policy (claude-code: ~/.claude/projects).
+    // Canonicalised the same way dsh's own roots are — `already` is built from
+    // canonical paths, and an as-spelled grant would neither dedupe against it
+    // nor match anything once Seatbelt/bwrap resolve symlinks themselves.
+    const requested = (Array.isArray(policy.extraWritableRoots) ? policy.extraWritableRoots : []).map(canonicalPath)
+    return [...this.toolchainRoots(), ...requested].filter((root, i, all) => !already.has(root) && all.indexOf(root) === i)
   }
 
   /**

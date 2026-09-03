@@ -179,6 +179,17 @@ const world = (paths, links = {}) => ({
   ok('bwrap seam: grants appended as binds')
 }
 
+// ---- 11. a caller-attached `policy.extraWritableRoots` (claude-code's
+//      ~/.claude/projects) is honoured once, workspace-write only.
+{
+  const provider = new ArxaSandboxProvider(new Context(), { runnerCommand: [], runnerFailureSignatures: [], probeTimeoutMs: 5000 })
+  const roots = provider.extraWritableRoots({ mode: 'workspace-write', workspaceRoot: '/ws', extraWritableRoots: ['/home/u/.claude/projects', '/home/u/.claude/projects'] })
+  assert.ok(roots.includes('/home/u/.claude/projects'))
+  assert.equal(roots.filter((r) => r === '/home/u/.claude/projects').length, 1)
+  assert.deepEqual(provider.extraWritableRoots({ mode: 'read-only', workspaceRoot: '/ws', extraWritableRoots: ['/home/u/.claude/projects'] }), [])
+  ok('policy.extraWritableRoots honoured once, workspace-write only')
+}
+
 // ---- LIVE rows: the real machine, skipped (never failed) without a toolchain.
 {
   const flutter = whichOnPath('flutter')
