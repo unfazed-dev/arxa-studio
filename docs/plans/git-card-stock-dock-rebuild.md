@@ -1,6 +1,8 @@
 # Git card — stock dock-card rebuild as its own plugin (`arxa-git-card`)
 
-Status: PART A + PART B LANDED (2026-09-02) — only item 5 (docs pointer) open. Grilled 2026-09-02. Supersedes the UI half of
+Status: LANDED (2026-09-02) — Part A, Part B and item 5 all done; the supersede
+pointer item 5 asked for is in `git-card-phase-4-card-rebuild.md`'s own header.
+Grilled 2026-09-02. Supersedes the UI half of
 `git-card-phase-4-card-rebuild.md` (Part A2/A3); the host actions and tests
 from Phase 4 are kept and MOVED, not rewritten.
 

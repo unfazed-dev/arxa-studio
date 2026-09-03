@@ -448,11 +448,18 @@ still open, restated against the corrected capability map.
    headless Chrome will not bind a conversation via `openCreated` or a tree
    click. Worth one attempt from a real browser session rather than more
    headless effort.
-5. **Session-branch push still never executed.** Wired and statically checked;
-   no stage boundary ran in either session, and firing one would have pushed to
-   a real repo.
-6. **Nothing was pushed to GitHub in either run.** RESTO remains untouched.
-   The auth-retry and status-clear fixes take effect on the next org open.
+5. **Session-branch push has now executed; its return was never asserted**
+   (revised 2026-09-03). The card smoke run reached a GREEN stage boundary on
+   `kitchen-project` — `card.commit` returned `gate=true`, and `parked === false`
+   is the exact branch that fires the advisory push
+   (`arxa-git-card/lib/index.js:475`). So the path ran on a real repo. The smoke
+   driver never read `out.pushed` back, so the push happened but its result is
+   unverified. One assertion on the next run closes this properly.
+6. **CLOSED (2026-09-03) — GitHub has been written to.** The card smoke pushed
+   session branches, opened PRs #5 and #6 on `kitchen-project` and merged both;
+   `origin/main` carries `ab496bd`, `7e1d36f`, `8090d13`. The auth-retry and
+   status-clear fixes have had live org opens since. RESTO's own repo is still
+   untouched — only its project repo was exercised.
 
 ## Commits
 1. `feat: mint readable session ids and pin the worktree name across sidebar, crumb and header`

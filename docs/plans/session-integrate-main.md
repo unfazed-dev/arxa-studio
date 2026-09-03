@@ -1,6 +1,9 @@
 # Session integrate-main — closing the gap tier 3 found
 
-Status: **grilled 2026-09-03, awaiting build approval.** Nothing implemented yet.
+Status: **LANDED 2026-09-03.** Grilled, built, tested and smoke-run against the
+live RESTO / kitchen-project repos. Commits `b5f1b29` (feature), `ddffa17`
+(advisor-review fixes), `0702cae` (the bug the smoke run found). Card smoke
+62/62 green across all 15 actions — results in the last section.
 
 ## The gap
 
