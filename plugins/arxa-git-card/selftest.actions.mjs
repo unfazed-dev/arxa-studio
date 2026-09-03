@@ -282,6 +282,18 @@ async function patchProjectManifest(projPath, patch) {
   check('D5: a second open inside 60s is served from cache, not the provider', hits === 0, 'hits=' + hits)
   await act('insight.review', { sessionId: sid, fresh: true })
   check('D5: an explicit refresh bypasses the cache', hits === 1, 'hits=' + hits)
+  // The cache key must carry the REPO. Session ids are minted per workspace per
+  // day, so two orgs routinely hold the SAME id at once — measured live on
+  // 2026-09-03, where `note-wt-260903-001` existed in both RESTO and TESTO and
+  // took the engine down. Keyed on the session alone, the second org would be
+  // served the first org's pull-request conversation for a full minute.
+  await act('insight.review', { sessionId: sid })          // warm under acme/widgets
+  const before = hits
+  await patchManifest(org.path, { repoOwner: 'other', repoName: 'repo', localOnly: false })
+  await act('insight.review', { sessionId: sid })          // same sid, DIFFERENT repo
+  check('the cache is keyed by repo+session — a second org is never served the first org\'s PR',
+    hits === before + 1, 'hits ' + before + ' -> ' + hits)
+  await patchManifest(org.path, { repoOwner: 'acme', repoName: 'widgets', localOnly: false })
 
   // ---- the write verbs (D1) ------------------------------------------------
   const posted = []

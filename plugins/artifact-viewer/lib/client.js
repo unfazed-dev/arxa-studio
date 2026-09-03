@@ -854,6 +854,7 @@ window.__ModuleLoader__.load({
       const [replyTo, setReplyTo] = React.useState(null)
       const [replyText, setReplyText] = React.useState('')
       const [showBots, setShowBots] = React.useState(false)
+      const freshRef = React.useRef(false)
       const load = React.useCallback(() => {
         let live = true
         setPhase('loading')
@@ -862,7 +863,13 @@ window.__ModuleLoader__.load({
         // can enumerate or stop them (no job.* RPC, no jobs on the ApiProxy).
         if (view === 'jobs') { setData({ jobs: given || [] }); setPhase('ready'); return () => {} }
         const action = view === 'subagents' ? 'agent.list' : 'insight.' + view
-        const arg = view === 'sessions' ? { orgId } : { sessionId }
+        // `fresh` rides a ref, not state: the refresh button must bypass the
+        // host's 60s cache, and a state flag would need its own render pass
+        // before load() could read it. Consumed here so the NEXT load is a
+        // normal cached one.
+        const wantFresh = freshRef.current
+        freshRef.current = false
+        const arg = view === 'sessions' ? { orgId } : (wantFresh ? { sessionId, fresh: true } : { sessionId })
         postAction(action, arg).then((res) => {
           if (!live) return
           // The server says "unavailable" rather than inventing an empty
@@ -1017,7 +1024,7 @@ window.__ModuleLoader__.load({
             divider('dh'),
             ioSection('acts', '',
               h(React.Fragment, null,
-                trailing(rt('refresh'), () => { setTick((n) => n + 1) }, false),
+                trailing(rt('refresh'), () => { freshRef.current = true; setTick((n) => n + 1) }, false),
                 trailing(rt('bots'), () => setShowBots(!showBots), false),
                 d.pr.url ? h('a', { className: I.summarySuffix, href: d.pr.url, target: '_blank', rel: 'noreferrer' }, rt('openPr')) : null))),
           // D3: the band. Everything here is something a person must act on.

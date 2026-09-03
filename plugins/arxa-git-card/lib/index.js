@@ -88,7 +88,20 @@ const EMPTY_REVIEW = Object.freeze({
   * entry so the repaint after a reply shows the reply. */
 const REVIEW_TTL_MS = 60_000
 const reviewCache = new Map()
-function invalidateReview(sid) { reviewCache.delete(sid) }
+/** Keyed by REPO + session, never the session alone. Session ids are minted per
+  * workspace per day, so two organisations routinely hold the same id on the
+  * same day — measured live on 2026-09-03, where `note-wt-260903-001` existed in
+  * both RESTO and TESTO at once and took the engine down. A session-only key
+  * would serve one org's pull-request conversation to the other for 60s. */
+const reviewKey = (owner, name, sid) => owner + '/' + name + '#' + sid
+/** A write knows its session but not always its repo (`insight.resolve` holds
+  * only a thread id), so drop every repo's entry for that session rather than
+  * guess one. Over-invalidating costs one refetch; under-invalidating shows a
+  * reply that is not there. */
+function invalidateReview(sid) {
+  const suffix = '#' + sid
+  for (const k of reviewCache.keys()) if (k.endsWith(suffix)) reviewCache.delete(k)
+}
 
 /** D3: what earns the top band. Everything here is something a person must act
   * on; everything else is history and falls through to its group. */
@@ -124,7 +137,8 @@ function needsYou(conv, ci, login) {
   * allSettled — an org with no linked issues, no commit comments or no Actions
   * must render, not blank (plan: Degradation). */
 async function reviewFor({ g, gw, owner, name, branch, sid, fresh }) {
-  const hit = reviewCache.get(sid)
+  const key = reviewKey(owner, name, sid)
+  const hit = reviewCache.get(key)
   if (!fresh && hit && Date.now() - hit.at < REVIEW_TTL_MS) return hit.value
   const prs = await g.prListForHead(owner, name, branch, 'all').catch(() => [])
   const pr = Array.isArray(prs) ? (prs.find((p) => p.state === 'open') ?? prs[0]) : null
@@ -132,7 +146,7 @@ async function reviewFor({ g, gw, owner, name, branch, sid, fresh }) {
     // Not an error: the session simply has no PR yet. The panel renders the
     // empty state that carries Create PR (D6 opens one on first push anyway).
     const value = { ...EMPTY_REVIEW, reason: 'no-pr' }
-    reviewCache.set(sid, { at: Date.now(), value })
+    reviewCache.set(key, { at: Date.now(), value })
     return value
   }
   const [conv, runs, who] = await Promise.allSettled([
@@ -164,7 +178,7 @@ async function reviewFor({ g, gw, owner, name, branch, sid, fresh }) {
     needs: needsYou(conversation, ci, login),
     degraded: conv.status === 'rejected' ? 'conversation' : runs.status === 'rejected' ? 'ci' : null,
   }
-  reviewCache.set(sid, { at: Date.now(), value })
+  reviewCache.set(key, { at: Date.now(), value })
   return value
 }
 

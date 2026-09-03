@@ -131,8 +131,8 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   // push-only, so those rows arrive from the sidebar's store via the event.
   assert.match(t5client, /function InsightPanel\(\{ t, view, sessionId, orgId, given \}\)/, 'InsightPanel exists with the five-prop face')
   assert.match(t5client, /body: JSON\.stringify\(\{ action, arg \}\)/, 'InsightPanel posts {action,arg} — the same shape the git card uses')
-  assert.match(t5client, /const arg = view === 'sessions' \? \{ orgId \} : \{ sessionId \}/,
-    'sessions is org-keyed; streak and CI are session-keyed')
+  assert.match(t5client, /const arg = view === 'sessions' \? \{ orgId \} : \(wantFresh \? \{ sessionId, fresh: true \} : \{ sessionId \}\)/,
+    'sessions is org-keyed; every other view is session-keyed, plus the fresh flag the refresh button arms')
   for (const a of ["'insight.' + view"]) assert.ok(t5client.includes(a), 'insight action name is derived from the view: ' + a)
   for (const a of ["'session.open'", "'session.rename'", "'session.archive'"]) {
     assert.ok(t5client.includes(a), 'sessions rows reuse the EXISTING sidebar action, no new one: ' + a)
@@ -161,6 +161,13 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   // comment next to the inline field names the banned call to explain itself.
   assert.doesNotMatch(t5code, /window\.prompt/, 'the sessions rename is an inline field — Tauri WKWebView has no window.prompt')
   assert.match(t5client, /className: 'aXa_av_insightInput'/, 'the rename field is a real input in the row')
+  // The refresh button has to BYPASS the host's 60s cache, not just re-ask for
+  // the value it already has. It arms a ref that load() consumes into the arg;
+  // an earlier version only bumped the tick and silently re-served the cache.
+  assert.match(t5client, /freshRef\.current = true; setTick/,
+    'the review refresh button arms the fresh flag before re-loading')
+  assert.match(t5client, /wantFresh \? \{ sessionId, fresh: true \} : \{ sessionId \}/,
+    'load() sends fresh:true to the host when the refresh button armed it')
   assert.match(t5client, /if \(state\.phase === 'insight'\) \{ setState\(\(st\) => \(\{ \.\.\.st, sessionId: id \}\)\); return \}/,
     'a session switch re-points an open insight panel instead of closing the column')
   // `insight.title.ci` is deliberately absent: D4 retired the standalone CI
