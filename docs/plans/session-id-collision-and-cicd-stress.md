@@ -274,3 +274,24 @@ Two build-side bugs fixed in the arxa repo while here: the README documented
 `TAURI_SIGNING_PRIVATE_KEY_PATH` (the CLI ignores it and fails on the LAST
 line, after both bundles are written, so it reads as success) — `34c523cd`;
 and a needless `mut` warning in `desktop/src-tauri/src/lib.rs` — `a19e3d86`.
+
+### Launch, verified end to end
+
+Run with an isolated `ARXA_HOME` so the operator's real store and the running
+dev engine were never touched:
+
+    ARXA_HOME=<temp> "/Applications/Arxa Studio.app/Contents/MacOS/arxa-desktop"
+
+Shell → sidecar → payload extraction → launcher → dsh, confirmed from the
+engine log: `launcher boot`, `profile materialized`, `preset materialized`,
+`dsh bin resolved` (out of the extracted payload), then
+`dsh web: http://127.0.0.1:7891` with the Tauri window ESTABLISHED against
+that port.
+
+**First launch after an update is SLOW and looks dead.** The first run
+extracts the ~142 MB payload before the launcher starts, so `engine.log` does
+not exist yet and the window sits on the waiting page — a 55 s observation
+window caught nothing at all and looked like a failed boot. The second run,
+with `<ARXA_HOME>/engine/<sha12>` already populated, reached
+`dsh web:` in about a second. Anyone diagnosing a "dead" first launch should
+wait for the extraction before concluding anything.
