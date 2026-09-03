@@ -118,3 +118,59 @@ Three scenarios, chosen as different FAILURE MODES rather than different repos:
   across processes; assert ids are distinct (this is the H3 verdict).
 - **S3 partial failure** — push succeeds, PR open fails. Assert `prReason`
   surfaces, nothing is half-written, and a retry opens the PR.
+
+## 6. What landed, and what is proven
+
+**Fixes**
+
+- `plugins/workspace/lib/store-heal.js` + boot preflight in
+  `bin/arxa-studio.mjs` — heals every clause of `validateStoredState`,
+  backs the store up first, prints each repair. **This is the answer to H4
+  and to every future duplicate, whatever its cause.**
+- `renameOrg` now calls `assertOrgFolderNameFree(newPath, oldPath)` (H1).
+  The `oldPath` argument is load-bearing: without it the D80 case-only
+  rename collides the org with itself.
+- `readOrgNames`/`rememberOrgName` in `plugins/workspace/lib/root.js` —
+  an uncapped, append-only org-name ledger, so the guard no longer depends on
+  a 10-entry recents list (H2). Omitted from the file when empty, so a fresh
+  install keeps the original `{ orgs }` shape.
+
+**Proven**
+
+- `plugins/workspace/selftest.heal.mjs` — 17 checks. The oracle is dsh's
+  OWN `validateStoredState`, imported by absolute file URL, so "healed"
+  is judged by the exact code that refuses to boot. Includes the real store
+  on this machine (read-only).
+- End-to-end through the real launcher: a store carrying the exact incident
+  shape was healed, backed up and reported before dsh was spawned.
+- `scripts/cicd-stress.mjs` — S1/S2/S3, all green, wired into
+  `scripts/ci.mjs`. **Both new guards were verified by removal**: deleting
+  the H1 call reddens the H1 check, stubbing the ledger reddens the H2 check.
+- Full `node scripts/ci.mjs`: ALL GREEN, 39 suites.
+
+**S2's verdict (measured, not assumed)**
+
+25 in-process mints and 6 separate processes, all shown the same unwritten
+registry, produce the SAME id. The day counter is therefore **not** a
+uniqueness mechanism — it is a readability feature, and uniqueness comes
+entirely from the org segment. No lock was added: a lock would only make
+concurrent creates *numbered* differently, which is not what protects the
+dsh store. Guarding the org segment (H1/H2) plus the boot heal is what does.
+
+**NOT proven — needs the user**
+
+`scripts/cicd-smoke.mjs --yes` is written and syntax-clean but has NOT been
+run: the sandbox permission classifier refused it, correctly, because it
+creates and deletes a real GitHub repository. It is bounded by construction
+(its own throwaway private repo, deleted in a `finally`, never an existing
+one) and covers the four things no offline suite can reach: D6 auto-open on
+first push, the live conversation READ, `insight.reply`, and
+`insight.resolve` — each confirmed against GitHub afterwards rather than
+trusting arxa's own response.
+
+**Not a bug (steelmanned, left alone)**
+
+A refused `createOrg` leaves its scaffolded folder on disk. That is
+deliberate — `lifecycle.js`: "renaming it and adding it is the recovery."
+It did mask H1 in an early draft of S1, which is why the scenario now renames
+into a name held only in another root.
