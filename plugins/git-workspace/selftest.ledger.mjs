@@ -3,12 +3,14 @@
 // The ledger's whole promise is that the RECORD survives without GitHub, so
 // everything here runs against a real registry and never touches the network.
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
   initOrgRepo, openSession, wipCommit,
   sessionTrailers, agentCoAuthor, readLedger, recordStage, renderLedger, withLedger, STAGES,
+  stageTime, readableTime,
 } from './lib/index.js'
 
 let passed = 0
@@ -57,15 +59,50 @@ ok('ledger: stages append to the registry row and survive re-reads', () => {
   // keeping; collapsing to the last outcome would hide exactly that.
   assert.deepEqual(l.filter((e) => e.stage === 'checks').map((e) => e.result), ['red', 'green'])
   assert.ok(l.every((e) => typeof e.at === 'string' && e.at.endsWith('Z')), 'every row is stamped UTC')
+  assert.ok(l.every((e) => e.atLocal && e.tz && e.atUtc), 'and every row carries the local clock it was recorded on')
   assert.throws(() => recordStage(org, id, {}), /stage is required/)
+})
+
+ok('time: a stage is stamped in UTC and in the recording machine`s own clock', () => {
+  const t = stageTime(new Date('2026-09-03T10:00:00Z'))
+  assert.equal(t.at, '2026-09-03T10:00:00.000Z', 'the ISO instant stays the sort key')
+  assert.equal(t.atUtc, '2026-09-03 10:00:00', 'UTC, formatted for a person')
+  assert.match(t.atLocal, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, 'local wall clock, same shape')
+  assert.ok(typeof t.tz === 'string' && t.tz !== '', 'a zone name — "14:32" means nothing without one')
+  // The local half must be the RECORDER's clock, captured now. Proven by
+  // running the same instant under a different TZ and seeing it move.
+  const inTokyo = JSON.parse(execFileSync(process.execPath, ['-e',
+    "import('" + new URL('./lib/index.js', import.meta.url).href + "').then(m=>console.log(JSON.stringify(m.stageTime(new Date('2026-09-03T10:00:00Z')))))",
+  ], { env: { ...process.env, TZ: 'Asia/Tokyo' }, encoding: 'utf8' }))
+  assert.equal(inTokyo.at, t.at, 'same instant')
+  assert.equal(inTokyo.atUtc, t.atUtc, 'same UTC clock')
+  assert.equal(inTokyo.atLocal, '2026-09-03 19:00:00', 'Tokyo is UTC+9 — the local half follows the machine')
+  assert.equal(inTokyo.tz, 'Asia/Tokyo')
+})
+
+ok('time: a row written before the column existed shows UTC and no invented local', () => {
+  // Formatting the instant in the READER's zone and labelling it "local"
+  // would be a quiet lie about where the work happened.
+  assert.equal(readableTime({ at: '2026-09-03T10:04:11.000Z' }), '2026-09-03 10:04:11 UTC')
+  assert.equal(readableTime({ atUtc: '2026-09-03 10:00:00', atLocal: '2026-09-03 12:00:00', tz: 'Europe/Paris' }),
+    '2026-09-03 10:00:00 UTC · 2026-09-03 12:00:00 Europe/Paris')
+  assert.equal(readableTime({}), null)
 })
 
 ok('ledger: renders a table with a Next: line, and survives a pipe in the detail', () => {
   const md = renderLedger(
-    [{ stage: 'committed', actor: 'Evan | boss', result: 'ok', sha: 'abcdef1', at: '2026-09-03T10:00:00Z', detail: 'a|b' }],
+    [{ stage: 'committed', actor: 'Evan | boss', result: 'ok', sha: 'abcdef1', at: '2026-09-03T10:00:00Z', atUtc: '2026-09-03 10:00:00', atLocal: '2026-09-03 12:00:00', tz: 'Europe/Paris', detail: 'a|b' }],
     { sessionId: 'Acme/notes/n-wt-260903-001', container: 'notes', next: 'a human reviewer' },
   )
-  assert.ok(md.includes('| stage | actor | result | sha | when (UTC) | detail |'))
+  assert.ok(md.includes('| stage | actor | result | sha | when (UTC) | when (readable) | detail |'))
+  assert.ok(md.includes('2026-09-03 10:00:00 UTC · 2026-09-03 12:00:00 Europe/Paris'), 'both clocks in one cell')
+  // Header, separator and body must agree on the column count or GitHub
+  // renders the row as prose instead of a table.
+  // Count UNESCAPED pipes only — an escaped `\|` inside a cell is content,
+  // not a column boundary, which is the whole point of escaping it.
+  const cols = (line) => line.replace(/\\\|/g, '').split('|').length
+  const lines = md.split('\n').filter((l) => l.startsWith('|'))
+  assert.equal(new Set(lines.map(cols)).size, 1, 'every table row has the same column count')
   assert.ok(md.includes('**Next:** a human reviewer'))
   assert.ok(md.includes('`Acme/notes/n-wt-260903-001`'))
   // An unescaped pipe would silently break the table into the wrong columns.

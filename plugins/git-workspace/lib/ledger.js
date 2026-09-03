@@ -25,6 +25,36 @@ export const STAGES = Object.freeze([
   'opened', 'committed', 'pushed', 'checks', 'gate', 'review', 'merged', 'archived', 'cleaned',
 ])
 
+const pad = (n) => String(n).padStart(2, '0')
+
+/**
+ * When a stage happened, in three forms, all captured AT RECORD TIME.
+ *
+ * The local half has to be stamped here rather than formatted when the table
+ * is drawn, because the table is drawn somewhere else — GitHub, in a browser,
+ * possibly on another continent. Formatting the instant at render time would
+ * show the READER's clock and quietly claim it was the machine's. The zone is
+ * stored alongside, because "14:32" means nothing without it.
+ *
+ * `at` (ISO, UTC) stays the machine-readable instant and the sort key; the
+ * other two are for a person reading the PR.
+ */
+export function stageTime(now = new Date()) {
+  const utc = `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())} ` +
+    `${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())}`
+  const local = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ` +
+    `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
+  let zone
+  try { zone = Intl.DateTimeFormat().resolvedOptions().timeZone } catch { zone = undefined }
+  if (!zone) {
+    // No IANA name available — a numeric offset still makes the local time
+    // readable. getTimezoneOffset is minutes WEST of UTC, hence the negation.
+    const off = -now.getTimezoneOffset()
+    zone = `UTC${off >= 0 ? '+' : '-'}${pad(Math.floor(Math.abs(off) / 60))}:${pad(Math.abs(off) % 60)}`
+  }
+  return { at: now.toISOString(), atUtc: utc, atLocal: local, tz: zone }
+}
+
 /**
  * The trailer block for a collapsed session commit.
  *
@@ -85,13 +115,17 @@ export function readLedger(repoPath, id, env = process.env) {
 export function recordStage(repoPath, id, entry, env = process.env) {
   const stage = String(entry?.stage ?? '').trim()
   if (stage === '') throw new TypeError('recordStage: stage is required')
+  const t = stageTime(entry?.now instanceof Date ? entry.now : new Date())
   const row = {
     stage,
     actor: entry?.actor ? String(entry.actor) : null,
     result: entry?.result ? String(entry.result) : 'ok',
     sha: entry?.sha ? String(entry.sha).slice(0, 7) : null,
     detail: entry?.detail ? String(entry.detail) : null,
-    at: entry?.at ?? new Date().toISOString(),
+    at: entry?.at ?? t.at,
+    atUtc: t.atUtc,
+    atLocal: t.atLocal,
+    tz: t.tz,
   }
   const ledger = [...readLedger(repoPath, id, env), row]
   annotateSession(repoPath, id, { ledger }, env)
@@ -99,6 +133,22 @@ export function recordStage(repoPath, id, entry, env = process.env) {
 }
 
 const cell = (v) => (v === null || v === undefined || v === '' ? '—' : String(v).replace(/\|/g, '\\|').replace(/\n+/g, ' '))
+
+/**
+ * One human-readable cell: the UTC wall clock, then the clock on the machine
+ * that actually did the work, named by its zone.
+ *
+ * Rows written before this column existed carry only `at`, so the UTC half is
+ * recovered from the instant and the local half is left blank rather than
+ * guessed — the reader's zone is not the recorder's, and printing it as if it
+ * were would be a quiet lie about where the work happened.
+ */
+export function readableTime(row) {
+  const utc = row?.atUtc ?? (typeof row?.at === 'string' ? row.at.replace('T', ' ').replace(/\..*$/, '') : null)
+  if (!utc) return null
+  const head = `${utc} UTC`
+  return row?.atLocal ? `${head} · ${row.atLocal} ${row.tz ?? 'local'}` : head
+}
 
 /**
  * The ledger as a markdown table, plus a `Next:` line naming who picks it up.
@@ -110,11 +160,17 @@ export function renderLedger(ledger, { sessionId, container, next } = {}) {
   const rows = Array.isArray(ledger) ? ledger : []
   const out = ['### Stage ledger', '']
   if (sessionId) out.push(`**Session** \`${sessionId}\`` + (container ? ` · **Container** \`${container}\`` : ''), '')
-  out.push('| stage | actor | result | sha | when (UTC) | detail |', '|---|---|---|---|---|---|')
+  out.push(
+    '| stage | actor | result | sha | when (UTC) | when (readable) | detail |',
+    '|---|---|---|---|---|---|---|',
+  )
   for (const r of rows) {
-    out.push(`| ${cell(r.stage)} | ${cell(r.actor)} | ${cell(r.result)} | ${r.sha ? '`' + r.sha + '`' : '—'} | ${cell(r.at)} | ${cell(r.detail)} |`)
+    out.push(
+      `| ${cell(r.stage)} | ${cell(r.actor)} | ${cell(r.result)} | ${r.sha ? '`' + r.sha + '`' : '—'} ` +
+      `| ${cell(r.at)} | ${cell(readableTime(r))} | ${cell(r.detail)} |`,
+    )
   }
-  if (rows.length === 0) out.push('| _no stages recorded yet_ |  |  |  |  |  |')
+  if (rows.length === 0) out.push('| _no stages recorded yet_ |  |  |  |  |  |  |')
   out.push('', `**Next:** ${next ?? 'awaiting review'}`)
   return out.join('\n')
 }
