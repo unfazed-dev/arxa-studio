@@ -169,6 +169,26 @@ root, `~/.claude/projects`, so its transcripts and resume keep working.
 is stricter than Claude Code alone. Linux (bwrap/landlock) and Windows
 (ACL) rungs need the same extra root; not yet measured.
 
+**Linux rung (Docker Desktop, `node:22-bookworm`, `--privileged`, kernel
+7.0.12-linuxkit), 2026-09-03** — script `spike-linux.sh`. bwrap argv is
+dsh's exact `bwrapProfileArgs` (`lib/index.js:22-40`) + one extra
+`--bind ~/.claude/projects`. Mechanics-only (no Linux credential yet):
+- plain shell under bwrap: workspace write ok, HOME write denied, 5 visible
+  pids (private PID namespace works).
+- `claude -p` 2.1.259 starts under bwrap, reaches the auth check, returns
+  a well-formed JSON result ("Not logged in"). Node runtime, `/proc`,
+  `/dev` all fine under the profile.
+- with the projects bind the session file IS written (persisted=1) even
+  for the failed run; without it, nothing is persisted.
+- Landlock: securityfs not mounted inside the container, so the landlock
+  rung was not probed. dsh prefers bwrap on Linux anyway.
+- Token-dependent runs (resume, Bash escape test) pending a
+  `claude setup-token` value in scratchpad `linux-token` (never printed,
+  only used by Claude Code inside the container).
+
+**Windows ACL rung**: cannot be spiked from macOS/Docker Desktop (Windows
+containers need a Windows host). UNMEASURED. Needs a Windows box/VM.
+
 Second lock layer, free: Agent SDK options `cwd`, `additionalDirectories`,
 `settingSources` (omit user/local so a user's own hooks/MCP don't leak into
 an arxa session), `disallowedTools`, `--restricted` when a preset asks for

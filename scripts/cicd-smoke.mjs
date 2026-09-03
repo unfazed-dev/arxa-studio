@@ -204,6 +204,77 @@ try {
   const isResolved = ghJson(['api', 'graphql', '-f', `query=query{repository(owner:"${owner}",name:"${repoName}"){pullRequest(number:${prNumber}){reviewThreads(last:5){nodes{isResolved}}}}}`,
     '--jq', '[.data.repository.pullRequest.reviewThreads.nodes[].isResolved]'])
   check('the thread is really resolved on GitHub', isResolved.includes(true), JSON.stringify(isResolved))
+
+  // ---- 8. SCENARIO L2 (live): two sessions, two PRs, and the dedupe -------
+  // The offline S3 fake could never exercise this. What can actually break is
+  // openPr's per-session dedupe (index.js:349): it lists PRs for the head
+  // branch and returns the existing one instead of opening a second. Two live
+  // sessions in one org prove the branches stay distinct, and a re-push proves
+  // the dedupe holds against real GitHub rather than against a fake list.
+  const openPrs = () => ghJson(['api', `repos/${owner}/${repoName}/pulls?state=open&per_page=50`,
+    '--jq', '[.[] | {n:.number, head:.head.ref}]'])
+
+  const sessB = await act('workspace.new-session', { orgId: org.id, workspace: 'notes' })
+  const sidB = sessB.result?.id
+  check('L2: a second session in the SAME org gets a distinct identity',
+    Boolean(sidB) && sidB !== sid, 'a=' + sid + ' b=' + sidB)
+  const rowB = gwlib.parkedSessions(org.path, process.env).find((s) => s.id === sidB)
+  fs.writeFileSync(path.join(rowB.worktree, 'second.md'), '# second\n')
+  await act('card.commit', { sessionId: sidB, subject: 'feat: add the second note' })
+  const pushB = await act('card.push', { sessionId: sidB })
+  const pb2 = pushB.result ?? pushB
+  check('L2: the second session opened its OWN pull request',
+    Boolean(pb2?.pr?.number) && pb2.pr.number !== prNumber,
+    'a=#' + prNumber + ' b=' + JSON.stringify(pb2?.pr) + ' reason=' + String(pb2?.prReason))
+  const twoPrs = openPrs()
+  check('L2: GitHub shows exactly two open PRs, one per session branch',
+    twoPrs.length === 2 && new Set(twoPrs.map((p) => p.head)).size === 2, JSON.stringify(twoPrs))
+  check('L2: each PR\'s head is its own session branch',
+    twoPrs.some((p) => p.head === rowB.branch) && twoPrs.some((p) => p.head === row.branch),
+    JSON.stringify(twoPrs) + ' vs ' + row.branch + ' / ' + rowB.branch)
+
+  // The dedupe: pushing session A again must find its PR, not open a second.
+  fs.writeFileSync(path.join(wt, 'smoke.md'), '# smoke again\n')
+  await act('card.commit', { sessionId: sid, subject: 'feat: revise the smoke note' })
+  const rePush = await act('card.push', { sessionId: sid })
+  const rp = rePush.result ?? rePush
+  check('L2: a later push returns the SAME PR, it does not open another',
+    rp?.pr?.number === prNumber, 'expected #' + prNumber + ' got ' + JSON.stringify(rp?.pr))
+  check('L2: GitHub still shows two open PRs after the re-push (dedupe held)',
+    openPrs().length === 2, JSON.stringify(openPrs()))
+
+  // ---- 9. SCENARIO L3 (live): push lands, PR open fails for real ----------
+  // Only the PR half is broken: repoName is flipped to a repo that does not
+  // exist, while origin and the credentials stay exactly as they were — so
+  // the push still reaches the real remote and only prCreate 404s. Breaking
+  // the whole manifest would fail the push too and prove nothing about the
+  // split.
+  const sessC = await act('workspace.new-session', { orgId: org.id, workspace: 'notes' })
+  const sidC = sessC.result?.id
+  const rowC = gwlib.parkedSessions(org.path, process.env).find((s) => s.id === sidC)
+  fs.writeFileSync(path.join(rowC.worktree, 'third.md'), '# third\n')
+  await act('card.commit', { sessionId: sidC, subject: 'feat: add the third note' })
+  const good = JSON.parse(fs.readFileSync(manifest, 'utf8'))
+  fs.writeFileSync(manifest, JSON.stringify({ ...good, repoName: repoName + '-does-not-exist' }, null, 2))
+  const broken = await act('card.push', { sessionId: sidC })
+  const bb = broken.result ?? broken
+  check('L3: the push still SUCCEEDED even though the PR could not open',
+    broken.ok === true && bb?.ok === true, JSON.stringify(broken).slice(0, 260))
+  check('L3: the failed PR is surfaced with a real reason from GitHub',
+    !bb?.pr && typeof bb?.prReason === 'string' && bb.prReason !== '', JSON.stringify(bb).slice(0, 260))
+  check('L3: the branch really did reach the remote despite the PR failure',
+    ghJson(['api', `repos/${owner}/${repoName}/branches/${rowC.branch}`, '--jq', '{n:.name}'])?.n === rowC.branch,
+    'branch=' + rowC.branch)
+  // Restore and retry: the work is already pushed, so the retry must open the
+  // PR without the user redoing anything.
+  fs.writeFileSync(manifest, JSON.stringify(good, null, 2))
+  const retried = await act('card.push', { sessionId: sidC })
+  const rb = retried.result ?? retried
+  check('L3: the retry opens the PR the outage denied',
+    Boolean(rb?.pr?.number), JSON.stringify(rb).slice(0, 260))
+  check('L3: GitHub now shows three open PRs, one per session',
+    openPrs().length === 3, JSON.stringify(openPrs()))
+
 } catch (err) {
   check('the smoke ran to completion', false, String(err?.stack ?? err).slice(0, 700))
 } finally {
