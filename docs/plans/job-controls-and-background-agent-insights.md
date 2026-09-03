@@ -395,11 +395,40 @@ points at a control that exists.
   `no-job-api`. A job cancel is not a gap any more — it is a different plane,
   and one arriving here means the client's routing broke.
 
+## The "cosmetic" chip clash was a false count
+
+`2 subagents ⌄` sitting beside `No subagents` was written up twice as a wording
+problem — two chips counting different things (total vs live). **That was a
+guess, and it was wrong.** Checked properly:
+
+```
+subagent.list(parentSessionId: note)  ->  2 children, both continuable, inactive
+arxa's chip                           ->  "No subagents"
+```
+
+Nothing about liveness. arxa's chip derived its count from the client session
+map (`state.byId`, filtered on `origin:"subagent"` + this parent). The field
+shape was right — the client store really does carry both — but the store only
+holds sessions the client has **loaded**, and subagent children are not among
+them. So the chip rendered a confident zero two pixels from dsh's correct two.
+
+The count now comes from `agent.list` → `subagents.list` over ctx.apiProxy: the
+same catalog dsh reads, and the same one arxa's details panel already used, so
+the chip and the panel can no longer disagree. Subagents are not pushed the way
+jobs are, so a fetch is the only way to know; the store count is kept as the
+first paint so the chip never flashes empty on a session that has children, and
+a late reply after a session switch is discarded.
+
+Live after the fix: `2 subagents` … `Subagents · 2`.
+
+**The lesson worth keeping:** "these two chips count different things" was a
+tidy explanation that fit the symptom and closed the question. One RPC call
+would have — and eventually did — show there was no second thing being counted.
+A plausible story about a UI discrepancy is not a diagnosis.
+
 ## Not yet done
 
-- **Nothing outstanding on jobs or subagent controls.** The remaining known
-  rough edge is cosmetic: `2 subagents ⌄` beside `No subagents` (total vs live)
-  reads as a contradiction, noted above.
+Nothing outstanding on job controls, subagent controls, or the header chips.
 
 ### Closed since the last revision
 
