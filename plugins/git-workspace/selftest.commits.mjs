@@ -22,7 +22,12 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { runGit } from './lib/run.js'
-import { commitDays } from './lib/commits.js'
+import { commitDays, reviewedTip } from './lib/commits.js'
+import { WIP_IDENTITY } from './lib/run.js'
+import { initOrgRepo, wipCommit } from './lib/index.js'
+import fsx from 'node:fs'
+import osx from 'node:os'
+import pathx from 'node:path'
 
 let passed = 0
 function ok(label, fn) {
@@ -146,5 +151,36 @@ ok('commitDays on a repo with no commits returns zeros and never throws', () => 
   assert.equal(result.current, 0)
   assert.equal(result.longest, 0)
 })
+// --- reviewedTip: "did the session's real work land?" ------------------------
+{
+  const dir = fsx.mkdtempSync(pathx.join(osx.tmpdir(), 'arxa-reviewed-'))
+  try {
+    initOrgRepo(dir)
+    fsx.writeFileSync(pathx.join(dir, 'a.txt'), 'one\n')
+    runGit(['add', '-A'], { cwd: dir })
+    runGit(['commit', '-m', 'feat(a): the real work'], { cwd: dir })
+    const real = runGit(['rev-parse', 'HEAD'], { cwd: dir })
+
+    // Exactly the shape that broke cleanup: a WIP checkpoint ON TOP of the
+    // commit that merged. The tip is not in main; the reviewed commit is.
+    fsx.writeFileSync(pathx.join(dir, 'a.txt'), 'two\n')
+    wipCommit(dir, { message: 'auto-save (watcher)' })
+    const tip = runGit(['rev-parse', 'HEAD'], { cwd: dir })
+
+    ok('reviewedTip skips a WIP checkpoint sitting above the real work', () => {
+      assert.notEqual(tip, real, 'fixture: the tip really is the WIP commit')
+      assert.equal(reviewedTip(dir, 'HEAD'), real)
+    })
+    ok('reviewedTip returns the tip when the tip is itself real work', () => {
+      runGit(['commit', '--allow-empty', '-m', 'fix(a): another real one'], { cwd: dir })
+      assert.equal(reviewedTip(dir, 'HEAD'), runGit(['rev-parse', 'HEAD'], { cwd: dir }))
+    })
+    ok('reviewedTip on an unknown branch is null, never a throw', () => {
+      assert.equal(reviewedTip(dir, 'no-such-branch'), null)
+    })
+  } finally {
+    fsx.rmSync(dir, { recursive: true, force: true })
+  }
+}
 
 console.log(`# ${passed} passed`)

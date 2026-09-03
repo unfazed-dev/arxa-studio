@@ -31,6 +31,7 @@ export {
   projectRepos,
 } from './routing.js'
 export { runGit, STAGE_IDENTITY, WIP_IDENTITY } from './run.js'
+export { reviewedTip } from './commits.js'
 export { ORG_GITIGNORE, FRAME_UNIGNORE_LINES, orgIgnoreFor, ensureFrameUnignored, isRepo, hasHead, initOrgRepo, initProjectRepo, getOrigin, setOrigin, pushRepo, fetchRepo, mainSyncState, ffMergeMain, readSnapshotMarker, snapshotOrgRepo, snapshotWorkerLive, spawnSnapshotOrgRepo } from './repos.js'
 export {
   STAGE_BASE_REF,

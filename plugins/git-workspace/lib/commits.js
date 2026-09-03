@@ -229,3 +229,28 @@ export function commitDays(repoPath, { since = '90 days', env = process.env } = 
 
 /** Test-only escape hatch: force the next commitDays() call to recompute. */
 commitDays.clearCache = () => commitDaysCache.clear()
+
+/**
+ * The newest commit on `branch` that represents the session's actual work —
+ * i.e. the newest one that is NOT a WIP checkpoint.
+ *
+ * "Did this session's work land in main?" must not be asked of the raw branch
+ * tip. After a merge the tip is routinely a WIP auto-save (the watcher fires,
+ * or archive takes its own snapshot), and that checkpoint is by definition not
+ * in main — so the raw tip answers "unmerged" for a session that merged
+ * cleanly, and its remote branch is then kept forever (2026-09-03,
+ * kitchen-project #1). WIP commits are app plumbing (D18): they carry the WIP
+ * committer identity and are squashed away at the next boundary, so they are
+ * exactly what this question skips.
+ *
+ * Returns null when the branch is unreadable or holds nothing but WIP.
+ */
+export function reviewedTip(repoPath, branch, env = process.env, { limit = 100 } = {}) {
+  const log = runGit(['log', branch, '-n', String(limit), '--format=%H%x09%ce'], { cwd: repoPath, env, allowFail: true })
+  if (!log) return null
+  for (const line of log.split('\n')) {
+    const [sha, committer] = line.split('\t')
+    if (sha && committer !== WIP_IDENTITY.email) return sha
+  }
+  return null
+}

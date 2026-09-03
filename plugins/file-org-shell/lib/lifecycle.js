@@ -83,6 +83,7 @@ import {
   mintSessionPath,
   listWorktreeDirs,
   recordStage,
+  reviewedTip,
   reviveSession,
   dropSession,
   archiveSession as archiveSessionBranch,
@@ -230,7 +231,19 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     const { repoPath, kind } = resolveSessionRepo(orgPath, row.workspace, { env })
     const m = readManifest(kind === 'org' ? orgManifestPath(repoPath) : projectManifestPath(repoPath))
     if (!m.repoUrl) return 'not-published'
-    const merged = runGit(['merge-base', '--is-ancestor', row.branch, 'main'], { cwd: repoPath, env, allowFail: true }) !== null
+    // Ask whether the session's REAL work landed, not whether its branch tip
+    // did. After a merge the tip is routinely a WIP auto-save — the watcher
+    // fires, or archive takes its own "nothing is ever lost" snapshot — and
+    // that checkpoint is by definition not in main. Testing the raw tip
+    // therefore answered "unmerged" for a session that had just merged
+    // cleanly, and every such branch was kept on the remote forever
+    // (2026-09-03, kitchen-project #1). WIP commits are app plumbing, D18:
+    // they carry the WIP committer identity and are squashed away at the next
+    // boundary, so they are exactly what this question should skip.
+    const reviewed = reviewedTip(repoPath, row.branch, env)
+    const merged = reviewed
+      ? runGit(['merge-base', '--is-ancestor', reviewed, 'main'], { cwd: repoPath, env, allowFail: true }) !== null
+      : false
     if (!merged && opts.dropRemote !== true) return 'kept-unmerged'
     const creds = await githubBridge.gitCredentials()
     if (!creds || !creds.ok) return 'kept-no-creds'
