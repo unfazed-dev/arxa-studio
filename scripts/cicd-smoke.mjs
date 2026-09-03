@@ -82,7 +82,10 @@ const github = {
 let created = false
 try {
   // ---- 1. the throwaway remote --------------------------------------------
-  sh('gh', ['repo', 'create', `${owner}/${repoName}`, '--private', '--add-readme'])
+  // NO --add-readme: that would give the remote its own initial commit, with
+  // no history in common with the org repo, and every PR would 422. The real
+  // link flow pushes the org's OWN history into an empty repo; mirror it.
+  sh('gh', ['repo', 'create', `${owner}/${repoName}`, '--private'])
   created = true
   check('a throwaway private repo exists on GitHub', true)
 
@@ -114,12 +117,17 @@ try {
     ...JSON.parse(fs.readFileSync(manifest, 'utf8')),
     repoOwner: owner, repoName, localOnly: false,
   }, null, 2))
-  const remote = `https://github.com/${owner}/${repoName}.git`
-  sh('git', ['-C', org.path, 'remote', 'add', 'origin', remote])
-  // The org repo must share history with the remote, or the push is rejected
-  // and D6 never gets its chance.
-  sh('git', ['-C', org.path, 'fetch', remote, 'main'], { allowFail: true })
-  sh('git', ['-C', org.path, 'branch', '-f', 'main', 'FETCH_HEAD'], { allowFail: true })
+  const authRemote = `https://${owner}:${accessToken}@github.com/${owner}/${repoName}.git`
+  sh('git', ['-C', org.path, 'remote', 'add', 'origin', `https://github.com/${owner}/${repoName}.git`])
+  // Establish the BASE. arxa pins init.defaultBranch=main (git-workspace
+  // run.js PINNED), so the org repo is on main and openPr's base:'main' is
+  // correct — but the branch has to exist on the remote before a PR can
+  // target it.
+  const orgBranch = sh('git', ['-C', org.path, 'symbolic-ref', '--short', 'HEAD'])
+  check('the org repo is on main (arxa pins init.defaultBranch)', orgBranch === 'main', 'branch was: ' + orgBranch)
+  sh('git', ['-C', org.path, 'push', authRemote, `${orgBranch}:refs/heads/main`])
+  check('the base branch exists on the remote', 
+    ghJson(['api', `repos/${owner}/${repoName}/branches/main`, '--jq', '{n:.name}'])?.n === 'main')
 
   const sess = await act('workspace.new-session', { orgId: org.id, workspace: 'notes' })
   check('a real session was minted with an org-led path identity',
@@ -127,9 +135,25 @@ try {
   const sid = sess.result.id
 
   // ---- 3. commit + push → D6 opens the PR by itself -----------------------
-  const wt = sess.result.path ?? sess.result.worktree
-  if (wt && fs.existsSync(wt)) fs.writeFileSync(path.join(wt, 'smoke.md'), '# smoke\n')
-  await act('card.commit', { sessionId: sid, message: 'feat: smoke commit' })
+  // Resolve the worktree from the REGISTRY rather than trusting the action's
+  // result shape — an undefined path here would silently produce an empty
+  // commit and the PR would fail for a different reason entirely.
+  const gwlib = await import(P('git-workspace', 'lib', 'sessions.js'))
+  const row = gwlib.parkedSessions(org.path, process.env).find((s) => s.id === sid)
+  const wt = row?.worktree
+  check('the session worktree exists on disk', Boolean(wt) && fs.existsSync(wt), 'worktree=' + String(wt))
+  fs.writeFileSync(path.join(wt, 'smoke.md'), '# smoke\n')
+  // The arg is `subject`, and it must be CONVENTIONAL — card.commit refuses
+  // anything else (SUBJECT_RE). With a linked+credentialed origin this is the
+  // prflow shape: collapse the WIP run on the BRANCH, gate, push the branch.
+  // main is deliberately NOT touched until card.pr.merge — the old shape
+  // ff-merged to main here and every PR then 422'd with "No commits between
+  // main and arxa/<identity>" (RESTO #1-#3).
+  const committed = await act('card.commit', { sessionId: sid, subject: 'feat: add the smoke note' })
+  check('the commit was made', (committed.result ?? committed)?.ok !== false, JSON.stringify(committed).slice(0, 200))
+  check('the branch really carries a commit ahead of main',
+    sh('git', ['-C', wt, 'rev-list', '--count', 'main..HEAD']) !== '0',
+    'ahead count: ' + sh('git', ['-C', wt, 'rev-list', '--count', 'main..HEAD'], { allowFail: true }))
   const pushed = await act('card.push', { sessionId: sid })
   const pb = pushed.result ?? pushed
   check('the push landed', pushed.ok === true && pb?.ok === true, JSON.stringify(pushed).slice(0, 300))
@@ -163,7 +187,12 @@ try {
 
   // ---- 6. WRITE: reply, and confirm it on GitHub -------------------------
   const replyText = 'answered from inside arxa studio'
-  const replied = await act('insight.reply', { sessionId: sid, replyTo: thread.replyTo, body: replyText })
+  // Args are text / number / commentId (index.js:995-1017) — NOT body/replyTo.
+  // `commentId` is the thread's FIRST comment: GitHub threads a reply by its
+  // parent comment id, which is what the review shape carries as `replyTo`.
+  const replied = await act('insight.reply', {
+    sessionId: sid, number: prNumber, commentId: thread.replyTo, text: replyText,
+  })
   check('insight.reply is accepted', (replied.result ?? replied)?.ok !== false, JSON.stringify(replied).slice(0, 260))
   const bodies = ghJson(['api', `repos/${owner}/${repoName}/pulls/${prNumber}/comments`, '--jq', '[.[].body]'])
   check('the reply is really on GitHub', bodies.some((b) => String(b).includes(replyText)),

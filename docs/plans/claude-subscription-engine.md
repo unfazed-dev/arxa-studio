@@ -143,6 +143,38 @@ itself there (dsh-agent-loop/lib/index.js:1023). One factory at a time.
 - D22 (grill decisions) already fixed the default inference lane as BYO
   keys / local. This adds a third lane, "BYO subscription via Claude Code".
 
+## Spike 2026-09-03 — Claude Code under arxa's own confinement (macOS)
+
+Script: scratchpad `spike-seatbelt.sh`, `spike2.sh`, plus F/G one-liner.
+Profile = the exact SBPL dsh-sandbox-local builds for `workspace-write`
+(`lib/index.js:65-76`): allow default, deny file-write*, re-allow
+workspace + /private/tmp + os.tmpdir(). Machine logged in via claude.ai
+(`claude auth status` -> `authMethod: "claude.ai"`). Child env had
+CLAUDECODE / CLAUDE_CODE_ENTRYPOINT unset (nested-session guard).
+
+| Run | Setup | Result |
+|-----|-------|--------|
+| A | profile, default `~/.claude` | exit 0, "OK", model claude-fable-5-1. Keychain read survives Seatbelt (reads are allowed). |
+| B/C | profile + `CLAUDE_CONFIG_DIR` inside workspace | "Not logged in": keychain entry is keyed per config dir (`Claude Code-credentials-<hash>`). Do NOT relocate the config dir. |
+| C' | profile, Bash allowed, default cfg | `touch $WS/inside.txt` exit 0; `touch $HOME/…` exit 1. Confined, and Claude reported the denial honestly. |
+| D | `--resume` of A under profile | "No conversation found": transcript under `~/.claude/projects` was never written (write denied). |
+| E | unconfined control | transcript persisted. |
+| F/G | profile + `(subpath ~/.claude/projects)` | persisted; `--resume` answered "PEACH" from the prior turn. |
+
+Conclusion: Claude Code CAN be locked by arxa's environment. The child is
+spawned through the arxa sandbox provider (same `runnerArgv` seam
+`plugins/sandbox/lib/index.js` already extends) with ONE extra writable
+root, `~/.claude/projects`, so its transcripts and resume keep working.
+`~/.claude/settings.json` and the rest of `~/.claude` stay read-only, which
+is stricter than Claude Code alone. Linux (bwrap/landlock) and Windows
+(ACL) rungs need the same extra root; not yet measured.
+
+Second lock layer, free: Agent SDK options `cwd`, `additionalDirectories`,
+`settingSources` (omit user/local so a user's own hooks/MCP don't leak into
+an arxa session), `disallowedTools`, `--restricted` when a preset asks for
+no code execution. And a third: arxa's own context via
+`systemPrompt.append` / `--add-dir` for the org context chain (D1/D2).
+
 ## Verification once a shape is chosen
 
 - `claude auth status` -> JSON shows subscription login; SDK
