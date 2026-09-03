@@ -250,3 +250,48 @@ is archived — so it needs a fresh session.
 
 This run is mechanical, not a design question. It is deliberately separate from
 the integrate build above.
+
+## Card smoke run — 2026-09-03, results
+
+All 15 card actions exercised against the live RESTO / kitchen-project repos.
+**62/62 checks green** across three drivers, after two fixes.
+
+Verified working, first time exercised: `card.status` (including the new
+integrate block), `card.commit.draft`, `card.push`, `card.pr.comment`,
+`card.ci.rerun`, `card.ci.cancel`, `card.runner.wake`, `version.mint`,
+`insight.streak` (15 commits on 1 day), `insight.ci` (2 real runs),
+`insight.sessions` (9 rows), `card.integrate`, `card.integrate.finish`.
+
+The four attribution fixes confirmed on GitHub (kitchen-project#5): author is
+`unfazed-dev`, `Collaborator: Claude Opus 5@(high)` present, the recorded time
+travels in the body as `… UTC · … Australia/Melbourne`, CI rows read
+`github-actions[bot]`, and the manual comment now matches the automatic one
+field for field.
+
+### BUG FOUND AND FIXED — `finishIntegrate` was unreachable
+
+`finishIntegrate` blocked while `git diff --diff-filter=U` listed any path.
+But in arxa a conflict is resolved by the agent EDITING the file in the
+worktree; nothing runs `git add`. So the paths stayed `AA`/unmerged with the
+correct resolution sitting in them, and Finish refused forever. Observed live:
+"markers ARE resolved" while `--diff-filter=U` still listed both files.
+
+Fix: block on conflict MARKERS only — the content check, which is the real
+question — then `git add -A` and commit, because staging is the product's job
+and not the user's. A conflict with no markers to find (binary, delete/modify)
+is resolved by that `add -A`; if git still refuses, its own message is
+reported.
+
+**Why the selftest missed it:** the original test staged the resolution with
+`git add` before calling finish, so it exercised a path no user takes. The test
+now restores the unmerged state with `checkout --merge`, edits WITHOUT staging,
+and asserts git still calls the path unmerged before finishing — 33 assertions.
+
+### Driver bugs, not product bugs
+
+- `prCommentApi` returns `{id, url}` only, no `body` — part A asserted against
+  a field that never existed. Re-checked by reading the comment back from
+  GitHub; the comment was correct all along.
+- `version.mint` states are capitalised (`Draft`, `In review`, `Approved`,
+  `Superseded`, `changes-requested`). Passing `draft` is refused with the list,
+  which is the right error.

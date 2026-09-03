@@ -228,16 +228,24 @@ export function finishIntegrate(session, { author, collaborator, env = process.e
   const repoPath = session.repoPath ?? worktree
   if (!isIntegrating(worktree, env)) return { finished: false, reason: 'not-integrating' }
 
-  const stillUnmerged = unmergedPaths(worktree, env)
+  // MARKERS are the check, not git's index state. In arxa a conflict is
+  // resolved by the agent EDITING the file in the worktree — it does not run
+  // `git add`, so those paths stay `AA`/unmerged with the resolution sitting
+  // in them. Blocking on unmerged paths made Finish unreachable by the only
+  // path a user actually takes (found by the card smoke run, 2026-09-03:
+  // "markers ARE resolved" while `--diff-filter=U` still listed both files).
+  // Staging is OUR job, so it happens below.
   const stillMarked = conflictMarkerFiles(worktree, env)
-  const blocked = [...new Set([...stillUnmerged, ...stillMarked])]
-  if (blocked.length > 0) {
-    return { finished: false, reason: 'markers-remain', files: blocked, unmerged: stillUnmerged, marked: stillMarked }
+  if (stillMarked.length > 0) {
+    return { finished: false, reason: 'markers-remain', files: stillMarked, unmerged: unmergedPaths(worktree, env), marked: stillMarked }
   }
 
   runGit(['add', '-A'], { cwd: worktree, env })
   const c = runGitProbe(['-c', 'core.editor=true', 'commit', '--no-edit'], { cwd: worktree, env })
-  if (c.status !== 0) return { finished: false, reason: 'commit-failed', message: c.stderr.trim() }
+  // A conflict with no markers to find — a binary file, or delete/modify —
+  // survives the check above and is resolved by the `add -A`. If git still
+  // refuses, its own message is the honest thing to report.
+  if (c.status !== 0) return { finished: false, reason: 'commit-failed', message: c.stderr.trim(), unmerged: unmergedPaths(worktree, env) }
 
   const sha = runGit(['rev-parse', '--short', 'HEAD'], { cwd: worktree, env, allowFail: true })
   const onto = runGit(['rev-parse', '--short', 'main'], { cwd: worktree, env, allowFail: true })

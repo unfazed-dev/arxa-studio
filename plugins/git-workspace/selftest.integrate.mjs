@@ -155,8 +155,18 @@ console.log('\n— finish refuses a staged marker, the case git waves through �
 
 console.log('\n— finish after a real resolution —')
 {
+  // NOT staged, deliberately. In arxa the agent EDITS the file and nothing
+  // runs `git add` — the path stays unmerged with the resolution in it. The
+  // first version of this test staged first and so never exercised the only
+  // route a user actually takes; the card smoke run found it in production.
+  // The block above staged the file to prove the marker check bites, which
+  // also resolved it in git's eyes. Put it back to genuinely unmerged first.
+  g(B.worktree, ['checkout', '--merge', '--', 'menu.txt'], true)
+  ok(runGit(['diff', '--name-only', '--diff-filter=U'], { cwd: B.worktree, allowFail: true }) !== '',
+    'the path is unmerged again')
   fs.writeFileSync(path.join(B.worktree, 'menu.txt'), 'starter\nA-PRICING\nB-ALLERGENS\ndessert\n')
-  g(B.worktree, ['add', 'menu.txt'])
+  ok(runGit(['diff', '--name-only', '--diff-filter=U'], { cwd: B.worktree, allowFail: true }) !== '',
+    'and editing it does NOT stage it — git still calls it unmerged')
   const done = finishIntegrate(B, { author: 'unfazed-dev', collaborator: 'Claude Opus 5@(high)' })
   ok(done.finished === true, 'the merge concludes')
   ok(isIntegrating(B.worktree) === false, 'MERGE_HEAD is gone')
