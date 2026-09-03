@@ -115,6 +115,41 @@ check('a healthy store is returned byte-identical', JSON.stringify(cleanHealed.s
 const twice = healWorkspaceStore(healed.store, { exists })
 check('healing an already-healed store changes nothing', twice.changes.length === 0)
 
+// ---- 5b. one repair CREATES the next violation -----------------------------
+// This is the shape that actually cost a session on 2026-09-03: removing the
+// dead workspace row exposed a SECOND failure, an id left behind in
+// workspaceIds pointing at the row that had just gone. Each clause is tested
+// alone above; this asserts they compose in the right ORDER — the path merge
+// deletes a workspace, and the order pass must then notice the dangling id.
+const cascade = mk({
+  keep: { path: '/live/same', sessionIds: ['s1', 's2'] },
+  loser: { path: '/live/same', sessionIds: ['s3'] },
+}, ['keep', 'loser'])
+const cascadeHealed = healWorkspaceStore(cascade, { exists })
+check('cascade: a store whose repair exposes a second violation still boots',
+  boots(cascadeHealed.store), JSON.stringify(cascadeHealed.changes))
+check('cascade: the id orphaned BY the merge is dropped from the registry order',
+  !cascadeHealed.store.global.workspaceIds.includes('loser')
+  && cascadeHealed.store.global.workspaceIds.includes('keep'),
+  JSON.stringify(cascadeHealed.store.global.workspaceIds))
+check('cascade: the merged-away workspace\'s sessions are kept, never dropped',
+  ['s1', 's2', 's3'].every((s) => cascadeHealed.store.tables.workspaces.keep.sessionIds.includes(s)),
+  JSON.stringify(cascadeHealed.store.tables.workspaces.keep.sessionIds))
+
+// ---- 5c. a malformed store is left alone, not half-repaired ---------------
+for (const [label, bad] of [
+  ['workspaces is a string', { unit: {}, global: { initialized: true, workspaceIds: [] }, tables: { workspaces: 'nope' } }],
+  ['workspaces is an array', { unit: {}, global: { initialized: true, workspaceIds: [] }, tables: { workspaces: [] } }],
+  ['global is missing', { unit: {}, tables: { workspaces: {} } }],
+  ['workspaceIds is not an array', { unit: {}, global: { workspaceIds: 'x' }, tables: { workspaces: {} } }],
+]) {
+  let threw = null
+  let res = null
+  try { res = healWorkspaceStore(bad, { exists }) } catch (err) { threw = err }
+  check(`malformed store (${label}) returns instead of throwing`,
+    threw === null && res !== null && res.changes.length === 0, String(threw?.message ?? ''))
+}
+
 // ---- 6. the live store on this machine, if present -------------------------
 // Read-only: proves the heal survives real data shapes, never writes.
 const { readFileSync, existsSync } = await import('node:fs')

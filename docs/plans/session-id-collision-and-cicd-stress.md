@@ -148,14 +148,29 @@ Three scenarios, chosen as different FAILURE MODES rather than different repos:
   the H1 call reddens the H1 check, stubbing the ledger reddens the H2 check.
 - Full `node scripts/ci.mjs`: ALL GREEN, 39 suites.
 
-**S2's verdict (measured, not assumed)**
+**S2's verdict — H3 is NOT exploitable, and this is now measured**
 
-25 in-process mints and 6 separate processes, all shown the same unwritten
-registry, produce the SAME id. The day counter is therefore **not** a
-uniqueness mechanism — it is a readability feature, and uniqueness comes
-entirely from the org segment. No lock was added: a lock would only make
-concurrent creates *numbered* differently, which is not what protects the
-dsh store. Guarding the org segment (H1/H2) plus the boot heal is what does.
+An earlier draft of this plan argued from first principles that no lock was
+needed. That was reasoning presented as evidence, and it was replaced with a
+test of the real write path.
+
+Four processes were spawned to run the FULL create path (`openOrg` →
+`newSession`: mint, branch, worktree, registry write) against one org
+simultaneously. Result: **1 created, 3 refused**, every refusal
+`OrgOpenError` with `cause=ShellLockError`, failing at step
+`"shell-lock"`.
+
+So the ORG LOCK serialises concurrent creates. `writeRegistry` having no
+lockfile of its own (H3 as originally described) is real but unreachable:
+nothing gets far enough to race. No lock was added, because the one that
+matters already exists one layer up.
+
+The test asserts the refusal REASON, not just that some were refused — if it
+ever reports 4 made and 0 refused, the lock has stopped serialising and the
+counter genuinely can collide. The separate in-process check (25 mints against
+one fixed registry all return the same id) documents that the mint is
+deterministic given fixed input; on its own it says nothing about concurrency,
+which is why the write-path test exists alongside it.
 
 **NOT proven — needs the user**
 

@@ -155,38 +155,63 @@ console.log('\n=== S2  concurrency ===')
   check('mint is a pure function of the registry it is shown (25 mints, same input, one id)',
     burst.size === 1, `got ${burst.size} distinct ids`)
 
-  // Cross-process: N processes each read the SAME registry state and mint.
-  // If the mint were the uniqueness mechanism they would differ; they do not,
-  // which is the point — uniqueness comes from the org segment, and the
-  // counter is only a per-day convenience.
-  const script = path.join(tmp('script'), 'mint.mjs')
-  fs.writeFileSync(script, `
-import path from 'node:path'
-const { mintSessionPath, parkedSessions } = await import(${JSON.stringify(P('git-workspace', 'lib', 'sessions.js'))})
-const orgPath = process.argv[2]
-const sessions = parkedSessions(orgPath, process.env)
-process.stdout.write(mintSessionPath({ org: path.basename(orgPath), workspace: 'notes', name: 'note', sessions }))
-`)
-  const ids = []
-  for (let i = 0; i < 6; i++) {
-    const r = spawnSync(process.execPath, [script, org.path], { env, encoding: 'utf8' })
-    if (r.status === 0) ids.push(r.stdout.trim())
-  }
-  const distinct = new Set(ids)
-  check('6 processes minting against one unwritten registry all reach the same id',
-    ids.length === 6 && distinct.size === 1, JSON.stringify(ids))
-  // THE VERDICT. Concurrent creates rely on each committing before the next
-  // reads. Nothing enforces that, so the counter is not a uniqueness
-  // guarantee — it is a readability feature. Recorded, not silently assumed.
-  check('VERDICT: the day counter is NOT a uniqueness mechanism (org segment is)',
-    [...distinct][0].startsWith(path.basename(org.path) + '/notes/'))
+  // THE ACTUAL RACE. The block above only shows the mint is deterministic
+  // given fixed input — it proves nothing about concurrency, because nothing
+  // was written between mints. This spawns real processes that each run the
+  // FULL create path (openOrg → newSession: mint, branch, worktree, registry
+  // write) against one org at the same time, which is the only way to find
+  // out whether two simultaneous creates can land on one id.
+  const child = path.join(tmp('script'), 'create.mjs')
+  fs.writeFileSync(child, `
+const { createOrgLifecycle } = await import(${JSON.stringify(P('file-org-shell', 'lib', 'index.js'))})
+const svc = createOrgLifecycle({ workspaceRoot: process.argv[2], env: process.env })
+try {
+  const opened = await svc.openOrg(process.argv[3])
+  const r = await opened.newSession('note', 'notes')
+  process.stdout.write('OK ' + r.id)
+} catch (err) {
+  // The NAME is the contract (OrgLockedError); the message is prose and gets
+  // truncated. Assert on the name.
+  process.stdout.write('ERR ' + (err && err.name) + ' | cause=' + (err && err.cause && err.cause.name) + ' | ' + String(err && err.message).replace(/\s+/g, ' ').slice(0, 200))
 }
+// openOrg leaves a handle open (the org lock), so the child would never exit
+// on its own and the parent's 'close' would never fire. Exit explicitly —
+// what is being measured is concurrent CREATES, not process teardown.
+process.exit(0)
+`)
+  const { spawn } = await import('node:child_process')
+  const runs = await Promise.all([0, 1, 2, 3].map(() => new Promise((res) => {
+    const p = spawn(process.execPath, [child, rootX, org.path], { env })
+    let out = ''
+    p.stdout.on('data', (d) => { out += d })
+    p.on('close', () => res(out.trim()))
+  })))
+  const madeIds = runs.filter((r) => r.startsWith('OK ')).map((r) => r.slice(3))
+  const refused = runs.filter((r) => r.startsWith('ERR '))
+  console.log('      concurrent creates: ' + madeIds.length + ' made, ' + refused.length + ' refused')
+  check('every session a concurrent create actually produced has a DISTINCT id',
+    new Set(madeIds).size === madeIds.length,
+    JSON.stringify(runs))
+  check('at least one concurrent create got through (the test really ran)',
+    madeIds.length >= 1, JSON.stringify(runs))
+  // THE H3 VERDICT, measured rather than argued. The losers do not race and
+  // do not crash — they are turned away by the ORG LOCK, which is what makes
+  // the read-modify-write mint safe across processes despite writeRegistry
+  // being a bare writeFileSync with no lockfile of its own. If this ever goes
+  // green with 4 made and 0 refused, the lock has stopped serialising and the
+  // counter really can collide.
+  check('H3: the losers are refused by the org lock, not left to race or crash',
+    refused.length === 0 || refused.every((r) => /ShellLockError/.test(r)),
+    JSON.stringify(refused))
+  // Whatever ids were produced must also be distinct in the REGISTRY, not
+  // just in the processes' return values — a lost write would show up here.
+  const persisted = parkedSessions(org.path, env).map((s) => s.id)
+  check('the registry persisted every created id, none lost to a clobbering write',
+    madeIds.every((id) => persisted.includes(id))
+    && new Set(persisted).size === persisted.length,
+    'made=' + JSON.stringify(madeIds) + ' persisted=' + JSON.stringify(persisted))
 
-// ===========================================================================
-// S3 — PARTIAL FAILURE
-// The push lands on the remote but opening the PR fails. The branch now exists
-// with no PR: the user must be TOLD, not silently left half-done, and a retry
-// must open the PR rather than push twice or wedge.
+}
 // ===========================================================================
 console.log('\n=== S3  partial failure: push lands, PR open fails ===')
 {

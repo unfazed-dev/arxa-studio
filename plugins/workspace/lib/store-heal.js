@@ -36,7 +36,11 @@ export function healWorkspaceStore(store, { exists = fs.existsSync } = {}) {
   const changes = []
   const table = out?.tables?.workspaces
   const global = out?.global
-  if (!table || !global || !Array.isArray(global.workspaceIds)) return { store: out, changes }
+  // A malformed store is left EXACTLY as it was rather than half-repaired:
+  // `typeof null === 'object'` and a string would survive a bare truthiness
+  // check and then be walked by Object.keys as if it were a record map.
+  const plain = (v) => typeof v === 'object' && v !== null && !Array.isArray(v)
+  if (!plain(table) || !plain(global) || !Array.isArray(global.workspaceIds)) return { store: out, changes }
 
   // Order is the tie-break authority throughout, so read it once up front —
   // later clauses rewrite `workspaceIds` and must not re-derive from it.
