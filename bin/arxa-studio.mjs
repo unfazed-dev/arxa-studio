@@ -511,6 +511,42 @@ const loaderArgs = ['--import', pathToFileURL(join(here, 'loopback-localhost-pat
 const childEnv = Object.fromEntries(
   Object.entries(process.env).filter(([k]) => !k.startsWith('DSH_')))
 
+// ---- workspace store preflight (2026-09-03) -------------------------------
+// dsh validates the workspace domain at BOOT and every failure is a hard
+// throw, so ONE duplicated session id means the engine never starts — and a
+// product that will not start cannot offer a repair UI. That is not
+// hypothetical: a legacy bare-leaf id claimed by two workspaces took this
+// engine down and had to be fixed by hand-editing the user's JSON.
+//
+// dsh is a dependency, never a fork, so the validator stays untouched and the
+// repair runs here instead — before the child is spawned. Loud, backed up,
+// and conservative: nothing whose path still exists is ever deleted.
+try {
+  const { healWorkspaceStore } = await import(
+    pathToFileURL(join(here, '..', 'plugins', 'workspace', 'lib', 'store-heal.js')).href)
+  const storeFile = join(dshHome, 'storages', 'workspace.json')
+  if (existsSync(storeFile)) {
+    const { store, changes } = healWorkspaceStore(JSON.parse(readFileSync(storeFile, 'utf8')))
+    if (changes.length > 0) {
+      // Back up BEFORE writing: this is the user's session-to-workspace map,
+      // and a wrong repair must stay undoable.
+      const backup = storeFile + '.bak-' + new Date().toISOString().replace(/[:.]/g, '-')
+      copyFileSync(storeFile, backup)
+      writeFileSync(storeFile, JSON.stringify(store, null, 2) + '\n')
+      const lines = [
+        'arxa: repaired the workspace store so dsh can boot (' + changes.length + ' change(s)):',
+        ...changes.map((c) => '  - ' + c),
+        '  backup: ' + backup,
+      ]
+      for (const l of lines) { console.error(l); engineLog(l) }
+    }
+  }
+} catch (err) {
+  // A store that cannot be read or healed is left exactly as it was; dsh will
+  // report it itself. Never turn a repair attempt into a new failure mode.
+  engineLog('arxa: workspace store preflight skipped — ' + (err?.message ?? err))
+}
+
 const child = spawn(process.execPath, [...loaderArgs, dshBin, '--profile', 'arxa', ...passthrough, ...trustArgs], {
   stdio: packed ? ['ignore', engineLogFd, engineLogFd] : 'inherit',
   env: { ...childEnv, DSH_HOME: dshHome, PI_CODING_AGENT_DIR: piHome },
