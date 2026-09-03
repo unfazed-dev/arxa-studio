@@ -79,6 +79,21 @@ reads `scopeOf(owner.ctx)` and threw `Cannot read properties of undefined
 `0` — correct, because no background job was running at probe time. That `[]`
 is therefore **not** evidence of a fence; it is evidence of an empty registry.
 
+**`caller.id` really is the session id** (checked after the grill, because D1
+rests on it). `Agent` is declared at
+`@deepseek-ai/dsh-agent/lib/types/runtime-types.d.ts:60-62`:
+
+```ts
+export interface Agent {
+    /** The single identity shared with {@link session}. */
+    readonly id: SessionId;
+```
+
+So `job.owner.id` is the owning session's id, and `{ id: sessionId }` matches it
+exactly. Had `Agent` carried only `sessionId`, `list()` would have returned `[]`
+silently — indistinguishable from the empty-registry result above, and D1 would
+have been built on nothing.
+
 ## What genuinely IS blocked (re-confirmed, unchanged)
 
 Checked against `@deepseek-ai/dsh-host-apiproxy/lib/types/api/rpc-map.d.ts`,
@@ -145,7 +160,14 @@ fail if jobs became controllable tomorrow.
 | D2 | Guard the undocumented seam | **CI gate + runtime degrade.** A selftest reads the installed `dsh-jobs-local` and asserts the fence is still the `.id` comparison, so a dsh upgrade is a loud RED naming the file. At runtime every registry call is wrapped; a throw falls back to today's honest `no-job-api` refusal. A user on a newer dsh gets a disabled button with a reason, never a crash. |
 | D3 | Subagent control surface | **Pause + a real wake box; Cancel stays refused.** Pause keeps `subagent.interrupt`. The dead Resume button becomes a message box sending through `subagent.prompt`, whose contract is "delivers human content to a continuable child" — asking the human for the words is not inventing them. Cancel stays disabled with `no-terminate-verb`, because none exists anywhere in the build. Closes gap 2. |
 | D4 | Background-work insight | **Live rows with real status + Cancel.** The jobs view round-trips to the host like subagents already do — real kind, label, status, elapsed, owner from the registry, refreshed on `onJobsChanged`. No new storage: a persisted history was considered and dropped, because `dsh-jobs-local` is in-memory only and a history would mean arxa owning a new on-disk log, its growth and its pruning. |
-| D5 | How it is proven | **Offline selftest + one live cancel.** A selftest drives the real handler against a fake registry for the logic and every refusal path, plus the D2 gate. Then one live run: prompt a session to start a background `sleep`, watch it appear in the card, cancel it from the button, confirm it died. |
+| D5 | How it is proven | **Offline selftest + one live cancel.** A selftest drives the real handler against a fake registry for the logic and every refusal path, plus the D2 gate. Then one live run: prompt a session to start a background `sleep`, watch it appear in the card, cancel it from the button, confirm it died. **The live run's FIRST assertion is that the job appears in `jobs.list({ id: sessionId })` at all** — the probe only ever saw an empty registry, so until one real job is observed through it, D1 and D4 rest on an inference, which is the exact shape of the fact this document corrects. |
+
+| D6 | The stronger subagent stop, found after Q3 | **Not used.** `ctx.get('agents').get(sessionId)` returns the live `Agent`, whose `cancel(cause, {keepInbox})` aborts the active turn AND clears queued work — a harder stop than `interrupt`. It is deliberately NOT wired. The jobs seam is dsh *not offering* a wire verb; this is dsh's wire verb existing and **explicitly refusing** subagents (`session.cancel`: "Session-backed subagents reject with `agent-busy`"). Going around a refusal is not the same as using an unoffered seam, and D1's reasoning does not cover it. Cancel keeps `no-terminate-verb`. |
+
+**Consequence of D6:** a runaway subagent still cannot be stopped from arxa.
+That is a known, accepted cost. Revisit only if someone establishes *why*
+`session.cancel` refuses subagents — if the reason turns out to be turn
+accounting rather than authority, the answer may change.
 
 ### Consequences taken without a separate question
 
