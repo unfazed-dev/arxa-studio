@@ -3663,16 +3663,44 @@ window.__ModuleLoader__.load({
 			});
 		}
 		function ArxaSubagentsPlaceholder({ sessionId, useSessions, t }) {
-			/* Descendants are derived from the session map rather than from
-			 * indexSubagentDescendants: a durable child carries
-			 * origin:"subagent" plus this session as its parent, which is the
-			 * same durable bit the stock index folds, with no extra import. */
-			const count = useSessions((state) => {
+			/* THE COUNT COMES FROM THE HOST, and it did not always.
+			 *
+			 * This used to derive descendants from the client session map —
+			 * `state.byId` filtered on origin:"subagent" plus this parent — on
+			 * the reasoning that a durable child carries the same bit the stock
+			 * index folds. The shape was right and the answer was wrong: the
+			 * store only holds sessions the client has actually loaded, and
+			 * subagent children are not among them. A session with two real
+			 * children rendered "No subagents" while dsh's own chip, two
+			 * pixels away, said "2 subagents". Not a wording clash — a false
+			 * count sitting beside a true one.
+			 *
+			 * `agent.list` reaches `subagents.list` over ctx.apiProxy, which is
+			 * the same catalog dsh reads, so this and the details panel can no
+			 * longer disagree. Subagents are NOT pushed (unlike jobs), so a
+			 * fetch is the only way to know — the panel already worked this way.
+			 * One request per session, and the store count is kept as the
+			 * first paint so the chip never flashes empty on a session that
+			 * has children. */
+			const stored = useSessions((state) => {
 				const by = state.byId || {};
 				let n = 0;
 				for (const k in by) { const s = by[k]; if (s && s.origin === "subagent" && s.parentSessionId === sessionId) n += 1; }
 				return n;
 			});
+			const [fetchedCount, setFetchedCount] = (0, react.useState)(null);
+			(0, react.useEffect)(() => {
+				if (!sessionId) { setFetchedCount(null); return; }
+				let live = true;
+				setFetchedCount(null);
+				ORG_POST("agent.list", { sessionId: sessionId }).then((b) => {
+					if (!live) return;
+					const r = (b && b.result) || {};
+					setFetchedCount(Array.isArray(r.subagents) ? r.subagents.length : 0);
+				}, () => { if (live) setFetchedCount(null); });
+				return () => { live = false; };
+			}, [sessionId]);
+			const count = fetchedCount === null ? stored : fetchedCount;
 			if (count > 0) return (0, react_jsx_runtime.jsx)(ArxaAgentControl, { kind: "subagents", sessionId: sessionId, count: count, t: t });
 			return (0, react_jsx_runtime.jsx)(ArxaEmptyChip, {
 				label: t("agents.subagents.empty"),

@@ -737,6 +737,17 @@ for (const reason of ['subagents-only', 'message-required', 'wrong-plane']) {
 check('locale: the wake control itself is translated in all 3 dictionaries',
   (client.match(/"agents\.wake"\s*:\s*"/g) ?? []).length === 3
   && (client.match(/"agents\.wakePlaceholder"\s*:\s*"/g) ?? []).length === 3)
+// The subagent chip counted from `state.byId`, which only holds sessions the
+// client has loaded — subagent children are not among them. A session with two
+// real children rendered "No subagents" next to dsh's own "2 subagents". The
+// count now comes from agent.list (the same catalog dsh reads), with the store
+// count kept only as the first paint so the chip never flashes empty.
+check('client: the subagent count comes from the HOST catalog, not the client store alone',
+  client.includes('const [fetchedCount, setFetchedCount]')
+  && /ORG_POST\("agent\.list", \{ sessionId: sessionId \}\)[\s\S]{0,260}setFetchedCount\(Array\.isArray\(r\.subagents\)/.test(client)
+  && client.includes('const count = fetchedCount === null ? stored : fetchedCount;'))
+check('client: the subagent fetch is guarded against a late reply after a session switch',
+  /let live = true;[\s\S]{0,400}return \(\) => \{ live = false; \};/.test(client))
 // Only `running` arms the button. `stopping` is still live but a cancel is
 // already in flight; arming it again invites a click that changes nothing.
 check('client: only a RUNNING job offers cancel, and stopping says why',
