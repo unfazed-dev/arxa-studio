@@ -342,14 +342,20 @@ export function setOrigin(dir, url, env = process.env) {
  *
  * @returns {boolean} true when the fetch command succeeded.
  */
-export function fetchRepo(dir, url, env = process.env) {
+export function fetchRepo(dir, url, env = process.env, { timeout } = {}) {
   if (typeof url !== 'string' || url.trim() === '') {
     throw new TypeError('fetchRepo: url must be a non-empty string')
   }
+  // GIT_TERMINAL_PROMPT=0 stops a credential PROMPT from hanging; it does
+  // nothing for a dead or slow socket, and runGit is synchronous — so a caller
+  // on a hot path must bound this or freeze the engine's whole event loop
+  // (run.js documents the 6-minute freeze that taught us). Default stays
+  // unbounded so existing callers are unchanged; the 30s status poll passes one.
   const out = runGit(['fetch', url, '+refs/heads/main:refs/remotes/origin/main'], {
     cwd: dir,
     env: { ...env, GIT_TERMINAL_PROMPT: '0' },
     allowFail: true,
+    timeout,
   })
   return out !== null || runGit(['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main'], { cwd: dir, env, allowFail: true }) !== null
 }

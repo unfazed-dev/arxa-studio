@@ -302,13 +302,13 @@ export async function mergeSessionPr(repoPath, id, {
  *
  * @returns {{ fetched: boolean, advanced: boolean, localMainSha: string|null, sync: object, reason?: string }}
  */
-export function reconcileLocalMain(repoPath, { env = process.env, origin } = {}) {
+export function reconcileLocalMain(repoPath, { env = process.env, origin, timeout } = {}) {
   const url = origin !== undefined ? origin : getOrigin(repoPath, env)
   const localSha = () => runGit(['rev-parse', 'main'], { cwd: repoPath, env, allowFail: true })
   if (url === null || url === undefined) {
     return { fetched: false, advanced: false, localMainSha: localSha(), sync: mainSyncState(repoPath, env), reason: 'no-origin' }
   }
-  const fetched = fetchRepo(repoPath, url, env)
+  const fetched = fetchRepo(repoPath, url, env, { timeout })
   const advanced = ffMergeMain(repoPath, env)
   const sync = mainSyncState(repoPath, env)
   return {

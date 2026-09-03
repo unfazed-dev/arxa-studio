@@ -36,6 +36,9 @@ import { recordStage } from './ledger.js'
 /** Conflict markers at the start of a line — what a resolution must remove. */
 const MARKER_RE = '^(<<<<<<<|>>>>>>>) '
 
+/** A user pressed a button and is watching — bound it, but generously. */
+export const FETCH_TIMEOUT_MS = 30_000
+
 /**
  * Is a merge sitting half-finished in this worktree?
  *
@@ -104,7 +107,10 @@ export function mergePreview(repoPath, branch, { env = process.env, base = 'main
       const r = runGitProbe(['merge-tree', '--write-tree', '--name-only', base, branch], {
         cwd: repoPath,
         env,
-        objectDir: { write: scratch, read: path.join(repoPath, '.git', 'objects') },
+        // `--git-path` rather than `.git/objects`: in a LINKED worktree `.git`
+        // is a file, so the joined path does not exist and the fast probe
+        // would silently fall back to the legacy one.
+        objectDir: { write: scratch, read: runGit(['rev-parse', '--git-path', 'objects'], { cwd: repoPath, env, allowFail: true }) ?? path.join(repoPath, '.git', 'objects') },
       })
       if (r.status === 0) return { behind, conflicts: false, files: [], mode: 'merge-tree' }
       if (r.status === 1) {
@@ -173,7 +179,7 @@ export function integrateMain(session, { author, collaborator, env = process.env
   const url = origin !== undefined ? origin : getOrigin(repoPath, env)
   let fetched = false
   if (url !== null && url !== undefined) {
-    fetched = fetchRepo(repoPath, url, env)
+    fetched = fetchRepo(repoPath, url, env, { timeout: FETCH_TIMEOUT_MS })
     ffMergeMain(repoPath, env)
   }
   const sync = mainSyncState(repoPath, env)
