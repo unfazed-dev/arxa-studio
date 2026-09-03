@@ -39,6 +39,7 @@ export class Probe {
       options: {
         pathToClaudeCodeExecutable: this.binary, env: this.env, settingSources: [], persistSession: false,
         maxTurns: 0, abortController: abort, tools: [], systemPrompt: { type: 'custom', prompt: 'probe' },
+        permissionMode: 'default',
       },
     })
     const timer = setTimeout(() => abort.abort(), this.timeoutMs)
