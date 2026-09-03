@@ -319,13 +319,55 @@ three places, deliberately:
   red instead of silently un-freezing the clock. Negative control: renaming
   `finishedAt` in the installed dsh made it FAIL, restoring made it pass.
 
+## D4 landed — and it was smaller than planned
+
+The plan assumed a new generated client plugin copying `dsh-client-ui-jobs`.
+That was wrong: **arxa already had the chip.** `ArxaJobsPlaceholder`
+(arxa-sidebar, order 19) renders `ArxaAgentControl` with real rows as soon as
+`count > 0`, with a capability map, a menu and per-row verbs. Only the claim was
+stale — `arxaJobRow` hardcoded `can.cancel: false, why: "no-job-api"`.
+
+So D4 was three surgical changes, not a new plugin:
+
+1. **The claim.** `cancel` is armed on `running` only. `stopping` is still live
+   but a cancel is already in flight — arming it again invites a click that
+   changes nothing. `pause` now refuses with `jobs-have-no-pause` (the status
+   union has no paused member) rather than the stale `no-job-api`.
+2. **The dispatch.** A job row goes to `/__arxa/jobs/action`, not the agent
+   plane. No `load()` after: the registry's push repaints the menu in ~154ms,
+   and re-fetching would race it.
+3. **The duplicate.** See below.
+
+### The stock chip came down, and the earlier reasoning was wrong
+
+This document previously recorded leaving `dsh-client-ui-jobs` mounted, because
+"replacing it would make arxa diverge from stock on every upgrade". Wrong twice:
+
+- **It is not what leaving it produces.** `conversation.session.header.actions`
+  is kind:list, `replaceRisk: none` — additive. arxa's chip and dsh's both read
+  `state.jobsBySession`, so with one job running the header would show **two**
+  job chips, and only arxa's could act.
+- **Disabling costs no divergence.** `- id: ui-jobs / disabled: true` lives in
+  *arxa's* patch; dsh's file is never touched and its package stays
+  byte-identical. Rows 11a/11/11c already do exactly this for `ui-sidebar`,
+  `ui-workspace` and `ui-layout`. Delete the row to revert.
+
+The stock chip was the only surface showing a duration, so the arxa row **gained
+elapsed** rather than losing it — same freeze rule as the host row, ticking once
+a second only while the menu is open over a live job.
+
 ## Not yet done
 
-- **D4's UI.** The chip still renders from the client store and shows no status,
-  no elapsed and no Cancel. The host half it needs now exists and is proven —
-  including that its cancel repaints the browser.
 - **D3's wake box.** `subagent.prompt` is confirmed as the sanctioned wake, but
   nothing is wired.
+- **`busy` is per-menu, not per-row.** With two live jobs, cancelling one greys
+  out both rows' buttons. Same class as the ticking clock; key it by row id.
+- **The populated chip has never been SEEN.** Everything above is proven at the
+  route level (live, twice, with the repaint push) and asserted at the source
+  level, but no screenshot shows the button rendered: arxa's sidebar is
+  org-based, so a scratch workspace never appears in it and the browser could
+  not be driven onto a session holding a job. Only the empty branch is
+  photographed. Worth one manual look next time a real background job runs.
 
 ### Closed since the last revision
 
