@@ -252,6 +252,23 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     const exists = runGit(['ls-remote', '--heads', url, row.branch], { cwd: repoPath, env, allowFail: true })
     if (!exists || exists.trim() === '') return 'absent'
     runGit(['push', url, '--delete', 'refs/heads/' + row.branch], { cwd: repoPath, env })
+    // Drop the local mirror of the branch we just deleted.
+    //
+    // `push --delete` DOES prune `refs/remotes/<remote>/<branch>` — but only
+    // when it is given a remote NAME. The delete above goes to a
+    // token-bearing URL (pushUrlFor, so the push never falls back to a TTY
+    // password prompt), and a URL has no tracking namespace to prune, so git
+    // deletes the branch and leaves the mirror standing. Measured both ways
+    // before writing this line, because the plausible-sounding reason (the
+    // ref was hand-written by prflow's pushSessionBranch, so git does not
+    // own it) is NOT why — a named-remote delete prunes that same
+    // hand-written ref perfectly well.
+    //
+    // Left behind, the ref claims a remote branch that no longer exists:
+    // ahead/behind on a revived session would answer from it, and one
+    // accumulates per merged session forever (RESTO and kitchen-project
+    // both carried one, 2026-09-03).
+    runGit(['update-ref', '-d', 'refs/remotes/origin/' + row.branch], { cwd: repoPath, env, allowFail: true })
     return merged ? 'deleted-merged' : 'deleted-closed'
   }
 

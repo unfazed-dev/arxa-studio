@@ -347,6 +347,41 @@ try {
       'pressure: `branch --merged main` lists all 10 session branches (D107)')
   }
 
+  // --- the stale remote-tracking mirror the cleanup stage must delete -------
+  // dropRemoteSessionBranch (file-org-shell/lib/lifecycle.js) pushes its
+  // delete to a token-bearing URL, not to the remote NAME. That distinction
+  // is the whole bug: a named-remote delete prunes refs/remotes/origin/<b>,
+  // a URL delete cannot (a URL has no tracking namespace), so the mirror
+  // outlives the branch. Asserted here as behaviour, both ways round, so a
+  // future refactor back to `push origin --delete` does not silently make
+  // the extra update-ref look redundant.
+  {
+    const bare = path.join(root, 'mirror-remote.git')
+    g(root, ['init', '--bare', bare])
+    const w = path.join(root, 'mirror-work')
+    g(root, ['init', w])
+    fs.writeFileSync(path.join(w, 'f.txt'), 'x\n')
+    g(w, ['add', '-A']); g(w, ['commit', '-m', 'feat: seed'])
+    g(w, ['branch', '-M', 'main']); g(w, ['push', bare, 'main'])
+    const br = 'arxa/ORG/notes/n-1'
+    g(w, ['checkout', '-b', br])
+    fs.writeFileSync(path.join(w, 'f.txt'), 'y\n')
+    g(w, ['commit', '-am', 'feat: work'])
+    // exactly what prflow's pushSessionBranch does: URL push + hand-written mirror
+    g(w, ['push', bare, `refs/heads/${br}:refs/heads/${br}`])
+    g(w, ['update-ref', `refs/remotes/origin/${br}`, g(w, ['rev-parse', br])])
+    g(w, ['checkout', 'main'])
+    const mirror = () => g(w, ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${br}`], true)
+
+    ok(mirror() !== null, 'mirror: prflow writes refs/remotes/origin/<branch> on push')
+    // exactly what dropRemoteSessionBranch does
+    g(w, ['push', bare, '--delete', `refs/heads/${br}`])
+    ok(g(w, ['ls-remote', '--heads', bare, br], true) === '', 'mirror: the remote branch really is deleted')
+    ok(mirror() !== null, 'mirror: a URL delete leaves the tracking ref behind — the leak')
+    g(w, ['update-ref', '-d', `refs/remotes/origin/${br}`])
+    ok(mirror() === null, 'mirror: the cleanup stage\'s update-ref -d clears it')
+  }
+
   console.log(`\nprflow selftest: ${passed} checks passed`)
 } finally {
   fs.rmSync(root, { recursive: true, force: true })
