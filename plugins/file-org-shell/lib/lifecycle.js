@@ -87,6 +87,7 @@ import {
   sessionStageBoundary,
   rekeySessionsProject,
   writeFrameFiles,
+  ensureFrameUnignored,
   FRAME_VERSION,
   settingsPayload,
   protectionPayload,
@@ -339,13 +340,32 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       const manifestFile = kind === 'org' ? orgManifestPath(repoPath) : projectManifestPath(repoPath)
       const m = readManifest(manifestFile)
       if (!m.repoUrl || !m.repoOwner || !m.repoName) return { skipped: 'not-published' }
-      if (m.frameWired === true) return { skipped: 'wired' }
-      const wrote = writeFrameFiles(repoPath, kind, { includeCiYml: true })
-      if (wrote.written.length) {
-        runGit(['add', 'check.sh', '.github'], { cwd: repoPath, allowFail: true })
-        runGit(['commit', '-m', 'chore(ci): wire the arxa frame (checks, workflow, PR template)'], { cwd: repoPath, allowFail: true })
+      // "Wired" only counts when the frame files are actually versioned.
+      // RESTO (2026-09-03) carried frameWired:true while check.sh and
+      // .github/ sat ignored by the org whitelist .gitignore: git refused
+      // the `add` (exit 1, "use -f"), allowFail swallowed it, so GitHub
+      // never had a workflow and no CI run ever happened. Re-wire in that
+      // state, and verify tracking instead of trusting the add.
+      const frameTracked = () => runGit(['ls-files', '--error-unmatch', '--', 'check.sh', '.github/workflows/ci.yml'], { cwd: repoPath, allowFail: true }) !== null
+      const alreadyWired = m.frameWired === true && frameTracked()
+      // upgrade: a stale stamped file (older FRAME_VERSION) is rewritten;
+      // a hand-modified one is left alone (conflicted) — nothing ever
+      // called upgrade before, so RESTO kept a pre-Q7 ci.yml forever.
+      const wrote = writeFrameFiles(repoPath, kind, { includeCiYml: true, upgrade: true })
+      if (kind === 'org') ensureFrameUnignored(repoPath)
+      runGit(['add', '--', '.gitignore', 'check.sh', '.github'], { cwd: repoPath, allowFail: true })
+      if (!frameTracked()) {
+        throw new Error('frame-files-untracked: check.sh/.github are ignored by .gitignore, the frame cannot reach GitHub')
+      }
+      // `diff --cached --quiet` exits 1 (→ null) when something is staged.
+      if (runGit(['diff', '--cached', '--quiet'], { cwd: repoPath, allowFail: true }) === null) {
+        const msg = alreadyWired
+          ? `chore(ci): upgrade the arxa frame to v${FRAME_VERSION}`
+          : 'chore(ci): wire the arxa frame (checks, workflow, PR template)'
+        runGit(['commit', '-m', msg], { cwd: repoPath, allowFail: true })
         await pushWithAuthRetry(repoPath, m.repoUrl, kind).catch(() => null)
       }
+      if (alreadyWired) return { skipped: 'wired', upgraded: wrote.upgraded, conflicted: wrote.conflicted }
       const wired = await githubBridge.wireFrame(m.repoOwner, m.repoName, { settings: settingsPayload(), protection: protectionPayload() })
       const fields = {}
       if (wired.ok) {
@@ -1110,8 +1130,13 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           if (title === '') throw new Error('name-required: a session name cannot be empty')
           // D98: the id may live in a project registry — look across all of
           // them, and let annotateSession's own preamble find the owner.
-          if (allSessions(resolved, env).every((s) => s.id !== id)) throw new Error('unknown-session: ' + id)
-          return annotateSession(resolved, id, { name: title }, env)
+          const row = allSessions(resolved, env).find((s) => s.id === id)
+          if (!row) throw new Error('unknown-session: ' + id)
+          const out = annotateSession(resolved, id, { name: title }, env)
+          // Q1 follow-up (2026-09-03): the dsh header title follows the
+          // registry name — re-pin the live conversation. Best-effort.
+          if (row.dshSessionId) await dshBridge.retitle(row.dshSessionId, title)
+          return out
         },
         async resumeSession(id, opts = {}) {
           // Sessions branch from HEAD; until the initial snapshot lands
@@ -1146,8 +1171,14 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           // (cwd = the worktree) so every opened session owns one; the
           // sidebar client then focuses it via the client sessions service
           // (2026-08-30). Best-effort: dsh absence never blocks git revival.
-          if (row?.dshSessionId) await dshBridge.attach(row.dshSessionId)
-          else if (out?.worktree) {
+          if (row?.dshSessionId) {
+            await dshBridge.attach(row.dshSessionId)
+            // Q1 follow-up (2026-09-03): re-pin the header title to the
+            // registry name on every resume (boot restore + row click both
+            // route through session.open). Sessions born before the spawn
+            // pin existed kept dsh's auto title — seen live on note-002.
+            await dshBridge.retitle(row.dshSessionId, typeof out?.name === 'string' ? out.name : row.name)
+          } else if (out?.worktree) {
             const spawned = await dshBridge.spawn({ cwd: out.worktree, name: out.name })
             if (spawned.ok) await annotateSession(resolved, id, { dshSessionId: spawned.id, dshStatus: null }, env)
           }

@@ -192,7 +192,10 @@ try {
     const r = readySession(repoPath, 'red1', { subject: 'feat: the thing' })
     ok(r.gate.green === false && r.gate.kind === 'check.sh', 'red gate: check.sh ran and failed')
     ok(r.pushed === false && r.reason === 'gate-red', 'red gate: readySession refuses to push')
-    ok(r.collapsed === false && r.sha === null, 'red gate: the branch is not even collapsed')
+    // 156a1ba: collapse runs BEFORE the gate (the light gate needs a clean
+    // tree), so a red gate leaves the collapsed commit on the local branch
+    // (D40, nothing lost) and still publishes nothing.
+    ok(r.collapsed === true && /^[0-9a-f]{40}$/.test(r.sha ?? ''), 'red gate: collapsed locally, commit kept on the branch')
     ok(remoteHeadSha(s.branch) === null, 'red gate: the branch never reached origin')
     ok(calls.length === before, 'red gate: no GitHub call of any kind was made')
   }

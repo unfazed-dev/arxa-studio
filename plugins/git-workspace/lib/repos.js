@@ -196,11 +196,37 @@ export function orgIgnoreFor({ includeExisting = true, managedDirs = [] } = {}) 
     '!/.gitignore',
     '!/org.json',
     '!/AGENTS.md',
+    ...FRAME_UNIGNORE_LINES,
   ]
   for (const d of managedDirs) {
     if (d !== 'projects' && d !== 'account') lines.push('!/' + d + '/')
   }
   return lines.join('\n') + '\n'
+}
+
+/** The CI frame (check.sh + .github/) must be versioned or GitHub never
+ * sees a workflow. The whitelist contract above ignored both until
+ * 2026-09-03 (RESTO: `frameWired: true`, zero runs ever — `git add` on an
+ * ignored path is a silent no-op). */
+export const FRAME_UNIGNORE_LINES = ['!/check.sh', '!/.github/']
+
+/**
+ * Patch an existing org .gitignore that uses the `/*` whitelist so the
+ * frame files are tracked. Idempotent; a D37-default ignore (no `/*`
+ * line) is left alone because it never ignored them.
+ * @returns {{ changed: boolean, reason?: string }}
+ */
+export function ensureFrameUnignored(orgPath) {
+  const file = path.join(orgPath, '.gitignore')
+  let text
+  try { text = fs.readFileSync(file, 'utf8') } catch { return { changed: false, reason: 'no-gitignore' } }
+  const lines = text.split('\n')
+  if (!lines.includes('/*')) return { changed: false, reason: 'not-whitelist' }
+  const missing = FRAME_UNIGNORE_LINES.filter((l) => !lines.includes(l))
+  if (missing.length === 0) return { changed: false, reason: 'already' }
+  const body = text.endsWith('\n') ? text : text + '\n'
+  fs.writeFileSync(file, body + missing.join('\n') + '\n')
+  return { changed: true }
 }
 
 /**
