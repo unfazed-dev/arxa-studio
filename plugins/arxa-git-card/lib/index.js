@@ -151,14 +151,20 @@ export function apply(ctx) {
             const urlFor = (creds) => origin.replace('https://', 'https://' + encodeURIComponent(creds.login) + ':' + creds.token + '@')
             let creds
             try { creds = await g.gitCredentials() } catch (err) { return fail(String(err?.message ?? err).slice(0, 120)) }
-            let out = gw.runGit(['push', '-u', urlFor(creds), s.branch], { cwd: repoPath, allowFail: true })
+            // Non-interactive + bounded (2026-09-03, RESTO smoke): with a
+            // rejected token git falls back to prompting for a password, and
+            // runGit is synchronous — the prompt sat on the launcher's TTY for
+            // six minutes with the entire engine frozen behind it. prflow.js
+            // and repos.js already push this way; the card was the odd one out.
+            const pushOpts = { cwd: repoPath, allowFail: true, timeout: 90_000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }
+            let out = gw.runGit(['push', '-u', urlFor(creds), s.branch], pushOpts)
             if (out === null) {
               // Same hole the org sync had: git reports a dead token as text on
               // a non-zero exit, so nothing retries unless we ask. One forced
               // refresh, one retry — then report.
               try {
                 const fresh = await g.gitCredentials(true)
-                out = gw.runGit(['push', '-u', urlFor(fresh), s.branch], { cwd: repoPath, allowFail: true })
+                out = gw.runGit(['push', '-u', urlFor(fresh), s.branch], pushOpts)
               } catch { /* refresh unavailable — fall through to the failure */ }
             }
             return out !== null ? { ok: true, branch: s.branch } : fail('push-failed')
@@ -267,7 +273,49 @@ export function apply(ctx) {
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               if (sid) {
                 // Session seat: squash + gate + merge to main (Q2 local half).
-                const out = gw.sessionStageBoundary(cur.path, sid, { message: subject })
+                // The boundary's main push needs credentials on the URL — a
+                // bare `origin` has none, and github-link is the only holder
+                // (2026-09-03, RESTO smoke: unauthenticated push prompted on
+                // the TTY and froze the engine; main sat ahead:1 of origin for
+                // days). Best-effort: no link / no origin → null → the
+                // boundary pushes bare `origin` non-interactively and reports
+                // push-failed in the RESULT, never fatal to the commit.
+                const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+                const repoPath = s?.repoPath ?? cur.path
+                const pushUrl = await (async () => {
+                  const origin = gw.getOrigin(repoPath)
+                  if (!origin || !origin.startsWith('https://')) return null
+                  const g = await getGithub().catch(() => null)
+                  if (!g) return null
+                  const creds = await g.gitCredentials().catch(() => null)
+                  return creds ? origin.replace('https://', 'https://' + encodeURIComponent(creds.login) + ':' + creds.token + '@') : null
+                })()
+                if (pushUrl !== null) {
+                  // Linked + credentialed repo → Phase 2 / D107 shape: the PR is
+                  // the merge gate. Collapse the session's WIP run on the BRANCH,
+                  // gate, push the branch; main is not touched until
+                  // `card.pr.merge` (then `reconcileLocalMain` brings it in).
+                  // The old shape ran the local boundary here — ff-merge to main
+                  // AND push main — so every PR opened against a main that
+                  // already held the commit: "No commits between main and
+                  // arxa/session/<id>" (RESTO #1-#3, 2026-09-03 smoke).
+                  const { readySession } = await importPrflow()
+                  const attribution = '— written by ' + String(arg?.model ?? 'the session model') + ' in arxa studio'
+                  const r = readySession(repoPath, sid, { subject, attribution, origin: pushUrl })
+                  if (r.reason === 'gate-red') {
+                    // Same promise as the local boundary (D40): red parks, nothing is lost.
+                    const parked = gw.parkSession(repoPath, sid, 'gate-red')
+                    return { squashed: r.collapsed, sha: r.sha, gate: r.gate, merged: false, parked: true, session: parked, shape: 'prflow' }
+                  }
+                  return {
+                    squashed: r.collapsed, sha: r.sha, gate: r.gate, merged: false, parked: false,
+                    reason: r.reason ?? null, branch: r.branch,
+                    pushed: r.push ? { ok: r.push.pushed, ...r.push } : { ok: false, reason: r.reason ?? 'not-pushed' },
+                    shape: 'prflow',
+                  }
+                }
+                // Unlinked / no credentials: local-only boundary (merge to main here).
+                const out = gw.sessionStageBoundary(cur.path, sid, { message: subject, pushUrl })
                 // Q6/Q7 (2026-09-03): a GREEN boundary publishes the session
                 // branch, which is what makes frame-check run against it on
                 // GitHub (ci.yml v3 watches arxa/session/**). A red boundary
@@ -389,6 +437,35 @@ export function apply(ctx) {
               const { g, owner, name, runId } = await ciTarget()
               return g.cancelRun({ owner, name, runId })
             },
+            /** Stage comment on the session's PR (2026-09-03, RESTO 3-PR
+              * smoke): `arxa · <stage>` + the engine's own result for that
+              * stage, so the PR's comment trail is the evidence. Resolves the
+              * PR from the session branch unless `number` is given. */
+            'card.pr.comment': async () => {
+              const gw = await importGitWorkspace()
+              const g = await getGithub().catch(() => null)
+              if (!g) throw new Error('github-unavailable')
+              const cur = handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (!sid) throw new Error('card.pr.comment serves session seats')
+              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              if (!s) throw new Error('session-not-found: ' + sid)
+              let manifest = {}
+              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch { /* unreadable — fails below as org-not-published */ }
+              if (!manifest.repoOwner || !manifest.repoName) throw new Error('org-not-published')
+              const stage = String(arg?.stage ?? '').trim()
+              if (stage === '') throw new Error('stage-required')
+              let number = Number.isInteger(arg?.number) ? arg.number : null
+              if (number === null) {
+                const prs = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
+                if (!Array.isArray(prs) || prs.length === 0) return { ok: false, reason: 'no-pr' }
+                number = prs[0].number
+              }
+              const detail = arg?.detail === undefined ? '' : (typeof arg.detail === 'string' ? arg.detail : '```json\n' + JSON.stringify(arg.detail, null, 2) + '\n```')
+              const body = ['**arxa · ' + stage + '**', detail].filter((x) => x !== '').join('\n\n')
+              const comment = await g.prComment(manifest.repoOwner, manifest.repoName, { number, body })
+              return { ok: true, number, comment }
+            },
             /** D116: merge-commit the reviewed PR, pinned to the sha the
               * checks were read from (D107) — never on anything but a fully
               * green run (asleep/pending/red/none all refuse, loud reason). */
@@ -414,7 +491,14 @@ export function apply(ctx) {
               // rather than through the index barrel, which does not re-export it.
               const { mergeSessionPr } = await importPrflow()
               const repoPath = s.repoPath ?? cur.path
-              const origin = gw.getOrigin(repoPath)
+              // Token-bearing URL for the post-merge fetch (D107 step 6): a bare
+              // https origin would fall back to a TTY password prompt.
+              const origin = await (async () => {
+                const bare = gw.getOrigin(repoPath)
+                if (!bare || !bare.startsWith('https://')) return bare
+                const creds = await g.gitCredentials().catch(() => null)
+                return creds ? bare.replace('https://', 'https://' + encodeURIComponent(creds.login) + ':' + creds.token + '@') : bare
+              })()
               const result = await mergeSessionPr(repoPath, sid, {
                 owner: manifest.repoOwner,
                 name: manifest.repoName,

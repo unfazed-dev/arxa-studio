@@ -69,6 +69,7 @@ export {
   openSession,
   runGate,
   sessionStageBoundary,
+  parkSession,
   holdSession,
   archiveSession,
   reviveSession,

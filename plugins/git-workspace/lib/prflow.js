@@ -100,16 +100,21 @@ export function readySession(repoPath, id, { subject, attribution, env = process
   }
   if (subject.includes('\n')) throw new TypeError('readySession: subject must be a single line')
 
-  // ---- 1. gate first, red never publishes ---------------------------------
-  const gateResult = gate(s.worktree, env)
-  if (!gateResult.green) {
-    return { sha: null, pushed: false, gate: gateResult, branch: s.branch, collapsed: false, reason: 'gate-red' }
-  }
-
-  // ---- 2. collapse to one commit above the merge-base with main -----------
+  // ---- 1. collapse to one commit above the merge-base with main -----------
+  // Collapse BEFORE gating, same order as sessionStageBoundary: the squash
+  // absorbs the uncommitted WIP (commit-tree of the working tree), and the
+  // gate then runs on that clean, collapsed tree. Gating first was wrong
+  // for the default "light" gate (= clean tree + resolvable HEAD): every
+  // real edit sat uncommitted in the worktree, so the gate read red, the
+  // session parked, and the branch went out unchanged (2026-09-03, RESTO
+  // smoke: "No commits between main and arxa/session/<id>" ×3, second
+  // cause). A red gate after the collapse still never publishes — and
+  // the collapsed commit stays on the branch, so nothing is lost (D40).
+  const dirty = isDirty(s.worktree, env)
   const tip = runGit(['rev-parse', 'HEAD'], { cwd: s.worktree, env })
   const mergeBase = runGit(['merge-base', 'main', s.branch], { cwd: s.worktree, env })
-  if (mergeBase === tip) {
+  if (mergeBase === tip && !dirty) {
+    const gateResult = gate(s.worktree, env)
     return { sha: null, pushed: false, gate: gateResult, branch: s.branch, collapsed: false, reason: 'nothing-to-propose' }
   }
 
@@ -134,7 +139,7 @@ export function readySession(repoPath, id, { subject, attribution, env = process
     // squashed:false can only mean the pre-squash WIP snapshot found the
     // branch already sitting on the base — treated as nothing to propose.
     if (!squash.squashed) {
-      return { sha: null, pushed: false, gate: gateResult, branch: s.branch, collapsed: false, reason: 'nothing-to-propose' }
+      return { sha: null, pushed: false, gate: gate(s.worktree, env), branch: s.branch, collapsed: false, reason: 'nothing-to-propose' }
     }
     sha = squash.sha
     collapsed = true
@@ -142,6 +147,12 @@ export function readySession(repoPath, id, { subject, attribution, env = process
     // next LOCAL stage boundary would re-collapse the already-published
     // commit and silently rewrite the sha under review.
     runGit(['update-ref', `${SESSION_BASE_PREFIX}${id}`, sha], { cwd: s.worktree, env })
+  }
+
+  // ---- 2. gate on the collapsed tree; red never publishes -----------------
+  const gateResult = gate(s.worktree, env)
+  if (!gateResult.green) {
+    return { sha, pushed: false, gate: gateResult, branch: s.branch, collapsed, reason: 'gate-red' }
   }
 
   // ---- 3. publish the branch ---------------------------------------------

@@ -435,7 +435,10 @@ export function runGate(worktree, env = process.env) {
 
 // ---- stage boundary --------------------------------------------------------
 
-function parkSession(repoPath, id, reason, env) {
+/** Park a session (D40: parked, never deleted). Exported for the prflow
+ * path in arxa-git-card, where a red gate must park exactly as the local
+ * boundary does. */
+export function parkSession(repoPath, id, reason, env = process.env) {
   const registry = readRegistry(repoPath, env)
   const session = getSession(registry, id)
   session.state = 'parked'
@@ -458,7 +461,7 @@ function parkSession(repoPath, id, reason, env) {
  *
  * @returns {{ squashed, sha, gate, merged, parked, session }}
  */
-export function sessionStageBoundary(repoPath, id, { message, env = process.env } = {}) {
+export function sessionStageBoundary(repoPath, id, { message, env = process.env, pushUrl = null } = {}) {
   repoPath = sessionRepoFor(repoPath, id, env) // D98: merge into the OWNING repo's main
   const registry = readRegistry(repoPath, env)
   const session = getSession(registry, id)
@@ -500,10 +503,20 @@ export function sessionStageBoundary(repoPath, id, { message, env = process.env 
   // the green merge to main. Best-effort and never session-fatal (D23:
   // pushes fail loud in the RESULT, the local merge stands; nothing parks
   // for a push failure). No origin = a normal local-only state.
+  // Non-interactive and bounded (2026-09-03, RESTO smoke): a bare `origin`
+  // carries no credentials, so git fell back to a password prompt on the
+  // launcher's TTY and the synchronous push froze the engine. Callers that
+  // hold credentials (git-card via github-link) pass `pushUrl` — the
+  // token-bearing origin URL — and the push goes by explicit refspec (`-u`
+  // needs a remote NAME, not a URL; tracking was set at publish time).
   let push = { pushed: false, reason: 'no-origin' }
   const origin = getOrigin(repoPath, env)
   if (origin !== null) {
-    const pushed = runGit(['push', '-u', 'origin', 'main'], { cwd: repoPath, env, allowFail: true })
+    const pushEnv = { ...env, GIT_TERMINAL_PROMPT: '0' }
+    const args = typeof pushUrl === 'string' && pushUrl !== ''
+      ? ['push', pushUrl, 'refs/heads/main:refs/heads/main']
+      : ['push', '-u', 'origin', 'main']
+    const pushed = runGit(args, { cwd: repoPath, env: pushEnv, allowFail: true, timeout: 90_000 })
     push = pushed !== null ? { pushed: true, origin } : { pushed: false, reason: 'push-failed' }
   }
 
