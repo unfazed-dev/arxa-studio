@@ -233,18 +233,89 @@ xlaude / Claude Code worktrees pick name = branch = dir once at creation.
      old question said unmerged, new says merged, and a genuinely unmerged
      commit still correctly says no.
 
-5. **Smoke tier 3** (Q12) — NOT STARTED: two parallel sessions on one file,
-   `strict` forcing the second to rebase after the first merges, a two-repo
-   linked feature, a run cancelled by `concurrency`, and a retro-CI replay.
-   Two things to carry in:
-   - Tier 2 must **commit `pubspec.lock`** explicitly. The gate itself writes
-     the lock on its first run, so a target scaffolded and committed before
-     any `check.sh` run reaches CI without one — and `--enforce-lockfile`,
-     guarded on the lock existing, would never fire on GitHub. The
-     enforcement would look proven while never having run.
-   - Tier 2 scaffolds `kitchen-project` itself (RESTO's `projects/` holds only
-     `.gitkeep`), so it picks up the `.fvmrc` pin from the scaffold. There is
-     nothing to backfill.
+5. **Smoke tier 3** (Q12) — **DONE, green end to end.** Four sessions across
+   two repos, four PRs, all merged, everything cleaned up.
+   - **Parallel conflict.** `happy-hour-wt-260903-002` and
+     `allergen-badges-wt-260903-003` were opened from the same kitchen main
+     (`3acfcb1`), both rewrote `Dish`'s field block, and both gated green
+     alone — the conflict was between them, not inside either. A merged
+     (PR #2, `6eb9f88`); B was then 2 commits behind AND conflicting
+     (`merge-tree` confirmed a real content conflict, not a lag).
+   - **The plan's `strict` premise cannot fire here, and did not need to.**
+     `strict` is GitHub's require-branches-up-to-date protection, and
+     kitchen-project records `frameProtection: "plan-limited"` — the free
+     plan refuses protection on a private repo. What actually blocked B was
+     the conflict, which fires regardless of protection. Tier 3 therefore
+     tests the mechanism really in play.
+   - **Concurrency.** A second push while run #1 was in flight cancelled it:
+     run `33719450955`, conclusion `cancelled` (`concurrency.group:
+     ci-${{ github.ref }}`, `cancel-in-progress: true`).
+   - **Two-repo linked feature.** `RESTO#5` (the allergen policy, org repo)
+     and `kitchen-project#4` (the code it needs) cross-reference each other
+     via `prUpdate`, written ABOVE the `<!-- arxa:ledger -->` fence.
+     Re-checked after both merged: the cross-link survived every ledger
+     rewrite, and the ledger is still live in both bodies.
+   - **Retro-CI replay** (t3ci `05-retro-ci.sh` technique): 4/4 feature
+     commits on kitchen main still pass today's gate, each in its own
+     `git worktree --detach`, removed on the way out via an exit trap.
+     Note for whoever writes the next one: under D107 a feature lands on
+     main AS A MERGE COMMIT carrying the feature's subject, so
+     `--first-parent --no-merges` selects precisely the wrong set (it
+     returned 0). Replay first-parent commits INCLUDING merges.
+   - **Cleanup verified both places**: all four sessions `archived` with
+     `remoteBranch: deleted-merged`; RESTO and kitchen-project each show
+     exactly one branch on GitHub (`main`), zero stale tracking mirrors,
+     zero live checkouts under `.arxa/worktrees`.
+   - **Carry-ins from tier 2, both discharged**: `pubspec.lock` is tracked
+     (verified with `git ls-files`), and the engine did not hold the org lock.
+
+5b. **Three bugs tier 3 exposed, all fixed**
+   - **A target's `build/` output was committed into the user's repo.**
+     46 MB in kitchen-project — `unit_test_assets/`, `NOTICES.Z`, shaders,
+     `.cache.dill.track.dill` — regenerated and re-committed on every gate
+     run. The project ignore scopes build dirs under a PLATFORM folder name
+     (`**/ios/build/`, `**/macos/build/`), so a target folder named anything
+     else (`backoffice`, a website-track `landing`) was never covered. The
+     gate had it right all along and the ignore disagreed: `check.sh` PRUNES
+     `-name build` when walking for targets. Fixed with `**/build/` plus
+     `!/build/`, which keeps template v2's managed root container and honours
+     the SAFETY note in gitignore.js rather than working around it. Verified
+     against real `git add` behaviour, with a negative control proving the
+     test reds without the fix. `ensureGeneratedIgnored` patches projects
+     that predate the rule (`ensureProjectGitignore` never overwrites, so
+     without it the fix reached nobody), wired where `ensureFrameUnignored`
+     already runs. Existing tracked output needed `git rm -r --cached` too —
+     an ignore alone does not untrack.
+   - **A merged session left its remote-tracking mirror behind forever.**
+     `push --delete` DOES prune `refs/remotes/origin/<branch>` — but only
+     when given a remote NAME. `dropRemoteSessionBranch` deletes via a
+     token-bearing URL, and a URL has no tracking namespace to prune. Both
+     paths measured before the fix was written, because the plausible
+     reason (prflow hand-writes that ref, so git does not own it) is NOT
+     why — a named-remote delete prunes the hand-written ref perfectly well.
+     Fixed with an explicit `update-ref -d`; asserted both ways round in
+     selftest.prflow.mjs so a refactor back to `push origin --delete` cannot
+     make the line look redundant.
+   - **A conflicting PR surfaced as `PR merge failed (405)`.** 409 was named
+     ("the head moved since review"); everything else fell through to a bare
+     HTTP status. 405 is GitHub's "Pull Request is not mergeable" — an
+     ordinary, actionable state, not a crash. Now returns
+     `reason: 'not-mergeable'` with GitHub's own message ("Pull Request has
+     merge conflicts"), in the same vocabulary the card already uses for
+     `checks-red` / `no-pr`. Proven against the real conflicting PR #3
+     before and after.
+
+5c. **The gap tier 3 documents rather than fixes**
+   - **arxa has no integrate-main machinery.** A grep of `plugins/*/lib` for
+     `rebase` finds one hit: `allow_rebase_merge: false`. There is no
+     `card.rebase`, no `session.integrate`. When B was blocked, the recovery
+     was raw `git rebase origin/main` + hand resolution inside a worktree
+     arxa created — 1 conflict stop here, but nothing in the product helps
+     with it and nothing tells the user that is what to do. `readySession`
+     recomputes its collapse base from the merge-base each time, so the
+     product picks up correctly AFTER the rebase; it just cannot get there.
+     Whoever picks this up: the driver at `/tmp/arxa-s2/tier3-remote-c.mjs`
+     brackets the manual half with `--- MANUAL ---` markers.
 
 3b. **Bugs found and fixed while getting the suite green** (all in `7ca2f72`)
    - `renameOrg` repaired only the TOP-LEVEL entries under `.arxa/worktrees`.
