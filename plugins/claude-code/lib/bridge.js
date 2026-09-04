@@ -26,6 +26,7 @@ export class TurnBridge {
     this.failure = undefined     // sticky, so a consumer arriving AFTER the failure still sees it
     this.ended = false           // sticky: the `result` was the last message; nothing more is coming
     this.mcpCallIds = new Set()  // tool_use ids the dsh loop itself runs (their results echo back)
+    this.openCalls = new Set()   // mirror-tool ids Claude started and has not reported a result for
     this.pump(messages[Symbol.asyncIterator]())
   }
 
@@ -45,19 +46,21 @@ export class TurnBridge {
         if (m.type === 'rate_limit_event') { this.onRateLimit(m.rate_limit_info); continue }
         if (m.type === 'stream_event' && m.event?.type === 'content_block_start' && m.event.content_block?.type === 'tool_use') {
           const { id, name } = m.event.content_block
-          if (name.startsWith(MCP_PREFIX)) this.mcpCallIds.add(id)
+          this.trackCall(id, name)
           this.onToolUse(id, name)
         }
         // Backstop for a stream without partial messages: the assistant message always
         // precedes its own tool_result, so every id is classified before its echo arrives.
         if (m.type === 'assistant') {
-          for (const b of m.message?.content ?? []) if (b.type === 'tool_use' && b.name.startsWith(MCP_PREFIX)) this.mcpCallIds.add(b.id)
+          for (const b of m.message?.content ?? []) if (b.type === 'tool_use') this.trackCall(b.id, b.name)
         }
         this.push(m)
         if (m.type === 'result') { this.close(); return }
       }
     } catch (err) { this.fail(err) }
   }
+
+  trackCall (id, name) { if (name.startsWith(MCP_PREFIX)) this.mcpCallIds.add(id); else this.openCalls.add(id) }
 
   /** A tool_result normally belongs to a mirror tool the loop is (or will be) waiting on, so it
    * parks in `pending` when it arrives first. The exception is a call the loop ran itself — an
@@ -68,13 +71,23 @@ export class TurnBridge {
       if (b.type !== 'tool_result') continue
       const outcome = { text: toolResultText(b), isError: b.is_error === true }
       if (this.mcpCallIds.has(b.tool_use_id)) this.pending.resolveIfWaiting(b.tool_use_id, outcome)
-      else this.pending.resolve(b.tool_use_id, outcome)
+      else { this.openCalls.delete(b.tool_use_id); this.pending.resolve(b.tool_use_id, outcome) }
     }
   }
 
+  /** Once the stream is over, no result is coming for a call still in flight — and the loop is
+   * very likely blocked inside a mirror tool awaiting exactly that id, which is a hang no later
+   * task can break: Task 9 is stuck inside the loop and never reaches clear(ids). An error
+   * outcome settles a mirror tool already waiting AND parks one for a mirror tool that asks a
+   * moment later, so both orderings end as a failed tool row instead of a wedged turn. */
+  settleOpenCalls (reason) {
+    for (const id of this.openCalls) this.pending.resolve(id, { text: reason, isError: true })
+    this.openCalls.clear()
+  }
+
   push (m) { this.queue.push(m); this.wake() }
-  fail (err) { this.failure = err; this.finished = true; this.wake() }
-  close () { this.ended = true; this.wake() }
+  fail (err) { this.failure = err; this.finished = true; this.settleOpenCalls(err.message); this.wake() }
+  close () { this.ended = true; this.settleOpenCalls('claude-code: the turn ended before this tool reported a result'); this.wake() }
   wake () { const w = this.waiter; this.waiter = undefined; w?.() }
 
   /** The next queued message, parking until the pump produces one. Always settles: a failure or

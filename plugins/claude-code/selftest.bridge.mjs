@@ -179,5 +179,40 @@ function channel () {
   chan.throwErr(new Error('done with it'))
   await assert.rejects(first, /done with it/)
 }
+// --- a dead stream must not leave the loop waiting inside a mirror tool forever
+{
+  const call = { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id: 'tu_hang', name: 'Bash', input: {} }] } }
+  {
+    const pending = new PendingResults(); const chan = channel()
+    const b = new TurnBridge({ pending, onSession: () => {}, onRateLimit: () => {}, messages: chan })
+    chan.push(init); chan.push(call)
+    assert.deepEqual((await collect(b.segment())).at(-1), { type: 'finish', reason: { kind: 'tool-calls' } })
+    const waiting = pending.expect('tu_hang')            // the loop is now inside the mirror tool
+    chan.throwErr(new Error('child died mid tool round'))
+    const out = await waiting
+    assert.equal(out.isError, true); assert.match(out.text, /child died mid tool round/)
+    ok('a stream failure settles the mirror tool already waiting on a result')
+  }
+  {
+    const pending = new PendingResults(); const chan = channel()
+    const b = new TurnBridge({ pending, onSession: () => {}, onRateLimit: () => {}, messages: chan })
+    chan.push(init); chan.push(call)
+    await collect(b.segment())
+    chan.throwErr(new Error('child died mid tool round'))
+    await tick()
+    const out = await pending.expect('tu_hang')          // dispatched only after the stream died
+    assert.equal(out.isError, true); ok('and the mirror tool that starts waiting after the failure')
+  }
+  {
+    const pending = new PendingResults()
+    const b = new TurnBridge({ pending, onSession: () => {}, onRateLimit: () => {}, messages: from([
+      init, call, { type: 'result', subtype: 'success', is_error: false, result: '', usage: { input_tokens: 0, output_tokens: 0 } },
+    ]) })
+    await collect(b.segment())
+    const out = await pending.expect('tu_hang')
+    assert.equal(out.isError, true); assert.match(out.text, /ended before this tool reported a result/)
+    ok('a turn that ends without a tool_result fails that tool instead of hanging it')
+  }
+}
 
 console.log(`# ${passed} ok`)
