@@ -31,6 +31,18 @@ ok('missing optional fields (no utilization, no rateLimitType, no account): text
 assert.equal(rateLimitToStatus({ status: 'allowed_warning', isUsingOverage: true, rateLimitType: 'overage' }, acct).title, 'Claude usage credits')
 ok('overage window labelled, isUsingOverage itself never surfaces (see leak test)')
 
+// resetsAt has no documented unit in sdk.d.ts and cannot be verified against a live SDK from a
+// selftest, so rate-limit.js normalises defensively instead of assuming: a seconds-shaped value
+// and the same instant expressed in milliseconds must both resolve to the same Unix-seconds
+// output. See MS_VS_S_THRESHOLD in lib/rate-limit.js for why 1e11 is a safe boundary.
+const secondsForm = rateLimitToStatus({ status: 'allowed', resetsAt: 1_800_000_000 }, acct).resetsAt
+const millisForm = rateLimitToStatus({ status: 'allowed', resetsAt: 1_800_000_000_000 }, acct).resetsAt
+assert.equal(secondsForm, 1_800_000_000); assert.equal(millisForm, 1_800_000_000)
+ok('resetsAt: seconds-shaped and millisecond-shaped values for the same instant normalise identically')
+
+assert.ok(!('resetsAt' in rateLimitToStatus({ status: 'allowed' }, acct)))
+ok('resetsAt: absent on the SDK payload stays absent on the output, never synthesised')
+
 // Every rateLimitType × status × utilization combination must (a) stay inside the 80-char text
 // cap the provider/status schema enforces and (b) actually pass PROVIDER_STATUS_SCHEMA.parse —
 // the real proof the browser will accept it, not just that the JS object looks right. The max

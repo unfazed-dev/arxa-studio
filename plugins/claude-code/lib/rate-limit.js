@@ -15,6 +15,14 @@ const TYPE_LABEL = {
   overage: 'usage credits',
 }
 
+// SDKRateLimitInfo.resetsAt has no documented unit (sdk.d.ts just says `number`) and we cannot
+// invoke the live SDK from a selftest to find out. Rather than assume, normalise defensively: a
+// Unix timestamp in seconds for any real date is ~1e9-2e9, the same instant in milliseconds is
+// ~1e12 — 1e11 sits between them with enormous margin (1e11s ≈ year 5138, 1e11ms ≈ 1973), so no
+// real timestamp is ever near the boundary in either unit.
+const MS_VS_S_THRESHOLD = 1e11
+const toUnixSeconds = (value) => (value > MS_VS_S_THRESHOLD ? Math.round(value / 1000) : value)
+
 // ponytail: `account` stays in the signature (interface contract) for a future plan-level
 // rate-limit rule, but no such rule exists yet, so it's unused here. Never fill it back in with
 // account.email/account.subscriptionType for display — the status pill is provider state, not
@@ -32,7 +40,7 @@ export function rateLimitToStatus (info, account = {}) {
     text,
     title,
     ...(info.utilization === undefined ? {} : { utilization: info.utilization }),
-    ...(info.resetsAt === undefined ? {} : { resetsAt: info.resetsAt }),
+    ...(info.resetsAt === undefined ? {} : { resetsAt: toUnixSeconds(info.resetsAt) }),
     // Allowlist: only the window kind and the raw status enum — both name rate-limit *state*,
     // never upstream payload, error body, headers, tokens, or an account identifier. An absent
     // rateLimitType is omitted rather than set to `undefined`: the provider/status schema's
