@@ -53,6 +53,11 @@ suites.push([root, 'scripts', 'mirror-drift-check.mjs'])
 // red when it is written — only when a user restarts and finds "Failed to load history". Two real
 // sessions were lost to this before the gate existed.
 suites.push([root, 'scripts', 'session-event-vocabulary-check.mjs'])
+// The platform-pin lockstep gate (update-strategy amendment 2026-09-05):
+// one wave, one version — every @deepseek-ai/dsh* in the lockfile on the
+// pinned release, the import surface still exporting what the plugins
+// destructure, and pi-ai owned by upstream’s range again.
+suites.push([root, 'scripts', 'dsh-contract-check.mjs'])
 
 // bin/ is outside the plugins/*/selftest.mjs sweep, so this is wired by hand.
 // arxa-engine-sync decides what reaches a user's desktop payload, and both of its
