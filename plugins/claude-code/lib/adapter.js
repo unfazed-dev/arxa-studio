@@ -16,6 +16,7 @@ import { MIRROR_TOOL_NAMES } from './mirror-tools.js'
 import { fromClaude, fromLoop } from './pending.js'
 import { publishProviderStatus } from '../../provider-status/lib/index.js'
 import { rateLimitToStatus } from './rate-limit.js'
+import { fetchUsageStatuses } from './usage.js'
 
 const textOf = (msg) => (msg?.content ?? []).filter((b) => b.type === 'text').map((b) => b.text).join('\n')
 const resultText = (block) => (block.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join('\n')
@@ -252,6 +253,10 @@ export class ClaudeCodeAdapter extends LlmAdapter {
         // dead" from any later failure — see the retry below.
         turn.sawInit = true
         this.claudeSessions.set(agent.id, id)
+        // Pull the plan's usage while the child is alive. At turn START, not turn end: the child
+        // is guaranteed up, there is no race with teardown closing the query, and nothing is added
+        // to the latency the user actually feels. Fire-and-forget — see refreshUsage.
+        this.refreshUsage(agent, turn)
       },
       // The API's own model stamp — the one witness that is neither the CLI's alias resolution
       // nor the model's word, which a 2026-09-04 session showed is unreliable (sonnet and haiku
@@ -331,6 +336,25 @@ export class ClaudeCodeAdapter extends LlmAdapter {
         title: `asked for ${requested} — Claude Code answered with ${actual}`,
       })
     } catch { /* never worth the turn */ }
+  }
+
+  /** Pull the plan's `/usage` windows from the live child and publish one status per limit.
+   *
+   * This is the PRIMARY source for the usage pill. `rate_limit_event` stays wired below, but it
+   * only fires "when rate limit info changes" — a whole Fable turn on a nearly-exhausted account
+   * produced none, so a pill fed only by that event shows nothing almost always.
+   *
+   * Deliberately not awaited: the pill must not add a millisecond to the turn, and a plan-limits
+   * lookup that hangs must not hold a conversation open. Every failure ends as no pill. */
+  refreshUsage (agent, turn) {
+    fetchUsageStatuses(turn.q).then(
+      (statuses) => {
+        for (const status of statuses) {
+          try { publishProviderStatus(agent.session, status) } catch { /* one bad window is not the others' problem */ }
+        }
+      },
+      () => {}, // never worth the turn
+    )
   }
 
   /** Compaction and session titles: one shot, no tools, no MCP, no resumed session — the

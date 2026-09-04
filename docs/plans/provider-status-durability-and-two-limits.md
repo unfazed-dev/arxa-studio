@@ -90,15 +90,11 @@ whichever limit moved most recently and had no way to know the other existed.
 `kind` is passed through raw (bounded by the schema) rather than mapped against the installed
 SDK's enum, so a limit type newer than the SDK still gets its own slot instead of colliding.
 
-### Not done, deliberately
+### Superseded: the labels now come from the server
 
-The installed SDK (0.3.220) enum is
-`five_hour | seven_day | seven_day_opus | seven_day_sonnet | seven_day_overage_included | overage`
-— **there is no Fable key.** Which of these now carries the premium bucket is not knowable from
-the type alone, and `TYPE_LABEL.seven_day_opus = 'weekly Opus limit'` may therefore read wrong.
-The `?? 'usage'` fallback absorbs an unknown string safely, so nothing breaks either way.
-Relabelling waits until a real turn is observed emitting the actual value — guessing at the label
-would be inventing an API.
+The earlier note here said the SDK enum has no Fable key and that relabelling would have to wait
+for observation. That is resolved — see "Fifth" below. `model_scoped[].display_name` is the plan's
+own name for the bucket, so arxa never guesses.
 
 ## Fourth: the fold must never mix providers
 
@@ -120,6 +116,49 @@ the selected provider until the user opens the picker.
   filter, never the pill.
 - `apply()` only rehydrates from disk when the store is empty, so a re-run (HMR) cannot wipe live
   state.
+
+## Fifth: the event never fires, so stop waiting for it
+
+Reported again after the durability fix shipped: still no pill, on Fable, on an account the user
+knew was low. The evidence settled it:
+
+- arxa restarted at 01:31:50, on the new payload.
+- A `claude-fable-5-1[1m]` turn ran at 01:32:03 — after the restart, with the new code.
+- `~/.arxa/provider-status.json` did not exist. `~/.arxa` is writable.
+
+So a Fable turn on a nearly-exhausted account produced **no `rate_limit_event` at all**. The SDK
+is explicit that it fires "when rate limit info changes" — that is a notification, not a source.
+A pill fed only by it shows nothing almost always. Durability was necessary and not sufficient.
+
+### Fix: ask, don't wait
+
+`Query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET()` returns the structured data
+behind the CLI's own `/usage` command: the 5-hour window, the 7-day windows, and — the point —
+`model_scoped[]`, per-model weekly windows each carrying the plan's own `display_name`
+("e.g. 'Fable'"). `plugins/claude-code/lib/usage.js` maps it; the adapter calls it from
+`onSession`, when the child is up, the query is alive, and nothing is added to turn latency.
+
+**The labels are the server's.** A bucket renamed upstream (Opus -> Fable) reaches the user with
+no arxa release and no guess.
+
+Two shape traps, both tested: `utilization` here is a **percentage 0-100** where the event path
+and the schema use a fraction (passing 90 through clamps to 1.0 and reads "limit reached" on an
+account with 10% left), and `resets_at` is an **ISO 8601 string**, not an epoch number.
+`rate_limits_available: false` (API key, Bedrock, Vertex) yields no pill rather than a zeroed one.
+
+### On depending on an experimental API
+
+The method name carries `_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET`, and the doc says the name will
+change on stabilisation. It is therefore found by **feature detection across both the experimental
+and the stable name**, never called by a hardcoded name alone; any absence or failure returns no
+statuses. `rate_limit_event` stays wired as the fallback — it costs nothing and it is the only
+path left if this method disappears.
+
+### And the blind spot that hid all this
+
+`save()` swallowed every write error with a bare `catch {}`, so a failed write and a status that
+was never published looked identical: an empty pill. That ambiguity is what forced a second
+debugging round. A write failure now warns once per process, naming the path.
 
 ## Standing gaps
 

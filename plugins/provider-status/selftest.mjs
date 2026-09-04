@@ -10,7 +10,7 @@ const HOME = mkdtempSync(join(tmpdir(), 'arxa-provider-status-'))
 process.env.ARXA_APP_DATA_DIR = HOME
 
 const { PROVIDER_STATUS_SCHEMA, STATUS_VALUE_SCHEMA, formatBadge, bindingStatus } = await import('./lib/status.js')
-const { publishProviderStatus, resetProviderStatus, loadProviderStatus, statusesFor, statusFile, RPC_CHANNEL, apply } = await import('./lib/index.js')
+const { publishProviderStatus, resetProviderStatus, resetProviderStatusWarning, loadProviderStatus, statusesFor, statusFile, RPC_CHANNEL, apply } = await import('./lib/index.js')
 
 let n = 0; const ok = (s) => { n++; console.log(`  ok ${s}`) }
 const good = { provider: 'claude-code', kind: 'default', level: 'warn', text: 'Claude 90%', title: 'weekly limit · max', utilization: 0.9, resetsAt: 1_800_000_000 }
@@ -181,6 +181,26 @@ assert.throws(() => publishProviderStatus(session, { ...good, text: 'x'.repeat(8
   publishProviderStatus({ id: 's1' }, good)
   assert.equal(loadProviderStatus(statusFile(), Date.now() + 8 * 24 * 60 * 60 * 1000), 0, 'a week-old status is dropped on load')
   ok('stale statuses expire on load')
+
+  // A write failure and a status that was never published both show as an empty pill. That
+  // ambiguity cost a whole debugging round, so a failed write must SAY so — once per process,
+  // since a broken disk would otherwise repeat the line on every turn.
+  {
+    resetProviderStatusWarning()
+    const said = []
+    const realWarn = console.warn
+    console.warn = (m) => said.push(String(m))
+    try {
+      // a path whose parent is a FILE, so mkdir/write cannot succeed
+      const wedged = join(statusFile(), 'not-a-dir', 'x.json')
+      publishProviderStatus({ id: 's1' }, good, wedged)
+      publishProviderStatus({ id: 's1' }, good, wedged)
+    } finally { console.warn = realWarn }
+    assert.equal(said.length, 1, 'a failed write warns exactly once, not once per turn')
+    assert.ok(said[0].includes('cannot persist'), 'the warning must name the actual problem')
+    assert.equal(statusesFor('s1').length > 0, true, 'a failed write must not lose the in-memory status too')
+    ok('a failed write is reported, once, instead of looking like no event')
+  }
 
   // The mirror must never contain a session transcript or anything but validated status rows.
   resetProviderStatus()

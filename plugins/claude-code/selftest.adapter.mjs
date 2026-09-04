@@ -568,4 +568,57 @@ ok('a turn runs on the resolved live id, not the static id the picker stored')
   ok('a failure after the child reported its session surfaces instead of being retried away')
 }
 
+// --- the usage pull is the PRIMARY source for the pill.
+//
+// rate_limit_event fires only "when rate limit info changes", and a real Fable turn on a
+// nearly-exhausted account produced none at all — the pill stayed empty and was reported as
+// broken twice. So the adapter must ASK the live child for its plan usage rather than wait to be
+// told, and it must do so as soon as the child reports its session, while the query is alive.
+{
+  const before = statusLog.length
+  const usage = {
+    rate_limits_available: true,
+    rate_limits: {
+      seven_day: { utilization: 41, resets_at: '2027-01-02T03:04:05.000Z' },
+      model_scoped: [{ display_name: 'Fable', utilization: 97, resets_at: '2027-01-02T03:04:05.000Z' }],
+    },
+  }
+  let asked = 0
+  const withUsage = (script) => (params) => {
+    queries.push(params)
+    const it = from(script)
+    it.interrupt = async () => {}
+    it.close = () => {}
+    it.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = async () => { asked++; return usage }
+    return it
+  }
+  const a = new ClaudeCodeAdapter({
+    query: withUsage([init, ...done('hi')]), probe, ctx, binary: '/opt/bin/claude', env: { PATH: '/x' }, version: '0.1.0',
+    spawn: () => ({ pid: 1 }), mkdir: () => {},
+  })
+  await collect(a.stream({ agent, messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }], model: 'fable' }))
+  // the fetch is fire-and-forget, so let its microtasks settle before asserting
+  await new Promise((r) => setTimeout(r, 0))
+
+  assert.equal(asked, 1, 'the adapter must ask the live child for usage, not wait for an event')
+  const published = statusLog.slice(before)
+  const fable = published.find((d) => d.kind === 'model_scoped:fable')
+  assert.ok(fable, 'the per-model bucket must reach the pill — this is the limit the user asked to see')
+  assert.equal(fable.text, 'Fable 97%', "and it must carry the plan's own label, not an arxa guess")
+  assert.ok(published.find((d) => d.kind === 'seven_day'), 'the all-models weekly limit is published alongside it, not instead of it')
+  assert.equal(events.find((e) => String(e.type).startsWith('claude-code/')), undefined, 'still no session event')
+  ok('usage is pulled from the live child and both limits reach the pill')
+}
+
+// A child whose CLI has no usage method at all must still complete its turn normally.
+{
+  const a = new ClaudeCodeAdapter({
+    query: fakeQuery([init, ...done('hi')]), probe, ctx, binary: '/opt/bin/claude', env: { PATH: '/x' }, version: '0.1.0',
+    spawn: () => ({ pid: 1 }), mkdir: () => {},
+  })
+  const out = await collect(a.stream({ agent, messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }], model: 'fable' }))
+  assert.ok(out.length > 0, 'an older CLI without the usage API must not break the turn')
+  ok('no usage API: the turn is unaffected')
+}
+
 console.log(`# ${passed} ok`)

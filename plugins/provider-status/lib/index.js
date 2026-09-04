@@ -53,6 +53,12 @@ const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
 /** Bounds the file if a producer ever publishes per-turn. Newest wins. */
 const MAX_ENTRIES = 500
 
+/** Warned once per process. A silent `catch {}` here cost a whole debugging round: a failed write
+ *  and a status that was never published look identical from the outside — an empty pill either
+ *  way — so the one thing that distinguishes them has to be said out loud. Once, not per turn:
+ *  a broken disk would otherwise flood the log with the same line. */
+let warned = false
+
 /** Persist the mirror. Never throws: a status update must not be able to kill a turn. */
 function save (file = statusFile()) {
   try {
@@ -63,8 +69,13 @@ function save (file = statusFile()) {
     const tmp = `${file}.${process.pid}.tmp`
     writeFileSync(tmp, JSON.stringify({ version: 1, rows }), 'utf8')
     renameSync(tmp, file)
-  } catch {}
+  } catch (err) {
+    if (!warned) { warned = true; console.warn(`arxa-provider-status: cannot persist ${file} — the usage pill will not survive a restart (${err?.message ?? err})`) }
+  }
 }
+
+/** Test seam for the warn-once latch. */
+export function resetProviderStatusWarning () { warned = false }
 
 /** Rehydrate the mirror at boot. A missing, unreadable, or malformed file is simply an empty
  *  store -- every row is re-validated, so a hand-edited file cannot inject an unchecked value. */
@@ -111,7 +122,11 @@ export function statusesFor (sessionId, provider = undefined) {
     .filter(([key]) => key.startsWith(`${sessionId} `))
     .map(([, value]) => value)
   if (provider !== undefined) return mine.filter((v) => v.provider === provider)
-  const newest = mine.reduce((a, b) => (a === undefined || b.at > a.at ? b : a), undefined)
+  // `>=`, not `>`: `at` has millisecond resolution and one turn publishes every window it learns
+  // about inside the same tick, so a strict `>` would tie and silently keep the FIRST provider
+  // seen — showing a stale provider's pill after a switch. Ties resolve to the later entry, which
+  // in Map iteration order is the more recently published one.
+  const newest = mine.reduce((a, b) => (a === undefined || b.at >= a.at ? b : a), undefined)
   return newest === undefined ? [] : mine.filter((v) => v.provider === newest.provider)
 }
 
