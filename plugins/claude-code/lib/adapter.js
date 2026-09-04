@@ -147,13 +147,24 @@ export class ClaudeCodeAdapter extends LlmAdapter {
 
     const claudeSessionId = lastClaudeSession(agent.session.events)
     const userText = textOf(last)
-    // No Claude session yet but a transcript exists → another engine ran this session; Claude
-    // starts fresh and needs the story so far as flat text.
-    const prompt = claudeSessionId === undefined && options.messages.length > 1
+    // Starting fresh means Claude has no history of its own, so it needs the story so far as
+    // flat text. That is true whether another engine ran this session (no claudeSessionId at
+    // all) or a resume was attempted and the binary no longer holds the session — hence a
+    // standalone value both paths can reach for.
+    const freshPrompt = options.messages.length > 1
       ? `${renderHandoff(options.messages.slice(0, -1))}\n\nUser: ${userText}`
       : userText
 
     const policy = this.ctx.sandboxPolicy.resolve({ session: agent.session })
+    // D5 forbids inheriting arxa's own working directory. `?? process.cwd()` ran the child
+    // wherever the controller happened to be started — not the session's workspace, and not
+    // what the sandbox is confining. The policy's workspace root is the root the confinement
+    // is built from, so it is the only correct fallback; with neither, refuse the turn rather
+    // than guess a directory to run someone's tools in.
+    const cwd = agent.session.header.cwd ?? policy.workspaceRoot
+    if (typeof cwd !== 'string' || cwd.length === 0) {
+      throw new Error('claude-code: this session has no workspace root — refusing to run the child in arxa\'s own working directory')
+    }
     const schemas = agent.ctx.tools.schemas()
     const mcpQueue = []              // { id, name } per mcp__arxa__* tool_use, oldest first
     const claudeIds = new Set()      // every tool_use id this turn produced (fromClaude side)
@@ -177,10 +188,13 @@ export class ClaudeCodeAdapter extends LlmAdapter {
       },
     })
 
-    const q = this.query({
-      prompt,
-      options: this.base(policy, {
-        cwd: agent.session.header.cwd ?? process.cwd(),
+    // One attempt at starting the child. Called twice at most: once with the recorded Claude
+    // session, and — if the binary turns out not to hold it any more — once without.
+    const startChild = (resumeId) => {
+      const q = this.query({
+        prompt: resumeId ? userText : freshPrompt,
+        options: this.base(policy, {
+        cwd,
         model: options.model,
         // D5: an allowlist of the built-ins arxa mirrors, plus arxa's own tools. `tools` is the
         // SDK's availability knob ("To restrict which tools are available, use the `tools`
@@ -193,7 +207,7 @@ export class ClaudeCodeAdapter extends LlmAdapter {
         tools: [...MIRROR_TOOL_NAMES, ...arxaMcpToolNames(schemas)],
         ...(isFable(options.model) ? { fallbackModel: 'opus' } : {}),
         ...(options.reasoningEffort ? { effort: options.reasoningEffort } : {}),
-        ...(claudeSessionId ? { resume: claudeSessionId } : {}),
+        ...(resumeId ? { resume: resumeId } : {}),
         systemPrompt: { type: 'custom', prompt: options.system ?? '' },
         mcpServers: { arxa: mcp },
         strictMcpConfig: true,
@@ -204,10 +218,17 @@ export class ClaudeCodeAdapter extends LlmAdapter {
     })
 
     turn.q = q
+    turn.sawInit = false
     turn.bridge = new TurnBridge({
       messages: q,
       pending: fromClaude,
-      onSession: (id, model) => agent.session.append('claude-code/session', { claudeSessionId: id, model }),
+      onSession: (id, model) => {
+        // The child reported a session, so it started. That is what separates "this resume is
+        // dead" from any later failure — see the retry below.
+        turn.sawInit = true
+        agent.session.append('claude-code/session', { claudeSessionId: id, model })
+        this.noteModelFallback(agent, options.model, model)
+      },
       // A status update is never worth a user's turn. rateLimitToStatus/appendProviderStatus can
       // still throw on a payload the source-level clamp in rate-limit.js doesn't cover (e.g. a
       // malformed resetsAt) — that .parse() throw would otherwise propagate out of this
@@ -219,7 +240,10 @@ export class ClaudeCodeAdapter extends LlmAdapter {
         claudeIds.add(id)
         if (name.startsWith(MCP_PREFIX)) mcpQueue.push({ id, name: stripMcpPrefix(name) })
       },
-    })
+      })
+    }
+
+    startChild(claudeSessionId)
     this.turns.set(agent.id, turn)
 
     // Abort comes from the caller only — there is no watchdog for a child that stays alive but
@@ -228,10 +252,50 @@ export class ClaudeCodeAdapter extends LlmAdapter {
     // endTurn stops the child, so this is the whole teardown.
     this.onceAborted(options.signal, () => this.endTurn(agent.id, turn))
 
+    let produced = false
     try {
-      yield * turn.bridge.segment()
-    } catch (err) { this.endTurn(agent.id, turn); throw err }
+      for await (const chunk of turn.bridge.segment()) { produced = true; yield chunk }
+    } catch (err) {
+      // A recorded Claude session is not a promise the binary can keep: `~/.claude/projects`
+      // may have been cleared, or the transcript may live on another machine. `resume` then
+      // fails and the whole turn used to just error. Start over without it instead, handing
+      // Claude the conversation as flat text the way a first-turn handoff does.
+      //
+      // `sawInit` is the discriminator, not the error text. A child that reported its session
+      // started fine, so any failure after that is a real one and must surface — only a child
+      // that died before saying anything looks like a dead resume. `produced` guards the rest:
+      // once chunks have reached the consumer there is no honest way to start again.
+      if (claudeSessionId !== undefined && !turn.sawInit && !produced && !turn.stopped) {
+        fromClaude.clear([...turn.claudeIds]); fromLoop.clear([...turn.loopIds])
+        turn.claudeIds.clear(); turn.loopIds.clear(); turn.mcpQueue.length = 0
+        startChild(undefined)
+        try {
+          yield * turn.bridge.segment()
+        } catch (retryErr) { this.endTurn(agent.id, turn); throw retryErr }
+        if (turn.bridge.finished) this.endTurn(agent.id, turn)
+        return
+      }
+      this.endTurn(agent.id, turn); throw err
+    }
     if (turn.bridge.finished) this.endTurn(agent.id, turn)
+  }
+
+  /** D10: `fallbackModel: 'opus'` lets the SDK swap the model out from under the user when
+   * Fable is unavailable. A silent downgrade is worse than a slow turn, so say so in the
+   * status channel. Only a Fable request can be downgraded (it is the only one that sets a
+   * fallback), so a Fable request answered by a non-Fable model IS the fallback — no string
+   * matching against model ids that may be aliased. Guarded exactly like onRateLimit: a status
+   * update must never be the thing that kills a turn. */
+  noteModelFallback (agent, requested, actual) {
+    if (!isFable(requested) || !actual || isFable(actual)) return
+    try {
+      appendProviderStatus(agent.session, {
+        provider: PROVIDER_ID,
+        level: 'info',
+        text: `Running on ${actual}`,
+        title: `${requested} was unavailable — Claude Code fell back to ${actual}`,
+      })
+    } catch { /* never worth the turn */ }
   }
 
   /** Compaction and session titles: one shot, no tools, no MCP, no resumed session — the

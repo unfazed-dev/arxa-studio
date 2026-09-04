@@ -84,12 +84,22 @@ ok('resolveModel efforts')
 
   // Task 14: a rate_limit_event publishes to the shared provider/status channel, not a
   // claude-code-only event — Claude Code is the first producer of the provider-neutral pill.
-  assert.deepEqual(events.find((e) => e.type === 'provider/status').data, {
+  const statuses = events.filter((e) => e.type === 'provider/status').map((e) => e.data)
+  assert.deepEqual(statuses.find((d) => d.level === 'warn'), {
     provider: 'claude-code', level: 'warn', text: 'Claude 90%', title: 'Claude weekly limit · 90% used',
     utilization: 0.9, detail: { rateLimitType: 'seven_day', status: 'allowed_warning' },
   })
   assert.equal(events.find((e) => e.type === 'claude-code/rate-limit'), undefined)
   ok('rate limit publishes provider/status, not the old claude-code/rate-limit event')
+
+  // D10: `fallbackModel: 'opus'` can swap the model out from under the user, and a silent
+  // downgrade is worse than a slow turn. This fixture IS a fallback — 'fable' was asked for
+  // and the child reported 'sonnet' — so the turn owes the user a visible note.
+  assert.deepEqual(statuses.find((d) => d.level === 'info'), {
+    provider: 'claude-code', level: 'info', text: 'Running on sonnet',
+    title: 'fable was unavailable — Claude Code fell back to sonnet',
+  })
+  ok('a model fallback is announced on the provider/status channel instead of happening silently')
 
   // D5 tool lock: an allowlist on `tools` (the SDK's availability knob), never a denylist and
   // never `allowedTools` — which only auto-approves and would bypass canUseTool entirely.
@@ -388,6 +398,91 @@ ok('resolveModel efforts')
     assert.deepEqual(o.tools, []); assert.equal(o.maxTurns, 1); assert.equal(o.mcpServers, undefined)
     ok('no initiating agent falls back to the utility path')
   } finally { initiator = agent }
+}
+
+// --- D5: the child never inherits arxa's own working directory.
+// `cwd: … ?? process.cwd()` ran Claude wherever the controller happened to be started.
+{
+  const rooted = {
+    ...ctx,
+    // A session with no cwd of its own, but a sandbox policy that does have a workspace root:
+    // that root is what the confinement is built from, so it is the right fallback.
+    sandboxPolicy: { resolve: () => ({ mode: 'workspace-write', workspaceRoot: '/policy-root', sessionId: 's' }) },
+  }
+  const rootlessAgent = { ...agent, session: { ...agent.session, header: {} } }
+  initiator = rootlessAgent
+  try {
+    const a = new ClaudeCodeAdapter({ query: fakeQuery([init, ...done('ok')]), probe, ctx: rooted, binary: '/opt/bin/claude', env: { PATH: '/x' }, version: '0.1.0' })
+    await collect(a.stream({ provider: 'claude-code', model: 'sonnet', system: 's', tools: [], messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] }))
+    assert.equal(queries.at(-1).options.cwd, '/policy-root')
+    ok('a session with no cwd falls back to the sandbox policy workspace root, not process.cwd()')
+
+    // And with no root anywhere, the turn is refused rather than run in an arbitrary directory.
+    const nowhere = { ...ctx, sandboxPolicy: { resolve: () => ({ mode: 'workspace-write', workspaceRoot: undefined, sessionId: 's' }) } }
+    const b = new ClaudeCodeAdapter({ query: fakeQuery([init, ...done('ok')]), probe, ctx: nowhere, binary: '/opt/bin/claude', env: { PATH: '/x' }, version: '0.1.0' })
+    const before = queries.length
+    await assert.rejects(
+      collect(b.stream({ provider: 'claude-code', model: 'sonnet', system: 's', tools: [], messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] })),
+      /no workspace root/,
+    )
+    assert.equal(queries.length, before, 'no child is started when there is nowhere safe to start it')
+    ok('with no workspace root anywhere the turn is refused, and no child is spawned')
+  } finally { initiator = agent }
+}
+
+// --- a recorded Claude session the binary no longer holds falls back to a fresh start.
+// Clearing ~/.claude/projects, or moving to another machine, used to make every later turn in
+// that session error out: `resume` pointed at a transcript that was simply gone.
+{
+  events.length = 0
+  events.push({ type: 'claude-code/session', data: { claudeSessionId: 'cs-gone', model: 'sonnet' } })
+  // Per-call scripts: the first attempt dies before saying anything, the second succeeds.
+  const scripts = [
+    (async function * () { throw new Error('No conversation found with session ID: cs-gone') })(),
+    from([init, ...done('picked up where we left off')]),
+  ]
+  const a = new ClaudeCodeAdapter({
+    query: (params) => { queries.push(params); const it = scripts.shift(); it.interrupt = async () => {}; it.close = () => {}; return it },
+    probe, ctx, binary: '/opt/bin/claude', env: { PATH: '/x' }, version: '0.1.0',
+  })
+  const before = queries.length
+  const chunks = await collect(a.stream({ provider: 'claude-code', model: 'sonnet', system: 's', tools: [], messages: [
+    { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'Hi' }] },
+    { role: 'user', content: [{ type: 'text', text: 'carry on' }] }] }))
+  assert.deepEqual(chunks.at(-1), { type: 'finish', reason: { kind: 'stop' } }, 'the turn completes instead of erroring')
+  assert.equal(queries.length - before, 2, 'exactly one retry, not a loop')
+  assert.equal(queries.at(-2).options.resume, 'cs-gone', 'the first attempt did try the recorded session')
+  assert.equal(queries.at(-1).options.resume, undefined, 'the retry starts fresh')
+  assert.match(queries.at(-1).prompt, /^Conversation so far/, 'and hands Claude the history as flat text')
+  assert.match(queries.at(-1).prompt, /User: carry on$/)
+  ok('a dead resume restarts fresh with a handoff instead of failing the turn')
+}
+
+// --- but a child that DID start and then failed must surface that failure.
+// `sawInit` is the discriminator: a real error after a healthy start is not a dead resume, and
+// retrying it would hide it and pay for the turn twice.
+{
+  events.length = 0
+  events.push({ type: 'claude-code/session', data: { claudeSessionId: 'cs-9', model: 'sonnet' } })
+  const scripts = [
+    (async function * () { yield init; throw new Error('model overloaded') })(),
+    from([init, ...done('should never run')]),
+  ]
+  const a = new ClaudeCodeAdapter({
+    query: (params) => { queries.push(params); const it = scripts.shift(); it.interrupt = async () => {}; it.close = () => {}; return it },
+    probe, ctx, binary: '/opt/bin/claude', env: { PATH: '/x' }, version: '0.1.0',
+  })
+  const before = queries.length
+  await assert.rejects(
+    collect(a.stream({ provider: 'claude-code', model: 'sonnet', system: 's', tools: [], messages: [
+      { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Hi' }] },
+      { role: 'user', content: [{ type: 'text', text: 'go' }] }] })),
+    /model overloaded/,
+  )
+  assert.equal(queries.length - before, 1, 'a failure after a healthy start is not retried')
+  ok('a failure after the child reported its session surfaces instead of being retried away')
 }
 
 console.log(`# ${passed} ok`)
