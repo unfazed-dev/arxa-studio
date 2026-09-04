@@ -183,29 +183,60 @@ export function createGithubLink({
       if (!force && current) return current
       throw new Error('github-link: token expired and no refresh token stored — sign in again (D76)')
     }
-    const clientId = getClientId(env) ?? SHIPPED_CLIENT_ID
+    // `||`, not `??`: getClientId ends in `||`, so a config file carrying a
+    // blank clientId yields '' — and `??` passes '' straight through, sending
+    // client_id='' and drawing GitHub's "incorrect_client_credentials". That is
+    // the same error a revoked grant gives, so the blank sends you hunting the
+    // wrong fault entirely. link() keeps `??` on purpose: a blank config must
+    // hit its loud guard there, never silently link against a different app
+    // than the one the user configured.
+    // shippedClientId (the constructor param), not the module constant: link()
+    // already honours the injected value, and getToken() reaching past it for
+    // SHIPPED_CLIENT_ID meant a custom-wired service refreshed against a
+    // different app than it linked with.
+    const clientId = getClientId(env) || shippedClientId
     let fresh
     try {
       fresh = await refreshAccessToken({ clientId, refreshToken: storedRefresh, fetch, tokenBase })
     } catch (err) {
-      // Refresh is dead (rotated-away refresh token, client-id mismatch,
-      // revoked grant). Found 2026-09-03 on the RESTO smoke: every push and
-      // PR failed with the raw "incorrect_client_credentials" and nothing
-      // told the user to re-link. Flag the state (status() surfaces it, the
-      // link button clears it) and say plainly what to do.
-      writeState({ ...state, relinkRequired: true, relinkReason: String(err?.message ?? err).slice(0, 160) }, env)
-      throw new Error(
-        'github-link: GitHub session expired and could not be refreshed (' +
-        String(err?.message ?? err).replace(/^github-link:\s*/, '') +
-        ') — re-link GitHub from Settings'
-      )
+      // GitHub burns BOTH tokens on every rotation: "once you use a refresh
+      // token, that refresh token and the old user access token will no longer
+      // work" (docs: Refreshing user access tokens). So a second arxa process —
+      // another engine, another window, the updater — that refreshes first
+      // leaves this one holding a superseded refresh token through no fault of
+      // its own. Re-read the keyring once: if the stored refresh token changed
+      // while our request was in flight, that rotation is exactly what happened
+      // and the newly stored one is good. Retry with it before condemning the
+      // user to a full interactive re-link.
+      const rotated = await ring.getSecret(state.login + REFRESH_SUFFIX).catch(() => null)
+      if (rotated && rotated !== storedRefresh) {
+        try {
+          fresh = await refreshAccessToken({ clientId, refreshToken: rotated, fetch, tokenBase })
+        } catch { /* the rotated one is dead too — fall through to re-link */ }
+      }
+      if (!fresh) {
+        // Genuinely dead: revoked grant, expired refresh token, or a client-id
+        // mismatch. Found 2026-09-03 on the RESTO smoke: every push and PR
+        // failed with the raw "incorrect_client_credentials" and nothing told
+        // the user to re-link. Flag the state (status() surfaces it, the link
+        // button clears it) and say plainly what to do.
+        writeState({ ...state, relinkRequired: true, relinkReason: String(err?.message ?? err).slice(0, 160) }, env)
+        throw new Error(
+          'github-link: GitHub session expired and could not be refreshed (' +
+          String(err?.message ?? err).replace(/^github-link:\s*/, '') +
+          ') — re-link GitHub from Settings'
+        )
+      }
     }
     await ring.setSecret(state.login, fresh.accessToken)
     if (fresh.refreshToken) await ring.setSecret(state.login + REFRESH_SUFFIX, fresh.refreshToken)
     const accessExpiresAt = fresh.expiresInSeconds
       ? new Date(Date.now() + fresh.expiresInSeconds * 1000).toISOString()
       : null
-    writeState({ ...state, accessExpiresAt }, env)
+    // Clear the re-link flag: a refresh that just succeeded is proof the grant
+    // is alive again, and `{ ...state }` would otherwise carry a stale
+    // relinkRequired:true forward forever, nagging past the actual fault.
+    writeState({ ...state, accessExpiresAt, relinkRequired: false, relinkReason: null }, env)
     return fresh.accessToken
   }
 

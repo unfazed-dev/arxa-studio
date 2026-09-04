@@ -37,6 +37,14 @@ export function readState(env = process.env) {
       scopes: Array.isArray(parsed.scopes) ? parsed.scopes : [],
       linkedAt: typeof parsed.linkedAt === 'string' ? parsed.linkedAt : null,
       accessExpiresAt: typeof parsed.accessExpiresAt === 'string' ? parsed.accessExpiresAt : null,
+      // getToken() writes these when a refresh is refused, and status() spreads
+      // readState() — so leaving them off this whitelist made the flag
+      // WRITE-ONLY: the file said relinkRequired, every reader saw undefined,
+      // and the UI never told the user to re-link. Measured 2026-09-04 on the
+      // RESTO smoke, where the flag sat in github-link.json unread while every
+      // push failed with a bare 401.
+      relinkRequired: parsed.relinkRequired === true,
+      relinkReason: typeof parsed.relinkReason === 'string' ? parsed.relinkReason : null,
     }
   } catch {
     return null

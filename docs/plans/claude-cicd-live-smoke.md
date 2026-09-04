@@ -215,60 +215,87 @@ Not covered — stated plainly rather than implied:
 - `.superpowers/` is untracked but **not** gitignored, so `git add -A` would sweep the SDD
   workspace into a commit.
 
-## F7 — the GitHub "unlink" was a refresh-token rotation race, caused by the smoke
+## F7 — the GitHub link is genuinely dead; the cause is NOT established
 
-**It never unlinked.** `~/.arxa/github-link.json` still reads `linked: true`,
-`login: unfazed-dev`, all four scopes (`delete_repo read:user repo workflow`),
-`linkedAt: 2026-09-03T01:21:17Z`. What flipped is `relinkRequired: true` with
+**Correction to the first version of this entry.** It claimed the smoke's second
+engine caused this through a refresh-token rotation race, and said so to the
+user. That claim does not survive the next measurement and is retracted. The
+timing overlap was real; the causal link was not.
+
+**It never "unlinked".** `~/.arxa/github-link.json` still reads `linked: true`,
+`login: unfazed-dev`, all four scopes. What flipped is `relinkRequired: true`,
 `relinkReason: "token request error: incorrect_client_credentials"`, written
-2026-09-04T09:01Z (19:01 AEST).
+2026-09-04T09:01Z.
 
-**Measured timeline**
+**Measured**
 
-- `2026-09-04T08:32:17Z` — both keychain items (`arxa-studio/unfazed-dev` and
-  `…#refresh`) have `mdat` at this exact second, and `accessExpiresAt` is
-  `16:32:17.305Z` = +8h. Only `getToken()`'s success branch writes both secrets
-  while preserving `linkedAt`, so this was a **successful, secretless refresh**.
-- Same minute, the smoke's second engine (port 7899) was booting —
-  `scratchpad/engine2.log` 18:32, `settings.yaml.bak` 18:33, `turn.log` 18:34.
-- `2026-09-04T09:01Z` — a forced refresh (`gitCredentials(force)` from
-  `card.push`'s 401 retry) was rejected; `relinkRequired` written.
+- Access token in the keychain: `gho_` prefix, 40 chars → an **OAuth App** user
+  token (a GitHub App would be `ghu_`). Matches the `Ov23liFN…` OAuth App client
+  id in `~/.arxa/github-link-config.json`, which overrides the shipped
+  `Iv23licJ…` GitHub App id.
+- Refresh token: `ghr_`, 80 chars. Both keychain items have `mdat`
+  `20260904083217Z` — the same second — so a secret-less refresh **succeeded**
+  at 08:32:17Z and stored a fresh pair.
+- `accessExpiresAt` is `16:32:17.305Z` = exactly +8h, confirming that write.
+- **`GET /user` with that token returns 401 Bad credentials right now** — hours
+  before its recorded expiry, with no later successful refresh written to the
+  keychain.
 
-**Mechanism (GitHub docs, "Refreshing user access tokens")**
+**Why the rotation-race story fails.** A race leaves the *winner's* valid token
+in the keychain; the loser re-reads it and recovers. Here the keychain holds a
+token that is dead well before expiry and no newer one was ever written. Nothing
+local invalidated it — the grant was invalidated **server-side** between
+08:32:17Z and 09:01Z. Most likely the authorization was revoked (GitHub →
+Settings → Applications → Authorized OAuth Apps will show this), or the OAuth
+app's credentials changed. That cannot be determined from this machine, and it
+is not attributable to the smoke.
 
-- "Once you use a refresh token, **that refresh token and the old user access
-  token will no longer work**."
-- Two arxa engines shared `~/.arxa` — one state file, one pair of keychain
-  items. The 08:32 refresh rotated the token and **instantly invalidated the
-  access token the other engine was already holding** → `401: Bad credentials`
-  on push (that is F5's real cause) → forced retry presented a superseded
-  refresh token → rejected.
+**Supporting note already in the codebase** (index.js:44): a 2025-08 probe
+recorded that GitHub answers `incorrect_client_credentials` for a secret-less
+web-flow exchange, device flow being the only secret-less path it grants OAuth
+apps. So that error string is what this app sees whenever GitHub declines to
+honour a secret-less request — it does not by itself mean "wrong client id".
 
-**The code is not at fault here.** `refreshAccessToken` deliberately sends no
-`client_secret`, and the docs say it is "Required *unless* the user access token
-was generated using the device flow" — `useDeviceFlow = true` is the default
-(index.js:48). That is why 08:32 succeeded. A distributed desktop app cannot
-ship a secret, so device flow is the correct choice.
+**Fix for the user:** one re-link from Settings. Nothing else recovers a
+server-side revocation.
 
-**Residual uncertainty:** GitHub does not document `incorrect_client_credentials`
-as the error for a *burned* refresh token, so the last link in the chain is
-inferred from the timeline, not from the docs.
+## F8 — four real defects found while diagnosing F7 (all fixed)
 
-**Real latent bug found alongside (unrelated to this incident).**
-`getToken()` does `const clientId = getClientId(env) ?? SHIPPED_CLIENT_ID`, but
-`getClientId` ends in `||`, so a missing/blank `clientId` in
-`~/.arxa/github-link-config.json` yields `''` — which `??` passes straight
-through. The refresh then sends `client_id: ''` and GitHub answers with exactly
-`incorrect_client_credentials`. `link()` is safe (its `if (!clientId)` guard at
-index.js:78 catches it); `getToken()` has no such guard. Fix: use `||`, or add
-the same guard. Not the cause here — the config holds a valid 20-char id.
+None were reachable by any existing suite; all four are covered now by
+`plugins/github-link/selftest.token-refresh.mjs` (5 assertions), and each was
+mutation-verified — reverting the fix fails the suite.
 
-**Two client ids are in play** (worth a deliberate decision, not a bug report):
-shipped `Iv23licJ…` is a **GitHub App** id; the local override in
-`~/.arxa/github-link-config.json` (written 2026-08-30) is `Ov23liFN…`, an
-**OAuth App** id. The override wins. The refresh code and its comments are
-written against GitHub App semantics.
+1. **Blank client id was sent as `''`** — `getToken()` did
+   `getClientId(env) ?? SHIPPED_CLIENT_ID`, but `getClientId` ends in `||`, so a
+   config file with a blank `clientId` yields `''`, which `??` passes straight
+   through. GitHub answers `incorrect_client_credentials` — the *same* error a
+   revoked grant gives, so the blank would send you hunting the wrong fault.
+   Now `||`. `link()` deliberately keeps `??`: a blank config must hit its loud
+   guard there, never silently link against a different app than the configured
+   one.
+2. **`relinkRequired` was write-only** — `getToken()` wrote the flag, but
+   `readState()`'s field whitelist dropped it, so `status()` (which spreads
+   `readState()`) never carried it to the UI. The comment claiming "status()
+   surfaces it" was false. This is why every push failed with a bare 401 and
+   nothing said "re-link". Both fields are now on the whitelist.
+3. **A successful refresh kept a stale `relinkRequired: true`** —
+   `writeState({ ...state, accessExpiresAt })` carried the flag forward forever,
+   nagging past the actual fault. Now cleared on success.
+4. **A rotation by another process forced a full re-link** — GitHub burns both
+   tokens on every rotation, so a second arxa process refreshing first left this
+   one holding a superseded token. `getToken()` now re-reads the keyring once on
+   failure and retries if the stored refresh token changed, self-healing instead
+   of demanding interactive OAuth. Exactly one retry, and only when the token
+   actually changed — an unchanged token makes no second request.
 
-**Fix for the user:** one re-link from Settings. Avoid running two arxa engines
-against the same `~/.arxa` — the keychain pair and state file are shared, and
-whichever refreshes first silently kills the other's token.
+Also fixed alongside: `getToken()` used the module constant `SHIPPED_CLIENT_ID`
+while `link()` used the injected `shippedClientId` param, so a custom-wired
+service refreshed against a different app than it linked with.
+
+**Not fixed — F6 needs the user's call.** The mirror tool list (21 names) drifts
+from the live CLI in both directions. Adding the missing built-ins widens what
+the model can reach inside arxa's sandbox, which is a capability decision under
+the standing security constraints, not a defect fix; and the phantom rows are
+asserted by `selftest.mirror-gate.mjs` in five places and may be deliberate
+forward-compat. Needs a fresh live init plus a decision on which tools arxa
+intends to expose.
