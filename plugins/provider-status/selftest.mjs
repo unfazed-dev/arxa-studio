@@ -26,7 +26,16 @@ assert.deepEqual(formatBadge({ ...v, level: 'ok' }, now), { level: 'ok', text: '
 assert.equal(formatBadge(null, now), undefined); assert.equal(formatBadge(undefined, now), undefined); ok('badge text')
 
 assert.equal(PROJECTION.key, 'providerStatus'); assert.equal(PROJECTION.init(), null); assert.equal(PROJECTION.stateVersion, 1)
-assert.deepEqual(PROJECTION.wire.view(v), v); ok('projection definition')
+assert.deepEqual(PROJECTION.wire.view(v), v)
+// detail's JsonValue is z.lazy, which memoizes its inner schema on first resolution — a schema-level
+// .parse() proved it's valid, but dsh-session-projection calls stateSchema.parse/viewSchema.parse on
+// the frozen PROJECTION object at runtime. stateSchema and wire.viewSchema are the same schema
+// instance here, so this one round-trip proves the lazy schema resolves through both real call shapes,
+// not just an ad hoc parse.
+const vWithDetail = { ...v, detail: { code: 429 } }
+assert.deepEqual(PROJECTION.wire.viewSchema.parse(PROJECTION.wire.view(vWithDetail)), vWithDetail)
+assert.deepEqual(PROJECTION.stateSchema.parse(vWithDetail), vWithDetail)
+ok('projection definition')
 
 const appended = []
 const session = { append: (type, data) => { appended.push([type, data]); return { seq: 0 } } }
