@@ -33,6 +33,7 @@ import { scrubEnv } from '../plugins/claude-code/lib/env.js'
 import { makeSpawner } from '../plugins/claude-code/lib/spawn.js'
 import { fromClaude } from '../plugins/claude-code/lib/pending.js'
 import { MIRROR_TOOL_NAMES } from '../plugins/claude-code/lib/mirror-tools.js'
+import { STATIC_MODELS } from '../plugins/claude-code/lib/models.js'
 
 if (!process.argv.includes('--yes')) { console.log('live smoke: pass --yes to run against your real Claude subscription'); process.exit(0) }
 
@@ -156,14 +157,23 @@ assert.match(q2b.filter((c) => c.type === 'text-delta').map((c) => c.text).join(
 console.log('Q2: mcp__arxa__gen_ui reachable through the live `tools` allowlist — the arxa MCP tool worked end to end')
 agent.ctx.tools.schemas = () => [] // back to the Part A / Q4 baseline
 
-// Q3: the never-yielding-prompt + abort.abort() pattern (Task 3's Probe) returns bounded
-// against the real SDK — a tiny timeout must not hang.
-const tightProbe = new Probe({ query, binary, env, timeoutMs: 50 })
+// Q3: the probe returns bounded AND correct against the real SDK.
+// This is the question that caught a shipped bug. The original probe passed a never-yielding
+// prompt to query() and waited for a `system/init` message — but the CLI does not emit init
+// until a prompt actually yields, so every probe ran to its full timeout and reported a
+// signed-in user as signed out, with the model picker silently falling back to STATIC_MODELS.
+// startup() completes the initialize handshake itself, so the probe settles in well under a
+// second. Asserting the live model list is strictly larger than the static fallback is what
+// makes this a real check: a probe that quietly failed would still return 4 static rows fast.
 const q3Started = Date.now()
-const q3Result = await tightProbe.current(true)
+const q3Result = await probe.current(true)
 const q3Elapsed = Date.now() - q3Started
+assert.equal(q3Result.loggedIn, true, `Q3: probe reported signed out — ${q3Result.error}`)
 assert.ok(q3Elapsed < 10_000, `Q3: probe did not return bounded — took ${q3Elapsed}ms`)
-console.log(`Q3: probe with a 50ms timeout returned in ${q3Elapsed}ms (bounded, did not hang); loggedIn=${q3Result.loggedIn}`)
+assert.ok(q3Result.models.length > STATIC_MODELS.length, `Q3: probe returned the ${STATIC_MODELS.length}-row static fallback, not the live model list`)
+assert.equal(q3Result.apiProvider, 'firstParty', 'Q3: expected an Anthropic OAuth (subscription) login')
+assert.ok(/^[0-9]+\.[0-9]+\.[0-9]+$/.test(q3Result.version ?? ''), `Q3: no CLI version for the Fable gate (got ${q3Result.version})`)
+console.log(`Q3: probe returned in ${q3Elapsed}ms — loggedIn, apiProvider=firstParty, CLI ${q3Result.version}, ${q3Result.models.length} live models (static fallback is ${STATIC_MODELS.length})`)
 
 // Q4: a superseded turn's child is genuinely stopped — checked against the real OS process
 // captured via trackingSpawn, not just trusted from reading endTurn(). endTurn() is the one

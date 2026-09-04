@@ -9,8 +9,9 @@ Advisor: consulted (approach, scope of the probe fix, and the split below).
 
 ## What the run found
 
-Three defects, all in shipped code on this branch, none reachable by the offline suites.
-They are listed worst-first.
+Five defects. Three are in this branch's own code (F1-F3); two are in the git/CI-CD surface
+itself (F4-F5). None were reachable by the offline suites — `npm test` was green throughout.
+Listed worst-first.
 
 ### F1 — the plugin stopped arxa studio from booting at all (critical)
 
@@ -75,6 +76,80 @@ before its first assertion on `require.resolve('@anthropic-ai/claude-agent-sdk/p
 — the SDK's `exports` map has no `./package.json` subpath — and then again on a `Probe`
 constructed without the spawner that commit `fa9becc` had made required. Commit `9f95411`.
 
+### F4 — a failed session create reported success and poisoned the session id (observed once)
+
+The first `workspace.new-session` on RESTO returned `ok: true` with a complete session
+record — id, branch, worktree path, `state: "open"`, `dshSessionId` — but nothing durable
+landed: the registry (`.git/arxa/sessions.json`) still held only the four archived sessions
+from 2026-09-03, `git worktree list` showed only the main checkout, and the card could not
+find the session (`session-not-found`). The branch `arxa/RESTO/notes/note-wt-260904-001`
+*was* created (at main's tip), so the create got partway and then stopped.
+
+The leftover directory then poisons that session id permanently — the next attempt fails with:
+
+```
+git worktree failed in /Volumes/business_ssd/RESTO: Preparing worktree (new branch 'arxa/RESTO/notes/note-wt-260904-001')
+fatal: '/Volumes/business_ssd/RESTO/.arxa/worktrees/RESTO/notes/note-wt-260904-001' already exists
+```
+
+After removing the stale directory and branch, session creation worked correctly every time —
+with and without a `title`, registry 4 → 5 → 6, real worktrees, branches checked out. So the
+trigger is not reproducible on demand; the most likely candidate is a race with `org.open`'s
+own housekeeping commits (`0241521`, `93abf7e`), which were being written at that moment.
+
+What is proven regardless, and is the part worth fixing: **a create whose `git worktree add`
+fails still returns `ok: true` with a full session record**, and leaves a directory behind
+that makes the same id unusable forever after.
+
+### F5 — arxa's GitHub link holds a dead credential, and the card hides it
+
+Every arxa-initiated GitHub call fails. `card.pr.create` names it exactly:
+
+```
+github-link: PR create failed (401: Bad credentials)
+```
+
+`card.commit`'s embedded push and the standalone `card.push` both report the opaque
+`push-failed`. This is not a missing retry — `index.js:290-301` already does the forced
+refresh and one retry that the D76 machinery was built for; the refresh itself no longer
+recovers the token, so re-authorisation is needed (an interactive OAuth flow, the user's to run).
+
+Two things make this worse than a stale token:
+
+- **The read path fails silently.** With PR #6 open on the branch, `card.pr.status` returns
+  `ok: true` with `pr: null` and `checks.state: "unknown"` — the card shows "no PR"
+  rather than "cannot reach GitHub". A user cannot tell the two apart.
+- **The write path's error does not name the cause.** `push-failed` gives the user nothing
+  to act on; the underlying 401 is only visible on the PR-create path.
+
+This is the same root cause as the open items already on record: TOPO's
+`githubStatus: publish-failed … Invalid username or token`, and RESTO's `main` sitting
+unpushed (B2). `status.linked` is `true` and `tokenAvailable` is `true` throughout, so
+no surface reports the link as broken.
+
+## The PR
+
+**[unfazed-dev/RESTO#6](https://github.com/unfazed-dev/RESTO/pull/6)** —
+`docs(notes): the winter menu changeover the kitchen will run`, six files across
+`notes/`, `meetings/` and `communications/`, commit `752e584`.
+
+- **Content:** written by Claude (Sonnet) on the subscription, through arxa's
+  `ClaudeCodeAdapter`, arxa's sandbox and arxa's mirror tools — 6 `Write` calls over 8
+  turns. Asserted at run time: `providerInfo().id === 'claude-code'`, `apiProvider ===
+  'firstParty'`, every listed model from the `claude-code` provider.
+- **Commit and gate:** through the arxa git card. `card.commit` squashed the session's
+  three `wip: auto-save (watcher)` commits into one conventional commit and ran the
+  `check.sh` frame gate: `gate: {green: true, kind: 'check.sh'}`.
+- **CI:** green on the self-hosted runner for both the `push` and `pull_request` events
+  (runs 33854971249 and 33855090350, 17-18s).
+- **Pushed with `gh`, not by arxa** — blocked by F5. The branch, the commit and the gate
+  are arxa's work; only the GitHub transport was substituted, and the PR body says so.
+
+One content note: Claude wrote the costing file to `account/`, which `.gitignore` never
+tracks by design (D37, financial records stay local). It moved to
+`notes/winter-menu-2026/03-costing.md` and its cross-references were updated. Not a bug —
+worth knowing that a valid dock is deliberately untracked.
+
 ## What is proven, and what is not
 
 Proven against the real binary and a real subscription:
@@ -97,7 +172,7 @@ Not covered — stated plainly rather than implied:
 
 ## Open items carried forward
 
-- **B2 (from `resto-cicd-3pr-smoke.md`) is still open.** RESTO's local `main` sits ahead of
+- **B2 (from `resto-cicd-3pr-smoke.md`) is still open, and F5 explains it.** RESTO's local `main` sits ahead of
   `origin/main` by two arxa housekeeping commits (`0241521 chore(github): record link state`,
   `93abf7e chore(ci): refresh the arxa frame to v5`), both written by arxa when the org was
   opened. Session branches are cut from local main, so they ride into any PR opened from one.
