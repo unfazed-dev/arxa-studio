@@ -208,7 +208,13 @@ export class ClaudeCodeAdapter extends LlmAdapter {
       messages: q,
       pending: fromClaude,
       onSession: (id, model) => agent.session.append('claude-code/session', { claudeSessionId: id, model }),
-      onRateLimit: (info) => appendProviderStatus(agent.session, rateLimitToStatus(info, account)),
+      // A status update is never worth a user's turn. rateLimitToStatus/appendProviderStatus can
+      // still throw on a payload the source-level clamp in rate-limit.js doesn't cover (e.g. a
+      // malformed resetsAt) — that .parse() throw would otherwise propagate out of this
+      // callback, through TurnBridge's pump(), and out of stream()'s generator, killing the turn
+      // at the exact moment the pill was most useful (the user hitting their limit). This is the
+      // one place in the plan that deliberately fails open: catch broadly, drop the update.
+      onRateLimit: (info) => { try { appendProviderStatus(agent.session, rateLimitToStatus(info, account)) } catch {} },
       onToolUse: (id, name) => {
         claudeIds.add(id)
         if (name.startsWith(MCP_PREFIX)) mcpQueue.push({ id, name: stripMcpPrefix(name) })

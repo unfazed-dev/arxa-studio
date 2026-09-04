@@ -101,6 +101,21 @@ ok('resolveModel efforts')
   ok('tools is an allowlist of mirrored built-ins + arxa mcp tools; no auto-approve or bypass knob is set')
 }
 
+// --- Task 14 fix round 1: a rate_limit_info that fails PROVIDER_STATUS_SCHEMA (here, a negative
+// resetsAt — a case rate-limit.js's utilization clamp doesn't cover) must not kill the turn.
+// appendProviderStatus's .parse() throws; onRateLimit swallows it and drops the update instead
+// of letting the throw reach TurnBridge's pump() and blow up stream()'s generator. The turn
+// finishes normally and no provider/status event is appended for the bad one.
+{
+  events.length = 0
+  const badRateLimitEvent = { type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning', resetsAt: -100 } }
+  const a = mk([init, badRateLimitEvent, ...done('still here')])
+  const chunks = await collect(a.stream({ provider: 'claude-code', model: 'sonnet', system: 's', messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }], tools: [] }))
+  assert.deepEqual(chunks.at(-1), { type: 'finish', reason: { kind: 'stop' } })
+  assert.equal(events.find((e) => e.type === 'provider/status'), undefined)
+  ok('a rate_limit_info that fails schema validation is dropped silently, the turn is not killed')
+}
+
 // --- second turn resumes and does NOT hand off
 {
   const a = mk([init, ...done('Again')])

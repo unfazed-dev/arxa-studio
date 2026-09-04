@@ -43,6 +43,14 @@ ok('resetsAt: seconds-shaped and millisecond-shaped values for the same instant 
 assert.ok(!('resetsAt' in rateLimitToStatus({ status: 'allowed' }, acct)))
 ok('resetsAt: absent on the SDK payload stays absent on the output, never synthesised')
 
+// utilization is passed through raw from the SDK and PROVIDER_STATUS_SCHEMA bounds it to [0,1]
+// non-NaN. An overage-billing payload can plausibly report utilization > 1 (measured against
+// base allocation while overage covers the rest) — that must clamp to a usable pill, not throw.
+assert.equal(rateLimitToStatus({ status: 'allowed', utilization: 1.5 }, acct).utilization, 1)
+assert.equal(rateLimitToStatus({ status: 'allowed', utilization: -0.5 }, acct).utilization, 0)
+assert.ok(!('utilization' in rateLimitToStatus({ status: 'allowed', utilization: NaN }, acct)))
+ok('utilization: out-of-range and NaN values clamp to a schema-valid pill instead of passing through raw')
+
 // Every rateLimitType × status × utilization × resetsAt combination must (a) stay inside the
 // 80-char text cap the provider/status schema enforces and (b) actually pass
 // PROVIDER_STATUS_SCHEMA.parse — the real proof the browser will accept it, not just that the
@@ -51,10 +59,13 @@ ok('resetsAt: absent on the SDK payload stays absent on the output, never synthe
 // instead. resetsAt is in the matrix (not just the two dedicated cases above) specifically so
 // the schema's `int` requirement is checked against a float seconds-shaped value
 // (1_800_000_000.5, e.g. Date.now() / 1000) — toUnixSeconds must round that branch too, or
-// PROVIDER_STATUS_SCHEMA.parse throws here.
+// PROVIDER_STATUS_SCHEMA.parse throws here. UTILS includes out-of-range and NaN values (not just
+// the in-bounds [0,1] samples) specifically so clampUtilization is proven against the whole
+// matrix, not just the two dedicated cases above — an in-range-only sample here is exactly the
+// shape of gap that hid the resetsAt rounding bug until it shipped.
 const TYPES = [undefined, 'five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet', 'seven_day_overage_included', 'overage']
 const STATUSES = ['allowed', 'allowed_warning', 'rejected']
-const UTILS = [undefined, 0, 0.2, 0.9, 1]
+const UTILS = [undefined, 0, 0.2, 0.9, 1, 1.5, -0.5, NaN]
 const RESETS_AT = [undefined, 0, 1_800_000_000, 1_800_000_000_000, 1_800_000_000.5]
 for (const rateLimitType of TYPES) {
   for (const status of STATUSES) {

@@ -26,14 +26,25 @@ const TYPE_LABEL = {
 const MS_VS_S_THRESHOLD = 1e11
 const toUnixSeconds = (value) => Math.round(value > MS_VS_S_THRESHOLD ? value / 1000 : value)
 
+// info.utilization is passed through raw from the SDK and PROVIDER_STATUS_SCHEMA bounds it to
+// [0,1] non-NaN — an unguarded pass-through means a schema-rejecting payload kills the whole
+// turn (appendProviderStatus's .parse() throws, and that throw propagates all the way out of
+// adapter.js's stream() generator; see the try/catch around the onRateLimit call there, which is
+// the backstop for whatever this clamp doesn't catch). The live vector is real, not
+// hypothetical: rateLimitType 'overage'/isUsingOverage means utilization can be measured
+// against a base allocation while overage billing is active, plausibly exceeding 1.0. Clamp
+// here so that case still produces a usable pill instead of being dropped by the backstop.
+const clampUtilization = (value) => (typeof value !== 'number' || Number.isNaN(value) ? undefined : Math.min(1, Math.max(0, value)))
+
 // ponytail: `account` stays in the signature (interface contract) for a future plan-level
 // rate-limit rule, but no such rule exists yet, so it's unused here. Never fill it back in with
 // account.email/account.subscriptionType for display — the status pill is provider state, not
 // identity; an account identifier reaching this object means it reaches the browser.
 /** SDK rate_limit_event → the provider-neutral status every model shares (Task 13). */
 export function rateLimitToStatus (info, account = {}) {
+  const utilization = clampUtilization(info.utilization)
   const what = TYPE_LABEL[info.rateLimitType] ?? 'usage'
-  const pct = info.utilization === undefined ? undefined : Math.round(info.utilization * 100)
+  const pct = utilization === undefined ? undefined : Math.round(utilization * 100)
   const title = ['Claude ' + what, ...(pct === undefined ? [] : [`${pct}% used`])].join(' · ')
   const level = info.status === 'rejected' ? 'limit' : info.status === 'allowed_warning' ? 'warn' : 'ok'
   const text = level === 'limit' ? 'Claude limit reached' : pct === undefined ? 'Claude' : `Claude ${pct}%`
@@ -42,7 +53,7 @@ export function rateLimitToStatus (info, account = {}) {
     level,
     text,
     title,
-    ...(info.utilization === undefined ? {} : { utilization: info.utilization }),
+    ...(utilization === undefined ? {} : { utilization }),
     ...(info.resetsAt === undefined ? {} : { resetsAt: toUnixSeconds(info.resetsAt) }),
     // Allowlist: only the window kind and the raw status enum — both name rate-limit *state*,
     // never upstream payload, error body, headers, tokens, or an account identifier. An absent
