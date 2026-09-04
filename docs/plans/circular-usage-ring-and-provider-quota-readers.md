@@ -152,6 +152,37 @@ extracts that copy by source slice to prove parity. The slice is bounded by
 moves to a stable `// PARITY-END` sentinel rather than a variable name it should never
 have been coupled to.
 
+## The payload was stale, and that is why every previous fix "didn't work"
+
+Found while syncing this change, and it is bigger than this change.
+
+`~/.arxa/dsh/profiles/arxa/node_modules/arxa-provider-status` resolves to a **hard copy**
+under pnpm's store, not a link back to the repo. That copy was dated **Sep 4 18:34** and
+contained neither `bindingStatus` nor `RPC_CHANNEL` — it was the pre-2026-09-05 build, from
+before the durability rewrite. Neighbouring plugins (`arxa-git-card`, `arxa-sidebar`) were
+dated Sep 5 01:51.
+
+So the whole previous session's work — the durable store, the wiring-gate fix, the
+provider-aware fold, the `/usage` reader — **never reached the running engine**. Every
+"still no chip" report was against code from hours earlier. That is a debugging cost worth
+naming: the fixes were tested and correct, and the engine was running something else.
+
+`--materialise-only` does not fix it: it deliberately skips the pnpm install
+(`bin/arxa-studio.mjs`, "without pnpm-installing the profile"). Until that refresh is made
+reliable, **verify the payload, not just the tests**:
+
+```
+P=$(readlink -f ~/.arxa/dsh/profiles/arxa/node_modules/arxa-provider-status)
+diff -q "$P/lib" plugins/provider-status/lib
+```
+
+Related, and the reason for the second commit: the payload is a **pnpm isolated layout**
+and this plugin declares no dependencies, so a bare `@deepseek-ai/dsh-credentials` import
+resolved by hoisting rather than entitlement. It worked when tested — and a layout change
+would have turned it into a load-time throw that takes the whole indicator down, which is
+the same class of failure this feature keeps hitting. The poller now imports nothing but
+its own sibling, and `selftest.quota.mjs` asserts that.
+
 ## Verified live
 
 `selftest.mjs` 24 ok, `selftest.quota.mjs` 16 ok, plus claude-code's `usage` 11,
