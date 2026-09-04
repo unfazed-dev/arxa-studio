@@ -22,21 +22,24 @@
 import { strict as assert } from 'node:assert'
 import { mkdtempSync, writeFileSync, existsSync, rmSync } from 'node:fs'
 import { tmpdir, homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { spawn as nodeSpawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { Context } from '@deepseek-ai/cordis'
-import { query } from '@anthropic-ai/claude-agent-sdk'
+import { query, startup } from '@anthropic-ai/claude-agent-sdk'
 import { ClaudeCodeAdapter } from '../plugins/claude-code/lib/adapter.js'
 import { Probe, resolveClaudeBinary } from '../plugins/claude-code/lib/probe.js'
 import { scrubEnv } from '../plugins/claude-code/lib/env.js'
+import { makeSpawner } from '../plugins/claude-code/lib/spawn.js'
 import { fromClaude } from '../plugins/claude-code/lib/pending.js'
 import { MIRROR_TOOL_NAMES } from '../plugins/claude-code/lib/mirror-tools.js'
 
 if (!process.argv.includes('--yes')) { console.log('live smoke: pass --yes to run against your real Claude subscription'); process.exit(0) }
 
 const require = createRequire(import.meta.url)
-const sdkRoot = join(require.resolve('@anthropic-ai/claude-agent-sdk/package.json'), '..')
+// The SDK's exports map has no './package.json' subpath (0.3.259), so resolving that
+// path throws ERR_PACKAGE_PATH_NOT_EXPORTED. Resolve the package entry and take its dir.
+const sdkRoot = dirname(require.resolve('@anthropic-ai/claude-agent-sdk'))
 const ws = mkdtempSync(join(tmpdir(), 'arxa-cc-smoke-'))
 writeFileSync(join(ws, 'note.txt'), 'PEACH')
 const escape = join(homedir(), 'arxa-cc-smoke-escape.txt'); rmSync(escape, { force: true })
@@ -56,8 +59,6 @@ const ctx = {
 }
 const env = scrubEnv(process.env, { version: 'smoke' })
 const binary = resolveClaudeBinary({ env: process.env, platform: process.platform, arch: process.arch, sdkRoot })
-const probe = new Probe({ query, binary, env })
-
 // Q4 needs the real child process behind each turn. This wrapper is a pass-through to Node's
 // own spawn — it changes nothing about what runs, it just keeps a handle so we can check later
 // whether endTurn() actually killed it. `spawn`/`mkdir` are adapter constructor seams that
@@ -66,6 +67,21 @@ const probe = new Probe({ query, binary, env })
 const spawnedChildren = []
 const trackingSpawn = (cmd, args, opts) => { const child = nodeSpawn(cmd, args, opts); spawnedChildren.push(child); return child }
 process.on('exit', () => { for (const c of spawnedChildren) if (c.exitCode === null && c.signalCode === null) { try { c.kill('SIGKILL') } catch { /* already gone */ } } })
+
+// The probe child is confined exactly like a turn child: probe.js requires a spawner so that
+// no claude process can ever start outside arxa's sandbox (commit fa9becc).
+const probePolicy = ctx.sandboxPolicy.resolve({ session: agent.session })
+const probe = new Probe({
+  startup,
+  binary,
+  env,
+  spawnClaudeCodeProcess: makeSpawner({
+    confine: (argv, p) => sandbox.confine(argv, p),
+    policy: probePolicy,
+    spawn: trackingSpawn,
+  }),
+})
+
 
 const a = new ClaudeCodeAdapter({ query, probe, ctx, binary, env, version: 'smoke', spawn: trackingSpawn })
 const collect = async (gen) => { const out = []; for await (const c of gen) out.push(c); return out }
