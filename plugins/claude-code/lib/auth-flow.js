@@ -1,8 +1,7 @@
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
-import { PROVIDER_NAME } from './models.js'
+import { PROVIDER_NAME, SIGNIN_CMD, INSTALL_URL } from './models.js'
 
 export const ACCOUNT_KEY = credentialKey('claude-code', 'account')
-const LOGIN_CMD = 'claude auth login'
 
 /** D6: arxa never launches login. It shows the command and re-checks until the CLI is signed in. */
 export function claudeAuthFlow ({ probe, credentials, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), pollMs = 3000, maxPolls = 200 }) {
@@ -11,7 +10,13 @@ export function claudeAuthFlow ({ probe, credentials, sleep = (ms) => new Promis
     label: PROVIDER_NAME,
     methods: [{ id: 'cli', label: 'Sign in with the claude CLI' }],
     async run (session) {
-      session.notify({ message: `In a terminal run \`${LOGIN_CMD}\` and finish the browser sign-in. arxa checks every ${pollMs / 1000}s.`, code: LOGIN_CMD })
+      session.notify({
+        // `code` is the copyable command; `url` is the way out for a user who has no CLI
+        // to run it in. arxa still never launches the login itself (D6) — it waits.
+        message: `In a terminal run \`${SIGNIN_CMD}\` and finish the browser sign-in. arxa checks every ${pollMs / 1000}s and picks it up automatically — leave this open.`,
+        code: SIGNIN_CMD,
+        url: INSTALL_URL,
+      })
       for (let i = 0; i < maxPolls; i++) {
         if (session.signal.aborted) throw new Error('claude-code: sign-in cancelled')
         const a = await probe.current(true)

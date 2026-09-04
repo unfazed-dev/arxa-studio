@@ -6,7 +6,7 @@
 // results appended. One Claude child spans all of those steps, so the live TurnBridge is
 // parked in `this.turns` between them and the second call resumes it instead of respawning.
 import { LlmAdapter } from '@deepseek-ai/dsh-llm'
-import { PROVIDER_ID, PROVIDER_NAME, FABLE_MIN_VERSION, describeModel, versionAtLeast } from './models.js'
+import { PROVIDER_ID, PROVIDER_NAME, FABLE_MIN_VERSION, describeModel, versionAtLeast, matchModel, signedOutMessage } from './models.js'
 import { TurnBridge, MCP_PREFIX, stripMcpPrefix } from './bridge.js'
 import { renderHandoff } from './handoff.js'
 import { makeSpawner } from './spawn.js'
@@ -47,7 +47,11 @@ export class ClaudeCodeAdapter extends LlmAdapter {
 
   async resolveModel (provider, model) {
     const account = await this.probe.current()
-    const row = account.models.find((m) => m.id === model) ?? { provider: PROVIDER_ID, id: model, name: model, description: '', efforts: [] }
+    // matchModel, not `find(m => m.id === model)`: the picker's id and the live SDK id
+    // are different strings for the two reasoning models (F12), and a stored selection
+    // outlives the probe that produced it. Equality here silently dropped `reasoning`
+    // and hid dsh's effort control for signed-in users.
+    const row = matchModel(account.models, model) ?? { provider: PROVIDER_ID, id: model, name: model, description: '', efforts: [] }
     const efforts = row.efforts ?? []
     return {
       provider: PROVIDER_ID,
@@ -123,7 +127,7 @@ export class ClaudeCodeAdapter extends LlmAdapter {
     if (options.purpose !== undefined || agent === undefined) { yield * this.utility(options, agent); return }
 
     const account = await this.probe.current()
-    if (!account.loggedIn) throw new Error('claude-code: not signed in. Run `claude auth login` in a terminal, then pick the model again.')
+    if (!account.loggedIn) throw new Error(signedOutMessage(account))
     if (isFable(options.model) && !versionAtLeast(account.version, FABLE_MIN_VERSION)) {
       throw new Error(`claude-code: Fable needs Claude Code ≥ ${FABLE_MIN_VERSION}, you have ${account.version}`)
     }

@@ -363,8 +363,23 @@ ok('resolveModel efforts')
 // --- signed out / old version refuse before spawning
 {
   const before = queries.length
-  const out = mk([], { current: async () => ({ loggedIn: false, error: 'x', models: [] }) })
+  // The real signed-out string the CLI produces — not a placeholder. F13: the three
+  // failure kinds below used to collapse into one fixed "not signed in" line that
+  // discarded account.error, so a timeout and a sign-out were indistinguishable.
+  const signedOut = { loggedIn: false, error: 'Not logged in · Please run /login', models: [] }
+  const out = mk([], { current: async () => signedOut })
   await assert.rejects(collect(out.stream({ provider: 'claude-code', model: 'sonnet', messages: [{ role: 'user', content: [{ type: 'text', text: 'a' }] }] })), /claude auth login/)
+  // A probe that timed out is NOT a sign-out: saying so sent users to re-run a login
+  // they had already done. The real cause has to survive into the message.
+  const timedOut = mk([], { current: async () => ({ loggedIn: false, error: 'initialize timed out', models: [] }) })
+  await assert.rejects(
+    collect(timedOut.stream({ provider: 'claude-code', model: 'sonnet', messages: [{ role: 'user', content: [{ type: 'text', text: 'a' }] }] })),
+    (e) => /initialize timed out/.test(e.message) && !/not signed in/.test(e.message))
+  // No CLI at all is a third case: telling this user to run a command they cannot run is a dead end.
+  const noBin = mk([], { current: async () => ({ loggedIn: false, error: 'no claude binary on PATH and no bundled binary', models: [] }) })
+  await assert.rejects(
+    collect(noBin.stream({ provider: 'claude-code', model: 'sonnet', messages: [{ role: 'user', content: [{ type: 'text', text: 'a' }] }] })),
+    /not installed.*docs\.claude\.com/s)
   const old = mk([], { current: async () => ({ loggedIn: true, version: '2.1.240', subscriptionType: 'max', models: [] }) })
   await assert.rejects(collect(old.stream({ provider: 'claude-code', model: 'fable', messages: [{ role: 'user', content: [{ type: 'text', text: 'a' }] }] })), /2\.1\.255/)
   assert.equal(queries.length, before)
