@@ -243,6 +243,27 @@ export function extendSeatbeltArgv (argv, roots) {
 }
 
 /**
+ * The never-grant invariant, enforced where the grant is built rather than only
+ * asserted in the selftest. Every extra root becomes a Seatbelt `(subpath ...)`
+ * or a bwrap `--bind`, so granting `$HOME`, `/`, `/Users` or `/Volumes` would
+ * silently turn `workspace-write` into `danger-full-access`, and any one-segment
+ * path is near-root enough to do the same. `policy.extraWritableRoots` is an
+ * open channel — it takes whatever a caller attaches — so the check belongs here,
+ * not in the one caller that happens to pass a constant today.
+ *
+ * @param {string} root - a canonicalised candidate root.
+ * @returns {boolean} whether it is specific enough to grant.
+ */
+function isGrantableRoot (root) {
+  if (typeof root !== 'string' || root.length === 0) return false
+  const forbidden = [homedir(), '/', '/Users', '/Volumes'].map(canonicalPath)
+  if (forbidden.includes(root)) return false
+  // Both separators: a Windows drive root (`C:\`) must fail this too, and a
+  // rejected grant is always the safe direction — it only narrows the sandbox.
+  return root.split(/[\\/]/).filter(Boolean).length >= 2
+}
+
+/**
  * The arxa sandbox provider: `LocalSandboxProvider` with the runtime-resolved
  * Flutter/Dart toolchain caches added to `workspace-write`'s writable roots.
  * Registers as the same `"sandbox"` service (the name is fixed by
@@ -283,7 +304,16 @@ export default class ArxaSandboxProvider extends LocalSandboxProvider {
     // Canonicalised the same way dsh's own roots are — `already` is built from
     // canonical paths, and an as-spelled grant would neither dedupe against it
     // nor match anything once Seatbelt/bwrap resolve symlinks themselves.
-    const requested = (Array.isArray(policy.extraWritableRoots) ? policy.extraWritableRoots : []).map(canonicalPath)
+    const asked = (Array.isArray(policy.extraWritableRoots) ? policy.extraWritableRoots : []).map(canonicalPath)
+    // The never-grant invariant, applied to the open channel before anything is
+    // granted. A rejected root is dropped, not thrown on: dropping only narrows
+    // the sandbox, while throwing would turn a caller's mistake into a failed
+    // spawn. It is logged so the narrowing is never silent.
+    const requested = asked.filter((root) => {
+      if (isGrantableRoot(root)) return true
+      this.ctx?.logger?.warn?.(`arxa-sandbox: refusing near-root extraWritableRoots grant ${JSON.stringify(root)}`)
+      return false
+    })
     return [...this.toolchainRoots(), ...requested].filter((root, i, all) => !already.has(root) && all.indexOf(root) === i)
   }
 

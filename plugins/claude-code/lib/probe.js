@@ -21,8 +21,18 @@ export function resolveClaudeBinary ({ env, platform, arch, exists = existsSync,
 const never = { [Symbol.asyncIterator] () { return { next: () => new Promise(() => {}) } } }
 
 export class Probe {
-  constructor ({ query, binary, env, ttlMs = 60_000, now = Date.now, timeoutMs = 15_000 }) {
-    Object.assign(this, { query, binary, env, ttlMs, now, timeoutMs }); this.cache = undefined
+  /** `spawnClaudeCodeProcess` is REQUIRED, not optional. D5 says no Claude child ever runs
+   * outside arxa's sandbox, and the probe is the busiest child of all: it runs on
+   * `listModels`, on `resolveModel`, on every `stream()`, and `auth-flow.js` polls it up to
+   * 200 times while the user sits at the sign-in screen. Left out, every one of those was a
+   * real `claude` binary launched unconfined. Injected rather than built here so the selftest
+   * can observe it, exactly like `query` and `now`; a missing one throws at construction so
+   * the guarantee is structural instead of a comment. */
+  constructor ({ query, binary, env, spawnClaudeCodeProcess, ttlMs = 60_000, now = Date.now, timeoutMs = 15_000 }) {
+    if (typeof spawnClaudeCodeProcess !== 'function') {
+      throw new TypeError('Probe: spawnClaudeCodeProcess is required — the probe child must never run outside arxa\'s sandbox')
+    }
+    Object.assign(this, { query, binary, env, spawnClaudeCodeProcess, ttlMs, now, timeoutMs }); this.cache = undefined
   }
 
   async current (force = false) {
@@ -39,7 +49,7 @@ export class Probe {
       options: {
         pathToClaudeCodeExecutable: this.binary, env: this.env, settingSources: [], persistSession: false,
         maxTurns: 0, abortController: abort, tools: [], systemPrompt: { type: 'custom', prompt: 'probe' },
-        permissionMode: 'default',
+        permissionMode: 'default', spawnClaudeCodeProcess: this.spawnClaudeCodeProcess,
       },
     })
     const timer = setTimeout(() => abort.abort(), this.timeoutMs)
