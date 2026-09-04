@@ -17,18 +17,23 @@ export class PendingResults {
   }
   // ponytail: a resolve() that arrives after the waiter aborted has nobody left to hand
   // the outcome to, so it parks in `early` like any unclaimed result. `early` has no TTL
-  // or eviction of its own — the release valve is clear(), which the caller (Task 9, on
-  // turn end/abort) is responsible for invoking; this class has no notion of "turn".
+  // or eviction of its own — the release valve is clear(ids), which the caller (Task 9, on
+  // turn end/abort, scoped to the ids it registered this turn) is responsible for invoking;
+  // this class has no notion of "turn".
   resolve (id, outcome) { const w = this.waiters.get(id); w ? w.resolve(outcome) : this.early.set(id, outcome) }
   /** Resolve only if someone is waiting; ids nobody asked for (mirror results echoed by the loop) are dropped. */
   resolveIfWaiting (id, outcome) { const w = this.waiters.get(id); if (w) w.resolve(outcome) }
   reject (id, err) { this.waiters.get(id)?.reject(err) }
-  /** Drop every unclaimed `early` result and reject every outstanding waiter. Caller-driven
-   * reset point (e.g. turn end) — this class doesn't know what a "turn" is. */
-  clear () {
+  /** Reject the outstanding waiter and drop the unclaimed `early` entry for each given id.
+   * `ids` is required, not a convenience no-arg overload: fromClaude/fromLoop are module-level
+   * singletons shared by every concurrent session in the process (subagent/fork/ralph/workflow
+   * presets all run multiple live sessions at once), so a no-arg "clear everything" on one
+   * session's turn end would reject every *other* session's in-flight waits too. Task 9 tracks
+   * the ids it registered this turn and passes exactly those. */
+  clear (ids) {
+    if (!ids) throw new Error('claude-code: PendingResults.clear(ids) requires an ids array')
     const err = new Error('claude-code: pending results cleared')
-    for (const w of [...this.waiters.values()]) w.reject(err)
-    this.early.clear()
+    for (const id of ids) { this.waiters.get(id)?.reject(err); this.early.delete(id) }
   }
 }
 export const fromClaude = new PendingResults() // Claude ran it; the dsh loop's mirror tool waits

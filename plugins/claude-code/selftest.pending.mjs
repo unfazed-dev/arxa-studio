@@ -35,6 +35,21 @@ p.resolveIfWaiting('nobody', { text: 'x', isError: false })
 assert.equal(p.early.size, 0, 'resolveIfWaiting never parks early results')
 ok('resolveIfWaiting drops results nobody asked for (no orphan in early)')
 
+const ac3 = new AbortController()
+const aborted = p.expect('t-late', ac3.signal)
+ac3.abort()
+await assert.rejects(aborted, /aborted/)
+p.resolve('t-late', { text: 'arrived late', isError: false }) // nobody's waiting anymore
+assert.deepEqual(await p.expect('t-late'), { text: 'arrived late', isError: false })
+ok('resolve() after abort parks the outcome in early for a later expect() to claim')
+
+const dup1 = p.expect('dup') // never awaited: superseded below, would hang forever otherwise
+const dup2 = p.expect('dup')
+p.resolve('dup', { text: 'second caller', isError: false })
+assert.deepEqual(await dup2, { text: 'second caller', isError: false })
+ok('a second expect() on the same id replaces the first waiter (last expect wins)')
+void dup1
+
 assert.ok(fromClaude instanceof PendingResults && fromLoop instanceof PendingResults && fromClaude !== fromLoop)
 ok('fromClaude and fromLoop are distinct PendingResults singletons')
 
@@ -42,12 +57,20 @@ const p2 = new PendingResults()
 const w1 = p2.expect('t5')
 const w2 = p2.expect('t6')
 p2.resolve('t7', { text: 'orphan', isError: false }) // parks in early, nobody waited
-p2.clear()
+p2.clear(['t5', 't6', 't7'])
 await assert.rejects(w1, /cleared/)
 await assert.rejects(w2, /cleared/)
 assert.equal(p2.has('t5'), false)
 assert.equal(p2.has('t6'), false)
-assert.equal(p2.early.size, 0)
-ok('clear() rejects every outstanding waiter and drops every early result')
+assert.equal(p2.early.has('t7'), false)
+ok('clear(ids) rejects the given waiters and drops the given early results, scoped to those ids')
+
+assert.throws(() => p2.clear(), /requires an ids array/)
+ok('clear() with no ids throws — a no-arg clear-everything is not a supported overload')
+
+const w8 = p2.expect('t8')
+p2.resolve('t8', { text: 'after clear', isError: false })
+assert.deepEqual(await w8, { text: 'after clear', isError: false })
+ok('clear(ids) round-trip: the object still settles a fresh id normally afterwards')
 
 console.log(`# ${passed} ok`)
