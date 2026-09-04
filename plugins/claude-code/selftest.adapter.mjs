@@ -430,6 +430,23 @@ ok('resolveModel efforts')
   } finally { initiator = agent }
 }
 
+// --- D5 applies to the utility path too: a session with no cwd of its own must fall back to
+// the sandbox policy's workspace root, not process.cwd() — the same rule the turn path enforces.
+{
+  const rooted = {
+    ...ctx,
+    sandboxPolicy: { resolve: () => ({ mode: 'workspace-write', workspaceRoot: '/policy-root', sessionId: 's' }) },
+  }
+  const rootlessAgent = { ...agent, session: { ...agent.session, header: {} } }
+  initiator = rootlessAgent
+  try {
+    const a = new ClaudeCodeAdapter({ query: fakeQuery([init, ...done('Summary')]), probe, ctx: rooted, binary: '/opt/bin/claude', env: { PATH: '/x' }, version: '0.1.0' })
+    await collect(a.stream({ provider: 'claude-code', model: 'haiku', purpose: 'compaction', messages: [{ role: 'user', content: [{ type: 'text', text: 'summarise' }] }] }))
+    assert.equal(queries.at(-1).options.cwd, '/policy-root')
+    ok('utility path: a session with no cwd falls back to the sandbox policy workspace root, not process.cwd()')
+  } finally { initiator = agent }
+}
+
 // --- a recorded Claude session the binary no longer holds falls back to a fresh start.
 // Clearing ~/.claude/projects, or moving to another machine, used to make every later turn in
 // that session error out: `resume` pointed at a transcript that was simply gone.

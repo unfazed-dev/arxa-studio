@@ -310,7 +310,7 @@ export class ClaudeCodeAdapter extends LlmAdapter {
     const q = this.query({
       prompt,
       options: this.base(policy, {
-        cwd: agent?.session?.header?.cwd ?? process.cwd(),
+        cwd: agent?.session?.header?.cwd ?? policy.workspaceRoot,
         model: options.model,
         tools: [],
         maxTurns: 1,
