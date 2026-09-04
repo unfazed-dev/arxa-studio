@@ -354,3 +354,25 @@ output rather than inviting the same mistake.
 
 **Open for the user:** rule on the 16, then update `acknowledged` in the
 fixture. Until then CI stays green and the names stay visible.
+
+## F9 — there is no front door for re-linking GitHub
+
+Found while answering "how do I re-link?". `github-link` is a **library**, not a
+plugin: it has no `index.mjs`, registers no dsh authorization flow, and arxa has
+**no Settings sign-in for GitHub**. The comment at
+`workspace-region.snippet.txt:2154` referring to "the Settings sign-in" describes
+something that does not exist.
+
+The only in-app re-link is a button inside the **delete-forever / purge modal**,
+and it renders only when an error string already contains "re-link GitHub"
+(`snippet:2206`). So the discovery path for a revoked grant is: try to
+permanently delete a repo, read the error, click the button. Nobody will find
+that while wondering why their push 401s.
+
+`scripts/github-relink.mjs` is the missing front door — `--check` reports state
+without touching anything, `--yes` runs the device flow and prints the one-time
+code. It needs no client secret and no running engine.
+
+**Still open:** a real Settings sign-in. Registering a dsh authorization flow the
+way `plugins/claude-code/lib/auth-flow.js` does would put GitHub beside Claude in
+the same surface. That is a UI decision, not a mechanical fix.
