@@ -18,7 +18,13 @@ const version = require(join(dirname(fileURLToPath(import.meta.url)), '..', '..'
 const sdkRoot = dirname(require.resolve('@anthropic-ai/claude-agent-sdk'))
 
 export const name = 'arxa-claude-code'
-export const inject = ['llm', 'agents', 'approval', 'sandbox', 'sandboxPolicy', 'authorization', 'credentials']
+// 'authorization' is deliberately NOT here. It is an optional seam: no arxa profile row mounts
+// @deepseek-ai/dsh-authorization, so requiring it up front leaves this plugin forever 'pending'
+// and dsh fails the whole boot — arxa studio will not start at all. dsh-llm-pi-ai, which
+// registers an auth flow on the same seam, declares inject = ['llm'] and reaches authorization
+// through a deferred ctx.inject() callback; this follows that pattern, so the adapter always
+// loads and the sign-in surface attaches only where the service exists.
+export const inject = ['llm', 'agents', 'approval', 'sandbox', 'sandboxPolicy', 'credentials']
 
 export function apply (ctx, config = {}) {
   // scrubEnv's second argument is required and must carry a real version: `{}` would silently
@@ -37,6 +43,10 @@ export function apply (ctx, config = {}) {
   })
   const probe = new Probe({ startup, binary, env, spawnClaudeCodeProcess: probeSpawner })
   ctx.llm.registerAdapter([PROVIDER_ID], new ClaudeCodeAdapter({ query, probe, ctx, binary, env, version }))
-  ctx.authorization.registerFlow(claudeAuthFlow({ probe, credentials: ctx.credentials }))
-  hideAnthropicOauth(ctx.authorization)
+  // Deferred: fires if and when ctx.authorization exists. The model adapter above does not
+  // depend on it — a user can pick a Claude model whether or not the login surface is mounted.
+  ctx.inject(['authorization'], (authorized) => {
+    authorized.authorization.registerFlow(claudeAuthFlow({ probe, credentials: ctx.credentials }))
+    hideAnthropicOauth(authorized.authorization)
+  })
 }
