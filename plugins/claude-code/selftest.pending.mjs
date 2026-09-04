@@ -38,4 +38,16 @@ ok('resolveIfWaiting drops results nobody asked for (no orphan in early)')
 assert.ok(fromClaude instanceof PendingResults && fromLoop instanceof PendingResults && fromClaude !== fromLoop)
 ok('fromClaude and fromLoop are distinct PendingResults singletons')
 
+const p2 = new PendingResults()
+const w1 = p2.expect('t5')
+const w2 = p2.expect('t6')
+p2.resolve('t7', { text: 'orphan', isError: false }) // parks in early, nobody waited
+p2.clear()
+await assert.rejects(w1, /cleared/)
+await assert.rejects(w2, /cleared/)
+assert.equal(p2.has('t5'), false)
+assert.equal(p2.has('t6'), false)
+assert.equal(p2.early.size, 0)
+ok('clear() rejects every outstanding waiter and drops every early result')
+
 console.log(`# ${passed} ok`)
