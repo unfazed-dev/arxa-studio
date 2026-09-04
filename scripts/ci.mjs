@@ -43,6 +43,11 @@ suites.push([root, 'scripts', 'cicd-stress.mjs'])
 // registry's `.id` fence). Its selftest runs against a faithful fake, so this
 // gate is the half that notices when the real thing moves.
 suites.push([root, 'scripts', 'jobs-fence-check.mjs'])
+// F6 mirror drift: MIRROR_TOOL_NAMES vs the pinned CLI's advertised tool list.
+// OFFLINE — reads plugins/claude-code/live-tools.json, never launches claude, so
+// it is safe here. It fails on CHANGE, not on the standing (unruled) diff, so a
+// CLI bump or an edit to the list goes red instead of drifting unnoticed.
+suites.push([root, 'scripts', 'mirror-drift-check.mjs'])
 
 console.log('arxa-studio CI — ' + suites.length + ' suites')
 let failed = 0

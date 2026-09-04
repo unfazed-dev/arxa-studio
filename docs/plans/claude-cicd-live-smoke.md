@@ -314,3 +314,43 @@ Still one layer short: the **git card** reads `card.status`, not
 `github.status`, so a push that fails on a dead grant surfaces there as a bare
 error. Carrying the flag onto the card is a UI decision, not a mechanical fix —
 left for the user.
+
+## F6 — resolved as far as it can be without a product decision
+
+**What I fixed:** the drift was invisible. `scripts/mirror-drift-check.mjs` now
+compares `MIRROR_TOOL_NAMES` against a captured fixture
+(`plugins/claude-code/live-tools.json`, CLI **2.1.260**, 26 advertised tools)
+and is wired into `npm test`. It is offline — it never launches the binary.
+Refresh with `node scripts/mirror-drift-check.mjs --capture --yes`.
+
+**It fails on CHANGE, not on the standing diff.** The current diff is a known,
+unruled baseline; failing on it would hold CI hostage to a decision nobody has
+made. A name entering or leaving either diff afterwards goes red. Verified both
+ways: adding a tool to the fixture and adding one to `MIRROR_TOOL_NAMES` each
+turn the gate red.
+
+**What I did NOT do, and why.** `tools` is the restriction knob, so the 16
+missing names are not a hole — they are simply not offered. Adding them widens
+what the model can reach, which is a product decision under the standing
+security constraints. Here they are, with names, so it can actually be ruled on:
+
+`CronCreate, CronDelete, CronList, DesignSync, EnterWorktree, ExitWorktree,
+ListAgents, Monitor, PushNotification, RemoteTrigger, ReportFindings,
+ScheduleWakeup, SendMessage, TaskOutput, TaskStop, Workflow`
+
+Several of these reach **outside** the sandbox — `RemoteTrigger`, `SendMessage`,
+`PushNotification`, `CronCreate` and `Monitor` touch the network, other
+sessions, schedules, or the user's phone. That is exactly why the decision is
+not mine to make silently.
+
+**Correction to the earlier F6 note.** It reported "11 phantom rows" as tools
+the CLI no longer has. That reading was wrong. The captured init carries
+`ToolSearch`, and under tool-search the CLI **defers** most built-ins rather
+than advertising them: `Glob`, `Grep`, `TodoWrite`, `AskUserQuestion`,
+`BashOutput` and `KillShell` all exist but are absent from the advertised list.
+Since `tools` is the restriction knob, keeping a deferred name is CORRECT —
+removing them would have broken working tools. The gate now says so in its own
+output rather than inviting the same mistake.
+
+**Open for the user:** rule on the 16, then update `acknowledged` in the
+fixture. Until then CI stays green and the names stay visible.
