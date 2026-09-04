@@ -1,6 +1,6 @@
 # Claude sign-in surface + reasoning-effort selector
 
-Status: investigated (systematic-debugging Phase 1-3 complete), ready to implement.
+Status: F12/F13/F14 fixed and verified live; F11 partially fixed (see Outcome).
 Trigger: user picked Opus, got no effort control, and the turn failed with
 "claude-code: not signed in" while the CLI was demonstrably signed in.
 
@@ -111,3 +111,59 @@ always `undefined` because `accountInfo()` does not return it — dead field.
 refuse the turn if `apiKeySource !== 'none'`; **arxa never launches
 `claude auth login`** — it shows the command and re-checks. No token, email or
 `~/.claude` content is printed, logged or committed.
+
+## Outcome (2026-09-04)
+
+**F12 fixed.** `matchModel()` in `lib/models.js` resolves a picked id to a live model
+by family: exact -> case-insensitive -> base before `[` -> whole-token match. Verified
+against the live SDK:
+
+```
+picked "opus"  -> id=opus[1m]              chip="Opus (1M context) · high"  efforts=low,medium,high,xhigh,max
+picked "fable" -> id=claude-fable-5-1[1m]  chip="Fable · high"              efforts=low,medium,high,xhigh,max
+picked "haiku" -> id=haiku                 chip="Haiku"                     efforts=NONE (correct — not a reasoning model)
+```
+
+dsh's own picker is unchanged: it renders the effort row as soon as `resolveModel`
+returns `reasoning`, which it now does.
+
+**F13 fixed.** `signedOutMessage()` separates three cases that used to be one fixed
+string: genuinely signed out, no CLI installed, and probe-failed-for-another-reason
+(which now carries `account.error` and says the sign-in may be fine). Selftests cover
+all three.
+
+**F14 fixed.** The sign-in notice now carries `code` (the copyable command) **and**
+`url` (the install docs), and the signed-out message names the surface —
+Settings -> Models -> Claude Code — which waits and picks the sign-in up
+automatically. arxa still never launches `claude auth login`.
+
+**F15 not done.** `claude auth status` would answer the liveness question far cheaper
+than a `startup()` handshake, but the probe is not the bug and changing it now would be
+an unforced risk. Left as a follow-up.
+
+**F11 partially fixed.** `bin/arxa-engine-sync.mjs` now compares a **content hash**
+instead of a package version, copies every plugin directory (not only those with a
+`package.json`), and copies `profile/`. Gated by `bin/selftest.engine-sync.mjs`, wired
+into CI. The first run proved the old traps were live, not theoretical:
+
+```
+synced plugins/claude-code: MISSING      -> a00ca8f055dc   (absent from EVERY payload)
+synced plugins/sandbox:     4a5f54770db5 -> 15e5c6e29828   (stale: same version, different bytes)
+synced profile:             441b96556e8d -> c902dc78997e   (never copied at all)
+```
+
+**Remaining blocker, unfixed and deliberate:** the payload carries no
+`@anthropic-ai/claude-agent-sdk`, and both claude-code rows (host plane in
+`profile/cordis.patch.yml`, agent plane in `profile/agent-presets/arxa/agent.cordis.yml`)
+load the plugin by **absolute repo path**. So claude-code still runs only on a machine
+holding this checkout. Shipping it needs the SDK vendored into the payload and the rows
+switched to package names — a distribution change that should not be improvised
+alongside a bug fix. `arxa-engine-sync` now prints this as a warning on every run rather
+than leaving it silent.
+
+## What was NOT the cause
+
+Ruled out by measurement, not argument — recorded so nobody re-investigates them:
+the sandbox (all three policy modes), the GUI-minimal environment, binary choice
+(PATH vs bundled), probe concurrency, and `modelsFromSdk` (which was correct
+throughout). `apiKeySource` enforcement at `bridge.js:42` is intact.

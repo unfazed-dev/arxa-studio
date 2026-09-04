@@ -49,6 +49,13 @@ suites.push([root, 'scripts', 'jobs-fence-check.mjs'])
 // CLI bump or an edit to the list goes red instead of drifting unnoticed.
 suites.push([root, 'scripts', 'mirror-drift-check.mjs'])
 
+// bin/ is outside the plugins/*/selftest.mjs sweep, so this is wired by hand.
+// arxa-engine-sync decides what reaches a user's desktop payload, and both of its
+// previous skip rules failed silently — a version-keyed compare shipped nothing when
+// the version was unchanged, and plugins without a package.json were passed over
+// entirely. A build tool that reports success while shipping nothing needs a gate.
+suites.push([root, 'bin', 'selftest.engine-sync.mjs'])
+
 console.log('arxa-studio CI — ' + suites.length + ' suites')
 let failed = 0
 const failedNames = []
