@@ -413,3 +413,47 @@ phone); `DesignSync` talks to claude.ai; `Workflow` fans out agents at real cost
 
 **To overturn:** move a name out of `acknowledged.missing` into
 `MIRROR_TOOL_NAMES`. The gate goes red until both agree — which is the point.
+
+## F10 — the authorization service is never mounted, so NO sign-in exists
+
+Found answering "why only for claude, what about the others?". The answer is
+that it is not only Claude — it is nothing, Claude included.
+
+**Four flows are written:**
+
+| flow key | registered by |
+|---|---|
+| `claude-code/account` | `plugins/claude-code/index.mjs` |
+| `github-link/account` | `plugins/github-link/index.mjs` (F9, today) |
+| `llm-pi-ai/anthropic` | `@deepseek-ai/dsh-llm-pi-ai` |
+| `llm-pi-ai/openai-codex` | `@deepseek-ai/dsh-llm-pi-ai` |
+
+pi-ai also registers one flow **per catalog provider**, dynamically
+(`dsh-llm-pi-ai/lib/index.js:2267`) — so every other provider it carries,
+zai/glm included, already has a sign-in written.
+
+**None of them ever register.** `@deepseek-ai/dsh-authorization` is not mounted
+by any profile: not `profile/cordis.patch.yml`, not `dsh-base`, not
+`dsh-web-app`, not `dsh-headless`, and dsh's boot does not provide it in code.
+It is on disk only as a transitive dependency of pi-ai. Compare `credentials`,
+which a real row mounts at `dsh-base/cordis.patch.yml:85`.
+
+Every registration therefore sits behind `ctx.inject(['authorization'], …)` —
+pi-ai's at :2429, claude-code's at index.mjs:48, github-link's at index.mjs:21 —
+and a deferred inject whose service never arrives never fires. Measured: with no
+authorization service, the callback does not run.
+
+**Consequence for F9:** the GitHub sign-in is correct and boot-safe, but it is
+currently INERT — nothing surfaces it, exactly like Claude's. F9 built the flow;
+it did not build the surface.
+
+**Consequence for D1:** `hideAnthropicOauth` (which strips pi-ai's forbidden
+Anthropic OAuth method) is dead code today, because there are no flows to strip.
+It only matters once the service is mounted.
+
+**The fix is one row** mounting `@deepseek-ai/dsh-authorization`, which would
+light up Claude, GitHub, and every pi-ai catalog provider at once. NOT shipped
+here: a bad profile row does not degrade, it stops arxa booting entirely (F1),
+and this environment cannot boot arxa to verify — `arxa --headless` fails on
+eight UI plugins that need `webServer`, which is pre-existing and unrelated.
+Adding it wants one real boot to confirm.
