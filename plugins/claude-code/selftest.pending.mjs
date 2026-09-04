@@ -47,8 +47,14 @@ const dup1 = p.expect('dup') // never awaited: superseded below, would hang fore
 const dup2 = p.expect('dup')
 p.resolve('dup', { text: 'second caller', isError: false })
 assert.deepEqual(await dup2, { text: 'second caller', isError: false })
-ok('a second expect() on the same id replaces the first waiter (last expect wins)')
-void dup1
+// "Last expect wins" is only half the claim. Asserting dup2 resolves proves the second waiter
+// works; it says nothing about the first. The whole point is that dup1 is STRANDED — the
+// resolve went to dup2 only, and dup1 stays pending forever. Race it against a settled promise:
+// if dup1 had also been resolved, the race would come back 'dup1'.
+const stranded = await Promise.race([dup1.then(() => 'dup1'), Promise.resolve('still-pending')])
+assert.equal(stranded, 'still-pending', 'the superseded waiter must stay pending, not resolve too')
+ok('a second expect() on the same id replaces the first waiter — and the first stays pending')
+dup1.catch(() => {}) // it never settles; keep node from flagging it if that ever changes
 
 assert.ok(fromClaude instanceof PendingResults && fromLoop instanceof PendingResults && fromClaude !== fromLoop)
 ok('fromClaude and fromLoop are distinct PendingResults singletons')

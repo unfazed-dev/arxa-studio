@@ -8,6 +8,12 @@ export const BLOCKED_ENV = [
 ]
 
 export function scrubEnv (env, { version }) {
+  // A missing version silently shipped `arxa-studio/undefined` as the client-app identifier
+  // Anthropic sees on every request. Fail here instead — it is a wiring mistake at plugin
+  // apply, and the only caller reads it straight out of package.json.
+  if (typeof version !== 'string' || version.length === 0) {
+    throw new TypeError('scrubEnv: a non-empty version is required for CLAUDE_AGENT_SDK_CLIENT_APP')
+  }
   const out = {}
   for (const [k, v] of Object.entries(env)) {
     if (v === undefined || BLOCKED_ENV.includes(k)) continue

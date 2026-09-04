@@ -86,7 +86,10 @@ export class TurnBridge {
   }
 
   push (m) { this.queue.push(m); this.wake() }
-  fail (err) { this.failure = err; this.finished = true; this.settleOpenCalls(err.message); this.wake() }
+  // `String(err?.message ?? err)` — the same idiom probe.js:59 uses — because the SDK iterator
+  // can reject with a non-Error (a string, an object with no `message`). Reading `err.message`
+  // straight made `fail` itself throw on exactly the paths that exist to report a failure.
+  fail (err) { this.failure = err; this.finished = true; this.settleOpenCalls(String(err?.message ?? err)); this.wake() }
   close () { this.ended = true; this.settleOpenCalls('claude-code: the turn ended before this tool reported a result'); this.wake() }
   wake () { const w = this.waiter; this.waiter = undefined; w?.() }
 
@@ -96,8 +99,12 @@ export class TurnBridge {
     while (this.queue.length === 0) {
       if (this.failure) throw this.failure
       if (this.ended) throw new Error('claude-code: segment() called after the turn finished')
-      // One waiter slot: a second concurrent consumer would clobber the first's wake-up and
-      // hang it forever, so say so instead of deadlocking.
+      // One waiter slot, so throw rather than overwrite it — a second consumer parking here
+      // would replace the first's resolve() and strand it forever. This is a deadlock
+      // preventer, NOT concurrency detection: it only fires when a second consumer reaches
+      // an EMPTY queue while another is parked. Two consumers racing a non-empty queue both
+      // shift from it and interleave, and nothing here notices. Single-consumer use is the
+      // contract; this guard only stops the one failure mode that would hang silently.
       if (this.waiter) throw new Error('claude-code: segment() is already being consumed')
       await new Promise((r) => { this.waiter = r })
     }

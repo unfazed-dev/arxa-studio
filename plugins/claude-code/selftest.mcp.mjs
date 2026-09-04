@@ -136,4 +136,29 @@ const schemas = [
   }
 }
 
+// --- withTimeout's `r.err` branch: the tool call REJECTS before the timeout wins. This is the
+// module's whole contract — turning a real tool failure into text Claude can read rather than
+// throwing into the MCP request pump — and it had never been exercised. The timeout branch
+// (r.done === false) and the success branch were covered; this one was not.
+{
+  for (const [label, thrown, expected] of [
+    ['an Error', new Error('disk on fire'), /tool call failed: disk on fire/],
+    ['a bare string', 'no message property', /tool call failed: no message property/],
+    ['an object with no message', { code: 'EACCES' }, /tool call failed: /],
+  ]) {
+    const cfg = createArxaMcpServer({
+      schemas: [{ name: 'boom', description: 'x', parameters: { type: 'object', properties: {} } }],
+      exclude: [],
+      onCall: async () => { throw thrown },
+      timeoutMs: 60_000, // generous: the rejection must win the race, not the clock
+    })
+    const handlers = getHandlers(cfg)
+    const res = await handlers.get('tools/call')({ method: 'tools/call', params: { name: 'boom', arguments: {} } }, {})
+    assert.equal(res.isError, true, `${label} must settle as an error result, not throw`)
+    assert.match(res.content[0].text, expected)
+    assert.doesNotMatch(res.content[0].text, /timed out/, `${label} must report the failure, not a timeout`)
+  }
+  ok('a tool call that rejects before the timeout becomes readable error text, whatever it threw')
+}
+
 console.log(`# ${passed} ok`)

@@ -213,6 +213,28 @@ function channel () {
     assert.equal(out.isError, true); assert.match(out.text, /ended before this tool reported a result/)
     ok('a turn that ends without a tool_result fails that tool instead of hanging it')
   }
+
+  // fail() is the path that exists to REPORT a failure, so it must survive whatever the SDK
+  // iterator rejects with. Reading `err.message` off a thrown string made fail() throw inside
+  // itself, losing both the open tool call and the error the consumer was owed.
+  for (const thrown of ['plain string boom', { code: 'ENOENT' }, null, 42]) {
+    const pending = new PendingResults()
+    const b = new TurnBridge({
+      pending,
+      onSession: () => {},
+      onRateLimit: () => {},
+      messages: (async function * () { yield init; yield call; throw thrown })(),
+    })
+    // The step may end at the tool-call boundary before the rejection surfaces, so tolerate
+    // either shape — what matters is that fail() ran without throwing inside itself.
+    try { await collect(b.segment()) } catch { /* the failure surfacing here is fine too */ }
+    assert.equal(b.finished, true, 'the bridge is finished however the rejection surfaced')
+    const out = await pending.expect('tu_hang')
+    assert.equal(out.isError, true)
+    assert.equal(typeof out.text, 'string')
+    assert.ok(out.text.length > 0, `a ${typeof thrown} rejection still yields readable tool text`)
+  }
+  ok('a non-Error rejection from the SDK iterator still fails the turn and its open tool cleanly')
 }
 
 console.log(`# ${passed} ok`)
