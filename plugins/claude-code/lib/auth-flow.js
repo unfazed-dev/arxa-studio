@@ -26,3 +26,22 @@ export function claudeAuthFlow ({ probe, credentials, sleep = (ms) => new Promis
     },
   }
 }
+
+export const ANTHROPIC_PIAI_KEY = credentialKey('llm-pi-ai', 'anthropic')
+
+/** D1: pi-ai's Anthropic OAuth is the Claude Code client-id spoof Anthropic forbids. Keep the API-key method. */
+export function stripOauthMethod (flow) {
+  if (flow.key !== ANTHROPIC_PIAI_KEY) return undefined
+  return { ...flow, methods: flow.methods.filter((m) => m.id !== 'oauth') }
+}
+
+export function hideAnthropicOauth (authorization) {
+  const fix = (flow) => {
+    const s = stripOauthMethod(flow); if (s === undefined) return flow
+    return s.methods.length === 0 ? null : s
+  }
+  const existing = authorization.flows?.get?.(ANTHROPIC_PIAI_KEY)
+  if (existing) { const f = fix(existing); f ? authorization.flows.set(ANTHROPIC_PIAI_KEY, f) : authorization.flows.delete(ANTHROPIC_PIAI_KEY) }
+  const original = authorization.registerFlow.bind(authorization)
+  authorization.registerFlow = (flow) => { const f = fix(flow); return f === null ? () => {} : original(f) }
+}

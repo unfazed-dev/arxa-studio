@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert'
-import { claudeAuthFlow, ACCOUNT_KEY } from './lib/auth-flow.js'
+import { claudeAuthFlow, ACCOUNT_KEY, stripOauthMethod, hideAnthropicOauth, ANTHROPIC_PIAI_KEY } from './lib/auth-flow.js'
 
 let n = 0; const ok = (s) => { n++; console.log(`  ok ${s}`) }
 const notices = [], records = []
@@ -54,5 +54,28 @@ const midFlow = claudeAuthFlow({ probe: midProbe, credentials: midCredentials, s
 await assert.rejects(midFlow.run({ method: 'cli', signal: midController.signal, notify: () => {}, prompt: async () => '' }), /cancelled/)
 assert.equal(midPolls, 2); assert.equal(midRecords.length, 0)
 ok('abort mid-poll stops the loop promptly, no credential written')
+
+// Task 11: pi-ai's Anthropic OAuth is a Claude Code client-id spoof — arxa hides it from the
+// login list, both when pi-ai's flow is already registered and when it registers afterward.
+{
+  const flow = { key: ANTHROPIC_PIAI_KEY, label: 'Anthropic', methods: [{ id: 'oauth', label: 'Claude.ai' }, { id: 'api-key', label: 'API key' }], run: async () => {} }
+  const s = stripOauthMethod(flow)
+  assert.deepEqual(s.methods, [{ id: 'api-key', label: 'API key' }]); assert.equal(s.run, flow.run)
+  assert.equal(stripOauthMethod({ ...flow, key: 'llm-pi-ai/openai' }), undefined, 'other providers untouched → undefined means leave alone'); ok('stripOauthMethod')
+
+  // already registered before us
+  const flows = new Map([[ANTHROPIC_PIAI_KEY, flow]])
+  const svc = { flows, registerFlow (f) { this.flows.set(f.key, f); return () => this.flows.delete(f.key) } }
+  hideAnthropicOauth(svc)
+  assert.deepEqual(flows.get(ANTHROPIC_PIAI_KEY).methods.map((m) => m.id), ['api-key']); ok('patches an existing flow')
+  // registered after us
+  flows.clear()
+  svc.registerFlow({ ...flow })
+  assert.deepEqual(flows.get(ANTHROPIC_PIAI_KEY).methods.map((m) => m.id), ['api-key']); ok('wraps later registrations')
+  // oauth-only flow would become method-less → dropped entirely
+  flows.clear()
+  svc.registerFlow({ ...flow, methods: [{ id: 'oauth', label: 'x' }] })
+  assert.equal(flows.has(ANTHROPIC_PIAI_KEY), false); ok('oauth-only flow dropped')
+}
 
 console.log(`selftest.auth-flow: ${n} ok`)
