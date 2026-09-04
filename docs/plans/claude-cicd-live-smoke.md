@@ -299,3 +299,18 @@ the standing security constraints, not a defect fix; and the phantom rows are
 asserted by `selftest.mirror-gate.mjs` in five places and may be deliberate
 forward-compat. Needs a fresh live init plus a decision on which tools arxa
 intends to expose.
+
+**F8 addendum — the flag had to reach the UI, not just `status()`.** The first
+pass fixed the service layer and stopped there. `/__arxa/sidebar/action` →
+`github.status` forwards the whole object (index.js:778), but the client read
+only `.linked` — so the org-create modal still offered "publish to GitHub"
+against a revoked grant. Fixed in `lib/workspace-region.snippet.txt` (the
+generator source; `lib/client.js` is generated and guarded by the drift gate in
+`selftest.mjs`, regenerate with `node scripts/gen-workspace.mjs`).
+`relinkRequired` now counts as not-linked, which lights the existing link
+affordance instead of needing new UI.
+
+Still one layer short: the **git card** reads `card.status`, not
+`github.status`, so a push that fails on a dead grant surfaces there as a bare
+error. Carrying the flag onto the card is a UI decision, not a mechanical fix —
+left for the user.

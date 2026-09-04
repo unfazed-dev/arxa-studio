@@ -4472,7 +4472,11 @@ window.__ModuleLoader__.load({
 			const [homeDir, setHomeDir] = (0, react.useState)(null);
 			const nameRef = (0, react.useRef)(null);
 			const checkGh = () => {
-				ORG_POST("github.status").then((r) => setGhLinked(!!(r.result && r.result.linked)), () => setGhLinked(null));
+				// relinkRequired counts as NOT linked: the grant is dead server-side, so
+				// offering "publish to GitHub" here only yields a push that 401s. status()
+				// carries the flag now; before 2026-09-04 readState() dropped it and this
+				// modal happily offered publishing against a token GitHub had revoked.
+				ORG_POST("github.status").then((r) => setGhLinked(!!(r.result && r.result.linked && !r.result.relinkRequired)), () => setGhLinked(null));
 			};
 			(0, react.useEffect)(() => {
 				if (open) {
