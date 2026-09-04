@@ -68,7 +68,8 @@ ok('resolveModel efforts')
 
 // --- first turn, fresh session: options assembled per D5/D7/D10
 {
-  const a = mk([init, ...done('Hi')])
+  const rateLimitEvent = { type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning', utilization: 0.9, rateLimitType: 'seven_day' } }
+  const a = mk([init, rateLimitEvent, ...done('Hi')])
   const chunks = await collect(a.stream({ provider: 'claude-code', model: 'fable', system: 'You are arxa.', messages: [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }], tools: [] }))
   assert.deepEqual(chunks.at(-1), { type: 'finish', reason: { kind: 'stop' } })
   const o = queries[0].options
@@ -80,6 +81,15 @@ ok('resolveModel efforts')
   assert.equal(o.mcpServers.arxa.type, 'sdk'); assert.equal(typeof o.canUseTool, 'function'); assert.equal(typeof o.spawnClaudeCodeProcess, 'function')
   assert.deepEqual(events.find((e) => e.type === 'claude-code/session').data, { claudeSessionId: 'cs-9', model: 'sonnet' })
   ok('fresh turn options + session event')
+
+  // Task 14: a rate_limit_event publishes to the shared provider/status channel, not a
+  // claude-code-only event — Claude Code is the first producer of the provider-neutral pill.
+  assert.deepEqual(events.find((e) => e.type === 'provider/status').data, {
+    provider: 'claude-code', level: 'warn', text: 'Claude 90%', title: 'Claude weekly limit · 90% used',
+    utilization: 0.9, detail: { rateLimitType: 'seven_day', status: 'allowed_warning' },
+  })
+  assert.equal(events.find((e) => e.type === 'claude-code/rate-limit'), undefined)
+  ok('rate limit publishes provider/status, not the old claude-code/rate-limit event')
 
   // D5 tool lock: an allowlist on `tools` (the SDK's availability knob), never a denylist and
   // never `allowedTools` — which only auto-approves and would bypass canUseTool entirely.

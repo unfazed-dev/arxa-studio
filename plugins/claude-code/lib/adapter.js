@@ -14,6 +14,8 @@ import { makeCanUseTool } from './approval.js'
 import { createArxaMcpServer } from './mcp-bridge.js'
 import { MIRROR_TOOL_NAMES } from './mirror-tools.js'
 import { fromClaude, fromLoop } from './pending.js'
+import { appendProviderStatus } from '../../provider-status/lib/index.js'
+import { rateLimitToStatus } from './rate-limit.js'
 
 const textOf = (msg) => (msg?.content ?? []).filter((b) => b.type === 'text').map((b) => b.text).join('\n')
 const resultText = (block) => (block.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join('\n')
@@ -206,7 +208,7 @@ export class ClaudeCodeAdapter extends LlmAdapter {
       messages: q,
       pending: fromClaude,
       onSession: (id, model) => agent.session.append('claude-code/session', { claudeSessionId: id, model }),
-      onRateLimit: (info) => agent.session.append('claude-code/rate-limit', info),
+      onRateLimit: (info) => appendProviderStatus(agent.session, rateLimitToStatus(info, account)),
       onToolUse: (id, name) => {
         claudeIds.add(id)
         if (name.startsWith(MCP_PREFIX)) mcpQueue.push({ id, name: stripMcpPrefix(name) })
