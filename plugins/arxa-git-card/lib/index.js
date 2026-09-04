@@ -552,8 +552,16 @@ export function apply(ctx) {
               try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch { /* unreadable — plain status */ }
               const g = await getGithub().catch(() => null)
               const mainChecks = await mainChecksFor(cur.path, manifest, g, gw).catch(() => null)
+              // F8 (2026-09-04): when GitHub revokes the grant, every push and
+              // PR on this card fails with a bare 401 and nothing says why or
+              // what to do. github-link records relinkRequired; the card is the
+              // surface where the user actually meets the failure, so the flag
+              // has to reach here — the sidebar's org modal is not where anyone
+              // is standing when a push dies.
+              const ghState = await (g ? g.status().catch(() => null) : null)
               return {
                 seat: { kind: sid ? 'session' : 'org', sessionId: sid, branch },
+                github: { relinkRequired: ghState?.relinkRequired === true },
                 // `health` is what the card must read before any count. When it
                 // is not 'ok' the counts were never measured, so they are null
                 // rather than zero — zero is a claim, and it would be a lie.

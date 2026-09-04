@@ -33,6 +33,13 @@ check('seam: card host serves POST /__arxa/git-card/action and dispatches every 
   hostSrc().includes("path: '/__arxa/git-card/action'") && ['card.status', 'card.commit.draft', 'card.commit', 'card.push', 'card.pr.create', 'card.pr.status', 'card.pr.comment', 'card.pr.merge', 'version.mint', 'card.runner.wake', 'insight.streak', 'insight.review', 'insight.sessions', 'insight.reply', 'insight.resolve', 'card.integrate', 'card.integrate.finish'].every((a) => hostSrc().includes("'" + a + "': async")))
 
 // ---- engine rules (moved verbatim from arxa-sidebar/selftest.mjs) ---------
+// F8 (2026-09-04): a revoked GitHub grant failed every push/PR on this card as
+// a bare 401 with nothing naming the recovery. The flag has to survive BOTH
+// halves — the host must read it off github-link's status(), and the generated
+// client must render it — so both are asserted here, not just the host.
+check('card: card.status carries github.relinkRequired (host half)',
+  hostSrc().includes('relinkRequired: ghState?.relinkRequired === true') && hostSrc().includes('g.status()'))
+
 check('card: engine exposes the six card actions (S3)', ['card.status', 'card.commit.draft', 'card.commit', 'card.push', 'card.pr.create', 'card.pr.status'].every((a) => hostSrc().includes("'" + a + "'")))
 check('card: commit validates the conventional-subject law (Q7)', hostSrc().includes('subject-not-conventional') && hostSrc().includes('SUBJECT_RE.test(subject)'))
 check('card: draft returns evidence only — the engine never drafts (Q6)', hostSrc().includes('card.commit.draft') && hostSrc().includes('EVIDENCE ONLY'))
@@ -61,6 +68,10 @@ check('client: tree mirrors QueueDock — dock > panel > header[lead,count,chevr
   ['S.dock', 'S.panel', 'S.header', 'S.lead', 'S.count', 'S.chevron', 'S.list', 'S.row', 'S.preview', 'S.editor', 'S.actions', 'S.action'].every((s) => clientSrc.includes(s)) && clientSrc.includes("'data-git-dock': ''") && clientSrc.includes("'aria-controls': listId"))
 check('client: seat-aware status with org fallback; commit/push+PR/merge ride the one host route',
   clientSrc.includes("CARD_ROUTE = '/__arxa/git-card/action'") && clientSrc.includes("post('card.status'") && clientSrc.includes('session-not-found') && ["post('card.commit'", "post('card.push'", "post('card.pr.create'", "post('card.pr.status'", "post('card.pr.merge'"].every((s) => clientSrc.includes(s)))
+
+check('card: the detail line names the re-link, in all three dictionaries (client half)',
+  clientSrc.includes("status.github.relinkRequired") && clientSrc.includes("t('git.relink')") &&
+  (clientSrc.match(/'git\.relink':/g) || []).length === 3)
 check('client: renders nothing without an org (no-org-open / no-workspace / sidebar-not-ready), like the empty queue',
   clientSrc.includes('no-org-open|no-workspace|sidebar-not-ready') && clientSrc.includes('if (absent || status === null) return null'))
 // Q8 (2026-09-03): the card CONTROLS the run, it does not merely report it.

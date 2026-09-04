@@ -59,6 +59,7 @@ const en = {
   'git.runner.asleep': 'runner asleep',
   'git.runner.unknown': 'runner unknown',
   'git.mainRed': 'main is red',
+  'git.relink': 're-link GitHub — the session expired',
   'git.wake': 'Wake the runner',
   'git.wakeStarted': 'Waking the runner — checks resume when it reports in.',
   'git.wakeManual': 'Start it by hand: run svc.sh start in ~/.arxa/runners/<owner>__<name>. {reason}',
@@ -124,6 +125,8 @@ const pl = {
   'git.runner.asleep': 'runner uśpiony',
   'git.runner.unknown': 'runner nieznany',
   'git.mainRed': 'main czerwony',
+  // TODO native review: machine-drafted.
+  'git.relink': 'połącz ponownie GitHub — sesja wygasła',
   'git.wake': 'Obudź runnera',
   'git.wakeStarted': 'Budzenie runnera — kontrole wznowią się, gdy się zgłosi.',
   'git.wakeManual': 'Uruchom ręcznie: svc.sh start w ~/.arxa/runners/<owner>__<name>. {reason}',
@@ -189,6 +192,8 @@ const fr = {
   'git.runner.asleep': 'runner en veille',
   'git.runner.unknown': 'runner inconnu',
   'git.mainRed': 'main est rouge',
+  // TODO native review: machine-drafted.
+  'git.relink': 'reconnectez GitHub — la session a expiré',
   'git.wake': 'Réveiller le runner',
   'git.wakeStarted': 'Réveil du runner — les contrôles reprennent dès qu’il répond.',
   'git.wakeManual': 'Lancez-le à la main : svc.sh start dans ~/.arxa/runners/<owner>__<name>. {reason}',
@@ -316,6 +321,11 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
   const checkState = checks ? (checks.asleep ? 'asleep' : String(checks.state || 'unknown')) : 'none'
   const runnerAsleep = frame.runner === 'asleep' || checkState === 'asleep'
   const sessionSeat = Boolean(status.seat && status.seat.kind === 'session')
+  // Leads the detail line: when GitHub has revoked the grant every push, PR
+  // and merge on this card fails, and before 2026-09-04 it failed as a bare
+  // 401 with nothing naming the one recovery. This is the surface the user is
+  // actually standing on when that happens — the sidebar's org modal is not.
+  if (status.github && status.github.relinkRequired) detailParts.push(t('git.relink'))
   if (status.localOnly) detailParts.push(t('git.localOnly'))
   if (frame.wired) detailParts.push(t(frame.wired === 'ok' ? 'git.frame.wired' : 'git.frame.missing'))
   // host says 'ok' (manifest.frameRunner) or 'online' (live probe) — both are up
