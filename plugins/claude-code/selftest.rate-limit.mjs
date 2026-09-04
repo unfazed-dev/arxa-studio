@@ -43,25 +43,37 @@ ok('resetsAt: seconds-shaped and millisecond-shaped values for the same instant 
 assert.ok(!('resetsAt' in rateLimitToStatus({ status: 'allowed' }, acct)))
 ok('resetsAt: absent on the SDK payload stays absent on the output, never synthesised')
 
-// Every rateLimitType × status × utilization combination must (a) stay inside the 80-char text
-// cap the provider/status schema enforces and (b) actually pass PROVIDER_STATUS_SCHEMA.parse —
-// the real proof the browser will accept it, not just that the JS object looks right. The max
-// reachable text is 'Claude 100%' (11 chars), so a single hand-picked boundary case would be
-// theater; the invariant has to hold over the whole matrix instead.
+// Every rateLimitType × status × utilization × resetsAt combination must (a) stay inside the
+// 80-char text cap the provider/status schema enforces and (b) actually pass
+// PROVIDER_STATUS_SCHEMA.parse — the real proof the browser will accept it, not just that the
+// JS object looks right. The max reachable text is 'Claude 100%' (11 chars), so a single
+// hand-picked boundary case would be theater; the invariant has to hold over the whole matrix
+// instead. resetsAt is in the matrix (not just the two dedicated cases above) specifically so
+// the schema's `int` requirement is checked against a float seconds-shaped value
+// (1_800_000_000.5, e.g. Date.now() / 1000) — toUnixSeconds must round that branch too, or
+// PROVIDER_STATUS_SCHEMA.parse throws here.
 const TYPES = [undefined, 'five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet', 'seven_day_overage_included', 'overage']
 const STATUSES = ['allowed', 'allowed_warning', 'rejected']
 const UTILS = [undefined, 0, 0.2, 0.9, 1]
+const RESETS_AT = [undefined, 0, 1_800_000_000, 1_800_000_000_000, 1_800_000_000.5]
 for (const rateLimitType of TYPES) {
   for (const status of STATUSES) {
     for (const utilization of UTILS) {
-      const info = { status, ...(rateLimitType === undefined ? {} : { rateLimitType }), ...(utilization === undefined ? {} : { utilization }) }
-      const result = rateLimitToStatus(info, acct)
-      assert.ok(result.text.length <= 80, `text over 80 chars: ${result.text}`)
-      PROVIDER_STATUS_SCHEMA.parse(result)
+      for (const resetsAt of RESETS_AT) {
+        const info = {
+          status,
+          ...(rateLimitType === undefined ? {} : { rateLimitType }),
+          ...(utilization === undefined ? {} : { utilization }),
+          ...(resetsAt === undefined ? {} : { resetsAt }),
+        }
+        const result = rateLimitToStatus(info, acct)
+        assert.ok(result.text.length <= 80, `text over 80 chars: ${result.text}`)
+        PROVIDER_STATUS_SCHEMA.parse(result)
+      }
     }
   }
 }
-ok('every rateLimitType × status × utilization stays ≤ 80 chars and passes PROVIDER_STATUS_SCHEMA')
+ok('every rateLimitType × status × utilization × resetsAt stays ≤ 80 chars and passes PROVIDER_STATUS_SCHEMA')
 
 // Leak test: a hostile/future SDK payload carrying a token, response headers and an account id
 // alongside the fields we do read. None of them may reach the output — the allowlist means an

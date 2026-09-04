@@ -20,8 +20,11 @@ const TYPE_LABEL = {
 // Unix timestamp in seconds for any real date is ~1e9-2e9, the same instant in milliseconds is
 // ~1e12 — 1e11 sits between them with enormous margin (1e11s ≈ year 5138, 1e11ms ≈ 1973), so no
 // real timestamp is ever near the boundary in either unit.
+// Round on both branches: PROVIDER_STATUS_SCHEMA requires resetsAt to be an int, and a
+// seconds-shaped float (Date.now() / 1000 is a common upstream idiom) would otherwise pass
+// the pass-through branch unrounded and fail .parse() in appendProviderStatus.
 const MS_VS_S_THRESHOLD = 1e11
-const toUnixSeconds = (value) => (value > MS_VS_S_THRESHOLD ? Math.round(value / 1000) : value)
+const toUnixSeconds = (value) => Math.round(value > MS_VS_S_THRESHOLD ? value / 1000 : value)
 
 // ponytail: `account` stays in the signature (interface contract) for a future plan-level
 // rate-limit rule, but no such rule exists yet, so it's unused here. Never fill it back in with
