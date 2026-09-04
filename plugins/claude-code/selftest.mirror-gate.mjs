@@ -84,12 +84,16 @@ const mirrorsIn = (list) => MIRROR_TOOL_NAMES.filter((n) => list.includes(n))
 
 // dsh-system-prompt collects the tool schemas BEFORE running the waterfall
 // (dsh-system-prompt/lib/index.js:249-283) — that is why the gate must filter too.
-const assemble = () => {
+// `assembleContextFor` sets `agent` and `scope` together, so the listener always has
+// the agent this assembly belongs to.
+const AGENT = { id: 'agent-1' }
+const assemble = (agent = AGENT) => {
   const assembly = { sections: [], contexts: [], tools: ctx.tools.schemas(), variables: { provider: BASELINE_PROVIDER, model: 'baseline' } }
-  return ctx.waterfall('system-prompt/assemble', assembly, {}, () => Promise.resolve(assembly))
+  return ctx.waterfall('system-prompt/assemble', assembly, { agent, scope: agent }, () => Promise.resolve(assembly))
 }
-// buildRequest guarantees a non-empty provider on the seed (dsh-agent-loop:693-715).
-const buildRequest = () => ctx.waterfall('agent/request', { turn: 1, step: 0 }, () => Promise.resolve({ provider: BASELINE_PROVIDER, model: 'baseline' }))
+// buildRequest guarantees a non-empty provider on the seed (dsh-agent-loop:693-715), and
+// agentEvents fuses `agent` into every payload it dispatches.
+const buildRequest = (agent = AGENT) => ctx.waterfall('agent/request', { turn: 1, step: 0, agent }, () => Promise.resolve({ provider: BASELINE_PROVIDER, model: 'baseline' }))
 
 assert.deepEqual(mirrorsIn(names()), MIRROR_TOOL_NAMES)
 ok('all 21 mirror tools are registered at plugin apply (pre-gate behaviour preserved)')
@@ -132,6 +136,47 @@ assert.equal(resolved.provider, OTHER)
 assert.deepEqual(mirrorsIn(names()), [])
 ok('agent/request re-syncs per step, so a switch between assemblies cannot leak them')
 
+// ── two agents on ONE standing composition ──────────────────────────────────────
+// agent.cordis.yml is mounted once and every agent is bound under it
+// (dsh-agent-presets/lib/index.js:959), so apply() runs once per PRESET and there is a
+// single registry layer behind every agent on it. A global on/off would let the
+// DeepSeek agent unregister the tools out from under the Claude agent's live turn.
+// So the registry is a union — open while any agent wants it — while the tools list
+// each model actually sees stays exact.
+{
+  const shared = makeCtx()
+  const sel = new Map() // per-agent selection, the way two live agents really differ
+  shared.on('system-prompt/assemble', async (_a, context, next) => {
+    const picked = sel.get(context.agent.id)
+    const assembled = await next()
+    return { ...assembled, variables: { ...assembled.variables, provider: picked } }
+  })
+  installMirrorTools({ ctx: shared, defineTool, pending: new PendingResults(), providerId: PROVIDER_ID })
+
+  const claude = { id: 'a-claude' }
+  const deepseek = { id: 'a-deepseek' }
+  sel.set(claude.id, PROVIDER_ID)
+  sel.set(deepseek.id, OTHER)
+  const run = (agent) => {
+    const assembly = { sections: [], contexts: [], tools: shared.tools.schemas(), variables: {} }
+    return shared.waterfall('system-prompt/assemble', assembly, { agent, scope: agent }, () => Promise.resolve(assembly))
+  }
+  const sharedNames = () => shared.tools.schemas().map((s) => s.name)
+
+  await run(claude)
+  const dsAssembly = await run(deepseek)
+  assert.deepEqual(mirrorsIn(dsAssembly.tools.map((t) => t.name)), [], 'the DeepSeek model must not be shown a single mirror tool')
+  assert.deepEqual(mirrorsIn(sharedNames()), MIRROR_TOOL_NAMES, 'but the shared registry stays open for the Claude agent mid-turn')
+  ok('a DeepSeek agent sharing the composition sees none, without breaking the Claude agent\'s dispatch')
+
+  // Once the Claude agent stops wanting them, the last claimant is gone and the
+  // registry closes — the single-agent case the bug describes.
+  sel.set(claude.id, OTHER)
+  await run(claude)
+  assert.deepEqual(mirrorsIn(sharedNames()), [], 'with no agent left wanting them the registry closes')
+  ok('the shared registry closes as soon as the last claiming agent moves off claude-code')
+}
+
 // ── the mechanism the brief asked us to justify ─────────────────────────────────
 assert.equal(ctx.restrictCalls, 0)
 ok('tools.restrict() is never called — it rejects scope-local names, so it cannot hide these')
@@ -140,7 +185,7 @@ ok('tools.restrict() is never called — it rejects scope-local names, so it can
 const bare = makeCtx()
 installMirrorTools({ ctx: bare, defineTool, pending: new PendingResults(), providerId: PROVIDER_ID })
 const bareAssembly = { sections: [], contexts: [], tools: bare.tools.schemas(), variables: {} }
-await bare.waterfall('system-prompt/assemble', bareAssembly, {}, () => Promise.resolve(bareAssembly))
+await bare.waterfall('system-prompt/assemble', bareAssembly, { agent: AGENT }, () => Promise.resolve(bareAssembly))
 assert.deepEqual(MIRROR_TOOL_NAMES.filter((n) => bare.tools.schemas().some((s) => s.name === n)), MIRROR_TOOL_NAMES)
 ok('an absent provider signal leaves them visible rather than breaking Claude Code')
 

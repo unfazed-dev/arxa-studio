@@ -266,6 +266,9 @@ export class ClaudeCodeAdapter extends LlmAdapter {
       // that died before saying anything looks like a dead resume. `produced` guards the rest:
       // once chunks have reached the consumer there is no honest way to start again.
       if (claudeSessionId !== undefined && !turn.sawInit && !produced && !turn.stopped) {
+        // A child that never reported a session has almost certainly exited already, but
+        // close it explicitly so "the retry leaks nothing" is structural, not inferred.
+        try { turn.q?.close?.() } catch { /* already gone */ }
         fromClaude.clear([...turn.claudeIds]); fromLoop.clear([...turn.loopIds])
         turn.claudeIds.clear(); turn.loopIds.clear(); turn.mcpQueue.length = 0
         startChild(undefined)
