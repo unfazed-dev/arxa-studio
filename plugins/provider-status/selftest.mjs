@@ -1,4 +1,5 @@
 import { strict as assert } from 'node:assert'
+import { ZodError } from 'zod'
 import { PROVIDER_STATUS_SCHEMA, applyProviderStatus, formatBadge } from './lib/status.js'
 import { appendProviderStatus, PROJECTION } from './lib/index.js'
 
@@ -54,9 +55,13 @@ assert.throws(() => PROJECTION.wire.viewSchema.parse(badDetailFn))
 // would have crashed the projection fold on one malformed producer payload. Prove it now rejects
 // cleanly (a real ZodError, not a RangeError) through every parse call that sees a `detail`.
 const circularDetail = {}; circularDetail.self = circularDetail
+// Positive check, not `!(err instanceof RangeError)`: "not a RangeError" would also pass on a
+// TypeError, an AssertionError, or anything else the schema might start throwing. A validation
+// rejection is only correct if it is an actual ZodError carrying issues.
 const rejectsCleanly = (fn) => {
   try { fn(); return false } catch (err) {
-    assert.ok(!(err instanceof RangeError), `must reject cleanly, got ${err.constructor.name}: ${err.message}`)
+    assert.ok(err instanceof ZodError, `must reject as a ZodError, got ${err?.constructor?.name}: ${err?.message}`)
+    assert.ok(Array.isArray(err.issues) && err.issues.length > 0, 'the ZodError must carry issues')
     return true
   }
 }
@@ -70,6 +75,26 @@ assert.equal(
   'invalid (circular) detail leaves state untouched, does not crash the fold',
 )
 ok('detail rejection proven through the real wire/fold path; circular detail rejects cleanly, not RangeError')
+
+// Depth is the other half of the same crash, and closing cycles did not close it. A deep but
+// perfectly ACYCLIC detail has a finite JSON shape, so it sails past the stringify probe, then
+// overflows inside JsonValue's union — and that parse runs host-side in applyProviderStatus,
+// inside the projection fold and outside the adapter's try/catch. Same dead session as the
+// circular case. Nothing produces this today (Claude's detail is flat); one nested array from a
+// future producer would.
+const deepDetail = (levels) => { let node = { leaf: true }; for (let i = 0; i < levels; i++) node = { nested: node }; return node }
+const deepAcyclic = deepDetail(5000)
+assert.equal(JSON.stringify(deepAcyclic).length > 0, true, 'the deep detail is acyclic — it serialises fine, which is the whole problem')
+assert.ok(rejectsCleanly(() => PROVIDER_STATUS_SCHEMA.parse({ ...good, detail: deepAcyclic })), 'PROVIDER_STATUS_SCHEMA rejects a deep acyclic detail cleanly')
+assert.ok(rejectsCleanly(() => PROJECTION.wire.viewSchema.parse({ ...v, detail: deepAcyclic })), 'wire.viewSchema rejects a deep acyclic detail cleanly')
+assert.doesNotThrow(() => applyProviderStatus(v, { type: 'provider/status', time: 127, data: { ...good, detail: deepAcyclic } }))
+assert.deepEqual(
+  applyProviderStatus(v, { type: 'provider/status', time: 127, data: { ...good, detail: deepAcyclic } }), v,
+  'a deep acyclic detail leaves state untouched instead of killing the fold',
+)
+// The limit must not be so tight that an ordinary nested detail is rejected.
+assert.deepEqual(PROVIDER_STATUS_SCHEMA.parse({ ...good, detail: deepDetail(8) }).detail, deepDetail(8))
+ok('a deep acyclic detail is rejected as data, while an ordinary nested detail still parses')
 
 const appended = []
 const session = { append: (type, data) => { appended.push([type, data]); return { seq: 0 } } }

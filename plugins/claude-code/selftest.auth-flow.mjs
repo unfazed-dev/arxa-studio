@@ -78,4 +78,52 @@ ok('abort mid-poll stops the loop promptly, no credential written')
   assert.equal(flows.has(ANTHROPIC_PIAI_KEY), false); ok('oauth-only flow dropped')
 }
 
+// ── the patch must not steal ownership of every later caller's flow ─────────────
+// `registerFlow` registers inside `this.ctx.effect(...)`, so whichever ctx is `this`
+// OWNS the flow and withdraws it on disposal. Reading the method off arxa's traceable
+// proxy hands back a shadow bound to ARXA's ctx — the old `.bind(authorization)` — which
+// made pi-ai's Anthropic row an arxa-owned effect: disposing arxa's plugin removed
+// `llm-pi-ai/anthropic` entirely, so under cordis-plugin-hmr an arxa reload silently
+// dropped Anthropic API-key sign-in until a full restart.
+{
+  const CORDIS_ORIGINAL = Symbol.for('cordis.original')
+  // A faithful-enough stand-in for cordis' traceable proxy: `[CORDIS_ORIGINAL]` yields the
+  // raw instance, and a method read through it comes back bound to THAT scope's shadow.
+  const raw = {
+    flows: new Map(),
+    registerFlow (flow) { this.ctx.owned.push(flow.key); this.flows.set(flow.key, flow); return () => this.flows.delete(flow.key) },
+  }
+  const proxyFor = (ctx) => new Proxy(raw, {
+    get: (target, prop, receiver) => {
+      if (prop === CORDIS_ORIGINAL) return target
+      const value = Reflect.get(target, prop, receiver)
+      return typeof value === 'function' ? value.bind({ ...target, ctx, flows: target.flows }) : value
+    },
+    set: (target, prop, value) => Reflect.set(target, prop, value),
+  })
+  const arxaCtx = { owned: [] }
+  const piCtx = { owned: [] }
+
+  hideAnthropicOauth(proxyFor(arxaCtx))
+
+  const anthropic = { key: ANTHROPIC_PIAI_KEY, label: 'Anthropic', methods: [{ id: 'oauth', label: 'Claude.ai' }, { id: 'api-key', label: 'API key' }], run: async () => {} }
+  proxyFor(piCtx).registerFlow(anthropic)
+  proxyFor(piCtx).registerFlow({ key: 'llm-pi-ai/openai', label: 'OpenAI', methods: [{ id: 'api-key', label: 'API key' }], run: async () => {} })
+
+  assert.deepEqual(arxaCtx.owned, [], 'arxa must own none of pi-ai\'s flows')
+  assert.deepEqual(piCtx.owned, [ANTHROPIC_PIAI_KEY, 'llm-pi-ai/openai'])
+  ok('a later caller\'s flow stays parented on the CALLER\'s fiber, not arxa\'s')
+
+  // The hide itself is untouched by the receiver fix.
+  assert.deepEqual(raw.flows.get(ANTHROPIC_PIAI_KEY).methods.map((m) => m.id), ['api-key'])
+  ok('the Claude.ai OAuth method is still stripped when the flow arrives through a proxy')
+
+  // Re-applying (an HMR reload of arxa) must not stack wrappers on a service that
+  // now outlives arxa's fiber.
+  const wrapped = raw.registerFlow
+  hideAnthropicOauth(proxyFor(arxaCtx))
+  assert.equal(raw.registerFlow, wrapped, 're-applying the hide must be a no-op, not a second wrapper')
+  ok('re-applying the hide does not stack wrappers across a reload')
+}
+
 console.log(`selftest.auth-flow: ${n} ok`)

@@ -13,10 +13,33 @@ const JsonValue = z.lazy(() => z.union([z.string(), z.number(), z.boolean(), z.n
 // would crash the projection fold outright. JSON.stringify has its own cheap cycle detector (it
 // tracks the objects currently being stringified, so it throws the moment a repeat shows up, not
 // after blowing the stack) — probe with that first and swap in a value JsonValue cleanly rejects.
-const CIRCULAR = Symbol('detail: circular or unserializable')
+// Depth is the other half of the same crash, and closing cycles did not close it. JsonValue's
+// union costs a stack of JS frames per level — far more than JSON.stringify's native walk — so
+// there is a window where a deep but perfectly ACYCLIC `detail` passes the stringify probe and
+// then overflows inside `safeParse`. That parse runs host-side in `applyProviderStatus`, inside
+// the projection fold and outside the adapter's try/catch, so it takes the session down exactly
+// as the circular case did. Claude's own detail is flat, so nothing produces this today; a
+// future producer is one nested array away from it.
+const MAX_DETAIL_DEPTH = 32
+// Iterative on purpose: a recursive depth check would blow the very stack it exists to guard.
+// Safe to run unguarded against cycles only because the stringify probe below rejects those
+// first — a cyclic value never reaches this walk.
+const tooDeep = (root) => {
+  const stack = [[root, 1]]
+  while (stack.length > 0) {
+    const [val, depth] = stack.pop()
+    if (val === null || typeof val !== 'object') continue
+    if (depth > MAX_DETAIL_DEPTH) return true
+    for (const child of Array.isArray(val) ? val : Object.values(val)) stack.push([child, depth + 1])
+  }
+  return false
+}
+
+const CIRCULAR = Symbol('detail: circular, too deep, or unserializable')
 const rejectCircular = (val) => {
   if (val === undefined || val === null || typeof val !== 'object') return val
-  try { JSON.stringify(val); return val } catch { return CIRCULAR }
+  try { JSON.stringify(val) } catch { return CIRCULAR }
+  return tooDeep(val) ? CIRCULAR : val
 }
 
 export const PROVIDER_STATUS_SCHEMA = z.object({
