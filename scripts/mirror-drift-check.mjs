@@ -81,7 +81,11 @@ function checkOffline () {
 
   if (!changed.length) {
     console.log('PASS  mirror drift gate: the diff matches the acknowledged baseline — no NEW drift.')
-    console.log('      The names above are the open F6 decision, not a regression.')
+    if (fx.ruling) {
+      console.log('      Ruled ' + fx.ruling.decided + ': ' + fx.ruling.outcome + '. ' + (fx.ruling.overturn ?? ''))
+    } else {
+      console.log('      The names above are an UNRULED decision, not a regression.')
+    }
     return 0
   }
   if (newMissing.length) console.log('  NEW missing since the baseline: ' + newMissing.join(', '))

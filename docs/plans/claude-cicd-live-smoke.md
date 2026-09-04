@@ -373,6 +373,43 @@ that while wondering why their push 401s.
 without touching anything, `--yes` runs the device flow and prints the one-time
 code. It needs no client secret and no running engine.
 
-**Still open:** a real Settings sign-in. Registering a dsh authorization flow the
-way `plugins/claude-code/lib/auth-flow.js` does would put GitHub beside Claude in
-the same surface. That is a UI decision, not a mechanical fix.
+**Fixed.** `plugins/github-link/index.mjs` (new) registers a dsh authorization
+flow via `lib/auth-flow.js`, mounted by the `arxa-github-link-signin` row in
+`profile/cordis.patch.yml`. GitHub now sits beside Claude in the same sign-in
+surface: pick it, get the one-time code, approve on github.com.
+
+Three things it is careful about, each a lesson already paid for:
+
+- **The library half is untouched.** `lib/index.js` still exports
+  `createGithubLink` and the sidebar still imports it. The row mounts by PATH,
+  not package name, because the package's `exports` maps `.` to the library.
+- **`authorization` is NOT in the top-level `inject`** — that is F1 exactly. No
+  arxa profile row mounts `@deepseek-ai/dsh-authorization`, so requiring it up
+  front leaves the plugin pending and dsh fails the WHOLE boot. It is reached
+  through a deferred `ctx.inject`, and the selftest fails if anyone moves it back.
+- **The token never enters the credential record** — identity only (login,
+  scopes, expiry). The record is asserted against `gho_`/`ghr_`/token/secret
+  substrings, so a future edit that leaks it goes red.
+
+Verified by mounting the plugin against a cordis context with NO authorization
+service: `apply()` completes and nothing stays pending. `scripts/github-relink.mjs`
+remains the headless path. Six assertions in `selftest.auth-flow.mjs`, three
+mutation-verified.
+
+## F6 — ruled: add none
+
+Recorded in `plugins/claude-code/live-tools.json` under `ruling`, and the gate
+prints it on every run.
+
+The 21 mirrored names cover file ops, shell, search, web, subagents, skills and
+planning — and nothing that leaves the workspace or the session. That is a policy
+readable off the existing list, not a preference invented for the occasion. All
+16 candidates break it: nine reach outright outside (`RemoteTrigger`,
+`SendMessage`, `PushNotification`, `CronCreate`/`Delete`/`List`, `Monitor`,
+`ScheduleWakeup`, `ListAgents` — network, other sessions, schedules, the user's
+phone); `DesignSync` talks to claude.ai; `Workflow` fans out agents at real cost;
+`EnterWorktree`/`ExitWorktree` mutate git state outside the session; and
+`TaskOutput`/`TaskStop`/`ReportFindings` are inert without the tools they serve.
+
+**To overturn:** move a name out of `acknowledged.missing` into
+`MIRROR_TOOL_NAMES`. The gate goes red until both agree — which is the point.

@@ -62,5 +62,11 @@
       "ExitPlanMode",
       "EnterPlanMode"
     ]
+  },
+  "ruling": {
+    "decided": "2026-09-04",
+    "outcome": "add none",
+    "rationale": "Read off the existing list rather than invented: the 21 mirrored names cover file ops, shell, search, web, subagents, skills and planning — and nothing that leaves the workspace or the session. All 16 break that line. Nine reach outright outside it (RemoteTrigger, SendMessage, PushNotification, CronCreate/Delete/List, Monitor, ScheduleWakeup, ListAgents — network, other sessions, schedules, the user's phone). Of the rest, DesignSync talks to claude.ai, Workflow fans out agents at real cost, and EnterWorktree/ExitWorktree mutate git state outside the session. TaskOutput/TaskStop/ReportFindings are inert without the tools they serve.",
+    "overturn": "Move a name out of acknowledged.missing and into MIRROR_TOOL_NAMES. The gate goes red until both agree, which is the point."
   }
 }

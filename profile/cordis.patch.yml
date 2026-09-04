@@ -369,6 +369,16 @@
   - id: arxa-claude-code
     name: /Volumes/business_ssd/arxa_digital_solutions/arxa-studio/plugins/claude-code/index.mjs
 
+# arxa-specific: GitHub's sign-in surface (F9). github-link was a LIBRARY only —
+# no plugin entry, no registered flow — so arxa had NO Settings sign-in for
+# GitHub and a revoked grant left the user with no route back (the sole in-app
+# re-link hid inside the delete-forever modal). HOST-PLANE: registers one
+# authorization flow. By PATH, not package name: the package's exports map "."
+# to lib/index.js, which the sidebar imports as a library and must keep doing.
+- insert:
+  - id: arxa-github-link-signin
+    name: /Volumes/business_ssd/arxa_digital_solutions/arxa-studio/plugins/github-link/index.mjs
+
 # arxa-specific: provider/status → providerStatus projection → composer pill.
 # HOST-PLANE (registers a projection). Works for every provider; claude-code is
 # the first producer. By PACKAGE NAME — browser half via package.json dsh.client.
