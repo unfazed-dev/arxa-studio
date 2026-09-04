@@ -9,8 +9,8 @@ Advisor: consulted (approach, scope of the probe fix, and the split below).
 
 ## What the run found
 
-Five defects. Three are in this branch's own code (F1-F3); two are in the git/CI-CD surface
-itself (F4-F5). None were reachable by the offline suites — `npm test` was green throughout.
+Six defects. Three are in this branch's own code (F1-F3); three are in the surrounding
+surface (F4-F6). None were reachable by the offline suites — `npm test` was green throughout.
 Listed worst-first.
 
 ### F1 — the plugin stopped arxa studio from booting at all (critical)
@@ -126,6 +126,25 @@ This is the same root cause as the open items already on record: TOPO's
 `githubStatus: publish-failed … Invalid username or token`, and RESTO's `main` sitting
 unpushed (B2). `status.linked` is `true` and `tokenAvailable` is `true` throughout, so
 no surface reports the link as broken.
+
+### F6 — the mirror tool list is out of sync with the real CLI, in both directions
+
+With the live smoke's Q1 finally able to read a real init message, the CLI's own tool list
+can be compared against `MIRROR_TOOL_NAMES` for the first time. They disagree both ways.
+
+Live built-ins with **no mirror row** (16): `CronCreate`, `CronDelete`, `CronList`,
+`DesignSync`, `EnterWorktree`, `ExitWorktree`, `ListAgents`, `Monitor`,
+`PushNotification`, `RemoteTrigger`, `ReportFindings`, `ScheduleWakeup`,
+`SendMessage`, `TaskOutput`, `TaskStop`, `Workflow`.
+
+Mirror rows the live CLI **does not expose** (11): `MultiEdit`, `BashOutput`,
+`KillShell`, `Glob`, `Grep`, `LS`, `Agent`, `TodoWrite`, `AskUserQuestion`,
+`ExitPlanMode`, `EnterPlanMode`.
+
+This is lost capability, not a hang: `tools` restricts the child to the mirror names plus
+the arxa MCP names, so Claude simply cannot reach the 16. But the list was written from an
+assumed tool set rather than a measured one, and it will drift again on the next CLI
+release. Worth regenerating from a live init and re-checking when the pinned CLI moves.
 
 ## The PR
 
