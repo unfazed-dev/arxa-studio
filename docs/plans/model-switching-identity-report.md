@@ -3,7 +3,12 @@
 Reported: "switching between Claude models doesn't work — I used opus, switched to
 sonnet and haiku, but it was still saying opus", plus "K3 said K1".
 
-## Verdict: the switching pipeline is correct. Nothing was mis-routed. No code change.
+## Verdict: the switching pipeline is correct. Nothing was mis-routed.
+
+Updated 2026-09-05 after pushback ("all Claude models replied Opus regardless"): the
+first verdict rested on the CLI's `init` model, which is only what the CLI *resolved*. The
+second pass measured the API's own `message.model` stamp — see "Ground truth" below — and
+ships one change so that stamp is on record for every future turn.
 
 Evidence: the real failing session, read off disk —
 `~/.arxa/dsh/sessions/--Volumes-…-notes-note-wt-260904-003--/…/session.jsonl.zstd`
@@ -36,6 +41,32 @@ Claude→Claude (#6 opus → #7 sonnet → #10 opus → #11 haiku).
 Caveat on scope: rows #4/#5 carry the static `opus` spelling and have no
 `claude-code/session` row — they predate the restart that picked up the F16/F12 fixes.
 The table spans that restart; rows #6-#11 are the post-fix behaviour.
+
+## Ground truth: the API's stamp, not the model's word
+
+Every Anthropic response carries `message.model` — set by the API on the answer itself.
+It is independent of the CLI's alias resolution and of anything the model says in prose.
+
+Measured (`scratchpad/repro-model-switch2.mjs`), one session `3706175e` resumed three
+times with a different `model` each time:
+
+| turn | asked | init (CLI resolved) | API answered | billed |
+|---|---|---|---|---|
+| T1 fresh | haiku | claude-haiku-4-5-20251001 | claude-haiku-4-5-20251001 | same |
+| T2 resume | sonnet | claude-sonnet-5 | **claude-sonnet-5** | same |
+| T3 resume | opus | claude-opus-5 | **claude-opus-5** | same |
+| T4 resume | haiku | claude-haiku-4-5-20251001 | **claude-haiku-4-5-20251001** | same |
+
+All three columns agree on every row. Resume does not pin the model; the API answers with
+the requested one and bills it.
+
+The CLI's own transcript for an earlier RESTO session (`wt-001`, `e531b624`) carries 10
+answers, every one stamped `claude-sonnet-5`. No CLI transcript exists for `wt-003` — that
+is why the API stamp was not on record for the disputed session, and why arxa now records
+it itself (below).
+
+No Fable turn exists in any session log on this machine. If one was run, it never reached
+the request stage; the row would read `claude-fable-5-1[1m]`.
 
 ## The two reported symptoms
 
@@ -74,7 +105,24 @@ snapshot: `system-prompt/assemble` rewrites the `model` variable and `agent/requ
 rewrites the routed config, deliberately from the same snapshot so the two cannot
 diverge. The table confirms it holds in practice. **Refuted.**
 
-## Why no fix ships
+## What ships
+
+`claude-code/answered { model }` — the API stamp, appended to the session log on every
+turn (`bridge.js` `onAnswered`, `adapter.js`). This is the record that settles the
+question next time without trusting prose.
+
+`noteModelFallback` now covers every model, not only Fable: a turn whose API-stamped
+family differs from the requested family posts a provider-status pill
+(`asked for sonnet — Claude Code answered with claude-opus-5`). Safe now because the
+comparison runs on the API's canonical id, never an alias. `default` has no family and is
+skipped. A user who doubts the picker gets a pill; if no pill appears, the API answered
+with the family they asked for.
+
+Tests: bridge selftest (onAnswered fires once with the stamp), adapter selftest
+(`claude-code/answered` recorded; sonnet→opus announced; sonnet→sonnet, haiku→haiku and
+`default` silent). CI green.
+
+## Why the model's reply is not fixed
 
 The routing is right, so there is nothing to repair. The real gap is that a user cannot
 verify which model answered without trusting the model's own word — the one signal that

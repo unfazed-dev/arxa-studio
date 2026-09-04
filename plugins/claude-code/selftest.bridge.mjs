@@ -30,18 +30,20 @@ function channel () {
 
 // --- plain text turn
 {
-  const sessions = []
-  const b = new TurnBridge({ pending: new PendingResults(), onSession: (id, m) => sessions.push([id, m]), onRateLimit: () => {}, messages: from([
+  const sessions = []; const answered = []
+  const b = new TurnBridge({ pending: new PendingResults(), onSession: (id, m) => sessions.push([id, m]), onAnswered: (m) => answered.push(m), onRateLimit: () => {}, messages: from([
     init,
     ev({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }),
     ev({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hel' } }),
     ev({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'lo' } }),
     ev({ type: 'content_block_stop', index: 0 }),
-    { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'text', text: 'Hello' }] } },
+    { type: 'assistant', parent_tool_use_id: null, message: { model: 'claude-sonnet-5', content: [{ type: 'text', text: 'Hello' }] } },
+    { type: 'assistant', parent_tool_use_id: null, message: { model: 'claude-sonnet-5', content: [{ type: 'text', text: '.' }] } },
     { type: 'result', subtype: 'success', is_error: false, result: 'Hello', usage: { input_tokens: 10, output_tokens: 2, cache_read_input_tokens: 3, cache_creation_input_tokens: 1 } },
   ]) })
   const chunks = await collect(b.segment())
   assert.deepEqual(sessions, [['cs-1', 'sonnet']])
+  assert.deepEqual(answered, ['claude-sonnet-5']); ok('onAnswered fires once with the API model stamp, not per message')
   assert.deepEqual(chunks, [
     { type: 'block-start', index: 0, blockType: 'text' },
     { type: 'text-delta', index: 0, text: 'Hel' }, { type: 'text-delta', index: 0, text: 'lo' },

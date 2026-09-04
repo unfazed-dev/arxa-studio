@@ -17,9 +17,10 @@ const toolResultText = (block) => typeof block.content === 'string'
   : (block.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join('\n')
 
 export class TurnBridge {
-  constructor ({ messages, onSession, onRateLimit, onToolUse = () => {}, pending = fromClaude }) {
-    Object.assign(this, { onSession, onRateLimit, onToolUse, pending })
+  constructor ({ messages, onSession, onRateLimit, onToolUse = () => {}, onAnswered = () => {}, pending = fromClaude }) {
+    Object.assign(this, { onSession, onRateLimit, onToolUse, onAnswered, pending })
     this.claudeSessionId = undefined
+    this.answeredModel = undefined  // the API's own model stamp on this child's answers; the init model is only what the CLI resolved
     this.finished = false        // true once a consumer has seen the SDK `result`, or the turn failed
     this.queue = []              // messages the pump has read and segment() has not consumed yet
     this.waiter = undefined      // the parked consumer's resolve(), if one is waiting
@@ -53,6 +54,10 @@ export class TurnBridge {
         // precedes its own tool_result, so every id is classified before its echo arrives.
         if (m.type === 'assistant') {
           for (const b of m.message?.content ?? []) if (b.type === 'tool_use') this.trackCall(b.id, b.name)
+          // `message.model` is stamped by the API on the response itself — the one source that
+          // is neither the CLI's alias resolution nor whatever the model claims in prose.
+          const answered = m.message?.model
+          if (answered && answered !== this.answeredModel) { this.answeredModel = answered; this.onAnswered(answered) }
         }
         this.push(m)
         if (m.type === 'result') { this.close(); return }

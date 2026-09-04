@@ -19,7 +19,7 @@ const done = (text) => [
   ev({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }),
   ev({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } }),
   ev({ type: 'content_block_stop', index: 0 }),
-  { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'text', text }] } },
+  { type: 'assistant', parent_tool_use_id: null, message: { model: 'claude-sonnet-5', content: [{ type: 'text', text }] } },
   { type: 'result', subtype: 'success', is_error: false, result: text, usage: { input_tokens: 1, output_tokens: 1 } },
 ]
 
@@ -94,12 +94,15 @@ ok('resolveModel efforts')
 
   // D10: `fallbackModel: 'opus'` can swap the model out from under the user, and a silent
   // downgrade is worse than a slow turn. This fixture IS a fallback — 'fable' was asked for
-  // and the child reported 'sonnet' — so the turn owes the user a visible note.
+  // and the API stamped the answer 'claude-sonnet-5' — so the turn owes the user a visible note.
   assert.deepEqual(statuses.find((d) => d.level === 'info'), {
-    provider: 'claude-code', level: 'info', text: 'Running on sonnet',
-    title: 'fable was unavailable — Claude Code fell back to sonnet',
+    provider: 'claude-code', level: 'info', text: 'Running on claude-sonnet-5',
+    title: 'asked for fable — Claude Code answered with claude-sonnet-5',
   })
   ok('a model fallback is announced on the provider/status channel instead of happening silently')
+  // The API's own stamp is recorded, so the answering model is readable from the session log.
+  assert.deepEqual(events.find((e) => e.type === 'claude-code/answered').data, { model: 'claude-sonnet-5' })
+  ok('the model that answered is recorded from the API stamp, not from the init message')
 
   // D5 tool lock: an allowlist on `tools` (the SDK's availability knob), never a denylist and
   // never `allowedTools` — which only auto-approves and would bypass canUseTool entirely.
@@ -375,6 +378,23 @@ const picked = mk([init, { type: 'assistant', message: { content: [{ type: 'text
 await collect(picked.stream({ provider: 'claude-code', model: 'opus', messages: [{ role: 'user', content: [{ type: 'text', text: 'a' }] }] }))
 assert.equal(queries.at(-1).options.model, 'opus[1m]')
 ok('a turn runs on the resolved live id, not the static id the picker stored')
+}
+
+
+// --- the mismatch note covers every model, not only Fable, and stays silent on a match
+{
+  const ask = async (model, answered) => {
+    const script = [init, ...done('ok')]
+    script.find((m) => m.type === 'assistant').message.model = answered
+    const before = events.length
+    await collect(mk(script).stream({ provider: 'claude-code', model, system: '', messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }], tools: [] }))
+    return events.slice(before).filter((e) => e.type === 'provider/status' && e.data.level === 'info').map((e) => e.data.title)
+  }
+  assert.deepEqual(await ask('sonnet', 'claude-sonnet-5'), [])
+  assert.deepEqual(await ask('haiku', 'claude-haiku-4-5-20251001'), [])
+  assert.deepEqual(await ask('sonnet', 'claude-opus-5'), ['asked for sonnet — Claude Code answered with claude-opus-5'])
+  assert.deepEqual(await ask('default', 'claude-opus-5'), [])
+  ok('a sonnet request answered by opus is announced; a matching family or `default` is not')
 }
 
 // --- signed out / old version refuse before spawning

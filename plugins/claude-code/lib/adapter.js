@@ -22,6 +22,7 @@ const resultText = (block) => (block.content ?? []).filter((c) => c.type === 'te
 const isToolResultsOnly = (msg) => msg?.role === 'user' && (msg.content?.length ?? 0) > 0 && msg.content.every((b) => b.type === 'tool-result')
 const lastClaudeSession = (events) => { for (let i = events.length - 1; i >= 0; i--) if (events[i].type === 'claude-code/session') return events[i].data.claudeSessionId }
 const isFable = (model) => /fable/i.test(String(model))
+const familyOf = (model) => String(model).match(/fable|opus|sonnet|haiku/i)?.[0].toLowerCase()
 
 /** The arxa tools Claude will see, under the names it will call them by. Mirror tools are
  * excluded from the MCP server (Claude has the real built-in), so they are excluded here too. */
@@ -238,7 +239,13 @@ export class ClaudeCodeAdapter extends LlmAdapter {
         // dead" from any later failure — see the retry below.
         turn.sawInit = true
         agent.session.append('claude-code/session', { claudeSessionId: id, model })
-        this.noteModelFallback(agent, options.model, model)
+      },
+      // Recorded per turn so "which model actually answered?" is answerable from the session
+      // log — not from the model's own word, which a 2026-09-04 session showed is unreliable:
+      // sonnet and haiku both answered "I am Opus" while the API stamped them sonnet and haiku.
+      onAnswered: (model) => {
+        agent.session.append('claude-code/answered', { model })
+        this.noteModelFallback(agent, modelId, model)
       },
       // A status update is never worth a user's turn. rateLimitToStatus/appendProviderStatus can
       // still throw on a payload the source-level clamp in rate-limit.js doesn't cover (e.g. a
@@ -294,20 +301,22 @@ export class ClaudeCodeAdapter extends LlmAdapter {
     if (turn.bridge.finished) this.endTurn(agent.id, turn)
   }
 
-  /** D10: `fallbackModel: 'opus'` lets the SDK swap the model out from under the user when
-   * Fable is unavailable. A silent downgrade is worse than a slow turn, so say so in the
-   * status channel. Only a Fable request can be downgraded (it is the only one that sets a
-   * fallback), so a Fable request answered by a non-Fable model IS the fallback — no string
-   * matching against model ids that may be aliased. Guarded exactly like onRateLimit: a status
-   * update must never be the thing that kills a turn. */
+  /** D10: a turn answered by a different model FAMILY than the one requested is announced in
+   * the status channel — a silent swap is worse than a slow turn. Originally Fable-only
+   * (`fallbackModel: 'opus'` is the one deliberate downgrade), it now covers every model:
+   * `actual` is the API's canonical stamp (`claude-sonnet-5`), never an alias, so family
+   * matching is safe, and a user who doubts the picker gets a pill instead of having to ask
+   * the model — the one witness that cannot be trusted. `default` has no family and is
+   * skipped. Guarded exactly like onRateLimit: a status update must never kill a turn. */
   noteModelFallback (agent, requested, actual) {
-    if (!isFable(requested) || !actual || isFable(actual)) return
+    const want = familyOf(requested); const got = familyOf(actual)
+    if (!want || !got || want === got) return
     try {
       appendProviderStatus(agent.session, {
         provider: PROVIDER_ID,
         level: 'info',
         text: `Running on ${actual}`,
-        title: `${requested} was unavailable — Claude Code fell back to ${actual}`,
+        title: `asked for ${requested} — Claude Code answered with ${actual}`,
       })
     } catch { /* never worth the turn */ }
   }
