@@ -49,6 +49,11 @@ suites.push([root, 'scripts', 'jobs-fence-check.mjs'])
 // CLI bump or an edit to the list goes red instead of drifting unnoticed.
 suites.push([root, 'scripts', 'mirror-drift-check.mjs'])
 
+// An event type dsh cannot load makes the WHOLE session unreadable on reopen, and nothing goes
+// red when it is written — only when a user restarts and finds "Failed to load history". Two real
+// sessions were lost to this before the gate existed.
+suites.push([root, 'scripts', 'session-event-vocabulary-check.mjs'])
+
 // bin/ is outside the plugins/*/selftest.mjs sweep, so this is wired by hand.
 // arxa-engine-sync decides what reaches a user's desktop payload, and both of its
 // previous skip rules failed silently — a version-keyed compare shipped nothing when

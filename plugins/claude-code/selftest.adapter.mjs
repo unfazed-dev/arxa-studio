@@ -1,5 +1,6 @@
 import { strict as assert } from 'node:assert'
 import { ClaudeCodeAdapter } from './lib/adapter.js'
+import { onProviderStatus } from '../provider-status/lib/index.js'
 import { fromClaude, fromLoop } from './lib/pending.js'
 import { MIRROR_TOOL_NAMES } from './lib/mirror-tools.js'
 
@@ -28,6 +29,9 @@ const interrupts = []
 const fakeQuery = (script) => (params) => { queries.push(params); const it = from(script); it.interrupt = async () => { interrupts.push(params) }; it.close = () => {}; return it }
 
 const events = []
+// provider/status is no longer a session event (it made logs unloadable), so observe the publisher.
+const statusLog = []
+onProviderStatus((_sessionId, data) => statusLog.push(data))
 const agent = {
   id: 'agent-1',
   session: { header: { cwd: '/ws' }, events, append: (type, data) => { events.push({ type, data }); return { seq: events.length - 1 } } },
@@ -79,17 +83,21 @@ ok('resolveModel efforts')
   assert.equal(o.model, 'fable'); assert.equal(o.fallbackModel, 'opus'); assert.equal(o.resume, undefined)
   assert.equal(o.pathToClaudeCodeExecutable, '/opt/bin/claude'); assert.equal(o.cwd, '/ws'); assert.equal(o.includePartialMessages, true)
   assert.equal(o.mcpServers.arxa.type, 'sdk'); assert.equal(typeof o.canUseTool, 'function'); assert.equal(typeof o.spawnClaudeCodeProcess, 'function')
-  assert.deepEqual(events.find((e) => e.type === 'claude-code/session').data, { claudeSessionId: 'cs-9', model: 'sonnet' })
+  // dsh refuses to load a log carrying an event type it does not know, so the resume id lives on
+  // the adapter, not in the session. Two real sessions rendered as "Failed to load history"
+  // because of this; the scan in docs/plans/session-event-vocabulary.md is the check that matters.
+  assert.equal(events.find((e) => String(e.type).startsWith('claude-code/')), undefined, 'no claude-code/* event may reach the session log')
   ok('fresh turn options + session event')
 
   // Task 14: a rate_limit_event publishes to the shared provider/status channel, not a
   // claude-code-only event — Claude Code is the first producer of the provider-neutral pill.
-  const statuses = events.filter((e) => e.type === 'provider/status').map((e) => e.data)
+  const statuses = statusLog
   assert.deepEqual(statuses.find((d) => d.level === 'warn'), {
     provider: 'claude-code', level: 'warn', text: 'Claude 90%', title: 'Claude weekly limit · 90% used',
     utilization: 0.9, detail: { rateLimitType: 'seven_day', status: 'allowed_warning' },
   })
   assert.equal(events.find((e) => e.type === 'claude-code/rate-limit'), undefined)
+  assert.equal(events.find((e) => e.type === 'provider/status'), undefined, 'and provider/status is not a session event either')
   ok('rate limit publishes provider/status, not the old claude-code/rate-limit event')
 
   // D10: `fallbackModel: 'opus'` can swap the model out from under the user, and a silent
@@ -101,8 +109,7 @@ ok('resolveModel efforts')
   })
   ok('a model fallback is announced on the provider/status channel instead of happening silently')
   // The API's own stamp is recorded, so the answering model is readable from the session log.
-  assert.deepEqual(events.find((e) => e.type === 'claude-code/answered').data, { model: 'claude-sonnet-5' })
-  ok('the model that answered is recorded from the API stamp, not from the init message')
+  ok('the model that answered drives the pill, without writing an unloadable event')
 
   // D5 tool lock: an allowlist on `tools` (the SDK's availability knob), never a denylist and
   // never `allowedTools` — which only auto-approves and would bypass canUseTool entirely.
@@ -121,17 +128,21 @@ ok('resolveModel efforts')
 // finishes normally and no provider/status event is appended for the bad one.
 {
   events.length = 0
+  const before = statusLog.length
   const badRateLimitEvent = { type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning', resetsAt: -100 } }
   const a = mk([init, badRateLimitEvent, ...done('still here')])
   const chunks = await collect(a.stream({ provider: 'claude-code', model: 'sonnet', system: 's', messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }], tools: [] }))
   assert.deepEqual(chunks.at(-1), { type: 'finish', reason: { kind: 'stop' } })
-  assert.equal(events.find((e) => e.type === 'provider/status'), undefined)
+  assert.equal(statusLog.length, before, 'a bad payload publishes nothing')
   ok('a rate_limit_info that fails schema validation is dropped silently, the turn is not killed')
 }
 
 // --- second turn resumes and does NOT hand off
 {
   const a = mk([init, ...done('Again')])
+  // Production registers ONE adapter for the process, so a turn sees the resume id the previous
+  // turn recorded. This fixture builds a fresh adapter per block, so seed what turn 1 would have.
+  a.claudeSessions.set('agent-1', 'cs-9')
   await collect(a.stream({ provider: 'claude-code', model: 'sonnet', system: 's', messages: [
     { role: 'user', content: [{ type: 'text', text: 'hello' }] }, { role: 'assistant', content: [{ type: 'text', text: 'Hi' }] }, { role: 'user', content: [{ type: 'text', text: 'more' }] }], tools: [] }))
   assert.equal(queries.at(-1).options.resume, 'cs-9'); assert.equal(queries.at(-1).prompt, 'more'); assert.equal(queries.at(-1).options.fallbackModel, undefined)
@@ -386,9 +397,9 @@ ok('a turn runs on the resolved live id, not the static id the picker stored')
   const ask = async (model, answered) => {
     const script = [init, ...done('ok')]
     script.find((m) => m.type === 'assistant').message.model = answered
-    const before = events.length
+    const before = statusLog.length
     await collect(mk(script).stream({ provider: 'claude-code', model, system: '', messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }], tools: [] }))
-    return events.slice(before).filter((e) => e.type === 'provider/status' && e.data.level === 'info').map((e) => e.data.title)
+    return statusLog.slice(before).filter((d) => d.level === 'info').map((d) => d.title)
   }
   assert.deepEqual(await ask('sonnet', 'claude-sonnet-5'), [])
   assert.deepEqual(await ask('haiku', 'claude-haiku-4-5-20251001'), [])
@@ -505,7 +516,7 @@ ok('a turn runs on the resolved live id, not the static id the picker stored')
 // that session error out: `resume` pointed at a transcript that was simply gone.
 {
   events.length = 0
-  events.push({ type: 'claude-code/session', data: { claudeSessionId: 'cs-gone', model: 'sonnet' } })
+  const seedResume = 'cs-gone'  // seeded on the adapter below: the resume id is no longer a session event
   // Per-call scripts: the first attempt dies before saying anything, the second succeeds.
   const scripts = [
     (async function * () { throw new Error('No conversation found with session ID: cs-gone') })(),
@@ -515,6 +526,7 @@ ok('a turn runs on the resolved live id, not the static id the picker stored')
     query: (params) => { queries.push(params); const it = scripts.shift(); it.interrupt = async () => {}; it.close = () => {}; return it },
     probe, ctx, binary: '/opt/bin/claude', env: { PATH: '/x' }, version: '0.1.0',
   })
+  a.claudeSessions.set('agent-1', seedResume)
   const before = queries.length
   const chunks = await collect(a.stream({ provider: 'claude-code', model: 'sonnet', system: 's', tools: [], messages: [
     { role: 'user', content: [{ type: 'text', text: 'hello' }] },
@@ -534,7 +546,7 @@ ok('a turn runs on the resolved live id, not the static id the picker stored')
 // retrying it would hide it and pay for the turn twice.
 {
   events.length = 0
-  events.push({ type: 'claude-code/session', data: { claudeSessionId: 'cs-9', model: 'sonnet' } })
+  const seedResume = 'cs-9'  // seeded on the adapter below: the resume id is no longer a session event
   const scripts = [
     (async function * () { yield init; throw new Error('model overloaded') })(),
     from([init, ...done('should never run')]),
@@ -543,6 +555,7 @@ ok('a turn runs on the resolved live id, not the static id the picker stored')
     query: (params) => { queries.push(params); const it = scripts.shift(); it.interrupt = async () => {}; it.close = () => {}; return it },
     probe, ctx, binary: '/opt/bin/claude', env: { PATH: '/x' }, version: '0.1.0',
   })
+  a.claudeSessions.set('agent-1', seedResume)
   const before = queries.length
   await assert.rejects(
     collect(a.stream({ provider: 'claude-code', model: 'sonnet', system: 's', tools: [], messages: [

@@ -14,13 +14,12 @@ import { makeCanUseTool } from './approval.js'
 import { createArxaMcpServer } from './mcp-bridge.js'
 import { MIRROR_TOOL_NAMES } from './mirror-tools.js'
 import { fromClaude, fromLoop } from './pending.js'
-import { appendProviderStatus } from '../../provider-status/lib/index.js'
+import { publishProviderStatus } from '../../provider-status/lib/index.js'
 import { rateLimitToStatus } from './rate-limit.js'
 
 const textOf = (msg) => (msg?.content ?? []).filter((b) => b.type === 'text').map((b) => b.text).join('\n')
 const resultText = (block) => (block.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join('\n')
 const isToolResultsOnly = (msg) => msg?.role === 'user' && (msg.content?.length ?? 0) > 0 && msg.content.every((b) => b.type === 'tool-result')
-const lastClaudeSession = (events) => { for (let i = events.length - 1; i >= 0; i--) if (events[i].type === 'claude-code/session') return events[i].data.claudeSessionId }
 const isFable = (model) => /fable/i.test(String(model))
 const familyOf = (model) => String(model).match(/fable|opus|sonnet|haiku/i)?.[0].toLowerCase()
 
@@ -37,6 +36,20 @@ export class ClaudeCodeAdapter extends LlmAdapter {
     super()
     Object.assign(this, { query, probe, ctx, binary, env, version, spawn, mkdir })
     this.turns = new Map()
+    // agent id -> the Claude session to resume. Deliberately in memory and NOT a session event.
+    //
+    // dsh refuses to load ANY log containing an event type outside its own vocabulary unless the
+    // envelope carries `ignorable: true` (dsh-session-persistence assertEventsSupported). Session
+    // .append() offers no way to set that flag, and dsh's own note says a registration surface for
+    // downstream plugin events is "deferred until such a consumer exists" — so a `claude-code/*`
+    // event makes the whole session's history unreadable: the transcript survives on disk but the
+    // history RPC refuses it and the conversation renders as "Failed to load history".
+    //
+    // The cost of holding it here is that an arxa restart forgets the resume id, so the next turn
+    // starts a fresh child and replays the conversation as handoff text — the path this adapter
+    // already takes for a session another engine ran. Losing a resume degrades one turn; losing
+    // the log's readability loses the whole conversation.
+    this.claudeSessions = new Map()
   }
 
   providerInfo () { return { id: PROVIDER_ID, name: PROVIDER_NAME } }
@@ -157,7 +170,7 @@ export class ClaudeCodeAdapter extends LlmAdapter {
     // mid-turn); release its ids rather than leaving them waiting for a child that is gone.
     if (live) this.endTurn(agent.id, live)
 
-    const claudeSessionId = lastClaudeSession(agent.session.events)
+    const claudeSessionId = this.claudeSessions.get(agent.id)
     const userText = textOf(last)
     // Starting fresh means Claude has no history of its own, so it needs the story so far as
     // flat text. That is true whether another engine ran this session (no claudeSessionId at
@@ -238,22 +251,21 @@ export class ClaudeCodeAdapter extends LlmAdapter {
         // The child reported a session, so it started. That is what separates "this resume is
         // dead" from any later failure — see the retry below.
         turn.sawInit = true
-        agent.session.append('claude-code/session', { claudeSessionId: id, model })
+        this.claudeSessions.set(agent.id, id)
       },
-      // Recorded per turn so "which model actually answered?" is answerable from the session
-      // log — not from the model's own word, which a 2026-09-04 session showed is unreliable:
-      // sonnet and haiku both answered "I am Opus" while the API stamped them sonnet and haiku.
-      onAnswered: (model) => {
-        agent.session.append('claude-code/answered', { model })
-        this.noteModelFallback(agent, modelId, model)
-      },
+      // The API's own model stamp — the one witness that is neither the CLI's alias resolution
+      // nor the model's word, which a 2026-09-04 session showed is unreliable (sonnet and haiku
+      // both answered "I am Opus"). It is NOT appended as a session event: see this.claudeSessions
+      // on why a `claude-code/*` event costs the whole log its readability. The mismatch still
+      // reaches the user through the provider-status pill below, which is what they asked for.
+      onAnswered: (model) => this.noteModelFallback(agent, modelId, model),
       // A status update is never worth a user's turn. rateLimitToStatus/appendProviderStatus can
       // still throw on a payload the source-level clamp in rate-limit.js doesn't cover (e.g. a
       // malformed resetsAt) — that .parse() throw would otherwise propagate out of this
       // callback, through TurnBridge's pump(), and out of stream()'s generator, killing the turn
       // at the exact moment the pill was most useful (the user hitting their limit). This is the
       // one place in the plan that deliberately fails open: catch broadly, drop the update.
-      onRateLimit: (info) => { try { appendProviderStatus(agent.session, rateLimitToStatus(info, account)) } catch {} },
+      onRateLimit: (info) => { try { publishProviderStatus(agent.session, rateLimitToStatus(info, account)) } catch {} },
       onToolUse: (id, name) => {
         claudeIds.add(id)
         if (name.startsWith(MCP_PREFIX)) mcpQueue.push({ id, name: stripMcpPrefix(name) })
@@ -312,7 +324,7 @@ export class ClaudeCodeAdapter extends LlmAdapter {
     const want = familyOf(requested); const got = familyOf(actual)
     if (!want || !got || want === got) return
     try {
-      appendProviderStatus(agent.session, {
+      publishProviderStatus(agent.session, {
         provider: PROVIDER_ID,
         level: 'info',
         text: `Running on ${actual}`,
