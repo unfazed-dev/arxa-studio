@@ -16,8 +16,16 @@
 // and never returned. The reachable URL set is the hardcoded table below — the RPC cannot ask this
 // module to fetch anything else, because a provider id that is not a key here does nothing.
 
-import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { zaiToStatuses, kimiToStatuses, deepseekToStatuses, brokenStatus, vendorError, PROVIDER_NAME } from './quota.js'
+
+// The ref is passed as a plain string on purpose. dsh's `credentialRef()` only validates the name
+// against the POSIX-identifier grammar and returns it — the brand is a TYPE, erased at runtime — so
+// importing it would buy a check on three hardcoded constants at the price of an undeclared
+// cross-package import. This plugin declares no dependencies, and the payload it ships into is a
+// pnpm isolated layout: that import resolves today by hoisting, not by entitlement, and a layout
+// change would turn it into a load-time crash that takes the whole indicator with it. The grammar
+// is asserted against these three constants in selftest.quota.mjs instead, where a typo is caught
+// before it ships rather than at boot.
 
 /**
  * provider id -> where its usage lives. The ids are dsh's own route keys, not arxa's invention:
@@ -77,7 +85,7 @@ export function createQuotaPoller ({
     const name = PROVIDER_NAME[provider] ?? provider
     let statuses
     try {
-      const key = await credentials.resolve(credentialRef(vendor.ref))
+      const key = await credentials.resolve(vendor.ref)
       // No key is not a failure — it is "this provider is not configured here". No ring, no `?`.
       if (!key?.value) return { statuses: [], configured: false }
       const res = await fetchImpl(vendor.url, {

@@ -113,7 +113,17 @@ const RESET_MS = 1_800_000_000_000
   for (const [id, v] of Object.entries(VENDORS)) {
     assert.ok(v.url.startsWith('https://'), `${id} must be fetched over TLS`)
     assert.equal(v.url.includes('?'), false, `${id}'s URL carries no query string, so nothing can be smuggled into one`)
+    // Stands in for dsh's credentialRef(), which the poller deliberately does not import: this is
+    // the same POSIX-identifier grammar, checked here so a typo fails a test rather than silently
+    // resolving to nothing and leaving a ring mysteriously dark.
+    assert.ok(/^[A-Za-z_][A-Za-z0-9_]*$/.test(v.ref), `${id}'s ref must be a valid credential reference name`)
   }
+  // The payload is a pnpm isolated layout and this plugin declares no dependencies, so a bare
+  // cross-package import resolves by hoisting rather than entitlement — and a load-time throw here
+  // takes the whole indicator down, which is exactly the failure mode this feature keeps hitting.
+  const pollerSrc = await (await import('node:fs/promises')).readFile(new URL('./lib/poller.js', import.meta.url), 'utf8')
+  const imports = [...pollerSrc.matchAll(/^import .* from '([^']+)'/gm)].map((m) => m[1])
+  assert.deepEqual(imports, ['./quota.js'], 'the poller imports nothing it is not entitled to resolve in the payload')
   ok('every reader emits schema-valid, detail-free statuses over TLS')
 }
 {
