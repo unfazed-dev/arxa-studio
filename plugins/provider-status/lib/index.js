@@ -31,6 +31,7 @@ import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { PROVIDER_STATUS_SCHEMA, STATUS_VALUE_SCHEMA, bindingStatus } from './status.js'
+import { createQuotaPoller } from './poller.js'
 
 /** `${sessionId} ${provider} ${kind}` -> newest status of that kind.
  *  Keyed by kind because a Claude subscription runs two limits at once (a premium-model
@@ -53,11 +54,16 @@ const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
 /** Bounds the file if a producer ever publishes per-turn. Newest wins. */
 const MAX_ENTRIES = 500
 
-/** Warned once per process. A silent `catch {}` here cost a whole debugging round: a failed write
- *  and a status that was never published look identical from the outside — an empty pill either
- *  way — so the one thing that distinguishes them has to be said out loud. Once, not per turn:
- *  a broken disk would otherwise flood the log with the same line. */
-let warned = false
+/** Warned once per FILE, not once per process. A silent `catch {}` here cost a whole debugging
+ *  round: a failed write and a status that was never published look identical from the outside —
+ *  an empty pill either way — so the one thing that distinguishes them has to be said out loud.
+ *  Once, not per turn: a broken disk would otherwise flood the log with the same line.
+ *
+ *  Per-site because a process-global latch means the FIRST failing path silences every other one.
+ *  With four producers now publishing (Claude plus three polled vendors) that is a real gap, not a
+ *  hypothetical: a test seam writing to a bad temp path would mute the real home directory's
+ *  warning for the rest of the run. */
+const warned = new Set()
 
 /** Persist the mirror. Never throws: a status update must not be able to kill a turn. */
 function save (file = statusFile()) {
@@ -70,12 +76,12 @@ function save (file = statusFile()) {
     writeFileSync(tmp, JSON.stringify({ version: 1, rows }), 'utf8')
     renameSync(tmp, file)
   } catch (err) {
-    if (!warned) { warned = true; console.warn(`arxa-provider-status: cannot persist ${file} — the usage pill will not survive a restart (${err?.message ?? err})`) }
+    if (!warned.has(file)) { warned.add(file); console.warn(`arxa-provider-status: cannot persist ${file} — the usage pill will not survive a restart (${err?.message ?? err})`) }
   }
 }
 
 /** Test seam for the warn-once latch. */
-export function resetProviderStatusWarning () { warned = false }
+export function resetProviderStatusWarning () { warned.clear() }
 
 /** Rehydrate the mirror at boot. A missing, unreadable, or malformed file is simply an empty
  *  store -- every row is re-validated, so a hand-edited file cannot inject an unchecked value. */
@@ -109,6 +115,31 @@ export function publishProviderStatus (session, status, file = statusFile()) {
 }
 
 /**
+ * Everything one provider currently has to say, replacing what it said before.
+ *
+ * REPLACE, not merge, and that distinction is the whole point. publishProviderStatus is keyed by
+ * kind, so a producer that stops reporting a window leaves the old one sitting in the store where
+ * bindingStatus keeps folding it in. For a polled vendor that means two live failures: a read that
+ * fails publishes `?` while yesterday's number stays beside it in the fold, and a window the vendor
+ * retires never goes away. A bad status must be able to erase a good one.
+ *
+ * Never throws — a poll must not be able to kill the RPC that triggered it. A status that fails
+ * validation is dropped and the rest still land.
+ */
+export function replaceProviderStatus (sessionId, provider, statuses, file = statusFile()) {
+  const prefix = `${sessionId} ${provider} `
+  for (const key of [...latest.keys()]) if (key.startsWith(prefix)) latest.delete(key)
+  const at = Date.now()
+  for (const status of statuses ?? []) {
+    const parsed = PROVIDER_STATUS_SCHEMA.safeParse(status)
+    if (!parsed.success || parsed.data.provider !== provider) continue
+    latest.set(KEY(sessionId, provider, parsed.data.kind), { ...parsed.data, at })
+    for (const fn of listeners) fn(sessionId, parsed.data)
+  }
+  save(file)
+}
+
+/**
  * Every live status for one session, for ONE provider.
  *
  * Never returns a mix. bindingStatus folds what it is given into a single pill, so handing it two
@@ -138,6 +169,13 @@ export function apply (ctx) {
   // Only at a cold start. loadProviderStatus clears the map, so an apply that re-runs (HMR,
   // re-registration) would otherwise wipe statuses this process already collected.
   if (latest.size === 0) loadProviderStatus()
+  // Held, not gated: `credentials` is what lets the polled vendors report at all, but a boot
+  // without it must still serve Claude's usage rather than leave the composer blank. Same lazy
+  // fiber the client half uses for `modelDirectories`, and for the same reason.
+  let poller
+  ctx.inject(['credentials'], (scope) => {
+    poller = createQuotaPoller({ credentials: scope.credentials, publish: replaceProviderStatus })
+  })
   // Child fiber: runs when `connection` is provided (web boot), stays pending harmlessly on a
   // headless boot -- the same shape gen-ui uses.
   ctx.inject(['connection'], (ctx) => ctx.connection.rpc.handle(RPC_CHANNEL, async (endpoint, payload) => {
@@ -146,6 +184,10 @@ export function apply (ctx) {
     const { sessionId, provider } = payload ?? {}
     if (typeof sessionId !== 'string') return { ok: false, error: { message: 'current needs a string sessionId' } }
     if (provider !== undefined && typeof provider !== 'string') return { ok: false, error: { message: 'provider must be a string' } }
+    // The refresh trigger. arxa owns Claude's request path and asks it at turn end; it owns none of
+    // the others, so their read hangs off the poll the browser is already doing. `ensure` respects
+    // its own TTL and never awaits a warm or stale fetch, so this stays a cheap call.
+    if (provider !== undefined && poller !== undefined) await poller.ensure(sessionId, provider)
     // Folded host-side: the browser copy of formatBadge stays a pure one-value function, and
     // the two-limit rule lives in exactly one place.
     return { ok: true, value: { status: bindingStatus(statusesFor(sessionId, provider)) ?? null } }

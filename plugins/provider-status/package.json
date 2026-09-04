@@ -2,13 +2,15 @@
   "name": "arxa-provider-status",
   "version": "0.1.0",
   "private": true,
-  "description": "One live status channel for every model provider: producer statuses held in a local durable store, read back over Connection RPC, rendered as a pill in the composer row.",
+  "description": "Provider usage as one circular indicator: Claude publishes its own limits, Z.ai/Kimi/DeepSeek are read host-side behind a TTL cache, all held in a local durable store and served over Connection RPC.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./quota": "./lib/quota.js",
+    "./poller": "./lib/poller.js"
   },
   "dsh": {
     "client": {

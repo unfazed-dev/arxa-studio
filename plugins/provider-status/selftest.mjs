@@ -74,8 +74,11 @@ assert.ok(rejectsCleanly(() => STATUS_VALUE_SCHEMA.parse({ ...v, detail: deepAcy
 assert.deepEqual(PROVIDER_STATUS_SCHEMA.parse({ ...good, detail: deepDetail(8) }).detail, deepDetail(8))
 ok('a deep acyclic detail is rejected as data, while an ordinary nested detail still parses')
 
-assert.deepEqual(formatBadge(v, now), { level: 'warn', text: 'Claude 90% · resets in 2h 46m', title: 'weekly limit · max' })
-assert.deepEqual(formatBadge({ ...v, level: 'ok' }, now), { level: 'ok', text: 'Claude 90%', title: 'weekly limit · max' })
+// `utilization` rides through formatBadge because the RING draws its arc from it. Without it the
+// badge is text-only and there is nothing to draw — the failure would be a ring stuck at empty.
+assert.deepEqual(formatBadge(v, now), { level: 'warn', text: 'Claude 90% · resets in 2h 46m', title: 'weekly limit · max', utilization: 0.9 })
+assert.deepEqual(formatBadge({ ...v, level: 'ok' }, now), { level: 'ok', text: 'Claude 90%', title: 'weekly limit · max', utilization: 0.9 })
+assert.equal(formatBadge({ ...v, utilization: undefined }, now).utilization, undefined, 'a balance has no utilization and must not gain one')
 assert.equal(formatBadge(null, now), undefined); assert.equal(formatBadge(undefined, now), undefined); ok('badge text')
 
 // Staleness: once resetsAt has passed the badge hides rather than freezing on old text. Recomputed
@@ -103,6 +106,11 @@ ok('the badge follows the selected provider')
   assert.ok(bound.title.includes('weekly Opus limit') && bound.title.includes('weekly limit · 80%'), 'both limits must be named in the tooltip — a limit the user is never shown is how they get surprised')
   // ties and single values
   assert.equal(bindingStatus([weekly], now).title, weekly.title, 'one limit keeps its own title, unjoined')
+  // The siblings must survive as VALUES, not just as joined title text: the ring is tapped through
+  // them, and a string cannot be cycled. This is what the joined title alone could not carry.
+  assert.deepEqual(bound.others, [weekly], 'the non-binding windows ride along structurally')
+  assert.equal(bindingStatus([weekly], now).others, undefined, 'a lone limit has no siblings to cycle to')
+  assert.deepEqual(bindingStatus([weekly, { ...premium, resetsAt: 1 }], now).others, undefined, 'an expired sibling is not offered for cycling')
   assert.equal(bindingStatus([], now), undefined)
   assert.equal(bindingStatus(undefined, now), undefined)
   // a limit whose window already reset must not win the fold
@@ -211,10 +219,47 @@ assert.throws(() => publishProviderStatus(session, { ...good, text: 'x'.repeat(8
   ok('the mirror holds only validated status rows')
 }
 
+// --- replaceProviderStatus: a poll REPLACES its provider's statuses, it does not merge into them
+{
+  const { replaceProviderStatus } = await import('./lib/index.js')
+  resetProviderStatus()
+  publishProviderStatus({ id: 's1' }, good)
+  replaceProviderStatus('s1', 'zai', [
+    { provider: 'zai', kind: 'hour:5', level: 'ok', text: 'GLM 49%', utilization: 0.49 },
+    { provider: 'zai', kind: 'week:1', level: 'warn', text: 'GLM 95%', utilization: 0.95 },
+  ])
+  assert.equal(statusesFor('s1', 'zai').length, 2)
+  // THE POINT: a failed read publishes only `?`, and the number it replaces must be GONE. Merging
+  // by kind would leave 'GLM 95%' sitting beside the '?' where bindingStatus keeps folding it in —
+  // a stale number presented as current, which is the failure the visible-breakage rule forbids.
+  replaceProviderStatus('s1', 'zai', [{ provider: 'zai', kind: 'unavailable', level: 'info', text: '?' }])
+  assert.deepEqual(statusesFor('s1', 'zai').map((s) => s.kind), ['unavailable'], 'the old windows are erased, not merged with')
+  // A provider's poll must never touch another provider's rows, or a Z.ai outage would blank Claude.
+  assert.equal(statusesFor('s1', 'claude-code').length, 1, "another provider's statuses are untouched")
+  // Nor another session's.
+  publishProviderStatus({ id: 's2' }, { ...good, provider: 'zai', text: 'GLM 10%' })
+  replaceProviderStatus('s1', 'zai', [])
+  assert.equal(statusesFor('s2', 'zai').length, 1, "another session's statuses are untouched")
+  assert.deepEqual(statusesFor('s1', 'zai'), [], 'an empty replace clears the provider — an unconfigured vendor shows nothing')
+  // Never throws, and one bad row does not cost the good ones: a poll must not be able to kill
+  // the RPC that triggered it.
+  assert.doesNotThrow(() => replaceProviderStatus('s1', 'zai', [
+    { provider: 'zai', kind: 'ok', level: 'ok', text: 'GLM 1%' },
+    { provider: 'zai', level: 'nonsense', text: '' },
+    { provider: 'claude-code', kind: 'sneaky', level: 'ok', text: 'not mine' },
+  ]))
+  assert.deepEqual(statusesFor('s1', 'zai').map((s) => s.kind), ['ok'], 'invalid rows are dropped and a foreign provider cannot ride in on another one\'s poll')
+  ok('replace: erases the provider it names, and only that provider, in that session')
+}
+
 // --- the RPC surface the browser half calls
 {
   let handler; let opts
-  const ctx = { inject: (_deps, fn) => fn({ connection: { rpc: { handle: (_ch, h, o) => { handler = h; opts = o } } } }) }
+  // Dep-aware on purpose. cordis fires an inject fiber only when its services actually exist, so a
+  // stub that hands every fiber the same object is not the runtime: it would have built a quota
+  // poller on an undefined `credentials`, and the first RPC would have wiped a real status and
+  // replaced it with `?`. Here credentials is absent, which is also the headless case.
+  const ctx = { inject: (deps, fn) => { if (deps.includes('connection')) fn({ connection: { rpc: { handle: (_ch, h, o) => { handler = h; opts = o } } } }) } }
   apply(ctx)
   assert.equal(typeof handler, 'function'); assert.deepEqual(opts, { authority: 'trusted-host' })
   resetProviderStatus()
@@ -266,7 +311,12 @@ assert.throws(() => publishProviderStatus(session, { ...good, text: 'x'.repeat(8
   // lib/client.js duplicates formatBadge for the browser bundle (no module graph into lib/ from a
   // __ModuleLoader__ factory). Extract it and prove it agrees with the host copy, including the
   // provider-visibility rule — the regression this pair exists to catch.
-  const relSrc = clientSrc.slice(clientSrc.indexOf('const relative'), clientSrc.indexOf('const COLOR'))
+  // Bounded by a sentinel COMMENT, not by whatever constant happens to come next: the extractor
+  // used to stop at `const COLOR`, so renaming that constant (which the ring did) broke the parity
+  // test in a way that reads like a real failure.
+  const end = clientSrc.indexOf('// PARITY-END')
+  assert.ok(end > 0, 'client.js must keep the // PARITY-END sentinel that bounds the shared block')
+  const relSrc = clientSrc.slice(clientSrc.indexOf('const relative'), end)
   const clientFormatBadge = new Function(`${relSrc} return formatBadge`)()
   for (const [value, at, active] of [
     [v, now, undefined], [{ ...v, level: 'ok' }, now, undefined], [null, now, undefined],
@@ -279,6 +329,46 @@ assert.throws(() => publishProviderStatus(session, { ...good, text: 'x'.repeat(8
   assert.equal(RPC_CHANNEL, '/rpc/arxa-provider-status')
   assert.ok(clientSrc.includes(RPC_CHANNEL), 'the client calls the channel the host registers')
   ok('client wiring gate + formatBadge parity + channel agreement')
+
+  // --- the ring. No DOM here, so the colour rule is extracted and exercised directly: it is the
+  // one piece of the indicator where a plausible-looking shortcut (colour off `level`) is wrong.
+  const ringSrc = clientSrc.slice(clientSrc.indexOf('const ACCENT'), clientSrc.indexOf('const SIZE'))
+  const RING_COLOR = new Function(`${ringSrc} return RING_COLOR`)()
+  const ACCENT = RING_COLOR(0), AMBER = RING_COLOR(0.75), RED = RING_COLOR(0.95)
+  assert.equal(new Set([ACCENT, AMBER, RED]).size, 3, 'the three steps must be three different colours')
+  assert.equal(RING_COLOR(0.69), ACCENT, '31% left is still accent')
+  // THE BUG THIS CATCHES: levelFor turns warn at 0.8 used (20% left), but the ring is specified to
+  // step at 30% left. Colouring off `level` would leave 0.75 accent — ten points late, on a weekly
+  // window about a full day of warning lost.
+  assert.equal(RING_COLOR(0.75), AMBER, '25% left is amber even though level is still "ok" at 0.75')
+  // Boundaries land on the rounded percent, which is also the digit pair the ring prints — so the
+  // colour and the number cannot contradict each other, and 1 - 0.7 === 0.30000000000000004 cannot
+  // quietly push exactly-30%-left into the accent band.
+  assert.equal(RING_COLOR(0.7), AMBER, 'exactly 30% left steps to amber')
+  assert.equal(RING_COLOR(0.9), RED, 'exactly 10% left steps to red')
+  assert.equal(RING_COLOR(0.895), RED, '10.5% left rounds to 10 and shows red, matching the "10" it prints')
+  assert.equal(RING_COLOR(1), RED, 'a spent window is red, not wrapped back to accent')
+  assert.equal(/RING_COLOR\(\s*(badge\.)?level/.test(clientSrc), false, 'the ring must colour off utilization, never off level')
+  ok('ring colour steps on % LEFT, read from utilization')
+
+  // Structure: a track always, an arc only when there is something to divide by.
+  assert.ok(/strokeDasharray:\s*`\$\{\(left \* CIRC\)/.test(clientSrc), 'the arc length is the fraction LEFT of the circumference')
+  assert.ok(/known \? \{\} : \{ strokeDasharray: '2 3' \}/.test(clientSrc), 'a balance-only status draws a dashed idle track, not a full one')
+  assert.ok(/strokeOpacity: known \? 0\.15/.test(clientSrc), 'the track is the accent at 15% — the second tone')
+  assert.ok(/String\(Math\.round\(left \* 100\)\)/.test(clientSrc), 'the centre shows percent LEFT, not percent used')
+  // Balance and breakage both land here: no utilization means no number in the ring, so the text
+  // has to carry it or the composer shows a silent empty circle.
+  assert.ok(/typeof badge\.utilization === 'number' \? null : h\('span'/.test(clientSrc), 'without a percentage the badge text renders beside the ring')
+  ok('ring structure: track, arc, centred percent-left, dashed idle form')
+
+  // Tap-to-cycle. Clicking is the ONLY route to the second window, so it must be reachable
+  // without a mouse — accessibility basics are not a simplification worth making.
+  assert.ok(/\[status, \.\.\.\(status\?\.others \?\? \[\]\)\]/.test(clientSrc), 'the ring cycles over the binding status plus its siblings')
+  assert.ok(/onKeyDown: cycles \?/.test(clientSrc), 'the cycle affordance must be keyboard-reachable')
+  assert.ok(/role: cycles \? 'button' : 'img'/.test(clientSrc), 'it announces as a button only when there is something to cycle to')
+  assert.ok(/setIndex\(0\) \}, \[activeProvider\]/.test(clientSrc), 'the window index resets on a provider switch — index 2 of Claude\'s three means nothing for GLM\'s two')
+  assert.ok(/const full = formatBadge\(status,/.test(clientSrc), 'the tooltip names every live window regardless of which one is on screen')
+  ok('tap-to-cycle: siblings, keyboard, index reset, full tooltip')
 }
 
 rmSync(HOME, { recursive: true, force: true })

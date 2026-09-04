@@ -77,7 +77,10 @@ export function formatBadge (value, now = Date.now(), activeProvider = undefined
   // this can't live in the fold, since the fold must stay deterministic for replay.
   if (value.resetsAt !== undefined && value.resetsAt * 1000 <= now) return undefined
   const reset = value.resetsAt !== undefined && value.level !== 'ok' ? ` · resets in ${relative(value.resetsAt, now)}` : ''
-  return { level: value.level, text: `${value.text}${reset}`, title: value.title ?? value.text }
+  // `utilization` rides along because the ring draws its arc from it. It stays a fraction USED —
+  // the one inversion to "left" happens at render, so nothing downstream has to remember which
+  // direction a number points.
+  return { level: value.level, text: `${value.text}${reset}`, title: value.title ?? value.text, utilization: value.utilization }
 }
 
 /** Rank: a refusal outranks a warning outranks fine; ties break on utilization. Two live
@@ -98,8 +101,10 @@ export function bindingStatus (values, now = Date.now()) {
   if (live.length === 0) return undefined
   const top = live.reduce((a, b) => (worse(a, b) ? a : b))
   if (live.length === 1) return top
-  // Both limits in the tooltip: the pill can only show one number, but hiding the other
-  // one is how a user gets surprised by a limit they were never shown.
-  const others = live.filter((v) => v !== top).map((v) => v.title ?? v.text)
-  return { ...top, title: [top.title ?? top.text, ...others].join(' · ') }
+  const rest = live.filter((v) => v !== top)
+  // Two things, for two audiences. `title` names every live limit for the tooltip — the ring can
+  // only draw one number, and a limit the user is never shown is how they get surprised by it.
+  // `others` carries the siblings STRUCTURALLY so the ring can be tapped through them; the joined
+  // string used to be the only channel, which left tap-to-cycle nothing to cycle to.
+  return { ...top, title: [top.title ?? top.text, ...rest.map((v) => v.title ?? v.text)].join(' · '), others: rest }
 }
