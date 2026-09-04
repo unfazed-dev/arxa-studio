@@ -360,12 +360,30 @@ ok('resolveModel efforts')
   ok('an mcp call with no queued tool_use id is refused instead of parking forever')
 }
 
+// --- the turn runs on the resolved model id
+{
+// F12, turn side: the id dsh stored is the one the picker listed, which is the STATIC
+// spelling whenever that list came from a cold probe. resolveModel() advertised
+// opus[1m]'s effort levels, so the turn must run on opus[1m) too — otherwise the model
+// whose capabilities we offered is not the model the subscription is billed for.
+const liveModels = [
+  { provider: 'claude-code', id: 'opus[1m]', name: 'Opus (1M context)', description: 'd', efforts: ['low', 'high'] },
+  { provider: 'claude-code', id: 'haiku', name: 'Haiku', description: 'd', efforts: [] },
+]
+const liveProbe = { current: async () => ({ loggedIn: true, version: '2.1.260', subscriptionType: 'max', models: liveModels }) }
+const picked = mk([init, { type: 'assistant', message: { content: [{ type: 'text', text: 'hi' }] } }, { type: 'result', subtype: 'success' }], liveProbe)
+await collect(picked.stream({ provider: 'claude-code', model: 'opus', messages: [{ role: 'user', content: [{ type: 'text', text: 'a' }] }] }))
+assert.equal(queries.at(-1).options.model, 'opus[1m]')
+ok('a turn runs on the resolved live id, not the static id the picker stored')
+}
+
 // --- signed out / old version refuse before spawning
 {
   const before = queries.length
   // The real signed-out string the CLI produces — not a placeholder. F13: the three
   // failure kinds below used to collapse into one fixed "not signed in" line that
   // discarded account.error, so a timeout and a sign-out were indistinguishable.
+
   const signedOut = { loggedIn: false, error: 'Not logged in · Please run /login', models: [] }
   const out = mk([], { current: async () => signedOut })
   await assert.rejects(collect(out.stream({ provider: 'claude-code', model: 'sonnet', messages: [{ role: 'user', content: [{ type: 'text', text: 'a' }] }] })), /claude auth login/)

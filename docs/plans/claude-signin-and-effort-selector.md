@@ -132,10 +132,21 @@ string: genuinely signed out, no CLI installed, and probe-failed-for-another-rea
 (which now carries `account.error` and says the sign-in may be fine). Selftests cover
 all three.
 
-**F14 fixed.** The sign-in notice now carries `code` (the copyable command) **and**
+**F12, turn side.** `stream()` resolves `options.model` through the same matcher, so
+the turn runs on the id whose capabilities were advertised — dsh stores whatever the
+picker listed, and a cold-probe list stores `opus`. Regression: *"a turn runs on the
+resolved live id, not the static id the picker stored"*.
+
+**F14 fixed — with an honest limit.** The sign-in notice now carries `code` (the copyable command) **and**
 `url` (the install docs), and the signed-out message names the surface —
 Settings -> Models -> Claude Code — which waits and picks the sign-in up
 automatically. arxa still never launches `claude auth login`.
+
+There is **no terminal-opening link**, because no such affordance exists: `notify`
+carries `message`, `url` and `code` only, and no OS URL scheme opens a terminal at a
+command. What a signed-out user gets is the copyable command, a link to the install
+docs, and a sign-in surface that polls and picks the login up on its own the moment it
+succeeds — so they never have to come back and re-select the model.
 
 **F15 not done.** `claude auth status` would answer the liveness question far cheaper
 than a `startup()` handshake, but the probe is not the bug and changing it now would be

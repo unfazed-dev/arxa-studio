@@ -128,7 +128,14 @@ export class ClaudeCodeAdapter extends LlmAdapter {
 
     const account = await this.probe.current()
     if (!account.loggedIn) throw new Error(signedOutMessage(account))
-    if (isFable(options.model) && !versionAtLeast(account.version, FABLE_MIN_VERSION)) {
+    // Resolve through the SAME matcher resolveModel() uses, so the turn runs on the id
+    // whose capabilities we advertised. dsh stores whatever the picker listed, which is
+    // the static spelling (`opus`) whenever the list was built from a cold probe — and
+    // handing the SDK `opus` while having offered `opus[1m]`'s effort levels means the
+    // advertised model and the billed one are not the same row. Falls back to the raw id
+    // so an id the probe has never heard of still reaches the CLI, which knows its own aliases.
+    const modelId = matchModel(account.models, options.model)?.id ?? options.model
+    if (isFable(modelId) && !versionAtLeast(account.version, FABLE_MIN_VERSION)) {
       throw new Error(`claude-code: Fable needs Claude Code ≥ ${FABLE_MIN_VERSION}, you have ${account.version}`)
     }
 
@@ -199,7 +206,7 @@ export class ClaudeCodeAdapter extends LlmAdapter {
         prompt: resumeId ? userText : freshPrompt,
         options: this.base(policy, {
         cwd,
-        model: options.model,
+        model: modelId,
         // D5: an allowlist of the built-ins arxa mirrors, plus arxa's own tools. `tools` is the
         // SDK's availability knob ("To restrict which tools are available, use the `tools`
         // option instead" — sdk.d.ts on allowedTools, which only auto-APPROVES and would bypass
@@ -209,7 +216,7 @@ export class ClaudeCodeAdapter extends LlmAdapter {
         // they are inert, and if it gates every name they are required. Task 12's live smoke is
         // what tells us which; either way this list cannot let an unmirrored built-in through.
         tools: [...MIRROR_TOOL_NAMES, ...arxaMcpToolNames(schemas)],
-        ...(isFable(options.model) ? { fallbackModel: 'opus' } : {}),
+        ...(isFable(modelId) ? { fallbackModel: 'opus' } : {}),
         ...(options.reasoningEffort ? { effort: options.reasoningEffort } : {}),
         ...(resumeId ? { resume: resumeId } : {}),
         systemPrompt: { type: 'custom', prompt: options.system ?? '' },
