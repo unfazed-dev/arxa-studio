@@ -92,7 +92,16 @@ const RESET_MS = 1_800_000_000_000
   const spent = deepseekToStatuses({ balance_infos: [{ currency: 'USD', total_balance: '0' }] })
   assert.equal(spent[0].level, 'limit', 'a wallet empty in every currency is the one case that must show')
   assert.deepEqual(deepseekToStatuses({ balance_infos: [] }), [], 'no balances at all is "not configured", not "empty"')
-  ok('deepseek: decimal strings, per-currency, no invented denominator')
+  // Two funded currencies both have `utilization: undefined`, so the fold's tie-break sees 0 vs 0.
+  // Which one binds must be the vendor's own order, not chance: the other is still reachable by
+  // tapping, but the ring must not swap which currency it opens on between renders.
+  const both = deepseekToStatuses({ balance_infos: [
+    { currency: 'USD', total_balance: '9.56' }, { currency: 'CNY', total_balance: '42.00' },
+  ] })
+  assert.deepEqual(both.map((b) => b.kind), ['balance:USD', 'balance:CNY'], 'currency order follows the payload')
+  for (let i = 0; i < 5; i++) assert.equal(bindingStatus(both).kind, 'balance:USD', 'the same currency binds every time')
+  assert.deepEqual(bindingStatus(both).others.map((o) => o.kind), ['balance:CNY'], 'the other currency stays reachable by tapping')
+  ok('deepseek: decimal strings, per-currency, no invented denominator, stable ordering')
 }
 
 // ---------------------------------------------------------------- shared guarantees

@@ -167,6 +167,18 @@ provider-aware fold, the `/usage` reader — **never reached the running engine*
 "still no chip" report was against code from hours earlier. That is a debugging cost worth
 naming: the fixes were tested and correct, and the engine was running something else.
 
+**Why only this plugin.** `profile/cordis.patch.yml` mounts the two halves differently:
+
+```yaml
+  - id: arxa-claude-code
+    name: /Volumes/.../plugins/claude-code/index.mjs     # absolute repo path — always current
+  - id: arxa-provider-status
+    name: arxa-provider-status                            # package name — via the pnpm copy
+```
+
+That asymmetry is the whole explanation. Every fix on the claude-code side took effect
+immediately; every fix on the provider-status side went into a copy nobody loaded.
+
 `--materialise-only` does not fix it: it deliberately skips the pnpm install
 (`bin/arxa-studio.mjs`, "without pnpm-installing the profile"). Until that refresh is made
 reliable, **verify the payload, not just the tests**:

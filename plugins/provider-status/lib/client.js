@@ -145,7 +145,12 @@ window.__ModuleLoader__.load({
       // Reset on a provider switch: index 2 of Claude's three windows is meaningless for GLM's two.
       React.useEffect(() => { setIndex(0) }, [activeProvider])
 
-      const badge = formatBadge(windows[index % Math.max(1, windows.length)], now, activeProvider)
+      // Fall back to the binding window when the cycled-to one formats to nothing. A sibling can
+      // expire WHILE it is the one on screen (formatBadge retires a window once its reset passes),
+      // and without this the whole ring would vanish until the next tick — invisible, when the
+      // binding window is still perfectly live. Degrade visible, never invisible.
+      const picked = windows[index % Math.max(1, windows.length)]
+      const badge = formatBadge(picked, now, activeProvider) ?? formatBadge(windows[0], now, activeProvider)
       if (badge === undefined) return null
       // The tooltip always names EVERY live window, whichever one is on screen -- the ring shows
       // one number, and a limit the user is never told about is how they get surprised by it.

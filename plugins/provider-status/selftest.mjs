@@ -368,7 +368,11 @@ assert.throws(() => publishProviderStatus(session, { ...good, text: 'x'.repeat(8
   assert.ok(/role: cycles \? 'button' : 'img'/.test(clientSrc), 'it announces as a button only when there is something to cycle to')
   assert.ok(/setIndex\(0\) \}, \[activeProvider\]/.test(clientSrc), 'the window index resets on a provider switch — index 2 of Claude\'s three means nothing for GLM\'s two')
   assert.ok(/const full = formatBadge\(status,/.test(clientSrc), 'the tooltip names every live window regardless of which one is on screen')
-  ok('tap-to-cycle: siblings, keyboard, index reset, full tooltip')
+  // A sibling can expire WHILE it is the one being shown — formatBadge retires a window once its
+  // reset passes. Without a fallback the whole ring vanishes even though the binding window is
+  // still live, which is the "degrade visible, never invisible" rule this file's header states.
+  assert.ok(/formatBadge\(picked, now, activeProvider\) \?\? formatBadge\(windows\[0\]/.test(clientSrc), 'an expired cycled-to window falls back to the binding one instead of blanking the ring')
+  ok('tap-to-cycle: siblings, keyboard, index reset, full tooltip, expiry fallback')
 }
 
 rmSync(HOME, { recursive: true, force: true })
