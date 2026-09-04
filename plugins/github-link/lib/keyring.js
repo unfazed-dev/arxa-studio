@@ -21,13 +21,20 @@ import { promisify } from 'node:util'
 export const KEYCHAIN_SERVICE = 'arxa-studio'
 export const SECURITY_PATH = '/usr/bin/security'
 
+// Process-wide store for the memory fallback: a real keychain is shared by
+// every keyring instance in the process, and consumers (the link flow, the
+// service, tests) each build their own keyring — per-instance Maps would
+// make a stored token invisible to the next reader. Still process-lifetime
+// only; never a storage story.
+const MEMORY_STORE = new Map()
+
 function makeMemoryBackend() {
   console.warn(
     '[github-link] WARNING: no keyring backend available (no Tauri shell ' +
-    'bridge, no /usr/bin/security). The GitHub token will be held IN MEMORY ' +
-    'ONLY and lost when this process exits.'
+    'bridge, no usable /usr/bin/security keychain). The GitHub token will ' +
+    'be held IN MEMORY ONLY and lost when this process exits.'
   )
-  const mem = new Map()
+  const mem = MEMORY_STORE
   return {
     backend: 'memory',
     async setSecret(account, secret) { mem.set(account, secret) },
