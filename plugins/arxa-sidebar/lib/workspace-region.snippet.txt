@@ -423,7 +423,15 @@
 		const sessionsList = (s) => {
 			const byId = {};
 			const ids = [];
+			// dsh 0.1.2-rc.1: derive the pendingInteractions MAP alongside the
+			// summaries (the stock sessionNode no longer reads the summary's
+			// pendingInteraction field — only the map through
+			// useSessionPendingInteraction). Kinds outside the visible union are
+			// dropped here so the map matches what the stock would ever show.
+			const pendingMap = new Map();
 			for (const o of s.orgs || []) for (const x of o.sessions || []) {
+				const pi = x.pendingInteraction;
+				if (pi != null && (pi.kind === "approval" || pi.kind === "plan-review" || pi.kind === "question")) pendingMap.set(x.id, pi);
 				byId[x.id] = {
 					id: x.id,
 					displayTitle: x.name,
@@ -436,7 +444,7 @@
 				};
 				ids.push(x.id);
 			}
-			return { byId, ids, current: s.currentSessionId ?? void 0 };
+			return { byId, ids, current: s.currentSessionId ?? void 0, pendingMap };
 		};
 		const orgOfSession = (sessionId) => {
 			for (const o of orgStore.get().orgs) if ((o.sessions || []).some((x) => x.id === sessionId)) return o.id;
@@ -1147,9 +1155,13 @@
 		const orgNoFlow = { getSnapshot: () => false, subscribe: () => () => {} };
 		// Hook faces are STABLE module-scope identities, bound at the component
 		// boundary (see OrgBrowser): the slot renderer merges its STANDARD runtime
-		// hooks (useSessions/useWorkspaces) OVER inject props, so declaring them in
-		// the inject face loses — passing them as plain props cannot be overridden.
-		let orgHostDescription = void 0;
+		// hooks (useSessions/useWorkspaces/useSessionPendingInteraction) OVER
+		// inject props, so declaring them in the inject face loses — passing them
+		// as plain props cannot be overridden.
+		// dsh 0.1.2-rc.1 (2026-09-05): the host face renamed
+		// useHostDescription → useHostInfo and now reads the remote $host
+		// snapshot (sel receives the info object with .home, not a store).
+		let orgHostInfo = void 0;
 		// Client runtime sessions service (dsh-client-runtime): open(id)
 		// focuses a conversation into the content area; clear() empties it
 		// AND wipes the persisted selection (the restore source at boot).
@@ -1223,7 +1235,15 @@
 		const orgUseWorkspaces = (sel) => useOrg((s) => sel(s.workspacesView));
 		const orgUseSessions = (sel) => useOrg((s) => sel(s.sessionsView));
 		const orgUseDirectoryFlow = (sel) => sel(orgNoFlow.getSnapshot());
-		const orgUseHostDescription = (sel) => sel(orgHostDescription);
+		const orgUseHostInfo = (sel) => sel(orgHostInfo && typeof orgHostInfo.getSnapshot === "function" ? orgHostInfo.getSnapshot() : orgHostInfo);
+		// dsh 0.1.2-rc.1: session rows read pending interactions from a MAP
+		// (useSessionPendingInteraction — the framework's standard hook, produced
+		// by dsh-client-ui-session's UiSession via provideRoot), no longer off the
+		// row summary. OrgBrowser overrides it with the org-derived map so the D63
+		// producer-consumer contract (waiting pills on org rows) rides unchanged;
+		// the stock's visiblePendingKind filters to approval|plan-review|question,
+		// so the map only ever carries that union.
+		const orgUsePendingInteraction = (sel) => sel(useOrg((s) => s.sessionsView.pendingMap));
 		/** CTA gate (D70/D71) is DECLARATIVE now (2026-09-01): the shell
 		 * button reads window.__ARXA_SIDEBAR__.ctaReady/ctaTitle at render —
 		 * see the lever comments at createOrgStore. The imperative DOM gate
@@ -2364,7 +2384,7 @@
 			// renderer merges its STANDARD runtime hooks (useSessions/useWorkspaces)
 			// over inject props, so declaring them in the inject face loses. Passing
 			// them straight to the stock component cannot be overridden.
-			const patched = { ...props, useWorkspaces: orgUseWorkspaces, useSessions: orgUseSessions, useDirectoryFlow: orgUseDirectoryFlow, useHostDescription: orgUseHostDescription };
+			const patched = { ...props, useWorkspaces: orgUseWorkspaces, useSessions: orgUseSessions, useDirectoryFlow: orgUseDirectoryFlow, useHostInfo: orgUseHostInfo, useSessionPendingInteraction: orgUsePendingInteraction };
 			// Create-org conversation lives HERE (local state, event-triggered by
 			// the spliced + flow) — see OrgCreateModal for why it must not emit.
 			const [creating, setCreating] = (0, react.useState)(false);

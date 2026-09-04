@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = dirname(here)
-const DSH_VERSION = '0.1.1-rc.2'
+const DSH_VERSION = '0.1.2-rc.1'
 const T = (n) => '\t'.repeat(n)
 const stockPath = join(root, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
 const regionPath = join(root, 'plugins', 'arxa-sidebar', 'lib', 'workspace-region.snippet.txt')
@@ -47,7 +47,7 @@ out = out.replace(/[\/][\/]#[ ]sourceMappingURL=client[.]js[.]map\s*$/m, '')
 
 // 2. identity renames
 out = out.replace('id: "@deepseek-ai/dsh-client-ui-workspace",', 'id: "arxa-sidebar-workspace",')
-out = out.replaceAll('qDHVXG_', 'aXa_wsb_')
+out = out.replaceAll('bhn1Oq_', 'aXa_wsb_')
 out = out.replaceAll('YDXeBa_', 'aXa_wsr_')
 out = out.replaceAll('_G5b-a_', 'aXa_wsp_')
 for (const mod of ['Rows', 'WorkspacePicker', 'WorkspaceBrowser']) {
@@ -123,15 +123,19 @@ out = out.replace(GROUP_KIDS, [
 ].join('\n'))
 // …and close the conditional spread after the item expression — the
 // sessions map line is the unique witness that the item just ended.
+// dsh 0.1.2-rc.1 (2026-09-05): the map line changed shape — the stock
+// overflow control became collapsedSessionRows() (blank sessions ride
+// free of COLLAPSED_SESSION_LIMIT), so the witness is the new
+// sessionsExpanded/collapsed.rows select. Uniqueness re-verified.
 const GROUP_ITEM_END = [
   T(9) + '}),',
-  T(9) + '(expandedSessionGroups.includes(group.key) ? group.sessions : group.sessions.slice(0, COLLAPSED_SESSION_LIMIT)).map((node) => {',
+  T(9) + '(sessionsExpanded ? group.sessions : collapsed.rows).map((node) => {',
 ].join('\n')
 if (!out.includes(GROUP_ITEM_END) || out.indexOf(GROUP_ITEM_END) !== out.lastIndexOf(GROUP_ITEM_END)) throw new Error('group item end anchor missing/dup — stock shape moved?')
 out = out.replace(GROUP_ITEM_END, [
   T(9) + '})]),',
   T(9) + 'ARXA_LEAF_FILES(group),',
-  T(9) + '(expandedSessionGroups.includes(group.key) ? group.sessions : group.sessions.slice(0, COLLAPSED_SESSION_LIMIT)).map((node) => {',
+  T(9) + '(sessionsExpanded ? group.sessions : collapsed.rows).map((node) => {',
 ].join('\n'))
 
 // 6c. leaf row click = stock expand/collapse AND selection (the New
@@ -223,7 +227,17 @@ const ourApply = [
   T(3) + '// — the lookup chain falls back per-key to en (enOver merged), so a',
   T(3) + '// missing translation shows English, never a raw key.',
   T(3) + 'ctx.effect(() => ctx.locale.register(NS, { zh, en: { ...en, ...enOver }, pl: plOver, fr: frOver }), "arxa-sidebar-workspace: dictionaries");',
-  T(3) + 'orgHostDescription = ctx.get("connection").hostDescription;',
+  T(3) + 'orgHostInfo = {',
+  T(4) + '// dsh 0.1.2-rc.1: connection.hostDescription is gone — the host-info',
+  T(4) + '// face is now the remote $host snapshot, re-read on connection/reset',
+  T(4) + '// (mirrors the stock ui-workspace apply).',
+  T(4) + 'getSnapshot: () => ctx.remote?.$host,',
+  T(4) + 'subscribe: (listener) => ctx.on("connection/reset", listener)',
+  T(3) + '};',
+  T(3) + '// dsh 0.1.2-rc.1: the stock apply provideRoot\'s the workspaces hook —',
+  T(3) + '// mirror it so framework-owned consumers of the root hook (and the',
+  T(3) + '// slot runtime\'s standard useWorkspaces) still see a live store.',
+  T(3) + 'try { ctx.slots.provideRoot({ hooks: { workspaces: ctx.get("workspaces").list } }) } catch { /* degrade */ }',
   T(3) + '// Client runtime sessions service (2026-08-30): open(id) focuses a',
   T(3) + '// conversation into the content area; clear() empties it and wipes',
   T(3) + '// the persisted selection. arxa drives the content area — resume',
@@ -313,7 +327,7 @@ const ourApply = [
   T(5) + 'return { workspaceId: (s.orgs.find((o) => o.open) || {}).id };',
   T(4) + '},',
   T(4) + 'trash: () => orgStore.toggleTrash(),',
-  T(4) + 'hooks: { directoryFlow: orgNoFlow, hostDescription: orgHostDescription },',
+  T(4) + 'hooks: { directoryFlow: orgNoFlow, hostInfo: orgHostInfo },',
   T(3) + '});',
   T(3) + 'ctx.slots.inject("sidebar.workspaces", () => ctx.slots.register({',
   T(4) + 'name: "sidebar.workspaces",',

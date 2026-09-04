@@ -1,6 +1,6 @@
 // gen-locale — regenerate plugins/locale/lib/client.js (the WHOLE arxa-locale
 // browser half) from the stock @deepseek-ai/dsh-client-locale lib/client.js
-// (dsh 0.1.1-rc.2). The stock package stays byte-identical in node_modules as
+// (dsh 0.1.2-rc.1). The stock package stays byte-identical in node_modules as
 // reference; hand-edits of the generated file are caught by the drift gate in
 // plugins/locale/selftest.mjs.
 //
@@ -10,13 +10,23 @@
 //   2. LOCALE_IDS (the client-side copy) → ["en", "pl", "fr"]
 //   3. common namespace: zh$1 dictionary REPLACED by pl$1 + fr$1 (en kept)
 //   4. settings.locale namespace: zh → pl + fr ("language.title")
-//   5. LOCALES frozen array → en/pl/fr (labels English/Polski/Français)
+//   5. shipped locale list → en/pl/fr (labels English/Polski/Français).
+//      [amended 2026-09-05, dsh 0.1.2-rc.1] stock renamed LOCALES →
+//      BUILT_IN_LOCALES and derives it from LOCALE_IDS ×
+//      BUILT_IN_LOCALE_METADATA; the mirror keeps the stock's frozen-entry
+//      shape but spells the list out and drops the metadata object with zh.
 //   6. DOCUMENT_LANGUAGE → { en, pl, fr } (BCP 47 primaries — no script
-//      ambiguity to disambiguate, unlike zh → zh-CN)
+//      ambiguity to disambiguate, unlike zh → zh-CN). [amended 2026-09-05,
+//      dsh 0.1.2-rc.1] stock folded the map into syncDocumentLanguage as a
+//      zh → "zh-CN" ternary; the mirror keeps the explicit identity map and
+//      consults it from the stock call site (pack languages added through
+//      the new addLanguage() fall back to their own validated id).
 //   7. register() calls carry { en, pl, fr } for both namespaces
-// Everything else — LocaleRuntime, lookup chain (active → en → common →
-// key), FALLBACK_LOCALE "en", detectBrowserLocale (iterates LOCALES
-// dynamically), the Language row, inject set, provide("locale") — is the
+// Everything else — LocaleRuntime, lookup chain (active → declared
+// fallbacks → en → common → key), FALLBACK_LOCALE "en", detectBrowserLocale
+// (iterates the registered catalog), addLanguage, the Language-row store
+// (dsh-client-store since 0.1.2-rc.1), the Language row, inject set
+// ("connection" dropped upstream in 0.1.2-rc.1), provide("locale") — is the
 // stock contract kept whole, so every stock plugin injecting
 // @deepseek-ai/dsh-client-locale works unchanged against this service face.
 //
@@ -31,7 +41,7 @@ import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = dirname(here)
-const DSH_VERSION = '0.1.1-rc.2'
+const DSH_VERSION = '0.1.2-rc.1'
 const stockPath = join(root, 'node_modules', '@deepseek-ai', 'dsh-client-locale', 'lib', 'client.js')
 const outPath = join(root, 'plugins', 'locale', 'lib', 'client.js')
 const T = (n) => '\t'.repeat(n)
@@ -48,12 +58,23 @@ function mustReplaceOnce(out, from, to, label) {
 // Key set = the stock en dictionary (en is the source of truth AND
 // FALLBACK_LOCALE). Native-speaker review flagged as a pre-ship product gate
 // (plan doc §Risks).
+// [amended 2026-09-05, dsh 0.1.2-rc.1] the stock en key set grew 24 → 39
+// keys (copy-option labels, json/markdown/number helpers, brand.localBuild);
+// the new keys are translated below so the completeness contract — pl/fr key
+// sets identical to the en key set — still holds.
 const plCommon = {
   'ok': 'OK',
   'cancel': 'Anuluj',
   'close': 'Zamknij',
   'copy': 'Kopiuj',
   'copied': 'Skopiowano',
+  'copy.failed': 'Kopiowanie nie powiodło się',
+  'copy.value': 'Kopiuj wartość',
+  'copy.json': 'Kopiuj JSON',
+  'copy.path': 'Kopiuj ścieżkę właściwości',
+  'copy.prettyJson': 'Kopiuj sformatowany JSON',
+  'copy.compactJson': 'Kopiuj zwięzły JSON',
+  'copy.optionsHint': '{action}; kliknij prawym przyciskiem, aby wybrać sposób kopiowania',
   'retry': 'Ponów',
   'loading': 'Ładowanie…',
   'load.failed': 'Nie udało się załadować',
@@ -70,9 +91,17 @@ const plCommon = {
   'collapse': 'Zwiń',
   'expand': 'Rozwiń',
   'back': 'Wróć',
+  'brand.localBuild': 'Lokalna kompilacja DSH',
   'unknown': 'Nieznany',
   'none': 'Brak',
   'truncated': 'Obcięto',
+  'json.collapseNode': 'Zwiń węzeł JSON',
+  'json.expandNode': 'Rozwiń węzeł JSON',
+  'json.label': 'JSON',
+  'markdown.footnotes': 'Przypisy',
+  'markdown.truncatedCharacters': '… obcięto na {total} znakach',
+  'number.thousand': '{value}K',
+  'number.million': '{value}M',
 }
 const frCommon = {
   'ok': 'OK',
@@ -80,6 +109,13 @@ const frCommon = {
   'close': 'Fermer',
   'copy': 'Copier',
   'copied': 'Copié',
+  'copy.failed': 'Échec de la copie',
+  'copy.value': 'Copier la valeur',
+  'copy.json': 'Copier JSON',
+  'copy.path': 'Copier le chemin de la propriété',
+  'copy.prettyJson': 'Copier le JSON formaté',
+  'copy.compactJson': 'Copier le JSON compact',
+  'copy.optionsHint': '{action} ; clic droit pour les options de copie',
   'retry': 'Réessayer',
   'loading': 'Chargement…',
   'load.failed': 'Échec du chargement',
@@ -96,9 +132,17 @@ const frCommon = {
   'collapse': 'Réduire',
   'expand': 'Développer',
   'back': 'Retour',
+  'brand.localBuild': 'Build local DSH',
   'unknown': 'Inconnu',
   'none': 'Aucun',
   'truncated': 'Tronqué',
+  'json.collapseNode': 'Réduire le nœud JSON',
+  'json.expandNode': 'Développer le nœud JSON',
+  'json.label': 'JSON',
+  'markdown.footnotes': 'Notes de bas de page',
+  'markdown.truncatedCharacters': '… tronqué à {total} caractères',
+  'number.thousand': '{value}K',
+  'number.million': '{value}M',
 }
 /** Emit one dictionary const in the stock bundle's formatting. */
 function dictConst(name, dict, comment) {
@@ -150,17 +194,28 @@ out = mustReplaceOnce(out,
   'const pl = { "language.title": "Język" };\n' + T(2) + '/** French dictionary, checked complete against the en key set. */\n' + T(2) + 'const fr = { "language.title": "Langue" };',
   'settings locale dicts')
 
-// 5. LOCALES frozen array
+// 5. shipped locale list [reshaped 2026-09-05, dsh 0.1.2-rc.1]: stock renamed
+//    LOCALES → BUILT_IN_LOCALES and derives it from LOCALE_IDS ×
+//    BUILT_IN_LOCALE_METADATA (zh declares fallback "en"; en, the fallback-
+//    chain terminal, declares none). Intent unchanged — the shipped list is
+//    en/pl/fr labelled English/Polski/Français, non-terminal locales
+//    declaring en as fallback — but the mirror spells the frozen list out so
+//    the shipped set stays explicit, and the metadata object goes with zh.
 out = mustReplaceOnce(out,
-  ['const LOCALES = Object.freeze([{', T(3) + 'id: "zh",', T(3) + 'label: "中文"', T(2) + '}, {', T(3) + 'id: "en",', T(3) + 'label: "English"', T(2) + '}]);'].join('\n'),
-  ['const LOCALES = Object.freeze([{', T(3) + 'id: "en",', T(3) + 'label: "English"', T(2) + '}, {', T(3) + 'id: "pl",', T(3) + 'label: "Polski"', T(2) + '}, {', T(3) + 'id: "fr",', T(3) + 'label: "Français"', T(2) + '}]);'].join('\n'),
-  'LOCALES array')
+  ['/** The two locales and dictionaries shipped by this package. */', T(2) + 'const BUILT_IN_LOCALE_METADATA = {', T(3) + 'zh: {', T(4) + 'label: "中文",', T(4) + 'fallback: "en"', T(3) + '},', T(3) + 'en: { label: "English" }', T(2) + '};', T(2) + 'const BUILT_IN_LOCALES = Object.freeze(LOCALE_IDS.map((id) => Object.freeze({', T(3) + 'id,', T(3) + '...BUILT_IN_LOCALE_METADATA[id]', T(2) + '})));'].join('\n'),
+  ['/** The three locales and dictionaries arxa ships — stock derives this list from LOCALE_IDS × metadata; the mirror spells it out (dsh 0.1.2-rc.1). */', T(2) + 'const BUILT_IN_LOCALES = Object.freeze([', T(3) + 'Object.freeze({ id: "en", label: "English" }),', T(3) + 'Object.freeze({ id: "pl", label: "Polski", fallback: "en" }),', T(3) + 'Object.freeze({ id: "fr", label: "Français", fallback: "en" })', T(2) + ']);'].join('\n'),
+  'BUILT_IN_LOCALES list')
 
-// 6. DOCUMENT_LANGUAGE
+// 6. DOCUMENT_LANGUAGE [reshaped 2026-09-05, dsh 0.1.2-rc.1]: stock folded
+//    the map into syncDocumentLanguage as a zh → "zh-CN" ternary (else the
+//    active id). Intent unchanged — arxa ships BCP 47 primaries with no
+//    script ambiguity, so the map stays the identity { en, pl, fr }; the
+//    stock else-branch semantics survive as `?? snapshot.active` for
+//    languages added later through the new addLanguage().
 out = mustReplaceOnce(out,
-  ['const DOCUMENT_LANGUAGE = {', T(3) + 'zh: "zh-CN",', T(3) + 'en: "en"', T(2) + '};'].join('\n'),
-  ['const DOCUMENT_LANGUAGE = {', T(3) + 'en: "en",', T(3) + 'pl: "pl",', T(3) + 'fr: "fr"', T(2) + '};'].join('\n'),
-  'DOCUMENT_LANGUAGE')
+  [T(2) + 'function syncDocumentLanguage(snapshot) {', T(3) + 'if (typeof document === "undefined") return;', T(3) + 'document.documentElement.lang = snapshot.active === "zh" ? "zh-CN" : snapshot.active;', T(2) + '}'].join('\n'),
+  [T(2) + 'const DOCUMENT_LANGUAGE = {', T(3) + 'en: "en",', T(3) + 'pl: "pl",', T(3) + 'fr: "fr"', T(2) + '};', T(2) + 'function syncDocumentLanguage(snapshot) {', T(3) + 'if (typeof document === "undefined") return;', T(3) + 'document.documentElement.lang = DOCUMENT_LANGUAGE[snapshot.active] ?? snapshot.active;', T(2) + '}'].join('\n'),
+  'DOCUMENT_LANGUAGE + syncDocumentLanguage')
 
 // 7. register() calls
 out = mustReplaceOnce(out,

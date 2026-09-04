@@ -3,9 +3,42 @@
 //
 // Derived-only posture, same fence as arxa-approvals (:31-44 there): nothing
 // persists here. Transcripts fold ON DEMAND from the durable session log via
-// apiProxy.sessions.history (JSONL is the source of truth — an engine restart
-// re-serves full history with no warm-up), and a send injects a plain user
-// turn via apiProxy.sessions.prompt (queue = send, steer = inject mid-turn).
+// the sessionController service (dsh-api-session-controller — the JSONL log
+// is the source of truth; an engine restart re-serves full history with no
+// warm-up), and a send injects a plain user turn via sessionController.prompt
+// (queue = send, steer = inject mid-turn).
+//
+// 2026-09-05 amendment (dsh 0.1.1-rc.2 → 0.1.2-rc.1): upstream REMOVED
+// @deepseek-ai/dsh-host-apiproxy and its `apiProxy` service outright. The
+// port maps every old seam onto the successor world — same routes, same
+// behavior, error taxonomy shifted from 'session-not-found' envelopes to
+// RemoteError throws with 'session/not-found' codes:
+//   apiProxy.sessions.history  → sessionController.page({address:{kind:
+//     'session', sessionId}, throughSeq:-1, maxMessages}) → {records:
+//     [{type:'event'|'chunks', event}], hasMore} — records[].event is the
+//     same wire event the old history envelope carried (packed chunk rows
+//     ride as 'chunkrow/*' types the fold ignores).
+//   apiProxy.sessions.attachment → sessionController.attachment({sessionId,
+//     attachmentId}) → {attachment, data} (throws session/not-found |
+//     session/attachment-invalid).
+//   apiProxy.sessions.models   → sessionController.modelCatalog() — the
+//     Host-generation catalog ({default, routableProviders, groups}); the
+//     old per-call 'current' field is now 'default' (the deployment's
+//     current selection), which is the sanctioned successor surface.
+//   apiProxy.sessions.selectModel → sessionController.selectModel({sessionId,
+//     provider, model}) → {selected}.
+//   apiProxy.sessions.prompt   → sessionController.prompt({requestId,
+//     sessionId, mode, content}) → {accepted:true}; requestId IS the rpcId
+//     the phone gets back (the Host echoes it into the durable user source).
+//   apiProxy.events.mux tap    → TWO host-side rails: (a) the `session/event`
+//     Cordis event (the firehose dsh-api-session-controller itself listens
+//     to — per-session domain events, no subscription stream needed) plus
+//     the `api-session/*` emits for list moves; (b) the typert gateway's
+//     $events stream (openWireStream('$events')) for question requested/
+//     resolved pings — questions ride the `user-questions/request` waterfall
+//     now, and a waterfall listener must NEVER be a passive observer (a
+//     listener that neither answers nor delegates vetoes the chain), so the
+//     observation path is the same $events client feed the browser rides.
 //
 //   GET  /__arxa/conversations
 //        → { sessions: [{ id, name, title, state, running, parkedReason,
@@ -35,7 +68,8 @@
 //          { type: 'session', sessionId, reason } when one conversation's
 //          surface moved (user/message | assistant/message | turn/start |
 //          turn/end | session/title | question/requested | question/resolved)
-//        one shared apiProxy.events.mux tap fans out to every subscriber;
+//        one shared tap over the session/event firehose + api-session emits
+//        + the gateway $events question rail fans out to every subscriber;
 //        ': ping' comments every 15s keep intermediaries honest
 //   GET  /__arxa/conversations/<id>/commands
 //        → { commands: [{ name, description, input }] } — the engine's human
@@ -51,7 +85,8 @@
 //        → the transcript as a markdown download (text/markdown,
 //        content-disposition attachment) folded from the same durable log
 //   POST /__arxa/conversations/<id>/model    body { provider, model }
-//        → { ok: true, selected } (apiproxy resumes the session itself)
+//        → { ok: true, selected } (sessionController resumes the session
+//        itself — the 2026-09-05 amendment: apiproxy is gone)
 //   POST /__arxa/conversations/<id>/mode     body { mode }
 //        → { ok: true, mode } — appends one durable sandbox/mode event; a
 //        parked session is hydrated through agents.resume first, so the
@@ -74,7 +109,11 @@ import { randomUUID } from 'node:crypto'
 import { SANDBOX_MODES, setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 
 export const name = 'arxa-conversation'
-export const inject = ['webServer', 'apiProxy', 'agents', 'sandboxPolicy', 'commands', 'agentPresets']
+// 2026-09-05 amendment: 'apiProxy' died with dsh-host-apiproxy at 0.1.2-rc.1.
+// 'sessionController' (dsh-api-session-controller — history/attachment/
+// models/selectModel/prompt, all in-process) and 'typertGateway'
+// (dsh-api-gateway — the $events feed for question pings) replace it.
+export const inject = ['webServer', 'sessionController', 'typertGateway', 'agents', 'sandboxPolicy', 'commands', 'agentPresets']
 
 /** Per-row char ceiling for the fold — a pathological tool output must not
  * drag megabytes through the tunnel. The marker names the honest count. */
@@ -203,35 +242,27 @@ export function foldMode(entries) {
   return mode ?? null
 }
 
-/** Fold one apiProxy.events.mux frame into the phone's live SSE payload
- * (or null when the frame is not phone surface). Pure; selftest-owned.
- *   session/projection        → { type: 'sessions' }   (list moved)
- *   user/message (source kind  → { type: 'session', sessionId, reason: 'user/message' })
- *   'user') / assistant/message, turn/start, turn/end, session/title,
- *   question/requested, question/resolved → { type: 'session', ... }
+/** Fold one host `session/event` dispatch (the 2026-09-05 amendment's
+ * surface rail — the firehose dsh-api-session-controller itself consumes)
+ * into the phone's live SSE payload (or null when the event is not phone
+ * surface). Pure; selftest-owned.
+ *   user/message, assistant/message, turn/start, turn/end, session/title
+ *     → { type: 'session', sessionId, reason }
  * Streaming chunks, tool calls/results and log-only events are NOT phone
  * surface — the phone re-pulls the folded transcript, it does not stream.
- * The payload.sessionId carries the dsh session id form when the frame has
- * one (the routes' key). */
-export function foldMuxEvent(frame) {
-  const payload = frame?.payload
-  const type = payload?.type
-  if (typeof type !== 'string' || type === '') return null
-  if (type === 'session/projection') return { type: 'sessions' }
-  // Surface moves ride the session/event WRAPPER — measured on the wire:
-  // payload { type: 'session/event', sessionId, event: { type: 'turn/start',
-  // seq, time, data } }. Unwrap before matching; direct domain frames still
-  // work (type falls through) so the selftest's legacy shapes stay honest.
-  const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId : null
-  const domainType = type === 'session/event' ? payload?.event?.type : type
+ * The sessionId is the live dsh session's id (the routes' key). */
+export function foldSessionEvent(sessionId, eventType) {
+  if (typeof sessionId !== 'string' || sessionId === '') return null
   const reasons = ['user/message', 'assistant/message', 'turn/start', 'turn/end', 'session/title', 'question/requested', 'question/resolved']
-  if (!reasons.includes(domainType)) return null
-  // user/message frames from the model's own context-injects are not human
-  // surface, but they still move the log — the phone's fold already filters
-  // them, so a cheap re-pull is harmless. Every reason pings.
-  if (!sessionId) return null
-  return { type: 'session', sessionId, reason: domainType }
+  if (!reasons.includes(eventType)) return null
+  return { type: 'session', sessionId, reason: eventType }
 }
+
+/** Host events that move the SESSIONS LIST (the session/projection mux
+ * frame successor): the api-session emits dsh-api-session-controller
+ * publishes (added/removed for membership, activity for updated-at order,
+ * status for the running flag, error for failures). */
+export const SESSIONS_PING_EVENTS = ['api-session/added', 'api-session/removed', 'api-session/activity', 'api-session/status', 'api-session/error']
 
 /** Render the transcript as a markdown download. Pure; selftest-owned.
  * Same human-turn filter as foldHistory (this is the conversation, not the
@@ -293,7 +324,11 @@ export function flattenSidebar(snapshot) {
 }
 
 export function apply(ctx, deps = {}) {
-  const api = deps.apiProxy ?? ctx.apiProxy
+  // 2026-09-05 amendment: the sessionController service (in-process Remote
+  // methods — dsh-api-session-controller) and the typertGateway ($events
+  // feed) replace the removed apiProxy. Same deps-seam discipline as before.
+  const sessionApi = deps.sessionController ?? ctx.sessionController
+  const gateway = deps.typertGateway ?? ctx.typertGateway
   const agents = deps.agents ?? ctx.agents
   const sandboxPolicy = deps.sandboxPolicy ?? ctx.sandboxPolicy
   const commands = deps.commands ?? ctx.commands
@@ -318,6 +353,12 @@ export function apply(ctx, deps = {}) {
     res.end(JSON.stringify(body))
   }
 
+  // 2026-09-05 amendment: the sessionController methods THROW RemoteError
+  // ('session/not-found' style codes — dsh-typert-protocol) instead of
+  // returning {ok,error} envelopes; every route reads the code off the
+  // thrown error with this tiny helper.
+  const errCode = (e) => (typeof e?.code === 'string' ? e.code : '')
+
   // ---- sessions list: the flattened desktop sidebar snapshot
   ctx.webServer.register({
     name: 'arxa-conversations-list',
@@ -336,36 +377,84 @@ export function apply(ctx, deps = {}) {
     },
   })
 
-  // ---- live rail: one shared events.mux tap fanned out over SSE subscribers.
-  // The engine's mux is the same feed the studio web client rides; frames the
-  // phone cares about (foldMuxEvent above) become one-line JSON pings. The
-  // tap starts with the first subscriber, re-dials with backoff if the stream
-  // ever ends, and stops (interval cleared) when the last subscriber leaves.
+  // ---- live rail (2026-09-05 amendment): the events.mux tap became TWO
+  // host-side rails fanned out over SSE subscribers.
+  // (a) The `session/event` Cordis event — the firehose every appended
+  //     session event publishes on (the same dispatch
+  //     dsh-api-session-controller's own control stream rides); it feeds
+  //     the surface pings AND the live-turn tracking.
+  // (b) The `api-session/*` emits — the session/projection successor (list
+  //     membership, activity order, running flag).
+  // (c) The typert gateway's $events stream for question requested/resolved
+  //     pings — questions ride the user-questions/request waterfall now,
+  //     and a waterfall listener may never be a passive observer (one that
+  //     neither answers nor delegates VETOES the chain for every real
+  //     answerer), so the sanctioned observation path is the same client
+  //     feed the browser remote rides. The tap re-dials with backoff if a
+  //     generation ends (boot can also race api-remotes' source
+  //     registration — heal, don't sleep).
   // [running] is the live-turn set (turn/start .. turn/end per dsh session) —
   // the sessions-list active indicator rides it (withRunning on the list
   // route). It seeds empty on plugin boot and converges at the next turn
   // boundary: honest, not clairvoyant.
-  const live = { subs: new Set(), tap: null, backoff: null, heartbeat: null, running: new Set() }
+  const live = { subs: new Set(), tap: null, started: false, heartbeat: null, running: new Set() }
   function liveBroadcast(event) {
     const payload = 'data: ' + JSON.stringify(event) + '\n\n'
     for (const res of live.subs) {
       try { res.write(payload) } catch { live.subs.delete(res) }
     }
   }
+  // (a)+(b): host listeners. Registered on the plugin's own fiber (ctx.on
+  // disposes with it); guarded so the selftest's minimal fake ctx — which
+  // has no event bus — can still drive the routes.
+  if (typeof ctx.on === 'function') {
+    ctx.on('session/event', (session, event) => {
+      const sid = typeof session?.id === 'string' ? session.id : null
+      if (sid === null) return
+      // the live-turn tracking rides the same dispatch the pings do — the
+      // domain event IS the argument here (no wire wrapper to unwrap)
+      if (event?.type === 'turn/start') live.running.add(sid)
+      if (event?.type === 'turn/end') live.running.delete(sid)
+      const ping = foldSessionEvent(sid, event?.type)
+      if (ping) liveBroadcast(ping)
+    })
+    for (const name of SESSIONS_PING_EVENTS) {
+      ctx.on(name, () => liveBroadcast({ type: 'sessions' }))
+    }
+  }
+  // (c): the $events question rail — one consumer generation at a time. The
+  // eventId→agentId map is per-generation (a cancel frame carries only the
+  // eventId, so the session it belonged to must be remembered from the
+  // waterfall frame; a new generation replays still-pending events, so the
+  // map re-seeds exactly like the approvals projection does).
+  const questionSessions = new Map()
   async function liveTapLoop(signal) {
     while (!signal.aborted) {
       try {
-        for await (const frame of api.events.mux({}, signal)) {
-          // the live-turn tracking rides the same frames the pings do —
-          // same session/event wrapper foldMuxEvent unwraps: the domain
-          // event is NESTED (payload.event.type), never payload.type
-          const payload = frame?.payload
-          const domainType = payload?.type === 'session/event' ? payload?.event?.type : payload?.type
-          const sid = typeof payload?.sessionId === 'string' ? payload.sessionId : null
-          if (sid !== null && domainType === 'turn/start') live.running.add(sid)
-          if (sid !== null && domainType === 'turn/end') live.running.delete(sid)
-          const event = foldMuxEvent(frame)
-          if (event) liveBroadcast(event)
+        // openWireStream is an `async` METHOD (dsh-api-gateway :581): it
+        // returns a PROMISE of the generation's async iterator — await it
+        // first (`for await (… of promise)` throws "not async iterable";
+        // caught live by the boot smoke, 2026-09-05).
+        const stream = await gateway.openWireStream('$events', { args: {} }, signal)
+        for await (const frame of stream) {
+          if (frame?.type === 'ready') {
+            questionSessions.clear()
+            continue
+          }
+          if (frame?.type === 'waterfall' && frame.event === 'user-questions/request') {
+            if (typeof frame.agentId === 'string' && frame.agentId !== '') {
+              questionSessions.set(String(frame.eventId), frame.agentId)
+              liveBroadcast({ type: 'session', sessionId: frame.agentId, reason: 'question/requested' })
+            }
+            continue
+          }
+          if (frame?.type === 'cancel') {
+            const sid = questionSessions.get(String(frame.eventId ?? ''))
+            if (sid !== undefined) {
+              questionSessions.delete(String(frame.eventId))
+              liveBroadcast({ type: 'session', sessionId: sid, reason: 'question/resolved' })
+            }
+          }
         }
       } catch (e) {
         if (signal.aborted) return
@@ -380,10 +469,14 @@ export function apply(ctx, deps = {}) {
     }
   }
   function liveStart() {
-    if (live.tap) return
+    // `started`, not `tap`: the gateway tap may be absent (a composition
+    // without one must not mint a fresh heartbeat interval per subscribe),
+    // and once started the rail stays up for the process lifetime.
+    if (live.started) return
+    live.started = true
     const ac = new AbortController()
     live.ac = ac
-    live.tap = liveTapLoop(ac.signal)
+    if (typeof gateway?.openWireStream === 'function') live.tap = liveTapLoop(ac.signal)
     live.heartbeat = setInterval(() => {
       for (const res of live.subs) {
         try { res.write(': ping\n\n') } catch { live.subs.delete(res) }
@@ -394,7 +487,7 @@ export function apply(ctx, deps = {}) {
     if (typeof live.heartbeat.unref === 'function') live.heartbeat.unref()
   }
   function liveStop() {
-    if (live.subs.size > 0 || !live.tap) return
+    if (live.subs.size > 0 || !live.started) return
     // The tap itself STAYS: the live-turn tracking (live.running) must keep
     // watching turn/start..turn/end even with zero subscribers, or a turn
     // that runs while no phone is connected would leave the active flag
@@ -412,9 +505,9 @@ export function apply(ctx, deps = {}) {
   // not from the phone's first SSE subscribe — a turn that runs before any
   // subscriber ever connected (fresh app sitting on the sessions list)
   // was invisible to the active dot. Subscribers are only the fan-out;
-  // the tracking is the point. Guarded: fake ctxs without an events mux
-  // (selftest fakes) skip it.
-  if (typeof api?.events?.mux === 'function') liveStart()
+  // the tracking is the point. Guarded: fake ctxs without an event bus or
+  // a gateway (selftest fakes) start the heartbeat only.
+  if (typeof ctx.on === 'function' || typeof gateway?.openWireStream === 'function') liveStart()
 
   // ---- SSE: GET /__arxa/conversations/events (served from the prefix
   // handler below — the 4-segment branch; kind-exact vs prefix match order
@@ -453,7 +546,7 @@ export function apply(ctx, deps = {}) {
       if (parts.length === 4 && parts[3] === 'events') return serveEvents(req, res)
       if (parts.length === 6 && parts[3] !== '' && parts[4] === 'attachments' && parts[5] !== '') {
         return serveAttachment(req, res, {
-          api,
+          sessionApi,
           sessionId: decodeURIComponent(parts[3]),
           attachmentId: decodeURIComponent(parts[5]),
         })
@@ -464,24 +557,27 @@ export function apply(ctx, deps = {}) {
       const sessionId = decodeURIComponent(parts[3])
       const section = parts[4]
 
-      // ---- attachment read (phone transcript thumbnails): the RPC owns the
-      // session-ownership check (the image must be referenced by THIS session).
-      async function serveAttachment(req, res, { api, sessionId, attachmentId }) {
+      // ---- attachment read (phone transcript thumbnails): the controller
+      // owns the session-ownership check (the image must be referenced by
+      // THIS session).
+      async function serveAttachment(req, res, { sessionApi, sessionId, attachmentId }) {
         if (req.method !== 'GET') return json(res, 404, { ok: false, error: 'no-such-route' })
-        let response
+        let value
         try {
-          response = await api.sessions.attachment({ rpcId: randomUUID(), payload: { sessionId, attachmentId } })
+          value = await sessionApi.attachment({ sessionId, attachmentId })
         } catch (e) {
-          return json(res, 502, { ok: false, error: 'attachment-failed', detail: String(e?.message ?? e) })
-        }
-        if (response?.result?.ok !== true) {
-          const err = response?.result?.error
-          if (err?.code === 'session-not-found') {
+          if (errCode(e) === 'session/not-found') {
             return json(res, 404, { ok: false, error: 'no-such-session', sessionId })
           }
-          return json(res, 404, { ok: false, error: 'attachment-not-found', code: err?.code, detail: err?.message })
+          if (errCode(e) === 'session/attachment-invalid') {
+            return json(res, 404, { ok: false, error: 'attachment-not-found', code: errCode(e), detail: e?.details?.reason ?? String(e?.message ?? e) })
+          }
+          return json(res, 502, { ok: false, error: 'attachment-failed', detail: String(e?.message ?? e) })
         }
-        return json(res, 200, response.result.value)
+        if (value == null || typeof value !== 'object') {
+          return json(res, 502, { ok: false, error: 'attachment-failed', detail: 'host returned no attachment' })
+        }
+        return json(res, 200, value)
       }
 
       // ---- human commands: the studio composer's `+` palette, verbatim.
@@ -566,19 +662,19 @@ export function apply(ctx, deps = {}) {
 
       // ---- transcript export: the conversation as a markdown download
       if (req.method === 'GET' && section === 'export') {
-        let response
+        let records
         try {
-          response = await api.sessions.history({ rpcId: randomUUID(), payload: { sessionId, maxMessages: 1000 } })
+          const page = await sessionApi.page({
+            address: { kind: 'session', sessionId },
+            throughSeq: -1,
+            maxMessages: 1000,
+          })
+          records = page?.records
         } catch (e) {
-          return json(res, 502, { ok: false, error: 'export-failed', detail: String(e?.message ?? e) })
+          if (errCode(e) === 'session/not-found') return json(res, 404, { ok: false, error: 'no-such-session', sessionId })
+          return json(res, 502, { ok: false, error: 'export-failed', code: errCode(e), detail: String(e?.message ?? e) })
         }
-        if (response?.result?.ok !== true) {
-          const err = response?.result?.error
-          if (err?.code === 'session-not-found') return json(res, 404, { ok: false, error: 'no-such-session', sessionId })
-          return json(res, 502, { ok: false, error: 'export-failed', code: err?.code, detail: err?.message })
-        }
-        const events = response.result.value?.events
-        const body = renderTranscriptMarkdown(sessionId, events, { mode: foldMode(events) })
+        const body = renderTranscriptMarkdown(sessionId, records, { mode: foldMode(records) })
         res.writeHead(200, {
           'content-type': 'text/markdown; charset=utf-8',
           'content-disposition': 'attachment; filename="arxa-' + sessionId + '.md"',
@@ -587,22 +683,19 @@ export function apply(ctx, deps = {}) {
         return void res.end(body)
       }
 
-      // ---- model directory (advisory; the menu's data)
+      // ---- model directory (advisory; the menu's data). 2026-09-05
+      // amendment: the per-session `models` RPC died with apiProxy — the
+      // successor is the Host-generation catalog (the same surface the
+      // studio's own model picker rides): {default, routableProviders,
+      // groups}. `default` replaces the old `current` field.
       if (req.method === 'GET' && section === 'models') {
-        let response
+        let catalog
         try {
-          response = await api.sessions.models({ rpcId: randomUUID(), payload: { sessionId } })
+          catalog = await sessionApi.modelCatalog()
         } catch (e) {
-          return json(res, 502, { ok: false, error: 'models-failed', detail: String(e?.message ?? e) })
+          return json(res, 502, { ok: false, error: 'models-failed', code: errCode(e), detail: String(e?.message ?? e) })
         }
-        if (response?.result?.ok !== true) {
-          const err = response?.result?.error
-          if (err?.code === 'session-not-found') {
-            return json(res, 404, { ok: false, error: 'no-such-session', sessionId })
-          }
-          return json(res, 502, { ok: false, error: 'models-failed', code: err?.code, detail: err?.message })
-        }
-        return json(res, 200, response.result.value)
+        return json(res, 200, catalog)
       }
 
       // ---- model selection
@@ -612,23 +705,16 @@ export function apply(ctx, deps = {}) {
         const provider = typeof body?.provider === 'string' ? body.provider.trim() : ''
         const model = typeof body?.model === 'string' ? body.model.trim() : ''
         if (provider === '' || model === '') return json(res, 400, { ok: false, error: 'empty-model' })
-        let response
+        let value
         try {
-          response = await api.sessions.selectModel({
-            rpcId: randomUUID(),
-            payload: { sessionId, provider, model },
-          })
+          value = await sessionApi.selectModel({ sessionId, provider, model })
         } catch (e) {
-          return json(res, 502, { ok: false, error: 'select-model-failed', detail: String(e?.message ?? e) })
-        }
-        if (response?.result?.ok !== true) {
-          const err = response?.result?.error
-          if (err?.code === 'session-not-found') {
+          if (errCode(e) === 'session/not-found') {
             return json(res, 404, { ok: false, error: 'no-such-session', sessionId })
           }
-          return json(res, 502, { ok: false, error: 'select-model-failed', code: err?.code, detail: err?.message })
+          return json(res, 502, { ok: false, error: 'select-model-failed', code: errCode(e), detail: String(e?.message ?? e) })
         }
-        return json(res, 200, { ok: true, selected: response.result.value?.selected })
+        return json(res, 200, { ok: true, selected: value?.selected })
       }
 
       // ---- sandbox mode (read-only | workspace-write | danger-full-access)
@@ -669,26 +755,26 @@ export function apply(ctx, deps = {}) {
       if (req.method === 'GET' && section === 'messages') {
         const rawLimit = parseInt(url.searchParams.get('limit') ?? '200', 10)
         const maxMessages = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 1000) : 200
-        let response
+        let records
         try {
-          response = await api.sessions.history({ rpcId: randomUUID(), payload: { sessionId, maxMessages } })
+          const page = await sessionApi.page({
+            address: { kind: 'session', sessionId },
+            throughSeq: -1,
+            maxMessages,
+          })
+          records = page?.records
         } catch (e) {
-          return json(res, 502, { ok: false, error: 'history-failed', detail: String(e?.message ?? e) })
-        }
-        if (response?.result?.ok !== true) {
-          const err = response?.result?.error
-          if (err?.code === 'session-not-found') {
+          if (errCode(e) === 'session/not-found') {
             return json(res, 404, { ok: false, error: 'no-such-session', sessionId })
           }
-          return json(res, 502, { ok: false, error: 'history-failed', code: err?.code, detail: err?.message })
+          return json(res, 502, { ok: false, error: 'history-failed', code: errCode(e), detail: String(e?.message ?? e) })
         }
-        const events = response.result.value?.events
         // effective mode = last sandbox/mode event ?? the deployment default
         // (a small tail page can miss the creation-time event; the default
         // covers that — the only drift is an ancient mid-log override, and a
         // mode switch writes a NEW event the tail page catches).
-        const mode = foldMode(events) ?? sandboxPolicy?.defaultMode ?? null
-        return json(res, 200, { sessionId, mode, messages: foldHistory(events, { sessionId }) })
+        const mode = foldMode(records) ?? sandboxPolicy?.defaultMode ?? null
+        return json(res, 200, { sessionId, mode, messages: foldHistory(records, { sessionId }) })
       }
 
       if (req.method === 'POST' && section === 'messages') {
@@ -718,29 +804,26 @@ export function apply(ctx, deps = {}) {
           const content = []
           if (text !== '') content.push({ type: 'text', text })
           content.push(...images)
-          let response
+          // 2026-09-05 amendment: requestId IS the correlation identity —
+          // the Host echoes it into the durable user source's rpcId, so the
+          // phone gets back the same id the old response envelope carried.
+          const requestId = randomUUID()
+          let value
           try {
-            response = await api.sessions.prompt({
-              rpcId: randomUUID(),
-              payload: { sessionId, mode, content },
-            })
+            value = await sessionApi.prompt({ requestId, sessionId, mode, content })
           } catch (e) {
-            return json(res, 502, { ok: false, error: 'prompt-failed', detail: String(e?.message ?? e) })
-          }
-          if (response?.result?.ok !== true) {
-            const err = response?.result?.error
-            if (err?.code === 'session-not-found') {
+            if (errCode(e) === 'session/not-found') {
               return json(res, 404, { ok: false, error: 'no-such-session', sessionId })
             }
-            if (err?.code === 'agent-busy' || /agent/i.test(String(err?.code ?? ''))) {
-              return json(res, 409, { ok: false, error: 'no-live-agent', code: err?.code })
+            if (/agent/i.test(errCode(e))) {
+              return json(res, 409, { ok: false, error: 'no-live-agent', code: errCode(e) })
             }
-            return json(res, 502, { ok: false, error: 'prompt-failed', code: err?.code, detail: err?.message })
+            return json(res, 502, { ok: false, error: 'prompt-failed', code: errCode(e), detail: String(e?.message ?? e) })
           }
-          if (response.result.value?.accepted !== true) {
+          if (value?.accepted !== true) {
             return json(res, 502, { ok: false, error: 'prompt-failed', detail: 'host did not accept' })
           }
-          return json(res, 200, { ok: true, accepted: true, rpcId: response.rpcId })
+          return json(res, 200, { ok: true, accepted: true, rpcId: requestId })
         })
         return
       }
