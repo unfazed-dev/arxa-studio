@@ -451,9 +451,32 @@ it did not build the surface.
 Anthropic OAuth method) is dead code today, because there are no flows to strip.
 It only matters once the service is mounted.
 
-**The fix is one row** mounting `@deepseek-ai/dsh-authorization`, which would
-light up Claude, GitHub, and every pi-ai catalog provider at once. NOT shipped
-here: a bad profile row does not degrade, it stops arxa booting entirely (F1),
-and this environment cannot boot arxa to verify — `arxa --headless` fails on
-eight UI plugins that need `webServer`, which is pre-existing and unrelated.
-Adding it wants one real boot to confirm.
+**Fixed.** `profile/cordis.patch.yml` now carries
+`id: authorization / name: '@deepseek-ai/dsh-authorization'`, and the package is
+a declared dependency instead of a hoisted transitive copy of pi-ai's (another
+install need not hoist it).
+
+Grounded in cordis's own semantics rather than pattern-matched: the package
+default-exports a cordis `Service` subclass (`AuthorizationService`,
+`super(ctx, 'authorization')`) exactly like `dsh-credentials-local` exports
+`LocalCredentialProvider`, and that one is mounted by a plain package-name row —
+so the same row shape is correct. Its own `static inject = ['credentials']` holds
+it until dsh-base's credentials row lands, so a top-level insert is order-safe.
+
+**Verified on a real cordis runtime**, not by inspection: mounting
+credentials + authorization + the github-link plugin yields
+`ctx.authorization: true` and one registered flow —
+`github-link/account -> label="GitHub" methods=device`. Without the
+authorization row the same probe registers nothing.
+
+The selftest now asserts both the profile row and the declared dependency, and
+fails if either goes. Mutation-verified.
+
+**Deliberately NOT done:** mounting `@deepseek-ai/dsh-tool-cordis`. arxa's agent
+preset excludes it on purpose — "arxa is distributed software, and
+self-modification (reading and rewriting the harness a session runs on) is not
+every session's default" (`agent-presets/arxa/agent.cordis.yml:26`). It was used
+only as a local throwaway probe; nothing ships it.
+
+**Still wants one real boot** to confirm in the running app — the suite proves
+the row's shape and the runtime chain, not arxa's full plugin tree.

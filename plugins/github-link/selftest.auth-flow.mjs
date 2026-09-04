@@ -115,4 +115,20 @@ console.log('github-link sign-in flow selftest (offline)')
   ok("plugin entry keeps 'authorization' deferred — arxa still boots without the service")
 }
 
+// ---- F10: the seam must actually be mounted ---------------------------------
+// A flow registered into a service nobody mounts is inert. That was the state
+// until 2026-09-04: pi-ai's, claude-code's and this one all sat behind a
+// deferred inject whose service never arrived, so arxa had NO sign-in surface
+// for any provider. Assert the row, or this whole file passes while the feature
+// does nothing.
+{
+  const profile = readFileSync(new URL('../../profile/cordis.patch.yml', import.meta.url), 'utf8')
+  assert.match(profile, /name: '@deepseek-ai\/dsh-authorization'/,
+    'no profile row mounts dsh-authorization — every sign-in flow, including this one, is inert')
+  const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
+  assert.ok(pkg.dependencies['@deepseek-ai/dsh-authorization'],
+    'dsh-authorization must be a declared dependency — it resolved only via a hoisted transitive copy')
+  ok('the authorization seam is mounted by a profile row and declared as a dependency')
+}
+
 console.log(`# ${passed} ok`)

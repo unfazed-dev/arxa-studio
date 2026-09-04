@@ -369,6 +369,24 @@
   - id: arxa-claude-code
     name: /Volumes/business_ssd/arxa_digital_solutions/arxa-studio/plugins/claude-code/index.mjs
 
+# F10: mount the authorization seam. Without this row `ctx.authorization` never
+# exists, and EVERY sign-in flow written against it is inert — pi-ai's per-provider
+# flows (dsh-llm-pi-ai/lib/index.js:2429), claude-code's, and github-link's all sit
+# behind a deferred ctx.inject whose service never arrives. dsh-base mounts
+# `credentials` the same way (dsh-base/cordis.patch.yml:85) but ships no
+# authorization row, and neither does dsh-web-app or dsh-headless. Measured
+# 2026-09-04: arxa had no sign-in surface at all, for any provider.
+#
+# Mounting it also revives D1: claude-code's hideAnthropicOauth strips pi-ai's
+# forbidden Anthropic-OAuth method, which is dead code while no flows register.
+#
+# Default-exports a cordis Service class, exactly like dsh-credentials-local, so a
+# plain package-name row is the right shape. Its own `static inject = ['credentials']`
+# holds it until dsh-base's credentials row lands, so top-level insert order is safe.
+- insert:
+  - id: authorization
+    name: '@deepseek-ai/dsh-authorization'
+
 # arxa-specific: GitHub's sign-in surface (F9). github-link was a LIBRARY only —
 # no plugin entry, no registered flow — so arxa had NO Settings sign-in for
 # GitHub and a revoked grant left the user with no route back (the sole in-app
