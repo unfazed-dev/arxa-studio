@@ -141,6 +141,17 @@ assert.throws(() => publishProviderStatus(session, { ...good, text: 'x'.repeat(8
   assert.equal(statusesFor('s1', 'zai').length, 1)
   assert.equal(statusesFor('other').length, 0, "one session's status must never appear in another")
   ok('store keys by session+provider+kind')
+
+  // bindingStatus folds whatever it is handed into ONE pill, so statusesFor must never return a
+  // mix of providers: folding across them picks a winner from one provider and mashes another's
+  // title into the tooltip — a Claude limit displayed against a GLM turn, the original bug.
+  // This is the ordinary path, not an edge case: dsh's picker leaves `current` null until it is
+  // opened, so the browser often calls with no provider at all.
+  const mixed = statusesFor('s1')
+  assert.equal(new Set(mixed.map((s) => s.provider)).size, 1, 'THE FOLD MUST NOT MIX PROVIDERS: a no-provider read returns one provider, never a blend')
+  assert.equal(mixed[0].provider, 'zai', 'with no provider named, the most recently updated provider wins')
+  assert.ok(!bindingStatus(statusesFor('s1'), now).title.includes('Claude'), "the newest provider's pill must not carry another provider's limit in its tooltip")
+  ok('a no-provider read never blends two providers')
 }
 
 // --- durability: THE 2026-09-05 regression. Moving off the session log dropped persistence, and
@@ -197,6 +208,11 @@ assert.throws(() => publishProviderStatus(session, { ...good, text: 'x'.repeat(8
   publishProviderStatus({ id: 's1' }, { ...good, provider: 'zai', text: 'GLM 10%' })
   assert.equal((await handler('current', { sessionId: 's1', provider: 'zai' })).value.status.text, 'GLM 10%')
   assert.equal((await handler('current', { sessionId: 's1', provider: 'claude-code' })).value.status.text, good.text)
+  // and the no-provider call — the common case, since the picker leaves `current` null until
+  // opened — must still resolve to exactly one provider rather than a blend of both.
+  const blended = (await handler('current', { sessionId: 's1' })).value.status
+  assert.equal(blended.provider, 'zai', 'no provider named -> the newest provider, not a merge')
+  assert.equal(blended.title.includes('Claude'), false, "the other provider's limit must not ride along in the tooltip")
   // the endpoint is an explicit allowlist, not a generic bridge
   assert.equal((await handler('anything-else', { sessionId: 's1' })).ok, false)
   assert.equal((await handler('current', {})).ok, false, 'a missing sessionId is refused, not coerced')
@@ -220,7 +236,12 @@ assert.throws(() => publishProviderStatus(session, { ...good, text: 'x'.repeat(8
   // arrive through the lazy fiber, which fires if and when model-selection registers.
   assert.ok(/ctx\.inject\(\['modelDirectories'\]/.test(clientSrc), 'modelDirectories must arrive through the lazy fiber, not a bare property read off ctx')
   assert.equal(/ctx\.modelDirectories/.test(clientSrc), false, 'a bare ctx.modelDirectories read throws in cordis and would be swallowed by the guard')
-  assert.ok(/try\s*{\s*return models\?\.directoryFor/.test(clientSrc), 'directoryFor throws for a session with no scope — it must be guarded')
+  assert.ok(/try\s*{[\s\S]{0,120}models\?\.directoryFor\(sessionId\)/.test(clientSrc), 'directoryFor throws for a session with no scope — it must be guarded')
+  // dsh's picker loads its catalog only when opened, and `current` is null until something loads
+  // it. If the pill never triggers a load, it never learns the selected provider and the filter
+  // it exists for is inert.
+  assert.ok(/d\.load\(\)\.catch/.test(clientSrc), 'the pill must load the directory itself, not wait for the user to open the picker')
+  assert.ok(/useEffect\(\(\) => \{ load\?\.\(\) \}/.test(clientSrc), 'load runs on mount, not during render')
 
   // lib/client.js duplicates formatBadge for the browser bundle (no module graph into lib/ from a
   // __ModuleLoader__ factory). Extract it and prove it agrees with the host copy, including the

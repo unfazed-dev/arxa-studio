@@ -47,9 +47,13 @@ window.__ModuleLoader__.load({
 
     const COLOR = { ok: 'var(--dsw-text-muted, #8a8f98)', info: 'var(--dsw-text-muted, #8a8f98)', warn: 'var(--dsw-warning, #d08a00)', limit: 'var(--dsw-danger, #d64545)' }
 
-    function ProviderStatusBadge ({ sessionId, connection, directory }) {
+    function ProviderStatusBadge ({ sessionId, connection, directory, load }) {
       const [status, setStatus] = React.useState(null)
       const [now, setNow] = React.useState(Date.now())
+      // dsh's own picker loads the catalog only when it is OPENED, and `current` is null until
+      // something loads it. Without this the pill would spend most of its life not knowing which
+      // provider is selected, and the provider filter it exists for would be inert.
+      React.useEffect(() => { load?.() }, [load])
       // The picker's live selection. `directory` is the same snapshot store the model selector
       // uses, so this re-renders the moment a model is chosen -- no turn, no poll.
       const selection = React.useSyncExternalStore(
@@ -103,8 +107,13 @@ window.__ModuleLoader__.load({
           // Resolved at render time, guarded: directoryFor() throws for a session with no scope
           // ("Unknown sessions fail loud") -- a subagent session, or one mid-teardown. A missing
           // directory costs the provider filter, not the pill.
-          directory: (() => {
-            try { return models?.directoryFor(sessionId)?.store } catch { return undefined }
+          ...(() => {
+            try {
+              const d = models?.directoryFor(sessionId)
+              // load() is fire-and-forget: a catalog that fails to load costs the provider filter,
+              // never the pill and never a conversation error.
+              return { directory: d?.store, load: d === undefined ? undefined : () => { d.load().catch(() => {}) } }
+            } catch { return { directory: undefined, load: undefined } }
           })(),
         }),
       }, ProviderStatusBadge))

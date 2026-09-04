@@ -97,10 +97,22 @@ export function publishProviderStatus (session, status, file = statusFile()) {
   return data
 }
 
-/** Every live status for one session, optionally narrowed to the provider on screen. */
+/**
+ * Every live status for one session, for ONE provider.
+ *
+ * Never returns a mix. bindingStatus folds what it is given into a single pill, so handing it two
+ * providers' rows would pick a winner across them and mash both titles together — a Claude limit
+ * shown against a GLM turn, which is the bug this plugin exists to prevent. With no provider named
+ * (the browser has not resolved the picker's selection yet) the newest provider's rows win, so the
+ * pill still says something true about one provider instead of something false about two.
+ */
 export function statusesFor (sessionId, provider = undefined) {
-  const prefix = `${sessionId} ${provider === undefined ? '' : `${provider} `}`
-  return [...latest.entries()].filter(([key]) => key.startsWith(prefix)).map(([, value]) => value)
+  const mine = [...latest.entries()]
+    .filter(([key]) => key.startsWith(`${sessionId} `))
+    .map(([, value]) => value)
+  if (provider !== undefined) return mine.filter((v) => v.provider === provider)
+  const newest = mine.reduce((a, b) => (a === undefined || b.at > a.at ? b : a), undefined)
+  return newest === undefined ? [] : mine.filter((v) => v.provider === newest.provider)
 }
 
 /** Test seam: the store is module state, so a suite that publishes must be able to reset it. */
@@ -108,7 +120,9 @@ export function resetProviderStatus () { latest.clear() }
 
 export const name = 'arxa-provider-status'
 export function apply (ctx) {
-  loadProviderStatus()
+  // Only at a cold start. loadProviderStatus clears the map, so an apply that re-runs (HMR,
+  // re-registration) would otherwise wipe statuses this process already collected.
+  if (latest.size === 0) loadProviderStatus()
   // Child fiber: runs when `connection` is provided (web boot), stays pending harmlessly on a
   // headless boot -- the same shape gen-ui uses.
   ctx.inject(['connection'], (ctx) => ctx.connection.rpc.handle(RPC_CHANNEL, async (endpoint, payload) => {

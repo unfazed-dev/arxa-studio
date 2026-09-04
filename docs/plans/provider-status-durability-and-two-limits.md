@@ -100,6 +100,27 @@ The `?? 'usage'` fallback absorbs an unknown string safely, so nothing breaks ei
 Relabelling waits until a real turn is observed emitting the actual value — guessing at the label
 would be inventing an API.
 
+## Fourth: the fold must never mix providers
+
+`bindingStatus()` folds what it is handed into one pill. `statusesFor(sessionId)` originally
+returned **every** provider's rows when no provider was named, so the fold picked a winner across
+providers and joined their titles -- a Claude limit shown against a GLM turn, the original bug in
+a new place.
+
+This is the ordinary path, not an edge case. dsh's `ModelSelect` loads its catalog only inside
+`useEffect(..., [open])`, and the directory starts at `current: null`, so the browser does not know
+the selected provider until the user opens the picker.
+
+### Fix
+
+- `statusesFor` returns one provider's rows, never a mix. With no provider named, the most recently
+  updated provider wins -- something true about one provider beats something false about two.
+- The pill calls `directory.load()` itself on mount, so it learns the selection without waiting for
+  the user to open the picker. Fire-and-forget: a catalog that fails to load costs the provider
+  filter, never the pill.
+- `apply()` only rehydrates from disk when the store is empty, so a re-run (HMR) cannot wipe live
+  state.
+
 ## Standing gaps
 
 - Status is per-machine and per-user, never shared. Intended.
