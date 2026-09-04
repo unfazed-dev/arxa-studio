@@ -77,15 +77,31 @@ export class ClaudeCodeAdapter extends LlmAdapter {
     }
   }
 
-  /** Release exactly the pending ids THIS turn registered. fromClaude/fromLoop are process-wide
-   * singletons shared with every other live session, so a blanket clear would reject their
-   * in-flight waits; and clear() is idempotent, so calling this twice (abort handler, then the
-   * catch below, after the bridge re-parked its open calls) is safe and is how the entries
-   * settleOpenCalls creates on the way down get dropped. */
+  /** Stop this turn's child and release exactly the pending ids it registered.
+   *
+   * Stopping the child is not optional. A turn can end with its Claude Code process still running
+   * — the user sends a new message while a tool round is parked (the supersede path), or the
+   * segment throws — and nothing below us aborts it: dsh's LlmRuntime only forwards
+   * `options.signal`, it never creates or aborts one. An orphan child keeps working unread, inside
+   * arxa's sandbox, billing the user's own subscription.
+   *
+   * fromClaude/fromLoop are process-wide singletons shared with every other live session, so a
+   * blanket clear would reject their in-flight waits — only this turn's ids are released. clear()
+   * is idempotent, so the several callers of this method are safe. */
   endTurn (agentId, turn) {
     // Identity-checked: a late abort from a turn the agent has already moved on from must not
     // evict the record of the turn running now — that would respawn a child mid-conversation.
     if (this.turns.get(agentId) === turn) this.turns.delete(agentId)
+    // Stopping the child happens once (an abort handler and a finish can both land here); a child
+    // that already exited makes abort/interrupt throw or reject, and releasing the ids matters
+    // more than a tidy shutdown, so neither may escape into the caller.
+    if (!turn.stopped) {
+      turn.stopped = true
+      try { turn.abortController?.abort() } catch { /* already torn down */ }
+      try { turn.q?.interrupt?.()?.catch?.(() => {}) } catch { /* already exited */ }
+    }
+    // Releasing ids stays unconditional: it is idempotent, and a later call sweeps entries the
+    // bridge re-parked into `early` while shutting down.
     fromClaude.clear([...turn.claudeIds])
     fromLoop.clear([...turn.loopIds])
   }
@@ -140,7 +156,10 @@ export class ClaudeCodeAdapter extends LlmAdapter {
     const mcpQueue = []              // { id, name } per mcp__arxa__* tool_use, oldest first
     const claudeIds = new Set()      // every tool_use id this turn produced (fromClaude side)
     const loopIds = new Set()        // ids an MCP call parked on (fromLoop side)
-    const turn = { bridge: undefined, mcpQueue, claudeIds, loopIds }
+    const abortController = new AbortController()
+    // `abortController` and `q` ride on the record so endTurn can stop the child from any path
+    // that reaches it — including the supersede branch, which has no signal of its own.
+    const turn = { bridge: undefined, q: undefined, abortController, stopped: false, mcpQueue, claudeIds, loopIds }
 
     const mcp = createArxaMcpServer({
       schemas,
@@ -156,7 +175,6 @@ export class ClaudeCodeAdapter extends LlmAdapter {
       },
     })
 
-    const abortController = new AbortController()
     const q = this.query({
       prompt,
       options: this.base(policy, {
@@ -183,6 +201,7 @@ export class ClaudeCodeAdapter extends LlmAdapter {
       }),
     })
 
+    turn.q = q
     turn.bridge = new TurnBridge({
       messages: q,
       pending: fromClaude,
@@ -198,11 +217,8 @@ export class ClaudeCodeAdapter extends LlmAdapter {
     // Abort comes from the caller only — there is no watchdog for a child that stays alive but
     // silent. Never race the signal against segment(): abandoning a parked segment() leaves the
     // bridge's waiter slot set and the next segment() throws "already being consumed".
-    this.onceAborted(options.signal, () => {
-      abortController.abort()
-      q.interrupt?.().catch(() => {})
-      this.endTurn(agent.id, turn)
-    })
+    // endTurn stops the child, so this is the whole teardown.
+    this.onceAborted(options.signal, () => this.endTurn(agent.id, turn))
 
     try {
       yield * turn.bridge.segment()

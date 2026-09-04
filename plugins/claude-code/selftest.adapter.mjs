@@ -262,6 +262,58 @@ ok('resolveModel efforts')
   ok('an abort from a superseded turn does not evict the turn running now')
 }
 
+// --- superseding a parked turn must STOP its child, not merely release its ids. Nothing below
+// the adapter aborts it (dsh's LlmRuntime only forwards options.signal, it never creates one), so
+// an orphan keeps working unread and bills the user's own subscription.
+{
+  events.length = 0
+  const script = [init,
+    ev({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tu_p', name: 'Read', input: {} } }),
+    ev({ type: 'content_block_stop', index: 0 }),
+    { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id: 'tu_p', name: 'Read', input: {} }] } },
+    ...done('later')]
+  const a = mk(script)
+  const base = { provider: 'claude-code', model: 'sonnet', system: 's', tools: [] }
+  await collect(a.stream({ ...base, messages: [{ role: 'user', content: [{ type: 'text', text: 'first' }] }] }))
+  const superseded = queries.at(-1)
+  const before = interrupts.length
+  assert.equal(superseded.options.abortController.signal.aborted, false, 'the first child is still running')
+  await collect(a.stream({ ...base, messages: [{ role: 'user', content: [{ type: 'text', text: 'second' }] }] }))
+  assert.equal(superseded.options.abortController.signal.aborted, true, 'the superseded child was aborted')
+  assert.equal(interrupts.length, before + 1, 'and interrupted')
+  assert.equal(queries.at(-1).options.abortController.signal.aborted, false, 'the turn that replaced it is untouched')
+  ok('superseding a parked turn stops its child instead of orphaning it')
+}
+
+// --- a child that has already exited makes interrupt throw; teardown must survive that and still
+// release the ids, or a parked MCP call would hang the next turn.
+{
+  events.length = 0
+  const script = [init,
+    ev({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tu_h', name: 'mcp__arxa__gen_ui', input: {} } }),
+    ev({ type: 'content_block_stop', index: 0 }),
+    { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id: 'tu_h', name: 'mcp__arxa__gen_ui', input: {} }] } },
+    ...done('later')]
+  const hostile = (params) => {
+    queries.push(params)
+    const it = from(script)
+    it.interrupt = () => { throw new Error('child already exited') }
+    it.close = () => {}
+    return it
+  }
+  const a = new ClaudeCodeAdapter({ query: hostile, probe, ctx, binary: '/opt/bin/claude', env: { PATH: '/x' }, version: '0.1.0', spawn: () => ({ pid: 1 }), mkdir: () => {} })
+  const base = { provider: 'claude-code', model: 'sonnet', system: 's', tools: [] }
+  await collect(a.stream({ ...base, messages: [{ role: 'user', content: [{ type: 'text', text: 'first' }] }] }))
+  const handlers = queries.at(-1).options.mcpServers.arxa.instance.server._requestHandlers
+  const mcpCall = handlers.get('tools/call')({ method: 'tools/call', params: { name: 'gen_ui', arguments: {} } }, {})
+  // The supersede runs teardown on the hostile child; the throw must not escape into this call.
+  await collect(a.stream({ ...base, messages: [{ role: 'user', content: [{ type: 'text', text: 'second' }] }] }))
+  const failed = await mcpCall
+  assert.equal(failed.isError, true)
+  assert.match(failed.content[0].text, /arxa: tool call failed/)
+  ok('a teardown whose interrupt throws still releases the turn\'s pending ids')
+}
+
 // --- a name Claude calls with no matching tool_use in flight is refused, not parked forever
 {
   events.length = 0
@@ -292,6 +344,11 @@ ok('resolveModel efforts')
   const o = queries.at(-1).options
   assert.deepEqual(o.tools, []); assert.equal(o.maxTurns, 1); assert.equal(o.mcpServers, undefined); assert.equal(o.persistSession, false)
   assert.equal(o.cwd, '/ws'); assert.deepEqual(o.settingSources, []); assert.equal(o.permissionMode, 'default')
+  // The utility path shares base(), but the security knobs are pinned here too rather than left
+  // to hold structurally — a later edit to either path must fail a test, not pass quietly.
+  assert.deepEqual(o.systemPrompt, { type: 'custom', prompt: 'Answer concisely.' })
+  assert.equal(o.allowedTools, undefined); assert.equal(o.disallowedTools, undefined)
+  assert.equal(o.bypassPermissions, undefined); assert.equal(o.allowDangerouslySkipPermissions, undefined)
   ok('compaction path is tool-less')
 }
 
