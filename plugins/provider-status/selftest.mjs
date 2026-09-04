@@ -37,6 +37,40 @@ assert.deepEqual(PROJECTION.wire.viewSchema.parse(PROJECTION.wire.view(vWithDeta
 assert.deepEqual(PROJECTION.stateSchema.parse(vWithDetail), vWithDetail)
 ok('projection definition')
 
+// Fix round 2 (Finding 1a): round 1 only proved detail rejection through the standalone
+// PROVIDER_STATUS_SCHEMA.parse — never through PROJECTION.stateSchema.parse / wire.viewSchema.parse,
+// which are the parse calls that actually guard the wire. The security claim rests on those, not on
+// a schema object nothing in production calls directly.
+const badDetailError = { ...v, detail: new Error('boom') }
+const badDetailFn = { ...v, detail: () => {} }
+assert.throws(() => PROJECTION.stateSchema.parse(badDetailError))
+assert.throws(() => PROJECTION.wire.viewSchema.parse(badDetailError))
+assert.throws(() => PROJECTION.stateSchema.parse(badDetailFn))
+assert.throws(() => PROJECTION.wire.viewSchema.parse(badDetailFn))
+
+// Fix round 2 (Finding 1b): a circular detail (detail.self = detail) has no finite JSON shape.
+// Before the rejectCircular fix in lib/status.js, JsonValue's union recursion had no cycle
+// detection and blew the call stack with a bare RangeError — which escaped even .safeParse() and
+// would have crashed the projection fold on one malformed producer payload. Prove it now rejects
+// cleanly (a real ZodError, not a RangeError) through every parse call that sees a `detail`.
+const circularDetail = {}; circularDetail.self = circularDetail
+const rejectsCleanly = (fn) => {
+  try { fn(); return false } catch (err) {
+    assert.ok(!(err instanceof RangeError), `must reject cleanly, got ${err.constructor.name}: ${err.message}`)
+    return true
+  }
+}
+assert.ok(rejectsCleanly(() => PROVIDER_STATUS_SCHEMA.parse({ ...good, detail: circularDetail })), 'PROVIDER_STATUS_SCHEMA rejects circular detail cleanly')
+assert.ok(rejectsCleanly(() => PROJECTION.stateSchema.parse({ ...v, detail: circularDetail })), 'stateSchema rejects circular detail cleanly')
+assert.ok(rejectsCleanly(() => PROJECTION.wire.viewSchema.parse({ ...v, detail: circularDetail })), 'wire.viewSchema rejects circular detail cleanly')
+// and the actual producer entry point — the fold itself — must not crash on it either
+assert.doesNotThrow(() => applyProviderStatus(v, { type: 'provider/status', time: 126, data: { ...good, detail: circularDetail } }))
+assert.equal(
+  applyProviderStatus(v, { type: 'provider/status', time: 126, data: { ...good, detail: circularDetail } }), v,
+  'invalid (circular) detail leaves state untouched, does not crash the fold',
+)
+ok('detail rejection proven through the real wire/fold path; circular detail rejects cleanly, not RangeError')
+
 const appended = []
 const session = { append: (type, data) => { appended.push([type, data]); return { seq: 0 } } }
 appendProviderStatus(session, good)

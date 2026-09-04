@@ -7,6 +7,18 @@ import { z } from 'zod'
 // responsible for not putting one in `detail`.
 const JsonValue = z.lazy(() => z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(JsonValue), z.record(z.string(), JsonValue)]))
 
+// A genuinely circular `detail` (detail.self = detail) has no finite JSON shape, and JsonValue's
+// union recursion has no cycle detection — it recurses forever and throws a bare RangeError (stack
+// overflow) instead of a ZodError. That escapes even .safeParse(), so a malformed producer payload
+// would crash the projection fold outright. JSON.stringify has its own cheap cycle detector (it
+// tracks the objects currently being stringified, so it throws the moment a repeat shows up, not
+// after blowing the stack) — probe with that first and swap in a value JsonValue cleanly rejects.
+const CIRCULAR = Symbol('detail: circular or unserializable')
+const rejectCircular = (val) => {
+  if (val === undefined || val === null || typeof val !== 'object') return val
+  try { JSON.stringify(val); return val } catch { return CIRCULAR }
+}
+
 export const PROVIDER_STATUS_SCHEMA = z.object({
   provider: z.string().min(1),
   level: z.enum(['ok', 'warn', 'limit', 'info']),
@@ -14,7 +26,7 @@ export const PROVIDER_STATUS_SCHEMA = z.object({
   title: z.string().max(240).optional(),
   utilization: z.number().min(0).max(1).optional(),
   resetsAt: z.number().int().nonnegative().optional(),
-  detail: JsonValue.optional(),
+  detail: z.preprocess(rejectCircular, JsonValue.optional()),
 })
 export const PROJECTION_VALUE_SCHEMA = PROVIDER_STATUS_SCHEMA.extend({ at: z.number() }).nullable()
 
