@@ -18,7 +18,7 @@ assert.throws(() => PROVIDER_STATUS_SCHEMA.parse({ ...good, detail: () => {} }))
 
 assert.equal(applyProviderStatus(null, { type: 'turn/start', time: 1, data: {} }), null)
 const v = applyProviderStatus(null, { type: 'provider/status', time: 123, data: good })
-assert.deepEqual(v, { ...good, at: 123 })
+assert.deepEqual(v, { ...good, at: 123, activeProvider: good.provider })
 assert.equal(applyProviderStatus(v, { type: 'provider/status', time: 124, data: { ...good, level: 'zzz' } }), v, 'invalid event leaves state untouched'); ok('fold = latest valid value')
 
 const now = 1_799_990_000 * 1000
@@ -117,6 +117,27 @@ assert.notEqual(formatBadge(v, v.resetsAt * 1000 - 1000), undefined, 'one second
 // falsy). A truthy-checked version of this guard would wrongly fall through to showing the badge.
 assert.equal(formatBadge({ ...v, resetsAt: 0 }, now), undefined, 'resetsAt: 0 is stale, not "unset"'); ok('badge hides once stale')
 
+// The reported bug: a Claude usage pill stayed on screen while the user worked in GLM, reading
+// as GLM's limit. A status describes one provider's account, so the fold tracks which provider
+// each turn is routed to and the badge hides a status belonging to anyone else.
+const hdr = (provider) => ({ type: 'request/header', time: 200, data: { header: { config: { provider, model: 'm' } } } })
+const cctx = (provider) => ({ type: 'request/context', time: 201, data: { provider, model: 'm', contextWindow: 1 } })
+assert.equal(v.activeProvider, 'claude-code', 'a status seeds activeProvider with its own provider — it is live when posted')
+assert.notEqual(formatBadge(v, now), undefined, 'visible while claude-code is the routed provider')
+
+const onGlm = applyProviderStatus(v, hdr('zai'))
+assert.equal(onGlm.activeProvider, 'zai')
+assert.equal(formatBadge(onGlm, now), undefined, 'THE BUG: claude usage must not show while a GLM turn is routed')
+assert.deepEqual({ ...onGlm, activeProvider: v.activeProvider }, v, 'hidden, not dropped — the status itself is untouched')
+
+const backOnClaude = applyProviderStatus(onGlm, hdr('claude-code'))
+assert.deepEqual(formatBadge(backOnClaude, now), formatBadge(v, now), 'switching back shows the same pill again')
+assert.equal(formatBadge(applyProviderStatus(v, cctx('zai')), now), undefined, 'request/context carries the routed provider too')
+assert.equal(applyProviderStatus(null, hdr('zai')), null, 'a routed turn with no status folds to nothing, not a bare activeProvider')
+// A status posted while another provider is marked active still wins: it is live by construction.
+assert.notEqual(formatBadge(applyProviderStatus(onGlm, { type: 'provider/status', time: 202, data: good }), now), undefined)
+ok('the badge follows the routed provider, not whichever status was folded last')
+
 // Parity guard: lib/client.js duplicates formatBadge for the browser bundle (no module graph
 // into lib/ from a __ModuleLoader__ factory). Extract it from the source and prove it agrees
 // with lib/status.js's formatBadge on the same fixtures, so the two never silently diverge.
@@ -130,7 +151,9 @@ const clientFormatBadge = new Function(`${relSrc} return formatBadge`)()
 // in h > 0). vNoReset covers resetsAt absent entirely (distinct from resetsAt: 0).
 const minutesOnly = { ...v, resetsAt: Math.floor(now / 1000) + 300 } // 5m out, not stale
 const { resetsAt: _drop, ...vNoReset } = v
-for (const [value, at] of [[v, now], [{ ...v, level: 'ok' }, now], [null, now], [{ ...v, title: '' }, now], [{ ...v, resetsAt: 0 }, now], [minutesOnly, now], [vNoReset, now]]) {
+// onGlm/backOnClaude carry the activeProvider mismatch, so the client copy is held to the
+// same provider-visibility rule as the host — the regression this pair exists to catch.
+for (const [value, at] of [[v, now], [{ ...v, level: 'ok' }, now], [null, now], [{ ...v, title: '' }, now], [{ ...v, resetsAt: 0 }, now], [minutesOnly, now], [vNoReset, now], [onGlm, now], [backOnClaude, now]]) {
   assert.deepEqual(clientFormatBadge(value, at), formatBadge(value, at))
 }
 ok('client formatBadge parity')

@@ -51,13 +51,38 @@ export const PROVIDER_STATUS_SCHEMA = z.object({
   resetsAt: z.number().int().nonnegative().optional(),
   detail: z.preprocess(rejectCircular, JsonValue.optional()),
 })
-export const PROJECTION_VALUE_SCHEMA = PROVIDER_STATUS_SCHEMA.extend({ at: z.number() }).nullable()
+// `activeProvider` is the provider of the LAST ROUTED TURN, which is not always the provider the
+// status came from — that is the whole point of it. See applyProviderStatus.
+export const PROJECTION_VALUE_SCHEMA = PROVIDER_STATUS_SCHEMA.extend({ at: z.number(), activeProvider: z.string().min(1).optional() }).nullable()
 
-/** Fold: the projection is the latest valid provider/status event. Whole value, never a delta. */
+/** The provider a turn was actually routed to. `request/header` is logged whenever the request
+ * config changes (so a provider switch always produces one) and `request/context` rides along
+ * with a flatter shape; reading both means neither event's absence can strand the pill. */
+const routedProvider = (event) => event.type === 'request/header'
+  ? event.data?.header?.config?.provider
+  : event.type === 'request/context' ? event.data?.provider : undefined
+
+/** Fold: the projection is the latest valid provider/status event. Whole value, never a delta.
+ *
+ * A status describes ONE provider's account — "Claude 90%" is a fact about the Claude
+ * subscription, not about the session. The pill used to render whatever was folded last,
+ * regardless of what was running, so switching to GLM left Claude's usage sitting next to a
+ * GLM answer, reading as GLM's limit. So the fold also tracks which provider each turn is
+ * routed to, and formatBadge hides a status belonging to anyone else.
+ *
+ * Hidden, not dropped: switching away and back must bring the pill back, and a rate-limit
+ * event only arrives when the provider chooses to send one — discarding it here would blank
+ * the badge until the next one, which may be many turns away.
+ *
+ * A producer only posts while its own turn is running, so a status is live by construction and
+ * seeds `activeProvider` with its own provider. That keeps a status visible even when the
+ * routed events never arrive (utility turns log no header). */
 export function applyProviderStatus (state, event) {
+  const routed = routedProvider(event)
+  if (routed !== undefined) return state ? { ...state, activeProvider: routed } : state
   if (event.type !== 'provider/status') return state
   const parsed = PROVIDER_STATUS_SCHEMA.safeParse(event.data)
-  return parsed.success ? { ...parsed.data, at: event.time } : state
+  return parsed.success ? { ...parsed.data, at: event.time, activeProvider: parsed.data.provider } : state
 }
 
 const relative = (resetsAt, now) => {
@@ -67,6 +92,9 @@ const relative = (resetsAt, now) => {
 
 export function formatBadge (value, now = Date.now()) {
   if (!value) return undefined
+  // Someone else's provider is running: a Claude usage pill next to a GLM answer reads as GLM's
+  // limit. Hidden only while another provider is routed — switching back shows it again.
+  if (value.activeProvider !== undefined && value.activeProvider !== value.provider) return undefined
   // Stale beats wrong: once resetsAt has passed with nothing new to say, show nothing rather
   // than freeze on "resets in 0m". Recomputed against `now` on every call, so a reconnect/replay
   // (which re-renders with a live clock, not a stored one) reproduces this correctly for free —
