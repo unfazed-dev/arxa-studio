@@ -122,6 +122,11 @@ const bundles = headless
 const designPanelDir = resolve(here, '..', 'plugins', 'design-panel')
 const brandDir = resolve(here, '..', 'plugins', 'brand')
 const genUiDir = resolve(here, '..', 'plugins', 'gen-ui')
+// arxa-provider-status: provider/status session events → providerStatus
+// projection → composer pill, shared by every model provider (docs/plans/
+// claude-subscription-engine.md task 13). By-name because it ships a
+// browser half via package.json dsh.client, like gen-ui above.
+const providerStatusDir = resolve(here, '..', 'plugins', 'provider-status')
 // Installed always, loaded only when the profile enables it (row 10 ships
 // commented out — it needs a real MCP server to point at).
 const mcpAppsDir = resolve(here, '..', 'plugins', 'mcp-apps')
@@ -193,6 +198,7 @@ const PROFILE_PLUGINS = [
   ['arxa-locale', localeDir],
   ['arxa-prism', prismDir],
   ['arxa-personalisation', personalisationDir],
+  ['arxa-provider-status', providerStatusDir],
 ]
 writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
   name: 'dsh-profile-arxa',
@@ -366,7 +372,7 @@ engineLog('dsh bin resolved: ' + dshBin)
 // The design panel, brand and gen-ui plugins resolve by package name (their
 // browser halves are discovered through package.json dsh.client, which a
 // file-path entry never reaches).
-const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa-mcp-apps', 'arxa-waiting-page', 'arxa-theme-accent', 'arxa-pairing', 'arxa-sidebar', 'arxa-git-card', 'arxa-artifact-viewer', 'arxa-frame', 'arxa-locale', 'arxa-prism']
+const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa-mcp-apps', 'arxa-waiting-page', 'arxa-theme-accent', 'arxa-pairing', 'arxa-sidebar', 'arxa-git-card', 'arxa-artifact-viewer', 'arxa-frame', 'arxa-locale', 'arxa-prism', 'arxa-provider-status']
 // ALWAYS install, never skip on presence: these are file: dependencies, and
 // pnpm copies them into .pnpm at add-time. A plain `pnpm install` sees the
 // lockfile entry unchanged and keeps the OLD copy — measured 2026-08-25: the

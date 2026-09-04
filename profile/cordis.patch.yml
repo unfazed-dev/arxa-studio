@@ -368,3 +368,10 @@
 - insert:
   - id: arxa-claude-code
     name: /Volumes/business_ssd/arxa_digital_solutions/arxa-studio/plugins/claude-code/index.mjs
+
+# arxa-specific: provider/status → providerStatus projection → composer pill.
+# HOST-PLANE (registers a projection). Works for every provider; claude-code is
+# the first producer. By PACKAGE NAME — browser half via package.json dsh.client.
+- insert:
+  - id: arxa-provider-status
+    name: arxa-provider-status
