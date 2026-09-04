@@ -271,8 +271,16 @@ function isGrantableRoot (root) {
  * `id: sandbox` cordis row.
  */
 export default class ArxaSandboxProvider extends LocalSandboxProvider {
-  /** Memoized toolchain roots — resolution shells out, so it runs once. */
-  #toolchainRoots
+  /** Memoized toolchain roots — resolution shells out, so it runs once.
+   *
+   * A PLAIN property, deliberately not a `#private` one. dsh hands every consumer
+   * `ctx.sandbox`, which is a cordis tracking Proxy rather than this instance, and a
+   * JS private field cannot be read through a Proxy — inside the method `this` is the
+   * proxy, which is not an instance of the declaring class, so the read throws
+   * "Cannot read private member #toolchainRoots from an object whose class did not
+   * declare it" and takes every confined spawn down with it. Ordinary properties
+   * forward through the proxy untouched. Do not convert this back to `#`. */
+  toolchainRootsMemo = undefined
 
   /** Injection seam for the selftest (mirrors the base class's `internals`). */
   arxaInternals = {}
@@ -282,10 +290,10 @@ export default class ArxaSandboxProvider extends LocalSandboxProvider {
    * @returns {string[]} canonical existing roots.
    */
   toolchainRoots () {
-    if (this.#toolchainRoots === undefined) {
-      this.#toolchainRoots = (this.arxaInternals.resolveToolchainRoots ?? resolveToolchainRoots)()
+    if (this.toolchainRootsMemo === undefined) {
+      this.toolchainRootsMemo = (this.arxaInternals.resolveToolchainRoots ?? resolveToolchainRoots)()
     }
-    return this.#toolchainRoots
+    return this.toolchainRootsMemo
   }
 
   /**

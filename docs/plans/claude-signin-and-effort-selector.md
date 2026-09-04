@@ -178,3 +178,48 @@ Ruled out by measurement, not argument — recorded so nobody re-investigates th
 the sandbox (all three policy modes), the GUI-minimal environment, binary choice
 (PATH vs bundled), probe concurrency, and `modelsFromSdk` (which was correct
 throughout). `apiKeySource` enforcement at `bridge.js:42` is intact.
+
+## F16 — `#toolchainRoots` through the cordis proxy (found by the F13 fix)
+
+The F13 message change paid for itself on its first run. Instead of a fake "not signed
+in", the app reported:
+
+> claude-code: could not reach Claude Code (Cannot read private member #toolchainRoots
+> from an object whose class did not declare it)
+
+**Root cause.** dsh hands every consumer `ctx.<service>`, which is a cordis tracking
+**Proxy**, not the instance. A JS `#private` field cannot be read through a Proxy —
+inside the method `this` is the proxy, which is not an instance of the declaring class.
+`ArxaSandboxProvider` memoized its toolchain roots in `#toolchainRoots`
+(`plugins/sandbox/lib/index.js`), and `extraWritableRoots()` reads it on every confined
+spawn. So **every** `ctx.sandbox.confine()` call threw.
+
+Reproduced in one run, three paths:
+
+```
+RAW instance       : ok
+via ctx.sandbox    : THROWS -> Cannot read private member #toolchainRoots …
+via cordis.original: ok
+```
+
+**Why every earlier test passed.** Every existing test — mine included — constructed the
+provider and called `confine()` on the **raw instance**. Production never does. The
+suite tested a path no caller uses.
+
+**Why it appeared only now.** The field dates from `e7f500c`, but the desktop payload
+carried a months-old copy of `plugins/sandbox` that predates it. The content-hash sync
+(F11) brought the payload current, which activated the latent defect. The bug was
+already in the repo; the sync made it reachable.
+
+**Fix.** The memo is a plain property (`toolchainRootsMemo`), not a `#private` field.
+Ordinary properties forward through the proxy untouched. Fixing it in the provider
+covers every call site, rather than asking each caller to remember
+`Symbol.for('cordis.original')`.
+
+**Gate.** `plugins/sandbox/selftest.mjs` now calls `confine()` through `ctx.sandbox` and
+asserts the memo still memoizes through the proxy. Swept the rest of the plugin tree:
+`ArxaSandboxProvider` is the only class extending a dsh Service, and the only host-plane
+private field. (`plugins/arxa-frame/lib/client.js` uses private fields but is
+browser-plane and extends no Service — unaffected.)
+
+**Standing rule:** no `#private` fields in a class registered as a dsh service.

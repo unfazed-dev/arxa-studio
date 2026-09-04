@@ -266,4 +266,26 @@ const world = (paths, links = {}) => ({
   }
 }
 
+// --- reached through the cordis service proxy, the way every real caller reaches it ---
+// dsh serves ctx.<service> as a tracked Proxy, and a JS `#private` field CANNOT be read
+// through a Proxy — `this` inside the method is the proxy, which is not an instance of
+// the declaring class. A memo held in a #field therefore turned every confined spawn
+// into "Cannot read private member #toolchainRoots from an object whose class did not
+// declare it". Every previous test called confine() on the RAW instance and passed,
+// which is exactly why this shipped.
+{
+  const ctx = new Context()
+  new ArxaSandboxProvider(ctx, { runnerCommand: [], runnerFailureSignatures: [], probeTimeoutMs: 5000 })
+  const policy = { mode: 'workspace-write', workspaceRoot: process.cwd(), extraWritableRoots: [join(homedir(), '.claude', 'projects')] }
+  // Through ctx.sandbox — NOT the raw instance. This is the production path.
+  const out = ctx.sandbox.confine(['/bin/echo', 'hi'], policy)
+  assert.ok(Array.isArray(out.argv) && out.argv.length > 0)
+  ok('confine() works through the cordis service proxy, not only on a raw instance')
+  // The memo must still memoize: resolution shells out, so a second call must not re-resolve.
+  const a = ctx.sandbox.toolchainRoots()
+  const b = ctx.sandbox.toolchainRoots()
+  assert.equal(a, b, 'toolchainRoots must return the same memoized array, not re-resolve')
+  ok('toolchainRoots stays memoized when reached through the proxy')
+}
+
 console.log(`arxa-sandbox selftest: ${checks} checks green` + (skipped > 0 ? `, ${skipped} skipped` : ''))
