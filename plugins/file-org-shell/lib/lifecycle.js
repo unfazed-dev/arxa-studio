@@ -54,6 +54,7 @@ import {
   readRecents,
   removeRecent,
   CATEGORIES,
+  ensureGeneratedIgnored,
 } from '../../workspace/lib/index.js'
 import {
   openBackend,
@@ -80,12 +81,17 @@ import {
   archivedSessionIds,
   openSession,
   annotateSession,
-  nextSessionName,
+  mintSessionPath,
+  listWorktreeDirs,
+  recordStage,
+  reviewedTip,
   reviveSession,
+  dropSession,
   archiveSession as archiveSessionBranch,
   sessionStageBoundary,
   rekeySessionsProject,
   writeFrameFiles,
+  ensureFrameUnignored,
   FRAME_VERSION,
   settingsPayload,
   protectionPayload,
@@ -96,7 +102,7 @@ import {
   ffMergeMain,
 } from '../../git-workspace/lib/index.js'
 import { runGit } from '../../git-workspace/lib/index.js'
-import { arxaHome } from '../../workspace/lib/root.js'
+import { arxaHome, readOrgNames, rememberOrgName } from '../../workspace/lib/root.js'
 import { getTemplate, TEMPLATE_VERSION } from '../../workspace/lib/template.js'
 import { refreshAccountMirror, ensureAccountExcluded } from '../../account-mirror/lib/index.js'
 import { claimMaterializer, materialize, readEdits } from '../../cairn-rail/lib/index.js'
@@ -181,6 +187,91 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     * command line only — it is never persisted, never logged, and never
     * written into .git/config (origin keeps the clean URL). Non-GitHub
     * URLs (test doubles point at local bare repos) pass through as-is. */
+  /** Git reports a rejected token as TEXT on a non-zero exit, not as a status
+   * code, so this is the only way to tell "your token is dead" apart from
+   * "the remote hung up". Kept deliberately broad — a false positive costs one
+   * wasted token refresh, a false negative costs a repo that never syncs
+   * again (measured on RESTO, 2026-09-03). */
+  const AUTH_FAILURE_RE = /invalid username or token|authentication failed|could not read username|403 forbidden|401/i
+
+  /**
+   * Push, and on an auth-shaped failure mint a FORCED fresh credential and try
+   * once more. This mirrors what createPrivateRepo / renameRepo / wireFrame
+   * already do for their REST calls; the push path was the one hole, so a
+   * token GitHub had already rejected while the local expiry clock still read
+   * "alive" failed permanently with no route back.
+   *
+   * Throws the ORIGINAL error when the retry also fails, so the manifest
+   * records the real cause rather than "retry failed".
+   */
+  async function pushWithAuthRetry(repoPath, repoUrl, kind = 'org') {
+    const creds = await githubBridge.gitCredentials()
+    if (!creds || !creds.ok) return { ok: false, reason: 'no-creds' }
+    try {
+      pushRepo(repoPath, pushUrlFor(repoUrl, creds), env)
+      return { ok: true, refreshed: false }
+    } catch (err) {
+      if (!AUTH_FAILURE_RE.test(String(err?.message ?? err))) throw err
+      const fresh = await githubBridge.gitCredentials(true).catch(() => null)
+      if (!fresh || !fresh.ok) throw err
+      try {
+        pushRepo(repoPath, pushUrlFor(repoUrl, fresh), env)
+        return { ok: true, refreshed: true }
+      } catch { throw err }
+    }
+  }
+
+  /**
+   * Cleanup stage (2026-09-03): drop the session branch `arxa/<identity>` on GitHub once the
+   * branch is merged into main, or when the caller closed its PR and says
+   * `dropRemote`. Never deletes an unmerged branch on its own — GitHub would
+   * close the open PR under the user. Returns a short status string.
+   */
+  async function dropRemoteSessionBranch(orgPath, row, opts = {}) {
+    if (!row?.branch) return 'no-branch'
+    const { repoPath, kind } = resolveSessionRepo(orgPath, row.workspace, { env })
+    const m = readManifest(kind === 'org' ? orgManifestPath(repoPath) : projectManifestPath(repoPath))
+    if (!m.repoUrl) return 'not-published'
+    // Ask whether the session's REAL work landed, not whether its branch tip
+    // did. After a merge the tip is routinely a WIP auto-save — the watcher
+    // fires, or archive takes its own "nothing is ever lost" snapshot — and
+    // that checkpoint is by definition not in main. Testing the raw tip
+    // therefore answered "unmerged" for a session that had just merged
+    // cleanly, and every such branch was kept on the remote forever
+    // (2026-09-03, kitchen-project #1). WIP commits are app plumbing, D18:
+    // they carry the WIP committer identity and are squashed away at the next
+    // boundary, so they are exactly what this question should skip.
+    const reviewed = reviewedTip(repoPath, row.branch, env)
+    const merged = reviewed
+      ? runGit(['merge-base', '--is-ancestor', reviewed, 'main'], { cwd: repoPath, env, allowFail: true }) !== null
+      : false
+    if (!merged && opts.dropRemote !== true) return 'kept-unmerged'
+    const creds = await githubBridge.gitCredentials()
+    if (!creds || !creds.ok) return 'kept-no-creds'
+    const url = pushUrlFor(m.repoUrl, creds)
+    const exists = runGit(['ls-remote', '--heads', url, row.branch], { cwd: repoPath, env, allowFail: true })
+    if (!exists || exists.trim() === '') return 'absent'
+    runGit(['push', url, '--delete', 'refs/heads/' + row.branch], { cwd: repoPath, env })
+    // Drop the local mirror of the branch we just deleted.
+    //
+    // `push --delete` DOES prune `refs/remotes/<remote>/<branch>` — but only
+    // when it is given a remote NAME. The delete above goes to a
+    // token-bearing URL (pushUrlFor, so the push never falls back to a TTY
+    // password prompt), and a URL has no tracking namespace to prune, so git
+    // deletes the branch and leaves the mirror standing. Measured both ways
+    // before writing this line, because the plausible-sounding reason (the
+    // ref was hand-written by prflow's pushSessionBranch, so git does not
+    // own it) is NOT why — a named-remote delete prunes that same
+    // hand-written ref perfectly well.
+    //
+    // Left behind, the ref claims a remote branch that no longer exists:
+    // ahead/behind on a revived session would answer from it, and one
+    // accumulates per merged session forever (RESTO and kitchen-project
+    // both carried one, 2026-09-03).
+    runGit(['update-ref', '-d', 'refs/remotes/origin/' + row.branch], { cwd: repoPath, env, allowFail: true })
+    return merged ? 'deleted-merged' : 'deleted-closed'
+  }
+
   function pushUrlFor(repoUrl, creds) {
     if (typeof repoUrl !== 'string' || !repoUrl.startsWith('https://github.com/')) return repoUrl
     return 'https://' + encodeURIComponent(creds.login) + ':' + encodeURIComponent(creds.token)
@@ -293,7 +384,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
    * @param {'org' | 'project'} kind
    */
   /** Part B S1 — wire the CI frame once a repo is published: ci.yml +
-   *  PR template committed and pushed, squash-only repo settings, branch
+   *  PR template committed and pushed, merge-commit-only repo settings, branch
    *  protection (the measured free-plan 403 recorded as plan-limited,
    *  S0 V1 — the card enforces gates client-side regardless, Q2), and a
    *  canon self-hosted runner on this machine (Q5). Best-effort end to
@@ -304,15 +395,60 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       const manifestFile = kind === 'org' ? orgManifestPath(repoPath) : projectManifestPath(repoPath)
       const m = readManifest(manifestFile)
       if (!m.repoUrl || !m.repoOwner || !m.repoName) return { skipped: 'not-published' }
-      if (m.frameWired === true) return { skipped: 'wired' }
-      const wrote = writeFrameFiles(repoPath, kind, { includeCiYml: true })
-      if (wrote.written.length) {
-        runGit(['add', 'check.sh', '.github'], { cwd: repoPath, allowFail: true })
-        runGit(['commit', '-m', 'chore(ci): wire the arxa frame (checks, workflow, PR template)'], { cwd: repoPath, allowFail: true })
-        const pushCreds = await githubBridge.gitCredentials()
-        if (pushCreds.ok) pushRepo(repoPath, pushUrlFor(m.repoUrl, pushCreds), env)
+      // "Wired" only counts when the frame files are actually versioned.
+      // RESTO (2026-09-03) carried frameWired:true while check.sh and
+      // .github/ sat ignored by the org whitelist .gitignore: git refused
+      // the `add` (exit 1, "use -f"), allowFail swallowed it, so GitHub
+      // never had a workflow and no CI run ever happened. Re-wire in that
+      // state, and verify tracking instead of trusting the add.
+      const frameTracked = () => runGit(['ls-files', '--error-unmatch', '--', 'check.sh', '.github/workflows/ci.yml'], { cwd: repoPath, allowFail: true }) !== null
+      const alreadyWired = m.frameWired === true && frameTracked()
+      // upgrade: a stale stamped file (older FRAME_VERSION) is rewritten;
+      // a hand-modified one is left alone (conflicted) — nothing ever
+      // called upgrade before, so RESTO kept a pre-Q7 ci.yml forever.
+      const wrote = writeFrameFiles(repoPath, kind, { includeCiYml: true, upgrade: true })
+      if (kind === 'org') ensureFrameUnignored(repoPath)
+      // A project scaffolded before TARGET_BUILD_LINES existed keeps its old
+      // .gitignore forever (ensureProjectGitignore never overwrites), so the
+      // patch has to happen on a path every published project passes through.
+      // This is that path — it already re-applies the frame every time.
+      if (kind === 'project') ensureGeneratedIgnored(repoPath)
+      runGit(['add', '--', '.gitignore', 'check.sh', '.github'], { cwd: repoPath, allowFail: true })
+      if (!frameTracked()) {
+        throw new Error('frame-files-untracked: check.sh/.github are ignored by .gitignore, the frame cannot reach GitHub')
       }
+      // `diff --cached --quiet` exits 1 (→ null) when something is staged.
+      if (runGit(['diff', '--cached', '--quiet'], { cwd: repoPath, allowFail: true }) === null) {
+        const msg = alreadyWired
+          ? `chore(ci): upgrade the arxa frame to v${FRAME_VERSION}`
+          : 'chore(ci): wire the arxa frame (checks, workflow, PR template)'
+        runGit(['commit', '-m', msg], { cwd: repoPath, allowFail: true })
+        await pushWithAuthRetry(repoPath, m.repoUrl, kind).catch(() => null)
+      }
+      // Settings + protection are re-applied EVERY time, not only on first
+      // wire: both calls are idempotent, and the payload changes over time
+      // (2026-09-02 flipped squash-only → merge-commit-only). RESTO was wired
+      // 2026-08-31 under the old payload, frameWired:true made every later
+      // heal return here, and card.pr.merge got a 405 from GitHub because the
+      // repo still allowed only squash. Drift in the payload must heal.
       const wired = await githubBridge.wireFrame(m.repoOwner, m.repoName, { settings: settingsPayload(), protection: protectionPayload() })
+      if (alreadyWired && wired.ok) {
+        // Record a protection change the same way first-wire does (annotate
+        // + commit the manifest). Writing without committing left org.json
+        // dirty on every reopen and tripped the D78 clean-tree gate.
+        if (m.frameProtection !== wired.protection) {
+          try {
+            const fields = { frameProtection: wired.protection }
+            if (kind === 'org') annotateOrgManifest(repoPath, fields)
+            else annotateProjectManifest(repoPath, fields)
+            const file = path.basename(manifestFile)
+            runGit(['add', file], { cwd: repoPath, allowFail: true })
+            runGit(['commit', '-m', 'chore(github): record frame protection', '--', file], { cwd: repoPath, allowFail: true })
+            await pushWithAuthRetry(repoPath, m.repoUrl, kind).catch(() => null)
+          } catch { /* annotation best-effort */ }
+        }
+        return { skipped: 'wired', settings: 'reapplied', upgraded: wrote.upgraded, conflicted: wrote.conflicted }
+      }
       const fields = {}
       if (wired.ok) {
         fields.frameWired = true
@@ -329,8 +465,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
         runGit(['add', file], { cwd: repoPath, allowFail: true })
         runGit(['commit', '-m', 'chore(github): record frame state', '--', file], { cwd: repoPath, allowFail: true })
         if (fields.frameWired === true) {
-          const c2 = await githubBridge.gitCredentials()
-          if (c2.ok) pushRepo(repoPath, pushUrlFor(m.repoUrl, c2), env)
+          await pushWithAuthRetry(repoPath, m.repoUrl, kind).catch(() => null)
         }
       } catch { /* annotation best-effort */ }
       return { ok: wired.ok === true, protection: wired.protection ?? null }
@@ -370,6 +505,29 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       if (!creds || !creds.ok) return 'no-creds'
       const url = pushUrlFor(manifest.repoUrl, creds)
       if (!fetchRepo(repoPath, url, env)) return 'fetch-failed'
+      /** A sync that reaches a healthy end state must CLEAR a stale failure.
+       * Without this one blip left `publish-failed: … Invalid username or
+       * token` on the manifest forever, so the org read as broken long after
+       * it had healed — which is most of why RESTO "looked" unsynced. */
+      const clearStaleStatus = async () => {
+        try {
+          const st = manifest.githubStatus
+          if (typeof st !== 'string') return
+          if (!/^(publish-failed|sync-conflict|push-failed)/.test(st)) return
+          const fields = { githubStatus: 'published' }
+          if (kind === 'org') annotateOrgManifest(repoPath, fields)
+          else annotateProjectManifest(repoPath, fields)
+          const file = path.basename(manifestFile)
+          runGit(['add', file], { cwd: repoPath, allowFail: true })
+          const committed = runGit(['commit', '-m', 'chore(github): clear a healed sync status', '--', file], { cwd: repoPath, allowFail: true })
+          // This commit is made AFTER the ahead/behind read, so nothing above
+          // will push it: leaving it here would trade "stuck showing a stale
+          // error" for "permanently 1 ahead of origin" — the very symptom
+          // being fixed. Push it now. Best-effort: a failure just means the
+          // next sync finds ahead>0 and pushes it then.
+          if (committed !== null) await pushWithAuthRetry(repoPath, manifest.repoUrl, kind).catch(() => null)
+        } catch { /* advisory — never fail a good sync on bookkeeping */ }
+      }
       const state = mainSyncState(repoPath, env)
       if (state.diverged) {
         // Park ONCE (the note itself commits — D78: never leave the
@@ -388,13 +546,20 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       }
       if (state.ahead > 0) {
         try {
-          pushRepo(repoPath, url, env)
+          const pushed = await pushWithAuthRetry(repoPath, manifest.repoUrl, kind)
+          if (!pushed.ok) return 'no-creds'
+          await clearStaleStatus()
           return 'pushed'
         } catch (err) {
           return 'push-failed: ' + String(err?.message ?? err).slice(0, 120)
         }
       }
-      if (state.behind > 0) return ffMergeMain(repoPath, env) ? 'pulled' : 'in-sync'
+      if (state.behind > 0) {
+        const pulled = ffMergeMain(repoPath, env)
+        if (pulled) await clearStaleStatus()
+        return pulled ? 'pulled' : 'in-sync'
+      }
+      await clearStaleStatus()
       return 'in-sync'
     } catch (err) {
       return 'error: ' + String(err?.message ?? err).slice(0, 120)
@@ -583,6 +748,80 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     return out
   }
 
+  /**
+   * Q6 (2026-09-03): org folder names are unique, case-insensitively.
+   *
+   * A session identity STARTS with the org folder name, and the desktop keeps
+   * one dsh conversation store for every org, so two orgs called `RESTO` would
+   * mint colliding identities and collide in the conversation store. Git refs
+   * are case-sensitive while macOS folders are not, which makes `resto` vs
+   * `RESTO` the same folder but two different branches — refuse both shapes.
+   */
+  function assertOrgFolderNameFree(candidatePath, selfPath) {
+    const resolved = path.resolve(candidatePath)
+    const wanted = path.basename(resolved).toLowerCase()
+    // `selfPath` is the org's own CURRENT location, and it exists for the
+    // case-only rename (D80): renaming /a/resto → /a/RESTO gives a candidate
+    // whose resolved string differs from the org's own recents entry, so the
+    // "same org, re-opened" skip below would not fire and the org would
+    // collide with itself. Exclude by where it is now, not by where it is going.
+    const self = selfPath === undefined ? null : path.resolve(selfPath)
+    const claims = [
+      ...listOrgs().map((o) => o.path),
+      // The recents list is capped at RECENTS_CAP, so it is NOT the full set
+      // of orgs that have minted session ids. The ledger is (see readOrgNames).
+      ...Object.values(readOrgNames(env)),
+    ]
+    for (const claimPath of claims) {
+      const claimed = path.resolve(claimPath)
+      if (claimed === resolved) continue // the same org, re-opened
+      if (self !== null && claimed === self) continue // the org renaming itself
+      if (path.basename(claimed).toLowerCase() !== wanted) continue
+      // A ledger entry whose folder is GONE is a name the user is free to
+      // reuse — refusing forever would strand the name after a delete. Any
+      // residue left in the dsh store is healed at boot by the workspace
+      // store preflight (plugins/workspace/lib/store-heal.js), so the
+      // remaining risk is a repaired store, not a dead engine.
+      if (!fs.existsSync(claimed)) continue
+      throw new Error(
+        `org-name-taken: "${path.basename(claimed)}" is already an organisation at ${claimed}. ` +
+        'A session identity begins with the org folder name, so two organisations cannot ' +
+        'share one (case-insensitively) — rename this folder before adding it.',
+      )
+    }
+    return resolved
+  }
+
+  /**
+   * Q7 (2026-09-03): identity is pinned at birth and never re-derived.
+   *
+   * Every session id starts with the org folder name AS IT WAS at creation, and
+   * that string is already baked into a branch, a worktree directory and a dsh
+   * conversation key. If the folder has since been renamed on disk, resuming
+   * would keep building under a name that no longer describes reality — and
+   * renaming the branch to catch up would CLOSE any open PR (GitHub closes a PR
+   * whose head branch is renamed). So the org opens in `path-moved`: rows stay
+   * visible, resume refuses, and restoring the folder name clears it.
+   *
+   * Only the BASENAME is compared, so moving the org to another disk (the case
+   * the org-move handling already supports) keeps working. Pre-path rows (no
+   * `/` in the id) are ignored — they predate this contract.
+   *
+   * @returns {{ expected: string[], actual: string }|null}
+   */
+  function sessionPathDrift(orgPath, checkEnv = env) {
+    const actual = path.basename(path.resolve(orgPath))
+    const expected = new Set()
+    let rows = []
+    try { rows = allSessions(orgPath, checkEnv) } catch { return null }
+    for (const s of rows) {
+      if (!s || typeof s.id !== 'string' || !s.id.includes('/')) continue
+      const first = s.id.split('/')[0]
+      if (first !== actual) expected.add(first)
+    }
+    return expected.size === 0 ? null : { expected: [...expected], actual }
+  }
+
   function createOrg(displayName) {
     // D69: org-create scaffolds IN PLACE into the picked folder. A service
     // bound to a folder that is itself an org has no create verb; a service
@@ -592,6 +831,10 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       throw new Error('org-create is in-place since D69: scaffold into the picked folder directly (scaffoldOrg)')
     }
     const created = scaffoldOrgInRoot(root, displayName)
+    // Refuse BEFORE the folder enters the registry (Q6). The scaffolded folder
+    // is left on disk untouched — renaming it and adding it is the recovery.
+    assertOrgFolderNameFree(created.path)
+    rememberOrgName(created.path, env) // claim the folder name for good (H2)
     try {
       touchRecent(created.path, env)
     } catch {
@@ -603,6 +846,10 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
   async function openOrg(orgPath, opts = {}) {
     if (current) throw new OrgAlreadyOpenError(current.path, orgPath)
     const resolved = path.resolve(orgPath)
+    // Q6: the universal chokepoint — an org that cannot open cannot mint a
+    // session, so a colliding folder name can never reach an identity.
+    assertOrgFolderNameFree(resolved)
+    rememberOrgName(resolved, env) // claim the folder name for good (H2)
     const slug = orgSlugOf(resolved)
 
     // Reverse-unwind stack: every acquired resource pushes its release;
@@ -799,6 +1046,9 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
         orgVersion: opened.orgVersion,
         migrated: opened.migrated,
         repoInitialised: repo.initialised,
+        /** Q7: non-null when the org folder was renamed under pinned session
+          * identities — the UI shows `path-moved` and resume refuses. */
+        pathMoved: sessionPathDrift(resolved),
         sessions,
         archivedSessionIds: archived,
         index: { backend, rebuilt: counts !== null, counts },
@@ -1003,10 +1253,44 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           // ids — the branch/worktree keep the session id as stable key.
           // The counter reads the OWNING repo's registry: two projects each
           // get their own design-001 rather than colliding through the org.
-          const title = typeof name === 'string' && name.trim() !== ''
-            ? name.trim()
-            : nextSessionName(listSessions(repoPath, env), ws)
-          const session = openSession(repoPath, { name: title, project: projectSlug, workspace: ws, env })
+          // Q2 (2026-09-03): the id is minted from the workspace context —
+          // `note-wt-260903-001` — so the worktree directory and the branch
+          // read as the thing they are. Q3: when the caller supplies no
+          // name, `name` DEFAULTS TO THE ID rather than to the old
+          // singular+counter, so one string reads across the sidebar row,
+          // the breadcrumb tail and the header title. An explicit name still
+          // wins and simply diverges from the id (rename semantics, D-2026-08-30).
+          // Uniqueness must span EVERY registry, not just this repo's: the id
+          // becomes the dsh session id (`arxa-<id>`), and dsh has one session
+          // store for the whole app — two projects minting the same readable
+          // id would put two arxa sessions on one conversation. So the mint
+          // reads the cross-registry aggregate. The counter still keys on the
+          // workspace string (unique per project: `projects/alpha/notes` vs
+          // `projects/beta/notes`), so numbering inside a container is
+          // natural; the day-namespace is shared, which is the deliberate
+          // trade for readable ids (supersedes D98's per-repo counters —
+          // those were safe only while ids were opaque and separate).
+          // Identity = the relative disk path, minted once and stored; never
+          // re-derived from the live folder name afterwards (Q2/Q7). The org
+          // segment comes from the org FOLDER, verbatim (Q5) — the add/create
+          // guard keeps folder names unique, which is what makes the dsh key
+          // unique across orgs.
+          const sid = mintSessionPath({
+            org: path.basename(resolved),
+            workspace: ws,
+            name,
+            sessions: allSessions(resolved, env),
+          })
+          // orgPath: a project session's branch lives in the project repo, its
+          // checkout under the ORG's single `.arxa/worktrees/` root.
+          const session = openSession(repoPath, {
+            id: sid,
+            orgPath: resolved,
+            name: typeof name === 'string' && name.trim() !== '' ? name.trim() : undefined,
+            project: projectSlug,
+            workspace: ws,
+            env,
+          })
           // Phase D (D71): AFTER branch+worktree exist, spawn the dsh session
           // with cwd = the worktree path (dsh sessions.create cwd contract)
           // and store its id on the registry row. Unavailable dsh degrades to
@@ -1031,10 +1315,26 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           if (title === '') throw new Error('name-required: a session name cannot be empty')
           // D98: the id may live in a project registry — look across all of
           // them, and let annotateSession's own preamble find the owner.
-          if (allSessions(resolved, env).every((s) => s.id !== id)) throw new Error('unknown-session: ' + id)
-          return annotateSession(resolved, id, { name: title }, env)
+          const row = allSessions(resolved, env).find((s) => s.id === id)
+          if (!row) throw new Error('unknown-session: ' + id)
+          const out = annotateSession(resolved, id, { name: title }, env)
+          // Q1 follow-up (2026-09-03): the dsh header title follows the
+          // registry name — re-pin the live conversation. Best-effort.
+          if (row.dshSessionId) await dshBridge.retitle(row.dshSessionId, title)
+          return out
         },
-        async resumeSession(id) {
+        async resumeSession(id, opts = {}) {
+          // Q7: pinned identity vs the folder on disk. Refuse rather than
+          // resume onto a path that no longer describes reality — the branch,
+          // the worktree and the dsh key all carry the old name.
+          const drift = sessionPathDrift(resolved)
+          if (drift) {
+            throw new Error(
+              `path-moved: these sessions were created under "${drift.expected.join('", "')}" ` +
+              `but this organisation's folder is now named "${drift.actual}". Rename it back to ` +
+              `"${drift.expected[0]}" to resume, or archive the sessions.`,
+            )
+          }
           // Sessions branch from HEAD; until the initial snapshot lands
           // there is nothing to branch from. Loud, human, and the rows
           // client normally prevents reaching this at all (CTA disabled).
@@ -1043,6 +1343,23 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           // reviveSession's own preamble routes the git work; this lookup
           // only needs the dsh annotation, so read the aggregate.
           const row = allSessions(resolved, env).find((s) => s.id === id)
+          // Q3 (grilled 2026-09-02): a BOOT resume of a session whose
+          // conversation never received a user message is not a resume —
+          // the row is dropped (dsh archive, worktree, branch, registry
+          // row) and the caller lands on the welcome hero. Only a POSITIVE
+          // "no message" verdict drops; dsh unavailable/unknown keeps the
+          // row (never destroy on doubt). Rows without a dshSessionId were
+          // never conversed in — nothing to judge, they resume as before.
+          if (opts?.dropIfEmpty === true && row?.dshSessionId) {
+            const probe = await dshBridge.hasUserMessage(row.dshSessionId)
+            if (probe.ok && probe.value === false) {
+              await dshBridge.archive([row.dshSessionId])
+              const dropped = dropSession(resolved, id, env)
+              dshLive = await dshBridge.list()
+              syncWipWatchPaths() // session set changed — re-watch
+              return { ...dropped, dropped: true, state: 'dropped' }
+            }
+          }
           const out = reviveSession(resolved, id, env)
           // Re-attach the dsh conversation (focus/open by dshSessionId) when
           // the row carries one. Rows born while dsh was unavailable (or
@@ -1050,8 +1367,14 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           // (cwd = the worktree) so every opened session owns one; the
           // sidebar client then focuses it via the client sessions service
           // (2026-08-30). Best-effort: dsh absence never blocks git revival.
-          if (row?.dshSessionId) await dshBridge.attach(row.dshSessionId)
-          else if (out?.worktree) {
+          if (row?.dshSessionId) {
+            await dshBridge.attach(row.dshSessionId)
+            // Q1 follow-up (2026-09-03): re-pin the header title to the
+            // registry name on every resume (boot restore + row click both
+            // route through session.open). Sessions born before the spawn
+            // pin existed kept dsh's auto title — seen live on note-002.
+            await dshBridge.retitle(row.dshSessionId, typeof out?.name === 'string' ? out.name : row.name)
+          } else if (out?.worktree) {
             const spawned = await dshBridge.spawn({ cwd: out.worktree, name: out.name })
             if (spawned.ok) await annotateSession(resolved, id, { dshSessionId: spawned.id, dshStatus: null }, env)
           }
@@ -1059,7 +1382,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           syncWipWatchPaths() // session set changed — re-watch
           return out
         },
-        async archiveSession(id) {
+        async archiveSession(id, opts = {}) {
           // Sessions branch from HEAD; until the initial snapshot lands
           // there is nothing to branch from. Loud, human, and the rows
           // client normally prevents reaching this at all (CTA disabled).
@@ -1069,7 +1392,30 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           // D98: aggregate lookup — a project session's row is not in the org
           // registry, and an undefined row here silently skipped dsh archive.
           const row = allSessions(resolved, env).find((s) => s.id === id)
+          // Q14: record the closing stages BEFORE the worktree goes. The
+          // registry is the record and needs no network, so an offline org
+          // keeps a complete history and simply has nowhere to publish it.
+          try {
+            recordStage(row?.repoPath ?? resolved, id, {
+              stage: 'archived', actor: String(opts?.actor ?? 'arxa studio'),
+              detail: 'worktree pruned, branch kept (D39: archive is never delete)',
+            }, env)
+          } catch { /* the archive itself must never fail on its own bookkeeping */ }
           const out = archiveSessionBranch(resolved, id, env)
+          // Remote branch (cleanup stage, 2026-09-03 smoke): a session whose
+          // branch is already merged into main has nothing left on GitHub —
+          // its PR is merged, so drop the remote branch. An unmerged branch
+          // may still back an open PR (deleting it would close the PR), so
+          // it is kept unless the caller says `dropRemote` (close-without-
+          // merge path). Local branch is always kept (D39: archive ≠ delete).
+          out.remoteBranch = await dropRemoteSessionBranch(resolved, row, opts).catch((err) => 'failed: ' + String(err?.message ?? err))
+          try {
+            recordStage(row?.repoPath ?? resolved, id, {
+              stage: 'cleaned', actor: String(opts?.actor ?? 'arxa studio'),
+              result: String(out.remoteBranch ?? 'kept').startsWith('failed') ? 'failed' : 'ok',
+              detail: 'remote branch: ' + String(out.remoteBranch ?? 'kept'),
+            }, env)
+          } catch { /* bookkeeping never fails the cleanup */ }
           // Feed dsh's archivedSessionIds set (D39 contract): the archived
           // session vanishes from dsh active views; its transcript persists
           // dsh-side. Best-effort.
@@ -1184,6 +1530,12 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     if (!caseOnly && fs.existsSync(newPath)) {
       throw new Error('renameOrg: destination already exists: ' + newPath)
     }
+    // H1 (2026-09-03): the existsSync above only catches a collision in the
+    // SAME directory. Renaming /a/FOO → /a/RESTO while /b/RESTO exists passed
+    // it happily, and both orgs then minted `RESTO/...` session ids — one dsh
+    // conversation key, two orgs, engine dead at next boot. createOrg and
+    // addOrg have always enforced the folder-name invariant; rename never did.
+    assertOrgFolderNameFree(newPath, oldPath)
     // D80: pre-flight the GitHub rename BEFORE the move — a taken name
     // aborts with the org untouched; unverifiable degrades to the net.
     const ghManifest = readManifest(orgManifestPath(oldPath))
@@ -1213,9 +1565,23 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       // needs an explicit repair (bare 'worktree repair' fatals on the
       // first stale gitdir). Best-effort; prune is FORBIDDEN (D40).
       try {
+        // Walk to the REAL checkouts. A session identity is a path now, so the
+        // top-level entry under the worktrees root is an intermediate folder
+        // (the org segment) and repairing it is a silent no-op — the actual
+        // checkout sits two or more levels down, keeping a gitlink that still
+        // points at the pre-rename path. listWorktreeDirs recurses to the
+        // directories that are genuinely worktrees.
+        // A worktree is repaired by the repo that OWNS it, and a project
+        // session's checkout lives under the org root while belonging to the
+        // project repo (Q3a). Its identity path says which: `<org>/projects/
+        // <slug>/…` is the project's, anything else is the org's.
         const wtRoot = path.join(newPath, '.arxa', 'worktrees')
-        for (const entry of fs.existsSync(wtRoot) ? fs.readdirSync(wtRoot) : []) {
-          runGit(['worktree', 'repair', path.join(wtRoot, entry)], { cwd: newPath, env, allowFail: true })
+        for (const rel of listWorktreeDirs(wtRoot)) {
+          const seg = rel.split('/')
+          const owner = seg[1] === 'projects' && seg[2]
+            ? path.join(newPath, 'projects', seg[2])
+            : newPath
+          runGit(['worktree', 'repair', path.join(wtRoot, ...seg)], { cwd: owner, env, allowFail: true })
         }
       } catch {
         /* repair is best-effort; nothing is ever pruned (D40) */
@@ -1225,6 +1591,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       } catch { /* recents are advisory */ }
       try {
         touchRecent(newPath, env) // … and record the new one
+        rememberOrgName(newPath, env) // …and claim the new folder name (H1)
       } catch { /* recents are advisory */ }
       indexRenameOrg(newPath, newPath, displayName)
       if (current && current.path === oldPath) {

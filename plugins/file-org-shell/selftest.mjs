@@ -305,7 +305,21 @@ try {
     ok(listSessions(orgB.path, env).find((s) => s.id === regRow.id).dshStatus === 'dsh-unavailable', 'annotation persisted on the registry row')
     ok(regRow.workspace === 'notes' && typeof regRow.createdAt === 'number' && regRow.updatedAt >= regRow.createdAt, 'session row carries its workspace scope + real timestamps (v2; the 56y bug was fake ordinals)')
     const autoRow = await hNo.newSession(undefined, 'notes')
-    ok(autoRow.name === 'note-001', 'auto-name: singular(folder)+counter, no ids (grilled 2026-08-30)')
+    // Q2/Q3 (2026-09-03) supersede the 2026-08-30 auto-name: the id is now the
+    // full `<org>/<workspace>/<leaf>` disk path, minted from the workspace
+    // context, and `name` DEFAULTS TO THE ID'S LEAF (Q9) — the breadcrumb
+    // already carries the folders, so the row would otherwise read them
+    // twice. The worktree dir and branch still carry the whole id. Stamp is
+    // computed, not frozen — a hardcoded date would rot tomorrow.
+    const dstamp = (d = new Date()) =>
+      String(d.getFullYear() % 100).padStart(2, '0') +
+      String(d.getMonth() + 1).padStart(2, '0') +
+      String(d.getDate()).padStart(2, '0')
+    // -002, not -001: the explicitly-named `no-dsh` row above already holds
+    // -001. An explicit name diverges from the id; it does not skip the mint.
+    ok(autoRow.id === `${orgB.slug}/notes/note-wt-${dstamp()}-002`, `auto-id: <org>/<workspace>/<prefix>-wt-<YYMMDD>-<NNN> from the workspace folder (${autoRow.id})`)
+    ok(autoRow.name === `note-wt-${dstamp()}-002`, 'auto-name defaults to the LEAF of the id, not the whole id — the breadcrumb already carries the folders (Q9)')
+    ok(autoRow.worktree.endsWith(autoRow.id) && autoRow.branch === `arxa/${autoRow.id}`, 'the minted id IS the worktree dir (under .arxa/worktrees) and the whole branch suffix after arxa/')
     try { await hNo.newSession('bad', null) } catch (e) { ok(/workspace-required/.test(String(e.message)), 'org-level sessions are impossible — workspace is required (v2)') }
     try { await hNo.newSession('bad', 'nope/deep') } catch (e) { ok(/unknown-workspace/.test(String(e.message)), 'unknown workspace fails loud') }
     svcNoDsh.closeOrg()
@@ -904,13 +918,19 @@ try {
       const proj = await svcF.current.newProject('Framed')
       ok(fs.existsSync(path.join(proj.path, 'check.sh')), 'S1: new projects carry the stack-probe check.sh')
       ok(wired.includes('octocat/Framed'), 'S1: project publish wired its frame too')
+      const commitsBefore = runGit(['rev-list', '--count', 'HEAD'], { cwd: orgF.path, env }).trim()
       svcF.closeOrg()
-      // reopen: the committed frame keeps the clean-tree gate green, and
-      // already-wired repos do not re-wire (frameWired === true skips).
+      // reopen (2026-09-03 contract): settings + protection re-apply on
+      // EVERY open so payload drift heals (RESTO sat squash-only under
+      // frameWired:true and card.pr.merge got a 405) — but the committed
+      // frame is tracked and current, so no new frame commit lands and the
+      // clean-tree gate stays green.
       wired.length = 0
       await svcF.openOrg(orgF.path)
       await svcF.current.githubHeal
-      ok(!wired.includes('octocat/Frame-Org'), 'S1: wireFrameOnce is idempotent (no re-wire once recorded)')
+      ok(wired.includes('octocat/Frame-Org'), 'S1: reopen re-applies GitHub settings/protection (drift heals every open)')
+      ok(runGit(['rev-list', '--count', 'HEAD'], { cwd: orgF.path, env }).trim() === commitsBefore, 'S1: reopen adds no frame commit (files tracked + current)')
+      ok(runGit(['status', '--porcelain'], { cwd: orgF.path, env }).trim() === '', 'S1: reopen leaves the tree clean')
       svcF.closeOrg()
     } finally {
       fs.rmSync(fRoot, { recursive: true, force: true })

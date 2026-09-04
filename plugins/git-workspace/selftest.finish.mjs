@@ -214,9 +214,11 @@ ok('sweepMerged dryRun lists candidates without touching anything', () => {
 ok('pressure: 30 sessions, 15 merged, sweepMerged finishes exactly 15 in under 5s', () => {
   const mergedIds = []
   const unmergedIds = []
+  const branchById = {}
   for (let i = 0; i < 30; i++) {
     const id = `p${i}`
     const s = openSession(proj, { id })
+    branchById[id] = s.branch
     fs.writeFileSync(path.join(s.worktree, 'p.txt'), `edit ${i}\n`)
     if (i % 2 === 0) {
       const res = sessionStageBoundary(proj, id)
@@ -249,11 +251,11 @@ ok('pressure: 30 sessions, 15 merged, sweepMerged finishes exactly 15 in under 5
   assert.equal(finishedMerged.length, 15)
   assert.ok(res.finished.every((r) => r.finished === true))
   for (const id of mergedIds) {
-    const branch = `arxa/session/${id}`
+    const branch = branchById[id]
     assert.equal(runGit(['branch', '--list', branch], { cwd: proj }), '', `${branch} survived the sweep`)
   }
   for (const id of unmergedIds) {
-    const branch = `arxa/session/${id}`
+    const branch = branchById[id]
     assert.ok(runGit(['branch', '--list', branch], { cwd: proj }) !== '', `${branch} was wrongly deleted`)
     archiveSession(proj, id)
   }

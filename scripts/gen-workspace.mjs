@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = dirname(here)
-const DSH_VERSION = '0.1.1-rc.2'
+const DSH_VERSION = '0.1.2-rc.1'
 const T = (n) => '\t'.repeat(n)
 const stockPath = join(root, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
 const regionPath = join(root, 'plugins', 'arxa-sidebar', 'lib', 'workspace-region.snippet.txt')
@@ -47,7 +47,7 @@ out = out.replace(/[\/][\/]#[ ]sourceMappingURL=client[.]js[.]map\s*$/m, '')
 
 // 2. identity renames
 out = out.replace('id: "@deepseek-ai/dsh-client-ui-workspace",', 'id: "arxa-sidebar-workspace",')
-out = out.replaceAll('qDHVXG_', 'aXa_wsb_')
+out = out.replaceAll('bhn1Oq_', 'aXa_wsb_')
 out = out.replaceAll('YDXeBa_', 'aXa_wsr_')
 out = out.replaceAll('_G5b-a_', 'aXa_wsp_')
 for (const mod of ['Rows', 'WorkspacePicker', 'WorkspaceBrowser']) {
@@ -123,15 +123,19 @@ out = out.replace(GROUP_KIDS, [
 ].join('\n'))
 // …and close the conditional spread after the item expression — the
 // sessions map line is the unique witness that the item just ended.
+// dsh 0.1.2-rc.1 (2026-09-05): the map line changed shape — the stock
+// overflow control became collapsedSessionRows() (blank sessions ride
+// free of COLLAPSED_SESSION_LIMIT), so the witness is the new
+// sessionsExpanded/collapsed.rows select. Uniqueness re-verified.
 const GROUP_ITEM_END = [
   T(9) + '}),',
-  T(9) + '(expandedSessionGroups.includes(group.key) ? group.sessions : group.sessions.slice(0, COLLAPSED_SESSION_LIMIT)).map((node) => {',
+  T(9) + '(sessionsExpanded ? group.sessions : collapsed.rows).map((node) => {',
 ].join('\n')
 if (!out.includes(GROUP_ITEM_END) || out.indexOf(GROUP_ITEM_END) !== out.lastIndexOf(GROUP_ITEM_END)) throw new Error('group item end anchor missing/dup — stock shape moved?')
 out = out.replace(GROUP_ITEM_END, [
   T(9) + '})]),',
   T(9) + 'ARXA_LEAF_FILES(group),',
-  T(9) + '(expandedSessionGroups.includes(group.key) ? group.sessions : group.sessions.slice(0, COLLAPSED_SESSION_LIMIT)).map((node) => {',
+  T(9) + '(sessionsExpanded ? group.sessions : collapsed.rows).map((node) => {',
 ].join('\n'))
 
 // 6c. leaf row click = stock expand/collapse AND selection (the New
@@ -148,6 +152,19 @@ out = out.replace(ROW_TOGGLE, 'onClick: () => { onToggle(); ARXA_SELECT_WS(row.w
 const MENU_ANCHOR = 'actions !== void 0 && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {'
 if (!out.includes(MENU_ANCHOR) || out.indexOf(MENU_ANCHOR) !== out.lastIndexOf(MENU_ANCHOR)) throw new Error('menu anchor missing/dup — stock shape moved?')
 out = out.replace(MENU_ANCHOR, 'false && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {')
+
+// 6e. (Q6, grilled 2026-09-02) the browser stashes the view store's
+//     actions in the region's `arxaViewActions` so orgStore.revealSession
+//     can open the stock leaf group (setGroupExpanded) from outside React.
+const VIEW_ACTIONS = 'const groupExpansion = useStore((s) => s.groupExpansion);'
+if (!out.includes(VIEW_ACTIONS) || out.indexOf(VIEW_ACTIONS) !== out.lastIndexOf(VIEW_ACTIONS)) throw new Error('view actions anchor missing/dup — stock shape moved?')
+out = out.replace(VIEW_ACTIONS, VIEW_ACTIONS + '\n' + T(3) + 'arxaViewActions = actions;')
+
+// 6f. (Q6) every session row carries its id in the DOM so revealSession can
+//     scrollIntoView the resumed/opened row once the tree has mounted it.
+const SESSION_ROW = 'className: clsx(Rows_module_css_default.sessionRow, selected && Rows_module_css_default.selected, menuOpen && Rows_module_css_default.menuOpen,'
+if (!out.includes(SESSION_ROW) || out.indexOf(SESSION_ROW) !== out.lastIndexOf(SESSION_ROW)) throw new Error('session row anchor missing/dup — stock shape moved?')
+out = out.replace(SESSION_ROW, '"data-session-id": node.id, ' + SESSION_ROW)
 
 // 6z. (D83) the trash surface rides the GROUPED tree's tail: injected as
 //      the last child of the treeBody (after the org-groups list, before
@@ -210,7 +227,17 @@ const ourApply = [
   T(3) + '// — the lookup chain falls back per-key to en (enOver merged), so a',
   T(3) + '// missing translation shows English, never a raw key.',
   T(3) + 'ctx.effect(() => ctx.locale.register(NS, { zh, en: { ...en, ...enOver }, pl: plOver, fr: frOver }), "arxa-sidebar-workspace: dictionaries");',
-  T(3) + 'orgHostDescription = ctx.get("connection").hostDescription;',
+  T(3) + 'orgHostInfo = {',
+  T(4) + '// dsh 0.1.2-rc.1: connection.hostDescription is gone — the host-info',
+  T(4) + '// face is now the remote $host snapshot, re-read on connection/reset',
+  T(4) + '// (mirrors the stock ui-workspace apply).',
+  T(4) + 'getSnapshot: () => ctx.remote?.$host,',
+  T(4) + 'subscribe: (listener) => ctx.on("connection/reset", listener)',
+  T(3) + '};',
+  T(3) + '// dsh 0.1.2-rc.1: the stock apply provideRoot\'s the workspaces hook —',
+  T(3) + '// mirror it so framework-owned consumers of the root hook (and the',
+  T(3) + '// slot runtime\'s standard useWorkspaces) still see a live store.',
+  T(3) + 'try { ctx.slots.provideRoot({ hooks: { workspaces: ctx.get("workspaces").list } }) } catch { /* degrade */ }',
   T(3) + '// Client runtime sessions service (2026-08-30): open(id) focuses a',
   T(3) + '// conversation into the content area; clear() empties it and wipes',
   T(3) + '// the persisted selection. arxa drives the content area — resume',
@@ -259,14 +286,21 @@ const ourApply = [
   T(5) + '// legacy org-level fallback is GONE (it created org-root worktrees).',
   T(5) + 'const s = String(workspaceId ?? "");',
   T(5) + 'const i = s.indexOf("|");',
-  T(5) + 'if (i > 0 && i < s.length - 1) orgStore.mutate("workspace.new-session", { orgId: s.slice(0, i), workspace: s.slice(i + 1) }).catch(() => {});',
+  T(5) + '// Close the loop like the shell CTA (found live 2026-09-02): create',
+  T(5) + '// alone left the composer dead — the row landed in the tree but the',
+  T(5) + '// conversation never opened until a second, manual open. Same chain',
+  T(5) + '// as the `open` lever below: session.open → reveal → conversation focus.',
+  T(5) + 'if (i > 0 && i < s.length - 1) orgStore.mutate("workspace.new-session", { orgId: s.slice(0, i), workspace: s.slice(i + 1) }).then((row) => {',
+  T(6) + 'if (!row || typeof row.id !== "string") return;',
+  T(6) + 'return orgStore.mutate("session.open", { orgId: s.slice(0, i), sessionId: row.id }).then(() => { try { orgStore.revealSession(row.id) } catch { /* presentation */ } return arxaOpenConversation(row.id); });',
+  T(5) + '}).catch(() => {});',
   T(4) + '},',
   T(4) + 'open: (sessionId) => {',
   T(5) + 'const orgId = orgOfSession(sessionId);',
   T(5) + '// Host revive first (spawns the engine conversation when the row',
   T(5) + '// lacks one), then the mutate-carried refresh lands the fresh',
   T(5) + '// dshSessionId, THEN focus the conversation — dsh own row-open call.',
-  T(5) + 'if (orgId !== void 0) orgStore.mutate("session.open", { orgId, sessionId }).then(() => arxaOpenConversation(sessionId)).catch(() => {});',
+  T(5) + 'if (orgId !== void 0) orgStore.mutate("session.open", { orgId, sessionId }).then(() => { try { orgStore.revealSession(sessionId) } catch { /* presentation */ } return arxaOpenConversation(sessionId); }).catch(() => {});',
   T(4) + '},',
   T(4) + '// Local derivation already matches session + org names (Q4); the content',
   T(4) + '// search fetch is an honest empty — we hold no transcript index.',
@@ -293,7 +327,7 @@ const ourApply = [
   T(5) + 'return { workspaceId: (s.orgs.find((o) => o.open) || {}).id };',
   T(4) + '},',
   T(4) + 'trash: () => orgStore.toggleTrash(),',
-  T(4) + 'hooks: { directoryFlow: orgNoFlow, hostDescription: orgHostDescription },',
+  T(4) + 'hooks: { directoryFlow: orgNoFlow, hostInfo: orgHostInfo },',
   T(3) + '});',
   T(3) + 'ctx.slots.inject("sidebar.workspaces", () => ctx.slots.register({',
   T(4) + 'name: "sidebar.workspaces",',
@@ -314,18 +348,47 @@ const ourApply = [
   T(4) + 'name: "conversation.hero.workspace",',
   T(4) + 'locale: NS',
   T(3) + '}, ArxaHeroGuide));',
-  T(3) + '// Git card mount (Part B S4 fix, 2026-09-01): the input dock is the',
-  T(3) + '// framework strip rendered directly above the composer bar in every',
-  T(3) + '// session-bound phase. The hero-portal first cut crashed the hero slot',
-  T(3) + '// (React #310, conditional useMemo) and would unmount with the hero',
-  T(3) + '// anyway once a session went active. todo=0, goal=10, card=30 → the',
-  T(3) + '// card sits nearest the bar; landing (no session zone) stays clean.',
-  T(3) + 'ctx.slots.inject("conversation.input.dock", () => ctx.slots.register({',
-  T(4) + 'name: "conversation.input.dock",',
-  T(4) + 'id: "arxa-git-card",',
-  T(4) + 'order: 30,',
+  T(3) + '// Composer breadcrumb (found live 2026-09-02): dsh unmounts the hero slot once a',
+  T(3) + '// conversation is open, so the path chip must live in the composer left zone',
+  T(3) + '// (conversation.input.left, kind:list, scope:session, nothing stock registers there).',
+  T(3) + 'ctx.slots.inject("conversation.input.left", () => ctx.slots.register({',
+  T(4) + 'name: "conversation.input.left",',
+  T(4) + 'id: "arxa-crumbs",',
+  T(4) + 'order: 0,',
+  T(4) + 'locale: NS,',
+  T(4) + 'inject: (sessionId) => ({ sessionId })',
+  T(3) + '}, ArxaCrumbBar));',
+  T(3) + '// Preset chip corner (2026-09-03): the stock seat lives on the hero row',
+  T(3) + '// ABOVE the card; the product wants it inside the card, top-right.',
+  T(3) + '// conversation.input.overlay (kind:list, scope:session) is the card-top',
+  T(3) + '// anchor — ArxaPresetCorner re-renders the stock entry there and the',
+  T(3) + '// hero-row copy is CSS-hidden. Locale is the seat namespace so `t`',
+  T(3) + '// resolves the stock labels.',
+  T(3) + 'ctx.slots.inject("conversation.input.overlay", () => ctx.slots.register({',
+  T(4) + 'name: "conversation.input.overlay",',
+  T(4) + 'id: "arxa-preset-corner",',
+  T(4) + 'order: 0,',
+  T(4) + 'locale: "settings.agentPreset",',
+  T(4) + 'inject: () => ({ slots: ctx.slots })',
+  T(3) + '}, ArxaPresetCorner));',
+  T(3) + '// Agent-capability placeholders (2026-09-03, Q4): header.actions is',
+  T(3) + '// kind:list / replaceRisk:none, so these sit BESIDE the stock',
+  T(3) + '// agent-preset (order -10) and job-list (order 20) entries. Orders',
+  T(3) + '// bracket the stock job chip so the empty and live states occupy the',
+  T(3) + '// same place in the row. NOT header.lineage: that is kind:single and',
+  T(3) + '// already held by the subagent catalog we are trying to surface.',
+  T(3) + 'ctx.slots.inject("conversation.session.header.actions", () => ctx.slots.register({',
+  T(4) + 'name: "conversation.session.header.actions",',
+  T(4) + 'id: "arxa-jobs-empty",',
+  T(4) + 'order: 19,',
   T(4) + 'locale: NS',
-  T(3) + '}, ArxaGitCardDock));',
+  T(3) + '}, ArxaJobsPlaceholder));',
+  T(3) + 'ctx.slots.inject("conversation.session.header.actions", () => ctx.slots.register({',
+  T(4) + 'name: "conversation.session.header.actions",',
+  T(4) + 'id: "arxa-subagents-empty",',
+  T(4) + 'order: 21,',
+  T(4) + 'locale: NS',
+  T(3) + '}, ArxaSubagentsPlaceholder));',
   T(3) + '// Welcome gate (Phase 2, conformance plan): the frame declares',
   T(3) + '// shell.overlay (kind:list, scope:root) — the gate registers THERE',
   T(3) + '// instead of fighting the shell with position:fixed + z-index',

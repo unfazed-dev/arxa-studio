@@ -17,8 +17,6 @@ async function fromDsh(pkg, sub) {
       homedir(), '.dsh', 'profiles', 'node_modules', pkg, sub)).href)
   }
 }
-const { installSettingsSection, settingsNamespace } =
-  await fromDsh('@deepseek-ai/dsh-settings', 'lib/index.js')
 const { default: z } = await fromDsh('@deepseek-ai/schemastery', 'lib/index.mjs')
 import { createOrgServer } from './org-server.js'
 import { startOrgFollow, readOpenOrg } from './follow.js'
@@ -39,7 +37,10 @@ export function defaultSettings() {
   return { maxEditBytes: 5_000_000, tokenTtlSeconds: 120 }
 }
 
-const NS = settingsNamespace('arxa-artifact-viewer')
+// dsh 0.1.2-rc.1 dropped the settingsNamespace() branding helper; the
+// settings provider validates kebab-case itself (installSection throws
+// TypeError on a bad namespace), so the plain string is the namespace.
+const NS = 'arxa-artifact-viewer'
 export const SCHEMA = z.object({
   maxEditBytes: z.number().min(1024).default(5_000_000).description(
     'Files above this size open read-only (D82 hard guard)'),
@@ -194,9 +195,16 @@ export function apply(ctx, config) {
     entry.tokenTtlSeconds = TOKEN_TTL_CEILING_SECONDS
   }
   current = entry
-  installSettingsSection(ctx, NS, SCHEMA, entry, {
-    setSource: () => { /* host half reads currentSettings(); browser half reads settings.describe */ },
-    onChange: (next) => { if (next && typeof next === 'object') current = { ...current, ...next } },
+  // dsh 0.1.2-rc.1 replaced the exported installSettingsSection helper with
+  // the service method SettingsProvider#installSection. The old helper was
+  // OPTIONAL-dependent (ctx.inject — no settings service mounted means none
+  // of this runs and the composed entry keeps working), so this keeps the
+  // dynamic inject rather than declaring a hard dependency in `inject`.
+  ctx.inject(['settings'], (sctx) => {
+    sctx.settings.installSection(ctx, NS, SCHEMA, entry, {
+      setSource: () => { /* host half reads currentSettings(); browser half reads settings.describe */ },
+      onChange: (next) => { if (next && typeof next === 'object') current = { ...current, ...next } },
+    })
   })
   // Boot must survive a follow failure — a plugin throwing at apply() kills
   // the engine cold (theme-accent D84 lesson). Log loud, never crash.

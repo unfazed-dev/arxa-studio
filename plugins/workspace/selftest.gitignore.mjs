@@ -15,7 +15,7 @@ import path from 'node:path'
 
 import { scaffoldOrgInRoot, scaffoldProject } from './lib/scaffold.js'
 import { getTemplate, TEMPLATE_VERSION } from './lib/template.js'
-import { PROJECT_GITIGNORE_V4, ensureProjectGitignore } from './lib/gitignore.js'
+import { PROJECT_GITIGNORE_V4, TARGET_BUILD_LINES, ensureProjectGitignore, ensureGeneratedIgnored } from './lib/gitignore.js'
 import { openOrg, MIGRATIONS } from './lib/migrate.js'
 import { writeOrgStampVersion } from './lib/stamp.js'
 import { initOrgRepo, initProjectRepo, runGit } from '../git-workspace/lib/index.js'
@@ -142,6 +142,61 @@ try {
     const unchanged = fs.readFileSync(path.join(customProj, '.gitignore'), 'utf8')
     assert.equal(unchanged, customIgnore, 'pre-existing .gitignore is never overwritten')
   })
+
+  // --- TARGET_BUILD_LINES: what git ACTUALLY does, not what the string says --
+  // The whole rule is a claim about git's matching behaviour, so it is tested
+  // by staging a real tree in a real repo. A string assertion here would have
+  // passed happily while `!/build/` silently failed to re-include anything.
+  check('a target build/ is ignored at depth while template v2\'s root container survives', () => {
+    const d = fs.mkdtempSync(path.join(tmp, 'buildignore-'))
+    runGit(['init'], { cwd: d })
+    fs.writeFileSync(path.join(d, '.gitignore'), PROJECT_GITIGNORE_V4)
+    const put = (rel, body) => {
+      fs.mkdirSync(path.join(d, path.dirname(rel)), { recursive: true })
+      fs.writeFileSync(path.join(d, rel), body)
+    }
+    // Template v2's MANAGED container, literally named `build` at the root.
+    put('build/brief/spec.md', 'user content, never generated\n')
+    // A target the platform-scoped rules cannot see: not named after a
+    // platform, which is exactly the case that leaked (RESTO tier 2).
+    put('06-build/application/backoffice/pubspec.yaml', 'name: backoffice\n')
+    put('06-build/application/backoffice/lib/menu.dart', 'class Menu {}\n')
+    put('06-build/application/backoffice/build/unit_test_assets/NOTICES.Z', 'junk\n')
+    put('06-build/application/backoffice/build/native_assets.json', '{}\n')
+    // The website track leaked the same way.
+    put('06-build/website/landing/build/out.js', 'junk\n')
+    runGit(['add', '-A'], { cwd: d })
+    const tracked = (runGit(['ls-files'], { cwd: d }) ?? '').split('\n').filter(Boolean)
+
+    assert.ok(tracked.includes('build/brief/spec.md'), 'the v2 managed root container must stay tracked — the SAFETY invariant')
+    assert.ok(tracked.includes('06-build/application/backoffice/lib/menu.dart'), 'real source next to the build dir must stay tracked')
+    assert.ok(tracked.includes('06-build/application/backoffice/pubspec.yaml'), 'the stack marker must stay tracked')
+    assert.deepEqual(tracked.filter((f) => f.includes('/build/')), [], 'no nested build output may be tracked')
+  })
+
+  check('ensureGeneratedIgnored patches a project that predates the rule, and is idempotent', () => {
+    const d = fs.mkdtempSync(path.join(tmp, 'patch-'))
+    // Exactly what an already-scaffolded project has on disk: the v4 file
+    // as it shipped BEFORE these lines existed.
+    const old = PROJECT_GITIGNORE_V4.split('\n').filter((l) => !TARGET_BUILD_LINES.includes(l)).join('\n')
+    fs.writeFileSync(path.join(d, '.gitignore'), old)
+    assert.equal(ensureGeneratedIgnored(d).changed, true, 'a pre-rule project is patched')
+    const after = fs.readFileSync(path.join(d, '.gitignore'), 'utf8').split('\n')
+    for (const line of TARGET_BUILD_LINES) assert.ok(after.includes(line), 'missing line: ' + line)
+    assert.equal(ensureGeneratedIgnored(d).changed, false, 'idempotent')
+    assert.equal(ensureGeneratedIgnored(d).reason, 'already')
+  })
+
+  check('ensureGeneratedIgnored keeps a human\'s own rules and never invents a file', () => {
+    const d = fs.mkdtempSync(path.join(tmp, 'human-'))
+    fs.writeFileSync(path.join(d, '.gitignore'), '# mine\nsecret-notes/\n')
+    assert.equal(ensureGeneratedIgnored(d).changed, true)
+    const after = fs.readFileSync(path.join(d, '.gitignore'), 'utf8')
+    assert.ok(after.startsWith('# mine\nsecret-notes/\n'), 'the human\'s rules stay first and intact')
+    const empty = fs.mkdtempSync(path.join(tmp, 'none-'))
+    assert.deepEqual(ensureGeneratedIgnored(empty), { changed: false, reason: 'no-gitignore' }, 'no .gitignore is never created here — that is ensureProjectGitignore\'s job')
+  })
+
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true })
 }

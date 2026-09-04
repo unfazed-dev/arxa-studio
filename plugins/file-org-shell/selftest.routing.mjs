@@ -18,7 +18,7 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { createOrgLifecycle } from './lib/index.js'
-import { runGit, listSessions, parkedSessions, RoutingRefusedError } from '../git-workspace/lib/index.js'
+import { runGit, listSessions, parkedSessions, RoutingRefusedError, sessionLeaf } from '../git-workspace/lib/index.js'
 
 let passed = 0
 function ok(cond, label) {
@@ -74,8 +74,9 @@ try {
     'B2 FIXED: it is NOT the org repo (the old silent fallback)',
   )
   ok(
-    ps.worktree.startsWith(fs.realpathSync(proj.path)) || ps.worktree.startsWith(proj.path),
-    'the worktree directory itself lives under the project',
+    ps.worktree === path.join(org.path, '.arxa', 'worktrees', ps.id) ||
+      ps.worktree === path.join(fs.realpathSync(org.path), '.arxa', 'worktrees', ps.id),
+    "the worktree directory itself lives under the ORG's .arxa/worktrees root, at the identity path — only the branch and registry stay in the project repo (Q2/D72 path-identity rewrite)",
   )
 
   // The registry is repo-local (D38): the row lands in the project's registry.
@@ -143,17 +144,45 @@ try {
   // still start at note-001, and advance within alpha alone. Drawing the
   // counter from the org registry — the pre-D98 behaviour — would have made
   // alpha's first note-002 and let two projects share one namespace.
-  // (Containers whose folder starts with a digit, e.g. `02-design`, never
-  //  advance the counter at all: nextSessionName's prefix regex requires a
-  //  leading letter. Pre-existing, unrelated to routing — noted, not fixed.)
+  // Q2 (2026-09-03): the counter now lives on the minted ID
+  // (`note-wt-<YYMMDD>-<NNN>`), scoped per workspace PER DAY. Per-repo
+  // isolation is unchanged and is what this case exists to prove.
+  // (The old `02-design` quirk — a digit-leading folder never advancing the
+  //  counter, because nextSessionName's prefix regex demanded a leading
+  //  letter — does NOT carry over: nextSessionId matches the full base
+  //  verbatim, so digit-leading containers count correctly now.)
+  const ymd = (d = new Date()) =>
+    String(d.getFullYear() % 100).padStart(2, '0') +
+    String(d.getMonth() + 1).padStart(2, '0') +
+    String(d.getDate()).padStart(2, '0')
   const aAuto1 = await h.newSession(undefined, 'projects/alpha/notes')
   const aAuto2 = await h.newSession(undefined, 'projects/alpha/notes')
   const ps2 = await h.newSession(undefined, 'projects/beta/notes')
+  const seq = (id) => Number(/-(\d+)$/.exec(id)[1])
+  // Q2 (2026-09-03): the id is now the full `<org>/<workspace>/<leaf>` disk
+  // path, not a bare leaf — check the leaf shape and the container prefix
+  // (org folder + workspace string) separately.
+  const leafOk = (id) => new RegExp(`^note-wt-${ymd()}-\\d{3}$`).test(sessionLeaf(id))
   ok(
-    aAuto1.name === 'note-001' && aAuto2.name === 'note-002',
-    `alpha's counter starts fresh and advances within its own repo (${aAuto1.name}, ${aAuto2.name})`,
+    aAuto1.id.startsWith(`${org.slug}/projects/alpha/notes/`) &&
+      aAuto2.id.startsWith(`${org.slug}/projects/alpha/notes/`) &&
+      leafOk(aAuto1.id) && leafOk(aAuto2.id) &&
+      seq(aAuto2.id) === seq(aAuto1.id) + 1,
+    `alpha's two sessions ascend consecutively within its own container (${aAuto1.id}, ${aAuto2.id})`,
   )
-  ok(ps2.name === 'note-001', `the counter is per-repo: beta's first is its own note-001 (${ps2.name})`)
+  // D98's per-repo counters are superseded by Q2/Q3's per-CONTAINER counter,
+  // not by a shared global one: mintSessionPath anchors its counter regex to
+  // `<org>/<workspace>` (sessions.js dir/base), so beta's `notes` container
+  // counts on its own, independent of alpha's. Global uniqueness no longer
+  // needs a shared numeric namespace at all — the full `<org>/<workspace>/`
+  // prefix baked into every id makes two containers' ids structurally
+  // distinct even when both restart at -001. That is the deliberate payoff
+  // of readable, path-shaped ids: beta's first session DOES restart at -001.
+  // (parkedSessions below still proves global uniqueness, via the aggregate.)
+  ok(
+    ps2.id.startsWith(`${org.slug}/projects/beta/notes/`) && leafOk(ps2.id) && seq(ps2.id) === 1,
+    `beta's own container starts its own count at -001, independent of alpha's (${ps2.id})`,
+  )
   ok(
     commonDir(ps2.worktree) === fs.realpathSync(path.join(proj2.path, '.git')),
     'the second project session lands in the second project repo',

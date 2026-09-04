@@ -8,6 +8,7 @@
 // context-file stub (org root's copy is the thin standing-instructions
 // layer, D1-capped).
 
+import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { slugify, uniqueSlug } from './slug.js'
@@ -46,7 +47,13 @@ function executeTemplateTree(spec, targetPath, ctx) {
     for (let i = 1; i < parts.length; i++) created.add(path.join(targetPath, ...parts.slice(0, i)))
   }
   for (const file of spec.files) {
-    fs.writeFileSync(path.join(targetPath, file.path), file.content(ctx))
+    // A content function may return null to decline: some files only make
+    // sense when the environment supplies a fact (the .fvmrc SDK pin needs a
+    // real installed version). Writing a placeholder instead would be worse
+    // than absence — the gate reads these, and a wrong pin reds every target.
+    const body = file.content(ctx)
+    if (body === null || body === undefined) continue
+    fs.writeFileSync(path.join(targetPath, file.path), body)
     const abs = path.dirname(path.join(targetPath, file.path))
     created.add(abs)
     const rel = path.relative(targetPath, abs)
@@ -66,6 +73,28 @@ function executeTemplateTree(spec, targetPath, ctx) {
     try {
       if (fs.readdirSync(dir).length === 0) fs.writeFileSync(path.join(dir, '.gitkeep'), '')
     } catch { /* best effort — the tree is still correct without it */ }
+  }
+}
+
+/**
+ * The Flutter version installed right now, or null when Flutter is absent.
+ *
+ * The SDK pin has to name a REAL version to be worth anything: "stable" moves
+ * under you, which is the opposite of the reproducibility the pin exists for.
+ * So the pin records what this developer actually builds with. No Flutter
+ * installed means no pin at all — the project is not a Flutter project, or the
+ * toolchain arrives later, and an invented version would red every target.
+ */
+function detectFlutterVersion() {
+  try {
+    const r = spawnSync('flutter', ['--version', '--machine'], {
+      encoding: 'utf8', timeout: 20_000, stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    if (r.status !== 0 || !r.stdout) return null
+    const v = JSON.parse(r.stdout)?.frameworkVersion
+    return typeof v === 'string' && /^\d+\.\d+\.\d+/.test(v) ? v : null
+  } catch {
+    return null
   }
 }
 
@@ -138,7 +167,7 @@ export function scaffoldProject(orgPath, displayName, { targets = {} } = {}) {
   const tree = typeof template.project.projectDirs === 'function'
     ? { ...template.project, dirs: template.project.projectDirs(chosen) }
     : template.project
-  executeTemplateTree(tree, projectPath, { displayName })
+  executeTemplateTree(tree, projectPath, { displayName, flutterVersion: detectFlutterVersion() })
   // No project-level stamp (B13): the org's stamp governs the whole tree.
   const manifest = createManifest(displayName, null)
   manifest.targets = chosen

@@ -366,6 +366,11 @@ try {
       if (u.endsWith('/pulls/9/merge')) {
         return { ok: false, status: 409, json: async () => ({ message: 'Head branch was modified. Review and try the merge again.' }) }
       }
+      if (u.endsWith('/pulls/10/merge')) {
+        // GitHub's real reply when another session landed first and this
+        // branch now conflicts (measured on kitchen-project #3, 2026-09-03).
+        return { ok: false, status: 405, json: async () => ({ message: 'Pull Request has merge conflicts' }) }
+      }
       if (u.endsWith('/pulls/7')) {
         return { ok: true, status: 200, json: async () => ({ number: 7, state: 'closed', merged: true, mergeable_state: 'unknown', head: { ref: 'arxa/session/s1', sha: 'headsha1' } }) }
       }
@@ -373,9 +378,26 @@ try {
         // No `head` object at all — the flattening must not throw.
         return { ok: true, status: 200, json: async () => ({ number: 8, state: 'open', merged: false }) }
       }
+      if (u.endsWith('/issues/7/comments') && opts.method === 'POST') {
+        return { ok: true, status: 201, json: async () => ({ id: 4242, html_url: 'https://github.com/octocat/framed/pull/7#issuecomment-4242' }) }
+      }
       return { ok: false, status: 404, json: async () => ({ message: 'no route: ' + u }) }
     }
     const pbase = { owner: 'octocat', name: 'framed', accessToken: 't', fetch: prFetch, apiBase: 'https://api.github.com' }
+
+    // ---- stage comments (2026-09-03) — PRs are issues for comment purposes
+    {
+      const { prCommentApi } = await import('./lib/index.js')
+      const c = await prCommentApi({ ...pbase, number: 7, body: '**arxa · ci**\n\ngreen' })
+      const creq = seen.at(-1)
+      ok(creq.method === 'POST' && creq.url === 'https://api.github.com/repos/octocat/framed/issues/7/comments',
+        'frame: prCommentApi POSTs the documented issue-comments endpoint (PRs are issues)')
+      ok(creq.body.body === '**arxa · ci**\n\ngreen', 'frame: prCommentApi sends the body verbatim')
+      ok(c.id === 4242 && c.url.endsWith('#issuecomment-4242'), 'frame: prCommentApi returns { id, url }')
+      await assert.rejects(() => prCommentApi({ ...pbase, number: 7, body: '   ' }), /body is required/)
+      passed++
+      console.log('  ✓ frame: prCommentApi refuses an empty body before touching the network')
+    }
 
     const merged = await prMergeApi({ ...pbase, number: 7, sha: 'headsha1', subject: 'feat(core): the thing' })
     const req = seen.at(-1)
@@ -392,6 +414,15 @@ try {
     await assert.rejects(() => prMergeApi({ ...pbase, number: 9, sha: 'stale' }), /head moved since review \(409\)/)
     passed++
     console.log('  ✓ frame: prMergeApi names the 409 head-moved refusal specifically')
+
+    // 405 is "not mergeable" — an ordinary, actionable state (a parallel
+    // session landed first), so it must come back as a REASON the caller can
+    // show, not as an exception carrying a bare HTTP status. It surfaced to
+    // the user as "PR merge failed (405)" until 2026-09-03.
+    const conflicted = await prMergeApi({ ...pbase, number: 10, sha: 'headsha2' })
+    ok(conflicted.merged === false, 'frame: a 405 merge does not report itself merged')
+    ok(conflicted.reason === 'not-mergeable', 'frame: prMergeApi names the 405 conflict refusal instead of throwing an HTTP status')
+    ok(/merge conflicts/.test(conflicted.message), 'frame: prMergeApi keeps GitHub\'s own explanation for the user')
 
     const st = await prStateApi({ ...pbase, number: 7 })
     ok(seen.at(-1).method === 'GET' && seen.at(-1).url === 'https://api.github.com/repos/octocat/framed/pulls/7',
@@ -480,6 +511,41 @@ try {
   ok(failure.status === 'completed' && failure.conclusion === 'failure' && failure.asleep === false, 'frame: completed-failure run maps conclusion:"failure"')
 
   await assert.rejects(() => workflowRunsApi({ ...wbase, name: 'missing-repo' }), /workflow runs failed \(404\)/, 'frame: workflowRunsApi throws loud on a non-ok response')
+
+  // ---- Q8 (2026-09-03): run control — rerun + cancel ----------------------
+  // Both are empty-body POSTs, so the STATUS is the whole answer.
+  {
+    const { rerunRunApi, cancelRunApi } = await import('./lib/index.js')
+    const hits = []
+    const ctlFetch = async (url, opts = {}) => {
+      const u = String(url)
+      hits.push({ url: u, method: opts.method ?? 'GET', headers: opts.headers ?? {} })
+      if (/\/actions\/runs\/9\/(rerun|rerun-failed-jobs|cancel)$/.test(u)) return { ok: true, status: 202, json: async () => ({}) }
+      if (/\/actions\/runs\/8\/cancel$/.test(u)) return { ok: false, status: 409, json: async () => ({}) }
+      return { ok: false, status: 404, json: async () => ({}) }
+    }
+    const cbase = { owner: 'octocat', name: 'framed', accessToken: 't', fetch: ctlFetch, apiBase: 'https://api.github.com' }
+
+    await rerunRunApi({ ...cbase, runId: 9 })
+    ok(hits.at(-1).method === 'POST' && hits.at(-1).url.endsWith('/actions/runs/9/rerun'), 'frame: rerunRunApi POSTs the documented rerun route')
+    ok(hits.at(-1).headers['X-GitHub-Api-Version'] === '2022-11-28', 'frame: rerunRunApi pins the REST API version')
+
+    await rerunRunApi({ ...cbase, runId: 9, failedOnly: true })
+    ok(hits.at(-1).url.endsWith('/actions/runs/9/rerun-failed-jobs'), 'frame: failedOnly re-runs only the failed jobs (cheaper on a self-hosted runner)')
+
+    const cancelled = await cancelRunApi({ ...cbase, runId: 9 })
+    ok(hits.at(-1).method === 'POST' && cancelled.outcome === 'cancellation-requested', 'frame: cancelRunApi requests cancellation')
+
+    // 409 means the run already finished — a state answer, not a failure the
+    // user can act on, so it must not surface as an error.
+    const already = await cancelRunApi({ ...cbase, runId: 8 })
+    ok(already.ok === true && already.outcome === 'already-finished', 'frame: cancelling a finished run reports already-finished, never throws')
+
+    await assert.rejects(() => rerunRunApi({ ...cbase, runId: 404 }), /rerun failed \(404\)/, 'frame: rerunRunApi throws loud on a non-ok response')
+    await assert.rejects(() => cancelRunApi({ ...cbase, runId: 404 }), /cancel failed \(404\)/, 'frame: cancelRunApi throws loud on a non-ok response')
+    passed += 7
+    console.log('  ✓ frame: rerunRunApi + cancelRunApi verified (routes, failedOnly, 409 already-finished, loud failures)')
+  }
   passed++
   console.log('  ✓ frame: workflowRunsApi verified (queued/success/failure mapping, asleep flags, url shape)')
 

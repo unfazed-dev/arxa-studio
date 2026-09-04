@@ -3,7 +3,8 @@
  * (durable worktree/branch record) and dsh (conversation record).
  *
  * The bridge is a set of FOUR FACES injected through createOrgLifecycle({
- * dsh: faces }): spawn({cwd,name}), attach(id), list(), archive(ids). The
+ * dsh: faces }): spawn({cwd,name}), attach(id), list(), archive(ids) — plus
+ * the optional fifth hasUserMessage(id) → boolean (Q3 empty-drop probe). The
  * deployment (arxa-sidebar host half) builds the real faces from dsh's
  * in-process cordis services — ctx.sessions (SessionStore, ctx key
  * "sessions": create(undefined, { meta: { cwd } }) is the sessions.create
@@ -50,6 +51,25 @@ export function createDshBridge(faces = {}) {
     }
   }
 
+  /**
+   * Q1 follow-up (2026-09-03): pin an existing dsh session's header title to
+   * the registry name (resume + rename). Spawn pins at birth; sessions born
+   * earlier kept dsh's auto title on reopen. Best-effort — {ok:false} when
+   * dsh is unavailable or the session is not live in-process.
+   */
+  async function retitle(id, name) {
+    if (typeof f.retitle !== 'function') return { ok: false, reason: 'dsh-unavailable' }
+    if (typeof id !== 'string' || id === '' || typeof name !== 'string' || name.trim() === '') {
+      return { ok: false, reason: 'dsh-unavailable' }
+    }
+    try {
+      const out = await f.retitle(id, name)
+      return out && typeof out === 'object' ? out : { ok: true }
+    } catch (err) {
+      return { ok: false, reason: 'dsh-unavailable', error: String(err?.message ?? err) }
+    }
+  }
+
   /** dsh's live session rows: [{ id, displayTitle?, running?, pendingInteraction? }]. */
   async function list() {
     if (typeof f.list !== 'function') return []
@@ -74,7 +94,29 @@ export function createDshBridge(faces = {}) {
     }
   }
 
-  return { spawn, attach, list, archive }
+  /**
+   * Q3 empty-session probe (2026-09-02): has a user message ever landed in
+   * this dsh session? → {ok:true,value:boolean} | {ok:false,reason}.
+   * Unknown/unavailable is NOT "empty" — callers may only act (drop) on
+   * `ok && value === false`; doubt keeps the row.
+   */
+  async function hasUserMessage(id) {
+    if (typeof f.hasUserMessage !== 'function') return { ok: false, reason: 'dsh-unavailable' }
+    try {
+      const out = await f.hasUserMessage(id)
+      if (typeof out === 'boolean') return { ok: true, value: out }
+      // Nested bridge: the arxa-sidebar host hands createOrgLifecycle its
+      // own bridge (getBridge()), not raw faces, so the inner answer arrives
+      // in bridge shape. Pass a definite verdict through; anything else is
+      // doubt (seen 2026-09-02: without this the drop never fired live).
+      if (out && typeof out === 'object' && out.ok === true && typeof out.value === 'boolean') return { ok: true, value: out.value }
+      return { ok: false, reason: out && typeof out === 'object' && typeof out.reason === 'string' ? out.reason : 'dsh-unavailable' }
+    } catch (err) {
+      return { ok: false, reason: 'dsh-unavailable', error: String(err?.message ?? err) }
+    }
+  }
+
+  return { spawn, attach, retitle, list, archive, hasUserMessage }
 }
 
 /**

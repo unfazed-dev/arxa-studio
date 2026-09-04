@@ -243,6 +243,27 @@ export function extendSeatbeltArgv (argv, roots) {
 }
 
 /**
+ * The never-grant invariant, enforced where the grant is built rather than only
+ * asserted in the selftest. Every extra root becomes a Seatbelt `(subpath ...)`
+ * or a bwrap `--bind`, so granting `$HOME`, `/`, `/Users` or `/Volumes` would
+ * silently turn `workspace-write` into `danger-full-access`, and any one-segment
+ * path is near-root enough to do the same. `policy.extraWritableRoots` is an
+ * open channel — it takes whatever a caller attaches — so the check belongs here,
+ * not in the one caller that happens to pass a constant today.
+ *
+ * @param {string} root - a canonicalised candidate root.
+ * @returns {boolean} whether it is specific enough to grant.
+ */
+function isGrantableRoot (root) {
+  if (typeof root !== 'string' || root.length === 0) return false
+  const forbidden = [homedir(), '/', '/Users', '/Volumes'].map(canonicalPath)
+  if (forbidden.includes(root)) return false
+  // Both separators: a Windows drive root (`C:\`) must fail this too, and a
+  // rejected grant is always the safe direction — it only narrows the sandbox.
+  return root.split(/[\\/]/).filter(Boolean).length >= 2
+}
+
+/**
  * The arxa sandbox provider: `LocalSandboxProvider` with the runtime-resolved
  * Flutter/Dart toolchain caches added to `workspace-write`'s writable roots.
  * Registers as the same `"sandbox"` service (the name is fixed by
@@ -250,8 +271,16 @@ export function extendSeatbeltArgv (argv, roots) {
  * `id: sandbox` cordis row.
  */
 export default class ArxaSandboxProvider extends LocalSandboxProvider {
-  /** Memoized toolchain roots — resolution shells out, so it runs once. */
-  #toolchainRoots
+  /** Memoized toolchain roots — resolution shells out, so it runs once.
+   *
+   * A PLAIN property, deliberately not a `#private` one. dsh hands every consumer
+   * `ctx.sandbox`, which is a cordis tracking Proxy rather than this instance, and a
+   * JS private field cannot be read through a Proxy — inside the method `this` is the
+   * proxy, which is not an instance of the declaring class, so the read throws
+   * "Cannot read private member #toolchainRoots from an object whose class did not
+   * declare it" and takes every confined spawn down with it. Ordinary properties
+   * forward through the proxy untouched. Do not convert this back to `#`. */
+  toolchainRootsMemo = undefined
 
   /** Injection seam for the selftest (mirrors the base class's `internals`). */
   arxaInternals = {}
@@ -261,23 +290,39 @@ export default class ArxaSandboxProvider extends LocalSandboxProvider {
    * @returns {string[]} canonical existing roots.
    */
   toolchainRoots () {
-    if (this.#toolchainRoots === undefined) {
-      this.#toolchainRoots = (this.arxaInternals.resolveToolchainRoots ?? resolveToolchainRoots)()
+    if (this.toolchainRootsMemo === undefined) {
+      this.toolchainRootsMemo = (this.arxaInternals.resolveToolchainRoots ?? resolveToolchainRoots)()
     }
-    return this.#toolchainRoots
+    return this.toolchainRootsMemo
   }
 
   /**
    * The roots this provider adds BEYOND dsh's own `writableRoots(policy)` —
    * empty for every mode but `workspace-write`, and never a root dsh already
    * grants.
-   * @param {object} policy - the resolved per-call file-effect policy.
+   * @param {object} policy - the resolved per-call file-effect policy, optionally
+   *   carrying `extraWritableRoots` — a per-call grant a caller attaches (e.g.
+   *   claude-code's `~/.claude/projects`).
    * @returns {string[]} the additional canonical roots.
    */
   extraWritableRoots (policy) {
     if (policy.mode !== 'workspace-write') return []
     const already = new Set(writableRoots(policy))
-    return this.toolchainRoots().filter((root) => !already.has(root))
+    // Per-call grants a caller attaches to the policy (claude-code: ~/.claude/projects).
+    // Canonicalised the same way dsh's own roots are — `already` is built from
+    // canonical paths, and an as-spelled grant would neither dedupe against it
+    // nor match anything once Seatbelt/bwrap resolve symlinks themselves.
+    const asked = (Array.isArray(policy.extraWritableRoots) ? policy.extraWritableRoots : []).map(canonicalPath)
+    // The never-grant invariant, applied to the open channel before anything is
+    // granted. A rejected root is dropped, not thrown on: dropping only narrows
+    // the sandbox, while throwing would turn a caller's mistake into a failed
+    // spawn. It is logged so the narrowing is never silent.
+    const requested = asked.filter((root) => {
+      if (isGrantableRoot(root)) return true
+      this.ctx?.logger?.warn?.(`arxa-sandbox: refusing near-root extraWritableRoots grant ${JSON.stringify(root)}`)
+      return false
+    })
+    return [...this.toolchainRoots(), ...requested].filter((root, i, all) => !already.has(root) && all.indexOf(root) === i)
   }
 
   /**

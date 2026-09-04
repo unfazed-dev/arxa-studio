@@ -1,0 +1,146 @@
+# Model switching + self-reported identity — investigation record
+
+Reported: "switching between Claude models doesn't work — I used opus, switched to
+sonnet and haiku, but it was still saying opus", plus "K3 said K1".
+
+## Verdict: the switching pipeline is correct. Nothing was mis-routed.
+
+Updated 2026-09-05 after pushback ("all Claude models replied Opus regardless"): the
+first verdict rested on the CLI's `init` model, which is only what the CLI *resolved*. The
+second pass measured the API's own `message.model` stamp — see "Ground truth" below — and
+ships one change so that stamp is on record for every future turn.
+
+Evidence: the real failing session, read off disk —
+`~/.arxa/dsh/sessions/--Volumes-…-notes-note-wt-260904-003--/…/session.jsonl.zstd`
+(244 KB, last written 23:42, matching the pasted transcript). Multi-frame zstd, so
+`zstdcat` is required — node's `zstdDecompress` returns only the first frame (1 event
+instead of 553).
+
+For each `request/header`: the routed `config`, the `{{model}}` value interpolated into
+the persona line, and the model the Claude child reported at init. The child-reported
+column is the load-bearing one — it comes from the CLI process, not from anything the
+model said.
+
+| # | routed config | persona line says | claude child ran |
+|---|---|---|---|
+| 1 | zai/glm-5.3-flash | glm-5.3-flash | — |
+| 2 | zai/glm-5.3 | glm-5.3 | — |
+| 3 | zai/glm-5.3 (max) | glm-5.3 | — |
+| 4 | claude-code/opus | opus | — |
+| 5 | claude-code/opus | opus | — |
+| 6 | claude-code/opus[1m] (xhigh) | opus[1m] | claude-opus-5[1m] |
+| 7 | claude-code/sonnet (high) | sonnet | claude-sonnet-5 |
+| 8 | zai/glm-5.3 (max) | glm-5.3 | — |
+| 9 | kimi-coding/k3 (max) | **k3** | — |
+| 10 | claude-code/opus[1m] (high) | opus[1m] | claude-opus-5[1m] |
+| 11 | claude-code/haiku | haiku | claude-haiku-4-5-20251001 |
+
+All three columns agree on every row. Switching worked every time, including
+Claude→Claude (#6 opus → #7 sonnet → #10 opus → #11 haiku).
+
+Caveat on scope: rows #4/#5 carry the static `opus` spelling and have no
+`claude-code/session` row — they predate the restart that picked up the F16/F12 fixes.
+The table spans that restart; rows #6-#11 are the post-fix behaviour.
+
+## Ground truth: the API's stamp, not the model's word
+
+Every Anthropic response carries `message.model` — set by the API on the answer itself.
+It is independent of the CLI's alias resolution and of anything the model says in prose.
+
+Measured (`scratchpad/repro-model-switch2.mjs`), one session `3706175e` resumed three
+times with a different `model` each time:
+
+| turn | asked | init (CLI resolved) | API answered | billed |
+|---|---|---|---|---|
+| T1 fresh | haiku | claude-haiku-4-5-20251001 | claude-haiku-4-5-20251001 | same |
+| T2 resume | sonnet | claude-sonnet-5 | **claude-sonnet-5** | same |
+| T3 resume | opus | claude-opus-5 | **claude-opus-5** | same |
+| T4 resume | haiku | claude-haiku-4-5-20251001 | **claude-haiku-4-5-20251001** | same |
+
+All three columns agree on every row. Resume does not pin the model; the API answers with
+the requested one and bills it.
+
+The CLI's own transcript for an earlier RESTO session (`wt-001`, `e531b624`) carries 10
+answers, every one stamped `claude-sonnet-5`. No CLI transcript exists for `wt-003` — that
+is why the API stamp was not on record for the disputed session, and why arxa now records
+it itself (below).
+
+No Fable turn exists in any session log on this machine. If one was run, it never reached
+the request stage; the row would read `claude-fable-5-1[1m]`.
+
+## The two reported symptoms
+
+**"still saying opus"** — turn #7 was routed to sonnet, and the CLI child confirms
+`claude-sonnet-5` actually ran. Its reply to the user was:
+
+> "I'm still the same model — **Claude Opus 5 (1M-token context)** — nothing has
+> switched mid-session."
+
+That is Sonnet denying a switch that had already happened. Turn #11 (haiku, child ran
+`claude-haiku-4-5-20251001`) likewise opened with "**Claude Opus 5** — same as I just
+told you." Both models asserted an identity contradicted by their own persona line.
+
+Why: this conversation is an argument *about* model identity, so every earlier assistant
+turn claiming "I am Claude Opus 5" sits in context. A model continuing that transcript
+weights its own apparent prior statements above one line of system prompt.
+
+**"K3 said K1"** — turn #9 was routed `kimi-coding/k3` and its persona line said `k3`.
+The model invented "k1" *and* invented a citation for it ("the runtime context tells me
+k1"). There is no `k1` anywhere: not in settings, not in dsh, not in the prompt. Pure
+confabulation. That same turn also said "k3".
+
+## Hypotheses tested and refuted
+
+**H1 — `resume` pins the session's model.** Motivated by sdk.d.ts:2405
+(`source: 'resume'` = "model restored while resuming a session"). Measured directly
+(`scratchpad/repro-model-switch.mjs`): a fresh haiku session `8f5bce99`, then resumed
+with `model: 'sonnet'` → init reported `claude-sonnet-5` on the *same* session id.
+An explicit `model` overrides on resume; that doc line describes interactive resume with
+no model specified. **Refuted — do not "fix" this.**
+
+**H2 — `{{model}}` is stale.** `dsh-agent-loop:1025` registers it as
+`context.agent?.options.model` (the agent's seed, never reassigned), which looks stale.
+But `dsh-agent/lib/index.js:262` `installModelSelection` overrides both surfaces from one
+snapshot: `system-prompt/assemble` rewrites the `model` variable and `agent/request`
+rewrites the routed config, deliberately from the same snapshot so the two cannot
+diverge. The table confirms it holds in practice. **Refuted.**
+
+## What ships
+
+`claude-code/answered { model }` — the API stamp, appended to the session log on every
+turn (`bridge.js` `onAnswered`, `adapter.js`). This is the record that settles the
+question next time without trusting prose.
+
+`noteModelFallback` now covers every model, not only Fable: a turn whose API-stamped
+family differs from the requested family posts a provider-status pill
+(`asked for sonnet — Claude Code answered with claude-opus-5`). Safe now because the
+comparison runs on the API's canonical id, never an alias. `default` has no family and is
+skipped. A user who doubts the picker gets a pill; if no pill appears, the API answered
+with the family they asked for.
+
+Tests: bridge selftest (onAnswered fires once with the stamp), adapter selftest
+(`claude-code/answered` recorded; sonnet→opus announced; sonnet→sonnet, haiku→haiku and
+`default` silent). CI green.
+
+## Why the model's reply is not fixed
+
+The routing is right, so there is nothing to repair. The real gap is that a user cannot
+verify which model answered without trusting the model's own word — the one signal that
+is demonstrably unreliable here.
+
+The natural place for an authoritative signal is the per-message footer that renders
+`Ran for 23s · TTFT 17s · 189 tok/s` and no model name. **arxa does not own it**:
+it lives in `@deepseek-ai/dsh-client-ui-conversation` and `dsh-client-ui-trajectory`.
+Adding the routed model there is a dsh change, not an arxa one.
+
+Deliberately not shipped: strengthening the persona line
+(`profile/agent-presets/arxa/agent.cordis.yml:48`) to declare itself authoritative.
+It is an unverifiable mitigation — there is no test that proves haiku stops
+confabulating — and editing a prompt next to a "nothing is broken" finding would imply
+a defect that the evidence says does not exist.
+
+## On the research ask
+
+Web research was moot: primary sources settled it — the SDK's own `sdk.d.ts`, the dsh
+package source, a live two-turn resume measurement, and the failing session on disk.
+No external best-practice guidance could outrank the session record.

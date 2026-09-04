@@ -47,8 +47,32 @@ export function isRepo(dir, env = process.env) {
   return fs.realpathSync(top) === fs.realpathSync(dir)
 }
 
+/** The one line that keeps arxa's own runtime state out of the user's history. */
+export const ARXA_EXCLUDE_LINE = '/.arxa/'
+
+/**
+ * Add `/.arxa/` to a git dir's info/exclude, idempotently.
+ *
+ * `.arxa/` is arxa's runtime state — the per-org process lock (a pid!), the
+ * worktree checkouts, the snapshot marker. None of it belongs in a user's
+ * history, and the lock in particular is rewritten on every open, so a
+ * committed one makes the tree permanently dirty and conflicts across
+ * machines. Excluding only helps files that are not ALREADY tracked, which is
+ * why this has to run before the first `git add`, not at first session.
+ */
+export function excludeArxaDir(gitDir) {
+  const exclude = path.join(gitDir, 'info', 'exclude')
+  const current = fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : ''
+  if (current.split('\n').includes(ARXA_EXCLUDE_LINE)) return
+  fs.mkdirSync(path.join(gitDir, 'info'), { recursive: true })
+  fs.writeFileSync(exclude, current + (current.endsWith('\n') || current === '' ? '' : '\n') + ARXA_EXCLUDE_LINE + '\n')
+}
+
 function initRepo(dir, env) {
   runGit(['init'], { cwd: dir, env })
+  // Before ANY `git add`: a fresh `git init` puts the git dir at <dir>/.git,
+  // so no common-dir lookup is needed here.
+  try { excludeArxaDir(path.join(dir, '.git')) } catch { /* exclusion is best-effort */ }
 }
 
 /**
@@ -196,11 +220,37 @@ export function orgIgnoreFor({ includeExisting = true, managedDirs = [] } = {}) 
     '!/.gitignore',
     '!/org.json',
     '!/AGENTS.md',
+    ...FRAME_UNIGNORE_LINES,
   ]
   for (const d of managedDirs) {
     if (d !== 'projects' && d !== 'account') lines.push('!/' + d + '/')
   }
   return lines.join('\n') + '\n'
+}
+
+/** The CI frame (check.sh + .github/) must be versioned or GitHub never
+ * sees a workflow. The whitelist contract above ignored both until
+ * 2026-09-03 (RESTO: `frameWired: true`, zero runs ever — `git add` on an
+ * ignored path is a silent no-op). */
+export const FRAME_UNIGNORE_LINES = ['!/check.sh', '!/.github/']
+
+/**
+ * Patch an existing org .gitignore that uses the `/*` whitelist so the
+ * frame files are tracked. Idempotent; a D37-default ignore (no `/*`
+ * line) is left alone because it never ignored them.
+ * @returns {{ changed: boolean, reason?: string }}
+ */
+export function ensureFrameUnignored(orgPath) {
+  const file = path.join(orgPath, '.gitignore')
+  let text
+  try { text = fs.readFileSync(file, 'utf8') } catch { return { changed: false, reason: 'no-gitignore' } }
+  const lines = text.split('\n')
+  if (!lines.includes('/*')) return { changed: false, reason: 'not-whitelist' }
+  const missing = FRAME_UNIGNORE_LINES.filter((l) => !lines.includes(l))
+  if (missing.length === 0) return { changed: false, reason: 'already' }
+  const body = text.endsWith('\n') ? text : text + '\n'
+  fs.writeFileSync(file, body + missing.join('\n') + '\n')
+  return { changed: true }
 }
 
 /**
@@ -231,7 +281,7 @@ export function initOrgRepo(orgPath, env = process.env, { deferSnapshot = false,
 
 /**
  * Push the repo's PRIMARY branch to `url` (D73 publish half). Session
- * branches (`arxa/session/*`) are local working state — they never publish;
+ * branches (`arxa/**`) are local working state — they never publish;
  * when HEAD sits on one (a session is open), the primary branch resolves
  * main → master instead. The URL carries its own credentials when GitHub
  * (token embedded by the caller, NEVER persisted — it rides this one
@@ -245,7 +295,7 @@ export function pushRepo(dir, url, env = process.env) {
     throw new TypeError('pushRepo: url must be a non-empty string')
   }
   let ref = runGit(['symbolic-ref', '--short', 'HEAD'], { cwd: dir, env, allowFail: true })
-  if (!ref || ref.startsWith('arxa/session/')) {
+  if (!ref || ref.startsWith('arxa/')) {
     ref = runGit(['show-ref', '--verify', '--hash', 'refs/heads/main'], { cwd: dir, env, allowFail: true }) !== null
       ? 'main'
       : 'master'
@@ -292,14 +342,20 @@ export function setOrigin(dir, url, env = process.env) {
  *
  * @returns {boolean} true when the fetch command succeeded.
  */
-export function fetchRepo(dir, url, env = process.env) {
+export function fetchRepo(dir, url, env = process.env, { timeout } = {}) {
   if (typeof url !== 'string' || url.trim() === '') {
     throw new TypeError('fetchRepo: url must be a non-empty string')
   }
+  // GIT_TERMINAL_PROMPT=0 stops a credential PROMPT from hanging; it does
+  // nothing for a dead or slow socket, and runGit is synchronous — so a caller
+  // on a hot path must bound this or freeze the engine's whole event loop
+  // (run.js documents the 6-minute freeze that taught us). Default stays
+  // unbounded so existing callers are unchanged; the 30s status poll passes one.
   const out = runGit(['fetch', url, '+refs/heads/main:refs/remotes/origin/main'], {
     cwd: dir,
     env: { ...env, GIT_TERMINAL_PROMPT: '0' },
     allowFail: true,
+    timeout,
   })
   return out !== null || runGit(['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main'], { cwd: dir, env, allowFail: true }) !== null
 }

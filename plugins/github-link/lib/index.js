@@ -10,13 +10,13 @@
  */
 
 import { getClientId, defaultApiBase, defaultTokenBase, linkViaBrowser, linkViaDevice, createPrivateRepoApi, renameRepoApi, repoNameAvailableApi, deleteRepoApi, refreshAccessToken, SCOPES, SHIPPED_CLIENT_ID, defaultOpen } from './auth.js'
-import { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prStateApi, prChecksApi, workflowRunsApi } from './frame.js'
+import { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prCommentApi, prUpdateApi, prStateApi,prChecksApi, workflowRunsApi, rerunRunApi, cancelRunApi, prConversationApi, setThreadResolvedApi, prThreadReplyApi, runJobsApi } from './frame.js'
 import { ensureRunner } from './runner.js'
 import { createKeyring } from './keyring.js'
 import { readState, writeState, clearState } from './state.js'
 
 export { SCOPES, createPkcePair, pkceChallenge, getClientId, loadClientId, linkViaBrowser, linkViaDevice, createPrivateRepoApi, renameRepoApi, repoNameAvailableApi } from './auth.js'
-export { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prStateApi, prChecksApi, workflowRunsApi } from './frame.js'
+export { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prCommentApi, prUpdateApi, prStateApi,prChecksApi, workflowRunsApi, rerunRunApi, cancelRunApi, prConversationApi, setThreadResolvedApi, prThreadReplyApi, runJobsApi } from './frame.js'
 export { ensureRunner, runnerExists } from './runner.js'
 export { createKeyring, KEYCHAIN_SERVICE, SECURITY_PATH } from './keyring.js'
 export { readState, writeState, clearState, statePath, arxaHome } from './state.js'
@@ -183,14 +183,60 @@ export function createGithubLink({
       if (!force && current) return current
       throw new Error('github-link: token expired and no refresh token stored — sign in again (D76)')
     }
-    const clientId = getClientId(env) ?? SHIPPED_CLIENT_ID
-    const fresh = await refreshAccessToken({ clientId, refreshToken: storedRefresh, fetch, tokenBase })
+    // `||`, not `??`: getClientId ends in `||`, so a config file carrying a
+    // blank clientId yields '' — and `??` passes '' straight through, sending
+    // client_id='' and drawing GitHub's "incorrect_client_credentials". That is
+    // the same error a revoked grant gives, so the blank sends you hunting the
+    // wrong fault entirely. link() keeps `??` on purpose: a blank config must
+    // hit its loud guard there, never silently link against a different app
+    // than the one the user configured.
+    // shippedClientId (the constructor param), not the module constant: link()
+    // already honours the injected value, and getToken() reaching past it for
+    // SHIPPED_CLIENT_ID meant a custom-wired service refreshed against a
+    // different app than it linked with.
+    const clientId = getClientId(env) || shippedClientId
+    let fresh
+    try {
+      fresh = await refreshAccessToken({ clientId, refreshToken: storedRefresh, fetch, tokenBase })
+    } catch (err) {
+      // GitHub burns BOTH tokens on every rotation: "once you use a refresh
+      // token, that refresh token and the old user access token will no longer
+      // work" (docs: Refreshing user access tokens). So a second arxa process —
+      // another engine, another window, the updater — that refreshes first
+      // leaves this one holding a superseded refresh token through no fault of
+      // its own. Re-read the keyring once: if the stored refresh token changed
+      // while our request was in flight, that rotation is exactly what happened
+      // and the newly stored one is good. Retry with it before condemning the
+      // user to a full interactive re-link.
+      const rotated = await ring.getSecret(state.login + REFRESH_SUFFIX).catch(() => null)
+      if (rotated && rotated !== storedRefresh) {
+        try {
+          fresh = await refreshAccessToken({ clientId, refreshToken: rotated, fetch, tokenBase })
+        } catch { /* the rotated one is dead too — fall through to re-link */ }
+      }
+      if (!fresh) {
+        // Genuinely dead: revoked grant, expired refresh token, or a client-id
+        // mismatch. Found 2026-09-03 on the RESTO smoke: every push and PR
+        // failed with the raw "incorrect_client_credentials" and nothing told
+        // the user to re-link. Flag the state (status() surfaces it, the link
+        // button clears it) and say plainly what to do.
+        writeState({ ...state, relinkRequired: true, relinkReason: String(err?.message ?? err).slice(0, 160) }, env)
+        throw new Error(
+          'github-link: GitHub session expired and could not be refreshed (' +
+          String(err?.message ?? err).replace(/^github-link:\s*/, '') +
+          ') — re-link GitHub from Settings'
+        )
+      }
+    }
     await ring.setSecret(state.login, fresh.accessToken)
     if (fresh.refreshToken) await ring.setSecret(state.login + REFRESH_SUFFIX, fresh.refreshToken)
     const accessExpiresAt = fresh.expiresInSeconds
       ? new Date(Date.now() + fresh.expiresInSeconds * 1000).toISOString()
       : null
-    writeState({ ...state, accessExpiresAt }, env)
+    // Clear the re-link flag: a refresh that just succeeded is proof the grant
+    // is alive again, and `{ ...state }` would otherwise carry a stale
+    // relinkRequired:true forward forever, nagging past the actual fault.
+    writeState({ ...state, accessExpiresAt, relinkRequired: false, relinkReason: null }, env)
     return fresh.accessToken
   }
 
@@ -248,15 +294,23 @@ export function createGithubLink({
    * push command line — it is not logged, not persisted, not returned to
    * any client surface. Throws loud when unlinked / token unavailable.
    */
-  async function gitCredentials() {
+  async function gitCredentials(force = false) {
     const state = readState(env)
     if (!state?.linked) throw new Error('github-link: not linked (push needs a linked GitHub account)')
-    const accessToken = await getToken()
+    // `force` mints a fresh token even when the recorded clock still reads
+    // "alive". A git push is the one caller that cannot self-heal on its own:
+    // every REST path here retries a 401 through getToken(true), but git
+    // reports auth failure as text on a non-zero exit, so the caller has to
+    // ask for the retry explicitly (2026-09-03: RESTO sat on
+    // "Invalid username or token" with a clock that still said valid).
+    const accessToken = await getToken(force === true)
     return { login: state.login, token: accessToken }
   }
 
-  /** Wire the CI frame on a published repo (Part B S1): squash-only repo
-   *  settings + branch protection (strict, frame-check required). The
+  /** Wire the CI frame on a published repo (Part B S1): merge-commit-only
+   *  repo settings + branch protection (strict, frame-check required). Both
+   *  calls are idempotent — callers re-apply on every heal so a changed
+   *  payload reaches repos wired under an older one. The
    *  measured free-plan 403 (S0 V1) is NOT an error — returned as
    *  protection:'plan-limited'; the card enforces gates client-side
    *  regardless (Q2). Payloads come from git-workspace/lib/frame.js. */
@@ -299,8 +353,8 @@ export function createGithubLink({
   function prCreate(owner, name, { title, body, head, base }) {
     return withRefresh((t) => prCreateApi({ owner, name, title, body, head, base, accessToken: t, fetch, apiBase }))
   }
-  function prListForHead(owner, name, head) {
-    return withRefresh((t) => prListForHeadApi({ owner, name, head, accessToken: t, fetch, apiBase }))
+  function prListForHead(owner, name, head, state = 'open') {
+    return withRefresh((t) => prListForHeadApi({ owner, name, head, state, accessToken: t, fetch, apiBase }))
   }
   /** DEPRECATED (D107) — see frame.js. No callers; use prMerge. */
   function prSquashMerge(owner, name, number) {
@@ -318,11 +372,46 @@ export function createGithubLink({
   function prChecks(owner, name, ref) {
     return withRefresh((t) => prChecksApi({ owner, name, ref, accessToken: t, fetch, apiBase }))
   }
+  /** Stage comment on a PR (2026-09-03) — { id, url }. */
+  /** Rewrite a PR's body — the ledger table is re-rendered at each stage. */
+  function prUpdate(owner, name, number, { body } = {}) {
+    return withRefresh((t) => prUpdateApi({ owner, name, number, body, accessToken: t, fetch, apiBase }))
+  }
+  function prComment(owner, name, { number, body } = {}) {
+    return withRefresh((t) => prCommentApi({ owner, name, number, body, accessToken: t, fetch, apiBase }))
+  }
+  /** Q8: re-run a workflow run (optionally only its failed jobs). */
+  function rerunRun({ owner, name, runId, failedOnly } = {}) {
+    return withRefresh((t) => rerunRunApi({ owner, name, runId, failedOnly, accessToken: t, fetch, apiBase }))
+  }
+  /** Q8: request cancellation of an in-flight workflow run. */
+  function cancelRun({ owner, name, runId } = {}) {
+    return withRefresh((t) => cancelRunApi({ owner, name, runId, accessToken: t, fetch, apiBase }))
+  }
   /** D101/A3: recent workflow runs for a branch (insight panel CI history).
    *  Single-options-object call shape (unlike prChecks' positional args) —
    *  matches the sidebar call site: g.workflowRuns({ owner, name, branch, perPage }). */
   function workflowRuns({ owner, name, branch, perPage } = {}) {
     return withRefresh((t) => workflowRunsApi({ owner, name, branch, perPage, accessToken: t, fetch, apiBase }))
+  }
+
+  /** The conversation on one PR — comments, reviews, review threads, linked
+   *  issues and commit notes in ONE GraphQL round trip. See frame.js for why
+   *  this surface is GraphQL while its neighbours are REST. */
+  function prConversation({ owner, name, number } = {}) {
+    return withRefresh((t) => prConversationApi({ owner, name, number, accessToken: t, fetch, apiBase }))
+  }
+  /** Resolve / unresolve a review thread (GraphQL-only capability). */
+  function setThreadResolved({ threadId, resolved } = {}) {
+    return withRefresh((t) => setThreadResolvedApi({ threadId, resolved, accessToken: t, fetch, apiBase }))
+  }
+  /** Reply inside a review thread, addressed to its first comment's numeric id. */
+  function prThreadReply({ owner, name, number, commentId, body } = {}) {
+    return withRefresh((t) => prThreadReplyApi({ owner, name, number, commentId, body, accessToken: t, fetch, apiBase }))
+  }
+  /** Jobs + failed step names for one workflow run. */
+  function runJobs({ owner, name, runId } = {}) {
+    return withRefresh((t) => runJobsApi({ owner, name, runId, accessToken: t, fetch, apiBase }))
   }
 
   /** Latest device-flow code for the UI (null until a link() starts one). */
@@ -346,9 +435,17 @@ export function createGithubLink({
     prListForHead,
     prSquashMerge,
     prMerge,
+    prComment,
+    prUpdate,
     prState,
     prChecks,
+    rerunRun,
+    cancelRun,
     workflowRuns,
+    prConversation,
+    setThreadResolved,
+    prThreadReply,
+    runJobs,
     deviceCode,
   }
 }

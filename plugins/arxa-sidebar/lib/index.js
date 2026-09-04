@@ -37,6 +37,13 @@ export const name = 'arxa-sidebar'
 // bridge faces (sessions.create cwd contract, archivedSessionIds, titles).
 export const inject = ['webServer', 'sessions', 'workspaceRegistry', 'sessionTitle', 'agents']
 
+/** Host object arxa-git-card reads (filled in apply(); `ready` flips then).
+  * Also published process-wide under Symbol.for('arxa.sidebar.host') so the
+  * card host finds it even when pnpm's virtual store gives the two plugins
+  * distinct module instances of this file. */
+export const sidebarHost = { ready: false }
+export const SIDEBAR_HOST_KEY = Symbol.for('arxa.sidebar.host')
+
 /** Import-probe the Phase A plugin in both deployment shapes. A failure is
   * LOGGED: a silent null here made both routes serve the stub while the UI
   * still rendered no-org — measured and cursed in bin/arxa-studio.mjs. */
@@ -74,6 +81,28 @@ async function importGithubLink() {
     }
   }
   return await import(new URL('../../github-link/lib/index.js', import.meta.url).href)
+}
+
+/** Import-probe git-workspace (Phase 4 card actions) in both deployment
+  * shapes — same discipline as importShell / artifact-viewer's gw():
+  *   1. bare "git-workspace" — the flat copy bin/arxa-studio.mjs places in
+  *      the profile's top-level node_modules (fiveLibs);
+  *   2. relative ../../git-workspace — repo checkout (smoke.mjs, selftests).
+  * The relative shape alone is NOT enough in an installed profile: this
+  * plugin is a pnpm file: symlink into the .pnpm virtual store, so
+  * ../../git-workspace resolves beside the store entry, where no sibling
+  * exists (measured live 2026-09-02: workspace.new-session → Cannot find
+  * module …/.pnpm/arxa-sidebar@…/node_modules/git-workspace/lib/index.js).
+  * Cached: the card actions call this per request. */
+let gwCache = null
+async function importGitWorkspace() {
+  if (gwCache) return gwCache
+  try {
+    gwCache = await import('git-workspace')
+  } catch {
+    gwCache = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+  }
+  return gwCache
 }
 
 export function apply(ctx, opts = {}) {
@@ -130,6 +159,55 @@ export function apply(ctx, opts = {}) {
     try {
       const sessions = ctx.sessions
       if (!sessions || typeof sessions.create !== 'function') return {}
+      // Q1 (2026-09-03): pin a dsh session's header title to the arxa registry
+      // name. Untouched, dsh generates a title from the first few words of the
+      // opening message, so the header disagreed with both the sidebar row and
+      // the breadcrumb tail. rename() appends source:{kind:'user'}, which
+      // supersedes in-flight automatic generation AND stops later messages
+      // scheduling any — a pin, not just a first value. It needs the EXACT
+      // live Session (it identity-checks against the store), so callers pass
+      // sessions.get(id); a session not loaded in-process is a no-op (the
+      // next resume re-pins it). Shared by spawn (birth) and retitle
+      // (resume/rename — sessions born before the pin existed kept dsh's
+      // auto title on reopen, seen live 2026-09-03 on note-002).
+      const pinTitleTo = (live, name) => {
+        try {
+          const svc = ctx.sessionTitle
+          if (process.env.ARXA_DEBUG_TITLE) console.error('[pinTitle] live=' + !!live + ' svc=' + !!svc + ' rename=' + (typeof svc?.rename) + ' name=' + JSON.stringify(name))
+          if (!live || !svc || typeof svc.rename !== 'function') return false
+          if (typeof name !== 'string' || name.trim() === '') return false
+          svc.rename(live, name)
+          if (process.env.ARXA_DEBUG_TITLE) console.error('[pinTitle] renamed ok')
+          return true
+        } catch (err) {
+          if (process.env.ARXA_DEBUG_TITLE) console.error('[pinTitle] threw: ' + String(err?.message ?? err))
+          return false /* title is presentation — never fails the caller */
+        }
+      }
+      // Deferred pins (measured 2026-09-03 on the s2 engine): at boot the
+      // sidebar's session.open → resumeSession → retitle runs BEFORE the
+      // client loads the conversation, so sessions.get(id) is undefined and
+      // an immediate pin has nothing to rename. Park the name; the store
+      // announces "session/created" when the session enters (create AND
+      // restore both go through prepare → enter → announce), and the pin
+      // lands then — one tick later, outside the store's announce phase so
+      // the title append never races the announcing entry.
+      const pendingTitles = new Map()
+      if (typeof ctx.on === 'function') {
+        try {
+          ctx.on('session/created', (session) => {
+            const id = session && typeof session.id === 'string' ? session.id : undefined
+            if (id === undefined || !pendingTitles.has(id)) return
+            const name = pendingTitles.get(id)
+            pendingTitles.delete(id)
+            if (process.env.ARXA_DEBUG_TITLE) console.error('[pinTitle] session/created fired for parked ' + id)
+            setTimeout(() => {
+              const live = typeof sessions.get === 'function' ? sessions.get(id) : undefined
+              pinTitleTo(live ?? session, name)
+            }, 0)
+          })
+        } catch { /* listener is best-effort — retitle still pins live sessions */ }
+      }
       const faces = {
         // D93 root-cause fix (2026-08-31): a dsh session whose cwd matches no
         // workspace is born into the engine's GLOBAL archivedSessionIds — and
@@ -152,26 +230,54 @@ export function apply(ctx, opts = {}) {
           //    session while it is live"). Going through ctx.agents.create()
           //    uses the engine's real factory so the session is born WITH its
           //    agent loop — prompting works from the first message.
-          const wanted = typeof arxaId === 'string' && arxaId.trim() !== '' ? `arxa-${arxaId}` : undefined
+          // dsh stores a conversation as a DIRECTORY named by its id, so the
+          // path identity's `/` cannot survive the trip (Q3, 2026-09-03):
+          // `RESTO/notes/note-wt-260903-001` → `arxa-RESTO-notes-note-wt-260903-001`.
+          // Canonical helper: git-workspace `dshSessionKey` — inlined here
+          // because this package stays zero-dep by convention.
+          const wanted = typeof arxaId === 'string' && arxaId.trim() !== ''
+            ? 'arxa-' + arxaId.split('/').filter(Boolean).join('-')
+            : undefined
           const agents = ctx.agents
+          // Q1 (2026-09-03): pin the header title to the worktree name at
+          // birth (see pinTitleTo). `name` is the registry name, which Q3
+          // defaults to the id and a rename diverges.
+          const pinTitle = (live) => { pinTitleTo(live, name) }
           if (agents && typeof agents.create === 'function') {
             try {
               let setup
+              let presetId
               try {
                 const presets = typeof ctx.get === 'function' ? ctx.get('agentPresets') : undefined
                 if (presets && typeof presets.resolve === 'function' && typeof presets.mount === 'function') {
-                  setup = async (agentCtx) => {
-                    const resolved = await presets.resolve(undefined)
-                    await presets.mount(agentCtx, resolved.id)
-                  }
+                  // 3. RECORDED PRESET (2026-09-03) — resolve BEFORE create.
+                  //    Mounting inside setup composes the agent correctly but
+                  //    leaves NOTHING on the session, so the stock
+                  //    AgentPresetLabel (header.actions, reads
+                  //    state.byId[id].agentPreset) rendered null on every
+                  //    arxa-spawned session while dsh-spawned ones showed
+                  //    their mode. The id has to ride on `meta`: agents.create
+                  //    forwards meta to sessions.prepare (dsh-agent-loop
+                  //    createAgent), which writes header.agentPreset
+                  //    (dsh-session prepare), which the wire SessionSummary
+                  //    passes through. Resolve failure degrades exactly as
+                  //    before — no preset recorded, host default composition.
+                  const resolved = await presets.resolve(undefined)
+                  if (resolved && typeof resolved.id === 'string' && resolved.id !== '') presetId = resolved.id
+                  setup = async (agentCtx) => { await presets.mount(agentCtx, resolved.id) }
                 }
               } catch { /* no preset roster — the host default composition stands */ }
               const handle = await agents.create({
                 ...(wanted === undefined ? {} : { sessionId: wanted }),
-                meta: { cwd },
+                meta: { cwd, ...(presetId === undefined ? {} : { agentPreset: presetId }) },
                 ...(setup === undefined ? {} : { setup })
               })
               const id = (handle && handle.session && handle.session.id) || (handle && handle.id) || wanted
+              // The AgentHandle does NOT carry `.session` (measured: live=false
+              // — that is also why the id resolver above falls through to
+              // handle.id). rename() identity-checks against the store, so the
+              // store is the only place to get an object it will accept.
+              pinTitle(typeof sessions.get === 'function' ? sessions.get(id) : undefined)
               try {
                 const registry = ctx.workspaceRegistry
                 if (registry && typeof registry.resolveByPath === 'function') {
@@ -194,6 +300,7 @@ export function apply(ctx, opts = {}) {
             if (!(wanted && typeof sessions.get === 'function' && sessions.get(wanted))) throw e
             id = wanted
           }
+          pinTitle(typeof sessions.get === 'function' ? sessions.get(id) : undefined)
           try {
             const registry = ctx.workspaceRegistry
             if (registry && typeof registry.resolveByPath === 'function') {
@@ -225,6 +332,32 @@ export function apply(ctx, opts = {}) {
       }
       if (typeof sessions.get === 'function') {
         faces.attach = async (id) => ({ ok: !!sessions.get(id) })
+        // Q1 follow-up (2026-09-03): re-pin on resume/rename. Sessions born
+        // before the spawn pin existed (or renamed since) otherwise keep dsh's
+        // auto-generated title in the header. A session not live in-process
+        // is parked in pendingTitles and pinned on "session/created" when
+        // the client loads it — {ok:true, deferred:true}; never an error.
+        faces.retitle = async (id, name) => {
+          if (typeof name !== 'string' || name.trim() === '') return { ok: false, reason: 'name-required' }
+          const live = sessions.get(id)
+          if (live) return { ok: pinTitleTo(live, name) }
+          pendingTitles.set(id, name)
+          if (process.env.ARXA_DEBUG_TITLE) console.error('[pinTitle] parked ' + id + ' → "' + name + '" (not live yet)')
+          return { ok: true, deferred: true }
+        }
+      }
+      // Q3 empty-session probe (2026-09-02): has a user message ever landed
+      // in this dsh session? Live store first (Session.events); a session
+      // not loaded in-process is read from its on-disk log under
+      // $DSH_HOME/sessions/<cwd-slug>/<id>/session.jsonl.zstd — one zstd
+      // frame per append, so split on the frame magic and inflate each.
+      // Throws when neither source can answer: the bridge turns that into
+      // {ok:false} and the lifecycle keeps the row (never drop on doubt).
+      faces.hasUserMessage = async (id) => {
+        const live = typeof sessions.get === 'function' ? sessions.get(id) : undefined
+        const events = live && Array.isArray(live.events) ? live.events : null
+        if (events) return events.some((e) => e && e.type === 'user/message')
+        return readLogHasUserMessage(id)
       }
       const registry = ctx.workspaceRegistry
       if (registry && typeof registry.archiveSession === 'function') {
@@ -236,6 +369,33 @@ export function apply(ctx, opts = {}) {
     } catch {
       return {}
     }
+  }
+
+  async function readLogHasUserMessage(id) {
+    const fs = await import('node:fs/promises')
+    const path = await import('node:path')
+    const os = await import('node:os')
+    const zlib = await import('node:zlib')
+    const envHome = typeof process.env.DSH_HOME === 'string' ? process.env.DSH_HOME.trim() : ''
+    const root = path.join(envHome !== '' ? envHome : path.join(os.homedir(), '.dsh'), 'sessions')
+    let scopes
+    try { scopes = await fs.readdir(root) } catch { throw new Error('dsh-log-unavailable: ' + root) }
+    if (typeof zlib.zstdDecompressSync !== 'function') throw new Error('zstd-unavailable')
+    const MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
+    for (const scope of scopes) {
+      let buf
+      try { buf = await fs.readFile(path.join(root, scope, id, 'session.jsonl.zstd')) } catch { continue }
+      const starts = []
+      let i = 0
+      while ((i = buf.indexOf(MAGIC, i)) !== -1) { starts.push(i); i += 4 }
+      for (let k = 0; k < starts.length; k++) {
+        let text
+        try { text = zlib.zstdDecompressSync(buf.subarray(starts[k], starts[k + 1] ?? buf.length)).toString('utf8') } catch { continue }
+        if (text.includes('"type":"user/message"')) return true
+      }
+      return false
+    }
+    throw new Error('dsh-log-missing: ' + id)
   }
 
   const getBridge = () => {
@@ -273,6 +433,49 @@ export function apply(ctx, opts = {}) {
     })
     res.end(JSON.stringify(body))
   }
+
+  /** The three per-request org helpers over a lifecycle — shared by the
+    * action route below and by arxa-git-card's route (sidebarHost). */
+  const orgHelpers = (l) => {
+    /** Client rows send org ids; openOrg wants a path. */
+    const orgByRef = (ref) => {
+      const hit = l.listOrgs().find((o) => o.id === ref || o.slug === ref || o.path === ref)
+      if (!hit) throw new Error('org-not-found: ' + ref)
+      return hit
+    }
+    /** The single open-org handle or loud failure — no silent ok. */
+    const handle = () => {
+      if (!l.current) throw new Error('no-org-open')
+      return l.current
+    }
+    /** Open exactly this org (switch tears the old one down first). */
+    const ensureOpen = async (ref) => {
+      const org = orgByRef(ref)
+      if (l.current?.path === org.path) return l.current
+      if (l.current) await l.switchOrg(org.path)
+      else await l.openOrg(org.path)
+      return l.current
+    }
+    return { orgByRef, handle, ensureOpen }
+  }
+
+  /** Publish the org shell to arxa-git-card (docs/plans/
+    * git-card-stock-dock-rebuild.md A2): its card.* / insight.* /
+    * version.mint actions moved out of this table on 2026-09-02 but still
+    * run against the SAME open-org singleton. Set on every apply() so a
+    * test harness that applies twice sees the latest ctx/opts (fake github). */
+  Object.assign(sidebarHost, {
+    ready: true,
+    seam: SEAM_LIFECYCLE_STUBBED,
+    orgContext: async () => {
+      const l = await getLifecycle()
+      return l ? { l, ...orgHelpers(l) } : null
+    },
+    getGithub,
+    mainChecksFor,
+    importGitWorkspace,
+  })
+  globalThis[SIDEBAR_HOST_KEY] = sidebarHost
   const params = (req) => new URL(req.url, 'http://x').searchParams
 
   /**
@@ -306,6 +509,9 @@ export function apply(ctx, opts = {}) {
           createdAt: s.createdAt ?? null,
           updatedAt: s.updatedAt ?? null,
           dshSessionId: s.dshSessionId ?? null,
+          // The crumb last segment (Q2: … / session / worktree) reads this — it was
+          // never served, so the segment silently never rendered (2026-09-02).
+          worktree: s.worktree ?? null,
         }))
       const bridge = getBridge()
       const live = bridge ? await bridge.list() : []
@@ -601,7 +807,10 @@ export function apply(ctx, opts = {}) {
             // live; this is the server-side mirror (never trust the client).
             // A non-empty target is a hard refusal: never merge, never
             // version foreign files unasked (the PLATO lesson, kept).
-            const { slugify } = await import(new URL('../../workspace/lib/slug.js', import.meta.url).href)
+            // Dual probe (see importGitWorkspace): bare "workspace" is the
+            // flat profile copy; the relative shape only resolves in-repo.
+            const { slugify } = await import('workspace').catch(
+              () => import(new URL('../../workspace/lib/slug.js', import.meta.url).href))
             const nameSlug = slugify(nm)
             if (nameSlug === '' || nameSlug === 'untitled') {
               return json(res, { ok: false, error: 'org name has no slug: ' + nm, action })
@@ -650,28 +859,229 @@ export function apply(ctx, opts = {}) {
             // snapshot runs detached; includeExisting is fixed false (above)
             return json(res, { ok: true, action, result: { path: created.path, slug: created.slug ?? path.basename(created.path) } })
           }
+          /**
+           * Q4/Q5 (2026-09-03): subagent + background-job control.
+           *
+           * These sit ABOVE the lifecycle gate on purpose. A session's
+           * children and its jobs exist whether or not an arxa org is open,
+           * so answering them with `no-workspace` would be a lie about the
+           * machine's state.
+           *
+           * ID CURRENCY: the DSH session id, raw. `listChildren` and
+           * `interrupt` both address durable dsh sessions. Nothing on this
+           * path may normalise it to a registry id the way the git-card
+           * route does for ITS actions — that would address a different
+           * object and silently answer about the wrong thing.
+           *
+           * The capability map is computed HERE and shipped with every row,
+           * because it is not uniform and the client must not guess it:
+           *
+           *   dsh-subagent's ONLY stop verb is `interrupt`, and its own
+           *   contract (dsh-subagent/lib/types/index.d.ts:138-152) says it
+           *   PRESERVES the Activation and parks unclaimed inbox work —
+           *   "once the interrupted driver is idle, a waking send resumes
+           *   the parked FIFO queue". That is a pause. There is no terminate
+           *   verb for a subagent at all, and an interrupt aimed at a
+           *   one-shot child is documented as an accepted no-op.
+           *
+           *   dsh-jobs is the mirror image: `kill` is a real cancel, and the
+           *   status union (running|stopping|completed|killed|failed) has no
+           *   paused member — there is nothing to pause with.
+           *
+           * So subagents pause, jobs cancel, and every other cell is false
+           * carrying the reason the UI puts on the disabled control. Naming
+           * the gap is the feature; a button that lies is not.
+           */
+          if (action.startsWith('agent.')) {
+            /**
+             * TRANSPORT (re-corrected 2026-09-03 against a live engine —
+             * the earlier note here was wrong about jobs; see below).
+             *
+             * SUBAGENTS: `ctx.subagents` is not reachable from a top-level
+             * plugin. It is composed under the agent scope, so this context's
+             * `reflect.get` does not resolve it and a bare property read
+             * throws cordis' "without inject". Adding it to this plugin's
+             * `inject` would not help — the service is not in this fiber's
+             * store at all — and would make a missing service stop the whole
+             * arxa shell from loading. `ctx.apiProxy` IS reachable (approvals
+             * and conversation already inject it) and exposes the subagent
+             * domain over the same code path the browser's RPC uses. Verified
+             * live: `subagent.list` answers while the direct property read
+             * reports nothing (scripts/agent-services-probe.mjs).
+             *
+             * JOBS ARE DIFFERENT, and the previous version of this comment
+             * generalised the subagent result to them without probing them
+             * separately. That was wrong. The job REGISTRY is a HOST service —
+             * `dsh-jobs-local` is loaded by dsh-base/cordis.patch.yml:69,
+             * beside `agent` and `settings` — so a top-level plugin reaches it
+             * with `ctx.get('jobs')`, which is dsh's own documented way to
+             * read an optional capability. What IS true is narrower: there is
+             * no `job.*` RPC and no jobs field on the ApiProxy, so no CLIENT
+             * can stop a job. The host can.
+             *
+             * `plugins/arxa-jobs` does exactly that, and its cancel reaches
+             * the browser: `dsh-jobs-local.kill()` calls
+             * `notifyChanged(job.owner)` (:207) and dsh-host-apiproxy
+             * subscribes `jobs.onJobsChanged` to push a `session/jobs` frame
+             * addressed to `owner.id` (:3589). Proven live over the client's
+             * own ws /api/events.mux — `stopping` then `killed` arrived 166ms
+             * after an arxa-initiated cancel (scripts/jobs-push-proof.mjs).
+             *
+             * This sidebar surface is still read-only about jobs; the cancel
+             * lives in arxa-jobs. Keep the two consistent — if this ever grows
+             * a job control, route it through arxa-jobs rather than a second
+             * path to the same registry.
+             */
+            const rpc = () => ({ rpcId: 'arxa-' + Math.random().toString(36).slice(2) })
+            const proxy = (() => {
+              try {
+                const viaReflect = ctx.reflect?.get?.('apiProxy')
+                if (viaReflect) return viaReflect
+              } catch { /* fall through */ }
+              try { return ctx.apiProxy ?? null } catch { return null }
+            })()
+            const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+            if (!sid) return json(res, { ok: false, error: 'sessionId-required', action })
+            /** Unwrap an RpcResponse; a refusal reads as absence, never a throw. */
+            const value = async (call) => {
+              try {
+                const r = await call
+                return r?.result?.ok === true ? r.result.value : null
+              } catch { return null }
+            }
+
+            const subRows = async () => {
+              if (!proxy?.subagents?.list) return { rows: [], parentAvailable: false }
+              const cat = await value(proxy.subagents.list({ ...rpc(), payload: { parentSessionId: sid } }))
+              if (!cat) return { rows: [], parentAvailable: false }
+              const rows = (cat.entries ?? []).filter((c) => c && c.kind === 'child').map((c) => {
+                const continuable = c.mode === 'continuable'
+                const running = c.activity === 'running'
+                return {
+                  kind: 'subagent',
+                  id: c.id,
+                  label: c.label || c.id,
+                  mode: c.mode,
+                  activity: c.activity,
+                  hasChildren: c.hasChildren === true,
+                  /* `wake` is the D3 control and it is NOT a verb button: it
+                   * opens a message box, because `subagent.prompt` carries the
+                   * human's words. Only a CONTINUABLE child is addressable —
+                   * the RPC's own address type is
+                   * `Extract<SubagentAddress, { mode: 'continuable' }>`, so a
+                   * one-shot child cannot be woken by anything, and the row
+                   * says so rather than offering a box that would be refused.
+                   *
+                   * Deliberately not gated on `running`: waking a child that is
+                   * paused is the whole point, and one that is still running
+                   * queues the message on its parked FIFO. `resume` stays false
+                   * forever — there is no content-free resume verb. */
+                  can: { pause: continuable && running, resume: false, cancel: false, wake: continuable },
+                  why: {
+                    ...(continuable && running ? {} : { pause: continuable ? 'not-running' : 'one-shot' }),
+                    resume: continuable ? 'send-message' : 'one-shot',
+                    cancel: 'no-terminate-verb',
+                    ...(continuable ? {} : { wake: 'one-shot' }),
+                  },
+                }
+              })
+              return { rows, parentAvailable: cat.parentAvailable === true }
+            }
+
+            const agentTable = {
+              'agent.list': async () => {
+                const { rows, parentAvailable } = await subRows()
+                return {
+                  sessionId: sid,
+                  parentLive: parentAvailable,
+                  services: { subagents: Boolean(proxy?.subagents?.list), jobs: false },
+                  subagents: rows,
+                  // Stated, not implied: the client lists jobs from its own
+                  // store because no host API can enumerate or stop them.
+                  jobs: [],
+                  jobsReadable: false,
+                  jobsControllable: false,
+                  jobsReason: 'no-job-api',
+                }
+              },
+              /** The one live verb. `interrupt` PRESERVES the Activation and
+                * parks unclaimed inbox work (dsh-subagent index.d.ts:138-152)
+                * — that is a pause, and it is the only one that exists. */
+              'agent.pause': async () => {
+                if (arg?.kind !== 'subagent') return { ok: false, reason: 'no-job-api' }
+                if (!proxy?.subagents?.interrupt) return { ok: false, reason: 'service-unavailable' }
+                const id = arg?.id
+                if (typeof id !== 'string' || id === '') return { ok: false, reason: 'id-required' }
+                const out = await value(proxy.subagents.interrupt({
+                  ...rpc(),
+                  payload: { parentSessionId: sid, childSessionId: id, mode: 'continuable' },
+                }))
+                if (!out) return { ok: false, reason: 'refused' }
+                return { ok: true, outcome: 'paused' }
+              },
+              /** Still no resume verb, and there never will be a content-free
+                * one: waking a paused child needs words the human writes, and
+                * inventing them is not a resume. The refusal now points at the
+                * control that DOES exist — `agent.wake` below — instead of
+                * naming a dead end. */
+              'agent.resume': async () => ({
+                ok: false,
+                reason: arg?.kind === 'job' ? 'jobs-have-no-pause' : 'send-message',
+              }),
+              /** THE WAKE (D3). `subagent.prompt` is dsh's own sanctioned way to
+                * reach a paused child: its contract says it "delivers human
+                * content to a continuable child", and a pause made by
+                * `agent.pause` above parks the inbox rather than ending the
+                * Activation — so this resumes the parked FIFO queue with the
+                * human's message at the front.
+                *
+                * `mode: 'continuable'` is not optional decoration: the address
+                * type is `Extract<SubagentAddress, { mode: 'continuable' }>`, so
+                * a one-shot child is not addressable here at all. That is the
+                * runtime refusing to wake something that cannot be woken, which
+                * is exactly the distinction the row's capability map draws. */
+              'agent.wake': async () => {
+                if (arg?.kind !== 'subagent') return { ok: false, reason: 'subagents-only' }
+                if (!proxy?.subagents?.prompt) return { ok: false, reason: 'service-unavailable' }
+                const id = arg?.id
+                if (typeof id !== 'string' || id === '') return { ok: false, reason: 'id-required' }
+                const text = typeof arg?.text === 'string' ? arg.text.trim() : ''
+                // An empty wake would deliver nothing and still count as a turn.
+                if (text === '') return { ok: false, reason: 'message-required' }
+                const out = await value(proxy.subagents.prompt({
+                  ...rpc(),
+                  payload: {
+                    parentSessionId: sid,
+                    childSessionId: id,
+                    mode: 'continuable',
+                    content: [{ type: 'text', text }],
+                  },
+                }))
+                if (!out) return { ok: false, reason: 'refused' }
+                return { ok: true, outcome: 'woken' }
+              },
+              /** Cancel is still refused HERE, and the two reasons are now
+                * different in a way that matters. A subagent genuinely has no
+                * terminate verb in the runtime. A job HAS one — but it lives on
+                * the host registry that `plugins/arxa-jobs` owns, not on the
+                * agent plane this route reaches, so a job row is dispatched to
+                * /__arxa/jobs/action by the client and never arrives here. If
+                * one ever does, it is a routing bug, and this says so rather
+                * than repeating the retired "no-job-api". */
+              'agent.cancel': async () => ({
+                ok: false,
+                reason: arg?.kind === 'job' ? 'wrong-plane' : 'no-terminate-verb',
+              }),
+            }
+            const agentFn = agentTable[action]
+            if (!agentFn) return json(res, { ok: false, error: 'unknown-action', action })
+            const agentOut = await agentFn()
+            return json(res, { ok: true, action, result: agentOut })
+          }
+
           const l = await getLifecycle()
           if (!l) return json(res, { ok: false, seam: SEAM_LIFECYCLE_STUBBED, error: 'no-workspace', action })
-
-          /** Client rows send org ids; openOrg wants a path. */
-          const orgByRef = (ref) => {
-            const hit = l.listOrgs().find((o) => o.id === ref || o.slug === ref || o.path === ref)
-            if (!hit) throw new Error('org-not-found: ' + ref)
-            return hit
-          }
-          /** The single open-org handle or loud failure — no silent ok. */
-          const handle = () => {
-            if (!l.current) throw new Error('no-org-open')
-            return l.current
-          }
-          /** Open exactly this org (switch tears the old one down first). */
-          const ensureOpen = async (ref) => {
-            const org = orgByRef(ref)
-            if (l.current?.path === org.path) return l.current
-            if (l.current) await l.switchOrg(org.path)
-            else await l.openOrg(org.path)
-            return l.current
-          }
+          const { orgByRef, handle, ensureOpen } = orgHelpers(l)
 
           const table = {
             /** D92: the create modal's defaults — the sticky last-used parent
@@ -712,7 +1122,12 @@ export function apply(ctx, opts = {}) {
             'org.open': async () => {
               const ref = arg?.orgId ?? arg
               try {
-                return ensureOpen(ref)
+                // `await` is load-bearing: a bare `return promise` resolves
+                // OUTSIDE this try, so an unknown-ref rejection skipped the
+                // catch and the by-path fallback below was unreachable
+                // (measured 2026-09-02: org.open with a bare path on a fresh
+                // home answered "org not found").
+                return await ensureOpen(ref)
               } catch (e) {
                 // D92: open-by-path when the org exists on disk but fell out
                 // of recents — the create modal's "already lives here — open
@@ -753,299 +1168,6 @@ export function apply(ctx, opts = {}) {
               const cur = arg?.orgId ? await ensureOpen(arg.orgId) : handle()
               return cur.publishGithub()
             },
-            // ---- Part B S3: composer git card engine actions (Q1/Q2/Q6/
-            // Q7/Q10 — docs/plans/git-card-part-b-grill.md). The card is
-            // SEAT-AWARE: a sessionId resolves the session worktree + its
-            // branch; without one it serves the org primary worktree. The
-            // engine NEVER drafts messages (Q6): card.commit.draft returns
-            // evidence only — the session model writes the subject.
-            'card.status': async () => {
-              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
-              const cur = handle()
-              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
-              let repoPath = cur.path
-              let branch = 'main'
-              let sessionRow = null
-              if (sid) {
-                // D98: a session id can live in the org registry OR any
-                // project registry. `parkedSessions` merges every repo's
-                // rows (each tagged with its owning `repoPath`); looking
-                // only at the org registry made project sessions
-                // unresolvable — "session-not-found" for work that exists.
-                sessionRow = gw.parkedSessions(cur.path).find((s) => s.id === sid) ?? null
-                if (!sessionRow) throw new Error('session-not-found: ' + sid)
-                repoPath = sessionRow.worktree
-                branch = sessionRow.branch
-              }
-              // B1: a session worktree can be deleted out from under the
-              // registry. `status --porcelain` then returns null, and the old
-              // `?? ''` turned that into "no output" — which the counters below
-              // read as CLEAN, so the card reported a worktree that no longer
-              // exists as having nothing to commit. Ask health first, and never
-              // report counts we did not actually measure.
-              const health = gw.worktreeHealth(repoPath)
-              const porcelain = health === 'ok'
-                ? (gw.runGit(['status', '--porcelain'], { cwd: repoPath, allowFail: true }) ?? '')
-                : ''
-              let staged = 0; let unstaged = 0; let untracked = 0
-              for (const line of porcelain.split('\n')) {
-                if (!line) continue
-                const x = line[0]; const y = line[1]
-                if (line.startsWith('??')) untracked++
-                else { if (x !== ' ' && x !== '?') staged++; if (y !== ' ' && y !== '?') unstaged++ }
-              }
-              let aheadBehind = null
-              if (health === 'ok' && gw.runGit(['rev-parse', '-q', '--verify', 'origin/main'], { cwd: cur.path, allowFail: true }) !== null) {
-                const c = gw.runGit(['rev-list', '--left-right', '--count', 'origin/main...HEAD'], { cwd: repoPath, allowFail: true })
-                if (c) { const [behind, ahead] = c.split(/\s+/).map(Number); aheadBehind = { ahead, behind } }
-              }
-              let manifest = {}
-              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch { /* unreadable — plain status */ }
-              const g = await getGithub().catch(() => null)
-              const mainChecks = await mainChecksFor(cur.path, manifest, g, gw).catch(() => null)
-              return {
-                seat: { kind: sid ? 'session' : 'org', sessionId: sid, branch },
-                // `health` is what the card must read before any count. When it
-                // is not 'ok' the counts were never measured, so they are null
-                // rather than zero — zero is a claim, and it would be a lie.
-                health,
-                dirty: health === 'ok' ? { staged, unstaged, untracked } : null,
-                aheadBehind,
-                // wipRun throws outright on a missing worktree, which used to
-                // reject the whole card.status call; the client swallows that
-                // and leaves stale numbers on screen.
-                wipRun: health === 'ok' ? gw.wipRun(repoPath).length : null,
-                chip: health === 'ok' ? gw.versionChip(repoPath) : null,
-                linked: Boolean(manifest.repoUrl),
-                localOnly: Boolean(manifest.localOnly),
-                // `files` is the per-file state of the GENERATED frame. openOrg
-                // upgrades a stale file on its own, but one a human edited comes
-                // back `modified` and is deliberately left alone — without this
-                // nobody could ever say so, and that repo would keep an old gate
-                // forever while looking fine.
-                frame: { wired: manifest.frameWired === true ? 'ok' : (manifest.frameWired ?? null), protection: manifest.frameProtection ?? null, runner: manifest.frameRunner ?? null, files: (() => { try { return gw.frameStatus(cur.path, 'org', { includeCiYml: true }) } catch { return null } })() },
-                main: { checks: mainChecks?.state ?? null },
-              }
-            },
-            /** Q6: EVIDENCE ONLY — the session model drafts the subject. */
-            'card.commit.draft': async () => {
-              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
-              const cur = handle()
-              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
-              const repoPath = sid
-                ? (gw.parkedSessions(cur.path).find((s) => s.id === sid) ?? {}).worktree ?? cur.path
-                : cur.path
-              return {
-                uncommittedStat: gw.runGit(['diff', '--stat'], { cwd: repoPath, allowFail: true }) ?? '',
-                wipSubjects: gw.wipRun(repoPath).map((c) => c.subject),
-                recentStageSubjects: gw.stageLog(repoPath).slice(0, 5).map((c) => c.subject),
-                rule: '<type>(<scope>): <what is now true, in words a human would use> — types: ' + gw.SUBJECT_TYPES.join(' '),
-              }
-            },
-            'card.commit': async () => {
-              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
-              const cur = handle()
-              const subject = String(arg?.subject ?? '').split('\n')[0].trim()
-              if (!gw.SUBJECT_RE.test(subject)) throw new Error('subject-not-conventional: use <type>(<scope>): <what is now true> — got: ' + subject)
-              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
-              if (sid) {
-                // Session seat: squash + gate + merge to main (Q2 local half).
-                return gw.sessionStageBoundary(cur.path, sid, { message: subject })
-              }
-              // Org seat: squash on main + the same gate, parked=false only on green.
-              // B3: this used to squash onto main and THEN gate, returning
-              // `parked: true` on red while the commit sat on main regardless —
-              // a gate that reported failure and prevented nothing. The session
-              // path avoids it structurally: it squashes on a BRANCH and only
-              // merges when green, so main is never touched by a red run.
-              //
-              // The org seat has no branch, so the equivalent is an explicit
-              // rewind: remember where main was, and put it back if the gate
-              // reds. `stageBoundarySquash` is commit-tree + update-ref, so
-              // resetting to the recorded SHA restores the exact prior state —
-              // the WIP run included. Nothing is lost, which is the same
-              // promise parkSession makes on the session path (D40).
-              const preSha = gw.runGit(['rev-parse', 'HEAD'], { cwd: cur.path, allowFail: true })
-              const sq = gw.stageBoundarySquash(cur.path, { message: subject, trailer: 'Arxa-Stage: org' })
-              const gate = gw.runGate(cur.path)
-              if (!gate.green) {
-                if (preSha) gw.runGit(['reset', '--hard', preSha], { cwd: cur.path, allowFail: true })
-                return { ...sq, gate, merged: false, parked: true, rewound: Boolean(preSha) }
-              }
-              return { ...sq, gate, merged: true, parked: false, rewound: false }
-            },
-            /** Push the session branch for PR purposes ONLY (the D73
-             * relaxation, Q2): main pushes ride boundaries/heal. */
-            'card.push': async () => {
-              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
-              const cur = handle()
-              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
-              if (!sid) throw new Error('card.push serves session seats — the org primary rides its boundaries')
-              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
-              if (!s) throw new Error('session-not-found: ' + sid)
-              const g = await getGithub().catch(() => null)
-              if (!g) throw new Error('github-unavailable')
-              const creds = await g.gitCredentials()
-              // D98: push the repo that actually HOLDS this branch. A project
-              // session's `arxa/session/<id>` exists only in the project repo,
-              // and its origin is the project's remote — pushing it from the
-              // org would push a ref that is not there, to the wrong remote.
-              const repoPath = s.repoPath ?? cur.path
-              const origin = gw.getOrigin(repoPath)
-              if (!origin) throw new Error('no-origin — connect this org to GitHub first')
-              const url = origin.replace('https://', 'https://' + encodeURIComponent(creds.login) + ':' + creds.token + '@')
-              const out = gw.runGit(['push', '-u', url, s.branch], { cwd: repoPath, allowFail: true })
-              return out !== null ? { ok: true, branch: s.branch } : { ok: false, reason: 'push-failed' }
-            },
-            'card.pr.create': async () => {
-              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
-              const g = await getGithub().catch(() => null)
-              if (!g) throw new Error('github-unavailable')
-              const cur = handle()
-              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
-              if (!sid) throw new Error('card.pr.create serves session seats')
-              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
-              if (!s) throw new Error('session-not-found: ' + sid)
-              // D98: a project session's branch and remote belong to the
-              // PROJECT repo, but the PR below is built from the ORG manifest.
-              // Before routing this seat was unreachable for project sessions
-              // (the org registry had no such id, so it threw). Keep it loud
-              // rather than silently filing an org-scoped PR for project work —
-              // choosing the right manifest is Phase 2 (D102/D107).
-              if (s.origin === 'project') throw new Error('project-session-pr-pending: PR flow for project repos lands in Phase 2')
-              let manifest = {}
-              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
-              if (!manifest.repoOwner || !manifest.repoName) throw new Error('org-not-published')
-              const title = String(arg?.title ?? '').trim()
-              if (!gw.SUBJECT_RE.test(title)) throw new Error('title-not-conventional: the PR title becomes the squash-merge subject (Q7/Q8)')
-              const attribution = '— written by ' + String(arg?.model ?? 'the session model') + ' in arxa studio'
-              const body = [String(arg?.problem ?? ''), String(arg?.fix ?? ''), attribution].filter((x) => x !== '').join('\n\n')
-              // file-pr rule 1: dedupe — update, never duplicate.
-              const existing = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
-              if (Array.isArray(existing) && existing.length > 0) return { ok: true, existing: true, pr: { number: existing[0].number, url: existing[0].html_url } }
-              const pr = await g.prCreate(manifest.repoOwner, manifest.repoName, { title, body, head: s.branch, base: 'main' })
-              return { ok: true, pr: { number: pr.number, url: pr.html_url } }
-            },
-            'card.pr.status': async () => {
-              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
-              const g = await getGithub().catch(() => null)
-              if (!g) throw new Error('github-unavailable')
-              const cur = handle()
-              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
-              if (!sid) throw new Error('card.pr.status serves session seats')
-              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
-              if (!s) throw new Error('session-not-found: ' + sid)
-              // D98: same as card.pr.create — the org manifest is the wrong
-              // source for a project session's PR. Loud, not silently wrong.
-              if (s.origin === 'project') throw new Error('project-session-pr-pending: PR flow for project repos lands in Phase 2')
-              let manifest = {}
-              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
-              if (!manifest.repoOwner || !manifest.repoName) throw new Error('org-not-published')
-              const prs = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
-              if (!Array.isArray(prs) || prs.length === 0) return { ok: true, pr: null }
-              const pr = prs[0]
-              const checks = await g.prChecks(manifest.repoOwner, manifest.repoName, pr.head?.sha ?? s.branch).catch(() => ({ state: 'unknown', asleep: false, runs: [] }))
-              return { ok: true, pr: { number: pr.number, url: pr.html_url, state: pr.state }, checks }
-            },
-            /** D116: merge-commit the reviewed PR, pinned to the sha the
-              * checks were read from (D107) — never on anything but a fully
-              * green run (asleep/pending/red/none all refuse, loud reason). */
-            'card.pr.merge': async () => {
-              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
-              const g = await getGithub().catch(() => null)
-              if (!g) throw new Error('github-unavailable')
-              const cur = handle()
-              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
-              if (!sid) throw new Error('card.pr.merge serves session seats')
-              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
-              if (!s) throw new Error('session-not-found: ' + sid)
-              if (s.origin === 'project') throw new Error('project-session-pr-pending: PR flow for project repos lands in Phase 2')
-              let manifest = {}
-              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
-              if (!manifest.repoOwner || !manifest.repoName) throw new Error('org-not-published')
-              const prs = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
-              if (!Array.isArray(prs) || prs.length === 0) return { ok: false, reason: 'no-pr' }
-              const pr = prs[0]
-              const checks = await g.prChecks(manifest.repoOwner, manifest.repoName, pr.head?.sha ?? s.branch).catch(() => ({ state: 'unknown', asleep: false, runs: [] }))
-              if (checks.state !== 'green') return { ok: false, reason: 'checks-' + checks.state }
-              // prflow.js has no other caller yet (D116) — imported directly
-              // rather than through the index barrel, which does not re-export it.
-              const { mergeSessionPr } = await import(new URL('../../git-workspace/lib/prflow.js', import.meta.url).href)
-              const repoPath = s.repoPath ?? cur.path
-              const origin = gw.getOrigin(repoPath)
-              const result = await mergeSessionPr(repoPath, sid, {
-                owner: manifest.repoOwner,
-                name: manifest.repoName,
-                number: pr.number,
-                sha: pr.head?.sha ?? null,
-                subject: pr.title,
-                api: { prMerge: g.prMerge },
-                origin,
-              })
-              return { ok: true, merged: result.merged, mergeSha: result.mergeSha, reconcile: result.reconcile }
-            },
-            /** D116: human-initiated "publish to client" — mint the next
-              * semantic version into the session's own worktree (same target
-              * `stageBoundarySquash` already uses inside sessionStageBoundary,
-              * sessions.js:423), captured in one clean stage commit. */
-            'version.mint': async () => {
-              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
-              const cur = handle()
-              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
-              if (!sid) throw new Error('version.mint serves session seats')
-              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
-              if (!s) throw new Error('session-not-found: ' + sid)
-              const name = typeof arg?.name === 'string' && arg.name.trim() !== '' ? arg.name.trim() : undefined
-              const state = typeof arg?.state === 'string' && arg.state.trim() !== '' ? arg.state.trim() : undefined
-              const result = gw.mintAtStageBoundary(s.worktree, { name, state, env: process.env })
-              return { ok: true, squashed: result.squashed, sha: result.sha, chip: result.chip }
-            },
-            /** D116/B8: wake the self-hosted runner for this org's linked
-              * repo. A human action (runner.js:10-16) — never throws; the
-              * client shows the manual `svc.sh start` instruction on ok:false. */
-            'card.runner.wake': async () => {
-              const cur = handle()
-              let manifest = {}
-              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
-              if (!manifest.repoOwner || !manifest.repoName) return { ok: false, reason: 'unlinked' }
-              const g = await getGithub().catch(() => null)
-              if (!g) return { ok: false, reason: 'unlinked' }
-              return g.ensureRunner(manifest.repoOwner, manifest.repoName)
-            },
-            /** A3: insight column, right-panel surfaces (D101/D105). Each
-              * degrades to an 'unavailable' shape rather than throwing when
-              * its backend export has not landed yet — a missing export
-              * must never break the whole card. */
-            'insight.streak': async () => {
-              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
-              const cur = handle()
-              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
-              if (!sid) throw new Error('insight.streak serves session seats')
-              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
-              if (!s) throw new Error('session-not-found: ' + sid)
-              if (typeof gw.commitDays !== 'function') return { days: [], current: 0, longest: 0, reason: 'unavailable' }
-              const repoPath = s.repoPath ?? cur.path
-              return gw.commitDays(repoPath, { since: '90 days', env: process.env })
-            },
-            'insight.ci': async () => {
-              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
-              const g = await getGithub().catch(() => null)
-              const cur = handle()
-              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
-              if (!sid) throw new Error('insight.ci serves session seats')
-              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
-              if (!s) throw new Error('session-not-found: ' + sid)
-              if (!g || typeof g.workflowRuns !== 'function') return { runs: [], reason: 'unavailable' }
-              let manifest = {}
-              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch {}
-              if (!manifest.repoOwner || !manifest.repoName) return { runs: [], reason: 'unavailable' }
-              return g.workflowRuns({ owner: manifest.repoOwner, name: manifest.repoName, branch: s.branch, perPage: 20 })
-            },
-            'insight.sessions': async () => {
-              const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
-              const cur = arg?.orgId ? await ensureOpen(arg.orgId) : handle()
-              return { rows: gw.parkedSessions(cur.path) }
-            },
             // 'org.new-session' is GONE (grilled 2026-08-30): org rows
             // never host sessions — the legacy + path that reached this
             // action created org-level worktrees by accident. Unknown
@@ -1078,7 +1200,7 @@ export function apply(ctx, opts = {}) {
               let notice = null
               const g = await getGithub().catch(() => null)
               if (g) {
-                const gw = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
+                const gw = await importGitWorkspace()
                 let route = null
                 try { route = gw.resolveSessionRepo(cur.path, ws, { env: process.env }) } catch { route = null }
                 if (route) {
@@ -1145,11 +1267,13 @@ export function apply(ctx, opts = {}) {
             },
             'session.open': async () => {
               const cur = await ensureOpen(arg?.orgId)
-              return cur.resumeSession(arg?.sessionId)
+              return cur.resumeSession(arg?.sessionId, { dropIfEmpty: arg?.dropIfEmpty === true })
             },
             'session.archive': async () => {
               const cur = await ensureOpen(arg?.orgId)
-              return cur.archiveSession(arg?.sessionId)
+              // dropRemote: close-without-merge cleanup — the caller asserts the
+              // PR is closed, so the unmerged remote branch may go too.
+              return cur.archiveSession(arg?.sessionId, { dropRemote: arg?.dropRemote === true })
             },
             'trash.restore': () => handle().restoreTrash(arg?.entryId ?? null),
             // 'ci.run' reserved for Phase D3 — deliberately absent.

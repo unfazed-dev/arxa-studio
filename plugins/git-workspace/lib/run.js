@@ -6,7 +6,7 @@
 // via -c. All state stays inside the workspace tree; nothing
 // machine-global is read or written.
 
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import os from 'node:os'
 import { ensureGit, gitBin } from './probe.js'
 
@@ -23,7 +23,17 @@ export const WIP_IDENTITY = Object.freeze({
   email: 'wip@arxa.invalid',
 })
 
-function childEnv(identity, env) {
+/**
+ * `objectDir` is the ONE deliberate exception to the deletes below. Pointing
+ * GIT_OBJECT_DIRECTORY at a scratch directory (with the repo's real store as
+ * an alternate, so reads still resolve) lets a read-only probe compute an
+ * answer whose intermediate objects are thrown away instead of landing in the
+ * repo. `merge-tree --write-tree` needs it: measured 2026-09-03 on git 2.51,
+ * it leaves 2 loose objects per call, and the conflict probe runs once per
+ * open session every 30 seconds. Ambient inheritance stays forbidden — this
+ * is opt-in, per call, and set AFTER the deletes for that reason.
+ */
+function childEnv(identity, env, objectDir) {
   const child = { ...env }
   // Never inherit repo pointers from the host process (the app may be
   // launched from inside another repo, or even from a git hook).
@@ -40,6 +50,10 @@ function childEnv(identity, env) {
   child.GIT_AUTHOR_EMAIL = identity.email
   child.GIT_COMMITTER_NAME = identity.name
   child.GIT_COMMITTER_EMAIL = identity.email
+  if (objectDir) {
+    child.GIT_OBJECT_DIRECTORY = objectDir.write
+    child.GIT_ALTERNATE_OBJECT_DIRECTORIES = objectDir.read
+  }
   return child
 }
 
@@ -52,13 +66,45 @@ const PINNED = [
 ]
 
 /**
+ * Run git where a NON-ZERO EXIT IS AN ANSWER, not a failure.
+ *
+ * `runGit` collapses every non-zero exit to `null` under `allowFail`, which
+ * throws away stdout. `merge-tree` reports a conflict as exit 1 *and* prints
+ * the conflicted paths, so the two halves have to arrive together — hence a
+ * separate entry point rather than a flag that changes runGit's return type.
+ *
+ * Same pinned config, same env hygiene, same opt-in `objectDir`.
+ *
+ * @returns {{ status: number|null, stdout: string, stderr: string }}
+ */
+export function runGitProbe(args, { cwd, identity = STAGE_IDENTITY, env = process.env, timeout, objectDir } = {}) {
+  ensureGit(env)
+  const r = spawnSync(gitBin(env), [...PINNED, '-c', `safe.directory=${cwd}`, ...args], {
+    cwd,
+    env: childEnv(identity, env, objectDir),
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    maxBuffer: 64 * 1024 * 1024,
+    ...(Number.isFinite(timeout) && timeout > 0 ? { timeout, killSignal: 'SIGKILL' } : {}),
+  })
+  return { status: r.status, stdout: String(r.stdout ?? ''), stderr: String(r.stderr ?? '') }
+}
+
+/**
  * Run git with pinned config. Returns trimmed stdout; throws on non-zero
  * exit (after `ensureGit` has vouched that git exists at all).
  *
  * @param {string[]} args
- * @param {{ cwd: string, identity?: {name:string,email:string}, env?: object, allowFail?: boolean }} opts
+ * `timeout` (ms) bounds the child — network verbs (push/fetch) MUST pass one:
+ * runGit is synchronous, so a git that sits on a credential prompt or a dead
+ * socket freezes the whole engine event loop (2026-09-03, RESTO smoke: a
+ * `push` with a rejected token waited on the launcher's TTY for 6 minutes and
+ * every HTTP route timed out with it). The same callers set
+ * GIT_TERMINAL_PROMPT=0 so a bad token fails as text instead of prompting.
+ *
+ * @param {{ cwd: string, identity?: {name:string,email:string}, env?: object, allowFail?: boolean, timeout?: number }} opts
  */
-export function runGit(args, { cwd, identity = STAGE_IDENTITY, env = process.env, allowFail = false } = {}) {
+export function runGit(args, { cwd, identity = STAGE_IDENTITY, env = process.env, allowFail = false, timeout, objectDir } = {}) {
   ensureGit(env)
   // Global config is nulled above, which also disables any user
   // safe.directory allowlist — on mounted volumes git can then refuse
@@ -68,10 +114,11 @@ export function runGit(args, { cwd, identity = STAGE_IDENTITY, env = process.env
   try {
     return execFileSync(gitBin(env), [...PINNED, ...perRepo, ...args], {
       cwd,
-      env: childEnv(identity, env),
+      env: childEnv(identity, env, objectDir),
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 64 * 1024 * 1024,
+      ...(Number.isFinite(timeout) && timeout > 0 ? { timeout, killSignal: 'SIGKILL' } : {}),
     }).trim()
   } catch (err) {
     if (allowFail) return null

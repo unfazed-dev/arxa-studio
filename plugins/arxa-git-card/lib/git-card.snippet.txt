@@ -1,0 +1,569 @@
+// GitDock — the Git card body. Composed into lib/client.js by
+// scripts/gen-git-card.mjs; `h`, `P`, `S` (stock QueueDock class map under
+// the aXa_gc_ identity) and `CARD_ROUTE` are in scope from the generator.
+// Tree mirrors the stock QueueDock exactly:
+//   div.dock[data-git-dock] > div.panel >
+//     button.header[aria-controls, aria-expanded] > span.lead + span.count + span.chevron
+//     ul.list[hidden] > li.row > (span.preview | input.editor) + div.actions > Tooltip > button.action > Icon
+// Collapsed = the header alone (the chip). Expanded = one panel, three rows:
+// Status / Commit / Approve (docs/plans/git-card-stock-dock-rebuild.md).
+const en = {
+  'git.head': '{branch} · {summary}',
+  'git.expand': 'Expand git card',
+  'git.collapse': 'Collapse git card',
+  'git.loading': 'loading',
+  'git.clean': 'clean',
+  'git.changed': '{n} changed',
+  'git.staged': '{n} staged',
+  'git.unstaged': '{n} unstaged',
+  'git.untracked': '{n} untracked',
+  'git.ahead': '{n} ahead',
+  'git.behind': '{n} behind',
+  'git.conflicts': 'conflicts',
+  'git.integrate': 'Integrate main',
+  'git.integrate.finish': 'Finish integrating',
+  'git.wip': '{n} wip',
+  'git.health.missing': 'worktree missing',
+  'git.health.detached': 'worktree detached',
+  'git.refresh': 'Refresh',
+  'git.commit': 'Commit',
+  'git.commitHint': 'nothing to commit',
+  'git.commitSubject': 'Commit subject — <type>(<scope>): <what is now true>',
+  'git.save': 'Commit',
+  'git.cancel': 'Cancel',
+  'git.committed': 'Committed: {subject}',
+  'git.parked': 'Gate red — commit parked, tree rewound',
+  'git.commitFailed': 'Commit failed: {reason}',
+  'git.pr.none': 'no pull request',
+  'git.pr.open': 'PR #{n} · {state}',
+  'git.pr.checks': 'checks {state}',
+  'git.pr.refresh': 'Check pull request',
+  'git.pr.create': 'Push and open pull request',
+  'git.pr.merge': 'Merge pull request',
+  'git.pr.created': 'PR #{n} opened',
+  'git.pr.merged': 'PR merged',
+  'git.pr.failed': 'Pull request failed: {reason}',
+  'git.ci.rerun': 'Re-run the latest checks',
+  'git.ci.cancel': 'Cancel the running checks',
+  'git.ci.open': 'Open the run on GitHub',
+  'git.ci.rerunStarted': 'Re-run requested',
+  'git.ci.cancelled': 'Cancel requested',
+  'git.ci.alreadyFinished': 'That run already finished',
+  'git.ci.failed': 'Run control failed: {reason}',
+  'git.statusFailed': 'Git status failed: {reason}',
+  'git.title.subject': 'PR title',
+  'git.localOnly': 'local-only',
+  'git.frame.wired': 'frame wired',
+  'git.frame.missing': 'frame missing',
+  'git.runner.online': 'runner online',
+  'git.runner.asleep': 'runner asleep',
+  'git.runner.unknown': 'runner unknown',
+  'git.mainRed': 'main is red',
+  'git.relink': 're-link GitHub — the session expired',
+  'git.wake': 'Wake the runner',
+  'git.wakeStarted': 'Waking the runner — checks resume when it reports in.',
+  'git.wakeManual': 'Start it by hand: run svc.sh start in ~/.arxa/runners/<owner>__<name>. {reason}',
+  'git.askDraft': 'Ask the session to draft the subject',
+  'git.draftFailed': 'Draft request failed: {reason}',
+  'git.insight.streak': 'Streak',
+  'git.insight.review': 'Review',
+  'git.insight.sessions': 'Sessions',
+  'git.mint': 'Mint a version',
+  'git.minted': 'Minted {chip}',
+  'git.mintFailed': 'Mint failed: {reason}',
+}
+const pl = {
+  'git.head': '{branch} · {summary}',
+  'git.expand': 'Rozwiń kartę git',
+  'git.collapse': 'Zwiń kartę git',
+  'git.loading': 'ładowanie',
+  'git.clean': 'czysto',
+  'git.changed': '{n} zmienionych',
+  'git.staged': '{n} w indeksie',
+  'git.unstaged': '{n} poza indeksem',
+  'git.untracked': '{n} nieśledzonych',
+  'git.ahead': '{n} do przodu',
+  'git.behind': '{n} w tyle',
+  'git.conflicts': 'konflikty',
+  'git.integrate': 'Scal main',
+  'git.integrate.finish': 'Dokończ scalanie',
+  'git.wip': '{n} wip',
+  'git.health.missing': 'brak drzewa roboczego',
+  'git.health.detached': 'drzewo robocze odłączone',
+  'git.refresh': 'Odśwież',
+  'git.commit': 'Zatwierdź',
+  'git.commitHint': 'nic do zatwierdzenia',
+  'git.commitSubject': 'Temat commita — <typ>(<zakres>): <co jest teraz prawdą>',
+  'git.save': 'Zatwierdź',
+  'git.cancel': 'Anuluj',
+  'git.committed': 'Zatwierdzono: {subject}',
+  'git.parked': 'Bramka czerwona — commit odłożony, drzewo cofnięte',
+  'git.commitFailed': 'Commit nie powiódł się: {reason}',
+  'git.pr.none': 'brak pull requesta',
+  'git.pr.open': 'PR #{n} · {state}',
+  'git.pr.checks': 'testy {state}',
+  'git.pr.refresh': 'Sprawdź pull request',
+  'git.pr.create': 'Wypchnij i otwórz pull request',
+  'git.pr.merge': 'Scal pull request',
+  'git.pr.created': 'Otwarto PR #{n}',
+  'git.pr.merged': 'PR scalony',
+  'git.pr.failed': 'Pull request nie powiódł się: {reason}',
+  'git.ci.rerun': 'Uruchom ponownie ostatnie testy',
+  'git.ci.cancel': 'Anuluj trwające testy',
+  'git.ci.open': 'Otwórz przebieg na GitHubie',
+  'git.ci.rerunStarted': 'Zażądano ponownego uruchomienia',
+  'git.ci.cancelled': 'Zażądano anulowania',
+  'git.ci.alreadyFinished': 'Ten przebieg już się zakończył',
+  'git.ci.failed': 'Sterowanie przebiegiem nie powiodło się: {reason}',
+  'git.statusFailed': 'Status git nie powiódł się: {reason}',
+  'git.title.subject': 'Tytuł PR',
+  // TODO native review (conformance decision 4): machine-drafted.
+  'git.localOnly': 'tylko lokalnie',
+  'git.frame.wired': 'rama podłączona',
+  'git.frame.missing': 'brak ramy',
+  'git.runner.online': 'runner online',
+  'git.runner.asleep': 'runner uśpiony',
+  'git.runner.unknown': 'runner nieznany',
+  'git.mainRed': 'main czerwony',
+  // TODO native review: machine-drafted.
+  'git.relink': 'połącz ponownie GitHub — sesja wygasła',
+  'git.wake': 'Obudź runnera',
+  'git.wakeStarted': 'Budzenie runnera — kontrole wznowią się, gdy się zgłosi.',
+  'git.wakeManual': 'Uruchom ręcznie: svc.sh start w ~/.arxa/runners/<owner>__<name>. {reason}',
+  'git.askDraft': 'Poproś sesję o szkic tematu',
+  'git.draftFailed': 'Szkic nie powiódł się: {reason}',
+  'git.insight.streak': 'Seria',
+  'git.insight.review': 'Recenzja',
+  'git.insight.sessions': 'Sesje',
+  'git.mint': 'Wybij wersję',
+  'git.minted': 'Wybito {chip}',
+  'git.mintFailed': 'Wybicie nie powiodło się: {reason}',
+}
+const fr = {
+  'git.head': '{branch} · {summary}',
+  'git.expand': 'Déplier la carte git',
+  'git.collapse': 'Replier la carte git',
+  'git.loading': 'chargement',
+  'git.clean': 'propre',
+  'git.changed': '{n} modifiés',
+  'git.staged': '{n} indexés',
+  'git.unstaged': '{n} non indexés',
+  'git.untracked': '{n} non suivis',
+  'git.ahead': '{n} en avance',
+  'git.behind': '{n} en retard',
+  'git.conflicts': 'conflits',
+  'git.integrate': 'Intégrer main',
+  'git.integrate.finish': "Terminer l'intégration",
+  'git.wip': '{n} wip',
+  'git.health.missing': 'arbre de travail manquant',
+  'git.health.detached': 'arbre de travail détaché',
+  'git.refresh': 'Actualiser',
+  'git.commit': 'Valider',
+  'git.commitHint': 'rien à valider',
+  'git.commitSubject': 'Sujet du commit — <type>(<portée>): <ce qui est vrai maintenant>',
+  'git.save': 'Valider',
+  'git.cancel': 'Annuler',
+  'git.committed': 'Validé : {subject}',
+  'git.parked': 'Porte rouge — commit mis de côté, arbre rembobiné',
+  'git.commitFailed': 'Échec du commit : {reason}',
+  'git.pr.none': 'aucune pull request',
+  'git.pr.open': 'PR #{n} · {state}',
+  'git.pr.checks': 'vérifications {state}',
+  'git.pr.refresh': 'Vérifier la pull request',
+  'git.pr.create': 'Pousser et ouvrir une pull request',
+  'git.pr.merge': 'Fusionner la pull request',
+  'git.pr.created': 'PR #{n} ouverte',
+  'git.pr.merged': 'PR fusionnée',
+  'git.pr.failed': 'Échec de la pull request : {reason}',
+  'git.ci.rerun': 'Relancer les dernières vérifications',
+  'git.ci.cancel': 'Annuler les vérifications en cours',
+  'git.ci.open': 'Ouvrir l’exécution sur GitHub',
+  'git.ci.rerunStarted': 'Relance demandée',
+  'git.ci.cancelled': 'Annulation demandée',
+  'git.ci.alreadyFinished': 'Cette exécution est déjà terminée',
+  'git.ci.failed': 'Échec du contrôle d’exécution : {reason}',
+  'git.statusFailed': 'Échec du statut git : {reason}',
+  'git.title.subject': 'Titre de la PR',
+  // TODO native review (conformance decision 4): machine-drafted.
+  'git.localOnly': 'local uniquement',
+  'git.frame.wired': 'cadre câblé',
+  'git.frame.missing': 'cadre manquant',
+  'git.runner.online': 'runner en ligne',
+  'git.runner.asleep': 'runner en veille',
+  'git.runner.unknown': 'runner inconnu',
+  'git.mainRed': 'main est rouge',
+  // TODO native review: machine-drafted.
+  'git.relink': 'reconnectez GitHub — la session a expiré',
+  'git.wake': 'Réveiller le runner',
+  'git.wakeStarted': 'Réveil du runner — les contrôles reprennent dès qu’il répond.',
+  'git.wakeManual': 'Lancez-le à la main : svc.sh start dans ~/.arxa/runners/<owner>__<name>. {reason}',
+  'git.askDraft': 'Demander à la session un sujet',
+  'git.draftFailed': 'Échec de la demande de brouillon : {reason}',
+  'git.insight.streak': 'Série',
+  'git.insight.review': 'Revue',
+  'git.insight.sessions': 'Sessions',
+  'git.mint': 'Frapper une version',
+  'git.minted': 'Version {chip} frappée',
+  'git.mintFailed': 'Échec de la frappe : {reason}',
+}
+
+/** Every read and write goes through the one host route. `arg.sessionId`
+ * makes the card SEAT-AWARE (session worktree + branch); a session the org
+ * registry does not know falls back to the org primary seat. */
+const postAction = async (action, arg) => {
+  const r = await fetch(CARD_ROUTE, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action, arg }),
+  })
+  const b = await r.json().catch(() => ({}))
+  if (!b.ok) { const e = new Error(b.error || action); e.code = b.error || action; throw e }
+  return b.result
+}
+const reasonOf = (e) => String((e && (e.code || e.message)) || e || 'unknown').split('\n')[0]
+const isNoOrg = (e) => /^(no-org-open|no-workspace|sidebar-not-ready)/.test(reasonOf(e))
+const Icon = (name, fallback, size) => {
+  const C = P[name] || P[fallback]
+  return C ? h(C, size ? { size } : {}) : null
+}
+
+function GitDock({ sessionId, postAction: post, notify, t }) {
+  const [status, setStatus] = React.useState(null)
+  const [pr, setPr] = React.useState(void 0)
+  const [absent, setAbsent] = React.useState(false)
+  const [collapsed, setCollapsed] = React.useState(true)
+  const [editing, setEditing] = React.useState(null)
+  const [busy, setBusy] = React.useState(null)
+  const [seatSession, setSeatSession] = React.useState(sessionId || null)
+  const [mintChip, setMintChip] = React.useState(null)
+  const listId = React.useId()
+  const alive = React.useRef(true)
+  React.useEffect(() => () => { alive.current = false }, [])
+
+  const seatArg = () => (seatSession ? { sessionId: seatSession } : {})
+
+  const load = React.useCallback(async () => {
+    try {
+      let r
+      try { r = await post('card.status', sessionId ? { sessionId } : {}) }
+      catch (e) {
+        if (sessionId && /^session-not-found/.test(reasonOf(e))) { r = await post('card.status', {}); if (alive.current) setSeatSession(null) }
+        else throw e
+      }
+      if (!alive.current) return
+      setAbsent(false)
+      setStatus(r)
+    } catch (e) {
+      if (!alive.current) return
+      if (isNoOrg(e)) { setAbsent(true); return }
+      notify('error', t('git.statusFailed', { reason: reasonOf(e) }))
+    }
+  }, [post, sessionId, notify, t])
+
+  const loadPr = React.useCallback(async () => {
+    if (!seatSession) { setPr(null); return }
+    try { const r = await post('card.pr.status', { sessionId: seatSession }); if (alive.current) setPr(r) }
+    catch (e) { if (alive.current) setPr({ ok: false, reason: reasonOf(e) }) }
+  }, [post, seatSession])
+
+  React.useEffect(() => { setSeatSession(sessionId || null); setPr(void 0); setMintChip(null); load() }, [sessionId, load])
+  React.useEffect(() => {
+    const on = () => { load(); if (!collapsed) loadPr() }
+    window.addEventListener('arxa-git-card-refresh', on)
+    return () => window.removeEventListener('arxa-git-card-refresh', on)
+  }, [load, loadPr, collapsed])
+  React.useEffect(() => {
+    if (!status || collapsed) return
+    if (status.seat && status.seat.kind === 'session' && status.linked && !status.localOnly && pr === void 0) loadPr()
+  }, [status, collapsed, pr, loadPr])
+
+  // Polling (A3, unchanged from Phase 4): status every 30 s; the PR read only
+  // while expanded AND a PR exists — no idle GitHub traffic. Timers live in
+  // effects with disposers.
+  const hasPr = Boolean(pr && pr.ok && pr.pr)
+  React.useEffect(() => {
+    const id = window.setInterval(() => { if (busy === null) load() }, 30000)
+    return () => window.clearInterval(id)
+  }, [load, busy])
+  React.useEffect(() => {
+    if (collapsed || !hasPr) return
+    const id = window.setInterval(() => { if (busy === null) loadPr() }, 30000)
+    return () => window.clearInterval(id)
+  }, [collapsed, hasPr, loadPr, busy])
+
+  if (absent || status === null) return null
+
+  const interactionActive = editing !== null || busy !== null
+  const expanded = !collapsed || interactionActive
+  const dirty = status.dirty
+  const changed = dirty ? dirty.staged + dirty.unstaged + dirty.untracked : null
+  const healthKey = status.health === 'ok' ? null : (status.health === 'missing' ? 'git.health.missing' : 'git.health.detached')
+  const summary = healthKey ? t(healthKey) : changed === 0 ? t('git.clean') : t('git.changed', { n: changed })
+  const branch = (status.seat && status.seat.branch) || 'main'
+  const detailParts = []
+  if (dirty) {
+    if (dirty.staged) detailParts.push(t('git.staged', { n: dirty.staged }))
+    if (dirty.unstaged) detailParts.push(t('git.unstaged', { n: dirty.unstaged }))
+    if (dirty.untracked) detailParts.push(t('git.untracked', { n: dirty.untracked }))
+  }
+  if (status.aheadBehind) {
+    if (status.aheadBehind.ahead) detailParts.push(t('git.ahead', { n: status.aheadBehind.ahead }))
+    if (status.aheadBehind.behind) detailParts.push(t('git.behind', { n: status.aheadBehind.behind }))
+  }
+  // `conflicts === true` only. A null means the probe could not run, and
+  // "we did not check" must not render as "there is no conflict".
+  if (status.integrate && status.integrate.conflicts === true) detailParts.push(t('git.conflicts'))
+  if (status.wipRun) detailParts.push(t('git.wip', { n: status.wipRun }))
+  if (status.chip) detailParts.push(String(status.chip))
+  // Frame health + runner + main gate ride the same readout (old status
+  // slide). A missing part is not a zero — only measured parts are said.
+  const frame = status.frame || {}
+  const checks = (pr && pr.ok && pr.checks) || null
+  const checkState = checks ? (checks.asleep ? 'asleep' : String(checks.state || 'unknown')) : 'none'
+  const runnerAsleep = frame.runner === 'asleep' || checkState === 'asleep'
+  const sessionSeat = Boolean(status.seat && status.seat.kind === 'session')
+  // Leads the detail line: when GitHub has revoked the grant every push, PR
+  // and merge on this card fails, and before 2026-09-04 it failed as a bare
+  // 401 with nothing naming the one recovery. This is the surface the user is
+  // actually standing on when that happens — the sidebar's org modal is not.
+  if (status.github && status.github.relinkRequired) detailParts.push(t('git.relink'))
+  if (status.localOnly) detailParts.push(t('git.localOnly'))
+  if (frame.wired) detailParts.push(t(frame.wired === 'ok' ? 'git.frame.wired' : 'git.frame.missing'))
+  // host says 'ok' (manifest.frameRunner) or 'online' (live probe) — both are up
+  if (frame.runner) detailParts.push(t(frame.runner === 'ok' || frame.runner === 'online' ? 'git.runner.online' : frame.runner === 'asleep' ? 'git.runner.asleep' : 'git.runner.unknown'))
+  if (status.main && status.main.checks === 'red') detailParts.push(t('git.mainRed'))
+  const detail = detailParts.length ? detailParts.join(' · ') : summary
+
+  const run = async (key, fn) => {
+    setBusy(key)
+    try { return await fn() }
+    finally { if (alive.current) setBusy((cur) => (cur === key ? null : cur)) }
+  }
+  const commit = async () => {
+    if (editing === null || editing.text.trim() === '') return
+    const subject = editing.text.trim()
+    await run('commit', async () => {
+      try {
+        const r = await post('card.commit', { ...seatArg(), subject })
+        if (!alive.current) return
+        setEditing(null)
+        notify(r && r.parked ? 'error' : 'info', r && r.parked ? t('git.parked') : t('git.committed', { subject }))
+        load()
+      } catch (e) { notify('error', t('git.commitFailed', { reason: reasonOf(e) })) }
+    })
+  }
+  const createPr = async () => {
+    const title = editing && editing.kind === 'pr' ? editing.text.trim() : ''
+    if (!title) return
+    await run('pr', async () => {
+      try {
+        const p = await post('card.push', seatArg())
+        if (p && p.ok === false) throw new Error(p.reason || 'push-failed')
+        const r = await post('card.pr.create', { ...seatArg(), title })
+        if (!alive.current) return
+        setEditing(null)
+        notify('info', t('git.pr.created', { n: r && r.pr ? r.pr.number : '?' }))
+        loadPr(); load()
+      } catch (e) { notify('error', t('git.pr.failed', { reason: reasonOf(e) })) }
+    })
+  }
+  const mergePr = async () => {
+    await run('merge', async () => {
+      try {
+        const r = await post('card.pr.merge', seatArg())
+        if (!alive.current) return
+        if (r && r.ok === false) throw new Error(r.reason || 'merge-failed')
+        notify('info', t('git.pr.merged'))
+        loadPr(); load()
+      } catch (e) { notify('error', t('git.pr.failed', { reason: reasonOf(e) })) }
+    })
+  }
+
+  /** Q8: run control from the card. `card.pr.status` already surfaced the
+   * run ids, so these never guess one — the newest run on the seat's branch
+   * is the target. The host refuses a project seat (ciTarget), and a 409 on
+   * cancel comes back as `already-finished` rather than an error. */
+  const latestRun = pr && pr.ok && Array.isArray(pr.runs) && pr.runs.length > 0 ? pr.runs[0] : null
+  const runLive = Boolean(latestRun && latestRun.status !== 'completed')
+  const ciControl = (which) => async () => {
+    if (!latestRun) return
+    await run('ci-' + which, async () => {
+      try {
+        const r = await post('card.ci.' + which, { ...seatArg(), runId: latestRun.id })
+        if (!alive.current) return
+        notify('info', r && r.outcome === 'already-finished'
+          ? t('git.ci.alreadyFinished')
+          : t(which === 'rerun' ? 'git.ci.rerunStarted' : 'git.ci.cancelled'))
+        loadPr()
+      } catch (e) { notify('error', t('git.ci.failed', { reason: reasonOf(e) })) }
+    })
+  }
+  const rerunCi = ciControl('rerun')
+  const cancelCi = ciControl('cancel')
+  const openRun = () => { if (latestRun && latestRun.url) window.open(latestRun.url, '_blank', 'noopener') }
+
+  /** D116/B8: a human action — the host never throws; ok:false carries the
+   * manual svc.sh instruction. */
+  const wake = async () => {
+    await run('wake', async () => {
+      try {
+        const r = await post('card.runner.wake', seatArg())
+        if (!alive.current) return
+        notify(r && r.ok ? 'info' : 'error', r && r.ok ? t('git.wakeStarted') : t('git.wakeManual', { reason: String((r && r.reason) || '') }))
+        load(); if (pr !== void 0) loadPr()
+      } catch (e) { notify('error', t('git.wakeManual', { reason: reasonOf(e) })) }
+    })
+  }
+  /** Stage boundary: mint a version on the merged seat; the chip it returns
+   * joins the approve readout until the session changes. */
+  const mint = async () => {
+    await run('mint', async () => {
+      try {
+        const r = await post('version.mint', seatArg())
+        if (!alive.current) return
+        const chip = r && r.chip ? r.chip : null
+        if (chip) setMintChip(chip)
+        notify('info', t('git.minted', { chip: chip ? (chip.label || String(chip)) : '' }))
+        load()
+      } catch (e) { notify('error', t('git.mintFailed', { reason: reasonOf(e) })) }
+    })
+  }
+  /** Q6: the engine never drafts — the host returns EVIDENCE and the session
+   * model writes the subject. Prefill the composer through the native value
+   * setter so React sees the input. */
+  const askDraft = async () => {
+    await run('draft', async () => {
+      try {
+        const r = await post('card.commit.draft', seatArg())
+        if (!alive.current) return
+        const ta = document.querySelector("[data-slot='conversation.composer.bar'] textarea")
+        if (!ta) throw new Error('composer-not-found')
+        const text = 'Draft a conventional commit subject for the current changes. ' + String((r && r.rule) || '')
+          + ' Evidence — stat: ' + String((r && r.uncommittedStat) || '(committed via WIP)')
+          + ' Recent stage subjects: ' + (((r && r.recentStageSubjects) || []).join(' | '))
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')
+        if (setter && setter.set) setter.set.call(ta, text); else ta.value = text
+        ta.dispatchEvent(new Event('input', { bubbles: true }))
+        ta.focus()
+        window.__arxaCardDraftRule = r && r.rule
+      } catch (e) { notify('error', t('git.draftFailed', { reason: reasonOf(e) })) }
+    })
+  }
+  /** Insight links: right-panel surfaces owned by artifact-viewer (A3). */
+  const openInsight = (view) => {
+    try { window.dispatchEvent(new CustomEvent('arxa-av-open', { detail: { kind: 'insight', view, sessionId: seatSession } })) } catch { /* no bridge */ }
+  }
+  const wakeAction = () => action('wake', t('git.wake'), Icon('IconTriangleRightFill14', 'IconRefreshOutline16', 14), { onClick: wake })
+
+  const action = (key, label, icon, opts) => h(P.Tooltip, { key, label, side: 'bottom', delayMs: 500 },
+    h('button', {
+      type: 'button', className: S.action, 'aria-label': label,
+      disabled: Boolean(opts && opts.disabled) || busy !== null,
+      onClick: opts && opts.onClick,
+    }, icon))
+  const editor = (kind, label, onSave) => h('input', {
+    autoFocus: true, className: S.editor, 'aria-label': label, value: editing.text,
+    onChange: (event) => { setEditing({ kind, text: event.currentTarget.value }) },
+    onKeyDown: (event) => {
+      if (event.key === 'Escape') { setEditing(null); return }
+      if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); onSave() }
+    },
+  })
+  const editActions = (onSave) => [
+    action('save', t('git.save'), Icon('IconCheckOutline16', 'IconCheckOutline16', 14), { disabled: editing.text.trim() === '', onClick: onSave }),
+    action('cancel', t('git.cancel'), Icon('IconCloseOutline16', 'IconCloseFill14', 14), { onClick: () => setEditing(null) }),
+  ]
+
+  const rows = []
+  // 1. Status
+  rows.push(h('li', { key: 'status', className: S.row },
+    h('span', { className: S.preview }, detail),
+    h('div', { className: S.actions },
+      [
+        action('refresh', t('git.refresh'), Icon('IconRefreshOutline16', 'IconRefreshOutline16', 14), { onClick: () => { load(); if (pr !== void 0) loadPr() } }),
+        runnerAsleep ? wakeAction() : null,
+        sessionSeat ? action('insight-streak', t('git.insight.streak'), Icon('IconChecklistOutline14', 'IconInspectOutline12', 14), { onClick: () => openInsight('streak') }) : null,
+        sessionSeat ? action('insight-review', t('git.insight.review'), Icon('IconQueueOutline14', 'IconInspectOutline12', 14), { onClick: () => openInsight('review') }) : null,
+        sessionSeat ? action('insight-sessions', t('git.insight.sessions'), Icon('IconBrowseOutline16', 'IconInspectOutline12', 14), { onClick: () => openInsight('sessions') }) : null,
+        // Integrate sits with the "{n} behind" it answers. Mid-merge it becomes
+        // Finish, so the card offers exactly one next move rather than a button
+        // that would start a merge already in progress.
+        sessionSeat && status.integrate && status.integrate.integrating
+          ? action('integrate-finish', t('git.integrate.finish'), Icon('IconCheckOutline16', 'IconCheckOutline16', 14), {
+            onClick: () => run('integrate', async () => { await post('card.integrate.finish', seatArg()); load() }),
+          })
+          : (sessionSeat && status.integrate && status.integrate.behind > 0
+            ? action('integrate', t('git.integrate'), Icon('IconRefreshOutline16', 'IconRefreshOutline16', 14), {
+              onClick: () => run('integrate', async () => { await post('card.integrate', seatArg()); load() }),
+            })
+            : null),
+      ])))
+  // 2. Commit — a stage boundary squashes the WIP run above the session
+  // base (gw.sessionStageBoundary), so a clean tree with WIP commits is
+  // committable. Gating on dirty files alone left Commit dark whenever the
+  // watcher had already auto-saved the work (2026-09-02, flow 2 smoke).
+  const wipRun = typeof status.wipRun === 'number' ? status.wipRun : 0
+  const canCommit = status.health === 'ok' && ((changed !== null && changed > 0) || wipRun > 0)
+  const commitPreview = changed === 0 && wipRun > 0 ? t('git.wip', { n: wipRun }) : summary
+  const committing = editing !== null && editing.kind === 'commit'
+  rows.push(h('li', { key: 'commit', className: S.row },
+    committing
+      ? editor('commit', t('git.commitSubject'), commit)
+      : h('span', { className: S.preview }, canCommit ? commitPreview : t('git.commitHint')),
+    h('div', { className: S.actions },
+      committing
+        ? editActions(commit)
+        : [
+          canCommit ? action('draft', t('git.askDraft'), Icon('IconEnhanceOutline16', 'IconEditOutline16', 14), { onClick: askDraft }) : null,
+          action('commit', t('git.commit'), Icon('IconCheckOutline16', 'IconCheckOutline16', 14), { disabled: !canCommit, onClick: () => setEditing({ kind: 'commit', text: '' }) }),
+        ])))
+  // 3. Approve — session seats of a linked org only
+  if (status.seat && status.seat.kind === 'session' && status.linked && !status.localOnly) {
+    const prAny = pr && pr.ok && pr.pr
+    const prMerged = Boolean(prAny && (pr.merged || pr.pr.state === 'merged'))
+    const prOpen = Boolean(prAny && !prMerged)
+    const prText = pr === void 0 ? t('git.loading')
+      : pr && pr.ok === false ? pr.reason
+      : prAny ? t('git.pr.open', { n: pr.pr.number, state: pr.pr.state })
+        + (checkState !== 'none' ? ' · ' + t('git.pr.checks', { state: checkState === 'asleep' ? t('git.runner.asleep') : checkState }) : '')
+        + (mintChip ? ' · ' + (mintChip.label || String(mintChip)) : '')
+      : t('git.pr.none')
+    const titling = editing !== null && editing.kind === 'pr'
+    rows.push(h('li', { key: 'approve', className: S.row },
+      titling
+        ? editor('pr', t('git.title.subject'), createPr)
+        : h('span', { className: S.preview }, prText),
+      h('div', { className: S.actions },
+        titling
+          ? editActions(createPr)
+          : [
+            action('pr-refresh', t('git.pr.refresh'), Icon('IconRefreshOutline16', 'IconRefreshOutline16', 14), { onClick: loadPr }),
+            checkState === 'asleep' ? wakeAction() : null,
+            // Q8: the run itself is controllable from the card. All three
+            // appear only once a run exists on this branch; re-run waits for
+            // it to finish and cancel waits for it to be live, so the pair is
+            // never both-enabled on the same run.
+            latestRun ? action('ci-rerun', t('git.ci.rerun'), Icon('IconRefreshOutline16', 'IconRefreshOutline16', 14), { disabled: runLive, onClick: rerunCi }) : null,
+            latestRun ? action('ci-cancel', t('git.ci.cancel'), Icon('IconCloseOutline16', 'IconCloseFill14', 14), { disabled: !runLive, onClick: cancelCi }) : null,
+            latestRun && latestRun.url ? action('ci-open', t('git.ci.open'), Icon('IconBrowseOutline16', 'IconInspectOutline12', 14), { onClick: openRun }) : null,
+            // Merge is the one irreversible button: green checks AND an open PR.
+            prOpen
+              ? action('merge', t('git.pr.merge'), Icon('IconCheckOutline16', 'IconCheckOutline16', 14), { disabled: !(pr.checks && pr.checks.state === 'green' && pr.pr.state === 'open'), onClick: mergePr })
+              : prMerged
+                ? action('mint', t('git.mint'), Icon('IconUploadOutline16', 'IconPlusOutline16', 14), { onClick: mint })
+                : action('pr-create', t('git.pr.create'), Icon('IconPlusOutline16', 'IconPlusOutline16', 14), { disabled: pr === void 0, onClick: () => setEditing({ kind: 'pr', text: '' }) }),
+          ])))
+  }
+
+  return h('div', { className: S.dock, 'data-git-dock': '' },
+    h('div', { className: S.panel },
+      h('button', {
+        type: 'button', className: S.header, 'aria-controls': listId, 'aria-expanded': expanded,
+        'aria-label': expanded ? t('git.collapse') : t('git.expand'),
+        disabled: interactionActive,
+        onClick: () => { setCollapsed((value) => !value) },
+      },
+        h('span', { className: S.lead, 'aria-hidden': true }, Icon('IconGitBranchOutline14', 'IconBranchOutline16', 14)),
+        h('span', { className: S.count }, t('git.head', { branch, summary })),
+        h('span', { className: S.chevron, 'aria-hidden': true }, expanded ? Icon('IconChevronDownOutline14', 'IconChevronDownOutline14') : Icon('IconChevronUpOutline14', 'IconChevronUpOutline14'))),
+      h('ul', { id: listId, className: S.list, hidden: !expanded }, expanded ? rows : null)))
+}

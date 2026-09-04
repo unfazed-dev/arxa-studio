@@ -19,7 +19,21 @@ import path from 'node:path'
  * older project keeps the old gate forever, silently. v2 is the per-target
  * walk (B11/B15/B16); v1 is anything generated before stamping existed.
  */
-export const FRAME_VERSION = 2
+/* v3 (2026-09-03, Q7): ci.yml's push trigger gained `arxa/session/**` so a
+ * session branch pushed at its stage boundary is actually CHECKED on GitHub.
+ * Before this a session-branch push fired no workflow at all — the trigger was
+ * main-only — so "push the branch" would have been a backup, not CI. */
+/* v4 (2026-09-03, path identity): session branches are `arxa/<org>/<workspace>/
+ * <leaf>` now, so the push trigger widens from `arxa/session/**` to `arxa/**`.
+ * (v4's note used to also promise the t3ci checks below. It shipped without
+ * them — the note was written from the plan, not from the code. They are v5.) */
+/* v5 (2026-09-03, Q13): the t3ci reproducibility checks reach project targets —
+ * SDK pinned by `.fvmrc`, `pub get --enforce-lockfile`, `analyze
+ * --fatal-warnings`. A separate version because `writeFrameFiles` keeps any
+ * file whose stamp already reads FRAME_VERSION: editing v4's body in place
+ * would have upgraded new repos only and left every existing one — RESTO
+ * included — silently on the old gate. */
+export const FRAME_VERSION = 5
 
 const STAMP_RE = /^# arxa-frame: v(\d+) ([0-9a-f]{16})$/m
 const STAMP_LINE_RE = /^# arxa-frame: v\d+ [0-9a-f]{16}\n/m
@@ -161,6 +175,9 @@ export function projectCheckSh() {
     'done || exit 1',
     '',
     "# --- project stack probe (the stack's own tests, when present) ------------",
+    '# The repo root, captured before the walk: a target is probed from its own',
+    '# directory, but a project-level .fvmrc lives up here.',
+    'root=$(pwd)',
     '# Targets live at <stage>/<track>/<target>/, not at the project root, so',
     '# walk to every stack marker and probe in ITS directory (B11 — probing the',
     '# root alone passed a broken real app in 0.03s). Green by absence: a tree',
@@ -190,13 +207,32 @@ export function projectCheckSh() {
     '        else',
     '          run=dart',
     '        fi',
-    '        command -v "$run" >/dev/null 2>&1 || exit 0',
+    '        # t3ci reproducibility (Q13), and every one of the three is GUARDED.',
+    '        # arxa studio is distributed software: a check that reds a tree for',
+    '        # LACKING an optional file is a check the user switches off, which',
+    '        # costs more than it ever caught. So green by absence survives here —',
+    '        # no .fvmrc or no fvm means the system SDK, and no pubspec.lock means',
+    '        # a plain `pub get` that writes one. Absence is never the failure.',
+    '        # fvm resolves .fvmrc by walking UP (verified against fvm 4.1.2),',
+    '        # so one pin at the project root governs every target under it and',
+    '        # a target may still pin its own. Both places are checked; testing',
+    '        # only the target dir would ignore the project-level pin the',
+    '        # scaffold writes, which is the common case.',
+    '        pin=""',
+    '        if command -v fvm >/dev/null 2>&1 && { [ -f .fvmrc ] || [ -f "$root/.fvmrc" ]; }; then pin="fvm"; fi',
+    '        lock=""',
+    '        if [ -f pubspec.lock ]; then lock="--enforce-lockfile"; fi',
+    '        # Unpinned needs the tool on PATH; pinned only needs fvm, which',
+    '        # supplies the SDK itself.',
+    '        [ -n "$pin" ] || command -v "$run" >/dev/null 2>&1 || exit 0',
     '        # Analysis does not need tests (B15 — `[ -d test ]` used to AND the',
     '        # analyzer away, so every freshly scaffolded target went unchecked).',
     '        # An unresolvable pubspec is a hard red: the target cannot build.',
-    '        "$run" pub get >/dev/null 2>&1 || fail "$run pub get ($d)"',
-    '        "$run" analyze || fail "$run analyze ($d)"',
-    '        if [ -d test ]; then "$run" test || fail "$run test ($d)"; fi',
+    '        # stdout is dropped, stderr is KEPT: a lockfile rejection that does',
+    '        # not say which dependency drifted is a gate nobody can act on.',
+    '        $pin "$run" pub get $lock >/dev/null || fail "$run pub get ($d)"',
+    '        $pin "$run" analyze --fatal-warnings || fail "$run analyze ($d)"',
+    '        if [ -d test ]; then $pin "$run" test || fail "$run test ($d)"; fi',
     '        ;;',
     '      Cargo.toml)',
     '        command -v cargo >/dev/null 2>&1 || exit 0',
@@ -226,7 +262,12 @@ export function ciYml() {
     'name: ci',
     'on:',
     '  push:',
-    '    branches: [main]',
+    // Q7 (2026-09-03): session branches are checked too. The stage boundary
+    // already runs this exact check.sh locally before it merges; this is the
+    // same gate re-run on the runner against what actually landed. The local
+    // gate stays authoritative for the merge, so an offline or local-only org
+    // is unaffected (a local-only org gets no ci.yml at all).
+    "    branches: [main, 'arxa/**']",
     '  pull_request:',
     'concurrency:',
     '  group: ci-@@EXPR@@',
@@ -271,7 +312,6 @@ export function protectionPayload() {
   }
 }
 
-/** Repo settings payload (Q8): squash-only, locked structurally. */
 /**
  * Repo merge settings (D107, flipped 2026-09-02 after the gate was proven).
  *

@@ -1,0 +1,12 @@
+{
+  "name": "arxa-jobs",
+  "version": "0.1.0",
+  "private": true,
+  "description": "arxa's background-job surface: lists one session's jobs from the host registry and cancels them. The stock dsh chip is read-only because JobView is push-only and there is no job.* RPC; this reaches ctx.get('jobs') host-side instead. Degrades to the stock honest refusal when the registry is absent or its fence changes.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  }
+}

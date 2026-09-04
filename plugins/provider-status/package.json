@@ -1,0 +1,11 @@
+{
+  "name": "arxa-provider-status",
+  "version": "0.1.0",
+  "private": true,
+  "description": "One live status channel for every model provider: provider/status session events → providerStatus projection → a small pill in the composer row.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": { ".": "./lib/index.js", "./client": "./lib/client.js", "./package.json": "./package.json" },
+  "dsh": { "client": { "inject": ["@deepseek-ai/dsh-client-runtime", "@deepseek-ai/dsh-client-ui-conversation"], "platform": "web" } },
+  "peerDependencies": { "react": "^18.2.0" }
+}

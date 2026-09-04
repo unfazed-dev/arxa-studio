@@ -1,0 +1,143 @@
+// The mirror tools are only meaningful while a `claude-code` model is selected.
+// Their `execute` parks on `fromClaude.expect(callId)`, and nothing ever resolves
+// that unless a Claude Code child produced the call. Left visible to a pi-ai or
+// DeepSeek model, a `Bash` call — the first name an Anthropic-trained model reaches
+// for — hangs the turn until the user cancels. Nothing fails loudly first: arxa's
+// own tools are snake_case, so there is no name collision at boot.
+//
+// `ctx.tools.restrict()` cannot hide them. Its contract (dsh-tools/lib/index.js,
+// `restrict`) reads: "Restrict global tools for the calling agent scope. Empty
+// filters, unknown names, scope-local names, and reserved transport names fail.
+// Restrictions intersect; scoped registrations remain visible." agent.mjs registers
+// into its own scope layer, so those names are scope-local — restrict() would throw
+// on them, and even if it did not, scoped registrations stay visible by design.
+// `register()` on the other hand "returns the exact disposer that unregisters the
+// tool", so registration itself is the lever.
+//
+// ── Two surfaces, because this plugin is SHARED ────────────────────────────────
+// agent.cordis.yml is mounted once as a STANDING composition and every agent is
+// bound under it (`bindScopeParent(agentKey, standing.key)`,
+// dsh-agent-presets/lib/index.js:959). So `apply()` runs once per preset, not once
+// per agent, and there is exactly one registry layer behind every agent on it. A
+// single global on/off would therefore let a DeepSeek agent unregister the tools
+// out from under a Claude agent's live turn — trading a hang for a broken dispatch.
+// The gate keeps the two surfaces separate:
+//
+//   * `assembly.tools` — what the MODEL actually sees, and the only thing that can
+//     make a model emit a call. Filtered EXACTLY, per agent. This is the real fix.
+//   * `ctx.tools.schemas()` — the shared registry the loop dispatches through, and
+//     what `adapter.js` reads to build its MCP list. Registered while ANY live agent
+//     wants them, so it can never be pulled from under a turn in flight.
+//
+// With one agent — the case the bug describes and the common case by far — the two
+// coincide exactly: select a non-claude model and the names leave both surfaces.
+//
+// ── Tracking the selection ─────────────────────────────────────────────────────
+// A static cordis-row gate is not enough: the selection can change mid-session. The
+// gate re-evaluates on every prompt assembly and every request build. Both listeners
+// are PREPENDED, which cordis documents as outermost-first ("Listeners run
+// outermost-first"; `on(name, listener, true)` is prepend shorthand). Being outermost
+// means `await next()` returns the value dsh-agent's own model-selection listener has
+// already stamped with the live selection — it sets `variables.provider` only AFTER
+// its own `next()` (dsh-agent/lib/index.js:272), and overrides `provider` on the
+// resolved request config the same way. A listener that is not outermost reads the
+// stale baseline instead.
+//
+// Both waterfalls reach this plugin: each is dispatched through `scopeTarget(...)`
+// keyed on the agent, and that carrier admits "a listener owned by an enclosing scope
+// … which is what lets one standing composition observe each of the agents composed
+// under it" (dsh-scope/lib/index.js:316-321). The standing preset scope is exactly
+// such an enclosing scope. Both also carry the agent: `context.agent` on assembly
+// (assembleContextFor), and a fused `payload.agent` on `agent/request` (agentEvents).
+//
+// Tool schemas are collected BEFORE the `system-prompt/assemble` waterfall runs
+// (dsh-system-prompt/lib/index.js:249-283), so a registry change made during the
+// waterfall cannot reach the list this turn already gathered — which is the other
+// reason the assembly list is reconciled directly rather than left to follow the
+// registry.
+import { MIRROR_TOOL_NAMES, mirrorToolDefinitions } from './mirror-tools.js'
+
+const MIRROR_NAMES = new Set(MIRROR_TOOL_NAMES)
+
+// An unknown provider keeps today's behaviour (mirror tools visible) rather than
+// breaking the Claude path in a deployment that never populates the signal. Every
+// real entry point does populate it: dsh-agent-loop registers the `provider` prompt
+// variable from `agent.options.provider` (lib/index.js:1024), and both dsh-headless
+// and dsh-host-apiproxy install the model selection that overrides it. `agent/request`
+// is stronger still — buildRequest throws unless the resolved provider is non-empty.
+const wants = (provider, providerId) => provider === undefined || provider === providerId
+
+// One key for a harness that runs a single unnamed agent, so the gate still works
+// where there is no agent identity to key on.
+const LONE_AGENT = '\0lone-agent'
+
+/**
+ * Register the mirror tools and keep their visibility tied to the selected model.
+ *
+ * @param ctx - the agent-plane plugin context (needs `tools` and `on`).
+ * @param defineTool - dsh-tools' `defineTool`.
+ * @param pending - the `fromClaude` PendingResults instance.
+ * @param providerId - the claude-code provider id.
+ * @returns a disposer that removes both listeners and unregisters the tools.
+ */
+export function installMirrorTools ({ ctx, defineTool, pending, providerId }) {
+  const definitions = mirrorToolDefinitions(defineTool, pending)
+  // Same shape and same defensive clone dsh-system-prompt gives a collected schema.
+  const mirrorSchemas = definitions.map(({ name, description, parameters }) => ({ name, description, parameters: structuredClone(parameters) }))
+  let disposers = null // null = currently unregistered
+
+  // Agents that currently want the mirror tools. Held by WeakRef and pruned on every
+  // sync, so an agent that ends while on claude-code is collected rather than pinning
+  // the registration open forever on a long-lived preset.
+  const claimants = new Map() // agentId -> WeakRef<agent> | null
+
+  const register = () => {
+    if (disposers !== null) return // duplicates within one layer fail; never register over a live one
+    disposers = definitions.map((definition) => ctx.tools.register(definition))
+  }
+  const unregister = () => {
+    if (disposers === null) return
+    for (const dispose of [...disposers].reverse()) dispose()
+    disposers = null
+  }
+
+  const sync = (agent, wanted) => {
+    const id = agent?.id ?? LONE_AGENT
+    if (wanted) claimants.set(id, typeof agent === 'object' && agent !== null ? new WeakRef(agent) : null)
+    else claimants.delete(id)
+    for (const [key, ref] of claimants) if (ref !== null && ref.deref() === undefined) claimants.delete(key)
+    // Steady state is a no-op: both calls return early when the registry already
+    // matches, so the per-step `agent/request` hook costs nothing.
+    claimants.size > 0 ? register() : unregister()
+  }
+
+  // Start visible, matching the pre-gate behaviour. The first assembly of any turn
+  // corrects this before the list reaches a model, and it filters that turn's list
+  // too, so a session that opens on DeepSeek never sees a mirror tool.
+  register()
+
+  const disposeAssemble = ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
+    const assembled = await next()
+    const provider = assembled?.variables?.provider
+    const wanted = wants(provider, providerId)
+    sync(context?.agent, wanted)
+    const tools = assembled?.tools ?? []
+    // Exact, per agent: this list is what the model sees, so it must reflect THIS
+    // agent's selection even while another agent keeps the shared registry open.
+    if (!wanted) {
+      const kept = tools.filter((tool) => !MIRROR_NAMES.has(tool.name))
+      return kept.length === tools.length ? assembled : { ...assembled, tools: kept }
+    }
+    const present = new Set(tools.map((tool) => tool.name))
+    const missing = mirrorSchemas.filter((schema) => !present.has(schema.name))
+    return missing.length === 0 ? assembled : { ...assembled, tools: [...tools, ...missing] }
+  }, true)
+
+  const disposeRequest = ctx.on('agent/request', async (payload, next) => {
+    const resolved = await next()
+    sync(payload?.agent, wants(resolved?.provider, providerId))
+    return resolved
+  }, true)
+
+  return () => { disposeRequest(); disposeAssemble(); claimants.clear(); unregister() }
+}

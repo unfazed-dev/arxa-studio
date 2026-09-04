@@ -192,7 +192,10 @@ try {
     const r = readySession(repoPath, 'red1', { subject: 'feat: the thing' })
     ok(r.gate.green === false && r.gate.kind === 'check.sh', 'red gate: check.sh ran and failed')
     ok(r.pushed === false && r.reason === 'gate-red', 'red gate: readySession refuses to push')
-    ok(r.collapsed === false && r.sha === null, 'red gate: the branch is not even collapsed')
+    // 156a1ba: collapse runs BEFORE the gate (the light gate needs a clean
+    // tree), so a red gate leaves the collapsed commit on the local branch
+    // (D40, nothing lost) and still publishes nothing.
+    ok(r.collapsed === true && /^[0-9a-f]{40}$/.test(r.sha ?? ''), 'red gate: collapsed locally, commit kept on the branch')
     ok(remoteHeadSha(s.branch) === null, 'red gate: the branch never reached origin')
     ok(calls.length === before, 'red gate: no GitHub call of any kind was made')
   }
@@ -212,7 +215,15 @@ try {
     ok(g(repoPath, ['log', '-1', '--format=%s', r.branch]) === subject, 'green: the subject is the human subject, verbatim')
     const full = g(repoPath, ['log', '-1', '--format=%B', r.branch])
     ok(full.includes('Co-worked in arxa studio.'), 'green: the attribution rides in the commit body')
-    ok(full.trimEnd().endsWith(stageTrailer('g1')), 'green: Arxa-Stage trailer is the last paragraph')
+    // Q14: the trailer BLOCK closes the message, and the point of it closing
+    // the message is that git parses it. Assert that with git itself rather
+    // than by string position — `Arxa-Session:` is no longer the final line
+    // now that container/actor/co-author follow it, but every one of them
+    // still has to come back as a real trailer.
+    ok(full.trimEnd().endsWith(stageTrailer('g1')) === false, 'green: the trailer block extends past Arxa-Session')
+    const trailers = g(repoPath, ['log', '-1', '--format=%(trailers:only,unfold)', r.branch])
+    ok(trailers.includes(stageTrailer('g1')), 'green: Arxa-Session parses as a real git trailer')
+    ok(/^Arxa-Session: /m.test(trailers), 'green: the session identity is a trailer key, not prose')
     ok(g(repoPath, ['log', `main..${r.branch}`, '--format=%s']).split('\n').every((s) => !s.startsWith('wip:')),
       'green: no wip: checkpoint survives the collapse')
 
@@ -298,12 +309,14 @@ try {
   {
     const firstParentBefore = Number(g(repoPath, ['rev-list', '--count', '--first-parent', 'main']))
     const mergesBefore = Number(g(repoPath, ['rev-list', '--count', '--merges', '--first-parent', 'main']))
+    const branches = []
     for (let i = 0; i < 10; i++) {
       const id = `p${i}`
       const subject = `feat(p${i}): pressure session ${i}`
-      work(id, { [`p${i}.txt`]: `session ${i} line one\n` })
+      const s = work(id, { [`p${i}.txt`]: `session ${i} line one\n` })
+      branches.push(s.branch)
       // a second edit so there is a real wip run to collapse
-      const wt = path.join(repoPath, '.arxa/worktrees', id)
+      const wt = s.worktree
       fs.appendFileSync(path.join(wt, `p${i}.txt`), 'line two\n')
       wipCommit(wt, { message: 'more' })
 
@@ -330,8 +343,43 @@ try {
       'pressure: all 10 collapsed commits are on main, one each')
 
     const mergedBranches = g(repoPath, ['branch', '--merged', 'main', '--format=%(refname:short)']).split('\n')
-    ok([...Array(10).keys()].every((i) => mergedBranches.includes(`arxa/session/p${i}`)),
+    ok([...Array(10).keys()].every((i) => mergedBranches.includes(branches[i])),
       'pressure: `branch --merged main` lists all 10 session branches (D107)')
+  }
+
+  // --- the stale remote-tracking mirror the cleanup stage must delete -------
+  // dropRemoteSessionBranch (file-org-shell/lib/lifecycle.js) pushes its
+  // delete to a token-bearing URL, not to the remote NAME. That distinction
+  // is the whole bug: a named-remote delete prunes refs/remotes/origin/<b>,
+  // a URL delete cannot (a URL has no tracking namespace), so the mirror
+  // outlives the branch. Asserted here as behaviour, both ways round, so a
+  // future refactor back to `push origin --delete` does not silently make
+  // the extra update-ref look redundant.
+  {
+    const bare = path.join(root, 'mirror-remote.git')
+    g(root, ['init', '--bare', bare])
+    const w = path.join(root, 'mirror-work')
+    g(root, ['init', w])
+    fs.writeFileSync(path.join(w, 'f.txt'), 'x\n')
+    g(w, ['add', '-A']); g(w, ['commit', '-m', 'feat: seed'])
+    g(w, ['branch', '-M', 'main']); g(w, ['push', bare, 'main'])
+    const br = 'arxa/ORG/notes/n-1'
+    g(w, ['checkout', '-b', br])
+    fs.writeFileSync(path.join(w, 'f.txt'), 'y\n')
+    g(w, ['commit', '-am', 'feat: work'])
+    // exactly what prflow's pushSessionBranch does: URL push + hand-written mirror
+    g(w, ['push', bare, `refs/heads/${br}:refs/heads/${br}`])
+    g(w, ['update-ref', `refs/remotes/origin/${br}`, g(w, ['rev-parse', br])])
+    g(w, ['checkout', 'main'])
+    const mirror = () => g(w, ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${br}`], true)
+
+    ok(mirror() !== null, 'mirror: prflow writes refs/remotes/origin/<branch> on push')
+    // exactly what dropRemoteSessionBranch does
+    g(w, ['push', bare, '--delete', `refs/heads/${br}`])
+    ok(g(w, ['ls-remote', '--heads', bare, br], true) === '', 'mirror: the remote branch really is deleted')
+    ok(mirror() !== null, 'mirror: a URL delete leaves the tracking ref behind — the leak')
+    g(w, ['update-ref', '-d', `refs/remotes/origin/${br}`])
+    ok(mirror() === null, 'mirror: the cleanup stage\'s update-ref -d clears it')
   }
 
   console.log(`\nprflow selftest: ${passed} checks passed`)

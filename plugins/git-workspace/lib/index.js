@@ -31,7 +31,8 @@ export {
   projectRepos,
 } from './routing.js'
 export { runGit, STAGE_IDENTITY, WIP_IDENTITY } from './run.js'
-export { ORG_GITIGNORE, orgIgnoreFor, isRepo, hasHead, initOrgRepo, initProjectRepo, getOrigin, setOrigin, pushRepo, fetchRepo, mainSyncState, ffMergeMain, readSnapshotMarker, snapshotOrgRepo, snapshotWorkerLive, spawnSnapshotOrgRepo } from './repos.js'
+export { reviewedTip } from './commits.js'
+export { ORG_GITIGNORE, FRAME_UNIGNORE_LINES, orgIgnoreFor, ensureFrameUnignored, isRepo, hasHead, initOrgRepo, initProjectRepo, getOrigin, setOrigin, pushRepo, fetchRepo, mainSyncState, ffMergeMain, readSnapshotMarker, snapshotOrgRepo, snapshotWorkerLive, spawnSnapshotOrgRepo } from './repos.js'
 export {
   STAGE_BASE_REF,
   WIP_PREFIX,
@@ -64,16 +65,28 @@ export {
   archivedSessionIds,
   annotateSession,
   nextSessionName,
+  mintSessionPath,
+  sessionLeaf,
+  dshSessionKey,
+  slugSegment,
+  assertSessionIdShape,
   rekeySessionsProject,
   openSession,
   runGate,
   sessionStageBoundary,
+  parkSession,
   holdSession,
   archiveSession,
   reviveSession,
+  dropSession,
   worktreeHealth,
 } from './sessions.js'
 export {
+  STAGES, sessionTrailers, agentCollaborator, EFFORT_UNSPECIFIED, readLedger, recordStage, renderLedger, withLedger, stageTime, readableTime,
+  rowAuthor, stageComment,
+} from './ledger.js'
+export {
+  listWorktreeDirs,
   parseWorktreePorcelain,
   reconcileWorktrees,
   repairWorktrees,
@@ -111,3 +124,5 @@ export function mintAtStageBoundary(repoPath, { message, name, state, env = proc
   })
   return { ...result, chip: versionChip(repoPath) }
 }
+
+export { mergePreview, integrateMain, finishIntegrate, isIntegrating, conflictMarkerFiles, unmergedPaths } from './integrate.js'

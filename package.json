@@ -3,38 +3,40 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "test": "node scripts/ci.mjs"
+    "test": "node scripts/ci.mjs",
+    "smoke": "node scripts/engine-boot-smoke.mjs"
   },
-  "description": "arxa \u2014 Totem Labs' agentic studio harness. A package that DEPENDS on dsh components (depend-don't-fork, arxa-harness-and-distribution.md amendment); never a fork, never a rebase.",
+  "description": "arxa — Totem Labs' agentic studio harness. A package that DEPENDS on dsh components (depend-don't-fork, arxa-harness-and-distribution.md amendment); never a fork, never a rebase.",
   "type": "module",
   "bin": {
     "arxa-studio": "bin/arxa-studio.mjs"
   },
   "dependencies": {
-    "@deepseek-ai/dsh": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-base": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-headless": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-web-app": "0.1.1-rc.2"
+    "@anthropic-ai/claude-agent-sdk": "0.3.259",
+    "@deepseek-ai/dsh": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-authorization": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-base": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-headless": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-web-app": "0.1.2-rc.1",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "js-yaml": "^4.3.1"
   },
-  "overrides": {
-    "@earendil-works/pi-ai": "0.84.4"
-  },
   "//": [
-    "Versions are EXACT \u2014 a caret on a prerelease moves under you (H1 finding 2).",
-    "private:true until the outward name check (trademark/domain/npm) \u2014 decision 10.",
+    "Versions are EXACT — a caret on a prerelease moves under you (H1 finding 2).",
+    "private:true until the outward name check (trademark/domain/npm) — decision 10.",
     "arxa update = bump these pins, run the suite. That is the whole upstream story.",
-    "overrides pins pi-ai 0.84.4 past dsh 0.1.1-rc.2's ^0.82.1 range: TEMPORARY",
-    "until a dsh release bumps llm-pi-ai (issue filed upstream). Unlocks the",
-    "catalog-served glm-5.3/glm-5.3-flash entries (zaiToolStream, maxTokensField).",
+    "the pi-ai override was dropped at the 0.1.2-rc.1 bump: upstream dsh-llm-pi-ai",
+    "now declares ^0.84.2 itself (the issue we filed landed), so the engine's own",
+    "range owns pi-ai again — glm-5.3 catalog entries ride it unchanged.",
     "js-yaml (devDependencies) was previously an UNDECLARED transitive dependency",
     "(hoisted only via @deepseek-ai/dsh-agent-presets) that scripts/preset-check.mjs",
     "relies on directly; now declared explicitly, pinned to the major already",
     "hoisted in node_modules (4.3.1) so a future install cannot silently stop",
     "hoisting it flat. devDependencies, not dependencies: only the dev-time",
-    "check script imports it \u2014 bin/arxa-studio.mjs and bin/materialise-preset.mjs",
+    "check script imports it — bin/arxa-studio.mjs and bin/materialise-preset.mjs",
     "do not use js-yaml at runtime."
   ]
 }

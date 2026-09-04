@@ -6,7 +6,8 @@
 // they are archived (D39).
 //
 // Mechanics:
-// - Session branch:   `arxa/session/<id>` off main.
+// - Session branch:   `arxa/<org>/<workspace>/<leaf>` off main — the identity
+//                     IS the relative disk path (2026-09-03).
 // - Session worktree: `<repo>/.arxa/worktrees/<id>`, hidden from the
 //   repo (and from every other worktree, since excludes live in the
 //   common git dir) via `.git/info/exclude` — so the D18 `add -A` WIP
@@ -55,10 +56,17 @@ import path from 'node:path'
 import { ensureGit } from './probe.js'
 import { runGit, STAGE_IDENTITY } from './run.js'
 import { wipCommit, stageBoundarySquash, STAGE_BASE_REF } from './commits.js'
-import { getOrigin } from './repos.js'
+import { getOrigin, excludeArxaDir } from './repos.js'
 import { projectRepos } from './routing.js'
 
-export const SESSION_BRANCH_PREFIX = 'arxa/session/'
+/**
+ * Branch namespace. Grilled 2026-09-03 (Q2/Q3): a session's identity IS its
+ * relative disk path — `<org folder>/<workspace key>/<leaf>` — so the branch is
+ * that path under `arxa/`, the worktree directory is that path under the ORG's
+ * `.arxa/worktrees/`, and the dsh conversation key is that path with `/` → `-`.
+ * One string, three surfaces. SUPERSEDES `arxa/session/<opaque-id>`.
+ */
+export const SESSION_BRANCH_PREFIX = 'arxa/'
 export const SESSION_BASE_PREFIX = 'refs/arxa/session-base/'
 export const SESSIONS_DIR = '.arxa/worktrees'
 export const SESSIONS_FILE = 'sessions.json'
@@ -233,6 +241,115 @@ export function nextSessionName(sessions, workspace) {
   return prefix + '-' + String(max + 1).padStart(3, '0')
 }
 
+/** The workspace folder, de-pluralised — the shared prefix rule behind both
+ * nextSessionName and nextSessionId. */
+function workspacePrefix(workspace) {
+  const folder = String(workspace || '').split('/').filter(Boolean).pop() || 'session'
+  return folder.length > 3 && folder.endsWith('s') ? folder.slice(0, -1) : folder
+}
+
+const reEscape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/** A path- and ref-safe segment: lowercase kebab, everything else dropped. */
+export function slugSegment(value) {
+  return String(value ?? '')
+    .normalize('NFKD')
+    .replace(/[^A-Za-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase()
+}
+
+/** The leaf of a session identity — what the sidebar row and the dsh header
+ * show, since the breadcrumb already carries the folders (Q9). */
+export function sessionLeaf(id) {
+  return String(id ?? '').split('/').filter(Boolean).pop() ?? ''
+}
+
+/**
+ * dsh conversation key for a session identity (Q3). dsh stores a conversation
+ * as a DIRECTORY named by its id, so `/` cannot survive the trip; the org
+ * segment leads, which is what makes the key unique across orgs (org folder
+ * names are unique by the create/add guard).
+ */
+export function dshSessionKey(id) {
+  return 'arxa-' + String(id ?? '').split('/').filter(Boolean).join('-')
+}
+
+const REF_SEGMENT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+/**
+ * Every segment of a session identity becomes BOTH a git ref component and a
+ * directory name, so both rule sets apply: no leading dot, no `.`/`..`, no
+ * `.lock` suffix, no space or ref metacharacter. Folder names reach here
+ * verbatim (Q5), so a folder git cannot express is refused loudly at mint
+ * time rather than producing an unusable branch three steps later.
+ */
+export function assertSessionIdShape(id) {
+  const segments = String(id ?? '').split('/')
+  if (segments.some((s) => s === '')) {
+    throw new TypeError(`session id "${id}" must be a relative path with no empty segments`)
+  }
+  for (const s of segments) {
+    if (s === '.' || s === '..' || s.endsWith('.lock') || !REF_SEGMENT_RE.test(s)) {
+      throw new TypeError(
+        `session id "${id}": segment "${s}" cannot be a git branch component — ` +
+        'rename the folder using letters, digits, dot, dash or underscore (no spaces)',
+      )
+    }
+  }
+  return id
+}
+
+/**
+ * Mint a session identity (grilled 2026-09-03, Q2/Q4/Q5). SUPERSEDES
+ * `nextSessionId`, which minted a bare leaf.
+ *
+ *   `<org folder>/<workspace key>/<word>-wt-<YYMMDD>-<NNN>`
+ *   RESTO/notes/note-wt-260903-001
+ *   RESTO/projects/kitchen-project/06-build/backoffice-wt-260903-001
+ *
+ * The path mirrors disk EXACTLY — `projects/` kept, numeric container
+ * prefixes kept, folder names verbatim — so the branch, the worktree
+ * directory and the folder a human sees are the same string, with no second
+ * vocabulary to learn.
+ *
+ * `word` is the slugged name the human typed at creation, else the
+ * de-pluralised workspace folder. It is baked in for life: a rename later
+ * moves the LABEL only (Q1). Identity must never chase a name — GitHub
+ * CLOSES an open PR whose head branch is renamed, and Docker Compose /
+ * Nx both had to abandon directory-derived identity for the same class of
+ * breakage (see docs/plans/session-path-identity-and-cicd-smoke.md §1).
+ *
+ * NNN counts per path per day, across words: two sessions born the same day
+ * in `RESTO/notes` are -001 and -002 whatever they are called. A number freed
+ * by a drop is skipped, never reused — the registry is the authority.
+ */
+export function mintSessionPath({ org, workspace, name, sessions, now = new Date() } = {}) {
+  const orgSegment = String(org ?? '').trim()
+  const ws = String(workspace ?? '').split('/').filter(Boolean).join('/')
+  if (orgSegment === '') throw new TypeError('mintSessionPath: the org folder name is required')
+  if (ws === '') throw new TypeError('mintSessionPath: the workspace key is required')
+  const word = slugSegment(name) || slugSegment(workspacePrefix(ws)) || 'session'
+  const stamp =
+    String(now.getFullYear() % 100).padStart(2, '0') +
+    String(now.getMonth() + 1).padStart(2, '0') +
+    String(now.getDate()).padStart(2, '0')
+  const dir = `${orgSegment}/${ws}`
+  const base = `${dir}/${word}-wt-${stamp}`
+  const counter = new RegExp('^' + reEscape(dir) + '/[A-Za-z0-9._-]+-wt-' + stamp + '-(\\d+)$')
+  const taken = new Set()
+  let max = 0
+  for (const s of Array.isArray(sessions) ? sessions : []) {
+    if (!s || typeof s.id !== 'string') continue
+    taken.add(s.id)
+    const m = counter.exec(s.id)
+    if (m) max = Math.max(max, Number(m[1]))
+  }
+  let n = max + 1
+  while (taken.has(base + '-' + String(n).padStart(3, '0'))) n++
+  return assertSessionIdShape(base + '-' + String(n).padStart(3, '0'))
+}
+
 /**
  * Rekey the project scope of every session row (D72 proper rename): after a
  * project's folder+slug move, registry rows carrying `project: oldSlug`
@@ -258,17 +375,39 @@ export function rekeySessionsProject(repoPath, oldSlug, newSlug, env = process.e
 
 /** Ensure `.arxa/` never enters any worktree's `add -A` (exclude lives in the common dir). */
 function ensureExcluded(repoPath, env) {
-  const info = path.join(gitCommonDir(repoPath, env), 'info')
-  const exclude = path.join(info, 'exclude')
-  const line = '/.arxa/'
-  const current = fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : ''
-  if (current.split('\n').includes(line)) return
-  fs.mkdirSync(info, { recursive: true })
-  fs.writeFileSync(exclude, current + (current.endsWith('\n') || current === '' ? '' : '\n') + line + '\n')
+  // Same rule, one implementation (repos.js). initRepo applies it at `git
+  // init` so nothing under .arxa/ is ever added in the first place; this call
+  // heals repos that predate that, and covers a worktree's common dir.
+  excludeArxaDir(gitCommonDir(repoPath, env))
 }
 
-function sessionWorktreePath(repoPath, id) {
-  return path.join(repoPath, SESSIONS_DIR, id)
+/**
+ * Worktree directory for an identity. The root is the ORG, not the owning
+ * repo: a project session's branch lives in the project repo but its checkout
+ * sits under the org's single `.arxa/worktrees/` (git places a worktree
+ * anywhere), so one root holds every session and the directory is the branch
+ * minus its `arxa/` prefix. Keeps the org-move handling that already carries
+ * `.arxa/worktrees` with the folder.
+ */
+function sessionWorktreePath(orgPath, id) {
+  return path.join(orgPath, ...SESSIONS_DIR.split('/'), ...String(id).split('/'))
+}
+
+/**
+ * Remove identity directories left empty under `.arxa/worktrees` once their
+ * last session goes (`RESTO/notes/` after the final note session). Walks up,
+ * stops at the worktrees root, and stops at the first non-empty directory.
+ */
+function pruneEmptyWorktreeParents(worktree) {
+  const marker = path.sep + SESSIONS_DIR.split('/').join(path.sep) + path.sep
+  const at = worktree.lastIndexOf(marker)
+  if (at < 0) return
+  const root = worktree.slice(0, at + marker.length - 1)
+  let dir = path.dirname(worktree)
+  while (dir.startsWith(root + path.sep)) {
+    try { fs.rmdirSync(dir) } catch { return } // non-empty or already gone
+    dir = path.dirname(dir)
+  }
 }
 
 /**
@@ -282,7 +421,7 @@ function sessionWorktreePath(repoPath, id) {
  *
  * @returns {{ id, name, branch, worktree, state, project: string|null }}
  */
-export function openSession(repoPath, { id, name, project, workspace, env = process.env } = {}) {
+export function openSession(repoPath, { id, orgPath = repoPath, name, project, workspace, env = process.env } = {}) {
   if (project !== undefined && project !== null && (typeof project !== 'string' || project === '')) {
     throw new TypeError(`session project must be a slug string, null, or undefined; got ${JSON.stringify(project)}`)
   }
@@ -290,10 +429,17 @@ export function openSession(repoPath, { id, name, project, workspace, env = proc
     throw new TypeError(`session workspace must be a non-empty path string, null, or undefined; got ${JSON.stringify(workspace)}`)
   }
   ensureGit(env)
-  if (!id) id = `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id)) {
-    throw new TypeError(`session id "${id}" is not a valid branch/path component`)
+  // Q8 (2026-09-03): the library never invents an identity. Minting needs the
+  // org folder, the workspace key and the CROSS-registry aggregate — context
+  // only the app layer has — and the old fallback (`s-<base36>-<rand>`) is how
+  // opaque ids reached the sidebar from a script that bypassed the product.
+  if (!id) {
+    throw new TypeError(
+      'openSession: id-required — a session identity is minted by the app layer ' +
+      '(mintSessionPath), never by this library',
+    )
   }
+  assertSessionIdShape(id)
   const registry = readRegistry(repoPath, env)
   if (registry.sessions.some((s) => s.id === id)) {
     throw new Error(`session "${id}" already exists — revive it instead of reopening`)
@@ -303,8 +449,11 @@ export function openSession(repoPath, { id, name, project, workspace, env = proc
   })
   if (!mainSha) throw new Error(`no main branch in ${repoPath} — init the repo first (initOrgRepo/initProjectRepo)`)
   ensureExcluded(repoPath, env)
+  // A project session's checkout lands under the ORG's `.arxa/`, so the org
+  // repo needs the exclude too — its own sessions may not have created it yet.
+  if (path.resolve(orgPath) !== path.resolve(repoPath)) ensureExcluded(orgPath, env)
   const branch = `${SESSION_BRANCH_PREFIX}${id}`
-  const worktree = sessionWorktreePath(repoPath, id)
+  const worktree = sessionWorktreePath(orgPath, id)
   fs.mkdirSync(path.dirname(worktree), { recursive: true })
   runGit(['worktree', 'add', '-b', branch, worktree, 'main'], { cwd: repoPath, env })
   // Per-session squash base (see header): starts at the branch point.
@@ -312,7 +461,9 @@ export function openSession(repoPath, { id, name, project, workspace, env = proc
   const now = Date.now()
   const session = {
     id,
-    name: name || id,
+    // Q9: the label defaults to the LEAF, not the whole path — the breadcrumb
+    // already carries the folders, so the row would otherwise read them twice.
+    name: name || sessionLeaf(id),
     branch,
     worktree,
     state: 'open',
@@ -389,7 +540,10 @@ export function runGate(worktree, env = process.env) {
 
 // ---- stage boundary --------------------------------------------------------
 
-function parkSession(repoPath, id, reason, env) {
+/** Park a session (D40: parked, never deleted). Exported for the prflow
+ * path in arxa-git-card, where a red gate must park exactly as the local
+ * boundary does. */
+export function parkSession(repoPath, id, reason, env = process.env) {
   const registry = readRegistry(repoPath, env)
   const session = getSession(registry, id)
   session.state = 'parked'
@@ -412,7 +566,7 @@ function parkSession(repoPath, id, reason, env) {
  *
  * @returns {{ squashed, sha, gate, merged, parked, session }}
  */
-export function sessionStageBoundary(repoPath, id, { message, env = process.env } = {}) {
+export function sessionStageBoundary(repoPath, id, { message, env = process.env, pushUrl = null } = {}) {
   repoPath = sessionRepoFor(repoPath, id, env) // D98: merge into the OWNING repo's main
   const registry = readRegistry(repoPath, env)
   const session = getSession(registry, id)
@@ -454,10 +608,20 @@ export function sessionStageBoundary(repoPath, id, { message, env = process.env 
   // the green merge to main. Best-effort and never session-fatal (D23:
   // pushes fail loud in the RESULT, the local merge stands; nothing parks
   // for a push failure). No origin = a normal local-only state.
+  // Non-interactive and bounded (2026-09-03, RESTO smoke): a bare `origin`
+  // carries no credentials, so git fell back to a password prompt on the
+  // launcher's TTY and the synchronous push froze the engine. Callers that
+  // hold credentials (git-card via github-link) pass `pushUrl` — the
+  // token-bearing origin URL — and the push goes by explicit refspec (`-u`
+  // needs a remote NAME, not a URL; tracking was set at publish time).
   let push = { pushed: false, reason: 'no-origin' }
   const origin = getOrigin(repoPath, env)
   if (origin !== null) {
-    const pushed = runGit(['push', '-u', 'origin', 'main'], { cwd: repoPath, env, allowFail: true })
+    const pushEnv = { ...env, GIT_TERMINAL_PROMPT: '0' }
+    const args = typeof pushUrl === 'string' && pushUrl !== ''
+      ? ['push', pushUrl, 'refs/heads/main:refs/heads/main']
+      : ['push', '-u', 'origin', 'main']
+    const pushed = runGit(args, { cwd: repoPath, env: pushEnv, allowFail: true, timeout: 90_000 })
     push = pushed !== null ? { pushed: true, origin } : { pushed: false, reason: 'push-failed' }
   }
 
@@ -490,6 +654,7 @@ export function archiveSession(repoPath, id, env = process.env) {
   } else {
     runGit(['worktree', 'prune'], { cwd: repoPath, env, allowFail: true })
   }
+  pruneEmptyWorktreeParents(session.worktree)
   session.state = 'archived'
   writeRegistry(repoPath, registry, env)
   return session
@@ -516,4 +681,31 @@ export function reviveSession(repoPath, id, env = process.env) {
   session.parkedReason = null
   writeRegistry(repoPath, registry, env)
   return session
+}
+
+/**
+ * Drop (grilled 2026-09-02, Q3): a session that was opened but never used —
+ * no user message ever landed in its conversation — is not resumed on
+ * relaunch; it is removed outright so no orphan row survives. Worktree
+ * (force: a never-typed-in session has no work worth a WIP snapshot),
+ * branch, squash-base ref and registry row all go. Idempotent: an unknown
+ * id is a `dropped:false` result, never a throw — boot cleanup must never
+ * fail the boot.
+ *
+ * @returns {{ id, dropped: boolean, worktree?: string, branch?: string }}
+ */
+export function dropSession(repoPath, id, env = process.env) {
+  repoPath = sessionRepoFor(repoPath, id, env) // D98 repo-discovery preamble
+  const registry = readRegistry(repoPath, env)
+  const session = registry.sessions.find((s) => s.id === id)
+  if (!session) return { id, dropped: false }
+  if (session.worktree && fs.existsSync(session.worktree)) {
+    runGit(['worktree', 'remove', '--force', session.worktree], { cwd: repoPath, env, allowFail: true })
+  }
+  runGit(['worktree', 'prune'], { cwd: repoPath, env, allowFail: true })
+  if (session.branch) runGit(['branch', '-D', session.branch], { cwd: repoPath, env, allowFail: true })
+  runGit(['update-ref', '-d', `${SESSION_BASE_PREFIX}${id}`], { cwd: repoPath, env, allowFail: true })
+  registry.sessions = registry.sessions.filter((s) => s.id !== id)
+  writeRegistry(repoPath, registry, env)
+  return { id, dropped: true, worktree: session.worktree, branch: session.branch }
 }

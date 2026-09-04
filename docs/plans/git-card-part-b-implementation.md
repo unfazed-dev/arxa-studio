@@ -231,6 +231,24 @@ verified live in the shipped app end-to-end.
   `workflow`; links created before it record `missingScopes` via status()
   and need ONE re-link (same unavoidable class as D76). Frame failures
   annotate the manifest and retry on next publish/heal.
+- **S1 follow-up (2026-09-03, RESTO live):** `frameWired: true` was a
+  false positive. The create-time whitelist `.gitignore`
+  (`orgIgnoreFor({ includeExisting: false })`: `/*` + `!/…`) never
+  un-ignored `check.sh` / `.github/`; `git add` refused them (exit 1,
+  "use -f"), `runGit(..., { allowFail: true })` swallowed it, the frame
+  commit was empty, and GitHub never had a workflow — every RESTO PR of
+  the 3-PR smoke ran with **zero** CI. `Arxa-S1-Frame` passed because it
+  used the D37 default ignore. Fix: `FRAME_UNIGNORE_LINES` in the
+  whitelist generator, `ensureFrameUnignored()` patches existing orgs,
+  and `wireFrameOnce` now (a) re-wires when `frameWired === true` but the
+  files are untracked, (b) verifies tracking with `git ls-files
+  --error-unmatch` and records `frameWired: 'failed: frame-files-untracked'`
+  otherwise, (c) commits only when something is staged, (d) runs
+  `writeFrameFiles({ upgrade: true })` so stale stamped files (RESTO kept a
+  pre-Q7 `ci.yml`) refresh on the next heal. RESTO patched by hand the same
+  way: `ab9d69b` on main → first-ever run, **success** on
+  `arxa-unfazed-dev-RESTO`. Coverage: `git-workspace/selftest.frame-ignore.mjs`
+  (6 checks, reproduces the refused add in a real repo).
 
 ## Traceability
 

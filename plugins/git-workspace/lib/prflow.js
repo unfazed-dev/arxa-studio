@@ -36,6 +36,8 @@ import { stageBoundarySquash, isDirty } from './commits.js'
 import { listSessions, runGate, SESSION_BRANCH_PREFIX, SESSION_BASE_PREFIX } from './sessions.js'
 import { getOrigin, fetchRepo, ffMergeMain, mainSyncState } from './repos.js'
 import { SUBJECT_RE } from './frame.js'
+import { sessionTrailers } from './ledger.js'
+import { integrateMain, isIntegrating } from './integrate.js'
 
 /**
  * Per-session ref holding the base the PR collapse commits against — the
@@ -47,9 +49,16 @@ import { SUBJECT_RE } from './frame.js'
  */
 export const PRFLOW_BASE_PREFIX = 'refs/arxa/prflow-base/'
 
-/** The `Arxa-Stage:` trailer that marks a collapsed session commit. */
+/**
+ * The trailer that marks a collapsed session commit.
+ *
+ * Q14: `Arxa-Session:` replaces `Arxa-Stage: session <id>`. The old key was
+ * doing three jobs — session, org boundary, version mint — so reading it back
+ * told you nothing without also parsing its value. Nothing consumed it
+ * (verified 2026-09-03), so the rename costs nothing.
+ */
 export function stageTrailer(id) {
-  return `Arxa-Stage: session ${id}`
+  return `Arxa-Session: ${id}`
 }
 
 function session(repoPath, id, env) {
@@ -65,10 +74,13 @@ function session(repoPath, id, env) {
  * `squash_merge_commit_message: 'PR_BODY'` workaround is dead with the
  * squash merge that needed it.
  */
-export function collapseMessage(id, { attribution } = {}) {
+export function collapseMessage(id, { attribution, container, author, actor, collaborator } = {}) {
   const lines = []
   if (attribution) lines.push(attribution, '')
-  lines.push(stageTrailer(id))
+  // One trailer paragraph: identity (session + container) and attribution
+  // (author + collaborator) travel with the commit into git, where they
+  // survive GitHub, the PR, and this tool entirely.
+  lines.push(sessionTrailers({ id, container, author, actor, collaborator }))
   return lines.join('\n')
 }
 
@@ -88,7 +100,7 @@ export function collapseMessage(id, { attribution } = {}) {
  * @returns {{ sha: string|null, pushed: boolean, gate: object, branch: string,
  *             collapsed: boolean, reason?: string, origin?: string|null }}
  */
-export function readySession(repoPath, id, { subject, attribution, env = process.env, gate = runGate, origin } = {}) {
+export function readySession(repoPath, id, { subject, attribution, author, actor, collaborator, env = process.env, gate = runGate, origin, integrate = true } = {}) {
   const s = session(repoPath, id, env)
   if (s.state !== 'open') {
     throw new Error(`session "${id}" is ${s.state} — revive it before readying a PR`)
@@ -100,16 +112,49 @@ export function readySession(repoPath, id, { subject, attribution, env = process
   }
   if (subject.includes('\n')) throw new TypeError('readySession: subject must be a single line')
 
-  // ---- 1. gate first, red never publishes ---------------------------------
-  const gateResult = gate(s.worktree, env)
-  if (!gateResult.green) {
-    return { sha: null, pushed: false, gate: gateResult, branch: s.branch, collapsed: false, reason: 'gate-red' }
+  // ---- 0. integrate main FIRST (grilled 2026-09-03) -----------------------
+  // Every commit is therefore gated against current main, which is what
+  // continuous integration actually means — and it happens at a moment the
+  // user started, so nothing is ever rewritten under a working agent.
+  //
+  // The position is load-bearing, not incidental. It must precede the reads
+  // below: integrating changes what `merge-base` is, so `mergeBase`, the
+  // `nothing-to-propose` check and `alreadyCollapsed` all have to see the
+  // post-integrate world. An integrate necessarily makes `alreadyCollapsed`
+  // false and the branch re-collapses onto the new base — correct, because the
+  // branch genuinely has new content in it.
+  //
+  // A conflict returns HERE, before the collapse touches anything: the branch
+  // is left mid-merge for the agent to resolve, and the next call is refused
+  // by the guard above it until that is done.
+  if (isIntegrating(s.worktree, env)) {
+    return { sha: null, pushed: false, gate: { green: false, reason: 'integrating' }, branch: s.branch, collapsed: false, reason: 'integrate-conflict', files: [] }
+  }
+  if (integrate) {
+    const done = integrateMain(s, { author: author ?? actor, collaborator, env, origin })
+    if (done.conflicted) {
+      return {
+        sha: null, pushed: false, gate: { green: false, reason: 'integrating' }, branch: s.branch,
+        collapsed: false, reason: 'integrate-conflict', files: done.files, onto: done.onto,
+      }
+    }
   }
 
-  // ---- 2. collapse to one commit above the merge-base with main -----------
+  // ---- 1. collapse to one commit above the merge-base with main -----------
+  // Collapse BEFORE gating, same order as sessionStageBoundary: the squash
+  // absorbs the uncommitted WIP (commit-tree of the working tree), and the
+  // gate then runs on that clean, collapsed tree. Gating first was wrong
+  // for the default "light" gate (= clean tree + resolvable HEAD): every
+  // real edit sat uncommitted in the worktree, so the gate read red, the
+  // session parked, and the branch went out unchanged (2026-09-03, RESTO
+  // smoke: "No commits between main and arxa/session/<id>" ×3, second
+  // cause). A red gate after the collapse still never publishes — and
+  // the collapsed commit stays on the branch, so nothing is lost (D40).
+  const dirty = isDirty(s.worktree, env)
   const tip = runGit(['rev-parse', 'HEAD'], { cwd: s.worktree, env })
   const mergeBase = runGit(['merge-base', 'main', s.branch], { cwd: s.worktree, env })
-  if (mergeBase === tip) {
+  if (mergeBase === tip && !dirty) {
+    const gateResult = gate(s.worktree, env)
     return { sha: null, pushed: false, gate: gateResult, branch: s.branch, collapsed: false, reason: 'nothing-to-propose' }
   }
 
@@ -127,14 +172,15 @@ export function readySession(repoPath, id, { subject, attribution, env = process
     runGit(['update-ref', baseRef, mergeBase], { cwd: s.worktree, env })
     const squash = stageBoundarySquash(s.worktree, {
       message: subject,
-      trailer: collapseMessage(id, { attribution }),
+      // The session row knows its own container; the caller supplies who acted.
+      trailer: collapseMessage(id, { attribution, container: s.workspace, author: author ?? actor, collaborator }),
       env,
       baseRef,
     })
     // squashed:false can only mean the pre-squash WIP snapshot found the
     // branch already sitting on the base — treated as nothing to propose.
     if (!squash.squashed) {
-      return { sha: null, pushed: false, gate: gateResult, branch: s.branch, collapsed: false, reason: 'nothing-to-propose' }
+      return { sha: null, pushed: false, gate: gate(s.worktree, env), branch: s.branch, collapsed: false, reason: 'nothing-to-propose' }
     }
     sha = squash.sha
     collapsed = true
@@ -142,6 +188,12 @@ export function readySession(repoPath, id, { subject, attribution, env = process
     // next LOCAL stage boundary would re-collapse the already-published
     // commit and silently rewrite the sha under review.
     runGit(['update-ref', `${SESSION_BASE_PREFIX}${id}`, sha], { cwd: s.worktree, env })
+  }
+
+  // ---- 2. gate on the collapsed tree; red never publishes -----------------
+  const gateResult = gate(s.worktree, env)
+  if (!gateResult.green) {
+    return { sha, pushed: false, gate: gateResult, branch: s.branch, collapsed, reason: 'gate-red' }
   }
 
   // ---- 3. publish the branch ---------------------------------------------
@@ -230,7 +282,11 @@ export async function mergeSessionPr(repoPath, id, {
   if (!sha) throw new TypeError('mergeSessionPr: the reviewed sha is required — an unpinned merge can land unreviewed work')
   const result = await api.prMerge(owner, name, { number, sha, subject, message })
   if (!result || result.merged !== true) {
-    return { merged: false, mergeSha: result?.sha ?? null, localMainSha: null, reconcile: { reason: 'not-merged' } }
+    // Keep the API's own reason when it gave one ('not-mergeable' = GitHub
+    // says this branch conflicts with main). Flattening every refusal to
+    // 'not-merged' told the caller nothing it could act on.
+    const reason = result?.reason ?? 'not-merged'
+    return { merged: false, mergeSha: result?.sha ?? null, localMainSha: null, reason, message: result?.message ?? '', reconcile: { reason } }
   }
   const reconcile = reconcileLocalMain(repoPath, { env, origin })
   return { merged: true, mergeSha: result.sha ?? null, localMainSha: reconcile.localMainSha, reconcile }
@@ -246,13 +302,13 @@ export async function mergeSessionPr(repoPath, id, {
  *
  * @returns {{ fetched: boolean, advanced: boolean, localMainSha: string|null, sync: object, reason?: string }}
  */
-export function reconcileLocalMain(repoPath, { env = process.env, origin } = {}) {
+export function reconcileLocalMain(repoPath, { env = process.env, origin, timeout } = {}) {
   const url = origin !== undefined ? origin : getOrigin(repoPath, env)
   const localSha = () => runGit(['rev-parse', 'main'], { cwd: repoPath, env, allowFail: true })
   if (url === null || url === undefined) {
     return { fetched: false, advanced: false, localMainSha: localSha(), sync: mainSyncState(repoPath, env), reason: 'no-origin' }
   }
-  const fetched = fetchRepo(repoPath, url, env)
+  const fetched = fetchRepo(repoPath, url, env, { timeout })
   const advanced = ffMergeMain(repoPath, env)
   const sync = mainSyncState(repoPath, env)
   return {

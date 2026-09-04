@@ -49,8 +49,10 @@ assert.match(patch, /- id: arxa-artifact-viewer\r?\n    name: arxa-artifact-view
   'patch row registers the plugin by package name')
 
 const launcher = fs.readFileSync(join(root, 'bin', 'arxa-studio.mjs'), 'utf8')
-assert.match(launcher, /'arxa-artifact-viewer':\s+\S*file:/,
-  'profile package.json materializes the file: dep')
+assert.match(launcher, /\['arxa-artifact-viewer', artifactViewerDir\]/,
+  'the plugin is in the one PROFILE_PLUGINS list (profile dep AND packed copy)')
+assert.match(launcher, /dependencies: Object\.fromEntries\(PROFILE_PLUGINS\.map/,
+  'profile package.json deps are derived from that list, never retyped')
 assert.match(launcher, /BY_NAME_PLUGINS = \[[^\]]*'arxa-artifact-viewer'/,
   'BY_NAME_PLUGINS carries the package name')
 assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
@@ -61,6 +63,8 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
 {
   const gen = execFileSync(process.execPath, [join(root, 'scripts', 'gen-frame.mjs'), '--check'], { cwd: root })
   assert.match(String(gen), /--check OK/, 'arxa-frame drift gate: generated client matches gen-frame.mjs')
+  const genIns = execFileSync(process.execPath, [join(root, 'scripts', 'gen-insight-css.mjs'), '--check'], { cwd: root })
+  assert.match(String(genIns), /--check OK/, 'insight-css drift gate: the lifted ToolRow/ToolDetails copy matches the stock bundle')
   const clientSrc = fs.readFileSync(join(here, 'lib', 'client.js'), 'utf8')
   assert.doesNotMatch(clientSrc, /inject\('shell\.overlay'/, 'viewer never floats over the frame again (D88)')
   assert.match(clientSrc, /inject\('viewer'/, 'viewer registers into the docked viewer seat')
@@ -105,7 +109,9 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   for (const prim of ['P.StateDot', 'P.Tooltip', 'P.Menu', 'P.Button', 'P.writeClipboard', 'P.IconCloseOutline16', 'P.IconCopyOutline16']) {
     assert.ok(t5client.includes(prim), 'primitives aboard: ' + prim)
   }
-  const hexes = t5client.match(/#[0-9a-fA-F]{3,8}\b/g) || []
+  // The generated insight-css region is a verbatim stock copy (its #0000 is a transparent scrollbar border) — the rule is about OUR css.
+  const handWritten = t5client.replace(/\/\/ >>> insight-css[\s\S]*?\/\/ <<< insight-css/, "")
+  const hexes = handWritten.match(/#[0-9a-fA-F]{3,8}\b/g) || []
   assert.deepEqual([...new Set(hexes)].sort(), ['#fff'],
     'no hardcoded hex colors — the only white left is the pdf/iframe document surface')
   assert.match(t5client, /--dsw-alias-border-l2|--dsw-alias-label-error|--dsw-alias-brand-primary/, 'real theme tokens used')
@@ -121,10 +127,12 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   assert.match(t5client, /phase: 'insight', view: p\.view/, 'the consume branch sets the insight phase')
   assert.match(t5client, /\} else if \(state\.phase === 'insight'\) \{\n\s*body = h\(InsightPanel,/,
     'the body renders InsightPanel for the insight phase and the file flow otherwise')
-  assert.match(t5client, /function InsightPanel\(\{ t, view, sessionId, orgId \}\)/, 'InsightPanel exists with the four-prop face')
+  // `given` joined the face when jobs stopped round-tripping: JobView is
+  // push-only, so those rows arrive from the sidebar's store via the event.
+  assert.match(t5client, /function InsightPanel\(\{ t, view, sessionId, orgId, given \}\)/, 'InsightPanel exists with the five-prop face')
   assert.match(t5client, /body: JSON\.stringify\(\{ action, arg \}\)/, 'InsightPanel posts {action,arg} — the same shape the git card uses')
-  assert.match(t5client, /const arg = view === 'sessions' \? \{ orgId \} : \{ sessionId \}/,
-    'sessions is org-keyed; streak and CI are session-keyed')
+  assert.match(t5client, /const arg = view === 'sessions' \? \{ orgId \} : \(wantFresh \? \{ sessionId, fresh: true \} : \{ sessionId \}\)/,
+    'sessions is org-keyed; every other view is session-keyed, plus the fresh flag the refresh button arms')
   for (const a of ["'insight.' + view"]) assert.ok(t5client.includes(a), 'insight action name is derived from the view: ' + a)
   for (const a of ["'session.open'", "'session.rename'", "'session.archive'"]) {
     assert.ok(t5client.includes(a), 'sessions rows reuse the EXISTING sidebar action, no new one: ' + a)
@@ -135,19 +143,55 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   assert.ok((t5client.match(/aXa_av_streakCell\[data-level=/g) || []).length === 3
     && t5client.includes(".aXa_av_streakCell{"), 'four streak intensity steps (base + 3 levels), token-derived')
   assert.match(t5client, /h\(P\.StateDot, \{ state: ciState\(run\) \}\)/, 'CI rows carry a StateDot, not a hand-rolled dot')
+  // ---- Part B (git-card-stock-dock-rebuild §4): stock tool-details grammar ---
+  assert.match(t5client, /const INSIGHT_CSS = "/, 'INSIGHT_CSS is the generated verbatim copy of the stock ToolRow+ToolDetails CSS')
+  assert.match(t5client, /tag\.textContent = css \+ INSIGHT_CSS/, 'the copied CSS ships in the same style tag as the panel CSS')
+  assert.ok(!t5client.includes('o3BgMG_') && !t5client.includes('xDAfVq_'), 'no stock hashed prefix leaks — every class is aXa_ins_')
+  assert.match(t5client, /'data-arxa-insight': view/, 'the insight root carries the single [data-arxa-insight] marker (no per-element markers)')
+  assert.match(t5client, /className: I\.cardBody \+ ' ' \+ I\.root/, 'the report container is ToolDetails.cardBody')
+  assert.match(t5client, /h\(P\.DisclosureRow, \{\n\s*key, icon, title, open: false, expandable: false/, 'runs and sessions are stock DisclosureRows (non-expanding)')
+  assert.match(t5client, /rowClassName: I\.row, leadingClassName: I\.leading, titleClassName: I\.title, chevronClassName: I\.chevron/, 'the row wears the copied ToolRow classes')
+  assert.match(t5client, /ioSection\('current', t\('insight\.streak\.current'\)/, 'streak metrics are ToolRow IN/OUT sections')
+  assert.match(t5client, /className: I\.empty \}/, 'empty / loading / unavailable use ToolDetails.empty')
+  assert.match(t5client, /className: I\.inspectButton/, 'session actions wear the stock inspect-button face')
+  for (const dead of ['aXa_av_insightRow', 'aXa_av_insightBtn', 'aXa_av_insightChip', 'aXa_av_insightNums', 'aXa_av_idle\'} }, h(\'div\', { className: \'aXa_av_hint\'} }, t(\'insight']) {
+    assert.ok(!t5client.includes(dead), 'hand-rolled insight styling is gone: ' + dead)
+  }
   // t5code is the comment-stripped source: the rule is about CODE, and the
   // comment next to the inline field names the banned call to explain itself.
   assert.doesNotMatch(t5code, /window\.prompt/, 'the sessions rename is an inline field — Tauri WKWebView has no window.prompt')
   assert.match(t5client, /className: 'aXa_av_insightInput'/, 'the rename field is a real input in the row')
+  // The refresh button has to BYPASS the host's 60s cache, not just re-ask for
+  // the value it already has. It arms a ref that load() consumes into the arg;
+  // an earlier version only bumped the tick and silently re-served the cache.
+  assert.match(t5client, /freshRef\.current = true; setTick/,
+    'the review refresh button arms the fresh flag before re-loading')
+  assert.match(t5client, /wantFresh \? \{ sessionId, fresh: true \} : \{ sessionId \}/,
+    'load() sends fresh:true to the host when the refresh button armed it')
   assert.match(t5client, /if \(state\.phase === 'insight'\) \{ setState\(\(st\) => \(\{ \.\.\.st, sessionId: id \}\)\); return \}/,
     'a session switch re-points an open insight panel instead of closing the column')
-  for (const key of ['insight.title.streak', 'insight.title.ci', 'insight.title.sessions', 'insight.loading',
-    'insight.unavailable', 'insight.streak.current', 'insight.streak.longest', 'insight.streak.empty',
-    'insight.ci.open', 'insight.ci.empty', 'insight.sessions.open', 'insight.sessions.rename',
-    'insight.sessions.archive', 'insight.sessions.empty']) {
+  // `insight.title.ci` is deliberately absent: D4 retired the standalone CI
+  // view and the review surface absorbed it. The `insight.ci.*` ROW strings
+  // stay — the CI group inside the review view still renders those buttons.
+  for (const key of ['insight.title.streak', 'insight.title.review', 'insight.title.sessions', 'insight.loading',
+    'insight.unavailable', 'insight.streak.current', 'insight.streak.longest', 'insight.streak.empty', 'insight.streak.days',
+    'insight.ci.open', 'insight.ci.rerun', 'insight.ci.cancel', 'insight.sessions.open', 'insight.sessions.rename',
+    'insight.sessions.archive', 'insight.sessions.empty', 'insight.seatRequired',
+    // the review surface (D1-D7)
+    'insight.review.needs', 'insight.review.reviews', 'insight.review.threads', 'insight.review.comments',
+    'insight.review.issues', 'insight.review.commits', 'insight.review.ci', 'insight.review.empty',
+    'insight.review.nopr', 'insight.review.refresh', 'insight.review.reply', 'insight.review.resolve',
+    'insight.review.unresolve', 'insight.review.resolved', 'insight.review.outdated', 'insight.review.bots',
+    'insight.review.openPr', 'insight.review.changes-requested', 'insight.review.unresolved-thread',
+    'insight.review.mention', 'insight.review.ci-failed']) {
     const n = (t5client.match(new RegExp("'" + key.replace(/\./g, '\\.') + "':", 'g')) || []).length
     assert.equal(n, 3, 'insight string "' + key + '" is in all three dicts (en/pl/fr), found ' + n)
   }
+  // The host's org-seat refusal ("insight.<view> serves session seats") is a
+  // dev string — the panel translates that one and passes every other fault
+  // through verbatim so real errors stay diagnosable.
+  assert.match(t5client, /\/serves session seats\/\.test\(m\) \? t\('insight\.seatRequired'\) : m/,
+    'insight error phase maps the seat refusal to insight.seatRequired and keeps other messages raw')
   assert.equal((t5client.match(/TODO native review \(conformance decision 4\)/g) || []).length, 2,
     'the machine-drafted pl/fr insight strings are flagged for native review')
   // wt lane accepts an absolute chip path that lives INSIDE the worktree,
@@ -263,6 +307,19 @@ assert.equal((await req(port, '/notes/a.md', { host: 'evil.example:1234' })).sta
     rq.end()
   })
   assert.equal(v6, 200, 'org server answers over ::1 (dual-stack loopback)')
+  // Port exclusivity (2026-09-02 flake): the old '::' wildcard let a foreign
+  // 127.0.0.1:N listener coexist on our port (BSD dual-stack rule) and steal
+  // v4 traffic. With explicit ::1 + 127.0.0.1 binds a second bind of either
+  // family on N must fail EADDRINUSE — nobody can sit in front of us.
+  for (const fam of ['::1', '127.0.0.1']) {
+    const code = await new Promise((resolve) => {
+      const probe = http.createServer(() => {})
+      probe.once('error', (e) => resolve(e.code))
+      probe.once('listening', () => probe.close(() => resolve('LISTENED')))
+      probe.listen(port, fam)
+    })
+    assert.equal(code, 'EADDRINUSE', 'org port is exclusive on ' + fam + ' (got ' + code + ')')
+  }
 }
 
 const rr = await req(port, '/vid.mp4', { host: H, method: 'GET' })
@@ -506,6 +563,33 @@ assert.ok(clientSrc.includes('FORMAT_EXTS.has(formatExt) && prettierOn'), 'prett
 assert.ok(clientSrc.includes("'aria-pressed'"), 'prettier toggle exposes pressed state')
 assert.ok(clientSrc.includes('aXa_av_prettierMark'), 'prettier brand chip rides the top bar')
 assert.ok(clientSrc.includes("'action.prettier.off'"), 'prettier toggle locales wired')
+
+// Q8 (2026-09-03): the CI insight panel mirrors the card's run control, but
+// per row — the card only ever reaches the newest run, this reaches every one.
+assert.ok(clientSrc.includes("act('ci-rerun', 'card.ci.rerun', { sessionId, runId: run.id })"), 'CI panel re-runs the row it is on, through the card host action')
+
+// Q5 (2026-09-03): the subagent / job detail panel — the same controls the
+// header dropdown carries, on the full record. agent.* is a SIDEBAR action:
+// a session's children are not a git concern and must not ride the card route.
+assert.ok(clientSrc.includes("const ROUTE_FOR = (action) => (/^agent\\./.test(action) ? SIDEBAR_ROUTE : CARD_ROUTE)"), 'agent.* is routed to the sidebar host, not the card host')
+assert.ok(clientSrc.includes("const action = view === 'subagents' ? 'agent.list' : 'insight.' + view"), 'subagents ask agent.list rather than a non-existent insight.subagents')
+assert.ok(clientSrc.includes("if (view === 'jobs') { setData({ jobs: given || [] }); setPhase('ready'); return () => {} }"), 'jobs never round-trip: JobView is push-only, the rows ride the open event')
+assert.match(clientSrc, /view === 'jobs' \|\| view === 'subagents'/, 'both agent views render')
+assert.ok(clientSrc.includes("row.can && row.can[verb] === true"), 'panel verbs are gated by the host capability map, never inferred')
+assert.ok(clientSrc.includes("t('agents.why.' + String(why || 'unavailable'))"), 'a disabled panel verb explains itself')
+assert.equal(clientSrc.split("'agents.why.no-job-api':").length - 1, 3, 'the job-control gap is stated in en/pl/fr')
+assert.ok(clientSrc.includes("if (r && r.ok === false) { setNote(t('agents.why.' + String(r.reason || 'unavailable'))); return }"), 'a refused verb surfaces its reason instead of a silent refresh')
+for (const k of ['agents.pause', 'agents.cancel', 'agents.why.no-terminate-verb', 'insight.title.jobs', 'insight.title.subagents']) {
+  assert.equal(clientSrc.split("'" + k + "':").length - 1, 3, k + ' present in en/pl/fr')
+}
+
+assert.ok(clientSrc.includes("act('ci-cancel', 'card.ci.cancel', { sessionId, runId: run.id })"), 'CI panel cancels the row it is on')
+assert.match(clientSrc, /const live = run\.status !== 'completed'/, 'row liveness decides which of the pair is enabled')
+assert.ok(clientSrc.includes("trailing(t('insight.ci.rerun'), () => act('ci-rerun'"), 'rerun wears the stock trailing-action face')
+for (const k of ['insight.ci.rerun', 'insight.ci.cancel']) {
+  assert.equal(clientSrc.split("'" + k + "':").length - 1, 3, k + ' present in en/pl/fr')
+}
+
 console.log('arxa-artifact-viewer selftest: GREEN (vendor bundles + route)');
 
 // ---- Task 6: engine write API over a REAL git session worktree ------------

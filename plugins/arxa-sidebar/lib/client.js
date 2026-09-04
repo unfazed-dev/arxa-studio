@@ -1,6 +1,6 @@
 // Browser half of arxa-sidebar (shell part; the workspace-section part is
 // appended by scripts/gen-workspace.mjs). GENERATED from
-// @deepseek-ai/dsh-client-ui-sidebar lib/client.js (dsh 0.1.1-rc.2) +
+// @deepseek-ai/dsh-client-ui-sidebar lib/client.js (dsh 0.1.2-rc.1) +
 // scripts/gen-sidebar.mjs deltas. Do not hand-edit: regenerate and let the
 // selftest drift gate compare bytes. The stock SidebarRoot shell is kept
 // whole — logoRow (brand slots + fold toggle), New-session CTA, regionArea
@@ -32,7 +32,7 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 		//#region \0dsh-css:/home/runner/work/deepseek-harness/deepseek-harness/packages/client/ui-sidebar/src/client/SidebarRoot.module.css.mjs
-		const css = ".aXa_sb_root{--dsh-sidebar-inline-padding:12px;height:100%;padding:6px var(--dsh-sidebar-inline-padding);box-sizing:border-box;background:var(--dsw-specific-sidebar-fill);color:var(--dsw-alias-label-primary);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);flex-direction:column;font-size:14px;display:flex}.aXa_sb_root.aXa_sb_collapsed{padding:18px 10px 6px}.aXa_sb_root.aXa_sb_quietBars{--dsh-scrollbar-thumb:transparent;--dsh-scrollbar-thumb-hover:transparent}.aXa_sb_fading>*{opacity:0;transition:opacity .15s var(--ds-ease-in-out)}.aXa_sb_wide{animation:aXa_sb_wide-in .2s var(--ds-ease-in-out)}@keyframes aXa_sb_wide-in{0%{opacity:0}}.aXa_sb_railIn .aXa_sb_iconButton,.aXa_sb_railIn .aXa_sb_newSession,.aXa_sb_railIn .aXa_sb_regionArea{animation:aXa_sb_rail-in .15s var(--ds-ease-in-out) backwards}.aXa_sb_railIn .aXa_sb_footArea{animation:aXa_sb_rail-fade-in .15s var(--ds-ease-in-out) backwards}@keyframes aXa_sb_rail-in{0%{opacity:0;transform:translate(49px)}}@keyframes aXa_sb_rail-fade-in{0%{opacity:0}}.aXa_sb_logoRow{box-sizing:border-box;flex:none;justify-content:flex-end;align-items:center;gap:8px;height:60px;margin-bottom:8px;padding:8px 0 8px 4px;display:flex;overflow:hidden}.aXa_sb_collapsed .aXa_sb_logoRow{justify-content:flex-start;height:36px;margin-bottom:12px;padding:0}.aXa_sb_brand{min-width:0;color:inherit;cursor:pointer;background:0 0;border:none;flex:1;align-items:center;padding:0;display:inline-flex;overflow:hidden}.aXa_sb_brandIdentity{align-items:center;gap:8px;min-width:0;height:24px;display:inline-flex}.aXa_sb_brandMark{flex:none;justify-content:center;align-items:center;display:inline-flex}.aXa_sb_brandName{letter-spacing:.04em;align-items:center;gap:6px;min-width:0;height:24px;font-size:18px;font-weight:600;line-height:24px;display:inline-flex}.aXa_sb_fallbackBrandName{letter-spacing:0;white-space:nowrap;font-size:17px}.aXa_sb_iconButton{cursor:pointer;width:28px;height:28px;color:var(--dsw-alias-label-secondary);background:0 0;border:none;border-radius:50%;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}.aXa_sb_iconButton:hover{background:var(--dsw-alias-interactive-bg-hover)}.aXa_sb_collapsed .aXa_sb_iconButton{width:36px;height:36px}.aXa_sb_collapsed .aXa_sb_toggle .aXa_sb_panelIcon{display:none}.aXa_sb_collapsed .aXa_sb_toggle:hover .aXa_sb_panelIcon{display:inline}.aXa_sb_collapsed .aXa_sb_toggle:hover .aXa_sb_railMark{display:none}.aXa_sb_railMark{justify-content:center;align-items:center;display:inline-flex}.aXa_sb_collapsed .aXa_sb_iconButton{color:var(--dsw-alias-label-primary)}.aXa_sb_buildRevision{height:16px;color:var(--dsw-alias-label-primary-inverted);background:var(--dsw-alias-label-primary);font-family:var(--ds-font-family-code);border-radius:3px;align-items:center;padding:0 4px;font-size:8px;font-weight:500;line-height:16px;display:inline-flex}.aXa_sb_newSession{box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-button-elevated-fill);height:38px;color:var(--dsw-alias-label-primary);cursor:pointer;border-radius:12px;flex:none;justify-content:center;align-items:center;gap:6px;margin:0 2px 8px;padding:8px 16px;font-size:14px;font-weight:500;line-height:22px;display:flex;overflow:hidden}.aXa_sb_newSession:hover{background:var(--dsw-alias-button-floating-hover)}.aXa_sb_collapsed .aXa_sb_newSession{background:0 0;border-color:#0000;align-self:flex-start;gap:0;width:36px;height:36px;margin:0 0 12px;padding:0}.aXa_sb_collapsed .aXa_sb_newSession:hover{background:var(--dsw-alias-interactive-bg-hover)}.aXa_sb_newSessionLabel{white-space:nowrap;max-width:200px;overflow:hidden}.aXa_sb_collapsed .aXa_sb_newSessionLabel{max-width:0}.aXa_sb_regionArea{min-height:0;margin-left:-4px;margin-right:calc(-1 * var(--dsh-sidebar-inline-padding));flex-direction:column;flex:1;padding-left:4px;display:flex;overflow:hidden}.aXa_sb_collapsed .aXa_sb_regionArea{margin-left:0;margin-right:0;padding-left:0}.aXa_sb_footArea{flex-direction:column;flex:none;display:flex}.aXa_sb_settingsArea,.aXa_sb_footerActions{flex:none;width:100%;min-width:0}.aXa_sb_footerActions{display:flex}.aXa_sb_collapsed .aXa_sb_footArea{align-items:center}.aXa_sb_collapsed .aXa_sb_settingsArea,.aXa_sb_collapsed .aXa_sb_footerActions{justify-content:center;width:auto;display:flex}@media (prefers-reduced-motion:reduce){.aXa_sb_wide,.aXa_sb_fading>*,.aXa_sb_railIn .aXa_sb_iconButton,.aXa_sb_railIn .aXa_sb_newSession,.aXa_sb_railIn .aXa_sb_footArea,.aXa_sb_railIn .aXa_sb_regionArea{transition:none;animation:none}}" + ".aXa_sb_ctaNotice{margin:-4px 2px 8px;padding:5px 8px;border-radius:8px;border:1px solid var(--dsw-alias-state-error-primary);color:var(--dsw-alias-state-error-primary);background:var(--dsw-alias-bg-layer-1);font-size:11.5px;line-height:15px;word-break:break-word}";
+		const css = ".aXa_sb_root{--dsh-sidebar-inline-padding:12px;height:100%;padding:6px var(--dsh-sidebar-inline-padding);box-sizing:border-box;background:var(--dsw-specific-sidebar-fill);color:var(--dsw-alias-label-primary);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);flex-direction:column;font-size:14px;display:flex}.aXa_sb_root.aXa_sb_collapsed{padding:18px 10px 6px}.aXa_sb_root.aXa_sb_quietBars{--dsh-scrollbar-thumb:transparent;--dsh-scrollbar-thumb-hover:transparent}.aXa_sb_fading>*{opacity:0;transition:opacity .15s var(--ds-ease-in-out)}.aXa_sb_wide{animation:aXa_sb_wide-in .2s var(--ds-ease-in-out)}@keyframes aXa_sb_wide-in{0%{opacity:0}}.aXa_sb_railIn .aXa_sb_iconButton,.aXa_sb_railIn .aXa_sb_newSession,.aXa_sb_railIn .aXa_sb_regionArea{animation:aXa_sb_rail-in .15s var(--ds-ease-in-out) backwards}.aXa_sb_railIn .aXa_sb_footArea{animation:aXa_sb_rail-fade-in .15s var(--ds-ease-in-out) backwards}@keyframes aXa_sb_rail-in{0%{opacity:0;transform:translate(49px)}}@keyframes aXa_sb_rail-fade-in{0%{opacity:0}}.aXa_sb_logoRow{box-sizing:border-box;flex:none;justify-content:flex-end;align-items:center;gap:8px;height:60px;margin-bottom:8px;padding:8px 0 8px 4px;display:flex;overflow:hidden}.aXa_sb_collapsed .aXa_sb_logoRow{justify-content:flex-start;height:36px;margin-bottom:12px;padding:0}.aXa_sb_brand{min-width:0;color:inherit;cursor:pointer;background:0 0;border:none;flex:1;align-items:center;padding:0;display:inline-flex;overflow:hidden}.aXa_sb_brandIdentity{align-items:center;gap:8px;min-width:0;height:24px;display:inline-flex}.aXa_sb_brandMark{flex:none;justify-content:center;align-items:center;display:inline-flex}.aXa_sb_brandName{letter-spacing:.04em;align-items:center;gap:6px;min-width:0;height:24px;font-size:18px;font-weight:600;line-height:24px;display:inline-flex}.aXa_sb_fallbackBrandName{letter-spacing:0;white-space:nowrap;font-size:17px}.aXa_sb_localBuildBrand{white-space:nowrap;flex-direction:column;flex:none;justify-content:center;align-items:flex-start;gap:1px;height:24px;display:inline-flex}.aXa_sb_localBuildTitle{letter-spacing:0;font-size:12px;line-height:13px}.aXa_sb_iconButton{corner-shape:round;cursor:pointer;width:28px;height:28px;color:var(--dsw-alias-label-secondary);background:0 0;border:none;border-radius:50%;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}.aXa_sb_iconButton:hover{background:var(--dsw-alias-interactive-bg-hover)}.aXa_sb_collapsed .aXa_sb_iconButton{width:36px;height:36px}.aXa_sb_collapsed .aXa_sb_toggle .aXa_sb_panelIcon{display:none}.aXa_sb_collapsed .aXa_sb_toggle:hover .aXa_sb_panelIcon{display:inline}.aXa_sb_collapsed .aXa_sb_toggle:hover .aXa_sb_railMark{display:none}.aXa_sb_railMark{justify-content:center;align-items:center;display:inline-flex}.aXa_sb_collapsed .aXa_sb_iconButton{color:var(--dsw-alias-label-primary)}.aXa_sb_buildVersion{height:10px;color:var(--dsw-alias-label-primary-inverted);background:var(--dsw-alias-label-primary);font-family:var(--ds-font-family-code);white-space:nowrap;border-radius:2px;flex:none;align-items:center;padding:0 3px;font-size:6px;font-weight:500;line-height:10px;display:inline-flex}.aXa_sb_newSession{box-sizing:border-box;border:.5px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-button-elevated-fill);height:38px;color:var(--dsw-alias-label-primary);cursor:pointer;border-radius:12px;flex:none;justify-content:center;align-items:center;gap:6px;margin:0 2px 8px;padding:8px 16px;font-size:14px;font-weight:500;line-height:22px;display:flex;overflow:hidden}.aXa_sb_newSession:hover{background:var(--dsw-alias-button-floating-hover)}.aXa_sb_collapsed .aXa_sb_newSession{background:0 0;border-color:#0000;align-self:flex-start;gap:0;width:36px;height:36px;margin:0 0 12px;padding:0}.aXa_sb_collapsed .aXa_sb_newSession:hover{background:var(--dsw-alias-interactive-bg-hover)}.aXa_sb_newSessionLabel{white-space:nowrap;max-width:200px;overflow:hidden}.aXa_sb_collapsed .aXa_sb_newSessionLabel{max-width:0}.aXa_sb_regionArea{min-height:0;margin-left:-4px;margin-right:calc(-1 * var(--dsh-sidebar-inline-padding));flex-direction:column;flex:1;padding-left:4px;display:flex;overflow:hidden}.aXa_sb_collapsed .aXa_sb_regionArea{margin-left:0;margin-right:0;padding-left:0}.aXa_sb_footArea{flex-direction:column;flex:none;display:flex}.aXa_sb_settingsArea,.aXa_sb_footerActions{flex:none;width:100%;min-width:0}.aXa_sb_footerActions{display:flex}.aXa_sb_collapsed .aXa_sb_footArea{align-items:center}.aXa_sb_collapsed .aXa_sb_settingsArea,.aXa_sb_collapsed .aXa_sb_footerActions{justify-content:center;width:auto;display:flex}@media (prefers-reduced-motion:reduce){.aXa_sb_wide,.aXa_sb_fading>*,.aXa_sb_railIn .aXa_sb_iconButton,.aXa_sb_railIn .aXa_sb_newSession,.aXa_sb_railIn .aXa_sb_footArea,.aXa_sb_railIn .aXa_sb_regionArea{transition:none;animation:none}}" + ".aXa_sb_ctaNotice{margin:-4px 2px 8px;padding:5px 8px;border-radius:8px;border:1px solid var(--dsw-alias-state-error-primary);color:var(--dsw-alias-state-error-primary);background:var(--dsw-alias-bg-layer-1);font-size:11.5px;line-height:15px;word-break:break-word}";
 		const tagId = "arxa-sidebar/SidebarRoot.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -46,13 +46,15 @@ window.__ModuleLoader__.load({
 			"brandIdentity": "aXa_sb_brandIdentity",
 			"brandMark": "aXa_sb_brandMark",
 			"brandName": "aXa_sb_brandName",
-			"buildRevision": "aXa_sb_buildRevision",
+			"buildVersion": "aXa_sb_buildVersion",
 			"collapsed": "aXa_sb_collapsed",
 			"fading": "aXa_sb_fading",
 			"fallbackBrandName": "aXa_sb_fallbackBrandName",
 			"footArea": "aXa_sb_footArea",
 			"footerActions": "aXa_sb_footerActions",
 			"iconButton": "aXa_sb_iconButton",
+			"localBuildBrand": "aXa_sb_localBuildBrand",
+			"localBuildTitle": "aXa_sb_localBuildTitle",
 			"logoRow": "aXa_sb_logoRow",
 			"newSession": "aXa_sb_newSession",
 			"newSessionLabel": "aXa_sb_newSessionLabel",
@@ -97,6 +99,10 @@ window.__ModuleLoader__.load({
 		* edge — on the way to the conversation, or around a portalled menu.
 		*/
 		const SCROLLBAR_LINGER_MS = 2e3;
+		/** Format complete-build metadata for the local brand badge. */
+		function localBuildVersion() {
+			return `0.1.2-rc.1-d4eb4f4` + ({}.DSH_CLIENT_GIT_DIRTY === "true" ? "-dirty" : "");
+		}
 		/**
 		* Render the sidebar column shell.
 		* @param props - composed slot props (runtime share + injected callbacks, contract/slots.ts).
@@ -166,6 +172,7 @@ window.__ModuleLoader__.load({
 					cancelLinger();
 				};
 			}, [pointerInside]);
+			const buildVersion = localBuildVersion();
 			return (0, react_jsx_runtime.jsxs)("div", {
 				ref: column,
 				className: clsx(SidebarRoot_module_css_default.root, !wide && SidebarRoot_module_css_default.collapsed, !wide && everWide.current && SidebarRoot_module_css_default.railIn, collapsed && wide && SidebarRoot_module_css_default.fading, !pointerInside && SidebarRoot_module_css_default.quietBars),
@@ -195,13 +202,19 @@ window.__ModuleLoader__.load({
 									children: renderSlot("sidebar.brand.mark", { size: 24 }, { fallback: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.FishLogo, { size: 24 }) })
 								}), (0, react_jsx_runtime.jsx)("span", {
 									className: SidebarRoot_module_css_default.brandName,
-									children: renderSlot("sidebar.brand.name", {}, { fallback: (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsx)("span", {
+									children: renderSlot("sidebar.brand.name", {}, { fallback: buildVersion === void 0 ? (0, react_jsx_runtime.jsx)("span", {
 										className: SidebarRoot_module_css_default.fallbackBrandName,
 										children: "arxa"
-									}), (0, react_jsx_runtime.jsx)("span", {
-										className: SidebarRoot_module_css_default.buildRevision,
-										children: "studio"
-									})] }) })
+									}) : (0, react_jsx_runtime.jsxs)("span", {
+										className: SidebarRoot_module_css_default.localBuildBrand,
+										children: [(0, react_jsx_runtime.jsx)("span", {
+											className: SidebarRoot_module_css_default.localBuildTitle,
+											children: "arxa"
+										}), (0, react_jsx_runtime.jsx)("span", {
+											className: SidebarRoot_module_css_default.buildVersion,
+											children: "studio"
+										})]
+									}) })
 								})]
 							})
 						}), (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Tooltip, {
@@ -315,14 +328,14 @@ window.__ModuleLoader__.load({
 		const inject = [
 			"slots",
 			"layout",
-			"sessions",
-			"workspaces",
+			"uiWorkspace",
 			"locale"
 		];
 		/** Registers the sidebar shell and its service callbacks.
 		* @param ctx - Client root context.
 		*/
 		function apply(ctx) {
+			const workspaceNavigation = ctx.get("uiWorkspace");
 			ctx.effect(() => ctx.locale.register(NS, {
 				zh,
 				en,
@@ -401,7 +414,7 @@ window.__ModuleLoader__.load({
 		{ // workspace section half (org rows world) — nested module scope
 // Browser half of arxa-sidebar (workspace-section part). GENERATED by
 // scripts/gen-workspace.mjs from @deepseek-ai/dsh-client-ui-workspace
-// lib/client.js (dsh 0.1.1-rc.2) + lib/workspace-region.snippet.txt +
+// lib/client.js (dsh 0.1.2-rc.1) + lib/workspace-region.snippet.txt +
 // the deltas listed in that script; composed after the shell part from
 // scripts/gen-sidebar.mjs into lib/client.js. Do not hand-edit: regenerate
 // and let the selftest drift gate compare bytes. The stock component tree
@@ -413,10 +426,160 @@ window.__ModuleLoader__.load({
 		var module = { exports: {} };
 		var exports = module.exports;
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
-		let _deepseek_ai_dsh_client_runtime_client = require("@deepseek-ai/dsh-client-runtime/client");
+		let _deepseek_ai_cordis = require("@deepseek-ai/cordis");
+		let _deepseek_ai_dsh_client_store = require("@deepseek-ai/dsh-client-store");
 		let react_jsx_runtime = require("react/jsx-runtime");
 		let react = require("react");
 		let _deepseek_ai_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
+		//#region lib/types/client/navigation.js
+		/** Workspace archive and directory UI capability. */
+		/** Structured directory failure exposed to directory UI consumers. */
+		var DirectoryBrowseError = class extends Error {
+			rpcError;
+			name = "DirectoryBrowseError";
+			/** @param rpcError - Host directory business failure. */
+			constructor(rpcError) {
+				super(`directory browse failed: ${rpcError.code}: ${rpcError.message}`);
+				this.rpcError = rpcError;
+			}
+		};
+		/** Implements Workspace archive and directory UI operations. */
+		var UiWorkspaceService = class extends _deepseek_ai_cordis.Service {
+			directoryPicker;
+			workspaces;
+			sessions;
+			connecting = /* @__PURE__ */ new Map();
+			/**
+			* @param ctx - Client root Context.
+			* @param directoryPicker - the directory-picking Remote namespace.
+			* @param workspaces - pure Workspace Controller.
+			* @param sessions - pure Session Controller.
+			*/
+			constructor(ctx, directoryPicker, workspaces, sessions) {
+				super(ctx, "uiWorkspace");
+				this.directoryPicker = directoryPicker;
+				this.workspaces = workspaces;
+				this.sessions = sessions;
+				ctx.effect(() => this.watchNavigation(), "ui-workspace: Workspace navigation policy");
+			}
+			async connectWorkspace(workspaceId) {
+				const workspace = this.workspaces.list.getSnapshot().items.find((item) => item.workspaceId === workspaceId);
+				if (workspace === void 0) throw new Error(`uiWorkspace.connectWorkspace: unknown workspace ${workspaceId}`);
+				const inflight = this.connecting.get(workspaceId);
+				if (inflight !== void 0) return inflight;
+				const archived = this.workspaces.list.getSnapshot().archivedSessionIds;
+				const sessions = this.sessions.list.getSnapshot();
+				for (const id of sessions.ids) {
+					const summary = sessions.byId[id];
+					if (summary !== void 0 && summary.blank && summary.cwd === workspace.path && workspace.sessionIds.includes(summary.id) && !archived.includes(summary.id)) return summary.id;
+				}
+				const attempt = this.sessions.create({ workspaceId }).finally(() => {
+					this.connecting.delete(workspaceId);
+				});
+				this.connecting.set(workspaceId, attempt);
+				return attempt;
+			}
+			startSession(workspaceId) {
+				const workspace = this.workspaces.list.getSnapshot();
+				const sessions = this.sessions.list.getSnapshot();
+				const current = sessions.current;
+				const currentWorkspaceId = current === void 0 ? void 0 : workspace.items.find((item) => item.sessionIds.includes(current))?.workspaceId;
+				const recent = workspace.phase === "ready" && sessions.phase === "ready" ? recentWorkspace(workspace.items, sessions.byId) : void 0;
+				const target = workspaceId ?? currentWorkspaceId ?? recent;
+				if (target === void 0) {
+					this.sessions.clear();
+					return;
+				}
+				this.connectWorkspace(target).then((sessionId) => {
+					this.sessions.open(sessionId);
+				}, (reason) => {
+					console.warn("new session failed:", reason);
+				});
+			}
+			async archiveSession(sessionId) {
+				await this.workspaces.archiveSession(sessionId);
+			}
+			async pickDirectory() {
+				const result = await this.directoryPicker.pick();
+				if (!result.ok) throw new Error(`directory picker failed: ${result.error.message}`);
+				return result.value;
+			}
+			async listDirectory(path, signal) {
+				const result = await this.directoryPicker.list(path, signal);
+				if (!result.ok) throw new DirectoryBrowseError(result.error);
+				return result.value;
+			}
+			async createDirectory(path, name) {
+				const result = await this.directoryPicker.createDirectory(path, name);
+				if (!result.ok) throw new DirectoryBrowseError(result.error);
+				return result.value;
+			}
+			watchNavigation() {
+				let initial = "waiting";
+				let disposed = false;
+				const reconcile = () => {
+					if (disposed) return;
+					if (this.clearArchivedCurrent()) return;
+					if (initial !== "waiting") return;
+					const workspace = this.workspaces.list.getSnapshot();
+					const sessions = this.sessions.list.getSnapshot();
+					if (workspace.phase !== "ready" || sessions.phase !== "ready") return;
+					if (sessions.current !== void 0) {
+						initial = "done";
+						return;
+					}
+					const target = recentWorkspace(workspace.items, sessions.byId);
+					if (target === void 0) {
+						initial = "done";
+						return;
+					}
+					initial = "connecting";
+					this.connectWorkspace(target).then((sessionId) => {
+						if (disposed) return;
+						if (this.sessions.list.getSnapshot().current === void 0) this.sessions.open(sessionId);
+						initial = "done";
+					}, (reason) => {
+						if (disposed) return;
+						initial = "waiting";
+						console.warn("initial workspace selection failed:", reason);
+					});
+				};
+				const disposeWorkspaces = this.workspaces.list.subscribe(reconcile);
+				const disposeSessions = this.sessions.list.subscribe(reconcile);
+				reconcile();
+				return () => {
+					disposed = true;
+					disposeSessions();
+					disposeWorkspaces();
+				};
+			}
+			/** @returns true when an archived current selection was cleared. */
+			clearArchivedCurrent() {
+				const current = this.sessions.list.getSnapshot().current;
+				if (current === void 0 || !this.workspaces.list.getSnapshot().archivedSessionIds.includes(current)) return false;
+				this.sessions.clear();
+				return true;
+			}
+		};
+		/** Stable tie-breaking follows Host Workspace order. */
+		function recentWorkspace(workspaces, sessions) {
+			let selected;
+			let selectedTime = Number.NEGATIVE_INFINITY;
+			for (const workspace of workspaces) {
+				let latest = Number.NEGATIVE_INFINITY;
+				for (const sessionId of workspace.sessionIds) {
+					const session = sessions[sessionId];
+					if (session !== void 0) latest = Math.max(latest, session.updatedAt);
+				}
+				if (latest === Number.NEGATIVE_INFINITY) latest = Date.parse(workspace.createdAt);
+				if (selected === void 0 || latest > selectedTime) {
+					selected = workspace.workspaceId;
+					selectedTime = latest;
+				}
+			}
+			return selected;
+		}
+		//#endregion
 		//#region lib/types/client/stores.js
 		/**
 		* The workspace browser's viewing store: the session-list grouping mode,
@@ -432,7 +595,7 @@ window.__ModuleLoader__.load({
 		* @returns the store handle (spec + type + identity + factory in one).
 		*/
 		function createWorkspaceViewStore() {
-			return (0, _deepseek_ai_dsh_client_runtime_client.defineStore)({
+			return (0, _deepseek_ai_dsh_client_store.defineStore)({
 				init: () => ({
 					groupBy: "workspace",
 					orderBy: "updated",
@@ -482,18 +645,82 @@ window.__ModuleLoader__.load({
 			for (var e, t, f = 0, n = "", o = arguments.length; f < o; f++) (e = arguments[f]) && (t = r(e)) && (n && (n += " "), n += t);
 			return n;
 		}
-		/** Display label for the ungrouped bucket row. */
-		const UNGROUPED_LABEL = "Ungrouped";
+		//#endregion
+		//#region ../../util/workspace-path/src/index.ts
+		/**
+		* Browser-safe Workspace path and display helpers.
+		* @module @deepseek-ai/dsh-util-workspace-path
+		*/
+		/** Whether a path uses a Windows drive or UNC prefix. */
+		function isWindowsStylePath(value) {
+			return /^[A-Za-z]:[/\\]/.test(value) || value.startsWith("\\\\");
+		}
+		/**
+		* Abbreviate a POSIX home directory for display.
+		* @param path - Absolute or already-short display path.
+		* @param home - Host account home; absent skips abbreviation.
+		* @returns `~` or `~/…` for the POSIX home and its descendants, otherwise `path`.
+		*/
+		function abbreviateHomePath(path, home) {
+			if (home === void 0 || home === "") return path;
+			if (isWindowsStylePath(path) || isWindowsStylePath(home)) return path;
+			const root = home.replace(/\/+$/, "");
+			if (root === "" || root === "/") return path;
+			if (path.replace(/\/+$/, "") === root) return "~";
+			if (path.startsWith(`${root}/`)) return `~${path.slice(root.length)}`;
+			return path;
+		}
+		/**
+		* Read the final non-empty segment of a Workspace path for display.
+		* Workspace-label surfaces use this helper instead of deriving another basename.
+		* @param path - Workspace directory path using POSIX or Windows separators.
+		* @returns the final segment, or an empty string for a separator-only path.
+		*/
+		function workspaceTitleOf(path) {
+			const trimmed = path.replace(/[/\\]+$/, "");
+			const separator = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+			return trimmed.slice(separator + 1);
+		}
+		//#endregion
+		//#region lib/types/client/subagent-lineage.js
+		/** UI Workspace-owned projection of descendant counts from Session summaries. */
+		/**
+		* Index uninterrupted subagent descendants under each ancestor.
+		* @param summaries - Session summaries keyed by id.
+		* @returns descendant totals keyed by possible parent id.
+		*/
+		function indexSubagentDescendants(summaries) {
+			const indexed = /* @__PURE__ */ new Map();
+			for (const descendant of Object.values(summaries)) {
+				if (descendant.origin !== "subagent") continue;
+				const seen = /* @__PURE__ */ new Set();
+				let current = descendant;
+				while (current?.origin === "subagent" && current.parentId !== void 0 && !seen.has(current.id)) {
+					seen.add(current.id);
+					const aggregate = indexed.get(current.parentId);
+					if (aggregate === void 0) indexed.set(current.parentId, {
+						count: 1,
+						runningCount: descendant.running ? 1 : 0
+					});
+					else {
+						aggregate.count += 1;
+						if (descendant.running) aggregate.runningCount += 1;
+					}
+					current = summaries[current.parentId];
+				}
+			}
+			return indexed;
+		}
 		/**
 		* Directory display label: basename of the path (both separators accepted).
 		* Ungrouped-bucket fallback for surfaces without a workspace title.
 		* @param cwd - directory path, or undefined for the ungrouped bucket.
-		* @returns basename, the raw cwd when it has no basename, or the ungrouped label.
+		* @returns basename, the raw cwd when it has no basename, or an empty ungrouped marker.
 		*/
 		function workspaceLabel(cwd) {
-			if (cwd === void 0 || cwd === "") return UNGROUPED_LABEL;
-			const base = cwd.replace(/[/\\]+$/, "").split(/[/\\]/).pop();
-			return base !== void 0 && base !== "" ? base : cwd;
+			if (cwd === void 0 || cwd === "") return "";
+			const base = workspaceTitleOf(cwd);
+			return base !== "" ? base : cwd;
 		}
 		/** Recency comparator: newest first, id as the deterministic tiebreak (ids are unique per group). */
 		function byRecency(a, b) {
@@ -515,7 +742,11 @@ window.__ModuleLoader__.load({
 		* and the renderer localizes its display label.
 		*/
 		function sessionTitle(session) {
-			return session.blank ? "New Session" : session.displayTitle;
+			return session.blank ? "" : session.displayTitle;
+		}
+		/** The list projection alone owns the best-effort active-Schedule indicator. */
+		function hasActiveSchedule(session) {
+			return (session.projectionValues?.schedule?.length ?? 0) > 0;
 		}
 		/** Build one group without projecting session lineage into presentation. */
 		function buildGroup(key, workspaceId, cwd, createdAt, label, members, order) {
@@ -568,10 +799,20 @@ window.__ModuleLoader__.load({
 				groups.push(buildGroup(workspace.workspaceId, workspace.workspaceId, workspace.path, Date.parse(workspace.createdAt), workspace.title, members, "account"));
 			}
 			const stray = list.ids.map((id) => list.byId[id]).filter((s) => s !== void 0 && !accounted.has(s.id) && sessionVisible(s, list.current, archived));
-			if (stray.length > 0) groups.push(buildGroup("", void 0, void 0, void 0, UNGROUPED_LABEL, ungroupedOrder === void 0 ? stray : orderedUngrouped(stray, ungroupedOrder), ungroupedOrder === void 0 ? "recency" : "account"));
+			if (stray.length > 0) groups.push(buildGroup("", void 0, void 0, void 0, "", ungroupedOrder === void 0 ? stray : orderedUngrouped(stray, ungroupedOrder), ungroupedOrder === void 0 ? "recency" : "account"));
 			return groups;
 		}
-		function sessionNode(s, descendants) {
+		/** Keep navigation presentation independent from domain-owned interaction objects. */
+		function visiblePendingKind(kind) {
+			switch (kind) {
+				case "approval":
+				case "plan-review":
+				case "question": return kind;
+				default: return;
+			}
+		}
+		function sessionNode(s, descendants, pendingInteractions) {
+			const pendingInteraction = visiblePendingKind(pendingInteractions.get(s.id)?.kind);
 			return {
 				id: s.id,
 				title: sessionTitle(s),
@@ -579,8 +820,9 @@ window.__ModuleLoader__.load({
 				running: s.running,
 				runningSubagentCount: descendants.get(s.id)?.runningCount ?? 0,
 				completed: s.completed === true,
+				hasActiveSchedule: hasActiveSchedule(s),
 				updatedAt: s.updatedAt,
-				...s.pendingInteraction === void 0 ? {} : { pendingInteraction: s.pendingInteraction }
+				...pendingInteraction === void 0 ? {} : { pendingInteraction }
 			};
 		}
 		/**
@@ -594,13 +836,14 @@ window.__ModuleLoader__.load({
 		* @param list - sessions list snapshot (`current` feeds containsCurrent).
 		* @param workspaces - real workspaces in stable Host order.
 		* @param archivedSessionIds - registry-global archive set.
+		* @param pendingInteractions - pending UI interactions by Session.
 		* @param view - local expansion arrays.
 		* @returns group sections in render order.
 		*/
-		function deriveGroups(list, workspaces, archivedSessionIds, view) {
+		function deriveGroups(list, workspaces, archivedSessionIds, pendingInteractions, view) {
 			const archived = new Set(archivedSessionIds);
 			const expandedGroups = new Set(view.expandedGroups);
-			const descendants = (0, _deepseek_ai_dsh_client_runtime_client.indexSubagentDescendants)(list.byId);
+			const descendants = indexSubagentDescendants(list.byId);
 			const currentGroup = list.current === void 0 ? void 0 : workspaces.find((w) => w.sessionIds.includes(list.current))?.workspaceId ?? "";
 			const groups = [];
 			for (const g of groupByWorkspace(list, workspaces, archived, view.ungroupedOrder)) {
@@ -614,7 +857,7 @@ window.__ModuleLoader__.load({
 					sessionCount: g.sessions.length,
 					expanded,
 					containsCurrent: g.key === currentGroup,
-					sessions: expanded ? g.sessions.map((session) => sessionNode(session, descendants)) : []
+					sessions: expanded ? g.sessions.map((session) => sessionNode(session, descendants, pendingInteractions)) : []
 				});
 			}
 			return groups;
@@ -626,11 +869,12 @@ window.__ModuleLoader__.load({
 		* (see {@link deriveSearchResults}).
 		* @param list - sessions list snapshot.
 		* @param archivedSessionIds - registry-global archive set.
+		* @param pendingInteractions - pending UI interactions by Session.
 		* @returns flat rows in render order.
 		*/
-		function deriveFlat(list, archivedSessionIds) {
+		function deriveFlat(list, archivedSessionIds, pendingInteractions) {
 			const archived = new Set(archivedSessionIds);
-			const descendants = (0, _deepseek_ai_dsh_client_runtime_client.indexSubagentDescendants)(list.byId);
+			const descendants = indexSubagentDescendants(list.byId);
 			const rows = [];
 			for (const id of list.ids) {
 				const s = list.byId[id];
@@ -638,7 +882,7 @@ window.__ModuleLoader__.load({
 				rows.push(s);
 			}
 			rows.sort(byRecency);
-			return rows.map((session) => sessionNode(session, descendants));
+			return rows.map((session) => sessionNode(session, descendants, pendingInteractions));
 		}
 		/**
 		* Merge immediate title/Workspace substring matches with ranked Host content
@@ -648,18 +892,19 @@ window.__ModuleLoader__.load({
 		* @param workspaces - Workspace membership and display labels.
 		* @param query - caller text; surrounding whitespace is ignored.
 		* @param archivedSessionIds - registry-global archive set (members never match).
+		* @param pendingInteractions - pending UI interactions by Session.
 		* @param content - ranked Host content-search page.
 		* @param limit - protocol-owned maximum merged row count.
 		* @returns bounded deduplicated flat rows and a refine-query hint bit.
 		*/
-		function deriveSearchResults(list, workspaces, query, archivedSessionIds, content, limit) {
+		function deriveSearchResults(list, workspaces, query, archivedSessionIds, pendingInteractions, content, limit) {
 			const q = query.trim().toLowerCase();
 			if (q === "") return {
 				items: [],
 				hasMore: false
 			};
 			const archived = new Set(archivedSessionIds);
-			const descendants = (0, _deepseek_ai_dsh_client_runtime_client.indexSubagentDescendants)(list.byId);
+			const descendants = indexSubagentDescendants(list.byId);
 			const workspaceBySession = /* @__PURE__ */ new Map();
 			for (const workspace of workspaces) for (const sessionId of workspace.sessionIds) if (!workspaceBySession.has(sessionId)) workspaceBySession.set(sessionId, workspace.title);
 			const labelOf = (summary) => workspaceBySession.get(summary.id) ?? workspaceLabel(summary.cwd);
@@ -687,60 +932,25 @@ window.__ModuleLoader__.load({
 			return {
 				items: ordered.slice(0, limit).map((summary) => {
 					const match = contentBySession.get(summary.id);
+					const pendingInteraction = visiblePendingKind(pendingInteractions.get(summary.id)?.kind);
 					return {
 						id: summary.id,
 						title: sessionTitle(summary),
 						workspace: labelOf(summary),
 						running: summary.running,
 						runningSubagentCount: descendants.get(summary.id)?.runningCount ?? 0,
-						...summary.pendingInteraction === void 0 ? {} : { pendingInteraction: summary.pendingInteraction },
+						...pendingInteraction === void 0 ? {} : { pendingInteraction },
 						completed: summary.completed === true,
+						hasActiveSchedule: hasActiveSchedule(summary),
 						...match === void 0 ? {} : { snippet: match.snippet }
 					};
 				}),
 				hasMore: content.hasMore || ordered.length > limit
 			};
 		}
-		/**
-		* Compact relative time for session rows, as a structured bucket the
-		* renderer localizes ("now"/"5min"/"3h"/"2d"/"4mo"/"1y" in en).
-		* @param updatedAt - epoch ms of the session's last activity.
-		* @param now - current epoch ms (injected for pure rendering).
-		* @returns the row's trailing time bucket and magnitude.
-		*/
-		function relativeTime(updatedAt, now) {
-			const MIN = 6e4;
-			const HOUR = 36e5;
-			const DAY = 864e5;
-			const diff = Math.max(0, now - updatedAt);
-			if (diff < MIN) return {
-				unit: "now",
-				n: 0
-			};
-			if (diff < HOUR) return {
-				unit: "minutes",
-				n: Math.floor(diff / MIN)
-			};
-			if (diff < DAY) return {
-				unit: "hours",
-				n: Math.floor(diff / HOUR)
-			};
-			if (diff < 30 * DAY) return {
-				unit: "days",
-				n: Math.floor(diff / DAY)
-			};
-			if (diff < 365 * DAY) return {
-				unit: "months",
-				n: Math.floor(diff / (30 * DAY))
-			};
-			return {
-				unit: "years",
-				n: Math.floor(diff / (365 * DAY))
-			};
-		}
 		//#endregion
 		//#region \0dsh-css:/home/runner/work/deepseek-harness/deepseek-harness/packages/client/ui-workspace/src/client/rows/Rows.module.css.mjs
-		const css$2 = ".aXa_wsr_projectRow,.aXa_wsr_sessionRow{cursor:pointer;user-select:none;color:var(--dsw-alias-label-primary);border-radius:8px;align-items:center;gap:6px;padding:0 8px;display:flex}.aXa_wsr_projectRow:hover,.aXa_wsr_sessionRow:hover,.aXa_wsr_sessionRow.aXa_wsr_selected{background:var(--dsw-alias-interactive-bg-hover)}.aXa_wsr_searchResultRow{box-sizing:border-box;cursor:pointer;text-align:left;width:100%;min-height:48px;color:var(--dsw-alias-label-primary);background:0 0;border:none;border-radius:8px;flex-direction:column;align-items:stretch;padding:4px 8px;display:flex}.aXa_wsr_searchResultRow:hover,.aXa_wsr_searchResultRow.aXa_wsr_selected{background:var(--dsw-alias-interactive-bg-hover)}.aXa_wsr_searchResultHeading{align-items:center;min-width:0;display:flex}.aXa_wsr_searchResultTitle{text-overflow:ellipsis;white-space:nowrap;min-width:0;margin-left:4px;font-size:14px;line-height:20px;overflow:hidden}.aXa_wsr_searchResultMeta{align-items:center;gap:6px;min-width:0;margin-left:20px;display:flex}.aXa_wsr_searchResultWorkspace,.aXa_wsr_searchResultSnippet{text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:17px;overflow:hidden}.aXa_wsr_searchResultWorkspace{max-width:40%;color:var(--dsw-alias-label-tertiary);flex:none}.aXa_wsr_searchResultSnippet{min-width:0;color:var(--dsw-alias-label-secondary);flex:1}.aXa_wsr_projectRow{box-sizing:border-box;align-items:center;height:34px}.aXa_wsr_projectRow .aXa_wsr_rowActions{height:20px}.aXa_wsr_sessionRow{height:32px;animation:aXa_wsr_row-in .15s var(--ds-ease-in-out);gap:0}.aXa_wsr_sessionRow .aXa_wsr_title{margin:0 6px 0 4px}.aXa_wsr_flatSessionRowWithoutStatus .aXa_wsr_title{margin-left:0}@keyframes aXa_wsr_row-in{0%{opacity:0}}.aXa_wsr_slot{width:16px;height:20px;color:var(--dsw-alias-label-tertiary);flex:none;justify-content:center;align-items:center;display:inline-flex}.aXa_wsr_visuallyHidden{clip:rect(0 0 0 0);white-space:nowrap;width:1px;height:1px;position:absolute;overflow:hidden}.aXa_wsr_folderActive{color:var(--dsw-alias-state-business-primary)}.aXa_wsr_projectRow .aXa_wsr_chevron{display:none}.aXa_wsr_projectRow:hover .aXa_wsr_chevron{display:inline-flex}.aXa_wsr_projectRow:hover .aXa_wsr_folder{display:none}.aXa_wsr_arrow{transition:transform .15s var(--ds-ease-in-out)}.aXa_wsr_arrowOpen{transform:rotate(90deg)}.aXa_wsr_projectText{flex-direction:column;flex:1;gap:2px;min-width:0;display:flex}.aXa_wsr_title{text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:14px;line-height:20px;overflow:hidden}.aXa_wsr_renameInput{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-button-elevated-fill);min-width:0;color:inherit;border-radius:4px;outline:none;padding:0 2px;font-size:14px;line-height:20px}.aXa_wsr_sessionRow .aXa_wsr_title{flex:1}.aXa_wsr_meta{text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:20px;overflow:hidden}.aXa_wsr_time{color:var(--dsw-alias-label-tertiary);flex:none;font-size:12px;line-height:20px}.aXa_wsr_dot{flex:none}.aXa_wsr_rowActions{flex:none;align-items:center;gap:12px;display:none}.aXa_wsr_projectRow:hover .aXa_wsr_rowActions,.aXa_wsr_sessionRow:hover .aXa_wsr_rowActions,.aXa_wsr_projectRow.aXa_wsr_menuOpen .aXa_wsr_rowActions,.aXa_wsr_sessionRow.aXa_wsr_menuOpen .aXa_wsr_rowActions{display:inline-flex}.aXa_wsr_sessionRow:hover .aXa_wsr_time,.aXa_wsr_sessionRow.aXa_wsr_menuOpen .aXa_wsr_time{display:none}.aXa_wsr_projectRow.aXa_wsr_menuOpen,.aXa_wsr_sessionRow.aXa_wsr_menuOpen{background:var(--dsw-alias-interactive-bg-hover)}.aXa_wsr_sessionRow.aXa_wsr_dropBefore,.aXa_wsr_sessionRow.aXa_wsr_dropAfter{position:relative}.aXa_wsr_sessionRow.aXa_wsr_dropBefore:before,.aXa_wsr_sessionRow.aXa_wsr_dropAfter:after{content:\"\";z-index:1;background:linear-gradient(55deg, transparent calc(50% - 1px), var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)) 0 0 / 5px 7px no-repeat, linear-gradient(125deg, transparent calc(50% - 1px), var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)) 0 5px / 5px 7px no-repeat, linear-gradient(var(--dsw-alias-state-business-primary) 0 0) 4px 5px / calc(100% - 4px) 2px no-repeat;pointer-events:none;height:12px;position:absolute;left:0;right:4px}.aXa_wsr_sessionRow.aXa_wsr_dropBefore:before{top:-7px}.aXa_wsr_sessionRow.aXa_wsr_dropAfter:after{bottom:-7px}.aXa_wsr_hoverContent{flex-direction:column;gap:8px;display:flex}.aXa_wsr_hoverTitle{color:#fff;overflow-wrap:break-word;font-size:14px;line-height:20px}.aXa_wsr_hoverPath{color:#cfd3d6;word-break:break-all;font-size:12px;line-height:16px}.aXa_wsr_hoverTime{color:#cfd3d6;font-size:12px;line-height:16px}.aXa_wsr_hoverStatus{color:#adb2b8;align-items:center;gap:8px;font-size:12px;line-height:20px;display:flex}.aXa_wsr_iconButton{cursor:pointer;width:16px;height:16px;color:var(--dsw-alias-label-tertiary);background:0 0;border:none;border-radius:4px;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}.aXa_wsr_iconButton:hover{color:var(--dsw-alias-label-primary)}.aXa_wsr_chevron{color:var(--dsw-alias-label-caption)}@media (prefers-reduced-motion:reduce){.aXa_wsr_sessionRow,.aXa_wsr_arrow{transition:none;animation:none}}";
+		const css$2 = ".aXa_wsr_projectRow,.aXa_wsr_sessionRow{cursor:pointer;user-select:none;color:var(--dsw-alias-label-primary);border-radius:8px;align-items:center;gap:6px;padding:0 8px;display:flex}.aXa_wsr_projectRow:hover,.aXa_wsr_sessionRow:hover,.aXa_wsr_sessionRow.aXa_wsr_selected{background:var(--dsw-alias-interactive-bg-hover)}.aXa_wsr_searchResultRow{box-sizing:border-box;cursor:pointer;text-align:left;width:100%;min-height:48px;color:var(--dsw-alias-label-primary);background:0 0;border:none;border-radius:8px;flex-direction:column;align-items:stretch;padding:4px 8px;display:flex}.aXa_wsr_searchResultRow:hover,.aXa_wsr_searchResultRow.aXa_wsr_selected{background:var(--dsw-alias-interactive-bg-hover)}.aXa_wsr_searchResultHeading{align-items:center;min-width:0;display:flex}.aXa_wsr_searchResultTitle{text-overflow:ellipsis;white-space:nowrap;flex:0 auto;min-width:0;margin-left:4px;font-size:14px;line-height:20px;overflow:hidden}.aXa_wsr_searchResultMeta{align-items:center;gap:6px;min-width:0;margin-left:20px;display:flex}.aXa_wsr_searchResultWorkspace,.aXa_wsr_searchResultSnippet{text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:17px;overflow:hidden}.aXa_wsr_searchResultWorkspace{max-width:40%;color:var(--dsw-alias-label-tertiary);flex:none}.aXa_wsr_searchResultSnippet{min-width:0;color:var(--dsw-alias-label-secondary);flex:1}.aXa_wsr_projectRow{box-sizing:border-box;align-items:center;height:34px}.aXa_wsr_projectRow .aXa_wsr_rowActions{height:20px}.aXa_wsr_sessionRow{height:32px;animation:aXa_wsr_row-in .15s var(--ds-ease-in-out);gap:0}.aXa_wsr_sessionRow .aXa_wsr_title{margin:0 6px 0 4px}.aXa_wsr_flatSessionRowWithoutStatus .aXa_wsr_title{margin-left:0}@keyframes aXa_wsr_row-in{0%{opacity:0}}.aXa_wsr_slot{width:16px;height:20px;color:var(--dsw-alias-label-tertiary);flex:none;justify-content:center;align-items:center;display:inline-flex}.aXa_wsr_visuallyHidden{clip:rect(0 0 0 0);white-space:nowrap;width:1px;height:1px;position:absolute;overflow:hidden}.aXa_wsr_folderActive{color:var(--dsw-alias-state-business-primary)}.aXa_wsr_projectRow .aXa_wsr_chevron{display:none}.aXa_wsr_projectRow:hover .aXa_wsr_chevron{display:inline-flex}.aXa_wsr_projectRow:hover .aXa_wsr_folder{display:none}.aXa_wsr_arrow{transition:transform .15s var(--ds-ease-in-out)}.aXa_wsr_arrowOpen{transform:rotate(90deg)}.aXa_wsr_projectText{flex-direction:column;flex:1;gap:2px;min-width:0;display:flex}.aXa_wsr_title{text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:14px;line-height:20px;overflow:hidden}.aXa_wsr_renameInput{border:.5px solid var(--dsw-alias-border-l4);background:var(--dsw-alias-button-elevated-fill);min-width:0;color:inherit;border-radius:4px;outline:none;padding:0 2px;font-size:14px;line-height:20px}.aXa_wsr_sessionRow .aXa_wsr_title{flex:1}.aXa_wsr_meta{text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:20px;overflow:hidden}.aXa_wsr_time{color:var(--dsw-alias-label-tertiary);flex:none;font-size:12px;line-height:20px}.aXa_wsr_scheduleIndicator{width:16px;height:20px;color:var(--dsw-alias-label-tertiary);flex:none;justify-content:center;align-items:center;margin-right:6px;display:inline-flex}.aXa_wsr_searchScheduleIndicator{margin-left:4px;margin-right:0}.aXa_wsr_dot{flex:none}.aXa_wsr_rowActions{flex:none;align-items:center;gap:12px;display:none}.aXa_wsr_projectRow:hover .aXa_wsr_rowActions,.aXa_wsr_sessionRow:hover .aXa_wsr_rowActions,.aXa_wsr_projectRow.aXa_wsr_menuOpen .aXa_wsr_rowActions,.aXa_wsr_sessionRow.aXa_wsr_menuOpen .aXa_wsr_rowActions{display:inline-flex}.aXa_wsr_sessionRow:hover .aXa_wsr_time,.aXa_wsr_sessionRow.aXa_wsr_menuOpen .aXa_wsr_time{display:none}.aXa_wsr_projectRow.aXa_wsr_menuOpen,.aXa_wsr_sessionRow.aXa_wsr_menuOpen{background:var(--dsw-alias-interactive-bg-hover)}.aXa_wsr_sessionRow.aXa_wsr_dropBefore,.aXa_wsr_sessionRow.aXa_wsr_dropAfter{position:relative}.aXa_wsr_sessionRow.aXa_wsr_dropBefore:before,.aXa_wsr_sessionRow.aXa_wsr_dropAfter:after{content:\"\";z-index:1;background:linear-gradient(55deg, transparent calc(50% - 1px), var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)) 0 0 / 5px 7px no-repeat, linear-gradient(125deg, transparent calc(50% - 1px), var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)) 0 5px / 5px 7px no-repeat, linear-gradient(var(--dsw-alias-state-business-primary) 0 0) 4px 5px / calc(100% - 4px) 2px no-repeat;pointer-events:none;height:12px;position:absolute;left:0;right:4px}.aXa_wsr_sessionRow.aXa_wsr_dropBefore:before{top:-7px}.aXa_wsr_sessionRow.aXa_wsr_dropAfter:after{bottom:-7px}.aXa_wsr_hoverContent{flex-direction:column;gap:8px;display:flex}.aXa_wsr_hoverTitle{color:#fff;overflow-wrap:break-word;font-size:14px;line-height:20px}.aXa_wsr_hoverPath{color:#cfd3d6;word-break:break-all;font-size:12px;line-height:16px}.aXa_wsr_hoverTime{color:#cfd3d6;font-size:12px;line-height:16px}.aXa_wsr_hoverStatus{color:#adb2b8;align-items:center;gap:8px;font-size:12px;line-height:20px;display:flex}.aXa_wsr_iconButton{cursor:pointer;width:16px;height:16px;color:var(--dsw-alias-label-tertiary);background:0 0;border:none;border-radius:4px;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}.aXa_wsr_iconButton:hover{color:var(--dsw-alias-label-primary)}.aXa_wsr_chevron{color:var(--dsw-alias-label-caption)}@media (prefers-reduced-motion:reduce){.aXa_wsr_sessionRow,.aXa_wsr_arrow{transition:none;animation:none}}";
 		const tagId$2 = "arxa-sidebar-workspace/Rows.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$2) + "]") === null) {
 			const tag = document.createElement("style");
@@ -772,12 +982,14 @@ window.__ModuleLoader__.load({
 			"renameInput": "aXa_wsr_renameInput",
 			"row-in": "aXa_wsr_row-in",
 			"rowActions": "aXa_wsr_rowActions",
+			"scheduleIndicator": "aXa_wsr_scheduleIndicator",
 			"searchResultHeading": "aXa_wsr_searchResultHeading",
 			"searchResultMeta": "aXa_wsr_searchResultMeta",
 			"searchResultRow": "aXa_wsr_searchResultRow",
 			"searchResultSnippet": "aXa_wsr_searchResultSnippet",
 			"searchResultTitle": "aXa_wsr_searchResultTitle",
 			"searchResultWorkspace": "aXa_wsr_searchResultWorkspace",
+			"searchScheduleIndicator": "aXa_wsr_searchScheduleIndicator",
 			"selected": "aXa_wsr_selected",
 			"sessionRow": "aXa_wsr_sessionRow",
 			"slot": "aXa_wsr_slot",
@@ -800,12 +1012,12 @@ window.__ModuleLoader__.load({
 		}
 		/** Localized compact relative time ("刚刚"/"5分钟" in zh, "now"/"5min" in en). */
 		function timeLabel(updatedAt, now, t) {
-			const { unit, n } = relativeTime(updatedAt, now);
+			const { unit, n } = (0, _deepseek_ai_dsh_client_ui_primitives.relativeTime)(updatedAt, now);
 			return unit === "now" ? t("time.now") : t(`time.${unit}`, { n });
 		}
 		/** Hover-card variant: distances wrap in the ago template; the now bucket stays bare (no "now ago"). */
 		function hoverTimeLabel(updatedAt, now, t) {
-			const { unit, n } = relativeTime(updatedAt, now);
+			const { unit, n } = (0, _deepseek_ai_dsh_client_ui_primitives.relativeTime)(updatedAt, now);
 			return unit === "now" ? t("time.now") : t("time.ago", { t: t(`time.${unit}`, { n }) });
 		}
 		/**
@@ -913,7 +1125,7 @@ window.__ModuleLoader__.load({
 							items: workspaceMenuItems,
 							onSelect: (id) => {
 								setMenuOpen(false);
-								/* v8 ignore next -- workspaceMenuItems carries exactly these two rows today. */
+								/* v8 ignore next -- Menu can emit only the rename and delete rows supplied above. */
 								if (id !== "rename" && id !== "delete") return;
 								if (id === "rename") actions.rename();
 								else actions.delete();
@@ -948,7 +1160,7 @@ window.__ModuleLoader__.load({
 				anchor: ownRow,
 				content: (0, react_jsx_runtime.jsx)(WorkspaceHoverContent, {
 					label: row.label,
-					cwd: row.cwd === void 0 ? void 0 : (0, _deepseek_ai_dsh_client_runtime_client.abbreviateHomePath)(row.cwd, home),
+					cwd: row.cwd === void 0 ? void 0 : abbreviateHomePath(row.cwd, home),
 					createdAt: row.createdAt,
 					t
 				}),
@@ -1020,6 +1232,17 @@ window.__ModuleLoader__.load({
 				children: status.label
 			}, status.label))] });
 		}
+		/** Non-interactive active-Schedule marker; the enclosing row remains the only action. */
+		function ActiveScheduleIndicator({ t, search = false }) {
+			const label = t("schedule.active");
+			return (0, react_jsx_runtime.jsx)("span", {
+				className: clsx(Rows_module_css_default.scheduleIndicator, search && Rows_module_css_default.searchScheduleIndicator),
+				role: "img",
+				"aria-label": label,
+				title: label,
+				children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconAlarmClockOutline16, {})
+			});
+		}
 		/** Hover-card body: full title, relative time, and every relevant live status. */
 		function SessionHoverContent({ node, now, t }) {
 			const statuses = sessionStatuses(node, t);
@@ -1065,18 +1288,25 @@ window.__ModuleLoader__.load({
 				},
 				children: [(0, react_jsx_runtime.jsxs)("span", {
 					className: Rows_module_css_default.searchResultHeading,
-					children: [(0, react_jsx_runtime.jsx)("span", {
-						className: Rows_module_css_default.slot,
-						children: (primaryStatus.state !== "done" || result.completed) && (0, react_jsx_runtime.jsx)(SessionStatusDots, { statuses })
-					}), (0, react_jsx_runtime.jsx)("span", {
-						className: Rows_module_css_default.searchResultTitle,
-						children: result.title
-					})]
+					children: [
+						(0, react_jsx_runtime.jsx)("span", {
+							className: Rows_module_css_default.slot,
+							children: (primaryStatus.state !== "done" || result.completed) && (0, react_jsx_runtime.jsx)(SessionStatusDots, { statuses })
+						}),
+						(0, react_jsx_runtime.jsx)("span", {
+							className: Rows_module_css_default.searchResultTitle,
+							children: result.title
+						}),
+						result.hasActiveSchedule && (0, react_jsx_runtime.jsx)(ActiveScheduleIndicator, {
+							t,
+							search: true
+						})
+					]
 				}), (0, react_jsx_runtime.jsxs)("span", {
 					className: Rows_module_css_default.searchResultMeta,
 					children: [(0, react_jsx_runtime.jsx)("span", {
 						className: Rows_module_css_default.searchResultWorkspace,
-						children: result.workspace
+						children: result.workspace || t("group.ungrouped")
 					}), result.snippet !== void 0 && (0, react_jsx_runtime.jsx)("span", {
 						className: Rows_module_css_default.searchResultSnippet,
 						children: result.snippet
@@ -1125,7 +1355,7 @@ window.__ModuleLoader__.load({
 			];
 			return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.HoverCard, {
 				anchor: (0, react_jsx_runtime.jsxs)("div", {
-					className: clsx(Rows_module_css_default.sessionRow, selected && Rows_module_css_default.selected, menuOpen && Rows_module_css_default.menuOpen, flat && !showStatus && Rows_module_css_default.flatSessionRowWithoutStatus, drag?.marker === "before" && Rows_module_css_default.dropBefore, drag?.marker === "after" && Rows_module_css_default.dropAfter),
+					"data-session-id": node.id, className: clsx(Rows_module_css_default.sessionRow, selected && Rows_module_css_default.selected, menuOpen && Rows_module_css_default.menuOpen, flat && !showStatus && Rows_module_css_default.flatSessionRowWithoutStatus, drag?.marker === "before" && Rows_module_css_default.dropBefore, drag?.marker === "after" && Rows_module_css_default.dropAfter),
 					role: "treeitem",
 					"aria-selected": selected,
 					onClick: () => {
@@ -1158,6 +1388,7 @@ window.__ModuleLoader__.load({
 							className: Rows_module_css_default.title,
 							children: title
 						}),
+						row.hasActiveSchedule && (0, react_jsx_runtime.jsx)(ActiveScheduleIndicator, { t }),
 						!row.blank && (0, react_jsx_runtime.jsx)("span", {
 							className: Rows_module_css_default.time,
 							children: timeLabel(row.updatedAt, now, t)
@@ -1377,8 +1608,8 @@ window.__ModuleLoader__.load({
 			});
 		}
 		//#endregion
-		//#region \0dsh-css:/home/runner/work/deepseek-harness/deepseek-harness/packages/client/ui-workspace/src/client/WorkspaceBrowser.module.css.mjs
-		const css = ".aXa_wsb_root{--dsh-session-list-edge-inset:var(--dsh-sidebar-inline-padding);--dsh-session-list-scrollbar-width:8px;--dsh-session-list-scrollbar-offset:2px;box-sizing:border-box;min-height:0;padding-right:var(--dsh-session-list-edge-inset);flex-direction:column;flex:1;display:flex}.aXa_wsb_root.aXa_wsb_rail{padding-right:0}.aXa_wsb_iconButton{cursor:pointer;width:28px;height:28px;color:var(--dsw-alias-label-secondary);background:0 0;border:none;border-radius:50%;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}.aXa_wsb_iconButton:hover{background:var(--dsw-alias-interactive-bg-hover)}.aXa_wsb_sectionHeader{box-sizing:border-box;height:36px;color:var(--dsw-alias-label-tertiary);border-radius:12px;flex:none;justify-content:flex-end;align-items:center;gap:4px;margin-bottom:4px;padding-left:4px;display:flex;overflow:hidden}.aXa_wsb_root:not(.aXa_wsb_rail) .aXa_wsb_sectionHeader{margin-top:2px;margin-right:-4px}.aXa_wsb_sectionLabel{white-space:nowrap;opacity:1;visibility:visible;min-width:0;max-width:45%;transition:max-width .18s var(--ds-ease-in-out), margin-right .18s var(--ds-ease-in-out), opacity .12s var(--ds-ease-in-out), transform .18s var(--ds-ease-in-out), visibility 0s linear;flex:none;line-height:20px;overflow:hidden}.aXa_wsb_sectionLabelHidden{opacity:0;visibility:hidden;max-width:0;margin-right:-4px;transition-delay:0s,0s,0s,0s,.18s;transform:translate(-4px)}.aXa_wsb_searchSlot{box-sizing:border-box;min-width:0;max-width:28px;transition:max-width .18s var(--ds-ease-in-out), padding-left .18s var(--ds-ease-in-out);flex:1;align-items:center;margin-left:auto;padding-left:0;display:flex}.aXa_wsb_searchSlotExpanded{max-width:100%;padding-left:0}.aXa_wsb_headerActions{opacity:1;visibility:visible;max-width:60px;transition:max-width .18s var(--ds-ease-in-out), opacity .12s var(--ds-ease-in-out), transform .18s var(--ds-ease-in-out), visibility 0s linear;flex:none;align-items:center;gap:4px;display:flex;overflow:hidden}.aXa_wsb_headerActionsHidden{opacity:0;visibility:hidden;pointer-events:none;max-width:0;transition-delay:0s,0s,0s,.18s;transform:translate(4px)}.aXa_wsb_search{box-sizing:border-box;cursor:text;width:100%;height:28px;color:var(--dsw-alias-label-secondary);transition:width .18s var(--ds-ease-in-out), padding .18s var(--ds-ease-in-out), border-color .18s var(--ds-ease-in-out), background-color .18s var(--ds-ease-in-out);background:0 0;border:none;border-radius:50%;flex:none;align-items:center;gap:0;margin:0;padding:0;display:flex;overflow:hidden}.aXa_wsb_searchExpanded{border:1px solid var(--dsw-alias-border-l2);width:calc(100% + 4px);height:30px;color:var(--dsw-alias-label-caption);background:0 0;border-radius:10px;margin-inline:-2px;padding:0 4px 0 0}.aXa_wsb_searchButton{cursor:pointer;width:28px;height:28px;color:inherit;background:0 0;border:none;border-radius:50%;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}.aXa_wsb_searchExpanded .aXa_wsb_searchButton{width:28px;height:30px}.aXa_wsb_searchButton:hover{background:var(--dsw-alias-interactive-bg-hover)}.aXa_wsb_searchExpanded .aXa_wsb_searchButton:hover{background:0 0}.aXa_wsb_searchInput{opacity:0;pointer-events:none;width:0;min-width:0;color:var(--dsw-alias-label-primary);transition:opacity .12s var(--ds-ease-in-out);background:0 0;border:none;outline:none;flex:1;font-size:13px;line-height:18px}.aXa_wsb_searchExpanded .aXa_wsb_searchInput{opacity:1;pointer-events:auto;margin-left:-2px}.aXa_wsb_searchInput::placeholder{color:var(--dsw-alias-label-tertiary)}.aXa_wsb_clearButton{cursor:pointer;width:24px;height:24px;color:var(--dsw-alias-label-secondary);background:0 0;border:none;border-radius:50%;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}.aXa_wsb_clearButton:hover{background:var(--dsw-alias-interactive-bg-hover)}.aXa_wsb_rail .aXa_wsb_sectionHeader{justify-content:flex-start;gap:0;margin-bottom:12px;padding-left:0}.aXa_wsb_rail .aXa_wsb_headerActions{max-width:none}.aXa_wsb_rail .aXa_wsb_iconButton{width:36px;height:36px;color:var(--dsw-alias-label-primary)}.aXa_wsb_rail .aXa_wsb_search{background:0 0;border-color:#0000;gap:0;width:36px;height:36px;margin:0 0 12px;padding:0}.aXa_wsb_rail .aXa_wsb_searchButton{width:36px;height:36px;color:var(--dsw-alias-label-primary)}.aXa_wsb_rail .aXa_wsb_searchButton:hover{background:var(--dsw-alias-interactive-bg-hover)}.aXa_wsb_listArea{min-height:0;margin-left:-4px;margin-right:calc(-1 * var(--dsh-session-list-edge-inset));flex-direction:column;flex:1;padding-left:4px;display:flex;overflow:visible}.aXa_wsb_rail .aXa_wsb_listArea{margin-left:0;margin-right:0;padding-left:0}.aXa_wsb_treeBody{flex-direction:column;flex:1;min-height:0;display:flex;position:relative}.aXa_wsb_fade{left:0;right:var(--dsh-session-list-edge-inset);background:linear-gradient(to bottom, transparent, var(--dsw-specific-sidebar-fill));pointer-events:none;height:24px;position:absolute;bottom:0}.aXa_wsb_wide{animation:aXa_wsb_wide-in .2s var(--ds-ease-in-out)}@keyframes aXa_wsb_wide-in{0%{opacity:0}}.aXa_wsb_list{min-height:0;margin-left:-4px;margin-right:var(--dsh-session-list-scrollbar-offset);padding-left:4px;padding-right:calc(var(--dsh-session-list-edge-inset) - var(--dsh-session-list-scrollbar-width) - var(--dsh-session-list-scrollbar-offset));scrollbar-gutter:stable;flex:1;padding-bottom:16px;overflow-y:auto}.aXa_wsb_flatList>*+*,.aXa_wsb_searchTree>[role=treeitem]+[role=treeitem],.aXa_wsb_groupSection>*+*{margin-top:2px}.aXa_wsb_searchStatus,.aXa_wsb_searchWarning{color:var(--dsw-alias-label-tertiary);padding:10px 12px;font-size:12px;line-height:18px}.aXa_wsb_searchWarning{color:var(--dsw-alias-label-secondary)}.aXa_wsb_groupSection{position:relative}.aXa_wsb_groupSection+.aXa_wsb_groupSection{margin-top:4px}.aXa_wsb_listTopDropIndicator,.aXa_wsb_workspaceDropBefore:before,.aXa_wsb_workspaceDropAfter:after{content:\"\";z-index:1;background:linear-gradient(55deg, transparent calc(50% - 1px), var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)) 0 0 / 5px 7px no-repeat, linear-gradient(125deg, transparent calc(50% - 1px), var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)) 0 5px / 5px 7px no-repeat, linear-gradient(var(--dsw-alias-state-business-primary) 0 0) 4px 5px / calc(100% - 4px) 2px no-repeat;pointer-events:none;height:12px;position:absolute;left:0;right:0}.aXa_wsb_listTopDropIndicator{top:-8px;left:0;right:var(--dsh-session-list-edge-inset)}.aXa_wsb_listTopDropActive>.aXa_wsb_workspaceDropBefore:first-child:before{display:none}.aXa_wsb_workspaceDropBefore:before{top:-8px}.aXa_wsb_workspaceDropAfter:after{bottom:-8px}.aXa_wsb_sessionOverflowButton{cursor:pointer;text-align:left;width:100%;height:28px;color:var(--dsw-alias-label-tertiary);background:0 0;border:none;border-radius:8px;padding:0 12px 0 28px;font-size:12px}.aXa_wsb_groupSection>.aXa_wsb_sessionOverflowButton{margin-top:0}.aXa_wsb_sessionOverflowButton:hover{color:var(--dsw-alias-label-secondary);background:0 0}.aXa_wsb_empty{color:var(--dsw-alias-label-tertiary);padding:16px 12px;font-size:13px}.aXa_wsb_renameInput{box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2);width:100%;height:44px;color:var(--dsw-alias-label-primary);background:0 0;border-radius:22px;outline:none;padding:7px 14px;font-size:14px;font-weight:400;line-height:22px}.aXa_wsb_renameInput:disabled{color:var(--dsw-alias-label-dimmed)}.aXa_wsb_renameError{color:var(--dsw-alias-state-error-primary);margin-top:8px;font-size:12px;line-height:18px}.aXa_wsb_deleteAction:not(:disabled){color:var(--dsw-alias-state-error-primary)}.aXa_wsb_deleteStatus{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}@media (prefers-reduced-motion:reduce){.aXa_wsb_wide{animation:none}.aXa_wsb_search,.aXa_wsb_sectionLabel,.aXa_wsb_searchSlot,.aXa_wsb_searchInput,.aXa_wsb_headerActions{transition:none}}";
+		//#region \0dsh-css:/home/runner/work/deepseek-harness/deepseek-harness/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.module.css.mjs
+		const css = ".aXa_wsb_root{--dsh-session-list-edge-inset:var(--dsh-sidebar-inline-padding);--dsh-session-list-scrollbar-width:8px;--dsh-session-list-scrollbar-offset:2px;box-sizing:border-box;min-height:0;padding-right:var(--dsh-session-list-edge-inset);flex-direction:column;flex:1;display:flex}.aXa_wsb_root.aXa_wsb_rail{padding-right:0}.aXa_wsb_iconButton{corner-shape:round;cursor:pointer;width:28px;height:28px;color:var(--dsw-alias-label-secondary);background:0 0;border:none;border-radius:50%;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}.aXa_wsb_iconButton:hover{background:var(--dsw-alias-interactive-bg-hover)}.aXa_wsb_sectionHeader{box-sizing:border-box;height:36px;color:var(--dsw-alias-label-tertiary);border-radius:12px;flex:none;justify-content:flex-end;align-items:center;gap:4px;margin-bottom:4px;padding-left:4px;display:flex;overflow:hidden}.aXa_wsb_root:not(.aXa_wsb_rail) .aXa_wsb_sectionHeader{margin-top:2px;margin-right:-4px}.aXa_wsb_sectionLabel{white-space:nowrap;opacity:1;visibility:visible;min-width:0;max-width:45%;transition:max-width .18s var(--ds-ease-in-out), margin-right .18s var(--ds-ease-in-out), opacity .12s var(--ds-ease-in-out), transform .18s var(--ds-ease-in-out), visibility 0s linear;flex:none;line-height:20px;overflow:hidden}.aXa_wsb_sectionLabelHidden{opacity:0;visibility:hidden;max-width:0;margin-right:-4px;transition-delay:0s,0s,0s,0s,.18s;transform:translate(-4px)}.aXa_wsb_searchSlot{box-sizing:border-box;min-width:0;max-width:28px;transition:max-width .18s var(--ds-ease-in-out), padding-left .18s var(--ds-ease-in-out);flex:1;align-items:center;margin-left:auto;padding-left:0;display:flex}.aXa_wsb_searchSlotExpanded{max-width:100%;padding-left:0}.aXa_wsb_headerActions{opacity:1;visibility:visible;max-width:60px;transition:max-width .18s var(--ds-ease-in-out), opacity .12s var(--ds-ease-in-out), transform .18s var(--ds-ease-in-out), visibility 0s linear;flex:none;align-items:center;gap:4px;display:flex;overflow:hidden}.aXa_wsb_headerActionsHidden{opacity:0;visibility:hidden;pointer-events:none;max-width:0;transition-delay:0s,0s,0s,.18s;transform:translate(4px)}.aXa_wsb_search{box-sizing:border-box;corner-shape:round;cursor:text;width:100%;height:28px;color:var(--dsw-alias-label-secondary);transition:width .18s var(--ds-ease-in-out), padding .18s var(--ds-ease-in-out), border-color .18s var(--ds-ease-in-out), background-color .18s var(--ds-ease-in-out);background:0 0;border:none;border-radius:50%;flex:none;align-items:center;gap:0;margin:0;padding:0;display:flex;overflow:hidden}.aXa_wsb_searchExpanded{border:.5px solid var(--dsw-alias-border-l4);width:calc(100% + 4px);height:30px;color:var(--dsw-alias-label-caption);background:0 0;border-radius:10px;margin-inline:-2px;padding:0 4px 0 0}.aXa_wsb_searchButton{corner-shape:round;cursor:pointer;width:28px;height:28px;color:inherit;background:0 0;border:none;border-radius:50%;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}.aXa_wsb_searchExpanded .aXa_wsb_searchButton{width:28px;height:30px}.aXa_wsb_searchButton:hover{background:var(--dsw-alias-interactive-bg-hover)}.aXa_wsb_searchExpanded .aXa_wsb_searchButton:hover{background:0 0}.aXa_wsb_searchInput{opacity:0;pointer-events:none;width:0;min-width:0;color:var(--dsw-alias-label-primary);transition:opacity .12s var(--ds-ease-in-out);background:0 0;border:none;outline:none;flex:1;font-size:13px;line-height:18px}.aXa_wsb_searchExpanded .aXa_wsb_searchInput{opacity:1;pointer-events:auto;margin-left:-2px}.aXa_wsb_searchInput::placeholder{color:var(--dsw-alias-label-tertiary)}.aXa_wsb_clearButton{corner-shape:round;cursor:pointer;width:24px;height:24px;color:var(--dsw-alias-label-secondary);background:0 0;border:none;border-radius:50%;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}.aXa_wsb_clearButton:hover{background:var(--dsw-alias-interactive-bg-hover)}.aXa_wsb_rail .aXa_wsb_sectionHeader{justify-content:flex-start;gap:0;margin-bottom:12px;padding-left:0}.aXa_wsb_rail .aXa_wsb_headerActions{max-width:none}.aXa_wsb_rail .aXa_wsb_iconButton{width:36px;height:36px;color:var(--dsw-alias-label-primary)}.aXa_wsb_rail .aXa_wsb_search{background:0 0;border-color:#0000;gap:0;width:36px;height:36px;margin:0 0 12px;padding:0}.aXa_wsb_rail .aXa_wsb_searchButton{width:36px;height:36px;color:var(--dsw-alias-label-primary)}.aXa_wsb_rail .aXa_wsb_searchButton:hover{background:var(--dsw-alias-interactive-bg-hover)}.aXa_wsb_listArea{min-height:0;margin-left:-4px;margin-right:calc(-1 * var(--dsh-session-list-edge-inset));flex-direction:column;flex:1;padding-left:4px;display:flex;overflow:visible}.aXa_wsb_rail .aXa_wsb_listArea{margin-left:0;margin-right:0;padding-left:0}.aXa_wsb_treeBody{flex-direction:column;flex:1;min-height:0;display:flex;position:relative}.aXa_wsb_fade{left:0;right:var(--dsh-session-list-edge-inset);background:linear-gradient(to bottom, transparent, var(--dsw-specific-sidebar-fill));pointer-events:none;height:24px;position:absolute;bottom:0}.aXa_wsb_wide{animation:aXa_wsb_wide-in .2s var(--ds-ease-in-out)}@keyframes aXa_wsb_wide-in{0%{opacity:0}}.aXa_wsb_list{min-height:0;margin-left:-4px;margin-right:var(--dsh-session-list-scrollbar-offset);padding-left:4px;padding-right:calc(var(--dsh-session-list-edge-inset) - var(--dsh-session-list-scrollbar-width) - var(--dsh-session-list-scrollbar-offset));scrollbar-gutter:stable;flex:1;padding-bottom:16px;overflow-y:auto}.aXa_wsb_flatList>*+*,.aXa_wsb_searchTree>[role=treeitem]+[role=treeitem],.aXa_wsb_groupSection>*+*{margin-top:2px}.aXa_wsb_searchStatus,.aXa_wsb_searchWarning{color:var(--dsw-alias-label-tertiary);padding:10px 12px;font-size:12px;line-height:18px}.aXa_wsb_searchWarning{color:var(--dsw-alias-label-secondary)}.aXa_wsb_groupSection{position:relative}.aXa_wsb_groupSection+.aXa_wsb_groupSection{margin-top:4px}.aXa_wsb_listTopDropIndicator,.aXa_wsb_workspaceDropBefore:before,.aXa_wsb_workspaceDropAfter:after{content:\"\";z-index:1;background:linear-gradient(55deg, transparent calc(50% - 1px), var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)) 0 0 / 5px 7px no-repeat, linear-gradient(125deg, transparent calc(50% - 1px), var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)) 0 5px / 5px 7px no-repeat, linear-gradient(var(--dsw-alias-state-business-primary) 0 0) 4px 5px / calc(100% - 4px) 2px no-repeat;pointer-events:none;height:12px;position:absolute;left:0;right:0}.aXa_wsb_listTopDropIndicator{top:-8px;left:0;right:var(--dsh-session-list-edge-inset)}.aXa_wsb_listTopDropActive>.aXa_wsb_workspaceDropBefore:first-child:before{display:none}.aXa_wsb_workspaceDropBefore:before{top:-8px}.aXa_wsb_workspaceDropAfter:after{bottom:-8px}.aXa_wsb_sessionOverflowButton{cursor:pointer;text-align:left;width:100%;height:28px;color:var(--dsw-alias-label-tertiary);background:0 0;border:none;border-radius:8px;padding:0 12px 0 28px;font-size:12px}.aXa_wsb_groupSection>.aXa_wsb_sessionOverflowButton{margin-top:0}.aXa_wsb_sessionOverflowButton:hover{color:var(--dsw-alias-label-secondary);background:0 0}.aXa_wsb_empty{color:var(--dsw-alias-label-tertiary);padding:16px 12px;font-size:13px}.aXa_wsb_renameInput{box-sizing:border-box;border:.5px solid var(--dsw-alias-border-l4);width:100%;height:44px;color:var(--dsw-alias-label-primary);background:0 0;border-radius:22px;outline:none;padding:7px 14px;font-size:14px;font-weight:400;line-height:22px}.aXa_wsb_renameInput:disabled{color:var(--dsw-alias-label-dimmed)}.aXa_wsb_renameError{color:var(--dsw-alias-state-error-primary);margin-top:8px;font-size:12px;line-height:18px}.aXa_wsb_deleteAction:not(:disabled){color:var(--dsw-alias-state-error-primary)}.aXa_wsb_deleteStatus{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}@media (prefers-reduced-motion:reduce){.aXa_wsb_wide{animation:none}.aXa_wsb_search,.aXa_wsb_sectionLabel,.aXa_wsb_searchSlot,.aXa_wsb_searchInput,.aXa_wsb_headerActions{transition:none}}";
 		const tagId = "arxa-sidebar-workspace/WorkspaceBrowser.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -1426,7 +1657,7 @@ window.__ModuleLoader__.load({
 			"workspaceDropBefore": "aXa_wsb_workspaceDropBefore"
 		};
 		//#endregion
-		//#region lib/types/client/WorkspaceBrowser.js
+		//#region lib/types/client/rows/WorkspaceBrowser.js
 		/**
 		* The workspace/session browsing region filling the sidebar shell's
 		* `sidebar.workspaces` hole: section header (title + view options + add
@@ -1449,6 +1680,20 @@ window.__ModuleLoader__.load({
 		const SEARCH_QUERY_MAX_CODE_UNITS = 500;
 		/** Session rows visible per Workspace before the local overflow control. */
 		const COLLAPSED_SESSION_LIMIT = 5;
+		/** Fold one Workspace without charging its provisional New Session against the ordinary-row limit. */
+		function collapsedSessionRows(sessions) {
+			let ordinaryCount = 0;
+			const rows = sessions.filter((session) => {
+				if (session.blank) return true;
+				if (ordinaryCount >= COLLAPSED_SESSION_LIMIT) return false;
+				ordinaryCount += 1;
+				return true;
+			});
+			return {
+				rows,
+				hiddenCount: sessions.length - rows.length
+			};
+		}
 		/** Keep controlled input and RPC payload inside the session.search wire contract. */
 		function sanitizeSearchQuery(value) {
 			const withoutNul = value.replaceAll("\0", "");
@@ -1609,8 +1854,9 @@ window.__ModuleLoader__.load({
 			return e.clientY < rect.top + rect.height / 2 ? "before" : "after";
 		}
 		/** The scrolling session tree; unmounting drops the sessions subscription and expand-all state. */
-		function SessionTree({ useSessions, startSession, open, forkSession, workspaces, archivedSessionIds, onRenameRequest, onDeleteRequest, onSessionRename, onSessionArchive, insertWorkspaceBefore, insertSessionBefore, orderBy, groupExpansion, setGroupExpanded, sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, t }) {
+		function SessionTree({ useSessions, useSessionPendingInteraction, startSession, open, forkSession, workspaces, archivedSessionIds, onRenameRequest, onDeleteRequest, onSessionRename, onSessionArchive, insertWorkspaceBefore, insertSessionBefore, orderBy, groupExpansion, setGroupExpanded, sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, t }) {
 			const list = useSessions((s) => s);
+			const pendingInteractions = useSessionPendingInteraction((s) => s);
 			const current = list.current;
 			const [expandedSessionGroups, setExpandedSessionGroups] = (0, react.useState)([]);
 			const [drag, setDrag] = (0, react.useState)(null);
@@ -1677,13 +1923,14 @@ window.__ModuleLoader__.load({
 				});
 			}, [sessionOrderByAccount, workspaces]);
 			const orderedUngroupedSessionIds = (0, react.useMemo)(() => reconciledSessionOrder(ungroupedSessionIds, sessionOrderByAccount[""]), [sessionOrderByAccount, ungroupedSessionIds]);
-			const groups = (0, react.useMemo)(() => deriveGroups(list, orderedWorkspaces, archivedSessionIds, {
+			const groups = (0, react.useMemo)(() => deriveGroups(list, orderedWorkspaces, archivedSessionIds, pendingInteractions, {
 				expandedGroups,
 				...sessionOrderByAccount[""] === void 0 ? {} : { ungroupedOrder: sessionOrderByAccount[""] }
 			}), [
 				list,
 				orderedWorkspaces,
 				archivedSessionIds,
+				pendingInteractions,
 				expandedGroups,
 				sessionOrderByAccount
 			]);
@@ -1694,18 +1941,40 @@ window.__ModuleLoader__.load({
 				setDrag(null);
 				const group = groups.find((candidate) => candidate.key === activeDrag.accountKey);
 				if (group === void 0) return;
-				const targetIndex = group.sessions.findIndex((session) => session.id === over.id);
+				const sessionsExpanded = expandedSessionGroups.includes(group.key);
+				const renderedSessions = sessionsExpanded ? group.sessions : collapsedSessionRows(group.sessions).rows;
+				const targetIndex = renderedSessions.findIndex((session) => session.id === over.id);
 				if (targetIndex === -1) return;
-				const anchor = over.half === "before" ? over.id : group.sessions[targetIndex + 1]?.id;
-				if (anchor === activeDrag.sessionId) return;
-				const sourceIndex = group.sessions.findIndex((session) => session.id === activeDrag.sessionId);
-				const anchorIndex = anchor === void 0 ? group.sessions.length : group.sessions.findIndex((session) => session.id === anchor);
-				if (sourceIndex !== -1 && (anchorIndex === sourceIndex || anchorIndex === sourceIndex + 1)) return;
+				const sourceIndex = renderedSessions.findIndex((session) => session.id === activeDrag.sessionId);
+				if (over.id === activeDrag.sessionId) return;
+				const withoutSource = renderedSessions.filter((session) => session.id !== activeDrag.sessionId);
+				const targetWithoutSourceIndex = withoutSource.findIndex((session) => session.id === over.id);
+				if (targetWithoutSourceIndex === -1) return;
+				const visibleInsertAt = over.half === "before" ? targetWithoutSourceIndex : targetWithoutSourceIndex + 1;
+				if (sourceIndex !== -1 && visibleInsertAt === sourceIndex) return;
 				const accountSessionIds = activeDrag.accountKey === "" ? orderedUngroupedSessionIds : orderedWorkspaces.find((workspace) => workspace.workspaceId === activeDrag.accountKey)?.sessionIds;
 				if (accountSessionIds === void 0) return;
 				const nextOrder = accountSessionIds.filter((id) => id !== activeDrag.sessionId);
+				let anchor;
+				if (sessionsExpanded) anchor = over.half === "before" ? over.id : renderedSessions[targetIndex + 1]?.id;
+				else {
+					const previousVisible = withoutSource[visibleInsertAt - 1]?.id;
+					if (previousVisible === void 0) anchor = nextOrder[0];
+					else {
+						const previousIndex = nextOrder.indexOf(previousVisible);
+						if (previousIndex === -1) return;
+						anchor = nextOrder[previousIndex + 1];
+					}
+				}
 				const insertAt = anchor === void 0 ? nextOrder.length : nextOrder.indexOf(anchor);
 				nextOrder.splice(insertAt === -1 ? nextOrder.length : insertAt, 0, activeDrag.sessionId);
+				if (!sessionsExpanded && sourceIndex !== -1) {
+					const nodes = new Map(group.sessions.map((node) => [node.id, node]));
+					if (!collapsedSessionRows(nextOrder.flatMap((id) => {
+						const node = nodes.get(id);
+						return node === void 0 ? [] : [node];
+					})).rows.some((node) => node.id === activeDrag.sessionId)) return;
+				}
 				setSessionOrder(activeDrag.accountKey, nextOrder.map((id) => id));
 				if (orderBy === "updated" || activeDrag.accountKey === "") return;
 				insertSessionBefore(activeDrag.accountKey, activeDrag.sessionId, anchor).catch((reason) => {
@@ -1744,6 +2013,8 @@ window.__ModuleLoader__.load({
 							children: t("empty.none")
 						}), groups.map((group) => {
 							const workspaceId = group.workspaceId;
+							const collapsed = collapsedSessionRows(group.sessions);
+							const sessionsExpanded = expandedSessionGroups.includes(group.key);
 							const workspaceMarker = workspaceId !== void 0 && workspaceDrag?.over?.id === workspaceId ? workspaceDrag.over.half : null;
 							const workspaceDragProps = workspaceId === void 0 ? void 0 : {
 								start: () => {
@@ -1818,7 +2089,7 @@ window.__ModuleLoader__.load({
 										}
 									})]),
 									ARXA_LEAF_FILES(group),
-									(expandedSessionGroups.includes(group.key) ? group.sessions : group.sessions.slice(0, COLLAPSED_SESSION_LIMIT)).map((node) => {
+									(sessionsExpanded ? group.sessions : collapsed.rows).map((node) => {
 										const sameGroupDrag = drag !== null && drag.accountKey === group.key;
 										return (0, react_jsx_runtime.jsx)(SessionNodeItem, {
 											node,
@@ -1866,14 +2137,14 @@ window.__ModuleLoader__.load({
 											t
 										}, node.id);
 									}),
-									group.sessions.length > COLLAPSED_SESSION_LIMIT && (0, react_jsx_runtime.jsx)("button", {
+									collapsed.hiddenCount > 0 && (0, react_jsx_runtime.jsx)("button", {
 										type: "button",
 										className: WorkspaceBrowser_module_css_default.sessionOverflowButton,
-										"aria-expanded": expandedSessionGroups.includes(group.key),
+										"aria-expanded": sessionsExpanded,
 										onClick: () => {
 											setExpandedSessionGroups((keys) => toggled(keys, group.key));
 										},
-										children: expandedSessionGroups.includes(group.key) ? t("sessions.collapse") : t("sessions.expand", { n: group.sessions.length - COLLAPSED_SESSION_LIMIT })
+										children: sessionsExpanded ? t("sessions.collapse") : t("sessions.expand", { n: collapsed.hiddenCount })
 									})
 								]
 							}, group.key);
@@ -1884,9 +2155,14 @@ window.__ModuleLoader__.load({
 			});
 		}
 		/** The flat "In one list" body: every session is one draggable top-level row. */
-		function FlatList({ useSessions, open, forkSession, onSessionRename, onSessionArchive, archivedSessionIds, orderBy, sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, t }) {
+		function FlatList({ useSessions, useSessionPendingInteraction, open, forkSession, onSessionRename, onSessionArchive, archivedSessionIds, orderBy, sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, t }) {
 			const list = useSessions((s) => s);
-			const baseRows = (0, react.useMemo)(() => deriveFlat(list, archivedSessionIds), [list, archivedSessionIds]);
+			const pendingInteractions = useSessionPendingInteraction((s) => s);
+			const baseRows = (0, react.useMemo)(() => deriveFlat(list, archivedSessionIds, pendingInteractions), [
+				list,
+				archivedSessionIds,
+				pendingInteractions
+			]);
 			const sessionIds = (0, react.useMemo)(() => baseRows.map((row) => row.id), [baseRows]);
 			const previousOrderBy = (0, react.useRef)(orderBy);
 			(0, react.useEffect)(() => {
@@ -2002,19 +2278,21 @@ window.__ModuleLoader__.load({
 			});
 		}
 		/** Flat search body: local metadata matches plus the current Host result page. */
-		function SearchResults({ useSessions, open, workspaces, archivedSessionIds, query, remote, resultLimit, t }) {
+		function SearchResults({ useSessions, useSessionPendingInteraction, open, workspaces, archivedSessionIds, query, remote, resultLimit, t }) {
 			const list = useSessions((s) => s);
+			const pendingInteractions = useSessionPendingInteraction((s) => s);
 			const currentRemote = remote.query === query ? remote : {
 				query,
 				status: "loading",
 				items: [],
 				hasMore: false
 			};
-			const results = (0, react.useMemo)(() => deriveSearchResults(list, workspaces, query, archivedSessionIds, currentRemote, resultLimit), [
+			const results = (0, react.useMemo)(() => deriveSearchResults(list, workspaces, query, archivedSessionIds, pendingInteractions, currentRemote, resultLimit), [
 				list,
 				workspaces,
 				query,
 				archivedSessionIds,
+				pendingInteractions,
 				currentRemote,
 				resultLimit
 			]);
@@ -2063,8 +2341,8 @@ window.__ModuleLoader__.load({
 		* @param props - composed slot props (shell owner share + store + injected actions).
 		* @returns the region element tree.
 		*/
-		function WorkspaceBrowser({ wide, expandSidebar, useSessions, useWorkspaces, useStore, actions, startSession, open, renameSession, forkSession, renameWorkspace, deleteWorkspace, insertWorkspaceBefore, archiveSession, insertSessionBefore, createWorkspace, searchSessions, searchResultLimit, useDirectoryFlow, useHostDescription, renderSlot, t }) {
-			const home = useHostDescription((description) => description?.home);
+		function WorkspaceBrowser({ wide, expandSidebar, useSessions, useSessionPendingInteraction, useWorkspaces, useStore, actions, startSession, open, renameSession, forkSession, renameWorkspace, deleteWorkspace, insertWorkspaceBefore, archiveSession, insertSessionBefore, createWorkspace, searchSessions, searchResultLimit, useDirectoryFlow, useHostInfo, renderSlot, t }) {
+			const home = useHostInfo((info) => info.home);
 			const workspaces = useWorkspaces((state) => state.items);
 			const workspacePhase = useWorkspaces((state) => state.phase);
 			const archivedSessionIds = useWorkspaces((state) => state.archivedSessionIds);
@@ -2072,6 +2350,7 @@ window.__ModuleLoader__.load({
 			const groupBy = useStore((s) => s.groupBy);
 			const orderBy = useStore((s) => s.orderBy);
 			const groupExpansion = useStore((s) => s.groupExpansion);
+			arxaViewActions = actions;
 			const sessionOrderByAccount = useStore((s) => s.sessionOrderByAccount);
 			const sessionUpdatedAtByAccount = useStore((s) => s.sessionUpdatedAtByAccount);
 			const currentBlankSessionId = useSessions((state) => {
@@ -2085,7 +2364,8 @@ window.__ModuleLoader__.load({
 					promotedBlank.current = void 0;
 					return;
 				}
-				if (promotedBlank.current?.sessionId === currentBlankSessionId && promotedBlank.current.accountKey === currentBlankAccount) return;
+				const promoted = promotedBlank.current;
+				if (promoted !== void 0 && promoted.sessionId === currentBlankSessionId && promoted.accountKey === currentBlankAccount) return;
 				promotedBlank.current = {
 					sessionId: currentBlankSessionId,
 					accountKey: currentBlankAccount
@@ -2431,6 +2711,7 @@ window.__ModuleLoader__.load({
 						className: WorkspaceBrowser_module_css_default.listArea,
 						children: wide && (normalizedQuery !== "" ? (0, react_jsx_runtime.jsx)(SearchResults, {
 							useSessions,
+							useSessionPendingInteraction,
 							open,
 							workspaces,
 							archivedSessionIds,
@@ -2440,6 +2721,7 @@ window.__ModuleLoader__.load({
 							t
 						}) : groupBy === "flat" ? (0, react_jsx_runtime.jsx)(FlatList, {
 							useSessions,
+							useSessionPendingInteraction,
 							open,
 							forkSession,
 							onSessionRename,
@@ -2453,6 +2735,7 @@ window.__ModuleLoader__.load({
 							t
 						}) : (0, react_jsx_runtime.jsx)(SessionTree, {
 							useSessions,
+							useSessionPendingInteraction,
 							onSessionRename,
 							onSessionArchive,
 							forkSession,
@@ -2682,6 +2965,7 @@ window.__ModuleLoader__.load({
 			"status.planReview": "计划待审",
 			"status.waitingAnswer": "等待回答",
 			"status.completed": "已完成",
+			"schedule.active": "有活动定时任务",
 			"hover.created": "创建于 {time}",
 			"hover.copied": "已复制",
 			"date.ymd": "{y}年{m}月{d}日",
@@ -2747,6 +3031,7 @@ window.__ModuleLoader__.load({
 			"status.planReview": "Plan awaiting review",
 			"status.waitingAnswer": "Waiting for answer",
 			"status.completed": "Completed",
+			"schedule.active": "Has active scheduled task",
 			"hover.created": "Created {time}",
 			"hover.copied": "Copied",
 			"date.ymd": "{y}-{m}-{d}",
@@ -2770,7 +3055,12 @@ window.__ModuleLoader__.load({
 			const r = await fetch("/__arxa/sidebar/state" + q);
 			return r.json();
 		};
-		const ORG_POST = (action, arg) => fetch("/__arxa/sidebar/action", {
+		// card.* / insight.* / version.* moved to the arxa-git-card host
+		// (docs/plans/git-card-stock-dock-rebuild.md A2); routed by prefix
+		// until the card itself leaves this bundle (plan step 3).
+		const ORG_ROUTE_FOR = (action) => /^(card|insight|version)\./.test(action)
+			? "/__arxa/git-card/action" : "/__arxa/sidebar/action";
+		const ORG_POST = (action, arg) => fetch(ORG_ROUTE_FOR(action), {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ action, arg })
@@ -2832,21 +3122,39 @@ window.__ModuleLoader__.load({
 				if (resumeTried) return;
 				if (!orgs || orgs.length === 0) {
 					// Welcome world (no orgs): land on the empty state too.
+					if (!state.loading) resumeTried = true; // boot decision is made ONCE the org list settled — a row the user creates later is never a stale boot candidate (found live 2026-09-02: fresh "+" session dropped by dropIfEmpty)
 					clearIfNothingToResume();
 					return;
 				}
-				// No org open YET (fresh boot): keep the shot — a later poll may
-				// see one (org.open switches server-side); once the data has
-				// settled with nothing openable, clear once.
-				const open = orgs.find((o) => o.open);
-				if (!open || !open.sessions || open.sessions.length === 0) {
+				// The open-org handle is server memory — after every relaunch NO org
+				// is open, so an open-org-only candidate never resumes anything
+				// (welcome hero on every boot). Design keeps "no org auto-opened"
+				// (file-org-shell lifecycle), so the org is opened BECAUSE a session
+				// is resumed: `session.open` runs ensureOpen(orgId) server-side.
+				// Candidate = the open org's last open-state row when one is open;
+				// otherwise the most recently updated open-state row across orgs.
+				const pickIn = (org) => {
+					const rows = (org && org.sessions) || [];
+					const openRows = rows.filter((x) => x.state === "open");
+					return openRows.length ? openRows[openRows.length - 1] : null;
+				};
+				let open = orgs.find((o) => o.open);
+				let cand = open ? (pickIn(open) || (open.sessions || [])[open.sessions.length - 1] || null) : null;
+				if (!cand) {
+					const ts = (x) => Date.parse(x.updatedAt || x.createdAt || "") || 0;
+					open = null;
+					for (const o of orgs) {
+						const r = pickIn(o);
+						if (r && (!cand || ts(r) > ts(cand))) { cand = r; open = o; }
+					}
+				}
+				if (!open || !cand) {
+					if (!state.loading) resumeTried = true; // boot decision is made ONCE the org list settled — a row the user creates later is never a stale boot candidate (found live 2026-09-02: fresh "+" session dropped by dropIfEmpty)
 					clearIfNothingToResume();
 					return;
 				}
 				resumeTried = true;
 				bootDecided = true;
-				const openSessions = open.sessions.filter((x) => x.state === "open");
-				const cand = openSessions.length ? openSessions[openSessions.length - 1] : open.sessions[open.sessions.length - 1];
 				currentSessionId = cand.id;
 			// The sig gate blocks the next state replacement when server data is
 			// unchanged — surface current NOW or the stock auto-expand (which
@@ -2856,8 +3164,24 @@ window.__ModuleLoader__.load({
 			emit();
 			// Host revive first (may spawn the engine conversation), then the
 			// refresh the mutate carries lands the fresh dshSessionId, then
-			// open the conversation — dsh's own resume call.
-			orgStore.mutate("session.open", { orgId: open.id, sessionId: cand.id }).then(() => arxaOpenConversation(cand.id)).catch(() => {});
+			// open the conversation — dsh's own resume call. Boot passes
+			// dropIfEmpty (Q3): a candidate that never received a user message
+			// comes back { dropped: true } — the row is gone; land on the
+			// welcome hero instead of an empty thread. Otherwise reveal the row
+			// in the tree (Q6) before opening.
+			orgStore.mutate("session.open", { orgId: open.id, sessionId: cand.id, dropIfEmpty: true }).then((r) => {
+				if (r && r.dropped === true) {
+					currentSessionId = null;
+					bootDecided = false;
+					state = { ...state, currentSessionId: null };
+					state.sessionsView = sessionsList(state);
+					emit();
+					clearIfNothingToResume();
+					return;
+				}
+				try { orgStore.revealSession(cand.id) } catch { /* reveal is presentation — never blocks the open */ }
+				return arxaOpenConversation(cand.id);
+			}).catch(() => {});
 			};
 			const emit = () => {
 				subs.forEach((l) => l());
@@ -2920,7 +3244,13 @@ window.__ModuleLoader__.load({
 						state.sessionsView = sessionsList(state);
 						emit();
 					}
-					return ORG_POST(action, arg).then((r) => refresh()).then(() => {}, (e) => {
+					// Resolves with the server's `result` (e.g. session.open →
+					// { dropped: true } on the Q3 empty-drop path) once the refresh
+					// that carries the new rows has landed.
+					return ORG_POST(action, arg).then(async (r) => {
+						await refresh();
+						return r ? r.result : void 0;
+					}).catch((e) => {
 						refresh();
 						throw e;
 					});
@@ -2954,6 +3284,51 @@ window.__ModuleLoader__.load({
 					state = { ...state, expanded: x };
 					state.emit = buildEmit(state);
 					emit();
+				},
+				/** Reveal (Q6, grilled 2026-09-02): open every ancestor container
+				 * of the session's row (org + each `orgId|prefix`, written true —
+				 * never toggled, so an already-open branch stays open), open the
+				 * stock leaf group (`orgId|ws`), then scroll the row into view once
+				 * it has mounted (rows land a render or two after the emit —
+				 * bounded rAF retry). Adds only; never collapses. Presentation:
+				 * every step degrades silently. */
+				revealSession(sessionId) {
+					let org = null;
+					let row = null;
+					for (const o of state.orgs || []) {
+						const hit = (o.sessions || []).find((x) => x.id === sessionId);
+						if (hit) {
+							org = o;
+							row = hit;
+							break;
+						}
+					}
+					if (!org || !row) return false;
+					const x = { ...(state.expanded ?? {}) };
+					x[org.id] = true;
+					const ws = typeof row.workspace === "string" ? row.workspace : "";
+					let prefix = "";
+					for (const p of ws.split("/").filter(Boolean)) {
+						prefix = prefix ? prefix + "/" + p : p;
+						x[org.id + "|" + prefix] = true;
+					}
+					state = { ...state, expanded: x };
+					state.emit = buildEmit(state);
+					emit();
+					const leafKey = ws === "" ? org.id : org.id + "|" + ws;
+					try {
+						if (arxaViewActions && typeof arxaViewActions.setGroupExpanded === "function") arxaViewActions.setGroupExpanded(leafKey, true);
+					} catch { /* view store missing — the tree still opens via `expanded` */ }
+					const scroll = (left) => {
+						const el = typeof document !== "undefined" ? document.querySelector('[data-session-id="' + (window.CSS && CSS.escape ? CSS.escape(sessionId) : sessionId) + '"]') : null;
+						if (el && typeof el.scrollIntoView === "function") {
+							el.scrollIntoView({ block: "nearest" });
+							return;
+						}
+						if (left > 0) window.requestAnimationFrame(() => scroll(left - 1));
+					};
+					window.requestAnimationFrame(() => scroll(10));
+					return true;
 				}
 			};
 		}
@@ -3004,7 +3379,10 @@ window.__ModuleLoader__.load({
 				return o && o.open && o.snapshotPending === true ? orgT("newSession.snapshotPending") : void 0;
 			},
 			openCreated(orgId, sessionId) {
-				orgStore.mutate("session.open", { orgId, sessionId }).then(() => arxaOpenConversation(sessionId)).catch(() => {});
+				orgStore.mutate("session.open", { orgId, sessionId }).then(() => {
+					try { orgStore.revealSession(sessionId) } catch { /* presentation */ }
+					return arxaOpenConversation(sessionId);
+				}).catch(() => {});
 			},
 			/** Diagnostic (2026-08-30): is the client sessions service bound?
 			 * Drives conversation focus (resume like dsh + row open). */
@@ -3091,7 +3469,15 @@ window.__ModuleLoader__.load({
 		const sessionsList = (s) => {
 			const byId = {};
 			const ids = [];
+			// dsh 0.1.2-rc.1: derive the pendingInteractions MAP alongside the
+			// summaries (the stock sessionNode no longer reads the summary's
+			// pendingInteraction field — only the map through
+			// useSessionPendingInteraction). Kinds outside the visible union are
+			// dropped here so the map matches what the stock would ever show.
+			const pendingMap = new Map();
 			for (const o of s.orgs || []) for (const x of o.sessions || []) {
+				const pi = x.pendingInteraction;
+				if (pi != null && (pi.kind === "approval" || pi.kind === "plan-review" || pi.kind === "question")) pendingMap.set(x.id, pi);
 				byId[x.id] = {
 					id: x.id,
 					displayTitle: x.name,
@@ -3104,7 +3490,7 @@ window.__ModuleLoader__.load({
 				};
 				ids.push(x.id);
 			}
-			return { byId, ids, current: s.currentSessionId ?? void 0 };
+			return { byId, ids, current: s.currentSessionId ?? void 0, pendingMap };
 		};
 		const orgOfSession = (sessionId) => {
 			for (const o of orgStore.get().orgs) if ((o.sessions || []).some((x) => x.id === sessionId)) return o.id;
@@ -3148,339 +3534,498 @@ window.__ModuleLoader__.load({
 		 * user asked for a blank page with guidance, not an inert input.
 		 * A BOUND blank session keeps its composer: typing there is a
 		 * legitimate first message into an org worktree. */
-		/** Composer git card (Part B S4, D75 — grilled 2026-08-31; rebuilt into
-		 * SLIDES 2026-09-02, docs/plans/git-card-phase-4-card-rebuild.md §3 A2).
-		 * A collapsible card mounted as an input-dock entry directly ABOVE the
-		 * composer bar, bound to the CURRENT org session's seat. The body is a
-		 * three-slide strip — status (Q10 cluster + frame health + Insights),
-		 * commit (conventional-subject field, Q7; "Ask the session" prefills the
-		 * composer per Q6 — the engine never drafts), approve (PR create /
-		 * checks / merge / mint). Hidden entirely when no session is focused.
-		 *
-		 * MOUNT FIX (2026-09-01, found live): the first cut portaled out of
-		 * ArxaHeroGuide — its conditional useMemo threw React #310 (hook-order
-		 * violation) and crashed the whole conversation.hero.workspace slot,
-		 * so the card NEVER rendered; and the hero slot unmounts once a
-		 * session goes active anyway. The card now lives in the framework's
-		 * conversation.input.dock — the ordered strip rendered directly above
-		 * the composer bar in every session-bound phase (todo=0, goal=10,
-		 * this=30 → nearest the bar). Landing keeps its clean empty state.
-		 *
-		 * Card CSS (2026-09-02 conformance): injected from a react.useEffect
-		 * WITH a disposer, not bare at factory scope. `ctx` is not in scope in
-		 * this region (the snippet is spliced into the module factory below
-		 * apply()), so ctx.effect() is unavailable — the component effect is
-		 * the only disposer-bearing mechanism here. The empty-state block keeps
-		 * its bare factory-scope injection: it styles the composer stack, which
-		 * outlives every card mount. */
-		const CARD_CSS = "[data-arxa-git-card]{border:1px solid var(--dsw-alias-border-l2);border-radius:10px;margin:0 12px 6px;font-size:12px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary)}"
-			+ "[data-arxa-card-head]{display:flex;gap:6px;align-items:center;width:100%;padding:6px 10px;background:none;border:none;color:inherit;font:inherit;cursor:pointer;text-align:left}"
-			+ "[data-arxa-card-teaser]{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-secondary)}"
-			+ "[data-arxa-card-head]:hover [data-arxa-card-teaser]{color:var(--dsw-alias-label-primary)}"
-			+ "[data-arxa-card-caret]{margin-left:auto;color:var(--dsw-alias-label-tertiary)}"
-			+ "[data-arxa-card-body]{padding:4px 10px 10px;display:flex;flex-direction:column;gap:6px}"
-			+ "[data-arxa-git-card]:not([data-open]) [data-arxa-card-body]{display:none}"
-			// The strip clips; the track slides. transform (not left/margin) so the
-			// browser composites the slide instead of reflowing three panes.
-			+ "[data-arxa-card-strip]{overflow:hidden}"
-			+ "[data-arxa-card-track]{display:flex;flex-direction:row;transition:transform var(--ds-transition-duration-slow) ease}"
-			+ "[data-arxa-card-slide]{flex:0 0 100%;min-width:0;display:flex;flex-direction:column;gap:6px}"
-			+ "[data-arxa-card-nav]{display:flex;gap:6px;align-items:center;justify-content:center;padding-top:2px}"
-			+ "[data-arxa-card-nav] button{background:none;border:none;color:var(--dsw-alias-label-tertiary);font:inherit;cursor:pointer;padding:2px 6px;border-radius:6px}"
-			+ "[data-arxa-card-nav] button:hover:not(:disabled){color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}"
-			+ "[data-arxa-card-nav] button:disabled{opacity:.35;cursor:default}"
-			+ "[data-arxa-card-dot]{width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center}"
-			+ "[data-arxa-card-dot]::before{content:\"\";width:5px;height:5px;border-radius:50%;background:var(--dsw-alias-label-tertiary)}"
-			+ "[data-arxa-card-dot][aria-current=\"true\"]::before{background:var(--dsw-alias-brand-primary)}"
-			+ "[data-arxa-card-status]{display:flex;flex-wrap:wrap;gap:4px 10px;color:var(--dsw-alias-label-secondary)}"
-			+ "[data-arxa-card-frame]{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;color:var(--dsw-alias-label-secondary)}"
-			+ "[data-arxa-card-frame] span{display:inline-flex;gap:4px;align-items:center}"
-			+ "[data-arxa-card-insights]{display:flex;flex-wrap:wrap;gap:10px}"
-			+ "[data-arxa-card-insight]{background:none;border:none;padding:0;font:inherit;cursor:pointer;color:var(--dsw-alias-brand-primary);text-decoration:underline}"
-			+ "[data-arxa-card-subject],[data-arxa-card-pr] input{width:100%;padding:5px 8px;border-radius:7px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);color:inherit;font:inherit}"
-			+ "[data-arxa-card-pr]{display:flex;flex-direction:column;gap:4px}"
-			+ "[data-arxa-card-prinfo]{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;color:var(--dsw-alias-label-secondary)}"
-			+ "[data-arxa-card-prinfo] a{color:var(--dsw-alias-brand-primary)}"
-			+ "[data-arxa-card-actions]{display:flex;flex-wrap:wrap;gap:6px}"
-			+ "[data-arxa-card-actions] button,[data-arxa-card-wake],[data-arxa-card-merge],[data-arxa-card-mint]{padding:4px 10px;border-radius:7px;border:1px solid var(--dsw-alias-border-l2);background:transparent;color:inherit;font:inherit;cursor:pointer}"
-			+ "[data-arxa-card-actions] button:hover:not(:disabled),[data-arxa-card-wake]:hover:not(:disabled),[data-arxa-card-merge]:hover:not(:disabled),[data-arxa-card-mint]:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}"
-			+ "[data-arxa-card-actions] button:disabled,[data-arxa-card-merge]:disabled,[data-arxa-card-mint]:disabled,[data-arxa-card-wake]:disabled{opacity:.45;cursor:default}"
-			+ "[data-arxa-card-mintchip]{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-brand-primary)}"
-			+ "[data-arxa-card-notice]{color:var(--dsw-alias-state-warn-label);font-size:11.5px}"
-			+ "[data-arxa-card-err]{color:var(--dsw-alias-state-error-primary);font-size:11.5px}";
-		/** StateDot vocabulary is done|ongoing|warning|error (stock jobs). */
-		const CHECK_STATE = { green: "done", red: "error", pending: "ongoing", asleep: "warning", none: "ongoing", unknown: "ongoing" };
-		function ArxaGitCard({ t, stack }) {
-			const [open, setOpen] = react.useState(false);
-			const [slide, setSlide] = react.useState(0);
-			const [data, setData] = react.useState(null);
-			const [subject, setSubject] = react.useState("");
-			const [prProblem, setPrProblem] = react.useState("");
-			const [prFix, setPrFix] = react.useState("");
-			const [prState, setPrState] = react.useState(null);
-			const [mintChip, setMintChip] = react.useState(null);
-			const [notice, setNotice] = react.useState(null);
-			const [busy, setBusy] = react.useState(null);
-			const [err, setErr] = react.useState(null);
-			const sid = orgStore.get().currentSessionId;
-			const orgId = orgOfSession(sid);
-			// Card CSS with a disposer (conformance: no bare side effects).
-			react.useEffect(() => {
-				if (typeof document === "undefined") return void 0;
-				if (document.querySelector("style[data-plugin-css=arxa-sidebar-card]") !== null) return void 0;
-				const tag = document.createElement("style");
-				tag.dataset.pluginCss = "arxa-sidebar-card";
-				tag.textContent = CARD_CSS;
-				document.head.appendChild(tag);
-				return () => { try { tag.remove() } catch { /* already gone */ } };
-			}, []);
-			const refresh = react.useCallback(() => {
-				if (!sid) { setData(null); return Promise.resolve(); }
-				return ORG_POST("card.status", { sessionId: sid }).then((r) => {
-					setData(r.result);
-					// A status payload may carry the same transient notice the
-					// new-session response does (runner-asleep / checks-pending).
-					// Transient means it CLEARS: a refresh that no longer reports
-					// one takes the line down, so a woken runner stops being
-					// described as asleep without the user reloading anything.
-					setNotice((r.result && r.result.notice) || null);
-				}, () => {});
-			}, [sid]);
-			// Session change resets the whole card, slide included: slide 2 of the
-			// PREVIOUS seat's approve flow is a lie about the new one.
-			react.useEffect(() => {
-				setSubject(""); setErr(null); setNotice(null); setSlide(0);
-				setPrProblem(""); setPrFix(""); setPrState(null); setMintChip(null);
-				refresh();
-			}, [refresh]);
-			react.useEffect(() => {
-				const id = window.setInterval(() => { if (!busy) refresh(); }, 30000);
-				return () => window.clearInterval(id);
-			}, [refresh, busy]);
-			const prNumber = prState && prState.pr ? prState.pr.number : null;
-			const refreshPr = react.useCallback(() => {
-				if (!sid) return Promise.resolve();
-				return ORG_POST("card.pr.status", { sessionId: sid }).then((r) => setPrState(r.result), () => {});
-			}, [sid]);
-			/* A once-per-session PR read, so the TEASER can name the PR without the
-			 * user first walking to the approve slide. card.status carries no pr and
-			 * no checks (its shape is settled, ade8f2e), so card.pr.status is the
-			 * only source for either.
-			 *
-			 * This gate skips the LOCAL-ONLY case and nothing else. It is not a
-			 * complete filter: card.status reports `linked` from the org manifest's
-			 * repoUrl, while card.pr.status throws org-not-published on a missing
-			 * repoOwner/repoName and project-session-pr-pending for a project-origin
-			 * session — neither of which repoUrl predicts. Those calls still go out
-			 * and still throw; refreshPr swallows the error and the teaser stays
-			 * PR-less. The gate earns its place because a local-only org is the
-			 * common case that can NEVER have a PR, not because it makes every
-			 * remaining call a valid one. */
-			const prReadable = Boolean(data && data.linked && !data.localOnly);
-			react.useEffect(() => {
-				if (!sid || !prReadable) return void 0;
-				refreshPr();
-				return void 0;
-			}, [sid, prReadable, refreshPr]);
-			// PR polling is scoped: only while the approve slide is on screen AND a
-			// PR exists. An idle status slide must not hammer the GitHub API.
-			react.useEffect(() => {
-				if (slide !== 2 || !sid) return void 0;
-				// The one-shot read is UNGATED on purpose: prNumber is derived from
-				// what this call returns, so gating the fetch on it would make an
-				// already-open PR undiscoverable and pin the slide to the create
-				// form forever. Only the repeating timer is PR-gated — that is the
-				// half the "poll only while a PR exists" rule is about.
-				refreshPr();
-				if (prNumber == null) return void 0;
-				const id = window.setInterval(() => { if (!busy) refreshPr(); }, 30000);
-				return () => window.clearInterval(id);
-			}, [slide, sid, prNumber, refreshPr, busy]);
-			if (!sid) return null;
-			const showErr = (e) => {
-				const m = String((e && e.message) || e);
-				// The gate speaks in codes; the card speaks in sentences.
-				setErr(m.indexOf("main-red") >= 0 ? t("card.mainRed") : m);
-			};
-			const run = (label, fn) => { setBusy(label); setErr(null); setNotice(null); Promise.resolve().then(fn).then(() => refresh()).then(() => setBusy(null), (e) => { showErr(e); setBusy(null); }); };
-			const askDraft = () => {
-				ORG_POST("card.commit.draft", { sessionId: sid }).then((r) => {
-					const ta = stack.querySelector("[data-slot='conversation.composer.bar'] textarea");
-					if (!ta) { setErr("composer not found"); return; }
-					const ev = (type) => { const e = new Event(type, { bubbles: true }); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(ta, "Draft a conventional commit subject for the current changes. " + r.result.rule + " Evidence — stat: " + (r.result.uncommittedStat || "(committed via WIP)") + " Recent stage subjects: " + r.result.recentStageSubjects.join(" | ")); ta.dispatchEvent(ev("input")); };
-					ta.focus();
-					window.__arxaCardDraftRule = r.result.rule;
-				}, (e) => showErr(e));
-			};
-			const chip = (k, v) => v == null ? null : (0, react_jsx_runtime.jsx)("span", { "data-arxa-card-chip": k, children: t("card." + k) + " " + v });
-			const d = data || {};
-			const frame = d.frame || {};
-			const checks = (prState && prState.checks) || null;
-			const checkState = checks ? (checks.asleep ? "asleep" : String(checks.state || "unknown")) : "none";
-			const pr = (prState && prState.pr) || null;
-			const runnerAsleep = frame.runner === "asleep" || checkState === "asleep";
-			// Teaser: only the parts that MEASURED something. A missing part is not
-			// a zero — "0 dirty" and "we could not look" are different sentences.
-			const teaserParts = [];
-			if (d.dirty) {
-				const n = (d.dirty.staged || 0) + (d.dirty.unstaged || 0) + (d.dirty.untracked || 0);
-				if (n > 0) teaserParts.push(String(n) + " " + t("card.dirty"));
-			}
-			if (d.aheadBehind && d.aheadBehind.ahead) teaserParts.push("↑" + d.aheadBehind.ahead);
-			if (pr) teaserParts.push("PR #" + pr.number + " " + String(pr.state || ""));
-			if (frame.runner === "asleep") teaserParts.push(t("card.teaser.runnerAsleep"));
-			if (d.main && d.main.checks === "red") teaserParts.push(t("card.teaser.mainRed"));
-			const teaser = teaserParts.length ? teaserParts.join(" · ") : ((d.seat && d.seat.branch) || "…");
-			const openInsight = (view) => {
-				try { window.dispatchEvent(new CustomEvent("arxa-av-open", { detail: { kind: "insight", view, sessionId: sid, orgId } })); } catch { /* no bridge — ignore */ }
-			};
-			const wakeBtn = () => (0, react_jsx_runtime.jsx)("button", {
-				type: "button",
-				"data-arxa-card-wake": "",
-				disabled: busy != null,
-				onClick: () => run("wake", () => ORG_POST("card.runner.wake", { sessionId: sid }).then((r) => {
-					const res = r.result || {};
-					setNotice(res.ok ? t("card.wakeStarted") : t("card.wakeManual") + " " + String(res.reason || ""));
-				})),
-				children: busy === "wake" ? t("card.busy") : t("card.wake")
-			});
-			const dot = (state, label) => (0, react_jsx_runtime.jsxs)("span", { children: [
-				(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.StateDot, { state }),
-				(0, react_jsx_runtime.jsx)("span", { children: label })
-			] });
-			const statusSlide = (0, react_jsx_runtime.jsxs)("div", { "data-arxa-card-slide": "status", children: [
-				(0, react_jsx_runtime.jsxs)("div", { "data-arxa-card-status": "", children: [
-					// B1: a dead worktree measured no counts, so it must not render
-					// one. "dirty 0" and "the directory is gone" are not the same
-					// thing, and the card used to show the first for the second.
-					d.health && d.health !== "ok"
-						? chip("worktree", d.health)
-						: chip("dirty", d.dirty ? (d.dirty.staged + "+" + d.dirty.unstaged + "?" + d.dirty.untracked) : "0"),
-					chip("ahead", d.aheadBehind ? d.aheadBehind.ahead : null),
-					chip("behind", d.aheadBehind ? d.aheadBehind.behind : null),
-					chip("wip", d.wipRun != null ? d.wipRun : null),
-					d.localOnly ? chip("localOnly", "") : null,
-					frame.protection ? chip("frame", frame.protection) : null
-				] }),
-				(0, react_jsx_runtime.jsxs)("div", { "data-arxa-card-frame": "", children: [
-					dot(frame.wired === "ok" ? "done" : "warning", t(frame.wired === "ok" ? "card.frameWired.ok" : "card.frameWired.missing")),
-					dot(frame.runner === "online" ? "done" : frame.runner === "asleep" ? "warning" : "ongoing",
-						t(frame.runner === "online" ? "card.runner.online" : frame.runner === "asleep" ? "card.runner.asleep" : "card.runner.unknown"))
-				] }),
-				runnerAsleep ? wakeBtn() : null,
-				(0, react_jsx_runtime.jsxs)("div", { "data-arxa-card-insights": "", children: [
-					(0, react_jsx_runtime.jsx)("button", { type: "button", "data-arxa-card-insight": "streak", onClick: () => openInsight("streak"), children: t("card.insight.streak") }),
-					(0, react_jsx_runtime.jsx)("button", { type: "button", "data-arxa-card-insight": "ci", onClick: () => openInsight("ci"), children: t("card.insight.ci") }),
-					(0, react_jsx_runtime.jsx)("button", { type: "button", "data-arxa-card-insight": "sessions", onClick: () => openInsight("sessions"), children: t("card.insight.sessions") })
-				] })
-			] });
-			const commitSlide = (0, react_jsx_runtime.jsxs)("div", { "data-arxa-card-slide": "commit", children: [
-				(0, react_jsx_runtime.jsx)("input", { "data-arxa-card-subject": "", placeholder: t("card.subjectPlaceholder"), value: subject, onChange: (e) => setSubject(e.target.value) }),
-				(0, react_jsx_runtime.jsx)("button", { type: "button", onClick: askDraft, children: t("card.askDraft") }),
-				(0, react_jsx_runtime.jsxs)("div", { "data-arxa-card-actions": "", children: [
-					(0, react_jsx_runtime.jsx)("button", { type: "button", disabled: busy != null || subject.trim() === "", onClick: () => run("commit", () => ORG_POST("card.commit", { sessionId: sid, subject })), children: busy === "commit" ? t("card.busy") : t("card.commit") }),
-					(0, react_jsx_runtime.jsx)("button", { type: "button", disabled: busy != null, onClick: () => run("push", () => ORG_POST("card.push", { sessionId: sid })), children: busy === "push" ? t("card.busy") : t("card.push") })
-				] })
-			] });
-			const approveSlide = (0, react_jsx_runtime.jsxs)("div", { "data-arxa-card-slide": "approve", children: [
-				pr ? (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-					(0, react_jsx_runtime.jsxs)("div", { "data-arxa-card-prinfo": "", children: [
-						(0, react_jsx_runtime.jsx)("a", { href: pr.url, target: "_blank", rel: "noreferrer", children: "PR #" + pr.number }),
-						(0, react_jsx_runtime.jsx)("span", { children: String(pr.state || "") }),
-						dot(CHECK_STATE[checkState] || "ongoing", t("card.checks." + checkState))
-					] }),
-					checkState === "asleep" ? wakeBtn() : null,
-					(0, react_jsx_runtime.jsx)("button", {
-						type: "button",
-						"data-arxa-card-merge": "",
-						// Merge is the one irreversible button on the card: green
-						// checks AND an open PR, or it stays dead.
-						disabled: busy != null || checkState !== "green" || pr.state !== "open",
-						onClick: () => run("merge", () => ORG_POST("card.pr.merge", { sessionId: sid }).then((r) => {
-							const res = r.result || {};
-							if (!res.ok) { setErr(t("card.mergeRefused") + " " + String(res.reason || "")); return; }
-							setNotice(t("card.merged"));
-							return refreshPr();
-						})),
-						children: busy === "merge" ? t("card.busy") : t("card.merge")
-					}),
-					(prState && prState.merged) || (pr.state === "merged") ? (0, react_jsx_runtime.jsx)("button", {
-						type: "button",
-						"data-arxa-card-mint": "",
-						disabled: busy != null,
-						onClick: () => run("mint", () => ORG_POST("version.mint", { sessionId: sid }).then((r) => {
-							const res = r.result || {};
-							if (res.ok && res.chip) setMintChip(res.chip);
-						})),
-						children: busy === "mint" ? t("card.busy") : t("card.mint")
-					}) : null,
-					mintChip ? (0, react_jsx_runtime.jsx)("span", { "data-arxa-card-mintchip": "", children: mintChip.label || String(mintChip) }) : null
-				] }) : (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-					(0, react_jsx_runtime.jsxs)("div", { "data-arxa-card-pr": "", children: [
-						(0, react_jsx_runtime.jsx)("input", { "data-arxa-card-pr-problem": "", placeholder: t("card.prProblem"), value: prProblem, onChange: (e) => setPrProblem(e.target.value) }),
-						(0, react_jsx_runtime.jsx)("input", { "data-arxa-card-pr-fix": "", placeholder: t("card.prFix"), value: prFix, onChange: (e) => setPrFix(e.target.value) })
-					] }),
-					(0, react_jsx_runtime.jsx)("button", {
-						type: "button",
-						disabled: busy != null || subject.trim() === "",
-						onClick: () => run("pr", () => ORG_POST("card.pr.create", { sessionId: sid, title: subject, problem: prProblem, fix: prFix }).then((r) => {
-							if (r.result && r.result.pr && r.result.pr.url) window.__arxaLastPrUrl = r.result.pr.url;
-							// A just-opened PR is the thing to look at: land on it.
-							setSlide(2);
-							return refreshPr();
-						})),
-						children: busy === "pr" ? t("card.busy") : t("card.prOpen")
-					})
-				] })
-			] });
-			const dotBtn = (i, key) => (0, react_jsx_runtime.jsx)("button", {
-				type: "button",
-				"data-arxa-card-dot": key,
-				"aria-current": slide === i ? "true" : "false",
-				"aria-label": t("card.slide." + key),
-				onClick: () => setSlide(i)
-			});
-			return (0, react_jsx_runtime.jsxs)("div", { "data-arxa-git-card": "", "data-open": open ? "" : null, children: [
-				(0, react_jsx_runtime.jsxs)("button", { type: "button", "data-arxa-card-head": "", onClick: () => setOpen(!open), children: [
-					(0, react_jsx_runtime.jsx)("span", { "data-arxa-card-teaser": "", children: teaser }),
-					(0, react_jsx_runtime.jsx)("span", { "data-arxa-card-caret": "", children: open ? "▾" : "▸" })
-				] }),
-				open ? (0, react_jsx_runtime.jsxs)("div", { "data-arxa-card-body": "", children: [
-					(0, react_jsx_runtime.jsx)("div", { "data-arxa-card-strip": "", children: (0, react_jsx_runtime.jsxs)("div", {
-						"data-arxa-card-track": "",
-						style: { transform: "translateX(" + (-slide * 100) + "%)" },
-						children: [statusSlide, commitSlide, approveSlide]
-					}) }),
-					(0, react_jsx_runtime.jsxs)("div", { "data-arxa-card-nav": "", children: [
-						(0, react_jsx_runtime.jsx)("button", { type: "button", "data-arxa-card-prev": "", disabled: slide === 0, "aria-label": t("card.slide.prev"), onClick: () => setSlide(slide - 1), children: "‹" }),
-						dotBtn(0, "status"), dotBtn(1, "commit"), dotBtn(2, "approve"),
-						(0, react_jsx_runtime.jsx)("button", { type: "button", "data-arxa-card-next": "", disabled: slide === 2, "aria-label": t("card.slide.next"), onClick: () => setSlide(slide + 1), children: "›" })
-					] }),
-					notice ? (0, react_jsx_runtime.jsx)("div", { "data-arxa-card-notice": "", children: notice === "runner-asleep" ? t("card.notice.runnerAsleep") : notice === "checks-pending" ? t("card.notice.checksPending") : notice }) : null,
-					err ? (0, react_jsx_runtime.jsx)("div", { "data-arxa-card-err": "", children: err }) : null
-				] }) : null
-			] });
-		}
-		function ArxaGitCardDock(props) {
-			const t = props && props.t ? props.t : function (k) { return k; };
-			return (0, react_jsx_runtime.jsx)(ArxaGitCard, { t, stack: document });
-		}
+		/** The composer git card moved to plugins/arxa-git-card (docs/plans/
+		 * git-card-stock-dock-rebuild.md A4, 2026-09-02): its own input-dock
+		 * entry, stock QueueDock grammar. Nothing card-related lives here. */
 		function ArxaHeroGuide({ t }) {
 			const ref = (0, react.useRef)(null);
+			const org = (0, react.useSyncExternalStore)(orgSubscribe, orgStore.get, orgStore.get);
+			const listSnap = (0, react.useSyncExternalStore)(arxaListSubscribe, arxaListGet, arxaListGet);
+			const current = listSnap ? listSnap.current : void 0;
+			const unbound = current === void 0 || current === null;
 			(0, react.useEffect)(() => {
 				const stack = ref.current ? ref.current.parentElement?.parentElement?.parentElement : null;
 				if (!stack) return;
-				const s = arxaClientSessions;
-				const snap = s && s.list && typeof s.list.getSnapshot === "function" ? s.list.getSnapshot() : null;
-				const unbound = !snap || snap.current === void 0 || snap.current === null;
 				if (unbound) stack.setAttribute("data-arxa-empty", "");
 				else stack.removeAttribute("data-arxa-empty");
 				return () => stack.removeAttribute("data-arxa-empty");
 			});
-			return (0, react_jsx_runtime.jsxs)("div", {
+			// Q1 (grilled 2026-09-02): the "sessions start…" guide ONLY when
+			// nothing is bound. A bound session — resumed or fresh — shows where
+			// it lives instead (Q2 cordis crumb: org / dock / project / session /
+			// worktree), read-only; the stock picker button is hidden by CSS
+			// below (the org model owns session creation).
+			if (unbound) return (0, react_jsx_runtime.jsxs)("div", {
 				ref,
 				"data-arxa-hero-guide": "",
 				children: [t("hero.guide")]
+			});
+			// Bound (2026-09-03): the crumb is rendered once, in the composer left
+			// zone (ArxaCrumbBar); the hero row is hidden by CSS. Keep a ref-bearing
+			// anchor so the data-arxa-empty effect above still finds the stack.
+			return (0, react_jsx_runtime.jsx)("span", {
+				ref,
+				"data-arxa-hero-anchor": "",
+				hidden: true
+			});
+		}
+		/** Cordis breadcrumb nav (org / dock / project / session / worktree) — shared by the
+		 * hero slot (ArxaHeroGuide, bound state) and the composer left zone (ArxaCrumbBar).
+		 * The hero slot is unmounted by dsh once a conversation is open (found live
+		 * 2026-09-02: no crumb on a resumed or freshly opened session), so the composer
+		 * registration is the one users actually see while working. */
+		const arxaCrumbNav = (t, org, current, ref) => {
+			const crumbs = arxaCrumbsFor(org, current) || [];
+			return (0, react_jsx_runtime.jsx)("nav", {
+				ref,
+				"data-arxa-crumbs": "",
+				"aria-label": t("crumbs.label"),
+				children: crumbs.map((c, i) => (0, react_jsx_runtime.jsxs)("span", {
+					"data-arxa-crumb-seg": "",
+					...c.keep ? { "data-keep": "" } : {},
+					children: [i > 0 ? (0, react_jsx_runtime.jsx)("span", {
+						"data-arxa-crumb-sep": "",
+						"aria-hidden": "true",
+						children: "/"
+					}) : null, (0, react_jsx_runtime.jsx)("span", {
+						"data-arxa-crumb": "",
+						...c.current ? {
+							"data-current": "",
+							"aria-current": "location"
+						} : {},
+						title: c.label,
+						children: c.label
+					})]
+				}, c.key))
+			});
+		};
+		function ArxaCrumbBar({ t }) {
+			const org = (0, react.useSyncExternalStore)(orgSubscribe, orgStore.get, orgStore.get);
+			const listSnap = (0, react.useSyncExternalStore)(arxaListSubscribe, arxaListGet, arxaListGet);
+			const current = listSnap ? listSnap.current : void 0;
+			if (current === void 0 || current === null) return null;
+			return arxaCrumbNav(t, org, current, null);
+		}
+		// Preset chip in the card's top-right corner (2026-09-03). The stock
+		// seat registers on conversation.hero.agentPreset — the hero ROW, above
+		// the card. The only in-card mount is conversation.input.overlay (the
+		// card-top anchor), and slot components get no renderSlot, so this
+		// renders the stock entry itself: entriesOfSlot → { component, inject },
+		// props built with the renderer's grammar (inject face `hooks:{x}` →
+		// `useX` snapshot-selector hook; `t` bound to settings.agentPreset via
+		// this entry's own locale declaration). Subscribes to the key so a
+		// late-loading agent-preset plugin still lands. The hero-row copy is
+		// CSS-hidden; both instances share one seat store.
+		const PRESET_SEAT_KEY = "conversation.hero.agentPreset";
+		const seatHookCache = new WeakMap();
+		function seatHook(source) {
+			let hook = seatHookCache.get(source);
+			if (hook === void 0) {
+				const subscribe = (fn) => source.subscribe(fn);
+				const get = () => source.getSnapshot();
+				// Identity selectors only (the seat passes `(s) => s`); a deriving
+				// selector would need the with-selector shim to avoid re-render loops.
+				hook = (sel) => {
+					const read = sel ? () => sel(get()) : get;
+					return (0, react.useSyncExternalStore)(subscribe, read, read);
+				};
+				seatHookCache.set(source, hook);
+			}
+			return hook;
+		}
+		const seatPropsCache = new WeakMap();
+		function seatProps(entry) {
+			let props = seatPropsCache.get(entry);
+			if (props === void 0) {
+				const face = typeof entry.inject === "function" ? entry.inject() ?? {} : {};
+				const { hooks, ...rest } = face;
+				props = { ...rest };
+				for (const [name, source] of Object.entries(hooks ?? {})) {
+					props[`use${name[0]?.toUpperCase() ?? ""}${name.slice(1)}`] = seatHook(source);
+				}
+				seatPropsCache.set(entry, props);
+			}
+			return props;
+		}
+		/* Q4 (2026-09-03): subagents and background jobs must be VISIBLE as
+		 * capabilities before anything has used them. Both stock chips exist
+		 * already and are wired; they simply return null at zero
+		 * (client-ui-jobs: `if (jobs.length === 0) return null`; the subagent
+		 * CatalogDropdown: `descendantCount > 0` in its visible gate). So
+		 * nothing needs building — only revealing.
+		 *
+		 * These placeholders occupy conversation.session.header.actions, which
+		 * the cordis catalogue declares kind:list / replaceRisk:none, so they
+		 * sit BESIDE the stock entries rather than replacing them. The subagent
+		 * catalog itself lives on header.lineage, which is kind:SINGLE and
+		 * already occupied — registering there would have deleted the very
+		 * dropdown we want back, so the placeholder deliberately lives here and
+		 * the real chip appears in the lineage region beside the title. That
+		 * region change on first use is a known, accepted consequence.
+		 *
+		 * Each returns null the moment its stock counterpart goes live, so the
+		 * two are never on screen together.
+		 *
+		 * `useSessions` is a framework owner prop of this slot (both stock
+		 * occupants destructure it with no inject face of their own). */
+		const ARXA_AGENT_PANEL = "arxa-av-open";
+		function openAgentPanel(view, sessionId, rows) {
+			try { window.dispatchEvent(new CustomEvent(ARXA_AGENT_PANEL, { detail: { kind: "insight", view: view, sessionId: sessionId, rows: rows || null } })); } catch { /* no bridge */ }
+		}
+		function ArxaEmptyChip({ label, title, onClick }) {
+			return (0, react_jsx_runtime.jsx)("button", {
+				type: "button",
+				"data-arxa-empty-chip": label,
+				className: "aXa_emptyChip",
+				title: title,
+				onClick: onClick,
+				children: label
+			});
+		}
+		/* Q5 (2026-09-03): the honest control surface for a session's children.
+		 *
+		 * The capability map is NOT computed here — it rides on every row from
+		 * the host (`agent.list`), because it is not uniform and the browser
+		 * cannot see the runtime that decides it. dsh-subagent's only stop verb
+		 * is `interrupt`, which PRESERVES the Activation and parks the inbox —
+		 * a pause, not a cancel; dsh-jobs is the mirror, with a real `kill` and
+		 * no paused state at all. So a subagent pauses, a job cancels, and the
+		 * rest are rendered disabled carrying the reason the host gave. A
+		 * button that lies is worse than a button that explains itself.
+		 *
+		 * Placement, per the grill: the actions live in the side panel AND on
+		 * hover over these dropdown rows. The stock chips beside this one stay
+		 * untouched — they list, this controls. `header.actions` is a kind:list
+		 * slot with replaceRisk:none, so adding here removes nothing. */
+		const ARXA_AGENT_VERBS = ["pause", "resume", "cancel"];
+		/* `busyId` is the id of the ONE row with a request in flight, not a
+		 * whole-menu boolean. With two live jobs the boolean greyed out both
+		 * rows' buttons while one was cancelling — the menu reporting that it
+		 * was busy with work it was not doing. Same class of small lie as a
+		 * clock still ticking on a dead job. */
+		function ArxaAgentRowActions({ row, t, busyId, onAct, onWake }) {
+			const busy = busyId === row.id;
+			return (0, react_jsx_runtime.jsxs)("span", {
+				className: "aXa_agentActs",
+				children: [ARXA_AGENT_VERBS.map((verb) => {
+					const allowed = row.can && row.can[verb] === true;
+					const why = row.why && row.why[verb];
+					return (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: "aXa_agentAct",
+						"data-verb": verb,
+						disabled: !allowed || busy,
+						/* The disabled control still explains itself — that is the
+						 * whole point of shipping the reason with the row. */
+						title: allowed ? t("agents." + verb) : t("agents.why." + String(why || "unavailable")),
+						onClick: () => onAct(verb, row),
+						children: t("agents." + verb)
+					}, verb);
+				}),
+				/* THE WAKE (D3). Only a continuable subagent can be woken, and
+				 * only with words the human writes — so this is a box, not a
+				 * verb button. It sits beside the refused `resume`, which
+				 * explains WHY there is a box here instead. */
+				row.kind === "subagent" && row.can && row.can.wake === true
+					? (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: "aXa_agentAct",
+						"data-verb": "wake",
+						disabled: busy,
+						title: t("agents.wakeHint"),
+						onClick: () => onWake(row),
+						children: t("agents.wake")
+					}, "wake")
+					: null]
+			});
+		}
+		function ArxaAgentControl({ kind, sessionId, count, given, t }) {
+			const [open, setOpen] = (0, react.useState)(false);
+			const [fetched, setFetched] = (0, react.useState)(null);
+			/* id of the ONE row with a request in flight — see ArxaAgentRowActions. */
+			const [busyId, setBusyId] = (0, react.useState)(null);
+			/* The row whose wake box is open, and its draft. */
+			const [wakeRow, setWakeRow] = (0, react.useState)(null);
+			const [wakeText, setWakeText] = (0, react.useState)("");
+			const [note, setNote] = (0, react.useState)("");
+			/* Jobs never round-trip and never enter state: `JobView` is PUSH-only,
+			 * so the store rows handed down are already the truth. Routing them
+			 * through setRows would also LOOP — `given` is a fresh array on every
+			 * store push, so a state write per push re-renders, re-allocates and
+			 * writes again for as long as the menu is open over a live job. */
+			const isJobs = kind === "jobs";
+			const rows = isJobs ? (given || []) : fetched;
+			const load = (0, react.useCallback)(() => {
+				if (isJobs) return;
+				/* ORG_POST rejects on ok:false, and the host refuses a missing
+				 * sessionId — without this guard a seat that has not resolved
+				 * its session yet would paint a raw "sessionId-required" note. */
+				if (!sessionId) { setFetched([]); setNote(""); return; }
+				ORG_POST("agent.list", { sessionId: sessionId }).then((b) => {
+					const r = (b && b.result) || {};
+					setNote("");
+					setFetched(r.subagents || []);
+				}, (e) => { setNote(String((e && e.message) || e)); setFetched([]); });
+			}, [sessionId, isJobs]);
+			(0, react.useEffect)(() => { if (open) load(); }, [open, load]);
+			/* One 1s tick while the menu is open over a LIVE job, so the elapsed
+			 * column moves. Deliberately not a store write — jobs stay out of
+			 * state (see the note above `rows`); this only re-renders. It stops
+			 * when the menu closes or the last live row settles, so a settled
+			 * list costs nothing. */
+			const anyLive = (rows || []).some((r) => r.status === "running" || r.status === "stopping");
+			const [, setTick] = (0, react.useState)(0);
+			(0, react.useEffect)(() => {
+				if (!open || !anyLive) return;
+				const h = setInterval(() => setTick((v) => v + 1), 1000);
+				return () => clearInterval(h);
+			}, [open, anyLive]);
+			/* Waking is not a verb — it carries the human's words — so it has its
+			 * own dispatcher rather than riding `act`. On success the box closes
+			 * and the list reloads: unlike a job, a subagent's state does NOT
+			 * arrive by push, so this is the one place a reload is right. */
+			const wake = (row, text) => {
+				setBusyId(row.id);
+				ORG_POST("agent.wake", { sessionId: sessionId, kind: row.kind, id: row.id, text: text }).then((b) => {
+					setBusyId(null);
+					const r = b && b.result;
+					if (r && r.ok === false) { setNote(t("agents.why." + String(r.reason || "unavailable"))); return; }
+					setWakeRow(null); setWakeText(""); setNote(""); load();
+				}, (e) => { setBusyId(null); setNote(String((e && e.message) || e)); });
+			};
+			const act = (verb, row) => {
+				setBusyId(row.id);
+				/* A JOB is not on the agent plane. Subagent verbs go through
+				 * ctx.apiProxy (`agent.*` on the sidebar route); the job
+				 * registry is a HOST service that arxa-jobs owns, so a job row
+				 * is dispatched to its own route.
+				 *
+				 * Deliberately no `load()` afterwards: jobs never round-trip
+				 * into state here (see the note above `rows`). The registry
+				 * pushes `session/jobs` on every change, `given` arrives fresh,
+				 * and the menu repaints itself — measured at ~154ms from cancel
+				 * to the killed frame (scripts/jobs-push-proof.mjs). Re-fetching
+				 * would race that push and could paint an older list. */
+				if (row.kind === "job") {
+					fetch("/__arxa/jobs/action", {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({ action: "jobs." + verb, arg: { sessionId: sessionId, jobId: row.id } })
+					}).then((res) => res.json()).then((b) => {
+						setBusyId(null);
+						const r = b && b.result;
+						/* `already-finished` is an outcome, not a failure: the job
+						 * ended between render and click. Say so plainly rather
+						 * than showing it as an error. */
+						if (!r || r.ok === false) setNote(t("agents.why." + String((r && r.reason) || "unavailable")));
+						else if (r.outcome === "already-finished") setNote(t("agents.why.already-finished"));
+						else setNote("");
+					}, (e) => { setBusyId(null); setNote(String((e && e.message) || e)); });
+					return;
+				}
+				ORG_POST("agent." + verb, { sessionId: sessionId, kind: row.kind, id: row.id }).then((b) => {
+					setBusyId(null);
+					const r = b && b.result;
+					if (r && r.ok === false) setNote(t("agents.why." + String(r.reason || "unavailable")));
+					else load();
+				}, (e) => { setBusyId(null); setNote(String((e && e.message) || e)); });
+			};
+			return (0, react_jsx_runtime.jsxs)("span", {
+				className: "aXa_agentWrap",
+				"data-arxa-agent-control": kind,
+				children: [(0, react_jsx_runtime.jsxs)("button", {
+					type: "button",
+					className: "aXa_emptyChip aXa_agentChip",
+					"aria-expanded": open,
+					title: t(kind === "jobs" ? "agents.jobs.control" : "agents.subagents.control"),
+					onClick: () => setOpen((v) => !v),
+					children: [t(kind === "jobs" ? "agents.jobs.label" : "agents.subagents.label"), " · ", String(count)]
+				}), open ? (0, react_jsx_runtime.jsxs)("span", {
+					className: "aXa_agentMenu",
+					role: "menu",
+					children: [
+						note ? (0, react_jsx_runtime.jsx)("span", { className: "aXa_agentNote", children: note }) : null,
+						rows === null ? (0, react_jsx_runtime.jsx)("span", { className: "aXa_agentNote", children: t("agents.loading") }) : null,
+						rows && rows.length === 0 ? (0, react_jsx_runtime.jsx)("span", { className: "aXa_agentNote", children: t(kind === "jobs" ? "agents.jobs.empty" : "agents.subagents.empty") }) : null,
+						(rows || []).map((row) => (0, react_jsx_runtime.jsxs)("span", {
+							className: "aXa_agentRow",
+							role: "menuitem",
+							children: [
+								(0, react_jsx_runtime.jsx)("span", { className: "aXa_agentLabel", title: row.label, children: row.label }),
+								(0, react_jsx_runtime.jsx)("span", { className: "aXa_agentState", children: String(row.status || row.activity || "") }),
+								/* Elapsed, only when the row carries a start. A settled job
+								 * whose end stamp never arrived shows nothing rather than a
+								 * clock that keeps running — same rule the host row follows. */
+								row.startedAt ? (0, react_jsx_runtime.jsx)("span", {
+									className: "aXa_agentState",
+									children: arxaElapsed(row.startedAt, row.finishedAt, row.status)
+								}) : null,
+								(0, react_jsx_runtime.jsx)(ArxaAgentRowActions, { row: row, t: t, busyId: busyId, onAct: act, onWake: (r) => { setWakeRow(r.id); setWakeText(""); setNote(""); } }),
+								/* The wake box. Present only for the row whose Wake was
+								 * clicked, because a message goes to ONE child. Enter
+								 * sends, Escape closes — the same grammar as the stock
+								 * inline editor the git card reuses, so there is no new
+								 * interaction to learn. */
+								wakeRow === row.id ? (0, react_jsx_runtime.jsx)("input", {
+									className: "aXa_agentWake",
+									type: "text",
+									autoFocus: true,
+									value: wakeText,
+									placeholder: t("agents.wakePlaceholder"),
+									disabled: busyId === row.id,
+									onChange: (e) => setWakeText(e.target.value),
+									onKeyDown: (e) => {
+										if (e.key === "Escape") { setWakeRow(null); setWakeText(""); return; }
+										if (e.key !== "Enter") return;
+										/* An empty wake would spend a turn delivering nothing —
+										 * the host refuses it too (`message-required`); this
+										 * just avoids the round trip. */
+										if (wakeText.trim() === "") return;
+										wake(row, wakeText);
+									}
+								}) : null
+							]
+						}, row.id)),
+						(0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							className: "aXa_agentDetails",
+							onClick: () => { setOpen(false); openAgentPanel(kind, sessionId, rows); },
+							children: t("agents.details")
+						})
+					]
+				}) : null]
+			});
+		}
+		/* A JobView carries no capability map, so the row mints one. Shaped to
+		 * match a subagent row's grammar so one menu renders both.
+		 *
+		 * Cancel is REAL now (plugins/arxa-jobs). The registry is a host
+		 * service, so the client cannot reach it — but arxa's host half can,
+		 * and `act()` below routes a job row to /__arxa/jobs/action instead of
+		 * the agent plane. Proven end to end by scripts/jobs-push-proof.mjs:
+		 * the cancel lands, and the registry's own push repaints this menu.
+		 *
+		 * `stopping` deliberately does NOT offer cancel. It is still live, but
+		 * a cancel is already in flight — arming the button again would invite
+		 * a second click that changes nothing and reads as a control that
+		 * ignored you. Pause stays refused: the job status union has no paused
+		 * member, so there is nothing to pause with. */
+		/* Elapsed as a short human string. A LIVE job runs to now; a settled one
+		 * freezes at its end stamp; a settled one with no stamp returns "" so the
+		 * row shows nothing rather than a clock still running on dead work. This
+		 * is the same rule as jobRow() in plugins/arxa-jobs — the bug that shipped
+		 * once was reading a field dsh does not have and falling through to now. */
+		function arxaElapsed(startedAt, finishedAt, status) {
+			var live = status === "running" || status === "stopping";
+			var end = live ? Date.now() : finishedAt;
+			if (!startedAt || !end) return "";
+			var s = Math.max(0, Math.round((end - startedAt) / 1000));
+			if (s < 60) return s + "s";
+			var m = Math.floor(s / 60);
+			if (m < 60) return m + "m " + (s % 60) + "s";
+			return Math.floor(m / 60) + "h " + (m % 60) + "m";
+		}
+		function arxaJobRow(j) {
+			var live = j.status === "running" || j.status === "stopping";
+			return {
+				kind: "job", id: j.id, label: j.label || j.id, status: j.status, detail: j.detail || null,
+				/* Carried so the row can show elapsed. The stock chip is disabled in
+				 * arxa's patch (row 11e) and it was the only surface showing a
+				 * duration — dropping it without replacing it would have traded a
+				 * duplicate chip for a less informative one. `finishedAt` is dsh's
+				 * field (JobView), absent while live. */
+				startedAt: j.startedAt || null, finishedAt: j.finishedAt || null,
+				can: { pause: false, resume: false, cancel: j.status === "running" },
+				why: {
+					pause: "jobs-have-no-pause",
+					resume: "jobs-have-no-pause",
+					cancel: j.status === "stopping" ? "stopping" : live ? "" : "already-finished"
+				}
+			};
+		}
+		function ArxaJobsPlaceholder({ sessionId, useSessions, t }) {
+			const jobs = useSessions((state) => state.jobsBySession?.[sessionId]);
+			const count = jobs ? jobs.length : 0;
+			/* Q4: present at zero as a muted placeholder, a live control above it. */
+			if (count > 0) return (0, react_jsx_runtime.jsx)(ArxaAgentControl, { kind: "jobs", sessionId: sessionId, count: count, given: jobs.map(arxaJobRow), t: t });
+			return (0, react_jsx_runtime.jsx)(ArxaEmptyChip, {
+				label: t("agents.jobs.empty"),
+				title: t("agents.jobs.emptyHint"),
+				onClick: () => openAgentPanel("jobs", sessionId)
+			});
+		}
+		function ArxaSubagentsPlaceholder({ sessionId, useSessions, t }) {
+			/* THE COUNT COMES FROM THE HOST, and it did not always.
+			 *
+			 * This used to derive descendants from the client session map —
+			 * `state.byId` filtered on origin:"subagent" plus this parent — on
+			 * the reasoning that a durable child carries the same bit the stock
+			 * index folds. The shape was right and the answer was wrong: the
+			 * store only holds sessions the client has actually loaded, and
+			 * subagent children are not among them. A session with two real
+			 * children rendered "No subagents" while dsh's own chip, two
+			 * pixels away, said "2 subagents". Not a wording clash — a false
+			 * count sitting beside a true one.
+			 *
+			 * `agent.list` reaches `subagents.list` over ctx.apiProxy, which is
+			 * the same catalog dsh reads, so this and the details panel can no
+			 * longer disagree. Subagents are NOT pushed (unlike jobs), so a
+			 * fetch is the only way to know — the panel already worked this way.
+			 * One request per session, and the store count is kept as the
+			 * first paint so the chip never flashes empty on a session that
+			 * has children. */
+			const stored = useSessions((state) => {
+				const by = state.byId || {};
+				let n = 0;
+				for (const k in by) { const s = by[k]; if (s && s.origin === "subagent" && s.parentSessionId === sessionId) n += 1; }
+				return n;
+			});
+			const [fetchedCount, setFetchedCount] = (0, react.useState)(null);
+			(0, react.useEffect)(() => {
+				if (!sessionId) { setFetchedCount(null); return; }
+				let live = true;
+				setFetchedCount(null);
+				ORG_POST("agent.list", { sessionId: sessionId }).then((b) => {
+					if (!live) return;
+					const r = (b && b.result) || {};
+					setFetchedCount(Array.isArray(r.subagents) ? r.subagents.length : 0);
+				}, () => { if (live) setFetchedCount(null); });
+				return () => { live = false; };
+			}, [sessionId]);
+			const count = fetchedCount === null ? stored : fetchedCount;
+			if (count > 0) return (0, react_jsx_runtime.jsx)(ArxaAgentControl, { kind: "subagents", sessionId: sessionId, count: count, t: t });
+			return (0, react_jsx_runtime.jsx)(ArxaEmptyChip, {
+				label: t("agents.subagents.empty"),
+				title: t("agents.subagents.emptyHint"),
+				onClick: () => openAgentPanel("subagents", sessionId)
+			});
+		}
+		function ArxaPresetCorner({ slots, t }) {
+			const subscribe = (0, react.useCallback)((fn) => slots.subscribe(PRESET_SEAT_KEY, fn), [slots]);
+			const read = (0, react.useCallback)(() => slots.entriesOfSlot(PRESET_SEAT_KEY)[0], [slots]);
+			const entry = (0, react.useSyncExternalStore)(subscribe, read, read);
+			const ref = (0, react.useRef)(null);
+			// Publish the chip's width to the card so the text layers pad right
+			// of it (see the [data-arxa-preset-corner] CSS).
+			(0, react.useLayoutEffect)(() => {
+				const el = ref.current;
+				const card = el?.closest("[data-composer-card]");
+				if (!el || !card) return;
+				const publish = () => card.style.setProperty("--arxa-preset-inset", `${Math.ceil(el.getBoundingClientRect().width) + 28}px`);
+				publish();
+				const ro = new ResizeObserver(publish);
+				ro.observe(el);
+				return () => {
+					ro.disconnect();
+					card.style.removeProperty("--arxa-preset-inset");
+				};
+			}, [entry]);
+			if (entry === void 0 || typeof entry.component !== "function") return null;
+			const Seat = entry.component;
+			return (0, react_jsx_runtime.jsx)("div", {
+				ref,
+				"data-arxa-preset-corner": true,
+				children: (0, react_jsx_runtime.jsx)(Seat, { ...seatProps(entry), t })
 			});
 		}
 		// Empty-state CSS (2026-08-30): inside a marked stack the text
@@ -3491,9 +4036,58 @@ window.__ModuleLoader__.load({
 			tag.dataset.pluginCss = "arxa-sidebar-empty-state";
 			tag.textContent = "[data-arxa-hero-guide]{font-size:12.5px;opacity:.72;line-height:1.55;max-width:470px}"
 				+ "[data-arxa-empty] [data-slot='conversation.composer.bar']{display:none!important}"
-				+ "[data-arxa-empty] .wSkVaW_heroWorkspaceRow>button{display:none!important}"
-				+ "[data-arxa-empty] [data-slot='conversation.hero.agentPreset']{display:none!important}"
-				+ "[data-arxa-empty] [data-arxa-hero-guide]{text-align:center;max-width:560px;margin:12px auto 0;font-size:13px;opacity:.78;line-height:1.7}";
+				// Q2: the stock workspace picker button is gone from the hero row in
+				// every state — the org model owns where sessions live.
+				+ ".wSkVaW_heroWorkspaceRow>button{display:none!important}"
+				// Q5 (revised 2026-09-03, round 3): the stock seat on the hero row is
+				// hidden in EVERY state — ArxaPresetCorner re-renders the same entry
+				// inside the composer card (conversation.input.overlay) instead.
+				+ "[data-slot='conversation.hero.agentPreset']{display:none!important}"
+				+ "[data-arxa-empty] [data-arxa-hero-guide]{text-align:center;max-width:560px;margin:12px auto 0;font-size:13px;opacity:.78;line-height:1.7}"
+				// Q2/Q4 cordis crumb (stock crumbs/crumbSeg/crumbSep/crumb/crumbCurrent
+				// grammar, copied verbatim minus the click affordance): the crumb
+				// takes the row's free width, middle segments ellipsize, the last
+				// two (session + worktree) never shrink.
+				+ "[data-slot='conversation.input.left']{flex:1 1 auto;min-width:0;display:flex;align-items:center}"
+				+ "[data-arxa-crumbs]{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:4px;white-space:nowrap;overflow:hidden}"
+				+ "[data-arxa-crumb-seg]{display:inline-flex;align-items:center;gap:4px;min-width:0}"
+				+ "[data-arxa-crumb-seg][data-keep]{flex-shrink:0}"
+				+ "[data-arxa-crumb]{display:block;max-width:220px;color:var(--dsw-alias-label-tertiary);font-size:14px;line-height:20px;padding:4px 8px;border-radius:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+				+ "[data-arxa-crumbs]>[data-arxa-crumb-seg]:first-child [data-arxa-crumb]{padding-left:0}"
+				+ "[data-arxa-crumb][data-current]{color:var(--dsw-alias-label-primary);font-weight:500}"
+				+ "[data-arxa-crumb-sep]{color:var(--dsw-alias-label-caption);font-size:14px;line-height:20px}"
+				// Q5 corner (2026-09-03): the chip sits INSIDE the card, top-right.
+				// The card's overlay anchor is a height:0 absolute strip at the card
+				// top (uV2eYG_overlayAnchor), so the corner positions itself; z-index
+				// lifts it above the card's absolutely-positioned textarea (later in
+				// DOM, would otherwise paint over the chip and eat its clicks). Hero
+				// only — stock drops the chip once a conversation exists. The text
+				// trio (input/mirror/backdrop share one box) pads right of the chip
+				// by the width the corner publishes; equal padding keeps the mirror's
+				// wrapping in sync with the textarea's.
+				+ "[data-arxa-preset-corner]{position:absolute;top:10px;right:14px;z-index:2}"
+				/* Q4 placeholder chips: present but quiet. They read as a
+				 * capability that exists and is idle, never as a live control —
+				 * the stock chip that replaces them carries the real weight. */
+				+ ".aXa_emptyChip{background:none;border:0;padding:2px 6px;border-radius:6px;font:inherit;font-size:12px;line-height:18px;color:var(--dsw-alias-label-caption);cursor:pointer;white-space:nowrap}"
+				+ ".aXa_emptyChip:hover{color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-bg-layer-2)}"
+				+ ".aXa_agentWrap{position:relative;display:inline-flex}"
+				+ ".aXa_agentChip[aria-expanded=true]{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-2)}"
+				+ ".aXa_agentMenu{position:absolute;top:100%;right:0;z-index:40;min-width:260px;display:flex;flex-direction:column;gap:2px;margin-top:4px;padding:4px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);box-shadow:0 8px 24px rgba(0,0,0,.18)}"
+				+ ".aXa_agentRow{display:flex;align-items:center;gap:6px;padding:3px 6px;border-radius:6px;font-size:12px;line-height:18px;white-space:nowrap}"
+				+ ".aXa_agentRow:hover{background:var(--dsw-alias-bg-layer-2)}"
+				+ ".aXa_agentLabel{flex:1;overflow:hidden;text-overflow:ellipsis}"
+				+ ".aXa_agentState{flex:none;color:var(--dsw-alias-label-caption)}"
+				+ ".aXa_agentActs{flex:none;display:inline-flex;gap:2px;opacity:0;transition:opacity .12s}"
+				+ ".aXa_agentRow:hover .aXa_agentActs,.aXa_agentActs:focus-within{opacity:1}.aXa_agentWake{min-width:150px;flex:1 1 auto;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-fill-secondary);border:1px solid var(--dsw-alias-border-secondary);border-radius:5px;margin-left:4px;padding:2px 6px;font-size:11px;line-height:16px}.aXa_agentWake:disabled{opacity:.6}"
+				+ ".aXa_agentAct{background:none;border:0;padding:1px 5px;border-radius:5px;font:inherit;font-size:11px;color:var(--dsw-alias-label-tertiary);cursor:pointer;text-transform:capitalize}"
+				+ ".aXa_agentAct:hover:not(:disabled){color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3)}"
+				+ ".aXa_agentAct:disabled{opacity:.38;cursor:not-allowed}"
+				+ ".aXa_agentNote{padding:3px 6px;font-size:11px;color:var(--dsw-alias-label-caption);white-space:normal}"
+				+ ".aXa_agentDetails{margin-top:2px;background:none;border:0;border-top:1px solid var(--dsw-alias-border-l2);padding:5px 6px 2px;font:inherit;font-size:11px;color:var(--dsw-alias-label-tertiary);cursor:pointer;text-align:left}"
+				+ ".aXa_agentDetails:hover{color:var(--dsw-alias-label-primary)}"
+				+ ".uV2eYG_root:not(.uV2eYG_hero) [data-arxa-preset-corner]{display:none}"
+				+ ".uV2eYG_hero [data-composer-card] :is(.uV2eYG_input,.uV2eYG_mirror,.uV2eYG_backdrop){box-sizing:border-box;padding-right:var(--arxa-preset-inset,120px)}";
 			document.head.appendChild(tag);
 		}
 		/** Parse "<orgId>|<wsPath>" composite ids. */
@@ -3607,9 +4201,13 @@ window.__ModuleLoader__.load({
 		const orgNoFlow = { getSnapshot: () => false, subscribe: () => () => {} };
 		// Hook faces are STABLE module-scope identities, bound at the component
 		// boundary (see OrgBrowser): the slot renderer merges its STANDARD runtime
-		// hooks (useSessions/useWorkspaces) OVER inject props, so declaring them in
-		// the inject face loses — passing them as plain props cannot be overridden.
-		let orgHostDescription = void 0;
+		// hooks (useSessions/useWorkspaces/useSessionPendingInteraction) OVER
+		// inject props, so declaring them in the inject face loses — passing them
+		// as plain props cannot be overridden.
+		// dsh 0.1.2-rc.1 (2026-09-05): the host face renamed
+		// useHostDescription → useHostInfo and now reads the remote $host
+		// snapshot (sel receives the info object with .home, not a store).
+		let orgHostInfo = void 0;
 		// Client runtime sessions service (dsh-client-runtime): open(id)
 		// focuses a conversation into the content area; clear() empties it
 		// AND wipes the persisted selection (the restore source at boot).
@@ -3618,10 +4216,80 @@ window.__ModuleLoader__.load({
 		// nothing to resume clears — pre-arxa/hero stranding sessions stop
 		// riding along. Null when the service is absent (degrade silently).
 		let arxaClientSessions = null;
+		/** The workspace view store's actions (setGroupExpanded …), captured
+		 * when the browser mounts so revealSession (Q6) can open the leaf group
+		 * from outside React. Null until the sidebar renders once. */
+		let arxaViewActions = null;
+		const arxaListSubscribe = (l) => {
+			const s = arxaClientSessions;
+			if (s && s.list && typeof s.list.subscribe === "function") {
+				const off = s.list.subscribe(l);
+				return typeof off === "function" ? off : () => {};
+			}
+			return () => {};
+		};
+		const arxaListGet = () => {
+			const s = arxaClientSessions;
+			return s && s.list && typeof s.list.getSnapshot === "function" ? s.list.getSnapshot() : null;
+		};
+		/** Crumb segments for the bound session (Q2, grilled 2026-09-02):
+		 * org / dock / project / session / worktree, read from the org tree —
+		 * read-only, navigation lives in the sidebar; the row tells the user
+		 * WHERE the thread lives. Container labels come from the emitted tree
+		 * rows when present (same words as the sidebar), raw path segments
+		 * otherwise. Null when the dsh current session is not an org row. */
+		const arxaCrumbsFor = (s, current) => {
+			if (!s || !Array.isArray(s.orgs)) return null;
+			let org = null;
+			let row = null;
+			for (const o of s.orgs) {
+				const hit = (o.sessions || []).find((x) => (current !== void 0 && current !== null && x.dshSessionId === current) || (s.currentSessionId && x.id === s.currentSessionId));
+				if (hit) {
+					org = o;
+					row = hit;
+					break;
+				}
+			}
+			if (!org || !row) return null;
+			const rows = Array.isArray(s.emit) ? s.emit : [];
+			const labelFor = (key, fallback) => {
+				const r = rows.find((x) => x && x.key === key);
+				return r && typeof r.label === "string" && r.label !== "" ? r.label : fallback;
+			};
+			const ws = typeof row.workspace === "string" ? row.workspace : "";
+			const parts = ws.split("/").filter(Boolean);
+			const out = [{ key: "org", label: org.name || org.id }];
+			let prefix = "";
+			parts.forEach((p, i) => {
+				prefix = prefix ? prefix + "/" + p : p;
+				out.push({ key: "ws" + i, label: labelFor(org.id + "|" + prefix, p) });
+			});
+			const wt = typeof row.worktree === "string" && row.worktree !== "" ? row.worktree.split("/").filter(Boolean).pop() : null;
+			const nm = row.name || row.id;
+			/* Q3 (2026-09-03): `name` now DEFAULTS TO THE ID, and the id is the
+			 * worktree directory name — so the old unconditional pair rendered
+			 * the same string twice (".../note-wt-260903-001/note-wt-260903-001").
+			 * The session segment earns its place only once a rename has actually
+			 * diverged it from the worktree; the worktree id stays pinned at the
+			 * tail either way, so the crumb always says which worktree you are in
+			 * even after the session is given a human name. */
+			if (!wt || nm !== wt) out.push({ key: "session", label: nm, keep: true });
+			if (wt) out.push({ key: "worktree", label: wt, keep: true, current: true });
+			else out[out.length - 1].current = true;
+			return out;
+		};
 		const orgUseWorkspaces = (sel) => useOrg((s) => sel(s.workspacesView));
 		const orgUseSessions = (sel) => useOrg((s) => sel(s.sessionsView));
 		const orgUseDirectoryFlow = (sel) => sel(orgNoFlow.getSnapshot());
-		const orgUseHostDescription = (sel) => sel(orgHostDescription);
+		const orgUseHostInfo = (sel) => sel(orgHostInfo && typeof orgHostInfo.getSnapshot === "function" ? orgHostInfo.getSnapshot() : orgHostInfo);
+		// dsh 0.1.2-rc.1: session rows read pending interactions from a MAP
+		// (useSessionPendingInteraction — the framework's standard hook, produced
+		// by dsh-client-ui-session's UiSession via provideRoot), no longer off the
+		// row summary. OrgBrowser overrides it with the org-derived map so the D63
+		// producer-consumer contract (waiting pills on org rows) rides unchanged;
+		// the stock's visiblePendingKind filters to approval|plan-review|question,
+		// so the map only ever carries that union.
+		const orgUsePendingInteraction = (sel) => sel(useOrg((s) => s.sessionsView.pendingMap));
 		/** CTA gate (D70/D71) is DECLARATIVE now (2026-09-01): the shell
 		 * button reads window.__ARXA_SIDEBAR__.ctaReady/ctaTitle at render —
 		 * see the lever comments at createOrgStore. The imperative DOM gate
@@ -4108,7 +4776,11 @@ window.__ModuleLoader__.load({
 			const [homeDir, setHomeDir] = (0, react.useState)(null);
 			const nameRef = (0, react.useRef)(null);
 			const checkGh = () => {
-				ORG_POST("github.status").then((r) => setGhLinked(!!(r.result && r.result.linked)), () => setGhLinked(null));
+				// relinkRequired counts as NOT linked: the grant is dead server-side, so
+				// offering "publish to GitHub" here only yields a push that 401s. status()
+				// carries the flag now; before 2026-09-04 readState() dropped it and this
+				// modal happily offered publishing against a token GitHub had revoked.
+				ORG_POST("github.status").then((r) => setGhLinked(!!(r.result && r.result.linked && !r.result.relinkRequired)), () => setGhLinked(null));
 			};
 			(0, react.useEffect)(() => {
 				if (open) {
@@ -4758,7 +5430,7 @@ window.__ModuleLoader__.load({
 			// renderer merges its STANDARD runtime hooks (useSessions/useWorkspaces)
 			// over inject props, so declaring them in the inject face loses. Passing
 			// them straight to the stock component cannot be overridden.
-			const patched = { ...props, useWorkspaces: orgUseWorkspaces, useSessions: orgUseSessions, useDirectoryFlow: orgUseDirectoryFlow, useHostDescription: orgUseHostDescription };
+			const patched = { ...props, useWorkspaces: orgUseWorkspaces, useSessions: orgUseSessions, useDirectoryFlow: orgUseDirectoryFlow, useHostInfo: orgUseHostInfo, useSessionPendingInteraction: orgUsePendingInteraction };
 			// Create-org conversation lives HERE (local state, event-triggered by
 			// the spliced + flow) — see OrgCreateModal for why it must not emit.
 			const [creating, setCreating] = (0, react.useState)(false);
@@ -4897,52 +5569,6 @@ window.__ModuleLoader__.load({
 			"disconnect.doneKept": "Disconnected — repositories kept on GitHub.",
 			"disconnect.doneRemoved": "Disconnected — removed from GitHub: {repos}",
 			"rows.ghSynced": "Synced with GitHub",
-			"card.dirty": "changes",
-			"card.worktree": "worktree",
-			"card.ahead": "↑",
-			"card.behind": "↓",
-			"card.wip": "wip",
-			"card.localOnly": "local-only",
-			"card.frame": "frame",
-			"card.subjectPlaceholder": "commit subject — <type>(<scope>): what is now true",
-			"card.askDraft": "Ask the session to draft",
-			"card.commit": "Commit",
-			"card.push": "Push branch",
-			"card.prOpen": "Create the PR",
-			"card.prProblem": "Problem (the user words)",
-			"card.prFix": "How it was fixed",
-			"card.busy": "Working…",
-			"card.teaser.runnerAsleep": "runner asleep",
-			"card.teaser.mainRed": "main red",
-			"card.mainRed": "main is red — fix the gate on main before merging this seat.",
-			"card.frameWired.ok": "frame wired",
-			"card.frameWired.missing": "frame missing",
-			"card.runner.online": "runner online",
-			"card.runner.asleep": "runner asleep",
-			"card.runner.unknown": "runner unknown",
-			"card.wake": "Wake the runner",
-			"card.wakeStarted": "Waking the runner — checks resume when it reports in.",
-			"card.wakeManual": "Start it by hand: run svc.sh start in ~/.arxa/runners/<owner>__<name>.",
-			"card.insight.streak": "Streak",
-			"card.insight.ci": "CI",
-			"card.insight.sessions": "Sessions",
-			"card.checks.green": "checks green",
-			"card.checks.red": "checks red",
-			"card.checks.pending": "checks running",
-			"card.checks.asleep": "runner asleep",
-			"card.checks.none": "no checks",
-			"card.checks.unknown": "checks unknown",
-			"card.merge": "Merge",
-			"card.merged": "Merged.",
-			"card.mergeRefused": "Merge refused:",
-			"card.mint": "Mint a version",
-			"card.slide.status": "Status",
-			"card.slide.commit": "Commit",
-			"card.slide.approve": "Approve",
-			"card.slide.prev": "Previous panel",
-			"card.slide.next": "Next panel",
-			"card.notice.runnerAsleep": "The runner is asleep — checks will not start until it wakes.",
-			"card.notice.checksPending": "Checks are still running.",
 			"org.create.ghToggle": "Publish to GitHub",
 			"org.create.ghOnHint": "A private GitHub repository is created and kept in sync.",
 			"org.create.ghOffHint": "This organisation stays on this device only. Connect it later from its menu.",
@@ -4979,6 +5605,42 @@ window.__ModuleLoader__.load({
 			"welcome.business": "arxa business",
 			"welcome.businessSoon": "arxa business (agency) — coming soon",
 			"tree.dock.projects": "Projects",
+			"crumbs.label": "Session location",
+			"agents.jobs.empty": "No background jobs",
+			"agents.jobs.emptyHint": "Background jobs appear here once one is started. Open the panel for details.",
+			"agents.subagents.empty": "No subagents",
+			"agents.subagents.emptyHint": "Subagents appear here once one is delegated. Open the panel for details.",
+			"agents.jobs.label": "Jobs",
+			"agents.subagents.label": "Subagents",
+			"agents.jobs.control": "Control this session's background jobs",
+			"agents.subagents.control": "Control this session's subagents",
+			"agents.loading": "Loading\u2026",
+			"agents.details": "Open details panel",
+			"agents.pause": "Pause",
+			"agents.resume": "Resume",
+			"agents.cancel": "Cancel",
+			"agents.why.one-shot": "A one-shot subagent runs to completion \u2014 it cannot be paused or stopped.",
+			"agents.why.not-running": "Nothing is running right now.",
+			"agents.why.send-message": "A paused subagent resumes when you send it a message.",
+			"agents.why.no-terminate-verb": "The engine has no way to terminate a subagent \u2014 pause is the only stop.",
+			"agents.why.jobs-have-no-pause": "Background jobs cannot be paused \u2014 only cancelled.",
+			"agents.why.no-job-api": "This engine build exposes no way to control a background job \u2014 it can only be watched.",
+			"agents.why.stopping": "This one is already being cancelled \u2014 give it a moment to settle.",
+			"agents.why.not-yours": "This job belongs to another session.",
+			"agents.why.gone": "This job is no longer in the registry.",
+			"agents.why.registry-refused": "The engine refused the request. Nothing was changed.",
+			"agents.wake": "Wake",
+			"agents.wakeHint": "Send this subagent a message to wake it",
+			"agents.wakePlaceholder": "Message to wake it with\u2026",
+			"agents.why.subagents-only": "Only a subagent can be woken this way.",
+			"agents.why.message-required": "Write a message first \u2014 an empty wake would spend a turn saying nothing.",
+			"agents.why.wrong-plane": "A background job is cancelled from its own control, not here.",
+			"agents.why.refused": "The engine refused it. Nothing changed.",
+			"agents.why.id-required": "That row is missing its id.",
+			"agents.why.already-finished": "This one has already finished.",
+			"agents.why.owner-not-live": "This session is not live, so its jobs cannot be reached.",
+			"agents.why.service-unavailable": "This engine build does not provide that service.",
+			"agents.why.unavailable": "Not available here.",
 			"hero.guide": "Sessions start inside a workspace — open an organisation, expand to a folder row, hover it and press + to start a session.",
 			"tree.dock.notes": "Notes",
 			"tree.dock.meetings": "Meetings",
@@ -5102,53 +5764,6 @@ window.__ModuleLoader__.load({
 			"disconnect.doneKept": "Odłączono — repozytoria zachowane na GitHub.",
 			"disconnect.doneRemoved": "Odłączono — usunięto z GitHub: {repos}",
 			"rows.ghSynced": "Zsynchronizowano z GitHub",
-			"card.dirty": "zmiany",
-			"card.worktree": "drzewo robocze",
-			"card.ahead": "↑",
-			"card.behind": "↓",
-			"card.wip": "wip",
-			"card.localOnly": "tylko lokalny",
-			"card.frame": "frame",
-			"card.subjectPlaceholder": "temat commitu — <type>(<scope>): co jest teraz prawdą",
-			"card.askDraft": "Poproś sesję o przygotowanie szkicu",
-			"card.commit": "Commit",
-			"card.push": "Push branch",
-			"card.prOpen": "Utwórz PR",
-			"card.prProblem": "Problem (słowami użytkownika)",
-			"card.prFix": "Jak to naprawiono",
-			"card.busy": "Praca…",
-			// TODO native review (conformance decision 4): machine-drafted.
-			"card.teaser.runnerAsleep": "runner uśpiony",
-			"card.teaser.mainRed": "main czerwony",
-			"card.mainRed": "main jest czerwony — napraw bramkę na main przed scaleniem tej sesji.",
-			"card.frameWired.ok": "szkielet podłączony",
-			"card.frameWired.missing": "brak szkieletu",
-			"card.runner.online": "runner online",
-			"card.runner.asleep": "runner uśpiony",
-			"card.runner.unknown": "runner nieznany",
-			"card.wake": "Obudź runnera",
-			"card.wakeStarted": "Budzenie runnera — kontrole wznowią się, gdy się zgłosi.",
-			"card.wakeManual": "Uruchom ręcznie: wykonaj svc.sh start w ~/.arxa/runners/<owner>__<name>.",
-			"card.insight.streak": "Passa",
-			"card.insight.ci": "CI",
-			"card.insight.sessions": "Sesje",
-			"card.checks.green": "kontrole zielone",
-			"card.checks.red": "kontrole czerwone",
-			"card.checks.pending": "kontrole trwają",
-			"card.checks.asleep": "runner uśpiony",
-			"card.checks.none": "brak kontroli",
-			"card.checks.unknown": "kontrole nieznane",
-			"card.merge": "Scal",
-			"card.merged": "Scalono.",
-			"card.mergeRefused": "Scalenie odrzucone:",
-			"card.mint": "Wybij wersję",
-			"card.slide.status": "Stan",
-			"card.slide.commit": "Commit",
-			"card.slide.approve": "Zatwierdzenie",
-			"card.slide.prev": "Poprzedni panel",
-			"card.slide.next": "Następny panel",
-			"card.notice.runnerAsleep": "Runner jest uśpiony — kontrole nie ruszą, dopóki się nie obudzi.",
-			"card.notice.checksPending": "Kontrole nadal trwają.",
 			"org.create.ghToggle": "Opublikuj na GitHub",
 			"org.create.ghOnHint": "Zostaje utworzone prywatne repozytorium GitHub i jest na bieżąco synchronizowane.",
 			"org.create.ghOffHint": "Ta organizacja pozostaje tylko na tym urządzeniu. Połącz ją później z jej menu.",
@@ -5185,6 +5800,42 @@ window.__ModuleLoader__.load({
 			"welcome.business": "arxa business",
 			"welcome.businessSoon": "arxa business (agencja) — wkrótce",
 			"tree.dock.projects": "Projekty",
+			"crumbs.label": "Położenie sesji",
+			"agents.jobs.empty": "Brak zadań w tle",
+			"agents.jobs.emptyHint": "Zadania w tle pojawią się tutaj po uruchomieniu. Otwórz panel, aby zobaczyć szczegóły.",
+			"agents.subagents.empty": "Brak podagentów",
+			"agents.subagents.emptyHint": "Podagenci pojawią się tutaj po delegowaniu. Otwórz panel, aby zobaczyć szczegóły.",
+			"agents.jobs.label": "Zadania",
+			"agents.subagents.label": "Podagenci",
+			"agents.jobs.control": "Steruj zadaniami w tle tej sesji",
+			"agents.subagents.control": "Steruj podagentami tej sesji",
+			"agents.loading": "Wczytywanie\u2026",
+			"agents.details": "Otwórz panel szczegółów",
+			"agents.pause": "Wstrzymaj",
+			"agents.resume": "Wznów",
+			"agents.cancel": "Anuluj",
+			"agents.why.one-shot": "Podagent jednorazowy działa do końca \u2014 nie można go wstrzymać ani zatrzymać.",
+			"agents.why.not-running": "Nic teraz nie działa.",
+			"agents.why.send-message": "Wstrzymany podagent wznawia się po wysłaniu mu wiadomości.",
+			"agents.why.no-terminate-verb": "Silnik nie potrafi zakończyć podagenta \u2014 wstrzymanie to jedyne zatrzymanie.",
+			"agents.why.jobs-have-no-pause": "Zadań w tle nie można wstrzymać \u2014 tylko anulować.",
+			"agents.why.no-job-api": "Ta wersja silnika nie pozwala sterować zadaniem w tle \u2014 można je tylko obserwować.",
+			"agents.why.stopping": "To zadanie jest już anulowane \u2014 daj mu chwilę na zako\u0144czenie.",
+			"agents.why.not-yours": "To zadanie nale\u017cy do innej sesji.",
+			"agents.why.gone": "Tego zadania nie ma ju\u017c w rejestrze.",
+			"agents.why.registry-refused": "Silnik odrzuci\u0142 \u017c\u0105danie. Nic nie zosta\u0142o zmienione.",
+			"agents.wake": "Obud\u017a",
+			"agents.wakeHint": "Wy\u015blij podagentowi wiadomo\u015b\u0107, aby go obudzi\u0107",
+			"agents.wakePlaceholder": "Wiadomo\u015b\u0107 na pobudk\u0119\u2026",
+			"agents.why.subagents-only": "W ten spos\u00f3b mo\u017cna obudzi\u0107 tylko podagenta.",
+			"agents.why.message-required": "Najpierw napisz wiadomo\u015b\u0107 \u2014 pusta pobudka zmarnuje tur\u0119.",
+			"agents.why.wrong-plane": "Zadanie w tle anuluje si\u0119 z jego w\u0142asnej kontrolki, nie st\u0105d.",
+			"agents.why.refused": "Silnik odm\u00f3wi\u0142. Nic si\u0119 nie zmieni\u0142o.",
+			"agents.why.id-required": "Ten wiersz nie ma identyfikatora.",
+			"agents.why.already-finished": "To już się zakończyło.",
+			"agents.why.owner-not-live": "Ta sesja nie jest aktywna, więc jej zadania są nieosiągalne.",
+			"agents.why.service-unavailable": "Ta wersja silnika nie udostępnia tej usługi.",
+			"agents.why.unavailable": "Niedostępne tutaj.",
 			"hero.guide": "Sesje zaczynają się wewnątrz obszaru roboczego — otwórz organizację, rozwiń do wiersza folderu, najedź na niego i naciśnij +, aby rozpocząć sesję.",
 			"tree.dock.notes": "Notatki",
 			"tree.dock.meetings": "Spotkania",
@@ -5308,53 +5959,6 @@ window.__ModuleLoader__.load({
 			"disconnect.doneKept": "Déconnecté — dépôts conservés sur GitHub.",
 			"disconnect.doneRemoved": "Déconnecté — supprimés de GitHub : {repos}",
 			"rows.ghSynced": "Synchronisé avec GitHub",
-			"card.dirty": "modifications",
-			"card.worktree": "arbre de travail",
-			"card.ahead": "↑",
-			"card.behind": "↓",
-			"card.wip": "wip",
-			"card.localOnly": "local uniquement",
-			"card.frame": "frame",
-			"card.subjectPlaceholder": "sujet du commit — <type>(<scope>) : ce qui est vrai maintenant",
-			"card.askDraft": "Demander à la session de rédiger",
-			"card.commit": "Commit",
-			"card.push": "Push branch",
-			"card.prOpen": "Créer la PR",
-			"card.prProblem": "Problème (mots de l’utilisateur)",
-			"card.prFix": "Comment cela a été corrigé",
-			"card.busy": "Traitement…",
-			// TODO native review (conformance decision 4): machine-drafted.
-			"card.teaser.runnerAsleep": "runner en veille",
-			"card.teaser.mainRed": "main au rouge",
-			"card.mainRed": "main est au rouge — corrigez la barrière sur main avant de fusionner ce poste.",
-			"card.frameWired.ok": "cadre branché",
-			"card.frameWired.missing": "cadre absent",
-			"card.runner.online": "runner en ligne",
-			"card.runner.asleep": "runner en veille",
-			"card.runner.unknown": "runner inconnu",
-			"card.wake": "Réveiller le runner",
-			"card.wakeStarted": "Réveil du runner — les contrôles reprendront dès qu’il répond.",
-			"card.wakeManual": "Démarrez-le à la main : lancez svc.sh start dans ~/.arxa/runners/<owner>__<name>.",
-			"card.insight.streak": "Série",
-			"card.insight.ci": "CI",
-			"card.insight.sessions": "Sessions",
-			"card.checks.green": "contrôles au vert",
-			"card.checks.red": "contrôles au rouge",
-			"card.checks.pending": "contrôles en cours",
-			"card.checks.asleep": "runner en veille",
-			"card.checks.none": "aucun contrôle",
-			"card.checks.unknown": "contrôles inconnus",
-			"card.merge": "Fusionner",
-			"card.merged": "Fusionné.",
-			"card.mergeRefused": "Fusion refusée :",
-			"card.mint": "Émettre une version",
-			"card.slide.status": "État",
-			"card.slide.commit": "Commit",
-			"card.slide.approve": "Approbation",
-			"card.slide.prev": "Panneau précédent",
-			"card.slide.next": "Panneau suivant",
-			"card.notice.runnerAsleep": "Le runner est en veille — les contrôles ne démarreront pas avant son réveil.",
-			"card.notice.checksPending": "Les contrôles sont encore en cours.",
 			"org.create.ghToggle": "Publier sur GitHub",
 			"org.create.ghOnHint": "Un dépôt GitHub privé est créé et synchronisé en continu.",
 			"org.create.ghOffHint": "Cette organisation reste uniquement sur cet appareil. Connectez-la plus tard depuis son menu.",
@@ -5391,6 +5995,42 @@ window.__ModuleLoader__.load({
 			"welcome.business": "arxa business",
 			"welcome.businessSoon": "arxa business (agence) — bientôt disponible",
 			"tree.dock.projects": "Projets",
+			"crumbs.label": "Emplacement de la session",
+			"agents.jobs.empty": "Aucune tâche en arrière-plan",
+			"agents.jobs.emptyHint": "Les tâches en arrière-plan apparaîtront ici une fois lancées. Ouvrez le panneau pour les détails.",
+			"agents.subagents.empty": "Aucun sous-agent",
+			"agents.subagents.emptyHint": "Les sous-agents apparaîtront ici une fois délégués. Ouvrez le panneau pour les détails.",
+			"agents.jobs.label": "Tâches",
+			"agents.subagents.label": "Sous-agents",
+			"agents.jobs.control": "Piloter les tâches en arrière-plan de cette session",
+			"agents.subagents.control": "Piloter les sous-agents de cette session",
+			"agents.loading": "Chargement\u2026",
+			"agents.details": "Ouvrir le panneau de détails",
+			"agents.pause": "Suspendre",
+			"agents.resume": "Reprendre",
+			"agents.cancel": "Annuler",
+			"agents.why.one-shot": "Un sous-agent à usage unique va jusqu\u2019au bout \u2014 impossible de le suspendre ou de l\u2019arrêter.",
+			"agents.why.not-running": "Rien ne tourne pour le moment.",
+			"agents.why.send-message": "Un sous-agent suspendu reprend lorsque vous lui envoyez un message.",
+			"agents.why.no-terminate-verb": "Le moteur ne sait pas terminer un sous-agent \u2014 suspendre est le seul arrêt.",
+			"agents.why.jobs-have-no-pause": "Les tâches en arrière-plan ne se suspendent pas \u2014 elles s\u2019annulent.",
+			"agents.why.no-job-api": "Cette version du moteur n\u2019offre aucun contrôle sur une tâche en arrière-plan \u2014 seulement son suivi.",
+			"agents.why.stopping": "Celle-ci est d\u00e9j\u00e0 en cours d\u2019annulation \u2014 laissez-lui un instant.",
+			"agents.why.not-yours": "Cette t\u00e2che appartient \u00e0 une autre session.",
+			"agents.why.gone": "Cette t\u00e2che n\u2019est plus dans le registre.",
+			"agents.why.registry-refused": "Le moteur a refus\u00e9 la demande. Rien n\u2019a \u00e9t\u00e9 modifi\u00e9.",
+			"agents.wake": "R\u00e9veiller",
+			"agents.wakeHint": "Envoyer un message \u00e0 ce sous-agent pour le r\u00e9veiller",
+			"agents.wakePlaceholder": "Message pour le r\u00e9veiller\u2026",
+			"agents.why.subagents-only": "Seul un sous-agent se r\u00e9veille ainsi.",
+			"agents.why.message-required": "\u00c9crivez d\u2019abord un message \u2014 un r\u00e9veil vide gaspillerait un tour.",
+			"agents.why.wrong-plane": "Une t\u00e2che en arri\u00e8re-plan s\u2019annule depuis son propre contr\u00f4le, pas ici.",
+			"agents.why.refused": "Le moteur a refus\u00e9. Rien n\u2019a chang\u00e9.",
+			"agents.why.id-required": "Cette ligne n\u2019a pas d\u2019identifiant.",
+			"agents.why.already-finished": "Celle-ci est déjà terminée.",
+			"agents.why.owner-not-live": "Cette session n\u2019est pas active, ses tâches sont donc inaccessibles.",
+			"agents.why.service-unavailable": "Cette version du moteur ne fournit pas ce service.",
+			"agents.why.unavailable": "Indisponible ici.",
 			"hero.guide": "Les sessions démarrent dans un espace de travail — ouvrez une organisation, dépliez jusqu’à une ligne de dossier, survolez-la et appuyez sur + pour démarrer une session.",
 			"tree.dock.notes": "Notes",
 			"tree.dock.meetings": "Réunions",
@@ -5472,7 +6112,8 @@ window.__ModuleLoader__.load({
 			"sessions",
 			"workspaces",
 			"locale",
-			"connection"
+			"remote",
+			"remote.directoryPicker"
 		];
 		/**
 		* Register the browser and picker once their slot declarations are on the
@@ -5487,7 +6128,17 @@ window.__ModuleLoader__.load({
 			// — the lookup chain falls back per-key to en (enOver merged), so a
 			// missing translation shows English, never a raw key.
 			ctx.effect(() => ctx.locale.register(NS, { zh, en: { ...en, ...enOver }, pl: plOver, fr: frOver }), "arxa-sidebar-workspace: dictionaries");
-			orgHostDescription = ctx.get("connection").hostDescription;
+			orgHostInfo = {
+				// dsh 0.1.2-rc.1: connection.hostDescription is gone — the host-info
+				// face is now the remote $host snapshot, re-read on connection/reset
+				// (mirrors the stock ui-workspace apply).
+				getSnapshot: () => ctx.remote?.$host,
+				subscribe: (listener) => ctx.on("connection/reset", listener)
+			};
+			// dsh 0.1.2-rc.1: the stock apply provideRoot's the workspaces hook —
+			// mirror it so framework-owned consumers of the root hook (and the
+			// slot runtime's standard useWorkspaces) still see a live store.
+			try { ctx.slots.provideRoot({ hooks: { workspaces: ctx.get("workspaces").list } }) } catch { /* degrade */ }
 			// Client runtime sessions service (2026-08-30): open(id) focuses a
 			// conversation into the content area; clear() empties it and wipes
 			// the persisted selection. arxa drives the content area — resume
@@ -5536,14 +6187,21 @@ window.__ModuleLoader__.load({
 					// legacy org-level fallback is GONE (it created org-root worktrees).
 					const s = String(workspaceId ?? "");
 					const i = s.indexOf("|");
-					if (i > 0 && i < s.length - 1) orgStore.mutate("workspace.new-session", { orgId: s.slice(0, i), workspace: s.slice(i + 1) }).catch(() => {});
+					// Close the loop like the shell CTA (found live 2026-09-02): create
+					// alone left the composer dead — the row landed in the tree but the
+					// conversation never opened until a second, manual open. Same chain
+					// as the `open` lever below: session.open → reveal → conversation focus.
+					if (i > 0 && i < s.length - 1) orgStore.mutate("workspace.new-session", { orgId: s.slice(0, i), workspace: s.slice(i + 1) }).then((row) => {
+						if (!row || typeof row.id !== "string") return;
+						return orgStore.mutate("session.open", { orgId: s.slice(0, i), sessionId: row.id }).then(() => { try { orgStore.revealSession(row.id) } catch { /* presentation */ } return arxaOpenConversation(row.id); });
+					}).catch(() => {});
 				},
 				open: (sessionId) => {
 					const orgId = orgOfSession(sessionId);
 					// Host revive first (spawns the engine conversation when the row
 					// lacks one), then the mutate-carried refresh lands the fresh
 					// dshSessionId, THEN focus the conversation — dsh own row-open call.
-					if (orgId !== void 0) orgStore.mutate("session.open", { orgId, sessionId }).then(() => arxaOpenConversation(sessionId)).catch(() => {});
+					if (orgId !== void 0) orgStore.mutate("session.open", { orgId, sessionId }).then(() => { try { orgStore.revealSession(sessionId) } catch { /* presentation */ } return arxaOpenConversation(sessionId); }).catch(() => {});
 				},
 				// Local derivation already matches session + org names (Q4); the content
 				// search fetch is an honest empty — we hold no transcript index.
@@ -5570,7 +6228,7 @@ window.__ModuleLoader__.load({
 					return { workspaceId: (s.orgs.find((o) => o.open) || {}).id };
 				},
 				trash: () => orgStore.toggleTrash(),
-				hooks: { directoryFlow: orgNoFlow, hostDescription: orgHostDescription },
+				hooks: { directoryFlow: orgNoFlow, hostInfo: orgHostInfo },
 			});
 			ctx.slots.inject("sidebar.workspaces", () => ctx.slots.register({
 				name: "sidebar.workspaces",
@@ -5591,18 +6249,47 @@ window.__ModuleLoader__.load({
 				name: "conversation.hero.workspace",
 				locale: NS
 			}, ArxaHeroGuide));
-			// Git card mount (Part B S4 fix, 2026-09-01): the input dock is the
-			// framework strip rendered directly above the composer bar in every
-			// session-bound phase. The hero-portal first cut crashed the hero slot
-			// (React #310, conditional useMemo) and would unmount with the hero
-			// anyway once a session went active. todo=0, goal=10, card=30 → the
-			// card sits nearest the bar; landing (no session zone) stays clean.
-			ctx.slots.inject("conversation.input.dock", () => ctx.slots.register({
-				name: "conversation.input.dock",
-				id: "arxa-git-card",
-				order: 30,
+			// Composer breadcrumb (found live 2026-09-02): dsh unmounts the hero slot once a
+			// conversation is open, so the path chip must live in the composer left zone
+			// (conversation.input.left, kind:list, scope:session, nothing stock registers there).
+			ctx.slots.inject("conversation.input.left", () => ctx.slots.register({
+				name: "conversation.input.left",
+				id: "arxa-crumbs",
+				order: 0,
+				locale: NS,
+				inject: (sessionId) => ({ sessionId })
+			}, ArxaCrumbBar));
+			// Preset chip corner (2026-09-03): the stock seat lives on the hero row
+			// ABOVE the card; the product wants it inside the card, top-right.
+			// conversation.input.overlay (kind:list, scope:session) is the card-top
+			// anchor — ArxaPresetCorner re-renders the stock entry there and the
+			// hero-row copy is CSS-hidden. Locale is the seat namespace so `t`
+			// resolves the stock labels.
+			ctx.slots.inject("conversation.input.overlay", () => ctx.slots.register({
+				name: "conversation.input.overlay",
+				id: "arxa-preset-corner",
+				order: 0,
+				locale: "settings.agentPreset",
+				inject: () => ({ slots: ctx.slots })
+			}, ArxaPresetCorner));
+			// Agent-capability placeholders (2026-09-03, Q4): header.actions is
+			// kind:list / replaceRisk:none, so these sit BESIDE the stock
+			// agent-preset (order -10) and job-list (order 20) entries. Orders
+			// bracket the stock job chip so the empty and live states occupy the
+			// same place in the row. NOT header.lineage: that is kind:single and
+			// already held by the subagent catalog we are trying to surface.
+			ctx.slots.inject("conversation.session.header.actions", () => ctx.slots.register({
+				name: "conversation.session.header.actions",
+				id: "arxa-jobs-empty",
+				order: 19,
 				locale: NS
-			}, ArxaGitCardDock));
+			}, ArxaJobsPlaceholder));
+			ctx.slots.inject("conversation.session.header.actions", () => ctx.slots.register({
+				name: "conversation.session.header.actions",
+				id: "arxa-subagents-empty",
+				order: 21,
+				locale: NS
+			}, ArxaSubagentsPlaceholder));
 			// Welcome gate (Phase 2, conformance plan): the frame declares
 			// shell.overlay (kind:list, scope:root) — the gate registers THERE
 			// instead of fighting the shell with position:fixed + z-index

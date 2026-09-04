@@ -25,9 +25,9 @@ import {
   hasHead, readSnapshotMarker, snapshotWorkerLive, spawnSnapshotOrgRepo,
   isDirty, wipCommit, wipRun, stageBoundarySquash, stageLog,
   mintAtStageBoundary, versionChip, readVersions,
-  SessionMergeError, GATE_CHECK_SCRIPT,
+  SessionMergeError, GATE_CHECK_SCRIPT, SESSION_BRANCH_PREFIX,
   openSession, sessionStageBoundary, archiveSession, reviveSession,
-  listSessions, archivedSessionIds,
+  listSessions, archivedSessionIds, mintSessionPath, sessionLeaf, dshSessionKey, assertSessionIdShape,
   getOrigin, setOrigin, rekeySessionsProject,
   pushRepo, fetchRepo, mainSyncState, ffMergeMain,
   worktreeHealth,
@@ -226,14 +226,14 @@ ok('red gate parks the branch — never deleted (D40)', () => {
   assert.equal(res.session.state, 'parked')
   assert.equal(res.session.parkedReason, 'gate-red')
   assert.equal(runGit(['rev-parse', 'main'], { cwd: projectPath }), mainBefore, 'red work reached main')
-  assert.ok(runGit(['branch', '--list', 'arxa/session/red1'], { cwd: projectPath }) !== '')
+  assert.ok(runGit(['branch', '--list', s.branch], { cwd: projectPath }) !== '')
 })
 
 ok('archive prunes worktree, keeps branch; revive continues from parked state (D39/D40)', () => {
   const parked = archiveSession(projectPath, 'red1')
   assert.equal(parked.state, 'archived')
-  assert.ok(!fs.existsSync(path.join(projectPath, '.arxa', 'worktrees', 'red1')))
-  assert.ok(runGit(['branch', '--list', 'arxa/session/red1'], { cwd: projectPath }) !== '',
+  assert.ok(!fs.existsSync(parked.worktree), 'archive did not prune the worktree directory')
+  assert.ok(runGit(['branch', '--list', parked.branch], { cwd: projectPath }) !== '',
     'archive deleted the parked branch (D40 violation)')
   assert.deepEqual(archivedSessionIds(projectPath), ['red1']) // dsh contract
   const s = reviveSession(projectPath, 'red1')
@@ -258,7 +258,7 @@ ok('concurrent sessions: merge loser fails loudly, zero commits lost', () => {
   assert.equal(loser.state, 'parked')
   assert.equal(loser.parkedReason, 'merge-conflict')
   // Loser's commits are all still on its branch, recoverable.
-  const tip = runGit(['rev-parse', 'arxa/session/race-b'], { cwd: projectPath })
+  const tip = runGit(['rev-parse', b.branch], { cwd: projectPath })
   assert.ok(tip)
   assert.equal(runGit(['show', `${tip}:shared.md`], { cwd: projectPath }), 'from b')
   assert.equal(fs.readFileSync(path.join(projectPath, 'shared.md'), 'utf8'), 'from a\n')
@@ -419,13 +419,15 @@ ok('pushRepo: pushes the PRIMARY branch to a remote URL (D73 push half, offline 
   initOrgRepo(src, process.env, { managedDirs: ['projects', 'notes', 'meetings', 'account', 'communications'] })
   runGit(['init', '--bare', bare], { cwd: tmp })
   // a session branch exists locally but must NEVER publish
-  runGit(['branch', 'arxa/session/noise'], { cwd: src })
+  const noiseBranch = `${SESSION_BRANCH_PREFIX}ORG/notes/noise-wt-260903-001`
+  runGit(['branch', noiseBranch], { cwd: src })
   const res = pushRepo(src, bare, process.env)
   assert.equal(res.ref, 'main', 'primary branch resolved (HEAD was main)')
   assert.ok(runGit(['rev-parse', '--verify', 'main'], { cwd: bare, allowFail: true }) !== null, 'main landed on the remote')
-  assert.equal(runGit(['rev-parse', '--verify', 'refs/heads/arxa/session/noise'], { cwd: bare, allowFail: true }), null, 'session branches never publish')
+  assert.equal(runGit(['rev-parse', '--verify', `refs/heads/${noiseBranch}`], { cwd: bare, allowFail: true }), null, 'session branches never publish')
   // HEAD on a session branch (session open) → falls back to main, still not the session branch
-  runGit(['checkout', '-b', 'arxa/session/open'], { cwd: src })
+  const openBranch = `${SESSION_BRANCH_PREFIX}ORG/notes/open-wt-260903-001`
+  runGit(['checkout', '-b', openBranch], { cwd: src })
   const res2 = pushRepo(src, bare, process.env)
   assert.equal(res2.ref, 'main', 'session-branch HEAD falls back to the primary branch')
   assert.throws(() => pushRepo(src, '', process.env), TypeError, 'empty url is a loud TypeError')
@@ -456,6 +458,17 @@ ok('frame: ci.yml carries the canon runner labels, concurrency, timeout (Q5)', (
   assert.ok(!y.includes('ubuntu-latest') && !y.includes('macos-1'), 'never GitHub-hosted')
 })
 
+// Q7 (2026-09-03): without this trigger a session-branch push fires no
+// workflow at all, so "push the branch at the stage boundary" would have been
+// a backup rather than CI. The version bump is what rolls it out to repos that
+// already carry a v2 frame.
+ok('frame: ci.yml runs frame-check on session branches as well as main (Q7)', () => {
+  const y = ciYml()
+  assert.ok(y.includes("branches: [main, 'arxa/**']"), 'session branches are watched')
+  assert.ok(y.includes('pull_request:'), 'the PR trigger survives — the review path is unchanged')
+  assert.equal(FRAME_VERSION, 5, 'the stamp version bumped so existing published repos heal to the t3ci project checks (v4 widened the branch glob; v5 adds pinned SDK + --enforce-lockfile + --fatal-warnings)')
+})
+
 ok('frame: protection + settings payloads (Q3/Q8)', () => {
   assert.deepEqual(protectionPayload().required_status_checks, { strict: true, checks: [{ context: FRAME_JOB }] })
   assert.equal(protectionPayload().enforce_admins, false, 'solo machine commits ride main (S0 V4)')
@@ -480,7 +493,52 @@ ok('frame: analyze is never gated on a test/ dir (B15)', () => {
   const guard = sh.slice(0, sh.indexOf('"$run" analyze'))
   assert.ok(!/\[ -d test \][^\n]*&&[^\n]*\n?[^\n]*analyze/.test(guard), 'no [ -d test ] AND before analyze')
   assert.ok(analyze.includes('if [ -d test ]'), 'only the test run is guarded by test/')
-  assert.ok(sh.includes('pub get >/dev/null 2>&1 || fail'), 'unresolvable pubspec is a hard red')
+  // The invariant is that a pub-get failure reds — NOT the exact redirect.
+  // v5 keeps stderr (only stdout is dropped) so a lockfile rejection names the
+  // dependency that drifted; a gate that fails without saying why is one
+  // nobody can act on.
+  assert.ok(/pub get[^\n]*\|\| fail "\$run pub get/.test(sh), 'unresolvable pubspec is a hard red')
+  assert.ok(!/pub get[^\n]*2>&1/.test(sh), 'pub get keeps stderr so the reason survives')
+})
+
+ok('frame: v5 t3ci checks are all GUARDED — absence is never a failure (Q13)', () => {
+  const sh = projectCheckSh()
+  // Each of the three reproducibility checks, and the guard that keeps it from
+  // reddening a tree that simply lacks an optional file. arxa studio is
+  // distributed: a gate that fails for a MISSING pubspec.lock is one users
+  // switch off, and a switched-off gate catches nothing at all.
+  assert.ok(sh.includes('--enforce-lockfile'), 'the lockfile is enforced')
+  assert.ok(/\[ -f pubspec\.lock \]/.test(sh), '…only when a lockfile actually exists')
+  assert.ok(sh.includes('analyze --fatal-warnings'), 'a warning is fatal')
+  assert.ok(sh.includes('command -v fvm'), 'the SDK is pinned through fvm')
+  assert.ok(/\[ -f \.fvmrc \] \|\| \[ -f "\$root\/\.fvmrc" \]/.test(sh),
+    'the pin is read from the target OR the project root — fvm resolves .fvmrc by walking up, so a project-level pin must count')
+  // Unpinned still requires the tool; pinned needs only fvm, which supplies it.
+  assert.ok(sh.includes('[ -n "$pin" ] || command -v "$run" >/dev/null 2>&1 || exit 0'),
+    'a target whose toolchain is absent is skipped, not failed')
+  assert.ok(sh.includes('root=$(pwd)'), 'the project root is captured before the per-target walk')
+})
+
+ok('frame: .arxa/ is excluded at git init, before anything can be added', () => {
+  // The per-org lock under .arxa/locks holds a pid and is rewritten on every
+  // open. Excluding only helps files that are not ALREADY tracked, so this has
+  // to happen at init — doing it at first session (as it used to) let the
+  // initial snapshot commit runtime state into the user's history.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-exclude-'))
+  try {
+    initOrgRepo(dir)
+    const exclude = path.join(dir, '.git', 'info', 'exclude')
+    assert.ok(fs.readFileSync(exclude, 'utf8').split('\n').includes('/.arxa/'), '.arxa/ excluded at init')
+    fs.mkdirSync(path.join(dir, '.arxa', 'locks'), { recursive: true })
+    fs.writeFileSync(path.join(dir, '.arxa', 'locks', 'x.lock'), '{"pid":1}')
+    fs.writeFileSync(path.join(dir, 'real.txt'), 'content\n')
+    runGit(['add', '-A'], { cwd: dir })
+    const staged = runGit(['diff', '--cached', '--name-only'], { cwd: dir })
+    assert.ok(staged.includes('real.txt'), 'real content is still added')
+    assert.ok(!staged.includes('.arxa'), 'no .arxa/ path is ever staged')
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 ok('frame: flutter targets are driven by flutter, not dart (B16)', () => {
@@ -563,7 +621,7 @@ ok('sessions: a deleted worktree is `missing`, never silently clean (B1)', () =>
   execFileSync('git', ['add', '-A'], { cwd: d })
   execFileSync('git', ['-c', 'user.email=a@b', '-c', 'user.name=a', 'commit', '-qm', 'feat: init'], { cwd: d })
 
-  const s = openSession(d, { name: 'probe' })
+  const s = openSession(d, { id: 'probe1', name: 'probe' })
   assert.equal(worktreeHealth(s.worktree), 'ok', 'a live worktree is ok')
 
   fs.rmSync(s.worktree, { recursive: true, force: true })
@@ -755,6 +813,168 @@ ok('frame: project check.sh probes stacks only when present (Q4)', () => {
   } finally {
     fs.rmSync(syncTmp, { recursive: true, force: true })
   }
+}
+
+// ---- Q2 (2026-09-03): readable session ids --------------------------------
+// `<org>/<workspace>/<word>-wt-<YYMMDD>-<NNN>`. The id IS the worktree dir
+// (under the org root) and the branch suffix (after `arxa/`), so these cases
+// guard a path/branch component, not a label. nextSessionId (bare-leaf mint)
+// is gone — mintSessionPath mints the full identity path (Q2/Q4/Q5 grill).
+{
+  const D = (y, m, d) => new Date(y, m - 1, d)
+  const row = (id) => ({ id })
+
+  ok('id: first of the day is -001, word de-pluralised from the workspace folder', () =>
+    assert.equal(
+      mintSessionPath({ org: 'RESTO', workspace: 'notes', sessions: [], now: D(2026, 9, 3) }),
+      'RESTO/notes/note-wt-260903-001',
+    ))
+
+  ok('id: counter advances within the same org/workspace on the same day', () =>
+    assert.equal(
+      mintSessionPath({
+        org: 'RESTO', workspace: 'notes',
+        sessions: [row('RESTO/notes/note-wt-260903-001'), row('RESTO/notes/note-wt-260903-002')],
+        now: D(2026, 9, 3),
+      }),
+      'RESTO/notes/note-wt-260903-003',
+    ))
+
+  ok('id: a different day restarts the counter', () =>
+    assert.equal(
+      mintSessionPath({ org: 'RESTO', workspace: 'notes', sessions: [row('RESTO/notes/note-wt-260903-001')], now: D(2026, 9, 4) }),
+      'RESTO/notes/note-wt-260904-001',
+    ))
+
+  ok('id: a different workspace does not inherit another folder`s count', () =>
+    assert.equal(
+      mintSessionPath({
+        org: 'RESTO', workspace: 'notes',
+        sessions: [row('RESTO/emails/email-wt-260903-001'), row('RESTO/emails/email-wt-260903-002')],
+        now: D(2026, 9, 3),
+      }),
+      'RESTO/notes/note-wt-260903-001',
+    ))
+
+  // The counter counts per org/workspace/day ACROSS WORDS (docstring, Q2/Q4):
+  // a differently-named session minted into the same dir still advances the
+  // same counter, it is not scoped per word. This replaces the old
+  // "an id taken by another workspace is skipped" case: that guarded a single
+  // flat/global id namespace, which path-qualified ids no longer have — a
+  // workspace's ids can never collide with another workspace's, the path
+  // itself disambiguates, so cross-workspace skipping is not a thing anymore.
+  ok('id: the day counter is shared across different names in the same org/workspace, not scoped per word', () =>
+    assert.equal(
+      mintSessionPath({
+        org: 'RESTO', workspace: 'notes', name: 'Kickoff',
+        sessions: [row('RESTO/notes/note-wt-260903-001')],
+        now: D(2026, 9, 3),
+      }),
+      'RESTO/notes/kickoff-wt-260903-002',
+    ))
+
+  // The invariant the old "an id taken by another workspace is skipped"
+  // test actually guarded: dsh has ONE store for the whole app, so two
+  // sessions that would reduce to the same dsh key can never collide. Flat
+  // leaf ids needed a skip loop to enforce this (alpha/notes and beta/notes
+  // could both mint 'note-wt-260903-001'). Path-qualified ids make the skip
+  // loop unnecessary — the org+workspace prefix disambiguates on its own.
+  ok('id: same leaf minted in two different workspaces still gets distinct dsh keys (dsh has ONE store)', () => {
+    const a = mintSessionPath({ org: 'RESTO', workspace: 'projects/alpha/notes', sessions: [], now: D(2026, 9, 3) })
+    const b = mintSessionPath({ org: 'RESTO', workspace: 'projects/beta/notes', sessions: [], now: D(2026, 9, 3) })
+    assert.equal(sessionLeaf(a), sessionLeaf(b), 'same leaf — the old flat id would have collided here')
+    assert.notEqual(dshSessionKey(a), dshSessionKey(b), 'the path disambiguates, which is why the skip loop is gone')
+  })
+
+  ok('id: a same-day id freed by a drop is not reused (registry is the authority)', () =>
+    assert.equal(
+      mintSessionPath({ org: 'RESTO', workspace: 'notes', sessions: [row('RESTO/notes/note-wt-260903-002')], now: D(2026, 9, 3) }),
+      'RESTO/notes/note-wt-260903-003',
+    ))
+
+  // The old nextSessionName counter never advanced for digit-leading folders
+  // (its prefix regex demanded a leading letter). mintSessionPath matches the
+  // full base verbatim, so these count correctly.
+  ok('id: a digit-leading container counts (the old prefix-regex bug is gone)', () =>
+    assert.equal(
+      mintSessionPath({
+        org: 'RESTO', workspace: 'projects/rocket/01-intake',
+        sessions: [row('RESTO/projects/rocket/01-intake/01-intake-wt-260903-001')],
+        now: D(2026, 9, 3),
+      }),
+      'RESTO/projects/rocket/01-intake/01-intake-wt-260903-002',
+    ))
+
+  // Org and workspace are now required inputs — the old bare-leaf mint
+  // tolerated an empty workspace with a 'session' fallback; the app layer
+  // must supply both now (the library never invents scope).
+  ok('id: mintSessionPath throws when the org folder is missing', () =>
+    assert.throws(() => mintSessionPath({ workspace: 'notes', sessions: [], now: D(2026, 9, 3) }), /org folder name is required/))
+
+  ok('id: mintSessionPath throws when the workspace key is missing', () =>
+    assert.throws(() => mintSessionPath({ org: 'RESTO', sessions: [], now: D(2026, 9, 3) }), /workspace key is required/))
+
+  // openSession's guard — a minted id that fails this is a broken worktree
+  // path and an unpushable branch name. assertSessionIdShape IS that guard
+  // now (every segment checked, not one flat token).
+  ok('id: every minted id satisfies openSession`s branch/path guard (assertSessionIdShape)', () => {
+    for (const ws of ['notes', 'emails', 'projects/rocket/01-intake', 'projects/alpha/design']) {
+      const id = mintSessionPath({ org: 'RESTO', workspace: ws, sessions: [], now: D(2026, 9, 3) })
+      assert.equal(assertSessionIdShape(id), id, `${ws} -> ${id}`)
+    }
+  })
+
+  ok('id: zero-padding survives past 999 without truncating', () => {
+    const sessions = [row('RESTO/notes/note-wt-260903-999')]
+    assert.equal(
+      mintSessionPath({ org: 'RESTO', workspace: 'notes', sessions, now: D(2026, 9, 3) }),
+      'RESTO/notes/note-wt-260903-1000',
+    )
+  })
+
+  // New surfaces the rename introduced: the leaf (sidebar/dsh header label,
+  // Q9) and the dsh conversation key (Q3: '/' -> '-', org segment leading for
+  // cross-org uniqueness).
+  ok('id: sessionLeaf returns the last path segment', () =>
+    assert.equal(sessionLeaf('RESTO/notes/note-wt-260903-001'), 'note-wt-260903-001'))
+
+  ok('id: dshSessionKey flattens the path with the org leading, arxa- prefixed', () =>
+    assert.equal(dshSessionKey('RESTO/notes/note-wt-260903-001'), 'arxa-RESTO-notes-note-wt-260903-001'))
+
+  // openSession: id is required (Q8) — the app layer mints via mintSessionPath,
+  // never the library. This is the contract behind the id-required failures
+  // this whole rename exists to fix.
+  ok('id: openSession throws id-required when no id is given', () => {
+    assert.throws(() => openSession(projectPath, { name: 'no id given' }), TypeError)
+    assert.throws(() => openSession(projectPath, { name: 'no id given' }), /id-required/)
+  })
+
+  // When no explicit name is given, the session's display name defaults to
+  // the LEAF of the id, not the whole path — the sidebar/dsh header label
+  // must not show the org/workspace prefix.
+  ok('id: session name defaults to the id`s leaf when no name is given', () => {
+    const s = openSession(projectPath, { id: 'RESTO/notes/note-wt-260903-777' })
+    assert.equal(s.name, 'note-wt-260903-777', 'name defaulted to the leaf, not the whole path')
+  })
+
+  // A multi-segment minted id nests the FULL path under `.arxa/worktrees` —
+  // the worktree directory, the branch and the folder a human sees are the
+  // same string end to end (Q2/Q5). Docstring example, verbatim.
+  ok('id: a multi-segment minted id creates the full nested worktree directory tree', () => {
+    const id = mintSessionPath({
+      org: 'RESTO', workspace: 'projects/kitchen-project/06-build', name: 'Backoffice',
+      sessions: [], now: D(2026, 9, 3),
+    })
+    assert.equal(id, 'RESTO/projects/kitchen-project/06-build/backoffice-wt-260903-001')
+    const s = openSession(projectPath, { id, name: 'Backoffice' })
+    assert.equal(s.branch, `arxa/${id}`)
+    assert.equal(s.worktree, path.join(projectPath, '.arxa', 'worktrees', ...id.split('/')))
+    assert.ok(fs.existsSync(s.worktree), 'leaf worktree directory was created')
+    assert.ok(
+      fs.existsSync(path.join(projectPath, '.arxa', 'worktrees', 'RESTO', 'projects', 'kitchen-project', '06-build')),
+      'intermediate path segments were created too, not just the leaf',
+    )
+  })
 }
 
 console.log(`\nselftest: ${passed}/${passed} passed`)

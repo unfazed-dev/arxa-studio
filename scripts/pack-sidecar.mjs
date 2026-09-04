@@ -47,7 +47,15 @@ if (!/node$/.test(nodeBin)) {
   console.error(`pack-sidecar: run me with node, not ${nodeBin} — the exec path is pinned into the payload`)
   process.exit(1)
 }
-for (const rel of ['bin/arxa-studio.mjs', 'bin/loopback-localhost-patch.mjs', 'profile/cordis.patch.yml', 'node_modules/@deepseek-ai/dsh/lib/bin.js']) {
+// Every bin/ module the launcher imports at runtime. Explicit (not a glob) on
+// purpose: bin/ also holds dev-only scripts (arxa-explore, isolation-check,
+// arxa-engine-sync, .arxa-cell-launcher) that must NOT ship in the sidecar.
+// One list drives both the existence check and the stage copy so they cannot
+// drift — a89b02e added materialise-preset.mjs to the launcher's imports and
+// the old two hard-coded copies missed it (packed sidecar died on
+// ERR_MODULE_NOT_FOUND before binding its port, 2026-09-02).
+const BIN_FILES = ['arxa-studio.mjs', 'loopback-localhost-patch.mjs', 'materialise-preset.mjs']
+for (const rel of [...BIN_FILES.map((f) => `bin/${f}`), 'profile/cordis.patch.yml', 'node_modules/@deepseek-ai/dsh/lib/bin.js']) {
   if (!existsSync(join(studioRoot, rel))) {
     console.error(`pack-sidecar: missing ${rel} — run npm install first`)
     process.exit(1)
@@ -66,7 +74,7 @@ try {
   // flags — no 270 MB staging copy.
   const stage = join(work, 'stage')
   mkdirSync(join(stage, studioName, 'bin'), { recursive: true })
-  for (const f of ['arxa-studio.mjs', 'loopback-localhost-patch.mjs']) {
+  for (const f of BIN_FILES) {
     cpSync(join(studioRoot, 'bin', f), join(stage, studioName, 'bin', f))
   }
   writeFileSync(join(stage, studioName, 'bin', 'packed.json'), JSON.stringify({

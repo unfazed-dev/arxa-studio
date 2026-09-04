@@ -35,6 +35,36 @@ const suites = readdirSync(pluginsDir, { withFileTypes: true })
     return out
   })
 suites.push([root, 'scripts', 'preset-check.mjs'])
+// The CI/CD stress harness (identity collision, concurrency, partial
+// failure). Offline and deterministic — the LIVE variant is cicd-smoke.mjs,
+// which needs a real engine and real GitHub and is hand-run only.
+suites.push([root, 'scripts', 'cicd-stress.mjs'])
+// arxa-jobs reads an UNDOCUMENTED shape out of the installed dsh (the job
+// registry's `.id` fence). Its selftest runs against a faithful fake, so this
+// gate is the half that notices when the real thing moves.
+suites.push([root, 'scripts', 'jobs-fence-check.mjs'])
+// F6 mirror drift: MIRROR_TOOL_NAMES vs the pinned CLI's advertised tool list.
+// OFFLINE — reads plugins/claude-code/live-tools.json, never launches claude, so
+// it is safe here. It fails on CHANGE, not on the standing (unruled) diff, so a
+// CLI bump or an edit to the list goes red instead of drifting unnoticed.
+suites.push([root, 'scripts', 'mirror-drift-check.mjs'])
+
+// An event type dsh cannot load makes the WHOLE session unreadable on reopen, and nothing goes
+// red when it is written — only when a user restarts and finds "Failed to load history". Two real
+// sessions were lost to this before the gate existed.
+suites.push([root, 'scripts', 'session-event-vocabulary-check.mjs'])
+// The platform-pin lockstep gate (update-strategy amendment 2026-09-05):
+// one wave, one version — every @deepseek-ai/dsh* in the lockfile on the
+// pinned release, the import surface still exporting what the plugins
+// destructure, and pi-ai owned by upstream’s range again.
+suites.push([root, 'scripts', 'dsh-contract-check.mjs'])
+
+// bin/ is outside the plugins/*/selftest.mjs sweep, so this is wired by hand.
+// arxa-engine-sync decides what reaches a user's desktop payload, and both of its
+// previous skip rules failed silently — a version-keyed compare shipped nothing when
+// the version was unchanged, and plugins without a package.json were passed over
+// entirely. A build tool that reports success while shipping nothing needs a gate.
+suites.push([root, 'bin', 'selftest.engine-sync.mjs'])
 
 console.log('arxa-studio CI — ' + suites.length + ' suites')
 let failed = 0

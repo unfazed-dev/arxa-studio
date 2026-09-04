@@ -122,6 +122,11 @@ const bundles = headless
 const designPanelDir = resolve(here, '..', 'plugins', 'design-panel')
 const brandDir = resolve(here, '..', 'plugins', 'brand')
 const genUiDir = resolve(here, '..', 'plugins', 'gen-ui')
+// arxa-provider-status: provider/status session events → providerStatus
+// projection → composer pill, shared by every model provider (docs/plans/
+// claude-subscription-engine.md task 13). By-name because it ships a
+// browser half via package.json dsh.client, like gen-ui above.
+const providerStatusDir = resolve(here, '..', 'plugins', 'provider-status')
 // Installed always, loaded only when the profile enables it (row 10 ships
 // commented out — it needs a real MCP server to point at).
 const mcpAppsDir = resolve(here, '..', 'plugins', 'mcp-apps')
@@ -129,6 +134,11 @@ const waitingPageDir = resolve(here, '..', 'plugins', 'waiting-page')
 const themeAccentDir = resolve(here, '..', 'plugins', 'theme-accent')
 const pairingDir = resolve(here, '..', 'plugins', 'pairing')
 const sidebarDir = resolve(here, '..', 'plugins', 'arxa-sidebar')
+// Git card (docs/plans/git-card-stock-dock-rebuild.md): its own plugin —
+// host half serves /__arxa/git-card/action over the sidebar's org shell;
+// browser half is the conversation.input.dock card in stock QueueDock grammar.
+const gitCardDir = resolve(here, '..', 'plugins', 'arxa-git-card')
+const jobsDir = resolve(here, '..', 'plugins', 'arxa-jobs')
 // Approvals loop (grill D60–D68): approvals doors new pendings through the
 // push-doorbell library by bare-name-then-relative import probe (the sidebar
 // importShell pattern) — both dirs ride the flat copies below so the probe
@@ -158,26 +168,42 @@ const prismDir = resolve(here, '..', 'plugins', 'prism')
 // look-and-feel rows (accent/editor-font/Background retarget there).
 const personalisationDir = resolve(here, '..', 'plugins', 'personalisation')
 mkdirSync(profileDir, { recursive: true })
+/**
+ * The profile's plugin set — ONE list, two consumers.
+ *
+ * It feeds the profile package.json below (checkout mode, where pnpm installs
+ * the file: deps) AND the packed-mode directory copy further down. Those were
+ * two hand-maintained lists until 2026-09-03, when `arxa-personalisation` sat
+ * in the deps but not in the packed copy: the desktop sidecar extracted fine,
+ * printed its banner, then died on `Cannot find package 'arxa-personalisation'`
+ * before binding its port — silently, because packed mode sends engine stdio
+ * to the engine log. Same failure shape as the bin/ file list that became
+ * BIN_FILES in eb9f088, so it gets the same cure rather than a second patch.
+ */
+const PROFILE_PLUGINS = [
+  ['arxa-design-panel', designPanelDir],
+  ['arxa-brand', brandDir],
+  ['arxa-gen-ui', genUiDir],
+  ['arxa-mcp-apps', mcpAppsDir],
+  ['arxa-waiting-page', waitingPageDir],
+  ['arxa-theme-accent', themeAccentDir],
+  ['arxa-pairing', pairingDir],
+  ['arxa-sidebar', sidebarDir],
+  ['arxa-git-card', gitCardDir],
+  ['arxa-jobs', jobsDir],
+  ['arxa-file-org-shell', fileOrgShellDir],
+  ['arxa-github-link', githubLinkDir],
+  ['arxa-artifact-viewer', artifactViewerDir],
+  ['arxa-frame', arxaFrameDir],
+  ['arxa-locale', localeDir],
+  ['arxa-prism', prismDir],
+  ['arxa-personalisation', personalisationDir],
+  ['arxa-provider-status', providerStatusDir],
+]
 writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
   name: 'dsh-profile-arxa',
   private: true,
-  dependencies: {
-    'arxa-design-panel': `file:${designPanelDir}`,
-    'arxa-brand': `file:${brandDir}`,
-    'arxa-gen-ui': `file:${genUiDir}`,
-    'arxa-mcp-apps': `file:${mcpAppsDir}`,
-    'arxa-waiting-page': `file:${waitingPageDir}`,
-    'arxa-theme-accent': `file:${themeAccentDir}`,
-    'arxa-pairing': `file:${pairingDir}`,
-    'arxa-sidebar': `file:${sidebarDir}`,
-    'arxa-file-org-shell': `file:${fileOrgShellDir}`,
-    'arxa-github-link': `file:${githubLinkDir}`,
-    'arxa-artifact-viewer': `file:${artifactViewerDir}`,
-    'arxa-frame': `file:${arxaFrameDir}`,
-    'arxa-locale': `file:${localeDir}`,
-    'arxa-prism': `file:${prismDir}`,
-    'arxa-personalisation': `file:${personalisationDir}`,
-  },
+  dependencies: Object.fromEntries(PROFILE_PLUGINS.map(([name, dir]) => [name, `file:${dir}`])),
   dsh: { profile: { bundles } },
 }, null, 2) + '\n')
 writeFileSync(join(profileDir, 'cordis.patch.yml'), readFileSync(template))
@@ -346,7 +372,7 @@ engineLog('dsh bin resolved: ' + dshBin)
 // The design panel, brand and gen-ui plugins resolve by package name (their
 // browser halves are discovered through package.json dsh.client, which a
 // file-path entry never reaches).
-const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa-mcp-apps', 'arxa-waiting-page', 'arxa-theme-accent', 'arxa-pairing', 'arxa-sidebar', 'arxa-artifact-viewer', 'arxa-frame', 'arxa-locale', 'arxa-prism']
+const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa-mcp-apps', 'arxa-waiting-page', 'arxa-theme-accent', 'arxa-pairing', 'arxa-sidebar', 'arxa-git-card', 'arxa-artifact-viewer', 'arxa-frame', 'arxa-locale', 'arxa-prism', 'arxa-provider-status']
 // ALWAYS install, never skip on presence: these are file: dependencies, and
 // pnpm copies them into .pnpm at add-time. A plain `pnpm install` sees the
 // lockfile entry unchanged and keeps the OLD copy — measured 2026-08-25: the
@@ -386,23 +412,11 @@ const fiveLibs = [
 ]
 const nm = join(profileDir, 'node_modules')
 if (packed) {
-  for (const [name, dir] of [
-    ['arxa-design-panel', designPanelDir],
-    ['arxa-brand', brandDir],
-    ['arxa-gen-ui', genUiDir],
-    ['arxa-mcp-apps', mcpAppsDir],
-    ['arxa-waiting-page', waitingPageDir],
-    ['arxa-theme-accent', themeAccentDir],
-    ['arxa-pairing', pairingDir],
-    ['arxa-sidebar', sidebarDir],
-    ['arxa-file-org-shell', fileOrgShellDir],
-    ['arxa-github-link', githubLinkDir],
-    ['arxa-artifact-viewer', artifactViewerDir],
-    ['arxa-frame', arxaFrameDir],
-    ['arxa-locale', localeDir],
-    ['arxa-prism', prismDir],
-    ...fiveLibs,
-  ]) {
+  // PROFILE_PLUGINS (above) is the single source for the plugin set; only the
+  // relative-import libs are extra here. A plugin added to the profile is
+  // therefore shipped by the sidecar automatically — the drift that killed the
+  // 2026-09-03 build cannot recur by omission.
+  for (const [name, dir] of [...PROFILE_PLUGINS, ...fiveLibs]) {
     rmSync(join(nm, name), { recursive: true, force: true })
     cpSync(dir, join(nm, name), { recursive: true })
   }
@@ -502,6 +516,42 @@ const loaderArgs = ['--import', pathToFileURL(join(here, 'loopback-localhost-pat
 // explicitly to arxa's own home and dsh derives the rest fresh.
 const childEnv = Object.fromEntries(
   Object.entries(process.env).filter(([k]) => !k.startsWith('DSH_')))
+
+// ---- workspace store preflight (2026-09-03) -------------------------------
+// dsh validates the workspace domain at BOOT and every failure is a hard
+// throw, so ONE duplicated session id means the engine never starts — and a
+// product that will not start cannot offer a repair UI. That is not
+// hypothetical: a legacy bare-leaf id claimed by two workspaces took this
+// engine down and had to be fixed by hand-editing the user's JSON.
+//
+// dsh is a dependency, never a fork, so the validator stays untouched and the
+// repair runs here instead — before the child is spawned. Loud, backed up,
+// and conservative: nothing whose path still exists is ever deleted.
+try {
+  const { healWorkspaceStore } = await import(
+    pathToFileURL(join(here, '..', 'plugins', 'workspace', 'lib', 'store-heal.js')).href)
+  const storeFile = join(dshHome, 'storages', 'workspace.json')
+  if (existsSync(storeFile)) {
+    const { store, changes } = healWorkspaceStore(JSON.parse(readFileSync(storeFile, 'utf8')))
+    if (changes.length > 0) {
+      // Back up BEFORE writing: this is the user's session-to-workspace map,
+      // and a wrong repair must stay undoable.
+      const backup = storeFile + '.bak-' + new Date().toISOString().replace(/[:.]/g, '-')
+      copyFileSync(storeFile, backup)
+      writeFileSync(storeFile, JSON.stringify(store, null, 2) + '\n')
+      const lines = [
+        'arxa: repaired the workspace store so dsh can boot (' + changes.length + ' change(s)):',
+        ...changes.map((c) => '  - ' + c),
+        '  backup: ' + backup,
+      ]
+      for (const l of lines) { console.error(l); engineLog(l) }
+    }
+  }
+} catch (err) {
+  // A store that cannot be read or healed is left exactly as it was; dsh will
+  // report it itself. Never turn a repair attempt into a new failure mode.
+  engineLog('arxa: workspace store preflight skipped — ' + (err?.message ?? err))
+}
 
 const child = spawn(process.execPath, [...loaderArgs, dshBin, '--profile', 'arxa', ...passthrough, ...trustArgs], {
   stdio: packed ? ['ignore', engineLogFd, engineLogFd] : 'inherit',
