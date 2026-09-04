@@ -3,7 +3,7 @@
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { createRequire } from 'node:module'
-import { query } from '@anthropic-ai/claude-agent-sdk'
+import { query, startup } from '@anthropic-ai/claude-agent-sdk'
 import { ClaudeCodeAdapter } from './lib/adapter.js'
 import { Probe, resolveClaudeBinary } from './lib/probe.js'
 import { scrubEnv } from './lib/env.js'
@@ -35,7 +35,7 @@ export function apply (ctx, config = {}) {
     confine: (argv, policy) => ctx.sandbox.confine(argv, policy),
     policy: ctx.sandboxPolicy.resolve({}),
   })
-  const probe = new Probe({ query, binary, env, spawnClaudeCodeProcess: probeSpawner })
+  const probe = new Probe({ startup, binary, env, spawnClaudeCodeProcess: probeSpawner })
   ctx.llm.registerAdapter([PROVIDER_ID], new ClaudeCodeAdapter({ query, probe, ctx, binary, env, version }))
   ctx.authorization.registerFlow(claudeAuthFlow({ probe, credentials: ctx.credentials }))
   hideAnthropicOauth(ctx.authorization)
