@@ -8,6 +8,7 @@ import { ClaudeCodeAdapter } from './lib/adapter.js'
 import { Probe, resolveClaudeBinary } from './lib/probe.js'
 import { scrubEnv } from './lib/env.js'
 import { PROVIDER_ID } from './lib/models.js'
+import { claudeAuthFlow } from './lib/auth-flow.js'
 
 const require = createRequire(import.meta.url)
 const version = require(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'package.json')).version
@@ -25,6 +26,6 @@ export function apply (ctx, config = {}) {
   const binary = config.binary ?? resolveClaudeBinary({ env: process.env, platform: process.platform, arch: process.arch, sdkRoot })
   const probe = new Probe({ query, binary, env })
   ctx.llm.registerAdapter([PROVIDER_ID], new ClaudeCodeAdapter({ query, probe, ctx, binary, env, version }))
-  // Task 10: ctx.authorization.registerFlow(claudeAuthFlow({ probe, credentials: ctx.credentials }))
+  ctx.authorization.registerFlow(claudeAuthFlow({ probe, credentials: ctx.credentials }))
   // Task 11: hideAnthropicOauth(ctx.authorization)
 }
