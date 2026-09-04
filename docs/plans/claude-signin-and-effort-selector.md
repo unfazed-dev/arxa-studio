@@ -206,10 +206,33 @@ via cordis.original: ok
 provider and called `confine()` on the **raw instance**. Production never does. The
 suite tested a path no caller uses.
 
-**Why it appeared only now.** The field dates from `e7f500c`, but the desktop payload
-carried a months-old copy of `plugins/sandbox` that predates it. The content-hash sync
-(F11) brought the payload current, which activated the latent defect. The bug was
-already in the repo; the sync made it reachable.
+**Why turns worked while the probe did not.** `extraWritableRoots()` returns early
+unless the mode is `workspace-write`, so the private field is only read in that one
+mode. Measured against the pre-fix file:
+
+```
+danger-full-access -> ok       (early return, field never read)
+read-only          -> ok       (early return)
+workspace-write    -> THROWS
+```
+
+The session runs **Full access**, so every turn's confined spawn was fine. The probe
+does not belong to a session: `index.mjs` builds its spawner from
+`ctx.sandboxPolicy.resolve({})`, the agentless deployment default —
+`workspace-write`. So the probe, and only the probe, threw on every call.
+
+**This is also the original "not signed in".** One defect produced every symptom:
+probe throws -> `loggedIn: false` -> the old fixed string said "not signed in" ->
+`listModels` fell back to `STATIC_MODELS` -> the picker stored `opus` -> `resolveModel`
+missed the live `opus[1m]` -> no `reasoning` -> no effort control. F12 is still a real
+defect (a stored id outlives any probe), but F16 is what triggered the whole sequence.
+
+**Correction.** An earlier draft of this section claimed the desktop payload's stale
+`plugins/sandbox` had shielded the bug until the content-hash sync brought it current.
+That was wrong: `profile/cordis.patch.yml:102` loads sandbox by **absolute repo path**,
+so the payload copy is never loaded and its staleness shielded nothing. `e7f500c` landed
+2026-09-02 and was in master well before this session. The mode matrix above is the
+actual explanation.
 
 **Fix.** The memo is a plain property (`toolchainRootsMemo`), not a `#private` field.
 Ordinary properties forward through the proxy untouched. Fixing it in the provider
