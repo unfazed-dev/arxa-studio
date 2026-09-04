@@ -190,6 +190,21 @@ const world = (paths, links = {}) => ({
   ok('policy.extraWritableRoots honoured once, workspace-write only')
 }
 
+// ---- 12. the blast-radius guard (never home/filesystem-root, never near-root)
+//      applies to the caller-attached channel too, not just the toolchain
+//      resolver — pinned against the real claude-code transcript-dir grant.
+{
+  const provider = new ArxaSandboxProvider(new Context(), { runnerCommand: [], runnerFailureSignatures: [], probeTimeoutMs: 5000 })
+  const claudeRoot = join(homedir(), '.claude', 'projects')
+  const roots = provider.extraWritableRoots({ mode: 'workspace-write', workspaceRoot: '/ws', extraWritableRoots: [claudeRoot] })
+  const forbidden = new Set([canonicalPath(homedir()), canonicalPath('/'), canonicalPath('/Users'), canonicalPath('/Volumes')])
+  for (const root of roots) {
+    assert.ok(!forbidden.has(root), `caller-attached grant must never be a home/filesystem root: ${root}`)
+    assert.ok(root.split('/').filter(Boolean).length >= 2, `caller-attached grant must be specific, not near-root: ${root}`)
+  }
+  ok('blast-radius guard covers caller-attached roots (extraWritableRoots output), not only the resolver')
+}
+
 // ---- LIVE rows: the real machine, skipped (never failed) without a toolchain.
 {
   const flutter = whichOnPath('flutter')
