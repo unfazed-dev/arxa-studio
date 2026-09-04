@@ -1,0 +1,311 @@
+import { strict as assert } from 'node:assert'
+import { ClaudeCodeAdapter } from './lib/adapter.js'
+import { fromClaude, fromLoop } from './lib/pending.js'
+import { MIRROR_TOOL_NAMES } from './lib/mirror-tools.js'
+
+let passed = 0
+const ok = (msg) => { passed++; console.log(`ok ${passed} - ${msg}`) }
+
+async function * from (arr) { for (const m of arr) yield m }
+const collect = async (gen) => { const out = []; for await (const c of gen) out.push(c); return out }
+const settledIn = (promise, ms) => Promise.race([
+  promise.then(() => 'resolved', () => 'rejected'),
+  new Promise((r) => setTimeout(() => r('pending'), ms)),
+])
+
+const init = { type: 'system', subtype: 'init', apiKeySource: 'none', session_id: 'cs-9', model: 'sonnet', claude_code_version: '2.1.259', tools: [] }
+const ev = (event) => ({ type: 'stream_event', event, parent_tool_use_id: null })
+const done = (text) => [
+  ev({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }),
+  ev({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } }),
+  ev({ type: 'content_block_stop', index: 0 }),
+  { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'text', text }] } },
+  { type: 'result', subtype: 'success', is_error: false, result: text, usage: { input_tokens: 1, output_tokens: 1 } },
+]
+
+const queries = []
+const interrupts = []
+const fakeQuery = (script) => (params) => { queries.push(params); const it = from(script); it.interrupt = async () => { interrupts.push(params) }; it.close = () => {}; return it }
+
+const events = []
+const agent = {
+  id: 'agent-1',
+  session: { header: { cwd: '/ws' }, events, append: (type, data) => { events.push({ type, data }); return { seq: events.length - 1 } } },
+  ctx: { tools: { schemas: () => [{ name: 'gen_ui', description: 'card', parameters: { type: 'object', properties: {} } }, { name: 'Read', description: 'm', parameters: {} }] } },
+}
+let initiator = agent
+const confined = []
+const ctx = {
+  agents: { currentInitiator: () => initiator },
+  sandbox: { confine: (argv, policy) => { confined.push({ argv, policy }); return { argv } } },
+  // `session?.` because the no-agent utility path resolves a policy with no session at all.
+  sandboxPolicy: { resolve: ({ session }) => ({ mode: 'workspace-write', workspaceRoot: session?.header?.cwd, sessionId: 's' }) },
+  approval: { request: async () => 'allowed-once' },
+}
+const probe = { current: async () => ({ loggedIn: true, version: '2.1.259', subscriptionType: 'max', models: [{ provider: 'claude-code', id: 'fable', name: 'Fable', description: 'Best', efforts: ['high'] }, { provider: 'claude-code', id: 'sonnet', name: 'Sonnet', description: 'Fast', efforts: [] }] }) }
+
+// spawn/mkdir are injected so exercising spawnClaudeCodeProcess neither starts a process nor
+// creates ~/.claude/projects on the machine running the test.
+const spawns = []
+const mkdirs = []
+const mk = (script, p = probe) => new ClaudeCodeAdapter({
+  query: fakeQuery(script), probe: p, ctx, binary: '/opt/bin/claude', env: { PATH: '/x' }, version: '0.1.0',
+  spawn: (cmd, args, opts) => { spawns.push({ cmd, args, opts }); return { pid: 1234 } },
+  mkdir: (dir, opts) => { mkdirs.push({ dir, opts }) },
+})
+
+assert.deepEqual(mk([]).providerInfo('claude-code'), { id: 'claude-code', name: 'Claude Code (your subscription)' })
+ok('providerInfo')
+
+const models = await mk([]).listModels('claude-code')
+assert.equal(models[0].description, 'Best — included on Max, up to 50% of your weekly limit')
+ok('listModels carries tier label')
+
+const resolved = await mk([]).resolveModel('claude-code', 'fable')
+assert.deepEqual(resolved.reasoning, { efforts: [{ id: 'high', name: 'high' }], defaultEffort: 'high' })
+assert.deepEqual(resolved.context, { contextWindow: 200_000 })
+ok('resolveModel efforts')
+
+// --- first turn, fresh session: options assembled per D5/D7/D10
+{
+  const a = mk([init, ...done('Hi')])
+  const chunks = await collect(a.stream({ provider: 'claude-code', model: 'fable', system: 'You are arxa.', messages: [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }], tools: [] }))
+  assert.deepEqual(chunks.at(-1), { type: 'finish', reason: { kind: 'stop' } })
+  const o = queries[0].options
+  assert.equal(queries[0].prompt, 'hello')
+  assert.deepEqual(o.settingSources, []); assert.equal(o.permissionMode, 'default'); assert.equal(o.strictMcpConfig, true)
+  assert.deepEqual(o.systemPrompt, { type: 'custom', prompt: 'You are arxa.' })
+  assert.equal(o.model, 'fable'); assert.equal(o.fallbackModel, 'opus'); assert.equal(o.resume, undefined)
+  assert.equal(o.pathToClaudeCodeExecutable, '/opt/bin/claude'); assert.equal(o.cwd, '/ws'); assert.equal(o.includePartialMessages, true)
+  assert.equal(o.mcpServers.arxa.type, 'sdk'); assert.equal(typeof o.canUseTool, 'function'); assert.equal(typeof o.spawnClaudeCodeProcess, 'function')
+  assert.deepEqual(events.find((e) => e.type === 'claude-code/session').data, { claudeSessionId: 'cs-9', model: 'sonnet' })
+  ok('fresh turn options + session event')
+
+  // D5 tool lock: an allowlist on `tools` (the SDK's availability knob), never a denylist and
+  // never `allowedTools` — which only auto-approves and would bypass canUseTool entirely.
+  assert.deepEqual(o.tools, [...MIRROR_TOOL_NAMES, 'mcp__arxa__gen_ui'])
+  assert.equal(o.allowedTools, undefined)
+  assert.equal(o.disallowedTools, undefined)
+  assert.equal(o.bypassPermissions, undefined)
+  assert.equal(o.allowDangerouslySkipPermissions, undefined)
+  ok('tools is an allowlist of mirrored built-ins + arxa mcp tools; no auto-approve or bypass knob is set')
+}
+
+// --- second turn resumes and does NOT hand off
+{
+  const a = mk([init, ...done('Again')])
+  await collect(a.stream({ provider: 'claude-code', model: 'sonnet', system: 's', messages: [
+    { role: 'user', content: [{ type: 'text', text: 'hello' }] }, { role: 'assistant', content: [{ type: 'text', text: 'Hi' }] }, { role: 'user', content: [{ type: 'text', text: 'more' }] }], tools: [] }))
+  assert.equal(queries.at(-1).options.resume, 'cs-9'); assert.equal(queries.at(-1).prompt, 'more'); assert.equal(queries.at(-1).options.fallbackModel, undefined)
+  ok('resume, no handoff')
+}
+
+// --- engine switch into claude: no session event yet → handoff prefix
+{
+  events.length = 0
+  const a = mk([init, ...done('Sw')])
+  await collect(a.stream({ provider: 'claude-code', model: 'sonnet', system: 's', messages: [
+    { role: 'user', content: [{ type: 'text', text: 'built by deepseek' }] }, { role: 'assistant', content: [{ type: 'text', text: 'done' }] }, { role: 'user', content: [{ type: 'text', text: 'continue' }] }], tools: [] }))
+  assert.match(queries.at(-1).prompt, /^Conversation so far/); assert.match(queries.at(-1).prompt, /User: continue$/)
+  ok('handoff on switch')
+}
+
+// --- tool round across two stream() calls + mcp bridged result
+{
+  events.length = 0
+  const script = [init,
+    ev({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tu_r', name: 'Read', input: {} } }),
+    ev({ type: 'content_block_stop', index: 0 }),
+    ev({ type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'tu_g', name: 'mcp__arxa__gen_ui', input: {} } }),
+    ev({ type: 'content_block_stop', index: 1 }),
+    { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id: 'tu_r', name: 'Read', input: {} }, { type: 'tool_use', id: 'tu_g', name: 'mcp__arxa__gen_ui', input: {} }] } },
+    { type: 'user', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu_r', content: 'file!', is_error: false }] } },
+    ...done('All done')]
+  const a = mk(script)
+  const base = { provider: 'claude-code', model: 'sonnet', system: 's', tools: [] }
+  const seg1 = await collect(a.stream({ ...base, messages: [{ role: 'user', content: [{ type: 'text', text: 'go' }] }] }))
+  const names = seg1.filter((c) => c.type === 'block-end').map((c) => c.block.name)
+  assert.deepEqual(names, ['Read', 'gen_ui'], 'mcp prefix stripped so the real dsh tool runs'); assert.deepEqual(seg1.at(-1).reason, { kind: 'tool-calls' })
+  assert.deepEqual(await fromClaude.expect('tu_r'), { text: 'file!', isError: false })
+  // the MCP handler asks for gen_ui's result; the loop answers via the next stream() messages
+  const handlers = queries.at(-1).options.mcpServers.arxa.instance.server._requestHandlers
+  const mcpCall = handlers.get('tools/call')({ method: 'tools/call', params: { name: 'gen_ui', arguments: {} } }, {})
+  const seg2 = await collect(a.stream({ ...base, messages: [
+    { role: 'user', content: [{ type: 'text', text: 'go' }] },
+    { role: 'assistant', content: [{ type: 'tool-call', id: 'tu_r', name: 'Read', arguments: '{}' }, { type: 'tool-call', id: 'tu_g', name: 'gen_ui', arguments: '{}' }] },
+    { role: 'user', content: [{ type: 'tool-result', toolCallId: 'tu_r', content: [{ type: 'text', text: 'file!' }] }, { type: 'tool-result', toolCallId: 'tu_g', content: [{ type: 'text', text: 'card shown' }] }] }] }))
+  assert.deepEqual(await mcpCall, { content: [{ type: 'text', text: 'card shown' }], isError: false })
+  assert.deepEqual(seg2.at(-1), { type: 'finish', reason: { kind: 'stop' } })
+  ok('tool round + mcp result round-trip')
+
+  // The spawner the SDK would have called: arxa's sandbox wraps the argv, with the transcript
+  // dir granted. Driven directly here because a fake query() never starts a process.
+  const proc = queries.at(-1).options.spawnClaudeCodeProcess({ command: '/opt/bin/claude', args: ['--print'], cwd: '/ws', env: { PATH: '/x' }, signal: undefined })
+  assert.equal(confined[0].policy.extraWritableRoots.length, 1)
+  assert.equal(confined[0].policy.mode, 'workspace-write')
+  assert.deepEqual(confined[0].argv, ['/opt/bin/claude', '--print'])
+  assert.equal(spawns[0].opts.cwd, '/ws'); assert.equal(proc.pid, 1234); assert.equal(mkdirs.length, 1)
+  ok('spawner built with the sandbox policy')
+}
+
+// --- a result Claude reported that no mirror tool ever claimed must not outlive the turn:
+// `early` has no eviction of its own, so a finished turn has to drop the ids it registered.
+{
+  events.length = 0
+  const script = [init,
+    ev({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tu_leak', name: 'Read', input: {} } }),
+    ev({ type: 'content_block_stop', index: 0 }),
+    { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id: 'tu_leak', name: 'Read', input: {} }] } },
+    { type: 'user', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu_leak', content: 'unclaimed', is_error: false }] } },
+    ...done('finished')]
+  const a = mk(script)
+  const base = { provider: 'claude-code', model: 'sonnet', system: 's', tools: [] }
+  const seg1 = await collect(a.stream({ ...base, messages: [{ role: 'user', content: [{ type: 'text', text: 'go' }] }] }))
+  assert.deepEqual(seg1.at(-1).reason, { kind: 'tool-calls' })
+  assert.equal(fromClaude.early.has('tu_leak'), true, 'the result parked while the loop was dispatching')
+  const seg2 = await collect(a.stream({ ...base, messages: [
+    { role: 'user', content: [{ type: 'text', text: 'go' }] },
+    { role: 'assistant', content: [{ type: 'tool-call', id: 'tu_leak', name: 'Read', arguments: '{}' }] },
+    { role: 'user', content: [{ type: 'tool-result', toolCallId: 'tu_leak', content: [{ type: 'text', text: 'unclaimed' }] }] }] }))
+  assert.deepEqual(seg2.at(-1), { type: 'finish', reason: { kind: 'stop' } })
+  assert.equal(fromClaude.early.has('tu_leak'), false, 'the finished turn released the id it registered')
+  ok('a finished turn drops its own unclaimed pending results')
+}
+
+// --- a real tool failure: the loop's wait is rejected, and the MCP call Claude is blocked on
+// settles as readable error text instead of hanging the child.
+{
+  events.length = 0
+  const otherSession = fromLoop.expect('other-session-call')       // a concurrent session's wait
+  const otherState = settledIn(otherSession, 30)
+  const script = [init,
+    ev({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tu_f', name: 'mcp__arxa__gen_ui', input: {} } }),
+    ev({ type: 'content_block_stop', index: 0 }),
+    { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id: 'tu_f', name: 'mcp__arxa__gen_ui', input: {} }] } },
+    ...done('never read')]
+  const a = mk(script)
+  const controller = new AbortController()
+  const seg = await collect(a.stream({ provider: 'claude-code', model: 'sonnet', system: 's', tools: [], signal: controller.signal, messages: [{ role: 'user', content: [{ type: 'text', text: 'go' }] }] }))
+  assert.deepEqual(seg.at(-1).reason, { kind: 'tool-calls' })
+  const handlers = queries.at(-1).options.mcpServers.arxa.instance.server._requestHandlers
+  const mcpCall = handlers.get('tools/call')({ method: 'tools/call', params: { name: 'gen_ui', arguments: {} } }, {})
+  controller.abort()
+  const failed = await mcpCall
+  assert.equal(failed.isError, true)
+  assert.match(failed.content[0].text, /arxa: tool call failed/)
+  ok('an aborted turn turns the loop-side rejection into text Claude can read, not a hang')
+
+  assert.equal(await otherState, 'pending', 'another session\'s pending wait must survive this turn ending')
+  ok('clear() is scoped to the ids this turn registered')
+  fromLoop.clear(['other-session-call'])
+  assert.equal(await settledIn(otherSession, 30), 'rejected')
+}
+
+// --- a dsh tool that FAILED must reach Claude flagged as an error. dsh's ToolResultBlock carries
+// `isError?: boolean` (dsh-llm lib/types/types.d.ts:73); every other case here leaves it unset, so
+// this is the only one that proves the flag is read from the field dsh actually writes.
+{
+  events.length = 0
+  const script = [init,
+    ev({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tu_bad', name: 'mcp__arxa__gen_ui', input: {} } }),
+    ev({ type: 'content_block_stop', index: 0 }),
+    { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id: 'tu_bad', name: 'mcp__arxa__gen_ui', input: {} }] } },
+    ...done('understood')]
+  const a = mk(script)
+  const base = { provider: 'claude-code', model: 'sonnet', system: 's', tools: [] }
+  const seg1 = await collect(a.stream({ ...base, messages: [{ role: 'user', content: [{ type: 'text', text: 'go' }] }] }))
+  assert.deepEqual(seg1.at(-1).reason, { kind: 'tool-calls' })
+  const handlers = queries.at(-1).options.mcpServers.arxa.instance.server._requestHandlers
+  const mcpCall = handlers.get('tools/call')({ method: 'tools/call', params: { name: 'gen_ui', arguments: {} } }, {})
+  await collect(a.stream({ ...base, messages: [
+    { role: 'user', content: [{ type: 'text', text: 'go' }] },
+    { role: 'assistant', content: [{ type: 'tool-call', id: 'tu_bad', name: 'gen_ui', arguments: '{}' }] },
+    { role: 'user', content: [{ type: 'tool-result', toolCallId: 'tu_bad', content: [{ type: 'text', text: 'gate refused this call' }], isError: true }] }] }))
+  assert.deepEqual(await mcpCall, { content: [{ type: 'text', text: 'gate refused this call' }], isError: true })
+  ok('a failed dsh tool reaches claude flagged as an error, not as ordinary output it would read as success')
+}
+
+// --- a signal that had already aborted before stream() reached the listener must still stop the
+// child: addEventListener on an aborted signal never fires, and probe.current() is a real await
+// (a cold TTL spawns) between the caller aborting and the wiring being reached.
+{
+  events.length = 0
+  const before = interrupts.length
+  const controller = new AbortController()
+  controller.abort()
+  const a = mk([init, ...done('nobody reads this')])
+  await collect(a.stream({ provider: 'claude-code', model: 'sonnet', system: 's', tools: [], signal: controller.signal, messages: [{ role: 'user', content: [{ type: 'text', text: 'go' }] }] }))
+  assert.equal(interrupts.length, before + 1, 'the pre-aborted signal still interrupted the child')
+  assert.equal(queries.at(-1).options.abortController.signal.aborted, true, 'and aborted the sdk controller')
+  assert.equal(a.turns.size, 0, 'and left no turn parked')
+  ok('a signal that aborted before the listener was attached still tears the turn down')
+}
+
+// --- a stale turn's abort arriving after the agent moved on must not evict the live turn, or the
+// next step would find nothing parked and respawn a child mid-conversation.
+{
+  events.length = 0
+  const script = [init,
+    ev({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tu_s', name: 'Read', input: {} } }),
+    ev({ type: 'content_block_stop', index: 0 }),
+    { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id: 'tu_s', name: 'Read', input: {} }] } },
+    ...done('later')]
+  const a = mk(script)
+  const base = { provider: 'claude-code', model: 'sonnet', system: 's', tools: [] }
+  const stale = new AbortController()
+  await collect(a.stream({ ...base, signal: stale.signal, messages: [{ role: 'user', content: [{ type: 'text', text: 'first' }] }] }))
+  await collect(a.stream({ ...base, messages: [{ role: 'user', content: [{ type: 'text', text: 'second' }] }] }))
+  const liveTurn = a.turns.get('agent-1')
+  assert.ok(liveTurn, 'the second turn is parked waiting for its tool results')
+  stale.abort()
+  assert.equal(a.turns.get('agent-1'), liveTurn, "the stale turn's abort left the live turn alone")
+  ok('an abort from a superseded turn does not evict the turn running now')
+}
+
+// --- a name Claude calls with no matching tool_use in flight is refused, not parked forever
+{
+  events.length = 0
+  const a = mk([init, ...done('hi')])
+  await collect(a.stream({ provider: 'claude-code', model: 'sonnet', system: 's', tools: [], messages: [{ role: 'user', content: [{ type: 'text', text: 'go' }] }] }))
+  const handlers = queries.at(-1).options.mcpServers.arxa.instance.server._requestHandlers
+  const res = await handlers.get('tools/call')({ method: 'tools/call', params: { name: 'gen_ui', arguments: {} } }, {})
+  assert.equal(res.isError, true); assert.match(res.content[0].text, /no pending call for gen_ui/)
+  ok('an mcp call with no queued tool_use id is refused instead of parking forever')
+}
+
+// --- signed out / old version refuse before spawning
+{
+  const before = queries.length
+  const out = mk([], { current: async () => ({ loggedIn: false, error: 'x', models: [] }) })
+  await assert.rejects(collect(out.stream({ provider: 'claude-code', model: 'sonnet', messages: [{ role: 'user', content: [{ type: 'text', text: 'a' }] }] })), /claude auth login/)
+  const old = mk([], { current: async () => ({ loggedIn: true, version: '2.1.240', subscriptionType: 'max', models: [] }) })
+  await assert.rejects(collect(old.stream({ provider: 'claude-code', model: 'fable', messages: [{ role: 'user', content: [{ type: 'text', text: 'a' }] }] })), /2\.1\.255/)
+  assert.equal(queries.length, before)
+  ok('refusals spawn nothing')
+}
+
+// --- utility purpose: no mcp, no tools, no resume
+{
+  const a = mk([init, ...done('Summary')])
+  const chunks = await collect(a.stream({ provider: 'claude-code', model: 'haiku', purpose: 'compaction', messages: [{ role: 'user', content: [{ type: 'text', text: 'summarise' }] }] }))
+  assert.equal(chunks.filter((c) => c.type === 'text-delta').map((c) => c.text).join(''), 'Summary')
+  const o = queries.at(-1).options
+  assert.deepEqual(o.tools, []); assert.equal(o.maxTurns, 1); assert.equal(o.mcpServers, undefined); assert.equal(o.persistSession, false)
+  assert.equal(o.cwd, '/ws'); assert.deepEqual(o.settingSources, []); assert.equal(o.permissionMode, 'default')
+  ok('compaction path is tool-less')
+}
+
+// --- no initiating agent at all (a call outside any session) takes the same utility path
+{
+  initiator = undefined
+  try {
+    const a = mk([init, ...done('Anon')])
+    const chunks = await collect(a.stream({ provider: 'claude-code', model: 'haiku', messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] }))
+    assert.equal(chunks.at(-1).reason.kind, 'stop')
+    const o = queries.at(-1).options
+    assert.deepEqual(o.tools, []); assert.equal(o.maxTurns, 1); assert.equal(o.mcpServers, undefined)
+    ok('no initiating agent falls back to the utility path')
+  } finally { initiator = agent }
+}
+
+console.log(`# ${passed} ok`)
