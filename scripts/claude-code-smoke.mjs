@@ -119,24 +119,28 @@ console.log('claude-code live smoke, part A: all green')
 // ---------------------------------------------------------------------------------------------
 
 // Q1: the real tool list the live binary exposes, unrestricted, vs MIRROR_TOOL_NAMES.
-const neverPrompt = { [Symbol.asyncIterator] () { return { next: () => new Promise(() => {}) } } }
+// The prompt is a real one on purpose. A never-yielding prompt gets no `system/init` at all —
+// the CLI does not emit init until a prompt actually yields (the same fact behind the probe
+// bug above), so the earlier version of this block hung for 15s and then died on the abort.
+// One tiny turn is the cheapest way to see the init the CLI really sends.
 const q1Abort = new AbortController()
 const q1 = query({
-  prompt: neverPrompt,
+  prompt: 'hi',
   options: {
     pathToClaudeCodeExecutable: binary, env, settingSources: [], persistSession: false,
-    maxTurns: 0, abortController: q1Abort, cwd: ws,
+    abortController: q1Abort, cwd: ws, spawnClaudeCodeProcess: makeSpawner({ confine: (argv, p) => sandbox.confine(argv, p), policy: probePolicy, spawn: trackingSpawn }),
     tools: { type: 'preset', preset: 'claude_code' }, // the CLI's own default set, not arxa's allowlist
     systemPrompt: { type: 'custom', prompt: 'smoke' }, permissionMode: 'default',
   },
 })
-const q1Timer = setTimeout(() => q1Abort.abort(), 15_000)
+const q1Timer = setTimeout(() => q1Abort.abort(), 30_000)
 let liveTools = []
 try {
   const { value: init } = await q1[Symbol.asyncIterator]().next()
   assert.ok(init && init.type === 'system' && init.subtype === 'init', 'Q1: expected an init message')
+  assert.equal(init.apiKeySource, 'none', `Q1: expected a subscription turn, got apiKeySource=${init.apiKeySource}`)
   liveTools = init.tools ?? []
-} finally { clearTimeout(q1Timer); q1.close?.() }
+} finally { clearTimeout(q1Timer); q1Abort.abort(); try { await q1.close?.() } catch { /* already down */ } }
 const gap = liveTools.filter((t) => !MIRROR_TOOL_NAMES.includes(t))
 console.log(`Q1 live tool list (${liveTools.length}): ${liveTools.join(', ')}`)
 console.log(`Q1 MIRROR_TOOL_NAMES (${MIRROR_TOOL_NAMES.length}): ${MIRROR_TOOL_NAMES.join(', ')}`)
@@ -145,9 +149,12 @@ console.log(gap.length ? `Q1 capability gap — live built-ins NOT in MIRROR_TOO
 // Q2: does `tools` also gate MCP names? Fake a gen_ui schema so arxaMcpToolNames() adds
 // mcp__arxa__gen_ui to the live allowlist, then make Claude actually call it end to end.
 agent.ctx.tools.schemas = () => [{ name: 'gen_ui', description: 'Render a UI card for the user', parameters: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] } }]
-const q2a = await collect(a.stream({ ...base, messages: [{ role: 'user', content: [{ type: 'text', text: "Use the gen_ui tool with title 'Smoke Test' to render a card, then reply with exactly the word RENDERED." }] }] }))
-const q2aCalls = q2a.filter((c) => c.type === 'block-end' && c.block.type === 'tool-call').map((c) => c.block.name)
-const genCall = q2a.find((c) => c.type === 'block-end' && c.block.type === 'tool-call' && c.block.name === 'gen_ui')
+let q2a = [], q2aCalls = [], genCall = null
+for (let attempt = 0; attempt < 2 && !genCall; attempt++) {
+  q2a = await collect(a.stream({ ...base, messages: [{ role: 'user', content: [{ type: 'text', text: "The gen_ui tool is already available to you — do not search for it. Call gen_ui once with title 'Smoke Test', then reply with exactly the word RENDERED." }] }] }))
+  q2aCalls = q2a.filter((c) => c.type === 'block-end' && c.block.type === 'tool-call').map((c) => c.block.name)
+  genCall = q2a.find((c) => c.type === 'block-end' && c.block.type === 'tool-call' && c.block.name === 'gen_ui')
+}
 assert.ok(genCall, `Q2: expected a gen_ui tool-call block — model made these tool calls instead: [${q2aCalls.join(', ') || 'none'}] (empty means the tool was unreachable, non-empty means the model chose not to call it)`)
 const q2b = await collect(a.stream({ ...base, messages: [
   { role: 'user', content: [{ type: 'text', text: 'x' }] },

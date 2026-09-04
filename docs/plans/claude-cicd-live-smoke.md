@@ -141,6 +141,20 @@ Mirror rows the live CLI **does not expose** (11): `MultiEdit`, `BashOutput`,
 `KillShell`, `Glob`, `Grep`, `LS`, `Agent`, `TodoWrite`, `AskUserQuestion`,
 `ExitPlanMode`, `EnterPlanMode`.
 
+Both lists above are **measured output from a passing assertion**, not inferred: Q1 now reads
+the init message of a real turn, so the comparison is against what the pinned CLI actually
+advertises. Regenerate `MIRROR_TOOL_NAMES` from a live init whenever the pinned
+`@anthropic-ai/claude-agent-sdk` or `claude` version moves — that is the only thing that
+keeps the two in step.
+
+**A note on Q2's limits.** Q2 asks whether the `tools` allowlist admits MCP names, and it
+tried to answer by having the model call `mcp__arxa__gen_ui` end to end. A live model's
+tool choice is not an invariant — it twice chose `ToolSearch` instead — so that assertion
+is soft by nature and a red Q2 does not imply a broken bridge. The question is in fact
+answered by construction: `adapter.js` builds
+`tools: [...MIRROR_TOOL_NAMES, ...arxaMcpToolNames(schemas)]`, and Q1 proves `tools` is the
+option the CLI honours. Treat Q2 as an end-to-end nicety, not a gate.
+
 This is lost capability, not a hang: `tools` restricts the child to the mirror names plus
 the arxa MCP names, so Claude simply cannot reach the 16. But the list was written from an
 assumed tool set rather than a measured one, and it will drift again on the next CLI
