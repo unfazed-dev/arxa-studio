@@ -93,7 +93,7 @@ ok('resolveModel efforts')
   // claude-code-only event — Claude Code is the first producer of the provider-neutral pill.
   const statuses = statusLog
   assert.deepEqual(statuses.find((d) => d.level === 'warn'), {
-    provider: 'claude-code', level: 'warn', text: 'Claude 90%', title: 'Claude weekly limit · 90% used',
+    provider: 'claude-code', kind: 'seven_day', level: 'warn', text: 'Claude 90%', title: 'Claude weekly limit · 90% used',
     utilization: 0.9, detail: { rateLimitType: 'seven_day', status: 'allowed_warning' },
   })
   assert.equal(events.find((e) => e.type === 'claude-code/rate-limit'), undefined)
@@ -104,7 +104,7 @@ ok('resolveModel efforts')
   // downgrade is worse than a slow turn. This fixture IS a fallback — 'fable' was asked for
   // and the API stamped the answer 'claude-sonnet-5' — so the turn owes the user a visible note.
   assert.deepEqual(statuses.find((d) => d.level === 'info'), {
-    provider: 'claude-code', level: 'info', text: 'Running on claude-sonnet-5',
+    provider: 'claude-code', kind: 'default', level: 'info', text: 'Running on claude-sonnet-5',
     title: 'asked for fable — Claude Code answered with claude-sonnet-5',
   })
   ok('a model fallback is announced on the provider/status channel instead of happening silently')

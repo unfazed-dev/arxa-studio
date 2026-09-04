@@ -50,6 +50,12 @@ export function rateLimitToStatus (info, account = {}) {
   const text = level === 'limit' ? 'Claude limit reached' : pct === undefined ? 'Claude' : `Claude ${pct}%`
   return {
     provider: 'claude-code',
+    // Two Claude limits run at once on a subscription — a premium-model weekly allowance and an
+    // all-models one — and they arrive as separate rate_limit_events. `kind` is what keeps both
+    // in the store; without it the second event overwrites the first and the user only ever sees
+    // whichever moved last. Passed through raw (bounded by the schema) so a limit type newer than
+    // the installed SDK's enum still gets its own slot instead of colliding with another.
+    kind: typeof info.rateLimitType === 'string' && info.rateLimitType !== '' ? info.rateLimitType : 'default',
     level,
     text,
     title,

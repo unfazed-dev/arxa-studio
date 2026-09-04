@@ -13,7 +13,7 @@ const acct = { subscriptionType: 'max' }
 
 assert.deepEqual(
   rateLimitToStatus({ status: 'allowed_warning', utilization: 0.9, resetsAt: 1_800_000_000, rateLimitType: 'seven_day' }, acct),
-  { provider: 'claude-code', level: 'warn', text: 'Claude 90%', title: 'Claude weekly limit · 90% used', utilization: 0.9, resetsAt: 1_800_000_000, detail: { rateLimitType: 'seven_day', status: 'allowed_warning' } },
+  { provider: 'claude-code', kind: 'seven_day', level: 'warn', text: 'Claude 90%', title: 'Claude weekly limit · 90% used', utilization: 0.9, resetsAt: 1_800_000_000, detail: { rateLimitType: 'seven_day', status: 'allowed_warning' } },
 )
 ok('warn level: weekly limit at 90%, no account info in title')
 

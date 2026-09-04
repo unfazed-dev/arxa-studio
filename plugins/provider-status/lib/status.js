@@ -44,6 +44,11 @@ const rejectCircular = (val) => {
 
 export const PROVIDER_STATUS_SCHEMA = z.object({
   provider: z.string().min(1),
+  // Which limit this is (the SDK's rateLimitType, or 'default' for producers with one
+  // limit). Two limits are live on a Claude subscription at once — a premium-model
+  // weekly allowance and an all-models one — and they arrive as separate events. Keying
+  // the store by provider+kind keeps both; without it the second event erases the first.
+  kind: z.string().min(1).max(64).default('default'),
   level: z.enum(['ok', 'warn', 'limit', 'info']),
   text: z.string().min(1).max(80),
   title: z.string().max(240).optional(),
@@ -73,4 +78,28 @@ export function formatBadge (value, now = Date.now(), activeProvider = undefined
   if (value.resetsAt !== undefined && value.resetsAt * 1000 <= now) return undefined
   const reset = value.resetsAt !== undefined && value.level !== 'ok' ? ` · resets in ${relative(value.resetsAt, now)}` : ''
   return { level: value.level, text: `${value.text}${reset}`, title: value.title ?? value.text }
+}
+
+/** Rank: a refusal outranks a warning outranks fine; ties break on utilization. Two live
+ * limits mean the user is bound by whichever is worst, so that is the one the pill shows. */
+const RANK = { limit: 3, warn: 2, info: 1, ok: 0 }
+const worse = (a, b) => (RANK[a.level] ?? 0) !== (RANK[b.level] ?? 0)
+  ? (RANK[a.level] ?? 0) > (RANK[b.level] ?? 0)
+  : (a.utilization ?? 0) >= (b.utilization ?? 0)
+
+/**
+ * Fold every live status for one provider into the single pill the composer shows.
+ * @param values statuses for one session, newest values of each kind.
+ * @param now used to drop limits whose window already reset.
+ * @returns the binding status, its title widened to name every live limit, or undefined.
+ */
+export function bindingStatus (values, now = Date.now()) {
+  const live = (values ?? []).filter((v) => v && (v.resetsAt === undefined || v.resetsAt * 1000 > now))
+  if (live.length === 0) return undefined
+  const top = live.reduce((a, b) => (worse(a, b) ? a : b))
+  if (live.length === 1) return top
+  // Both limits in the tooltip: the pill can only show one number, but hiding the other
+  // one is how a user gets surprised by a limit they were never shown.
+  const others = live.filter((v) => v !== top).map((v) => v.title ?? v.text)
+  return { ...top, title: [top.title ?? top.text, ...others].join(' · ') }
 }
