@@ -214,3 +214,61 @@ Not covered — stated plainly rather than implied:
   healthy org (`published`, frame wired, runner online).
 - `.superpowers/` is untracked but **not** gitignored, so `git add -A` would sweep the SDD
   workspace into a commit.
+
+## F7 — the GitHub "unlink" was a refresh-token rotation race, caused by the smoke
+
+**It never unlinked.** `~/.arxa/github-link.json` still reads `linked: true`,
+`login: unfazed-dev`, all four scopes (`delete_repo read:user repo workflow`),
+`linkedAt: 2026-09-03T01:21:17Z`. What flipped is `relinkRequired: true` with
+`relinkReason: "token request error: incorrect_client_credentials"`, written
+2026-09-04T09:01Z (19:01 AEST).
+
+**Measured timeline**
+
+- `2026-09-04T08:32:17Z` — both keychain items (`arxa-studio/unfazed-dev` and
+  `…#refresh`) have `mdat` at this exact second, and `accessExpiresAt` is
+  `16:32:17.305Z` = +8h. Only `getToken()`'s success branch writes both secrets
+  while preserving `linkedAt`, so this was a **successful, secretless refresh**.
+- Same minute, the smoke's second engine (port 7899) was booting —
+  `scratchpad/engine2.log` 18:32, `settings.yaml.bak` 18:33, `turn.log` 18:34.
+- `2026-09-04T09:01Z` — a forced refresh (`gitCredentials(force)` from
+  `card.push`'s 401 retry) was rejected; `relinkRequired` written.
+
+**Mechanism (GitHub docs, "Refreshing user access tokens")**
+
+- "Once you use a refresh token, **that refresh token and the old user access
+  token will no longer work**."
+- Two arxa engines shared `~/.arxa` — one state file, one pair of keychain
+  items. The 08:32 refresh rotated the token and **instantly invalidated the
+  access token the other engine was already holding** → `401: Bad credentials`
+  on push (that is F5's real cause) → forced retry presented a superseded
+  refresh token → rejected.
+
+**The code is not at fault here.** `refreshAccessToken` deliberately sends no
+`client_secret`, and the docs say it is "Required *unless* the user access token
+was generated using the device flow" — `useDeviceFlow = true` is the default
+(index.js:48). That is why 08:32 succeeded. A distributed desktop app cannot
+ship a secret, so device flow is the correct choice.
+
+**Residual uncertainty:** GitHub does not document `incorrect_client_credentials`
+as the error for a *burned* refresh token, so the last link in the chain is
+inferred from the timeline, not from the docs.
+
+**Real latent bug found alongside (unrelated to this incident).**
+`getToken()` does `const clientId = getClientId(env) ?? SHIPPED_CLIENT_ID`, but
+`getClientId` ends in `||`, so a missing/blank `clientId` in
+`~/.arxa/github-link-config.json` yields `''` — which `??` passes straight
+through. The refresh then sends `client_id: ''` and GitHub answers with exactly
+`incorrect_client_credentials`. `link()` is safe (its `if (!clientId)` guard at
+index.js:78 catches it); `getToken()` has no such guard. Fix: use `||`, or add
+the same guard. Not the cause here — the config holds a valid 20-char id.
+
+**Two client ids are in play** (worth a deliberate decision, not a bug report):
+shipped `Iv23licJ…` is a **GitHub App** id; the local override in
+`~/.arxa/github-link-config.json` (written 2026-08-30) is `Ov23liFN…`, an
+**OAuth App** id. The override wins. The refresh code and its comments are
+written against GitHub App semantics.
+
+**Fix for the user:** one re-link from Settings. Avoid running two arxa engines
+against the same `~/.arxa` — the keychain pair and state file are shared, and
+whichever refreshes first silently kills the other's token.
