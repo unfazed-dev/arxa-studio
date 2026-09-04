@@ -480,3 +480,30 @@ only as a local throwaway probe; nothing ships it.
 
 **Still wants one real boot** to confirm in the running app — the suite proves
 the row's shape and the runtime chain, not arxa's full plugin tree.
+
+## F11 — engine-sync is version-keyed, so edits ship silently stale
+
+Hit while syncing the desktop payload. `bin/arxa-engine-sync.mjs` copies a plugin
+only when `package.json` versions differ (`if (rv === ev) continue`). Every
+plugin edited this session — `github-link`, `arxa-git-card`, `arxa-sidebar` —
+still carried its old version, so the first sync reported **"engine payload
+already in sync"** and shipped none of the fixes. The desktop app would have kept
+running the old code while the repo and CI both looked correct.
+
+Bumped: github-link 0.1.4→0.1.5, arxa-git-card 0.1.0→0.1.1, arxa-sidebar
+0.2.8→0.2.9. Then all three synced.
+
+**Two more traps in the same path:**
+
+1. `plugins/claude-code` has **no `package.json`**, so the sync loop skips it
+   entirely (`if (!existsSync(join(src, 'package.json'))) continue`). It works
+   only because its profile row mounts it by ABSOLUTE REPO PATH. Fine on this
+   machine; impossible on a user's install.
+2. **engine-sync does not copy `profile/`.** The payload's
+   `profile/cordis.patch.yml` was from Sep 3 and carried none of the new rows.
+   The profile is what mounts everything, so a plugin sync alone changes nothing.
+   Copied by hand (payload's original backed up alongside it).
+
+**Worth fixing properly:** compare content hashes rather than versions, and sync
+`profile/` too. Otherwise every future change needs a manual version bump that
+nothing enforces, and CI cannot see the mistake.
