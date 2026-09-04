@@ -84,6 +84,15 @@ window.__ModuleLoader__.load({
     }
 
     function apply (ctx) {
+      // Held, not gated. Reading `modelDirectories` off ctx without declaring it throws outright
+      // ("cannot get property without inject", cordis lib/index.js), so it cannot simply be
+      // optional-chained at render time -- but declaring it in `exports.inject` makes the whole
+      // pill hostage to another plugin. The lazy fiber is the seam dsh itself uses: it fires when
+      // model-selection registers its service, and until then the pill renders with no provider
+      // filter rather than not at all.
+      let models
+      ctx.inject(['modelDirectories'], (scope) => { models = scope.modelDirectories })
+
       ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
         name: 'conversation.input.right',
         id: 'arxa-provider-status',
@@ -91,12 +100,11 @@ window.__ModuleLoader__.load({
         inject: (sessionId) => ({
           sessionId,
           connection: ctx.connection?.rpc,
-          // Resolved here, at render time, not at apply time: model-selection may register its
-          // service after this plugin, and directoryFor() throws outright for a session with no
-          // scope (subagent sessions, a session mid-teardown). Either way the pill keeps working
-          // without a provider filter -- a visible pill beats a crash inside the composer row.
+          // Resolved at render time, guarded: directoryFor() throws for a session with no scope
+          // ("Unknown sessions fail loud") -- a subagent session, or one mid-teardown. A missing
+          // directory costs the provider filter, not the pill.
           directory: (() => {
-            try { return ctx.modelDirectories?.directoryFor(sessionId)?.store } catch { return undefined }
+            try { return models?.directoryFor(sessionId)?.store } catch { return undefined }
           })(),
         }),
       }, ProviderStatusBadge))

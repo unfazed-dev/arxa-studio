@@ -214,8 +214,13 @@ assert.throws(() => publishProviderStatus(session, { ...good, text: 'x'.repeat(8
   // plugin's own module-level list for this reason. Naming it here makes the entire pill
   // hostage to another plugin's service, which is how it disappeared for every provider.
   assert.equal(gate[1].includes('modelDirectories'), false, 'modelDirectories must NOT gate the plugin — resolve it at render time instead')
-  assert.ok(clientSrc.includes('ctx.modelDirectories?.directoryFor'), 'the directory is resolved optionally, at render time')
-  assert.ok(/try\s*{\s*return ctx\.modelDirectories/.test(clientSrc), 'directoryFor throws for a session with no scope — it must be guarded')
+  // Reading an undeclared service THROWS in cordis ("cannot get property without inject"), so the
+  // directory cannot merely be optional-chained off ctx — the try/catch below would swallow that
+  // throw and silently disable the provider filter, putting the GLM bug straight back. It has to
+  // arrive through the lazy fiber, which fires if and when model-selection registers.
+  assert.ok(/ctx\.inject\(\['modelDirectories'\]/.test(clientSrc), 'modelDirectories must arrive through the lazy fiber, not a bare property read off ctx')
+  assert.equal(/ctx\.modelDirectories/.test(clientSrc), false, 'a bare ctx.modelDirectories read throws in cordis and would be swallowed by the guard')
+  assert.ok(/try\s*{\s*return models\?\.directoryFor/.test(clientSrc), 'directoryFor throws for a session with no scope — it must be guarded')
 
   // lib/client.js duplicates formatBadge for the browser bundle (no module graph into lib/ from a
   // __ModuleLoader__ factory). Extract it and prove it agrees with the host copy, including the
