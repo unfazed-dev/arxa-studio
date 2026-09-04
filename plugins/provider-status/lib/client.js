@@ -19,6 +19,7 @@ window.__ModuleLoader__.load({
     const relative = (resetsAt, now) => { const s = Math.max(0, Math.round(resetsAt - now / 1000)); const hh = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60); return hh > 0 ? `${hh}h ${mm}m` : `${mm}m` }
     function formatBadge (value, now) {
       if (!value) return undefined
+      if (value.resetsAt !== undefined && value.resetsAt * 1000 <= now) return undefined
       const reset = value.resetsAt !== undefined && value.level !== 'ok' ? ` · resets in ${relative(value.resetsAt, now)}` : ''
       return { level: value.level, text: `${value.text}${reset}`, title: value.title ?? value.text }
     }
@@ -27,7 +28,7 @@ window.__ModuleLoader__.load({
     function ProviderStatusBadge ({ useProjection }) {
       const value = useProjection('providerStatus')
       const [now, setNow] = React.useState(Date.now())
-      React.useEffect(() => { const t = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(t) }, []) // only re-renders the "resets in" text
+      React.useEffect(() => { const t = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(t) }, []) // re-renders the "resets in" text, and hides the badge once resetsAt passes
       const badge = formatBadge(value, now)
       if (!badge) return null
       return h('span', {
