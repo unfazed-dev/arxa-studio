@@ -2,15 +2,29 @@
   "name": "arxa-claude-code",
   "version": "0.1.0",
   "private": true,
-  "description": "Claude models through the user's own Claude subscription: the dsh LLM adapter (host plane), the tool mirror (agent plane), and the CLI sign-in flow. arxa never launches `claude auth login` — it shows the command and waits for the CLI's own session.",
+  "description": "Claude models through the user's own Claude subscription: the dsh LLM adapter (host plane), the tool mirror (agent plane), the CLI sign-in flow, and the account card on Settings → Models. arxa never launches `claude auth login` — it shows the command and waits for the CLI's own session.",
   "type": "module",
   "main": "index.mjs",
   "exports": {
     ".": "./index.mjs",
     "./agent": "./agent.mjs",
+    "./client": "./lib/client.js",
+    "./account": "./lib/account.js",
     "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings-models"
+      ],
+      "platform": "web"
+    }
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "*"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0"
   }
 }

@@ -4,12 +4,14 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { createRequire } from 'node:module'
 import { query, startup } from '@anthropic-ai/claude-agent-sdk'
+import z from '@deepseek-ai/schemastery'
 import { ClaudeCodeAdapter } from './lib/adapter.js'
 import { Probe, resolveClaudeBinary } from './lib/probe.js'
 import { scrubEnv } from './lib/env.js'
 import { makeSpawner } from './lib/spawn.js'
-import { PROVIDER_ID } from './lib/models.js'
+import { PROVIDER_ID, PROVIDER_NAME } from './lib/models.js'
 import { claudeAuthFlow, hideAnthropicOauth } from './lib/auth-flow.js'
+import { createAccountRpc, ACCOUNT_CHANNEL } from './lib/account.js'
 // No `../provider-status/...` import here, on purpose — see the providerStatus seam in apply().
 
 const require = createRequire(import.meta.url)
@@ -42,11 +44,23 @@ export const name = 'arxa-claude-code'
 // loads and the sign-in surface attaches only where the service exists.
 export const inject = ['llm', 'agents', 'approval', 'sandbox', 'sandboxPolicy', 'credentials']
 
+// The Models-page seat (docs/plans/claude-signin-surface-models-page.md). dsh's Models page
+// lists ONLY providers in the configurable directory whose settings namespace exists
+// (dsh-client-ui-settings-models client.js:889, :1930) — a registered adapter alone is invisible
+// there. One real field, so the stock "Edit" on the row edits something true: the binary path.
+// The sign-in surface itself is the card lib/client.js registers under this same namespace.
+export const NS = 'arxa-claude-code'
+export const Config = z.object({
+  binary: z.string().default('').description('Path to the `claude` binary. Empty: the one on PATH, else the SDK\'s bundled one.'),
+})
+
 export function apply (ctx, config = {}) {
   // scrubEnv's second argument is required and must carry a real version: `{}` would silently
   // brand every child `arxa-studio/undefined` in Anthropic's client-app telemetry.
   const env = scrubEnv(process.env, { version })
-  const binary = config.binary ?? resolveClaudeBinary({ env: process.env, platform: process.platform, arch: process.arch, sdkRoot })
+  const resolved = () => resolveClaudeBinary({ env: process.env, platform: process.platform, arch: process.arch, sdkRoot })
+  // `let`: the settings section below rebinds it, and probe/adapter read their own copies.
+  let binary = config.binary || resolved()
   // D5 covers the probe child too. It has no session of its own, so the policy is the
   // agentless resolve() the adapter's utility path already uses — deployment default mode,
   // configured workspace root — wrapped by the same spawner every turn child gets, transcript
@@ -72,7 +86,27 @@ export function apply (ctx, config = {}) {
   // before any turn can run.
   let statusService
   const publish = (session, status) => { if (statusService !== undefined) statusService.publish(session, status) }
-  ctx.llm.registerAdapter([PROVIDER_ID], new ClaudeCodeAdapter({ query, probe, ctx, binary, env, version, publish }))
+  const adapter = new ClaudeCodeAdapter({ query, probe, ctx, binary, env, version, publish })
+  ctx.llm.registerAdapter([PROVIDER_ID], adapter)
+  // The row on Settings → Models. `settingsPath: []` = the whole section is the profile, like
+  // dsh-llm-deepseek's own entry (dsh-llm-deepseek/lib/index.js:2037).
+  ctx.llm.registerConfigurableProviders([{ provider: PROVIDER_ID, displayName: PROVIDER_NAME, settingsNs: NS, settingsPath: [] }])
+  // Deferred like the others: no settings service mounted = no row, the adapter still works.
+  ctx.inject(['settings'], (sctx) => {
+    let current = () => ({ binary: config.binary ?? '' })
+    sctx.settings.installSection(ctx, NS, Config, { binary: config.binary ?? '' }, {
+      setSource: (source) => { current = source },
+      onChange: () => {
+        const next = current().binary || resolved()
+        if (next === binary) return
+        binary = next; probe.binary = next; adapter.binary = next; probe.cache = undefined
+      },
+    })
+  })
+  // The card's wire (lib/account.js). `authority: 'trusted-host'` like provider-status: the
+  // desktop page is arxa.studio.localhost, inside the widened loopback fence.
+  const account = createAccountRpc({ probe, credentials: ctx.credentials, spawn: probeSpawner, binary: () => binary, env })
+  ctx.inject(['connection'], (cctx) => cctx.connection.rpc.handle(ACCOUNT_CHANNEL, account, { authority: 'trusted-host' }))
   ctx.inject(['providerStatus'], (scope) => {
     statusService = scope.providerStatus
     // The usage ring's turn-free source: the provider-status poller asks this the moment a Claude
