@@ -214,3 +214,26 @@ wake, and the `ensureAny` branch; `selftest.quota.mjs` covers `ensureAny` cold/w
 
 - Status is per-machine and per-user, never shared. Intended.
 - A user who has never hit a limit event still sees no pill. Correct: there is nothing to report.
+
+## Eighth: two rings, next to the context ring (2026-09-06)
+
+User report on the first visible build: three rings in a row, in the dock row above the
+composer, nowhere near dsh's context ring. Three separate mistakes:
+
+1. **Wrong slot.** `conversation.input.dock` is a row stack *above* the composer (the git card
+   lives there). The bottom row's trailing group is `conversation.input.right` ·
+   `conversation.input.model` · `ContextMeter` · send. The pill now registers in
+   `conversation.input.right`.
+2. **One ring too many.** The Claude usage answer carries `five_hour`, `seven_day` and
+   `model_scoped:<name>` windows, each numeric, and every numeric window got a ring. Only the
+   5-hour and weekly windows are rings now (`RING_RANK`); model-scoped and textual windows
+   stay in the panel.
+3. **Rings landed after the send button.** Slot entries render inside a `display: contents`
+   wrapper, so CSS sibling selectors from the entry never reach the send button and `order` on
+   the entry alone is not enough. `pushSendAfter()` walks up to the trailing group and gives its
+   last child (the send tooltip wrapper) `order: 2`; the pill's root is `order: 1`. Row reads:
+   model · context ring · 5h ring · weekly ring · send. Verified on screen 03:13:24.
+
+Known gap, not fixed here: on a cold desktop boot the Claude probe can take far longer than
+`COLD_WAIT_MS`; the vendor rows bind first, the Fable filter hides them, and the rings appear
+only when the retry ladder lands the Claude rows (measured 59 s after boot on 2026-09-06).

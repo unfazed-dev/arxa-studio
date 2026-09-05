@@ -181,7 +181,23 @@ window.__ModuleLoader__.load({
       )
     }
 
+    // Pushes the composer's send button after the rings (see the root span's `order: 1`), so the
+    // bottom row reads model · context ring · rings · send. Done by walking the DOM, not by a CSS
+    // sibling selector: dsh renders slot entries inside a `display: contents` wrapper, so the
+    // rings join the trailing flex row (that is why `order` works) but are NOT DOM siblings of
+    // the send button — `~` never matched (2026-09-06, two attempts). `trailing` is the module-CSS
+    // key dsh's InputBar uses for that row; if it ever renames, the rings simply stay where the
+    // slot put them, left of the picker, and nothing breaks.
+    function pushSendAfter (el) {
+      const host = el?.closest?.('[class*="trailing"]')
+      if (!host) return
+      const last = host.lastElementChild
+      if (last && last !== el && !last.contains(el)) last.style.order = '2'
+    }
+
     function ProviderStatusBadge ({ sessionId, connection, directory: initialDirectory, load: initialLoad, resolveDirectory, onModels }) {
+      const rootRef = React.useRef(null)
+      React.useEffect(() => { pushSendAfter(rootRef.current) })
       const [status, setStatus] = React.useState(null)
       const [now, setNow] = React.useState(Date.now())
       const [open, setOpen] = React.useState(null) // the kind whose panel is open, or null
@@ -266,18 +282,29 @@ window.__ModuleLoader__.load({
       if (live.length === 0) return null
       // Rings for windows with a number to divide by; a balance or a failed read has none, and
       // keeps its text.
-      const metered = live.filter((x) => typeof x.badge.utilization === 'number')
+      const numeric = live.filter((x) => typeof x.badge.utilization === 'number')
       const textual = live.filter((x) => typeof x.badge.utilization !== 'number')
-      const focus = metered.find((x) => x.w.kind === open) ?? metered[0]
+      // Exactly two rings: the 5-hour window and the weekly one (2026-09-06, "should be only 2").
+      // Claude's kinds are five_hour / seven_day, the polled vendors' hour:5 / week:1. Every other
+      // numeric window — the per-model weekly Fable/Opus limits — is a panel row, not a ring: it
+      // is the same weekly allowance sliced by model, and a third ring read as a third limit.
+      const RING_RANK = { five_hour: 0, 'hour:5': 0, seven_day: 1, 'week:1': 1 }
+      const metered = numeric.filter((x) => x.w.kind in RING_RANK).sort((a, b) => RING_RANK[a.w.kind] - RING_RANK[b.w.kind])
+      const focus = numeric.find((x) => x.w.kind === open) ?? metered[0] ?? numeric[0]
 
-      return h('span', { style: { position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 0, whiteSpace: 'nowrap', fontSize: 11 } },
+      // `order: 1` + the ORDER_CSS rule below: the `conversation.input.right` slot renders BEFORE the
+      // model picker, and dsh has no slot between the picker and its context ring. The trailing
+      // group is a flex row, so the rings take order 1 and the send button (its last child) order
+      // 2, which lands the rings immediately right of the context ring: model · context · rings ·
+      // send. Structural selector on this element's own siblings — no hashed class, no locale.
+      return h('span', { ref: rootRef, 'data-arxa-provider-status': '', style: { position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 0, whiteSpace: 'nowrap', fontSize: 11, order: 1 } },
         ...metered.map((x) => h(Meter, { key: x.w.kind, badge: x.badge, open: open === x.w.kind, onToggle: () => setOpen((o) => (o === x.w.kind ? null : x.w.kind)) })),
         ...textual.map((x) => h('span', {
           key: x.w.kind, title: x.badge.title, 'aria-label': x.badge.title, role: 'img',
           style: { display: 'inline-flex', alignItems: 'center', gap: 4, height: 28, padding: '0 6px', color: x.badge.level === 'limit' ? RED : MUTED },
         }, h(Ring, { utilization: undefined, level: x.badge.level }), h('span', null, x.badge.text))),
         open !== null && focus !== undefined
-          ? h(Panel, { windows: metered.map((x) => x.w), focus: focus.w, now, onClose: close })
+          ? h(Panel, { windows: numeric.map((x) => x.w), focus: focus.w, now, onClose: close })
           : null,
       )
     }
@@ -310,13 +337,17 @@ window.__ModuleLoader__.load({
         } catch { return { directory: undefined, load: undefined } }
       }
 
-      // `conversation.input.dock` is the composer's bottom row in dsh 0.1.2-rc.1 (Full access ·
-      // path · model picker · context ring · send) — the row the git card and dsh's own queue
-      // entry register into, with the same `inject: (sessionId) => props` contract. The slot this
-      // used to name, `conversation.input.right`, no longer exists in rc.1, so the badge was
-      // registered into nothing and never rendered for ANY provider (2026-09-06).
-      ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
-        name: 'conversation.input.dock',
+      // `conversation.input.right` is the composer's trailing group in dsh 0.1.2-rc.1 — the slot
+      // rendered immediately left of the model picker, in the same row as the context ring and
+      // send button (client-ui-conversation client.js ~line 15642: right · model · ContextMeter ·
+      // send). Same `inject: (sessionId) => props` contract as the dock.
+      //
+      // History: on 2026-09-06 this slot was declared "gone in rc.1" and the pill was moved to
+      // `conversation.input.dock` (b0e7ff0). That diagnosis was wrong — the slot exists; the pill
+      // was invisible because the client ensure() saw `{ rows: [] }` and the component returns
+      // null with no status, which looks identical to "slot never rendered". Fixed in 20832e1.
+      ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
+        name: 'conversation.input.right',
         id: 'arxa-provider-status',
         order: 20,
         inject: (sessionId) => ({
