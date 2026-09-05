@@ -107,16 +107,16 @@ window.__ModuleLoader__.load({
       '.arxa-ps-root{display:inline-flex;align-items:center;position:relative;white-space:nowrap;font-size:11px;order:1}',
       '.arxa-ps-trigger{width:28px;height:28px;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border:none;padding:0;border-radius:999px;flex:none;place-items:center;display:grid}',
       '.arxa-ps-trigger:hover,.arxa-ps-trigger[aria-expanded="true"]{background:var(--dsw-alias-interactive-bg-hover)}',
-      '.arxa-ps-panel{z-index:100;box-sizing:border-box;background:var(--dsw-specific-menu);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);width:264px;box-shadow:var(--dsw-elevation-prominent);color:var(--dsw-alias-label-secondary);cursor:default;border:0;border-radius:12px;padding:12px;font-size:12px;line-height:20px;position:absolute;bottom:calc(100% + 8px);right:0}',
+      '.arxa-ps-panel{z-index:100;box-sizing:border-box;background:var(--dsw-specific-menu);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);width:264px;box-shadow:var(--dsw-elevation-prominent);color:var(--dsw-alias-label-secondary);cursor:default;border:0;border-radius:12px;padding:14px 16px;font-size:12px;line-height:20px;position:absolute;bottom:calc(100% + 8px);right:0}',
       '.arxa-ps-header{align-items:center;gap:6px;display:flex}',
-      '.arxa-ps-figures{font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-primary);margin-left:auto;font-weight:500}',
+      '.arxa-ps-figures{font-variant-numeric:tabular-nums;color:var(--meter-tint,var(--dsw-alias-label-primary));margin-left:auto;font-weight:500}',
       '.arxa-ps-percent{color:var(--dsw-alias-label-primary);font-weight:500}',
       '.arxa-ps-headline{color:var(--dsw-alias-label-tertiary)}',
-      '.arxa-ps-bar{background:var(--dsw-alias-interactive-bg-hover);border-radius:999px;gap:1px;height:4px;margin:10px 0 12px;display:flex;overflow:hidden}',
+      '.arxa-ps-bar{background:var(--dsw-alias-interactive-bg-hover);border-radius:999px;gap:1px;height:4px;margin:12px 0 14px;display:flex;overflow:hidden}',
       '.arxa-ps-segment{background:var(--meter-tint,var(--dsw-alias-label-tertiary));border-radius:1px;flex:none;min-width:2px;height:100%}',
       '.arxa-ps-swatch{background:var(--meter-tint,var(--dsw-alias-label-tertiary));vertical-align:baseline;border-radius:2px;width:8px;height:8px;margin-right:6px;display:inline-block}',
-      '.arxa-ps-rows{margin:6px 0 0}',
-      '.arxa-ps-row{justify-content:space-between;align-items:center;gap:12px;padding:2px 0;display:flex}',
+      '.arxa-ps-rows{margin:8px 0 0}',
+      '.arxa-ps-row{justify-content:space-between;align-items:center;gap:16px;padding:4px 0;display:flex}',
       '.arxa-ps-row dt{color:var(--dsw-alias-label-secondary)}',
       '.arxa-ps-row dd{font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-primary);margin:0}',
     ].join('\n')
@@ -162,6 +162,19 @@ window.__ModuleLoader__.load({
     const percentOf = (w) => Math.min(100, Math.max(0, Math.round((w.utilization ?? 0) * 100)))
     // Reads like ContextMeter's own "12% of context used".
     const hoverLabel = (w) => `${percentOf(w)}% of ${labelOf(w)} window used`
+    // One tint per window, the way ContextMeter tints System / Tools / Messages -- its own three
+    // tokens, so the two cards share a palette: 5-hour blue, weekly violet, per-model bluish grey.
+    // A window running low keeps the ring's amber/red instead, so the card never contradicts it.
+    const WINDOW_TINT = {
+      'five_hour': 'var(--dsw-static-blue-450, #3b82f6)', 'hour:5': 'var(--dsw-static-blue-450, #3b82f6)',
+      'seven_day': '#a78bfa', 'week:1': '#a78bfa',
+    }
+    const tintOf = (w) => {
+      const c = RING_COLOR(w.utilization ?? 0)
+      if (c !== FILL) return c
+      const kind = String(w.kind ?? '')
+      return WINDOW_TINT[kind] ?? (kind.startsWith('model_scoped:') ? 'var(--dsw-static-neutral-bluish-400, #8b98ad)' : FILL)
+    }
 
     /** ContextMeter's trigger, verbatim: the 28px round button (its CSS above) holding the ring,
      *  dsh's own Tooltip on hover -- same side, same 200 ms delay, muted while the card is open --
@@ -188,13 +201,14 @@ window.__ModuleLoader__.load({
         return () => { document.removeEventListener('keydown', onKey); document.removeEventListener('mousedown', onDown) }
       }, [onClose])
       const pct = percentOf(focus)
-      const reset = (w) => (w.resetsAt !== undefined ? `resets in ${relative(w.resetsAt, now)}` : '')
-      const tint = (w) => ({ '--meter-tint': RING_COLOR(w.utilization ?? 0) })
+      // Countdown only -- "35% / 31m" -- the words cost room the card does not have (2026-09-06).
+      const reset = (w) => (w.resetsAt !== undefined ? relative(w.resetsAt, now) : '')
+      const tint = (w) => ({ '--meter-tint': tintOf(w) })
       return h('div', { ref, role: 'dialog', 'aria-label': hoverLabel(focus), className: 'arxa-ps-panel' },
         h('div', { className: 'arxa-ps-header' },
           h('span', { className: 'arxa-ps-percent' }, `${pct}%`),
           h('span', { className: 'arxa-ps-headline' }, `of ${labelOf(focus)} window used`),
-          h('span', { className: 'arxa-ps-figures' }, reset(focus)),
+          h('span', { className: 'arxa-ps-figures', style: tint(focus) }, reset(focus)),
         ),
         h('div', { className: 'arxa-ps-bar' },
           pct > 0 ? h('div', { className: 'arxa-ps-segment', style: { width: `${pct}%`, ...tint(focus) } }) : null,
@@ -202,7 +216,7 @@ window.__ModuleLoader__.load({
         h('dl', { className: 'arxa-ps-rows' },
           ...windows.map((w) => h('div', { key: w.kind, className: 'arxa-ps-row' },
             h('dt', null, h('span', { className: 'arxa-ps-swatch', 'aria-hidden': 'true', style: tint(w) }), labelOf(w)),
-            h('dd', null, [`${percentOf(w)}%`, reset(w)].filter(Boolean).join(' · ')),
+            h('dd', null, [`${percentOf(w)}%`, reset(w)].filter(Boolean).join(' / ')),
           )),
         ),
       )

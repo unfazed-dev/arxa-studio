@@ -425,7 +425,7 @@ assert.throws(() => publishProviderStatus(session, { ...good, text: 'x'.repeat(8
   for (const cls of ['panel', 'header', 'percent', 'headline', 'figures', 'bar', 'segment', 'rows', 'row', 'swatch']) {
     assert.ok(clientSrc.includes(`.arxa-ps-${cls}{`), `card CSS mirrors ContextMeter's ${cls} rule`)
   }
-  assert.ok(/width:264px;box-shadow:var\(--dsw-elevation-prominent\)/.test(clientSrc) && /border-radius:12px;padding:12px;font-size:12px;line-height:20px/.test(clientSrc), 'the card is ContextMeter\'s 264px / 12px-radius / elevation-prominent card')
+  assert.ok(/width:264px;box-shadow:var\(--dsw-elevation-prominent\)/.test(clientSrc) && /border-radius:12px;padding:14px 16px;font-size:12px;line-height:20px/.test(clientSrc), 'the card is ContextMeter\'s 264px / 12px-radius / elevation-prominent card')
   assert.ok(/'aria-haspopup': 'dialog'/.test(clientSrc) && /'aria-expanded': open/.test(clientSrc), 'the trigger announces its panel')
   assert.ok(/role: 'dialog'/.test(clientSrc), 'the panel is a dialog')
   assert.ok(/e\.key === 'Escape'\) onClose\(\)/.test(clientSrc) && /addEventListener\('mousedown', onDown\)/.test(clientSrc), 'the panel closes on Escape and on an outside click')

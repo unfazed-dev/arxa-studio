@@ -260,3 +260,11 @@ and the ring had no hover behaviour.
 Verified on screen 03:28–03:30: row evenly spaced, hover wash on the trigger, card open with
 three rows. `selftest.mjs` pins one `Meter`, `numeric[0]` as the ring's window, the Tooltip
 props, and every `arxa-ps-*` class ContextMeter has.
+
+### Ninth, follow-up: colour and air in the card (2026-09-06)
+
+- Per-window tints on ContextMeter's own three tokens: 5-hour `--dsw-static-blue-450`, weekly
+  `#a78bfa`, per-model `--dsw-static-neutral-bluish-400`. Swatch, bar and the header countdown
+  share the window's tint; a window running low keeps the ring's amber/red instead (`tintOf`).
+- Rows read `36% / 23m`, header figures show the countdown alone — the words "resets in" are gone.
+- Padding 14/16px, row padding 4px, bar margins 12/14px. Verified on screen 03:36.
