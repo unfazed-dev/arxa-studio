@@ -5,7 +5,9 @@
  * workspace). Exercises the wired route pair end to end:
  *   boot (root, no orgs) → org.create (auto-open) → rename (D41 manifest-only)
  *   → project fixture → org.new-session (row appears) → park → session.open
- *   → session.archive (hidden per D39) → second org auto-switch → rows served
+ *   → session.archive (hidden per D39) → archives surface (D117: face,
+ *   revive, not-archived guard, trash round-trip, precheck, local-only
+ *   purge) → second org auto-switch → rows served
  *   for BOTH orgs read-only → trash surface + restore / restore-all.
  * Exit 0 = every assertion held.
  */
@@ -127,6 +129,65 @@ r = await act('session.archive', { orgId: acme.id, sessionId: sid })
 check('session.archive ok', r.ok === true, r.error)
 s = await state()
 check('archived row held back from active views', s.orgs[0].sessions.length === 0, JSON.stringify(s.orgs[0].sessions))
+
+// ---- archives surface (2026-09-05 grill) ----------------------------------
+// The Archives section lists every org's archived sessions (D39 browse
+// face); Restore revives; Move to Trash parks a logical entry; the trash
+// owns restore-back and the one destructive door (local-only purge here —
+// the org has no origin).
+check('archives face lists the archived session, org-tagged',
+  Array.isArray(s.archives) && s.archives.length === 1 && s.archives[0].sessionId === sid
+  && s.archives[0].orgId === acme.id && s.archives[0].name === row.name,
+  JSON.stringify(s.archives))
+// Guard: Move-to-Trash refuses a session that is not archived (the door
+// opens only from the archives tier, D47).
+r = await act('session.trash', { orgId: acme.id, sessionId: 'not-a-real-id' })
+check('session.trash of an unknown session fails loud', r.ok === false && /unknown-session/.test(r.error), JSON.stringify(r))
+r = await act('session.revive', { orgId: acme.id, sessionId: sid })
+check('session.revive (archives restore) ok', r.ok === true, r.error)
+s = await state()
+check('revived row back under its workspace, archives empty',
+  s.orgs[0].sessions.length === 1 && s.orgs[0].sessions[0].id === sid && s.orgs[0].sessions[0].state === 'open'
+  && s.archives.length === 0,
+  JSON.stringify({ sessions: s.orgs[0].sessions, archives: s.archives }))
+r = await act('session.trash', { orgId: acme.id, sessionId: sid })
+check('session.trash of an OPEN session refused (not-archived)', r.ok === false && /not-archived/.test(r.error), JSON.stringify(r))
+// Archive again, then the full trash round-trip.
+r = await act('session.archive', { orgId: acme.id, sessionId: sid })
+check('re-archive ok', r.ok === true, r.error)
+r = await act('session.trash', { orgId: acme.id, sessionId: sid })
+check('session.trash ok (entry minted)', r.ok === true && /^2\d{7}T.+Z-session-/.test(r.result.entryId), r.error || JSON.stringify(r.result))
+s = await state()
+check('sessionTrash face lists the entry; trash face stays folders-only',
+  s.sessionTrash.length === 1 && s.sessionTrash[0].sessionId === sid && s.sessionTrash[0].orgId === acme.id
+  && s.archives.length === 0 && s.trash.length === 0 && s.trashCount === 1,
+  JSON.stringify({ sessionTrash: s.sessionTrash, archives: s.archives, trash: s.trash, trashCount: s.trashCount }))
+r = await act('sessiontrash.restore', { orgId: acme.id, entryId: s.sessionTrash[0].entryId })
+check('sessiontrash.restore ok (back to archives)', r.ok === true && r.result.sessionId === sid && r.result.state === 'archived', r.error || JSON.stringify(r.result))
+s = await state()
+check('archives face re-lists the restored session',
+  s.archives.length === 1 && s.archives[0].sessionId === sid && s.sessionTrash.length === 0, JSON.stringify(s.archives))
+// Purge: precheck (local-only org → no repo, no open PR) then the door.
+r = await act('session.trash', { orgId: acme.id, sessionId: sid })
+check('trash again for purge', r.ok === true, r.error)
+s = await state()
+const purgeEntry = s.sessionTrash[0]
+r = await act('sessiontrash.precheck', { orgId: acme.id, entryId: purgeEntry.entryId })
+check('sessiontrash.precheck: local-only picture (no repo, no PR, branch named)',
+  r.ok === true && r.result.repo === null && r.result.openPr === null && r.result.branch === purgeEntry.branch,
+  r.error || JSON.stringify(r.result))
+const branchBefore = purgeEntry.branch
+r = await act('sessiontrash.purge', { orgId: acme.id, entryId: purgeEntry.entryId })
+check('sessiontrash.purge ok: local-only (no-origin) — refs dropped, entry deleted',
+  r.ok === true && r.result.remoteBranch === 'no-origin' && r.result.refs.branchDropped === true && r.result.deleted != null,
+  r.error || JSON.stringify(r.result))
+s = await state()
+const branchGone = gw.runGit(['rev-parse', '--verify', branchBefore], { cwd: orgPath, allowFail: true }) === null
+check('parked branch really gone; both faces empty; count 0',
+  branchGone && s.sessionTrash.length === 0 && s.archives.length === 0 && s.trashCount === 0,
+  JSON.stringify({ sessionTrash: s.sessionTrash, archives: s.archives, trashCount: s.trashCount }))
+r = await act('sessiontrash.restore', { orgId: acme.id, entryId: purgeEntry.entryId })
+check('restore of a purged entry fails loud (no-trash-entry)', r.ok === false && /no-trash-entry/.test(r.error), JSON.stringify(r))
 
 // second org: create auto-SWITCHES (single-handle lifecycle), and the first
 // org's rows are still served read-only — no open cycle needed to LIST.

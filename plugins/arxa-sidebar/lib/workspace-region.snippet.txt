@@ -30,7 +30,7 @@
 			// set by resume + session.open; server truth is which org is open, not
 			// which session is focused — dsh owns focus, we mirror the last open.
 			let currentSessionId = null;
-			let state = { orgs: [], trash: [], trashCount: 0, root: false, selectedProject: null, trashView: { rows: [], open: true }, selectedRowId: null, expanded: {}, emit: {}, currentSessionId: null, loading: true, __sig: "", workspacesView: { items: [], phase: "ready", archivedSessionIds: [] }, sessionsView: { byId: {}, ids: [], current: void 0 } };
+			let state = { orgs: [], trash: [], trashCount: 0, archives: [], sessionTrash: [], root: false, selectedProject: null, trashView: { rows: [], open: true }, selectedRowId: null, expanded: {}, emit: {}, currentSessionId: null, loading: true, __sig: "", workspacesView: { items: [], phase: "ready", archivedSessionIds: [] }, sessionsView: { byId: {}, ids: [], current: void 0 } };
 			const subs = new Set();
 			let timer = 0;
 			/** Resume (D71 UX + 2026-08-30): on first sight of an org with
@@ -148,7 +148,11 @@
 			// orgTrash (the org left orgs when it was trashed), so without this
 			// the post-purge snapshot was silently discarded and the ghost row
 			// survived every refresh and poll.
-			const sig = JSON.stringify([next.orgs, next.trash, next.orgTrash, next.trashCount, next.root, next.selectedProject]);
+			// 2026-09-05: archives + sessionTrash ride the signature for the same
+			// reason — session.trash changes ONLY those two faces (the registry
+			// row left, the entry just appeared), and a signature without them
+			// discards the snapshot exactly when the Archives row must react.
+			const sig = JSON.stringify([next.orgs, next.trash, next.orgTrash, next.trashCount, next.archives, next.sessionTrash, next.root, next.selectedProject]);
 					if (sig !== state.__sig) {
 						// Client-side faces survive every server replacement (the trash
 						// toggle, the row selection and the container expansion are not
@@ -423,7 +427,15 @@
 		const sessionsList = (s) => {
 			const byId = {};
 			const ids = [];
+			// dsh 0.1.2-rc.1: derive the pendingInteractions MAP alongside the
+			// summaries (the stock sessionNode no longer reads the summary's
+			// pendingInteraction field — only the map through
+			// useSessionPendingInteraction). Kinds outside the visible union are
+			// dropped here so the map matches what the stock would ever show.
+			const pendingMap = new Map();
 			for (const o of s.orgs || []) for (const x of o.sessions || []) {
+				const pi = x.pendingInteraction;
+				if (pi != null && (pi.kind === "approval" || pi.kind === "plan-review" || pi.kind === "question")) pendingMap.set(x.id, pi);
 				byId[x.id] = {
 					id: x.id,
 					displayTitle: x.name,
@@ -436,7 +448,7 @@
 				};
 				ids.push(x.id);
 			}
-			return { byId, ids, current: s.currentSessionId ?? void 0 };
+			return { byId, ids, current: s.currentSessionId ?? void 0, pendingMap };
 		};
 		const orgOfSession = (sessionId) => {
 			for (const o of orgStore.get().orgs) if ((o.sessions || []).some((x) => x.id === sessionId)) return o.id;
@@ -1096,6 +1108,12 @@
 		 * it hundreds of px below the orgs once an org is open. The flat
 		 * "In one list" stock mode has no org rows — no trash there. */
 		const ARXA_TRASH_AFTER_ORGS = () => orgT ? (0, react_jsx_runtime.jsx)(TrashSection, { t: orgT, key: "arxa-trash" }) : null;
+		/** 2026-09-05 grill: the Archives surface rides the grouped tree's
+		 * tail DIRECTLY ABOVE the trash (gen splice 6z) — the lifecycle
+		 * reads top-down (tree → archives → trash: archive first, trash is
+		 * the terminal tier), and the destructive door stays the last row.
+		 * Same grouped-mode-only rule as the trash. */
+		const ARXA_ARCHIVES_AFTER_ORGS = () => orgT ? (0, react_jsx_runtime.jsx)(ArchivesSection, { t: orgT, key: "arxa-archives" }) : null;
 		/** T4 v2: the separate tail Files section is GONE (user direction —
 		 * files belong inside the tree under the owning row). ArxaDirRows +
 		 * ARXA_LEAF_FILES render inline instead; the tree-read route and the
@@ -1147,9 +1165,13 @@
 		const orgNoFlow = { getSnapshot: () => false, subscribe: () => () => {} };
 		// Hook faces are STABLE module-scope identities, bound at the component
 		// boundary (see OrgBrowser): the slot renderer merges its STANDARD runtime
-		// hooks (useSessions/useWorkspaces) OVER inject props, so declaring them in
-		// the inject face loses — passing them as plain props cannot be overridden.
-		let orgHostDescription = void 0;
+		// hooks (useSessions/useWorkspaces/useSessionPendingInteraction) OVER
+		// inject props, so declaring them in the inject face loses — passing them
+		// as plain props cannot be overridden.
+		// dsh 0.1.2-rc.1 (2026-09-05): the host face renamed
+		// useHostDescription → useHostInfo and now reads the remote $host
+		// snapshot (sel receives the info object with .home, not a store).
+		let orgHostInfo = void 0;
 		// Client runtime sessions service (dsh-client-runtime): open(id)
 		// focuses a conversation into the content area; clear() empties it
 		// AND wipes the persisted selection (the restore source at boot).
@@ -1223,7 +1245,15 @@
 		const orgUseWorkspaces = (sel) => useOrg((s) => sel(s.workspacesView));
 		const orgUseSessions = (sel) => useOrg((s) => sel(s.sessionsView));
 		const orgUseDirectoryFlow = (sel) => sel(orgNoFlow.getSnapshot());
-		const orgUseHostDescription = (sel) => sel(orgHostDescription);
+		const orgUseHostInfo = (sel) => sel(orgHostInfo && typeof orgHostInfo.getSnapshot === "function" ? orgHostInfo.getSnapshot() : orgHostInfo);
+		// dsh 0.1.2-rc.1: session rows read pending interactions from a MAP
+		// (useSessionPendingInteraction — the framework's standard hook, produced
+		// by dsh-client-ui-session's UiSession via provideRoot), no longer off the
+		// row summary. OrgBrowser overrides it with the org-derived map so the D63
+		// producer-consumer contract (waiting pills on org rows) rides unchanged;
+		// the stock's visiblePendingKind filters to approval|plan-review|question,
+		// so the map only ever carries that union.
+		const orgUsePendingInteraction = (sel) => sel(useOrg((s) => s.sessionsView.pendingMap));
 		/** CTA gate (D70/D71) is DECLARATIVE now (2026-09-01): the shell
 		 * button reads window.__ARXA_SIDEBAR__.ctaReady/ctaTitle at render —
 		 * see the lever comments at createOrgStore. The imperative DOM gate
@@ -1427,6 +1457,93 @@
 				open ? (0, react_jsx_runtime.jsx)(ArxaDirRows, { dir: d.kind === "org" ? "" : d.kind === "dock" ? d.slug : "projects/" + d.slug, depth: d.depth + 1, mode: "files-only", hideDirs: d.kind === "org" ? ARXA_ROW_HIDDEN.org : d.kind === "dock" ? (ARXA_ROW_HIDDEN.docks[d.slug] || {}) : null }, "arxa-dir:" + d.key) : null
 			] }, d.key);
 		}
+		/** 2026-09-05 grill — the Archives section: every org's archived
+		 * sessions (D39's sanctioned browse face), grouped by org, rendered
+		 * in the trash's exact idiom (D82/D84): permanent row, tree-row
+		 * chevron, 28px rowActions icon buttons under Tooltips, auto-open
+		 * while non-empty. Archives NEVER destroys: Restore revives the
+		 * worktree from the parked branch (the row returns under its
+		 * workspace), Move to Trash is reversible (normal ink, not danger —
+		 * deletion is the trash row's door alone). */
+		function ArchivesSection({ t }) {
+			const rows = useOrg((s) => s.archives) || [];
+			const total = rows.length;
+			const [manual, setManual] = (0, react.useState)(null);
+			const open = manual === null ? total > 0 : manual;
+			const toggle = () => setManual(!open);
+			const revive = (orgId, sessionId) => {
+				orgStore.mutate("session.revive", { orgId, sessionId }).catch(() => {});
+			};
+			const toTrash = (orgId, sessionId) => {
+				orgStore.mutate("session.trash", { orgId, sessionId }).catch(() => {});
+			};
+			// Same entryAction / groupLabel / entryRow shapes as the trash —
+			// the two sections must read as one design.
+			const entryAction = (label, Icon, onClick, danger) => (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Tooltip, {
+				label,
+				side: "bottom",
+				children: (0, react_jsx_runtime.jsx)("button", {
+					type: "button",
+					className: Rows_module_css_default.iconButton,
+					"aria-label": label,
+					onClick: (e) => { e.stopPropagation(); onClick(); },
+					style: danger ? { color: "var(--dsw-alias-label-error)" } : void 0,
+					children: (0, react_jsx_runtime.jsx)(Icon, {})
+				})
+			});
+			const groupLabel = (text) => (0, react_jsx_runtime.jsx)("div", {
+				style: { fontSize: 10, lineHeight: "16px", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--dsw-alias-label-tertiary)", padding: "8px 8px 2px 26px" },
+				children: text
+			});
+			const entryRow = (e) => (0, react_jsx_runtime.jsxs)("div", {
+				className: Rows_module_css_default.projectRow,
+				style: { marginLeft: 18, marginTop: 2, cursor: "default" },
+				children: [
+					(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.slot, children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20, { size: 16 }) }),
+					(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", {
+						className: Rows_module_css_default.title,
+						title: (e.orgName || "") + " · " + (e.project || "org") + (e.workspace ? " · " + e.workspace : "") + " · " + e.sessionId,
+						children: e.name
+					}) }),
+					(0, react_jsx_runtime.jsx)("span", { style: { display: "flex", gap: 12, flex: "none", alignItems: "center" }, children: [
+						entryAction(t("archives.revive"), _deepseek_ai_dsh_client_ui_primitives.IconRefreshOutline16, () => revive(e.orgId, e.sessionId)),
+						entryAction(t("archives.toTrash"), _deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, () => toTrash(e.orgId, e.sessionId))
+					] })
+				]
+			}, e.orgId + "|" + e.sessionId);
+			// Group by org, first-appearance order (the host serves orgs in
+			// recents order; the map preserves it).
+			const byOrg = new Map();
+			for (const e of rows) {
+				if (!byOrg.has(e.orgId)) byOrg.set(e.orgId, { name: e.orgName || e.orgId, entries: [] });
+				byOrg.get(e.orgId).entries.push(e);
+			}
+			return (0, react_jsx_runtime.jsxs)("div", {
+				style: { borderTop: "1px solid var(--dsw-alias-border-l2)", marginTop: 8, padding: "0 0 8px", opacity: total === 0 ? 0.45 : 1 },
+				children: [
+					(0, react_jsx_runtime.jsxs)("div", {
+						className: Rows_module_css_default.projectRow,
+						role: "treeitem",
+						"aria-expanded": open,
+						tabIndex: 0,
+						onClick: toggle,
+						onKeyDown: (e) => { if (e.key === "Enter" || e.key === " ") toggle(); },
+						style: { marginLeft: 4, marginTop: 4, borderRadius: 6, cursor: "pointer", fontWeight: 600 },
+						children: [
+							(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder), children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20, { size: 16 }) }),
+							(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.chevron), children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTriangleRightFill14, { className: clsx(Rows_module_css_default.arrow, open && Rows_module_css_default.arrowOpen) }) }),
+							(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: t("archives.section") }) }),
+							total > 0 ? (0, react_jsx_runtime.jsx)("span", { style: { fontSize: 11, opacity: 0.55, flex: "none", marginRight: 4 }, children: String(total) }) : null
+						]
+					}),
+					open && total === 0 && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, color: "var(--dsw-alias-label-tertiary)", padding: "4px 8px 2px 26px" }, children: t("archives.empty") }),
+					open && [...byOrg.entries()].map(([orgId, g]) => (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+						groupLabel(g.name),
+						g.entries.map(entryRow)
+					], key: orgId })),
+				]
+			});
+		}
 		function TrashSection({ t }) {
 			// D80/D81/D82: the trash is a PERMANENT, discoverable row. Two groups:
 			// trashed ORGANISATIONS (workspace-root trash) and the open org's
@@ -1440,8 +1557,9 @@
 			// modal and REALLY deletes the GitHub repos (grilled 2026-08-30).
 			const view = useOrg((s) => s.trashView);
 			const orgRows = useOrg((s) => s.orgTrash) || [];
+			const sessionRows = useOrg((s) => s.sessionTrash) || [];
 			const rows = view.rows || [];
-			const total = rows.length + orgRows.length;
+			const total = rows.length + orgRows.length + sessionRows.length;
 			// D82: auto-open while entries exist; the user's first toggle wins.
 			const [manual, setManual] = (0, react.useState)(null);
 			const open = manual === null ? total > 0 : manual;
@@ -1452,8 +1570,13 @@
 			const restoreOrg = (entryId) => {
 				orgStore.mutate("orgtrash.restore", { entryId }).catch(() => {});
 			};
-			const purge = (scope, entryId, name) => {
-				window.dispatchEvent(new CustomEvent("arxa-purge-trash", { detail: { scope, entryId, name } }));
+			// 2026-09-05: session entries restore to the ARCHIVES row (their
+			// owning org must be open — the entry lives in ITS trash).
+			const restoreSession = (orgId, entryId) => {
+				orgStore.mutate("sessiontrash.restore", { orgId, entryId }).catch(() => {});
+			};
+			const purge = (scope, entryId, name, orgId) => {
+				window.dispatchEvent(new CustomEvent("arxa-purge-trash", { detail: { scope, entryId, name, orgId } }));
 			};
 			const entryAction = (label, Icon, onClick, danger) => (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Tooltip, {
 				label,
@@ -1521,6 +1644,12 @@
 					open && orgRows.map((e) => entryRow(e, (0, react_jsx_runtime.jsx)(OrgGlyph, {}), () => restoreOrg(e.entryId), () => purge("org", e.entryId, e.name))),
 					open && rows.length > 0 && groupLabel(t("trash.projectSection")),
 					open && rows.map((e) => entryRow(e, (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {}), () => restore(e.entryId), () => purge("project", e.entryId, e.name))),
+					// 2026-09-05: sessions trashed from the Archives row — logical entries
+					// (registry row + parked branch), restored back to the Archives row,
+					// purged through the same typed-name modal with a live open-PR warning
+					// (the CI/CD-aware destructive door).
+					open && sessionRows.length > 0 && groupLabel(t("trash.sessionSection")),
+					open && sessionRows.map((e) => entryRow(e, (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20, { size: 16 }), () => restoreSession(e.orgId, e.entryId), () => purge("session", e.entryId, e.name, e.orgId))),
 				]
 			});
 		}
@@ -2125,6 +2254,18 @@
 			// later that day).
 			const [relinking, setRelinking] = (0, react.useState)(false);
 			const [devCode, setDevCode] = (0, react.useState)(null);
+			const [pre, setPre] = (0, react.useState)(null);
+			// 2026-09-05 (session purge): the live CI/CD picture — the open PR
+			// riding the parked branch and the owning repo's GitHub coordinates.
+			// Read-only; any failure degrades to null (the static warning text
+			// still states the blast radius).
+			(0, react.useEffect)(() => {
+				if (target && target.scope === "session" && target.orgId) {
+					setPre(null);
+					ORG_POST("sessiontrash.precheck", { orgId: target.orgId, entryId: target.entryId })
+						.then((r) => { setPre(r && r.result ? r.result : null); }, () => { setPre(null); });
+				} else { setPre(null); }
+			}, [target]);
 			(0, react.useEffect)(() => { setPhase("confirm"); setErrMsg(null); setTyped(""); setRelinking(false); setDevCode(null); setSummary(null); }, [target]);
 			if (!target) return null;
 			// D88: busy LOCKS the modal — Close and Escape are dead while the
@@ -2135,7 +2276,7 @@
 			const submit = () => {
 				if (phase === "busy") return;
 				setPhase("busy"); setErrMsg(null);
-				ORG_POST(target.scope === "org" ? "orgtrash.purge" : "projecttrash.purge", { entryId: target.entryId }).then((r) => {
+				ORG_POST(target.scope === "org" ? "orgtrash.purge" : target.scope === "session" ? "sessiontrash.purge" : "projecttrash.purge", target.scope === "session" ? { orgId: target.orgId, entryId: target.entryId } : { entryId: target.entryId }).then((r) => {
 					// D88 success summary: exactly what left the machine.
 					const res = r && r.result;
 					const parts = [target.name];
@@ -2180,12 +2321,15 @@
 				open: true,
 				onClose: dismiss,
 				closeLabel: t("publish.cancel"),
-				title: target.scope === "org" ? t("purge.orgTitle") : t("purge.projectTitle"),
+				title: target.scope === "org" ? t("purge.orgTitle") : target.scope === "session" ? t("purge.sessionTitle") : t("purge.projectTitle"),
 				footer,
 				children: (0, react_jsx_runtime.jsxs)("div", { children: [
 					phase !== "done" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, marginBottom: 8 }, children: target.name }),
-						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginBottom: 8 }, children: target.scope === "org" ? t("purge.orgWarn") : t("purge.projectWarn") }),
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginBottom: 8 }, children: target.scope === "org" ? t("purge.orgWarn") : target.scope === "session" ? t("purge.sessionWarn") : t("purge.projectWarn") }),
+					target.scope === "session" && pre && pre.openPr && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, color: "var(--dsw-alias-label-error)", marginTop: 6 }, children: t("purge.prLine").replace("{n}", String(pre.openPr.number ?? "?")).replace("{title}", String(pre.openPr.title ?? "")) }),
+					target.scope === "session" && pre && !pre.openPr && pre.repo && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginTop: 6 }, children: t("purge.repoLine").replace("{repo}", pre.repo.owner + "/" + pre.repo.name) }),
+					target.scope === "session" && pre && pre.repoGone && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginTop: 6 }, children: t("purge.repoGoneLine") }),
 						// D88: GitHub-style typed gate — Delete forever stays dead until
 						// the EXACT row label (case-sensitive) is retyped.
 						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.55, margin: "10px 0 4px" }, children: t("purge.typeName").replace("{name}", target.name) }),
@@ -2364,7 +2508,7 @@
 			// renderer merges its STANDARD runtime hooks (useSessions/useWorkspaces)
 			// over inject props, so declaring them in the inject face loses. Passing
 			// them straight to the stock component cannot be overridden.
-			const patched = { ...props, useWorkspaces: orgUseWorkspaces, useSessions: orgUseSessions, useDirectoryFlow: orgUseDirectoryFlow, useHostDescription: orgUseHostDescription };
+			const patched = { ...props, useWorkspaces: orgUseWorkspaces, useSessions: orgUseSessions, useDirectoryFlow: orgUseDirectoryFlow, useHostInfo: orgUseHostInfo, useSessionPendingInteraction: orgUsePendingInteraction };
 			// Create-org conversation lives HERE (local state, event-triggered by
 			// the spliced + flow) — see OrgCreateModal for why it must not emit.
 			const [creating, setCreating] = (0, react.useState)(false);
@@ -2411,7 +2555,7 @@
 				window.addEventListener("arxa-rename-project", onRenameProject);
 				const onPurge = (e) => {
 					const d = (e && e.detail) || {};
-					if (d && d.entryId) setPurging({ scope: String(d.scope || "project"), entryId: String(d.entryId), name: String(d.name || d.entryId) });
+					if (d && d.entryId) setPurging({ scope: String(d.scope || "project"), entryId: String(d.entryId), name: String(d.name || d.entryId), orgId: d.orgId ? String(d.orgId) : void 0 });
 				};
 				window.addEventListener("arxa-purge-trash", onPurge);
 			window.addEventListener("arxa-disconnect-github", onDisconnect);
@@ -2479,6 +2623,16 @@
 			"trash.orgSection": "Organisations",
 			"trash.projectSection": "Projects",
 			"trash.deleteForever": "Delete forever",
+			"archives.section": "Archives",
+			"archives.empty": "No archived sessions",
+			"archives.revive": "Restore",
+			"archives.toTrash": "Move to Trash",
+			"trash.sessionSection": "Sessions",
+			"purge.sessionTitle": "Delete session forever?",
+			"purge.sessionWarn": "This permanently deletes the archived session's branch and its registry row. Its conversation transcript is kept. A GitHub branch left behind is deleted too — an open pull request backed by it will be closed. This cannot be undone.",
+			"purge.prLine": "Open PR #{n}: {title} — deleting this branch closes it.",
+			"purge.repoLine": "Published under {repo} — the remote branch is deleted first.",
+			"purge.repoGoneLine": "The owning project is no longer on disk — only the marker is removed.",
 			"purge.orgTitle": "Delete organisation forever?",
 			"purge.projectTitle": "Delete project forever?",
 			"purge.orgWarn": "This permanently deletes the organisation folder AND every GitHub repo it owns — the org repo and each published project repo. This cannot be undone.",
@@ -2674,6 +2828,16 @@
 			"trash.orgSection": "Organizacje",
 			"trash.projectSection": "Projekty",
 			"trash.deleteForever": "Usuń na zawsze",
+			"archives.section": "Archiwum",
+			"archives.empty": "Brak zarchiwizowanych sesji",
+			"archives.revive": "Przywróć",
+			"archives.toTrash": "Przenieś do kosza",
+			"trash.sessionSection": "Sesje",
+			"purge.sessionTitle": "Usunąć sesję na zawsze?",
+			"purge.sessionWarn": "Trwale usuwa gałąź zarchiwizowanej sesji i jej wpis w rejestrze. Zapis rozmowy zostaje. Pozostała gałąź na GitHubie również zostanie usunięta — otwarty pull request oparty na niej zostanie zamknięty. Tego nie da się cofnąć.",
+			"purge.prLine": "Otwarty PR #{n}: {title} — usunięcie gałęzi zamyka go.",
+			"purge.repoLine": "Opublikowane w {repo} — zdalna gałąź jest usuwana najpierw.",
+			"purge.repoGoneLine": "Projekt właścicielski nie istnieje na dysku — usuwany jest tylko znacznik.",
 			"purge.orgTitle": "Usunąć organizację na zawsze?",
 			"purge.projectTitle": "Usunąć projekt na zawsze?",
 			"purge.orgWarn": "To trwale usuwa folder organizacji ORAZ każde repo GitHub, które do niej należy — repo organizacji i każde opublikowane repo projektu. Tej operacji nie można cofnąć.",
@@ -2869,6 +3033,16 @@
 			"trash.orgSection": "Organisations",
 			"trash.projectSection": "Projets",
 			"trash.deleteForever": "Supprimer définitivement",
+			"archives.section": "Archives",
+			"archives.empty": "Aucune session archivée",
+			"archives.revive": "Restaurer",
+			"archives.toTrash": "Déplacer dans la corbeille",
+			"trash.sessionSection": "Sessions",
+			"purge.sessionTitle": "Supprimer la session définitivement ?",
+			"purge.sessionWarn": "Supprime définitivement la branche de la session archivée et sa ligne de registre. La transcription de la conversation est conservée. Une branche GitHub restante est également supprimée — une pull request ouverte basée dessus sera fermée. Irréversible.",
+			"purge.prLine": "PR ouverte #{n} : {title} — supprimer cette branche la fermera.",
+			"purge.repoLine": "Publié sous {repo} — la branche distante est supprimée en premier.",
+			"purge.repoGoneLine": "Le projet propriétaire n'est plus sur le disque — seul le marqueur est supprimé.",
 			"purge.orgTitle": "Supprimer l’organisation définitivement ?",
 			"purge.projectTitle": "Supprimer le projet définitivement ?",
 			"purge.orgWarn": "Ceci supprime définitivement le dossier de l’organisation ET tous les repos GitHub qu’elle possède — le repo de l’organisation et chaque repo de projet publié. Cette action est irréversible.",

@@ -7,11 +7,14 @@
  *
  *   GET  /__arxa/sidebar/state?project=<id|slug>
  *        → { seam, root, orgs: [{ id, name, slug, path, open, sessions }],
- *            trashCount, selectedProject }
+ *            trashCount, archives, sessionTrash, selectedProject }
  *        Every org carries its registry session rows (read-only listSessions
  *        — no shell lock needed to LIST); the open org additionally serves
- *        projects and the selected scope. Archived sessions never leave the
- *        host (D39 archivedSessionIds contract).
+ *        projects and the selected scope. `archives` (2026-09-05 grill) is
+ *        the D39-sanctioned browse face: every org's ARCHIVED rows, listed
+ *        for the Archives section — active faces still never include them.
+ *        `sessionTrash` lists session-kind trash entries across all orgs
+ *        (the destructive door must be visible the moment it exists, D82).
  *
  *   POST /__arxa/sidebar/action  body { action, arg }
  *        org.create | org.open | org.close | org.rename | org.new-session |
@@ -482,7 +485,9 @@ export function apply(ctx, opts = {}) {
    * One org's session rows off the plain registry read — no shell lock, no
    * open cycle: LISTING sessions is read-only fs (+ git common-dir walk).
    * An org that never opened (no repo yet) or an unreadable registry lists
-   * as empty; a row is presentation, not a lifecycle.
+   * as empty; a row is presentation, not a lifecycle. Returns BOTH halves
+   * (2026-09-05 grill): active rows for the tree and archived rows for the
+   * Archives section — one registry read feeds the two faces.
    */
   const orgSessions = async (l, org) => {
     try {
@@ -494,31 +499,66 @@ export function apply(ctx, opts = {}) {
       // projects in slug order). An older shell without the aggregate lister
       // degrades to org-only rows rather than failing the face.
       const listAll = shell.listSessionsAcrossRepos ?? shell.listSessions
-      const rows = listAll(org.path, process.env)
-        .filter((s) => s.state !== 'archived')
-        .map((s) => ({
-          id: s.id,
-          name: s.name,
-          state: s.state,
-          parkedReason: s.parkedReason,
-          project: s.project ?? null,
-          // Workspace scope + real timestamps (grilled 2026-08-30): rows
-          // render under their workspace row; ages read from ms epochs —
-          // the 56y bug was fake ordinals rendered as ages from 1970.
-          workspace: s.workspace ?? null,
-          createdAt: s.createdAt ?? null,
-          updatedAt: s.updatedAt ?? null,
-          dshSessionId: s.dshSessionId ?? null,
-          // The crumb last segment (Q2: … / session / worktree) reads this — it was
-          // never served, so the segment silently never rendered (2026-09-02).
-          worktree: s.worktree ?? null,
-        }))
+      const all = listAll(org.path, process.env)
+      const shape = (s) => ({
+        id: s.id,
+        name: s.name,
+        state: s.state,
+        parkedReason: s.parkedReason,
+        project: s.project ?? null,
+        // Workspace scope + real timestamps (grilled 2026-08-30): rows
+        // render under their workspace row; ages read from ms epochs —
+        // the 56y bug was fake ordinals rendered as ages from 1970.
+        workspace: s.workspace ?? null,
+        createdAt: s.createdAt ?? null,
+        updatedAt: s.updatedAt ?? null,
+        dshSessionId: s.dshSessionId ?? null,
+        // The crumb last segment (Q2: … / session / worktree) reads this — it was
+        // never served, so the segment silently never rendered (2026-09-02).
+        worktree: s.worktree ?? null,
+      })
+      const rows = all.filter((s) => s.state !== 'archived').map(shape)
+      // D39 browse face: archived rows ride the Archives section (the one
+      // sanctioned surface); active faces above still never include them.
+      const archived = all.filter((s) => s.state === 'archived').map((s) => ({
+        sessionId: s.id,
+        name: s.name,
+        project: s.project ?? null,
+        workspace: s.workspace ?? null,
+        updatedAt: s.updatedAt ?? s.createdAt ?? null,
+      }))
       const bridge = getBridge()
       const live = bridge ? await bridge.list() : []
-      return shell.joinDshLive(rows, live)
+      return { active: shell.joinDshLive(rows, live), archived }
     } catch {
-      return []
+      return { active: [], archived: [] }
     }
+  }
+
+  /**
+   * Session-kind trash entries across ALL orgs (2026-09-05 grill): the
+   * trash's Sessions group must be visible the moment an entry exists —
+   * D82's own principle — so the face aggregates every org's trash, not
+   * just the open one. Pure fs read per org; orgs without a trash list [].
+   */
+  const orgSessionTrash = (l) => {
+    const out = []
+    for (const org of l.listOrgs()) {
+      let entries = []
+      try { entries = shell.listTrash(org.path) } catch { continue }
+      for (const e of entries) {
+        if (!e.origin || e.origin.kind !== shell.SESSION_TRASH_KIND) continue
+        out.push({
+          entryId: e.entryId,
+          name: e.origin.name || e.origin.sessionId,
+          orgId: org.id,
+          orgName: org.name,
+          sessionId: e.origin.sessionId,
+          branch: e.origin.branch ?? null,
+        })
+      }
+    }
+    return out
   }
 
   const emptySnap = (seam) => ({
@@ -528,6 +568,8 @@ export function apply(ctx, opts = {}) {
     rows: [],
     tree: null,
     trashCount: 0,
+    archives: [],
+    sessionTrash: [],
     selectedProject: null,
   })
 
@@ -557,23 +599,32 @@ export function apply(ctx, opts = {}) {
       if (typeof l.orgTree !== 'function') return null
       try { return l.orgTree(p) } catch { return null }
     }
-    const orgs = await Promise.all(l.listOrgs().map(async ({ id, name, slug, path, manifest }) => ({
-      id,
-      name,
-      slug,
-      path,
-      open: cur?.path === path,
-      // Initial-snapshot state (2025-08 create-org hang), open org only:
-      // the rows client disables the New Session CTA while true.
-      snapshotPending: cur?.path === path ? !!cur.snapshotPending?.() : false,
-      createdAt: manifest?.createdAt ?? null,
-      // D90: connected = the org repo is published (repoUrl in the manifest).
-      connected: !!manifest?.repoUrl,
-      sessions: await orgSessions(l, { path }),
-      // v2 tree face: docks/containers/projects for this org. Read-only;
-      // failures degrade to null (the client renders the org row only).
-      tree: treeOf(path),
-    })))
+    // Archives face (2026-09-05 grill): every org's archived rows, tagged
+    // with their org — the client groups by it. One registry read per org
+    // (shared with the sessions face below) — no extra git work.
+    const archivesByOrg = new Map()
+    const orgs = await Promise.all(l.listOrgs().map(async ({ id, name, slug, path, manifest }) => {
+      const sess = await orgSessions(l, { path })
+      archivesByOrg.set(path, (sess.archived || []).map((a) => ({ ...a, orgId: id, orgName: name })))
+      return {
+        id,
+        name,
+        slug,
+        path,
+        open: cur?.path === path,
+        // Initial-snapshot state (2025-08 create-org hang), open org only:
+        // the rows client disables the New Session CTA while true.
+        snapshotPending: cur?.path === path ? !!cur.snapshotPending?.() : false,
+        createdAt: manifest?.createdAt ?? null,
+        // D90: connected = the org repo is published (repoUrl in the manifest).
+        connected: !!manifest?.repoUrl,
+        sessions: sess.active,
+        // v2 tree face: docks/containers/projects for this org. Read-only;
+        // failures degrade to null (the client renders the org row only).
+        tree: treeOf(path),
+      }
+    }))
+    const archives = [...archivesByOrg.values()].flat()
     // Project scope (open org only): the client's id-or-slug selection
     // resolves once against the registry's slug; unknown renders as none.
     const selSlug = (() => {
@@ -594,7 +645,9 @@ export function apply(ctx, opts = {}) {
       // surface (Q6) hangs off the open org's row menu.
       // D69: trash is org-local (<org>/.arxa/trash) — the surface (Q6)
       // hangs off the open org's row menu and lists THAT org's trash.
-      trash: cur ? shell.listTrash(cur.path).map((e) => ({
+      // 2026-09-05: session entries are a DIFFERENT kind (logical markers,
+      // not folder moves) — they ride sessionTrash below, never this face.
+      trash: cur ? shell.listTrash(cur.path).filter((e) => e.origin?.kind !== shell.SESSION_TRASH_KIND).map((e) => ({
         entryId: e.entryId,
         name: (e.origin?.originalPath ?? e.entryId).replace(/[/\\]+$/, '').split('/').pop() || e.entryId,
       })) : [],
@@ -604,6 +657,12 @@ export function apply(ctx, opts = {}) {
         entryId: e.entryId,
         name: e.name || e.entryId,
       })),
+      // 2026-09-05 grill: the Archives section's data (every org's archived
+      // sessions, org-tagged) and the trash's Sessions group (every org's
+      // session-kind entries — the destructive door visible the moment it
+      // exists, D82). Both ride the change signature client-side.
+      archives,
+      sessionTrash: orgSessionTrash(l),
       selectedProject: selSlug,
     }
   }
@@ -1274,6 +1333,46 @@ export function apply(ctx, opts = {}) {
               // dropRemote: close-without-merge cleanup — the caller asserts the
               // PR is closed, so the unmerged remote branch may go too.
               return cur.archiveSession(arg?.sessionId, { dropRemote: arg?.dropRemote === true })
+            },
+            // ---- Archives section (2026-09-05 grill) ---------------------
+            // Restore = bare revival (worktree back from the parked branch;
+            // the row reappears under its workspace). The conversation
+            // attaches when the user opens the row — trash-restore parity.
+            'session.revive': async () => {
+              const cur = await ensureOpen(arg?.orgId)
+              if (typeof arg?.sessionId !== 'string' || arg.sessionId.trim() === '') {
+                throw new Error('session-id-required')
+              }
+              return cur.reviveSessionOnly(arg.sessionId)
+            },
+            // Move to Trash (reversible): a logical entry + registry-row
+            // removal. The branch parks until the trash's own purge — the
+            // Archives row never destroys anything.
+            'session.trash': async () => {
+              const cur = await ensureOpen(arg?.orgId)
+              if (typeof arg?.sessionId !== 'string' || arg.sessionId.trim() === '') {
+                throw new Error('session-id-required')
+              }
+              return cur.trashArchivedSession(arg.sessionId)
+            },
+            'sessiontrash.restore': async () => {
+              const cur = await ensureOpen(arg?.orgId)
+              if (typeof arg?.entryId !== 'string' || arg.entryId.trim() === '') throw new Error('entry-id-required')
+              return cur.restoreSessionEntry(arg.entryId)
+            },
+            // Purge-modal data: the live CI/CD picture (open PR on the
+            // parked branch, the owning repo's GitHub coordinates).
+            'sessiontrash.precheck': async () => {
+              const cur = await ensureOpen(arg?.orgId)
+              if (typeof arg?.entryId !== 'string' || arg.entryId.trim() === '') throw new Error('entry-id-required')
+              return cur.precheckSessionEntry(arg.entryId)
+            },
+            // The ONE destructive door for a session (D47): remote-first
+            // branch delete when published, then local refs + the entry.
+            'sessiontrash.purge': async () => {
+              const cur = await ensureOpen(arg?.orgId)
+              if (typeof arg?.entryId !== 'string' || arg.entryId.trim() === '') throw new Error('entry-id-required')
+              return cur.purgeSessionEntry(arg.entryId)
             },
             'trash.restore': () => handle().restoreTrash(arg?.entryId ?? null),
             // 'ci.run' reserved for Phase D3 — deliberately absent.

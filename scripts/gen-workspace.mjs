@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = dirname(here)
-const DSH_VERSION = '0.1.1-rc.2'
+const DSH_VERSION = '0.1.2-rc.1'
 const T = (n) => '\t'.repeat(n)
 const stockPath = join(root, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
 const regionPath = join(root, 'plugins', 'arxa-sidebar', 'lib', 'workspace-region.snippet.txt')
@@ -47,7 +47,7 @@ out = out.replace(/[\/][\/]#[ ]sourceMappingURL=client[.]js[.]map\s*$/m, '')
 
 // 2. identity renames
 out = out.replace('id: "@deepseek-ai/dsh-client-ui-workspace",', 'id: "arxa-sidebar-workspace",')
-out = out.replaceAll('qDHVXG_', 'aXa_wsb_')
+out = out.replaceAll('bhn1Oq_', 'aXa_wsb_')
 out = out.replaceAll('YDXeBa_', 'aXa_wsr_')
 out = out.replaceAll('_G5b-a_', 'aXa_wsp_')
 for (const mod of ['Rows', 'WorkspacePicker', 'WorkspaceBrowser']) {
@@ -123,15 +123,19 @@ out = out.replace(GROUP_KIDS, [
 ].join('\n'))
 // …and close the conditional spread after the item expression — the
 // sessions map line is the unique witness that the item just ended.
+// dsh 0.1.2-rc.1 (2026-09-05): the map line changed shape — the stock
+// overflow control became collapsedSessionRows() (blank sessions ride
+// free of COLLAPSED_SESSION_LIMIT), so the witness is the new
+// sessionsExpanded/collapsed.rows select. Uniqueness re-verified.
 const GROUP_ITEM_END = [
   T(9) + '}),',
-  T(9) + '(expandedSessionGroups.includes(group.key) ? group.sessions : group.sessions.slice(0, COLLAPSED_SESSION_LIMIT)).map((node) => {',
+  T(9) + '(sessionsExpanded ? group.sessions : collapsed.rows).map((node) => {',
 ].join('\n')
 if (!out.includes(GROUP_ITEM_END) || out.indexOf(GROUP_ITEM_END) !== out.lastIndexOf(GROUP_ITEM_END)) throw new Error('group item end anchor missing/dup — stock shape moved?')
 out = out.replace(GROUP_ITEM_END, [
   T(9) + '})]),',
   T(9) + 'ARXA_LEAF_FILES(group),',
-  T(9) + '(expandedSessionGroups.includes(group.key) ? group.sessions : group.sessions.slice(0, COLLAPSED_SESSION_LIMIT)).map((node) => {',
+  T(9) + '(sessionsExpanded ? group.sessions : collapsed.rows).map((node) => {',
 ].join('\n'))
 
 // 6c. leaf row click = stock expand/collapse AND selection (the New
@@ -168,6 +172,9 @@ out = out.replace(SESSION_ROW, '"data-session-id": node.id, ' + SESSION_ROW)
 //      mounting it after the whole stock browser left it stranded below
 //      the sessions region once an org is open. Flat "In one list" mode
 //      has no org rows — no trash there.
+//      2026-09-05: the ARCHIVES surface rides the same tail, directly
+//      ABOVE the trash — lifecycle order top-down (tree → archives →
+//      trash), destructive door last.
 const TREE_TAIL = [
 	T(7) + '}, group.key);',
 	T(6) + '})]',
@@ -177,7 +184,7 @@ const TREE_TAIL = [
 if (!out.includes(TREE_TAIL) || out.indexOf(TREE_TAIL) !== out.lastIndexOf(TREE_TAIL)) throw new Error('tree tail anchor missing/dup — stock shape moved?')
 out = out.replace(TREE_TAIL, [
 	T(7) + '}, group.key);',
-	T(6) + '}), ARXA_TRASH_AFTER_ORGS()]',
+	T(6) + '}), ARXA_ARCHIVES_AFTER_ORGS(), ARXA_TRASH_AFTER_ORGS()]',
 	T(5) + '}),',
 	T(5) + '(0, react_jsx_runtime.jsx)("span", { className: WorkspaceBrowser_module_css_default.fade })',
 ].join('\n'))
@@ -217,13 +224,31 @@ const expAt = out.indexOf(EXPORTS)
 if (headAt < 0 || expAt < 0 || expAt < headAt) throw new Error('apply tail anchors missing — stock shape moved?')
 const ourApply = [
   T(2) + 'function apply(ctx) {',
+  T(3) + '// dsh 0.1.2-rc.1: the stock sidebar shell now injects "uiWorkspace" and',
+  T(3) + '// reads it first thing in its apply. The stock ui-workspace plugin (the',
+  T(3) + '// only provider) is DISABLED in profile/cordis.patch.yml — this composed',
+  T(3) + '// plugin is the provider, so the service is constructed HERE (cordis',
+  T(3) + '// Service ctor calls ctx.reflect.provide) before the shell apply runs.',
+  T(3) + '// Without it the plugin waits on a service only it could provide and',
+  T(3) + '// every uiWorkspace/uiConversation consumer stays pending at boot.',
+  T(3) + 'new UiWorkspaceService(ctx, ctx.remote.directoryPicker, ctx.get("workspaces"), ctx.get("sessions"));',
   T(3) + '// Locale world (Phase 0/2, conformance plan): arxa ships en/pl/fr —',
   T(3) + '// zhOver is DELETED (the stock zh dicts ride along as dead weight',
   T(3) + '// and are never selected); plOver/frOver are sparse override dicts',
   T(3) + '// — the lookup chain falls back per-key to en (enOver merged), so a',
   T(3) + '// missing translation shows English, never a raw key.',
   T(3) + 'ctx.effect(() => ctx.locale.register(NS, { zh, en: { ...en, ...enOver }, pl: plOver, fr: frOver }), "arxa-sidebar-workspace: dictionaries");',
-  T(3) + 'orgHostDescription = ctx.get("connection").hostDescription;',
+  T(3) + 'orgHostInfo = {',
+  T(4) + '// dsh 0.1.2-rc.1: connection.hostDescription is gone — the host-info',
+  T(4) + '// face is now the remote $host snapshot, re-read on connection/reset',
+  T(4) + '// (mirrors the stock ui-workspace apply).',
+  T(4) + 'getSnapshot: () => ctx.remote?.$host,',
+  T(4) + 'subscribe: (listener) => ctx.on("connection/reset", listener)',
+  T(3) + '};',
+  T(3) + '// dsh 0.1.2-rc.1: the stock apply provideRoot\'s the workspaces hook —',
+  T(3) + '// mirror it so framework-owned consumers of the root hook (and the',
+  T(3) + '// slot runtime\'s standard useWorkspaces) still see a live store.',
+  T(3) + 'try { ctx.slots.provideRoot({ hooks: { workspaces: ctx.get("workspaces").list } }) } catch { /* degrade */ }',
   T(3) + '// Client runtime sessions service (2026-08-30): open(id) focuses a',
   T(3) + '// conversation into the content area; clear() empties it and wipes',
   T(3) + '// the persisted selection. arxa drives the content area — resume',
@@ -313,7 +338,7 @@ const ourApply = [
   T(5) + 'return { workspaceId: (s.orgs.find((o) => o.open) || {}).id };',
   T(4) + '},',
   T(4) + 'trash: () => orgStore.toggleTrash(),',
-  T(4) + 'hooks: { directoryFlow: orgNoFlow, hostDescription: orgHostDescription },',
+  T(4) + 'hooks: { directoryFlow: orgNoFlow, hostInfo: orgHostInfo },',
   T(3) + '});',
   T(3) + 'ctx.slots.inject("sidebar.workspaces", () => ctx.slots.register({',
   T(4) + 'name: "sidebar.workspaces",',
@@ -438,7 +463,14 @@ const nestBlock = [
   T(2) + '  })(require);',
   T(2) + '  const wsApply = wsExports.apply;',
   T(2) + '  const shellApply = exports.apply;',
-  T(2) + '  exports.apply = (ctx) => { shellApply(ctx); wsApply(ctx); };',
+  T(2) + '  // dsh 0.1.2-rc.1: the shell lists "uiWorkspace" in its inject, but this',
+  T(2) + '  // composed plugin IS the provider (workspace half constructs the',
+  T(2) + '  // service). A plugin waiting on its own service never applies, so drop',
+  T(2) + '  // it and add the services the provider needs (stock ui-workspace list).',
+  T(2) + '  exports.inject = [...exports.inject.filter((n) => n !== "uiWorkspace"), "sessions", "workspaces", "remote", "remote.directoryPicker"];',
+  T(2) + '  // Workspace half first: it provides uiWorkspace, which the shell apply',
+  T(2) + '  // reads on its first line (stock order: ui-workspace before ui-sidebar).',
+  T(2) + '  exports.apply = (ctx) => { wsApply(ctx); shellApply(ctx); };',
   T(2) + '}',
 ].join('\n');
 const client = shellPart.slice(0, shellReturnAt) + nestBlock + '\n' + shellPart.slice(shellReturnAt);
@@ -453,6 +485,15 @@ if (process.argv.includes('--write')) {
   }
   writeFileSync(join(root, 'plugins', 'arxa-sidebar', 'lib', 'client.js'), client)
   console.log('written', client.length, 'bytes (shell', shellPart.length, '+ workspace', out.length, ') — parse-checked')
+} else if (process.argv.includes('--check')) {
+  // Drift gate: the committed bundle must equal a fresh composition byte for
+  // byte. Exit 1 (never print the bundle) so CI/selftest can gate on it.
+  const { existsSync } = await import('node:fs')
+  const target = join(root, 'plugins', 'arxa-sidebar', 'lib', 'client.js')
+  const onDisk = existsSync(target) ? readFileSync(target, 'utf8') : null
+  if (onDisk === client) { console.log('gen-workspace: --check OK (' + client.length + ' bytes)'); process.exit(0) }
+  console.error('gen-workspace: --check DRIFT — lib/client.js (' + (onDisk?.length ?? 'missing') + ' bytes) != fresh composition (' + client.length + ' bytes); run: node scripts/gen-workspace.mjs --write')
+  process.exit(1)
 } else {
   process.stdout.write(client)
 }

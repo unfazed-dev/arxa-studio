@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = dirname(here)
-const DSH_VERSION = '0.1.1-rc.2'
+const DSH_VERSION = '0.1.2-rc.1'
 const stockPath = join(root, 'node_modules', '@deepseek-ai', 'dsh-client-ui-sidebar', 'lib', 'client.js')
 
 let out = readFileSync(stockPath, 'utf8')
@@ -40,9 +40,17 @@ out = out.replaceAll('hHd-Xa_', 'aXa_sb_')
 out = out.replace('"@deepseek-ai/dsh-client-ui-sidebar/SidebarRoot.module.css"', '"arxa-sidebar/SidebarRoot.module.css"')
 out = out.replace('tag.dataset.plugin = "@deepseek-ai/dsh-client-ui-sidebar";', 'tag.dataset.plugin = "arxa-sidebar";')
 
-// 3. brand fallbacks (slot registrants from arxa-brand override these)
-out = out.replace('children: "DSH Local Build"', 'children: "arxa"')
-out = out.replace('children: "29b22c5"', 'children: "studio"')
+// 3. brand fallbacks (slot registrants from arxa-brand override these).
+//    dsh 0.1.2-rc.1 (2026-09-05): the plain "DSH Local Build"/"29b22c5"
+//    strings became a two-part local-build badge — localBuildTitle labelled
+//    by t("brand.localBuild") over a buildVersion stamp. Same intent, new
+//    shape: the title slot reads "arxa", the version slot reads "studio".
+//    replaceAll covers the badge title AND the plain-fallback branch (dead
+//    while localBuildVersion() is defined) so no surface can render stock.
+if (!out.includes('localBuildBrand')) throw new Error('shell local-build badge anchor missing — stock shape moved?')
+out = out.replaceAll('t("brand.localBuild")', '"arxa"')
+if (!out.includes('children: buildVersion')) throw new Error('shell buildVersion anchor missing — stock shape moved?')
+out = out.replace('children: buildVersion', 'children: "studio"')
 
 // 4. shell New-session CTA → org-aware (Q5). Marker surgery on the inject
 //    factory: no orgId — the host uses the current open-org handle.

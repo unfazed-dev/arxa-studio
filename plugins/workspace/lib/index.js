@@ -49,6 +49,7 @@ export { OrgLockedError, acquireOrgLock, withOrgLock } from './lock.js'
 export {
   TRASH_DIR,
   ORIGIN_MANIFEST,
+  SESSION_TRASH_KIND,
   TrashError,
   RestoreConflictError,
   HistoryBoundaryError,
@@ -56,6 +57,7 @@ export {
   hardDeleteToken,
   trashRoot,
   softDelete,
+  softDeleteSession,
   listTrash,
   restoreFromTrash,
   hardDelete,
