@@ -65,6 +65,7 @@ suites.push([root, 'scripts', 'dsh-contract-check.mjs'])
 // the version was unchanged, and plugins without a package.json were passed over
 // entirely. A build tool that reports success while shipping nothing needs a gate.
 suites.push([root, 'bin', 'selftest.engine-sync.mjs'])
+suites.push([root, 'bin', 'selftest.loopback-patch.mjs'])
 
 console.log('arxa-studio CI — ' + suites.length + ' suites')
 let failed = 0

@@ -21,7 +21,7 @@
 // @deepseek-ai/* exactly, and if a dep bump rewrites the needle both paths
 // throw at boot instead of silently shipping a broken (or silently
 // widened) fence.
-import { registerHooks } from 'node:module'
+import { registerHooks, syncBuiltinESMExports } from 'node:module'
 import fs from 'node:fs'
 
 const NEEDLE = 'if (hostname === "localhost" || hostname === "[::1]") return true;'
@@ -60,3 +60,9 @@ const origReadFileSync = fs.readFileSync
 fs.readFileSync = function (path, ...rest) {
   return maybePatch(path, origReadFileSync.call(this, path, ...rest))
 }
+// dsh-client-modules reads bundles through `import { readFileSync } from 'node:fs'` — a NAMED
+// ESM binding, which assigning over fs.readFileSync does not move. Without this sync the browser
+// got the stock predicate (found live 2026-09-06: connection.isLoopback false at
+// arxa.studio.localhost, settings mirror "memory", Models page "settings are unavailable in this
+// browser"). bin/selftest.loopback-patch.mjs pins it.
+syncBuiltinESMExports()
