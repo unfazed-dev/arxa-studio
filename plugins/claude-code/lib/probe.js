@@ -70,15 +70,38 @@ export class Probe {
    * waited for a `system/init` message — but the CLI does not emit init until a prompt
    * actually arrives, so every probe stalled to its full timeout and reported a signed-in
    * user as signed out, with the model picker falling back to STATIC_MODELS. */
-  warmStart () {
-    return this.startup({
-      options: {
-        pathToClaudeCodeExecutable: this.binary, env: this.env, settingSources: [], persistSession: false,
-        systemPrompt: { type: 'custom', prompt: 'probe' }, permissionMode: 'default',
-        spawnClaudeCodeProcess: this.spawnClaudeCodeProcess,
-      },
-      initializeTimeoutMs: this.timeoutMs,
-    })
+  async warmStart () {
+    // startup() plus a reaper. The SDK's close() destroys the child's stdin and stops there; a
+    // sandbox-exec'd claude sits on the dead socket instead of exiting (2026-09-05: two children
+    // still alive 3s after close(), nine idle under one engine after a day of probes). So every
+    // child a handle spawned is remembered and killed when the handle closes — or when startup()
+    // itself throws, which is where a timed-out handshake used to leak the child for good.
+    const children = new Set()
+    const spawnClaudeCodeProcess = (request) => {
+      const child = this.spawnClaudeCodeProcess(request)
+      children.add(child)
+      child.on?.('exit', () => children.delete(child))
+      return child
+    }
+    const reap = () => {
+      for (const child of children) { try { child.kill('SIGTERM') } catch { /* already gone */ } }
+      children.clear()
+    }
+    let warm
+    try {
+      warm = await this.startup({
+        options: {
+          pathToClaudeCodeExecutable: this.binary, env: this.env, settingSources: [], persistSession: false,
+          systemPrompt: { type: 'custom', prompt: 'probe' }, permissionMode: 'default',
+          spawnClaudeCodeProcess,
+        },
+        initializeTimeoutMs: this.timeoutMs,
+      })
+    } catch (err) { reap(); throw err }
+    return {
+      query: (prompt) => warm.query(prompt),
+      close: () => { try { warm.close() } finally { reap() } },
+    }
   }
 
   /** The plan's `/usage` windows WITHOUT a turn — the provider-status poller's reader for

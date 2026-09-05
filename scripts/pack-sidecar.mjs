@@ -77,8 +77,11 @@ try {
   for (const f of BIN_FILES) {
     cpSync(join(studioRoot, 'bin', f), join(stage, studioName, 'bin', f))
   }
+  // `version` is read by plugins/claude-code (readAppVersion) for CLAUDE_AGENT_SDK_CLIENT_APP:
+  // the payload has no root package.json, so this is the only version the packed app has.
   writeFileSync(join(stage, studioName, 'bin', 'packed.json'), JSON.stringify({
     packedAt: new Date().toISOString(),
+    version: JSON.parse(readFileSync(join(studioRoot, 'package.json'), 'utf8')).version,
     node: spawnSync(nodeBin, ['--version'], { encoding: 'utf8' }).stdout.trim(),
   }, null, 2) + '\n')
   mkdirSync(join(stage, 'node', 'bin'), { recursive: true })

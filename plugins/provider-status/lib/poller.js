@@ -156,7 +156,14 @@ export function createQuotaPoller ({
     const inflight = read(provider).then(
       ({ statuses, configured }) => {
         const t = now()
-        cache.set(provider, { expires: configured ? expiryFor(statuses, t) : t + ttlMs, inflight: undefined })
+        // The statuses are HELD with the expiry, and the sessions they were published to are
+        // remembered: the cache is per provider (an account quota is account-wide) but the store
+        // is per session, so a warm hit for a session that has not been published to yet must
+        // hand it the held statuses instead of nothing. Without this a second tab, a new
+        // session, or the composer opened within the TTL of any earlier poll got `null` and
+        // drew no ring at all (2026-09-06: the engine had Claude 38%/10%/17% for one session and
+        // nothing for the one on screen).
+        cache.set(provider, { expires: configured ? expiryFor(statuses, t) : t + ttlMs, inflight: undefined, statuses, sessions: new Set([sessionId]) })
         if (configured) seen.add(provider)
         publish(sessionId, provider, statuses)
       },
@@ -178,7 +185,14 @@ export function createQuotaPoller ({
     async ensure (sessionId, provider) {
       if (!Object.hasOwn(VENDORS, provider) && !readers.has(provider)) return
       const entry = cache.get(provider)
-      if (entry !== undefined && entry.inflight === undefined && entry.expires > now()) return
+      if (entry !== undefined && entry.inflight === undefined && entry.expires > now()) {
+        // Warm: no fetch, but a session that has not been handed these statuses gets them now.
+        if (entry.statuses !== undefined && !entry.sessions.has(sessionId)) {
+          entry.sessions.add(sessionId)
+          publish(sessionId, provider, entry.statuses)
+        }
+        return
+      }
       const inflight = refresh(sessionId, provider)
       // Cold only: with nothing held there is nothing to answer with, so a bounded wait beats
       // 60 seconds of empty composer. Bounded, because the wait is on an undocumented endpoint.

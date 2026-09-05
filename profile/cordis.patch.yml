@@ -99,7 +99,7 @@
   disabled: true
 - insert:
   - id: arxa-sandbox
-    name: /Volumes/business_ssd/arxa_digital_solutions/arxa-studio/plugins/sandbox/lib/index.js
+    name: __ARXA_STUDIO_PLUGINS__/sandbox/lib/index.js
 
 # 7. The design panel (H4, viewer-first): shell.overlay dock iframing a live
 #    `arxa design serve` with the viewport-rung ladder. By PACKAGE NAME —
@@ -304,7 +304,7 @@
 #     before they moved to the arxa preset (rows 5/6).
 - insert:
   - id: arxa-approvals
-    name: /Volumes/business_ssd/arxa_digital_solutions/arxa-studio/plugins/approvals/lib/index.js
+    name: __ARXA_STUDIO_PLUGINS__/approvals/lib/index.js
 
 # 15. Artifact viewer-editor (D7 + D78-D87, 2026-08-30): the per-org,
 #     origin-separated artifact viewer with the text-family editor (CM6 in
@@ -342,7 +342,7 @@
 #     source of truth. Host-only plugin, absolute path — same shape as row 14.
 - insert:
   - id: arxa-conversation
-    name: /Volumes/business_ssd/arxa_digital_solutions/arxa-studio/plugins/conversation/lib/index.js
+    name: __ARXA_STUDIO_PLUGINS__/conversation/lib/index.js
 
 # 18. Prism background field (step 1, grilled 2026-09): one 100x100 square at
 #     the top-left of the conversation scrollport — tile (0,0) of the future
@@ -376,7 +376,7 @@
 # profile/agent-presets/arxa/agent.cordis.yml.
 - insert:
   - id: arxa-claude-code
-    name: /Volumes/business_ssd/arxa_digital_solutions/arxa-studio/plugins/claude-code/index.mjs
+    name: __ARXA_STUDIO_PLUGINS__/claude-code/index.mjs
 
 # F10: mount the authorization seam. Without this row `ctx.authorization` never
 # exists, and EVERY sign-in flow written against it is inert — pi-ai's per-provider
@@ -404,7 +404,7 @@
 # to lib/index.js, which the sidebar imports as a library and must keep doing.
 - insert:
   - id: arxa-github-link-signin
-    name: /Volumes/business_ssd/arxa_digital_solutions/arxa-studio/plugins/github-link/index.mjs
+    name: __ARXA_STUDIO_PLUGINS__/github-link/index.mjs
 
 # arxa-specific: provider/status → providerStatus projection → composer pill.
 # HOST-PLANE (registers a projection). Works for every provider; claude-code is
@@ -425,4 +425,4 @@
 # and github-link-signin rows).
 - insert:
   - id: arxa-desktop-session
-    name: /Volumes/business_ssd/arxa_digital_solutions/arxa-studio/plugins/desktop-session/lib/index.js
+    name: __ARXA_STUDIO_PLUGINS__/desktop-session/lib/index.js

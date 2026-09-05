@@ -206,7 +206,15 @@ writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
   dependencies: Object.fromEntries(PROFILE_PLUGINS.map(([name, dir]) => [name, `file:${dir}`])),
   dsh: { profile: { bundles } },
 }, null, 2) + '\n')
-writeFileSync(join(profileDir, 'cordis.patch.yml'), readFileSync(template))
+// Path-loaded rows (sandbox, approvals, conversation, claude-code, github-link, desktop-session)
+// name their entry as `__ARXA_STUDIO_PLUGINS__/<plugin>/...` and are resolved HERE to the
+// plugins/ dir beside this launcher: the repo checkout in checkout mode, the payload in packed
+// mode. The template used to carry one developer's absolute `/Volumes/...` path, which no
+// end-user machine has, and which in a checkout split the plugin tree in two — claude-code ran
+// from the repo while provider-status ran from the profile's node_modules copy, so the usage
+// reader landed in a module instance the poller never read (2026-09-05).
+const pluginsRoot = resolve(here, '..', 'plugins')
+writeFileSync(join(profileDir, 'cordis.patch.yml'), readFileSync(template, 'utf8').replaceAll('__ARXA_STUDIO_PLUGINS__', pluginsRoot))
 engineLog('profile materialized: ' + profileDir)
 
 // The arxa agent preset (AGENT-PLANE, docs/plans/arxa-harness-and-distribution.md)

@@ -13,7 +13,22 @@ import { claudeAuthFlow, hideAnthropicOauth } from './lib/auth-flow.js'
 // No `../provider-status/...` import here, on purpose — see the providerStatus seam in apply().
 
 const require = createRequire(import.meta.url)
-const version = require(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'package.json')).version
+const pluginDir = dirname(fileURLToPath(import.meta.url))
+// The app version for CLAUDE_AGENT_SDK_CLIENT_APP. In the repo it is package.json two levels
+// up; in the packed sidecar payload (~/.arxa/engine/<hash>/arxa-studio) there is NO root
+// package.json — only bin/packed.json, which the packer stamps with the version. This must never
+// throw: a throw here fails the whole dsh plugin tree and arxa studio does not boot (2026-09-05,
+// 456 crash-loop boots from exactly that). 'unknown' is the honest floor, not `undefined`.
+export function readAppVersion (root = join(pluginDir, '..', '..')) {
+  for (const candidate of [join(root, 'package.json'), join(root, 'bin', 'packed.json')]) {
+    try {
+      const v = require(candidate).version
+      if (typeof v === 'string' && v.length > 0) return v
+    } catch {}
+  }
+  return 'unknown'
+}
+const version = readAppVersion()
 // Resolved via the package's main entry, not './package.json': the SDK's `exports` map does
 // not expose its own package.json, so requiring that subpath throws at plugin load.
 const sdkRoot = dirname(require.resolve('@anthropic-ai/claude-agent-sdk'))

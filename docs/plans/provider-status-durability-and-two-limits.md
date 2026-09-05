@@ -160,6 +160,29 @@ path left if this method disappears.
 was never published looked identical: an empty pill. That ambiguity is what forced a second
 debugging round. A write failure now warns once per process, naming the path.
 
+## Sixth: the packed payload is not the repo (2026-09-05)
+
+Two boots of the desktop engine died in a row after `bin/arxa-engine-sync.mjs`, for two
+different reasons, both from treating `~/.arxa/engine/<hash>/arxa-studio` as a copy of the repo:
+
+1. `engine-sync` copies `profile/` and `plugins/` into the payload but never `bin/`. The template
+   `profile/cordis.patch.yml` had just switched to `__ARXA_STUDIO_PLUGINS__/...` placeholders that
+   only the *new* launcher resolves; the payload's old launcher wrote them verbatim and dsh failed
+   every plugin include with `ERR_MODULE_NOT_FOUND`. Fix: copy the launcher over as well whenever
+   the template contract changes (the payload launcher was byte-identical to `HEAD`, so this was
+   safe). `engine-sync` still does not sync `bin/` — do it by hand and say so.
+2. `plugins/claude-code/index.mjs` read the app version with a hard
+   `require('../../package.json')`. The payload has no root `package.json` — only
+   `bin/packed.json`, which carried no version. The throw failed the whole plugin tree, and the
+   desktop watchdog crash-looped 456 boots at 10 s intervals. Fix: `readAppVersion()` tries
+   `package.json`, then `bin/packed.json`, then returns `'unknown'` and never throws
+   (`selftest.version.mjs`); `scripts/pack-sidecar.mjs` now stamps `version` into `packed.json`.
+   The live payload was stamped by hand (`"version": "0.1.0"`) until the next repack.
+
+Rule that falls out: anything a plugin needs at load time must exist in **both** trees, and a
+load-time read that can miss must degrade, never throw — a throw there is a no-boot, not a
+warning.
+
 ## Standing gaps
 
 - Status is per-machine and per-user, never shared. Intended.

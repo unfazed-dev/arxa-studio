@@ -252,8 +252,13 @@ window.__ModuleLoader__.load({
       let models
       ctx.inject(['modelDirectories'], (scope) => { models = scope.modelDirectories })
 
-      ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
-        name: 'conversation.input.right',
+      // `conversation.input.dock` is the composer's bottom row in dsh 0.1.2-rc.1 (Full access ·
+      // path · model picker · context ring · send) — the row the git card and dsh's own queue
+      // entry register into, with the same `inject: (sessionId) => props` contract. The slot this
+      // used to name, `conversation.input.right`, no longer exists in rc.1, so the badge was
+      // registered into nothing and never rendered for ANY provider (2026-09-06).
+      ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
+        name: 'conversation.input.dock',
         id: 'arxa-provider-status',
         order: 20,
         inject: (sessionId) => ({
