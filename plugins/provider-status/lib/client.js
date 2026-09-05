@@ -72,6 +72,11 @@ window.__ModuleLoader__.load({
     // usage ring escalates through as a window runs down.
     const TRACK = 'var(--dsw-alias-border-l3, #3a3f47)'
     const FILL = 'var(--dsw-alias-label-tertiary, #8a8f98)'
+    // The healthy arc is the ACCENT -- dsh's button-info-fill, the send button's own blue, which
+    // arxa's theme-accent plugin remaps with the rest of the palette -- drawn at low opacity
+    // (ACCENT_SOFT, below) so the usage ring reads as a tinted sibling of the grey context ring
+    // rather than a copy of it (2026-09-06).
+    const ACCENT = 'var(--dsw-alias-button-info-fill, #4d8ef7)'
     const AMBER = 'var(--dsw-alias-state-warn-primary, #d08a00)'
     const RED = 'var(--dsw-alias-state-error-primary, #d64545)'
     const MUTED = FILL
@@ -90,12 +95,13 @@ window.__ModuleLoader__.load({
     // the wrong side of a boundary.)
     const RING_COLOR = (utilization) => {
       const left = Math.round((1 - utilization) * 100)
-      return left > 30 ? FILL : left > 10 ? AMBER : RED
+      return left > 30 ? ACCENT : left > 10 ? AMBER : RED
     }
     // RING-COLOR-END
 
     // ContextMeter's geometry, verbatim: viewBox 14, r 5.5, 2px stroke.
     const SIZE = 14, R = 5.5, MID = SIZE / 2
+    const ACCENT_SOFT = 0.55 // arc opacity while healthy; amber/red draw solid so a warning is never faint
     const CIRC = 2 * Math.PI * R
 
     // The card and trigger are ContextMeter's own stylesheet, rule for rule (JObwrW_* in
@@ -104,7 +110,7 @@ window.__ModuleLoader__.load({
     // Injected once, the way dsh injects module CSS: a tagged <style>, skipped if already present.
     const CSS_TAG = 'arxa-provider-status'
     const CSS = [
-      '.arxa-ps-root{display:inline-flex;align-items:center;position:relative;white-space:nowrap;font-size:11px;order:1}',
+      '.arxa-ps-root{display:inline-flex;align-items:center;position:relative;white-space:nowrap;font-size:11px;order:1;margin-left:-6px}',
       '.arxa-ps-trigger{width:28px;height:28px;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border:none;padding:0;border-radius:999px;flex:none;place-items:center;display:grid}',
       '.arxa-ps-trigger:hover,.arxa-ps-trigger[aria-expanded="true"]{background:var(--dsw-alias-interactive-bg-hover)}',
       '.arxa-ps-panel{z-index:100;box-sizing:border-box;background:var(--dsw-specific-menu);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);width:264px;box-shadow:var(--dsw-elevation-prominent);color:var(--dsw-alias-label-secondary);cursor:default;border:0;border-radius:12px;padding:14px 16px;font-size:12px;line-height:20px;position:absolute;bottom:calc(100% + 8px);right:0}',
@@ -142,6 +148,7 @@ window.__ModuleLoader__.load({
         }),
         known ? h('circle', {
           cx: MID, cy: MID, r: R, fill: 'none', stroke: color, strokeWidth: 2, strokeLinecap: 'round',
+          strokeOpacity: color === ACCENT ? ACCENT_SOFT : 1,
           strokeDasharray: `${(CIRC * used).toFixed(3)} ${CIRC.toFixed(3)}`,
           transform: `rotate(-90 ${MID} ${MID})`,
         }) : null,
@@ -171,7 +178,7 @@ window.__ModuleLoader__.load({
     }
     const tintOf = (w) => {
       const c = RING_COLOR(w.utilization ?? 0)
-      if (c !== FILL) return c
+      if (c !== ACCENT) return c
       const kind = String(w.kind ?? '')
       return WINDOW_TINT[kind] ?? (kind.startsWith('model_scoped:') ? 'var(--dsw-static-neutral-bluish-400, #8b98ad)' : FILL)
     }

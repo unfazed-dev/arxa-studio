@@ -268,3 +268,12 @@ props, and every `arxa-ps-*` class ContextMeter has.
   share the window's tint; a window running low keeps the ring's amber/red instead (`tintOf`).
 - Rows read `36% / 23m`, header figures show the countdown alone — the words "resets in" are gone.
 - Padding 14/16px, row padding 4px, bar margins 12/14px. Verified on screen 03:36.
+
+### Ninth, follow-up 2: accent-tinted ring, tighter pair (2026-09-06)
+
+- The healthy arc is now `--dsw-alias-button-info-fill` (the send button's accent, which
+  theme-accent remaps with the palette) at 0.55 opacity, so the usage ring is a tinted sibling of
+  the grey context ring. Amber/red stay solid. `RING_COLOR` returns `ACCENT` for healthy, and the
+  card's `tintOf` keys off the same constant.
+- `.arxa-ps-root{margin-left:-6px}` pulls the usage ring to 6px from the context ring (the row's
+  own gap is 12px); the gap to send is unchanged. Verified on screen 03:41.
