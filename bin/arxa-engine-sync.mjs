@@ -11,6 +11,7 @@
 // released, run this after shipping plugin changes, then bounce the sidecar
 // (kill its dsh child — the desktop app's heartbeat watchdog respawns it).
 import { readdirSync, readFileSync, rmSync, cpSync, existsSync, statSync } from 'node:fs'
+import { execSync } from 'node:child_process'
 import { join, dirname, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
@@ -72,7 +73,29 @@ const main = () => {
   const engineRoot = join(homedir(), '.arxa', 'engine')
   const engines = existsSync(engineRoot) ? readdirSync(engineRoot).map((d) => join(engineRoot, d, 'arxa-studio')).filter((p) => existsSync(join(p, 'plugins'))) : []
   if (!engines.length) { console.log('no engine payload found — nothing to sync'); return }
-  const engine = engines.sort((a, b) => statSync(join(b, 'plugins')).mtimeMs - statSync(join(a, 'plugins')).mtimeMs)[0]
+  // Target selection, in order:
+  //  1. explicit `--engine <dir>` / ARXA_ENGINE_DIR;
+  //  2. the payload the LIVE engine process is running from (its argv names
+  //     ~/.arxa/engine/<sha12>/arxa-studio/bin/...) — the only choice that
+  //     guarantees the bounce afterwards picks up what we just wrote;
+  //  3. newest engine dir by its own mtime.
+  // It used to sort by plugins/ mtime — which this very sync bumps, so it
+  // locked onto whichever payload it touched last and silently passed over
+  // the one the app launched (2026-09-05: wrote to a Sep 3 payload while the
+  // desktop ran that day's build; "4 path(s) synced", nothing changed).
+  const flagIdx = process.argv.indexOf('--engine')
+  const explicit = flagIdx !== -1 ? process.argv[flagIdx + 1] : process.env.ARXA_ENGINE_DIR
+  let engine
+  if (explicit) {
+    engine = explicit.endsWith('arxa-studio') ? explicit : join(explicit, 'arxa-studio')
+    if (!engines.includes(engine)) { console.error('arxa-engine-sync: --engine dir has no plugins/: ' + engine); process.exit(2) }
+  } else {
+    let live = ''
+    try { live = execSync('ps -axo args=', { encoding: 'utf8' }) } catch {}
+    engine = engines.find((p) => live.includes(p + '/'))
+      ?? engines.sort((a, b) => statSync(dirname(b)).mtimeMs - statSync(dirname(a)).mtimeMs)[0]
+    if (engines.length > 1 && !live.includes(engine + '/')) console.warn('arxa-engine-sync: no live engine found; falling back to newest payload dir (pass --engine to pin)')
+  }
   console.log('engine payload: ' + engine)
 
   const skew = platformSkew(repo, engine)

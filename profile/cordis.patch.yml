@@ -212,6 +212,15 @@
 #     byte-identical — plugins/arxa-sidebar/selftest.mjs hashes it).
 - id: ui-sidebar
   disabled: true
+# 11a-ii. dsh 0.1.2-rc.1 moved the sidebar mark + wordmark into slots
+#     (sidebar.brand.mark / sidebar.brand.name) and ships
+#     dsh-client-ui-brand-official to fill them with DeepSeek artwork — an
+#     element arxa-brand's class-suffix CSS never matched, so the DeepSeek mark
+#     painted over ours after the bump. arxa-brand now fills those slots itself
+#     (plugins/brand/lib/client.js); this row keeps the stock occupant out so
+#     exactly one registrant claims each slot. Delete the row to revert.
+- id: ui-brand-official
+  disabled: true
 # 11b. The same arxa-sidebar client also replaces the sidebar.workspaces
 #     registrant (dsh-client-ui-workspace): the ORGANISATIONS rows world
 #     (docs/plans/sidebar-org-rethink.md). Same revert shape: delete this

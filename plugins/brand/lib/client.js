@@ -18,10 +18,12 @@
 //     first render, after client plugins load, so writing early sticks.
 window.__ModuleLoader__.load({
   id: 'arxa-brand',
-  factory: () => {
+  factory: (require) => {
     var module = { exports: {} }
     var exports = module.exports
     Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' })
+    const React = require('react')
+    const h = React.createElement
 
     const MOSS = `
 body, body[data-ds-dark-theme] {
@@ -150,7 +152,45 @@ body, body[data-ds-dark-theme] {
       + '<path d="M381.907 718.494L314.406 832.413H272.492C208.932 832.413 165.181 775.677 173.312 718.491L381.907 718.494ZM850.647 718.502C858.771 775.684 815.022 832.413 751.466 832.413H439.174L506.675 718.496L850.647 718.502ZM797.076 613.222L569.057 613.218L683.065 420.814L797.076 613.222ZM425.948 277.272C464.679 211.908 559.279 211.907 598.01 277.271L620.681 315.531L444.29 613.215L226.887 613.212L425.948 277.272Z" fill="#FFFFFF"/>'
       + '</svg>')
 
-    function apply() {
+    // dsh 0.1.2-rc.1 moved the sidebar mark and wordmark into slots
+    // (`sidebar.brand.mark` / `sidebar.brand.name`) and ships
+    // dsh-client-ui-brand-official to fill them with its own artwork — an
+    // element the class-suffix CSS above never sees, so it painted over the
+    // arxa mark. Fill the slots ourselves (that plugin is disabled in the
+    // profile). Same mask + background-color treatment, so it re-tints live.
+    function ArxaBrandMark ({ size = 24 } = {}) {
+      return h('span', {
+        'aria-hidden': 'true',
+        className: 'arxa-brand-slot-mark',
+        style: {
+          display: 'inline-block', width: size, height: size, flex: '0 0 auto',
+          background: 'var(--dsw-static-deepseek-450, #0EBAE4)',
+          WebkitMask: 'var(--arxa-brand-mark-white) center / contain no-repeat',
+          mask: 'var(--arxa-brand-mark-white) center / contain no-repeat',
+        },
+      })
+    }
+    function ArxaBrandName () {
+      return h('span', { className: 'arxa-brand-slot-name', style: { display: 'inline-flex', gap: 6, alignItems: 'baseline' } },
+        h('span', { style: { font: '700 21px/1 ui-sans-serif, system-ui, sans-serif', letterSpacing: '0.03em', color: 'var(--dsw-alias-label-primary, #e8e8e8)' } }, 'arxa'),
+        h('span', { style: { font: '400 21px/1 ui-sans-serif, system-ui, sans-serif', letterSpacing: '0.03em', color: 'var(--dsw-static-deepseek-400, color-mix(in oklab, #0EBAE4 78%, white))' } }, 'studio'))
+    }
+
+    function apply(ctx) {
+      // Slots first: the mark seat is the thing the user sees at every boot.
+      // The register API is the same one dsh-client-ui-brand-official uses.
+      // Shape is byte-for-byte what dsh-client-ui-brand-official does: a
+      // declaration-aware registration set; bare register() outside it is
+      // not a supported seam.
+      try {
+        ctx.slots.inject('sidebar.brand.mark', () => ctx.slots.inject('sidebar.brand.name', function* () {
+          yield ctx.slots.register({ name: 'sidebar.brand.mark' }, ArxaBrandMark)
+          yield ctx.slots.register({ name: 'sidebar.brand.name' }, ArxaBrandName)
+        }))
+      } catch (err) {
+        console.warn('[arxa-brand] slot registration failed; CSS fallback only', err)
+      }
+
       const style = document.createElement('style')
       style.dataset.arxaBrand = ''
       style.textContent = MOSS
@@ -192,7 +232,7 @@ body, body[data-ds-dark-theme] {
     }
 
     exports.apply = apply
-    exports.inject = []
+    exports.inject = ['slots']
     return module.exports
   },
 })

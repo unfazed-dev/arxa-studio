@@ -135,6 +135,19 @@ assert.throws(() => publishProviderStatus(session, { provider: 'x' }), /text/); 
 assert.throws(() => PROVIDER_STATUS_SCHEMA.parse({ ...good, text: 'x'.repeat(81) }))
 assert.throws(() => publishProviderStatus(session, { ...good, text: 'x'.repeat(81) })); ok('overlong text is rejected')
 
+// dsh 0.1.2-rc.1 keys the session record by `header.id` (no top-level `id`). The ring went blank
+// because the store keyed rows "undefined …" and the RPC lookup by real id never matched. The
+// producer must read both shapes and refuse a record with neither.
+{
+  resetProviderStatus()
+  const rc1 = { header: { id: 's-rc1', cwd: '/tmp' } }
+  publishProviderStatus(rc1, good)
+  assert.equal(statusesFor('s-rc1', good.provider).find((s) => s.kind === good.kind)?.text, good.text)
+  assert.deepEqual(statusesFor('undefined', good.provider), [])
+  assert.throws(() => publishProviderStatus({ header: {} }, good), /no id/)
+  ok('session.header.id (rc.1 shape) keys the store; id-less records are rejected')
+}
+
 // --- the store keeps one row per session+provider+kind
 {
   resetProviderStatus()

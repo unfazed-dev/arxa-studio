@@ -199,7 +199,9 @@ export function apply(ctx, opts = {}) {
       if (typeof ctx.on === 'function') {
         try {
           ctx.on('session/created', (session) => {
-            const id = session && typeof session.id === 'string' ? session.id : undefined
+            // dsh 0.1.2-rc.1 keys the record by header.id; 0.1.1 had a top-level id.
+            const rawId = session && (session.id ?? session.header?.id)
+            const id = typeof rawId === 'string' ? rawId : undefined
             if (id === undefined || !pendingTitles.has(id)) return
             const name = pendingTitles.get(id)
             pendingTitles.delete(id)

@@ -106,11 +106,22 @@ const listeners = new Set()
 export function onProviderStatus (fn) { listeners.add(fn); return () => listeners.delete(fn) }
 
 /** Producer helper: validate, hold, mirror to disk. Throws a zod error on a bad status. */
+/** The session record's id moved between dsh waves: 0.1.1 exposed `session.id`, 0.1.2-rc.1 keeps
+ *  it on `session.header.id` (the same record whose `header.cwd` the adapter already reads). Read
+ *  both; throw on neither, because a status keyed `"undefined …"` is exactly the invisible failure
+ *  this plugin exists to prevent — the RPC lookup by a real session id would never match it. */
+export function sessionIdOf (session) {
+  const id = session?.id ?? session?.header?.id ?? session?.sessionId
+  if (typeof id !== 'string' || id === '') throw new TypeError('publishProviderStatus: session has no id')
+  return id
+}
+
 export function publishProviderStatus (session, status, file = statusFile()) {
   const data = PROVIDER_STATUS_SCHEMA.parse(status)
-  latest.set(KEY(session.id, data.provider, data.kind), { ...data, at: Date.now() })
+  const sessionId = sessionIdOf(session)
+  latest.set(KEY(sessionId, data.provider, data.kind), { ...data, at: Date.now() })
   save(file)
-  for (const fn of listeners) fn(session.id, data)
+  for (const fn of listeners) fn(sessionId, data)
   return data
 }
 
