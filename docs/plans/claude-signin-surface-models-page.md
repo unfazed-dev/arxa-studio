@@ -96,3 +96,20 @@ See the closing note appended after the relaunch.
   itself was verified non-interactive in a temp `CLAUDE_CONFIG_DIR`.
 - NOT exercised live: the stock Edit form for the `binary` field.
 - Tests: selftest.account 6 ok, selftest.surface 4 ok; auth-flow/models/probe unchanged.
+
+### Follow-up (2026-09-06): same grammar as the other rows
+
+- User direction: colour indicator like the other providers, no Edit, no "Check again",
+  laid out like the other cards. No cordis skill is installed on this machine; the
+  reference used is dsh's own ModelsSection markup and CSS (the stock `rowHead /
+  rowIdentity / rowName / credentialDot / rowActions` classes).
+- The card now renders its own head in those classes — name + dot (green signed in,
+  red signed out) left, Sign out right (danger, where the others have Delete) — and
+  hides the stock head of its row on mount with an inline `display:none` (the
+  `hidden` attribute lost to `.rowHead{display:flex}`; a `:has(>…)` selector never
+  matched because the slot renders inside a wrapper). One secondary line carries
+  email · tier · CLI version. Signed out: the copyable command and install link on
+  that line; polling every 3 s replaces the button.
+- Verified on screen after relaunch: four identical-looking rows, Claude's with
+  the green dot and Sign out. The settings section (binary field) still seats the
+  row; its stock Edit is hidden, not removed.
