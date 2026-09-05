@@ -10,7 +10,7 @@ import { scrubEnv } from './lib/env.js'
 import { makeSpawner } from './lib/spawn.js'
 import { PROVIDER_ID } from './lib/models.js'
 import { claudeAuthFlow, hideAnthropicOauth } from './lib/auth-flow.js'
-import { registerUsageReader } from '../provider-status/lib/poller.js'
+// No `../provider-status/...` import here, on purpose — see the providerStatus seam in apply().
 
 const require = createRequire(import.meta.url)
 const version = require(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'package.json')).version
@@ -43,11 +43,28 @@ export function apply (ctx, config = {}) {
     policy: ctx.sandboxPolicy.resolve({}),
   })
   const probe = new Probe({ startup, binary, env, spawnClaudeCodeProcess: probeSpawner })
-  ctx.llm.registerAdapter([PROVIDER_ID], new ClaudeCodeAdapter({ query, probe, ctx, binary, env, version }))
-  // The usage ring's turn-free source: the provider-status poller asks this the moment a Claude
-  // model is picked (and every 60s while one is), so the 5-hour / weekly windows show in every
-  // session, not only after a turn has run in it. Same sandboxed probe child, no turn, no tokens.
-  registerUsageReader(PROVIDER_ID, () => probe.usage())
+  // Everything this plugin tells the usage ring goes through the `providerStatus` SERVICE that
+  // arxa-provider-status provides — never through a relative import of ../provider-status.
+  // The profile loads this plugin by absolute path (cordis.patch.yml) and provider-status by
+  // package name through a copy under the profile's node_modules, so a relative import bound a
+  // SECOND module instance: a READERS map the real poller never consulted and a `latest` map the
+  // RPC never served. Reader registered, ring never appeared, no row, not even a `?`
+  // (measured 2026-09-05; DeepSeek/Kimi were fine because their path never leaves that plugin).
+  // A cordis service is one object per app however many copies of a file got loaded.
+  //
+  // Deferred like `authorization`: the adapter never waits on it. A status published before the
+  // service exists is dropped — a status update is never worth a turn, and the seam is up long
+  // before any turn can run.
+  let statusService
+  const publish = (session, status) => { if (statusService !== undefined) statusService.publish(session, status) }
+  ctx.llm.registerAdapter([PROVIDER_ID], new ClaudeCodeAdapter({ query, probe, ctx, binary, env, version, publish }))
+  ctx.inject(['providerStatus'], (scope) => {
+    statusService = scope.providerStatus
+    // The usage ring's turn-free source: the provider-status poller asks this the moment a Claude
+    // model is picked (and every 60s while one is), so the 5-hour / weekly windows show in every
+    // session, not only after a turn has run in it. Same sandboxed probe child, no turn, no tokens.
+    statusService.registerUsageReader(PROVIDER_ID, () => probe.usage())
+  })
   // Deferred: fires if and when ctx.authorization exists. The model adapter above does not
   // depend on it — a user can pick a Claude model whether or not the login surface is mounted.
   ctx.inject(['authorization'], (authorized) => {

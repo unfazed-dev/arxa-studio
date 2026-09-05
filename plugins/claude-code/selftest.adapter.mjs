@@ -4,6 +4,16 @@ import { onProviderStatus } from '../provider-status/lib/index.js'
 import { fromClaude, fromLoop } from './lib/pending.js'
 import { MIRROR_TOOL_NAMES } from './lib/mirror-tools.js'
 import { contextWindowFor } from './lib/models.js'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+// The adapter publishes provider statuses, and the mirror lands wherever ARXA_APP_DATA_DIR points.
+// Set it BEFORE anything publishes: without this the 2026-09-05 CI run wrote `sess-adapter-test`
+// rows into the developer's real ~/.arxa/provider-status.json, which the live engine then loaded.
+// (statusFile() reads the env at call time, so setting it here — after the static imports, before
+// the first publish — is sufficient.)
+process.env.ARXA_APP_DATA_DIR = mkdtempSync(join(tmpdir(), 'arxa-adapter-selftest-'))
 
 let passed = 0
 const ok = (msg) => { passed++; console.log(`ok ${passed} - ${msg}`) }

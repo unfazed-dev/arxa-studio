@@ -272,9 +272,24 @@ assert.throws(() => publishProviderStatus(session, { ...good, text: 'x'.repeat(8
   // stub that hands every fiber the same object is not the runtime: it would have built a quota
   // poller on an undefined `credentials`, and the first RPC would have wiped a real status and
   // replaced it with `?`. Here credentials is absent, which is also the headless case.
-  const ctx = { inject: (deps, fn) => { if (deps.includes('connection')) fn({ connection: { rpc: { handle: (_ch, h, o) => { handler = h; opts = o } } } }) } }
+  const provided = {}
+  const ctx = {
+    provide: (name, value) => { provided[name] = value },
+    inject: (deps, fn) => { if (deps.includes('connection')) fn({ connection: { rpc: { handle: (_ch, h, o) => { handler = h; opts = o } } } }) },
+  }
   apply(ctx)
   assert.equal(typeof handler, 'function'); assert.deepEqual(opts, { authority: 'trusted-host' })
+  // The seam other plugins couple through. claude-code registers its reader and publishes turn
+  // statuses via this service, NOT via a relative import: the profile loads it by absolute path
+  // and this plugin by package name (a copy under the profile's node_modules), so an import bound
+  // a second module instance — a READERS map the poller never read. Reader registered, ring never
+  // appeared (2026-09-05). Identity matters: `publish` must be THIS instance's producer.
+  const seam = provided.providerStatus
+  assert.equal(typeof seam?.registerUsageReader, 'function', 'providerStatus.registerUsageReader')
+  assert.equal(seam.publish, publishProviderStatus, 'providerStatus.publish is this module\'s producer')
+  assert.equal(typeof seam.replace, 'function'); assert.equal(typeof seam.onStatus, 'function')
+  assert.ok(Object.isFrozen(seam), 'the seam is not a place to hang state')
+  ok('apply provides the providerStatus service')
   resetProviderStatus()
   assert.deepEqual(await handler('current', { sessionId: 's1' }), { ok: true, value: { status: null } })
   publishProviderStatus({ id: 's1' }, good)
@@ -339,13 +354,22 @@ assert.throws(() => publishProviderStatus(session, { ...good, text: 'x'.repeat(8
   ]) {
     assert.deepEqual(clientFormatBadge(value, at, active), formatBadge(value, at, active), `client/host parity for ${JSON.stringify(value)} active=${active}`)
   }
-  assert.equal(RPC_CHANNEL, '/rpc/arxa-provider-status')
-  assert.ok(clientSrc.includes(RPC_CHANNEL), 'the client calls the channel the host registers')
+  assert.equal(RPC_CHANNEL, '/arxa-provider-status')
+  // dsh-client-connection assertChannel: CHANNEL_PATTERN = /^\/[A-Za-z0-9._~-]+$/ and '/api' is
+  // reserved. A second segment ('/rpc/…') makes registerRpc throw at activation and the throw is
+  // swallowed — the ring simply never appears (2026-09-05). Guard the real rule here.
+  assert.ok(/^\/[A-Za-z0-9._~-]+$/.test(RPC_CHANNEL) && RPC_CHANNEL !== '/api', `RPC_CHANNEL ${RPC_CHANNEL} must be one path segment (dsh CHANNEL_PATTERN)`)
+  assert.ok(clientSrc.includes(`'${RPC_CHANNEL}'`), 'the client calls the channel the host registers')
   ok('client wiring gate + formatBadge parity + channel agreement')
 
   // --- the ring. No DOM here, so the colour rule is extracted and exercised directly: it is the
   // one piece of the indicator where a plausible-looking shortcut (colour off `level`) is wrong.
-  const ringSrc = clientSrc.slice(clientSrc.indexOf('const ACCENT'), clientSrc.indexOf('const SIZE'))
+  // Sentinels, like PARITY-END above: this used to slice from `const ACCENT`, and renaming that
+  // constant to dsh's own token names (2026-09-05) made indexOf return -1 and the eval fail with
+  // "RING_COLOR is not defined" — a failure that reads like a ring bug and is not one.
+  const ringStart = clientSrc.indexOf('// RING-COLOR-START'), ringEnd = clientSrc.indexOf('// RING-COLOR-END')
+  assert.ok(ringStart > 0 && ringEnd > ringStart, 'client.js must keep the RING-COLOR-START/END sentinels around the colour rule')
+  const ringSrc = clientSrc.slice(ringStart, ringEnd)
   const RING_COLOR = new Function(`${ringSrc} return RING_COLOR`)()
   const ACCENT = RING_COLOR(0), AMBER = RING_COLOR(0.75), RED = RING_COLOR(0.95)
   assert.equal(new Set([ACCENT, AMBER, RED]).size, 3, 'the three steps must be three different colours')
@@ -364,28 +388,38 @@ assert.throws(() => publishProviderStatus(session, { ...good, text: 'x'.repeat(8
   assert.equal(/RING_COLOR\(\s*(badge\.)?level/.test(clientSrc), false, 'the ring must colour off utilization, never off level')
   ok('ring colour steps on % LEFT, read from utilization')
 
-  // Structure: a track always, an arc only when there is something to divide by.
-  assert.ok(/strokeDasharray:\s*`\$\{\(left \* CIRC\)/.test(clientSrc), 'the arc length is the fraction LEFT of the circumference')
-  assert.ok(/known \? \{\} : \{ strokeDasharray: '2 3' \}/.test(clientSrc), 'a balance-only status draws a dashed idle track, not a full one')
-  assert.ok(/strokeOpacity: known \? 0\.15/.test(clientSrc), 'the track is the accent at 15% — the second tone')
-  assert.ok(/String\(Math\.round\(left \* 100\)\)/.test(clientSrc), 'the centre shows percent LEFT, not percent used')
-  // Balance and breakage both land here: no utilization means no number in the ring, so the text
-  // has to carry it or the composer shows a silent empty circle.
-  assert.ok(/typeof badge\.utilization === 'number' \? null : h\('span'/.test(clientSrc), 'without a percentage the badge text renders beside the ring')
-  ok('ring structure: track, arc, centred percent-left, dashed idle form')
+  // Structure: the ring is built to dsh's own ContextMeter numbers (dsh-client-ui-conversation
+  // 0.1.2-rc.1) so it sits beside the context ring as a sibling — same 14px viewBox, r 5.5, 2px
+  // stroke, 28px round trigger, and the arc measures what is USED, the way the context ring fills.
+  // A ring that grew as the window EMPTIED next to one that grows as context FILLS would read as
+  // two opposite instruments.
+  assert.ok(/const SIZE = 14, R = 5\.5/.test(clientSrc), 'ring geometry is ContextMeter\'s: viewBox 14, r 5.5')
+  assert.ok(/strokeDasharray:\s*`\$\{\(CIRC \* used\)/.test(clientSrc), 'the arc length is the fraction USED of the circumference, like the context ring')
+  assert.ok(/stroke: TRACK/.test(clientSrc) && /--dsw-alias-border-l3/.test(clientSrc), 'the track is dsh\'s border-l3 token, the context ring\'s own track tone')
+  assert.ok(/--dsw-alias-label-tertiary/.test(clientSrc), 'the healthy arc is dsh\'s label-tertiary, the context ring\'s own fill tone')
+  assert.ok(/strokeDasharray: '2 3'/.test(clientSrc), 'a balance-only status draws a dashed idle track, not a full one')
+  assert.equal(/String\(Math\.round\(left \* 100\)\)/.test(clientSrc), false, 'no digits inside a 14px ring — the panel and tooltip carry the number')
+  assert.ok(/width: 28, height: 28, borderRadius: 999/.test(clientSrc), 'the trigger is ContextMeter\'s 28px round button')
+  // Balance and breakage both land here: no utilization means no arc, so the text has to carry
+  // it or the composer shows a silent empty circle.
+  assert.ok(/typeof x\.badge\.utilization !== 'number'/.test(clientSrc) && /h\('span', null, x\.badge\.text\)/.test(clientSrc), 'without a percentage the badge text renders beside a dashed ring')
+  ok('ring structure: ContextMeter geometry and tokens, arc = used, dashed idle form, text fallback')
 
-  // Tap-to-cycle. Clicking is the ONLY route to the second window, so it must be reachable
-  // without a mouse — accessibility basics are not a simplification worth making.
-  assert.ok(/\[status, \.\.\.\(status\?\.others \?\? \[\]\)\]/.test(clientSrc), 'the ring cycles over the binding status plus its siblings')
-  assert.ok(/onKeyDown: cycles \?/.test(clientSrc), 'the cycle affordance must be keyboard-reachable')
-  assert.ok(/role: cycles \? 'button' : 'img'/.test(clientSrc), 'it announces as a button only when there is something to cycle to')
-  assert.ok(/setIndex\(0\) \}, \[activeProvider\]/.test(clientSrc), 'the window index resets on a provider switch — index 2 of Claude\'s three means nothing for GLM\'s two')
-  assert.ok(/const full = formatBadge\(status,/.test(clientSrc), 'the tooltip names every live window regardless of which one is on screen')
-  // A sibling can expire WHILE it is the one being shown — formatBadge retires a window once its
-  // reset passes. Without a fallback the whole ring vanishes even though the binding window is
-  // still live, which is the "degrade visible, never invisible" rule this file's header states.
-  assert.ok(/formatBadge\(picked, now, activeProvider\) \?\? formatBadge\(windows\[0\]/.test(clientSrc), 'an expired cycled-to window falls back to the binding one instead of blanking the ring')
-  ok('tap-to-cycle: siblings, keyboard, index reset, full tooltip, expiry fallback')
+  // One ring per window, a panel per click. The 5-hour and weekly windows are both live at once,
+  // and both are shown at once — nothing to cycle, nothing hidden behind a click.
+  assert.ok(/\[status, \.\.\.\(status\?\.others \?\? \[\]\)\]/.test(clientSrc), 'the rings come from the binding status plus its siblings')
+  assert.ok(/metered\.map\(\(x\) => h\(Meter/.test(clientSrc), 'every metered window gets its own trigger')
+  assert.ok(/'aria-haspopup': 'dialog'/.test(clientSrc) && /'aria-expanded': open/.test(clientSrc), 'the trigger announces its panel')
+  assert.ok(/role: 'dialog'/.test(clientSrc), 'the panel is a dialog')
+  assert.ok(/e\.key === 'Escape'\) onClose\(\)/.test(clientSrc) && /addEventListener\('mousedown', onDown\)/.test(clientSrc), 'the panel closes on Escape and on an outside click')
+  assert.ok(/removeEventListener\('keydown', onKey\); document\.removeEventListener\('mousedown', onDown\)/.test(clientSrc), 'the panel\'s document listeners are removed with it')
+  assert.ok(/setOpen\(null\) \}, \[activeProvider\]/.test(clientSrc), 'the panel closes on a provider switch — Claude\'s weekly panel means nothing for GLM')
+  assert.ok(/bottom: 'calc\(100% \+ 8px\)'/.test(clientSrc), 'the panel opens upward — the composer sits at the bottom of the viewport')
+  // formatBadge retires a window once its reset passes and drops another provider's windows;
+  // the rings must be derived from what it returns, not from the raw list, or a spent window
+  // keeps a ring.
+  assert.ok(/\.filter\(\(x\) => x\.badge !== undefined\)/.test(clientSrc), 'only windows formatBadge accepts get a ring')
+  ok('one ring per window, dialog panel, escape/outside/provider-switch close, expiry drop')
 }
 
 rmSync(HOME, { recursive: true, force: true })

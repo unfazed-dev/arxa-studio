@@ -25,13 +25,16 @@
 // So the store is mirrored to ONE local JSON file. Local-only on purpose: arxa studio is
 // distributed software and must never require the Arxa Digital Solutions database (CLAUDE.md),
 // and a usage pill is exactly the kind of state that has to work for a user with no database.
-export const RPC_CHANNEL = '/rpc/arxa-provider-status'
+// ONE path segment only: dsh-client-connection's CHANNEL_PATTERN is /^\/[A-Za-z0-9._~-]+$/ and
+// registerRpc throws (silently swallowed at plugin activation) for anything like '/rpc/…'.
+// Same shape as gen-ui's '/arxa-gen-ui'. selftest.mjs guards this.
+export const RPC_CHANNEL = '/arxa-provider-status'
 
 import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { PROVIDER_STATUS_SCHEMA, STATUS_VALUE_SCHEMA, bindingStatus } from './status.js'
-import { createQuotaPoller } from './poller.js'
+import { createQuotaPoller, registerUsageReader } from './poller.js'
 
 /** `${sessionId} ${provider} ${kind}` -> newest status of that kind.
  *  Keyed by kind because a Claude subscription runs two limits at once (a premium-model
@@ -180,6 +183,20 @@ export function apply (ctx) {
   // Only at a cold start. loadProviderStatus clears the map, so an apply that re-runs (HMR,
   // re-registration) would otherwise wipe statuses this process already collected.
   if (latest.size === 0) loadProviderStatus()
+  // The seam every other plugin couples through. claude-code registers its usage reader and
+  // publishes turn statuses via THIS object — never by importing ./poller.js or this file.
+  // The profile loads claude-code by absolute repo path and provider-status by package name
+  // through a copy under the profile's node_modules, so a relative import from another plugin
+  // binds a SECOND instance of this module: a READERS map the poller below never consults and
+  // a `latest` map the RPC below never serves. Measured 2026-09-05: reader registered, ring
+  // never appeared, no row, not even a `?`. A cordis service is one object per app however
+  // many copies of this file were loaded, which is exactly the guarantee a store needs.
+  ctx.provide('providerStatus', Object.freeze({
+    registerUsageReader,
+    publish: publishProviderStatus,
+    replace: replaceProviderStatus,
+    onStatus: onProviderStatus,
+  }))
   // Held, not gated: `credentials` is what lets the polled vendors report at all, but a boot
   // without it must still serve Claude's usage rather than leave the composer blank. Same lazy
   // fiber the client half uses for `modelDirectories`, and for the same reason.

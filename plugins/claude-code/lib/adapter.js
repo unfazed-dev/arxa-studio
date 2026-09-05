@@ -34,9 +34,13 @@ const arxaMcpToolNames = (schemas) => schemas
 export class ClaudeCodeAdapter extends LlmAdapter {
   /** `spawn`/`mkdir` exist only so the selftest can exercise spawnClaudeCodeProcess without
    * touching the real filesystem or starting a process; production leaves them undefined. */
-  constructor ({ query, probe, ctx, binary, env, version, spawn, mkdir }) {
+  constructor ({ query, probe, ctx, binary, env, version, spawn, mkdir, publish }) {
     super()
     Object.assign(this, { query, probe, ctx, binary, env, version, spawn, mkdir })
+    // Where statuses go. Production hands in the providerStatus SERVICE's publish (index.mjs) so
+    // the ring's store is the one the RPC serves, whichever copy of provider-status this file
+    // resolved by relative path; the module import stays as the selftest default only.
+    this.publish = publish ?? publishProviderStatus
     this.turns = new Map()
     // agent id -> the Claude session to resume. Deliberately in memory and NOT a session event.
     //
@@ -278,7 +282,7 @@ export class ClaudeCodeAdapter extends LlmAdapter {
       // callback, through TurnBridge's pump(), and out of stream()'s generator, killing the turn
       // at the exact moment the pill was most useful (the user hitting their limit). This is the
       // one place in the plan that deliberately fails open: catch broadly, drop the update.
-      onRateLimit: (info) => { try { publishProviderStatus(agent.session, rateLimitToStatus(info, account)) } catch {} },
+      onRateLimit: (info) => { try { this.publish(agent.session, rateLimitToStatus(info, account)) } catch {} },
       onToolUse: (id, name) => {
         claudeIds.add(id)
         if (name.startsWith(MCP_PREFIX)) mcpQueue.push({ id, name: stripMcpPrefix(name) })
@@ -337,7 +341,7 @@ export class ClaudeCodeAdapter extends LlmAdapter {
     const want = familyOf(requested); const got = familyOf(actual)
     if (!want || !got || want === got) return
     try {
-      publishProviderStatus(agent.session, {
+      this.publish(agent.session, {
         provider: PROVIDER_ID,
         level: 'info',
         text: `Running on ${actual}`,
@@ -369,7 +373,7 @@ export class ClaudeCodeAdapter extends LlmAdapter {
     fetchUsageStatuses(turn.q).then(
       (statuses) => {
         for (const status of statuses) {
-          try { publishProviderStatus(agent.session, status) } catch { /* one bad window is not the others' problem */ }
+          try { this.publish(agent.session, status) } catch { /* one bad window is not the others' problem */ }
         }
       },
       () => {}, // never worth the turn
