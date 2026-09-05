@@ -277,3 +277,15 @@ props, and every `arxa-ps-*` class ContextMeter has.
   card's `tintOf` keys off the same constant.
 - `.arxa-ps-root{margin-left:-6px}` pulls the usage ring to 6px from the context ring (the row's
   own gap is 12px); the gap to send is unchanged. Verified on screen 03:41.
+
+### Ninth, follow-up 3: the 6px is between the circles, not the buttons (2026-09-06)
+
+`margin-left:-6px` put the 28px *triggers* 6px apart, but each pads its 13px ring by 7.5px, so
+the circles the user sees were 22px apart. The margin is now `-22px` (the row's 12px gap plus
+both paddings, minus 6): measured on screen, context circle at x 219–230, usage circle at
+237–248 — 6px between them. Trade-off recorded in the source: the hover wash now overlaps the
+context ring's edge by ~2px.
+
+Also caught: a sandboxed patch had thrown silently, the old pin passed, and the unchanged file was
+synced — "tests green + synced" proved nothing. The re-run was chained with `&&` through the shell
+so a failing step stops the chain, and every live copy was grepped for the new value.

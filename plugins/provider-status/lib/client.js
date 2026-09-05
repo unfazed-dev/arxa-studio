@@ -110,7 +110,7 @@ window.__ModuleLoader__.load({
     // Injected once, the way dsh injects module CSS: a tagged <style>, skipped if already present.
     const CSS_TAG = 'arxa-provider-status'
     const CSS = [
-      '.arxa-ps-root{display:inline-flex;align-items:center;position:relative;white-space:nowrap;font-size:11px;order:1;margin-left:-6px}',
+      '.arxa-ps-root{display:inline-flex;align-items:center;position:relative;white-space:nowrap;font-size:11px;order:1;margin-left:-22px}', // ponytail: -22 = the row's 12px gap + both triggers' 7.5px ring padding, minus 6 -- so the CIRCLES sit 6px apart (measured 2026-09-06: -6px left them 22px apart). The hover wash overlaps the context ring's edge by ~2px; a narrower trigger would fix that at the cost of the shared 28px hover geometry.
       '.arxa-ps-trigger{width:28px;height:28px;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border:none;padding:0;border-radius:999px;flex:none;place-items:center;display:grid}',
       '.arxa-ps-trigger:hover,.arxa-ps-trigger[aria-expanded="true"]{background:var(--dsw-alias-interactive-bg-hover)}',
       '.arxa-ps-panel{z-index:100;box-sizing:border-box;background:var(--dsw-specific-menu);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);width:264px;box-shadow:var(--dsw-elevation-prominent);color:var(--dsw-alias-label-secondary);cursor:default;border:0;border-radius:12px;padding:14px 16px;font-size:12px;line-height:20px;position:absolute;bottom:calc(100% + 8px);right:0}',

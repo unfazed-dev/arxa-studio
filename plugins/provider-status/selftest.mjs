@@ -407,7 +407,7 @@ assert.throws(() => publishProviderStatus(session, { ...good, text: 'x'.repeat(8
   assert.ok(/stroke: TRACK/.test(clientSrc) && /--dsw-alias-border-l3/.test(clientSrc), 'the track is dsh\'s border-l3 token, the context ring\'s own track tone')
   assert.ok(/const ACCENT = 'var\(--dsw-alias-button-info-fill/.test(clientSrc), 'the healthy arc is dsh\'s accent (button-info-fill), not the context ring\'s grey')
   assert.ok(/strokeOpacity: color === ACCENT \? ACCENT_SOFT : 1/.test(clientSrc) && /const ACCENT_SOFT = 0\.55/.test(clientSrc), 'the accent arc is drawn soft; amber/red stay solid')
-  assert.ok(/order:1;margin-left:-6px\}/.test(clientSrc), 'the usage ring sits 6px from the context ring, not the row\'s 12px')
+  assert.ok(/order:1;margin-left:-22px\}/.test(clientSrc), 'the usage CIRCLE sits 6px from the context circle: the row gap plus both triggers\' ring padding is absorbed')
   assert.ok(/strokeDasharray: '2 3'/.test(clientSrc), 'a balance-only status draws a dashed idle track, not a full one')
   assert.equal(/String\(Math\.round\(left \* 100\)\)/.test(clientSrc), false, 'no digits inside a 14px ring — the panel and tooltip carry the number')
   assert.ok(/\.arxa-ps-trigger\{width:28px;height:28px;[^}]*border-radius:999px/.test(clientSrc), 'the trigger is ContextMeter\'s 28px round button')
