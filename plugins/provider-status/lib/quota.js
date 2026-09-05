@@ -22,12 +22,19 @@ const num = (v) => {
   return typeof n === 'number' && Number.isFinite(n) ? n : undefined
 }
 
-/** Epoch, in whichever unit the vendor felt like. Z.ai sends ms, Kimi sends ms, and neither says
- *  so; a seconds value would otherwise land in 1970 and the badge would read as permanently stale.
- *  1e11 seconds is year 5138 and 1e11 ms is 1973, so the split is unambiguous for any real value. */
+/** Epoch, in whichever shape the vendor felt like. Z.ai sends epoch ms; Kimi sends an ISO 8601
+ *  string with microseconds (`"2026-09-12T00:45:13.375515Z"`, observed 2026-09-06 — an earlier
+ *  note here said ms, and every Kimi reset was silently dropped for it). A numeric value in
+ *  seconds would land in 1970 and read as permanently stale: 1e11 seconds is year 5138 and 1e11
+ *  ms is 1973, so the split is unambiguous for any real value. */
 const toUnixSeconds = (v) => {
   const n = num(v)
-  if (n === undefined || n <= 0) return undefined
+  if (n === undefined) {
+    if (typeof v !== 'string') return undefined
+    const ms = Date.parse(v)
+    return Number.isNaN(ms) || ms <= 0 ? undefined : Math.round(ms / 1000)
+  }
+  if (n <= 0) return undefined
   return Math.round(n > 1e11 ? n / 1000 : n)
 }
 

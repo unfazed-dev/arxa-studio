@@ -456,4 +456,20 @@ const okRes = (body) => ({ ok: true, status: 200, json: async () => body })
   ok('poller: ensureAny warms every answerable provider when the browser sends none')
 }
 
+{
+  // Kimi's reset is an ISO string with MICROSECONDS, not epoch ms — the live payload on
+  // 2026-09-06, numeric-string counters and all. Both windows must keep their reset; the card
+  // showed none for Kimi while GLM's (epoch ms) were fine.
+  const list = kimiToStatuses({
+    usage: { limit: '100', used: '5', remaining: '95', resetTime: '2026-09-12T00:45:13.375515Z' },
+    limits: [{ window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '100', remaining: '100', resetTime: '2026-09-05T19:45:13.375515Z' } }],
+  })
+  const by = Object.fromEntries(list.map((s) => [s.kind, s]))
+  assert.equal(by['week:1'].resetsAt, Math.round(Date.parse('2026-09-12T00:45:13.375Z') / 1000), 'weekly reset parsed from the ISO string')
+  assert.equal(by['hour:5'].resetsAt, Math.round(Date.parse('2026-09-05T19:45:13.375Z') / 1000), '5-hour reset parsed from the ISO string')
+  assert.equal(by['hour:5'].utilization, 0)
+  assert.equal(kimiToStatuses({ limits: [{ window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: 10, used: 1, resetTime: 'soon' } }] })[0].resetsAt, undefined, 'garbage is dropped, never 1970')
+  ok('kimi: ISO reset times survive; numeric ms (Z.ai) still do too')
+}
+
 console.log(`selftest.quota: ${n} ok`)

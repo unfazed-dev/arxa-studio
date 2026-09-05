@@ -313,3 +313,12 @@ Two defects, one per side:
    provider is a miss for the ladder.
 
 Verified: after relaunch at 17:53:17Z both sessions got Claude rows at 17:53:26.20, together.
+
+## Eleventh: Kimi's reset times were dropped (2026-09-06)
+
+The card showed no reset for either Kimi window while GLM's were fine. Live payload from
+`GET /coding/v1/usages`: `resetTime` is an **ISO 8601 string with microseconds**
+(`"2026-09-12T00:45:13.375515Z"`), not epoch ms as the old `toUnixSeconds` comment claimed;
+`num()` returned undefined and the reset was silently omitted. `toUnixSeconds` now parses a
+non-numeric string with `Date.parse` (garbage stays undefined, never 1970). `selftest.quota.mjs`
+pins the live shape for both windows (24 ok).
