@@ -156,7 +156,13 @@ export function createQuotaPoller ({
 
   function refresh (sessionId, provider) {
     const entry = cache.get(provider) ?? {}
-    if (entry.inflight !== undefined) return entry.inflight
+    if (entry.inflight !== undefined) { entry.pending.add(sessionId); return entry.inflight }
+    // Every session that asks while this read is in flight is remembered here and published to
+    // when it lands. Without it a joiner got NOTHING: the read published to the session that
+    // started it only, the joiner's RPC answered from an empty store, and — because the browser's
+    // provider filter then hid the vendor rows it did have — the composer drew no ring until the
+    // 60 s tick (measured 2026-09-06: other session at +9 s, the one on screen at +67 s).
+    const pending = new Set([sessionId])
     const inflight = read(provider).then(
       ({ statuses, configured }) => {
         const t = now()
@@ -167,15 +173,15 @@ export function createQuotaPoller ({
         // session, or the composer opened within the TTL of any earlier poll got `null` and
         // drew no ring at all (2026-09-06: the engine had Claude 38%/10%/17% for one session and
         // nothing for the one on screen).
-        cache.set(provider, { expires: configured ? expiryFor(statuses, t) : t + ttlMs, inflight: undefined, statuses, sessions: new Set([sessionId]) })
+        cache.set(provider, { expires: configured ? expiryFor(statuses, t) : t + ttlMs, inflight: undefined, statuses, sessions: new Set(pending) })
         if (configured) seen.add(provider)
-        publish(sessionId, provider, statuses)
+        for (const s of pending) publish(s, provider, statuses)
       },
       // read() catches its own failures; this only fires if publish or the cache write throws,
       // and even then the next tick must be able to try again.
       () => { cache.set(provider, { expires: now() + MIN_TTL_MS, inflight: undefined }) },
     )
-    cache.set(provider, { ...entry, inflight })
+    cache.set(provider, { ...entry, inflight, pending })
     return inflight
   }
 

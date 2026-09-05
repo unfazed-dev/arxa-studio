@@ -308,14 +308,18 @@ window.__ModuleLoader__.load({
         let step = 0
         const pending = new Set()
         const tick = () => refresh().then((next) => {
-          if (cancelled || next !== null || step >= RETRY_MS.length) return
+          // A reply for another provider is hidden by formatBadge's filter and draws nothing, so
+          // for the ladder it is a miss: right after boot the host answers with whichever
+          // provider landed first (the cheap vendor polls) while Claude's probe is still cold.
+          const hidden = next !== null && activeProvider !== undefined && next.provider !== activeProvider
+          if (cancelled || (next !== null && !hidden) || step >= RETRY_MS.length) return
           const t = setTimeout(() => { pending.delete(t); tick() }, RETRY_MS[step++])
           pending.add(t)
         })
         tick()
         const id = setInterval(tick, 60_000)
         return () => { cancelled = true; clearInterval(id); for (const t of pending) clearTimeout(t) }
-      }, [refresh])
+      }, [refresh, activeProvider])
 
       // A provider's windows: the binding one first, then its siblings. The host folds to decide
       // WHICH binds; the siblings ride along structurally so each can have its own ring.

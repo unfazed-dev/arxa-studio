@@ -294,3 +294,22 @@ so a failing step stops the chain, and every live copy was grepped for the new v
 
 At 6px between circles the two 28px hover washes overlapped. `margin-left:-16px` now: 12px
 between the circles, still tighter than the row's own gap, washes just touching at most.
+
+## Tenth: the joiner was never published to (2026-09-06)
+
+"Cannot see the usage ring" after a relaunch, with the row for the *other* session in the store
+9 s after boot and the on-screen session's Claude rows only at +67 s — the 60 s tick.
+
+Two defects, one per side:
+
+1. **Host.** `refresh()` de-duplicated concurrent reads by returning the in-flight promise, but
+   only the session that *started* the read was published to when it landed. A session that
+   joined (the composer on screen, asking a second later) answered from an empty store. Fix:
+   the in-flight entry carries a `pending` set; every joiner is added and published to on
+   landing, and `sessions` starts from that set. `selftest.quota.mjs` covers it (23 ok).
+2. **Browser.** The retry ladder stopped on any non-null reply. Right after boot the host's
+   provider-less answer is whichever provider landed first (the cheap vendor polls), which the
+   Fable filter hides — a reply that draws nothing counted as success. Fix: a reply for another
+   provider is a miss for the ladder.
+
+Verified: after relaunch at 17:53:17Z both sessions got Claude rows at 17:53:26.20, together.

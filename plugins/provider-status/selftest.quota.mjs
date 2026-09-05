@@ -235,6 +235,29 @@ const okRes = (body) => ({ ok: true, status: 200, json: async () => body })
 }
 
 {
+  // Two sessions ask while one read is in flight: BOTH must be published to when it lands. The
+  // joiner used to get nothing until the next tick (2026-09-06, the session on screen).
+  const published = []
+  let release
+  const poller = createQuotaPoller({
+    credentials: creds(),
+    publish: (...a) => published.push(a),
+    fetchImpl: () => new Promise((r) => { release = () => r(okRes(zaiBody)) }),
+    now: () => 1000,
+    coldWaitMs: 10,
+  })
+  const a = poller.ensure('s1', 'zai')
+  const b = poller.ensure('s2', 'zai')
+  await Promise.all([a, b])
+  assert.equal(published.length, 0, 'nothing lands before the read does')
+  release()
+  await new Promise((r) => setTimeout(r, 5))
+  assert.deepEqual(published.map((p) => p[0]).sort(), ['s1', 's2'], 'the starter AND the joiner are published to')
+  assert.equal(published[0][2][0].provider, 'zai')
+  ok('poller: a session that joins an in-flight read is published to when it lands')
+}
+
+{
   // Z.ai refuses a dead key with HTTP **200** and `success: false`. Observed live: the key in this
   // account went bad mid-session and the endpoint answered
   // `200 {"code":1000,"msg":"Authentication Failed","success":false}`. Reporting that as a shape
