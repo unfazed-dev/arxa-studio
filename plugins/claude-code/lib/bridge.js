@@ -17,8 +17,8 @@ const toolResultText = (block) => typeof block.content === 'string'
   : (block.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join('\n')
 
 export class TurnBridge {
-  constructor ({ messages, onSession, onRateLimit, onToolUse = () => {}, onAnswered = () => {}, pending = fromClaude }) {
-    Object.assign(this, { onSession, onRateLimit, onToolUse, onAnswered, pending })
+  constructor ({ messages, onSession, onRateLimit, onToolUse = () => {}, onAnswered = () => {}, onModelUsage = () => {}, pending = fromClaude }) {
+    Object.assign(this, { onSession, onRateLimit, onToolUse, onAnswered, onModelUsage, pending })
     this.claudeSessionId = undefined
     this.answeredModel = undefined  // the API's own model stamp on this child's answers; the init model is only what the CLI resolved
     this.finished = false        // true once a consumer has seen the SDK `result`, or the turn failed
@@ -166,6 +166,13 @@ export class TurnBridge {
         this.finished = true
         if (m.is_error) throw new Error((m.errors ?? []).join('; ') || m.result || `claude-code: ${m.subtype}`)
         yield * closeOpen()
+        // The model's REAL context window rides on the result's per-model usage — the one live
+        // source; supportedModels() has none. Reported before the usage chunk so the adapter's
+        // next resolveModel() already divides by it. Never worth the turn: the adapter's
+        // callback swallows, and a malformed entry is skipped rather than thrown on.
+        for (const [model, mu] of Object.entries(m.modelUsage ?? {})) {
+          if (Number.isInteger(mu?.contextWindow) && mu.contextWindow > 0) this.onModelUsage(model, mu.contextWindow)
+        }
         const u = m.usage ?? {}
         yield { type: 'usage', usage: {
           inputTokens: u.input_tokens ?? 0, outputTokens: u.output_tokens ?? 0,

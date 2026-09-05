@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert'
-import { STATIC_MODELS, modelsFromSdk, describeModel, versionAtLeast, matchModel, PROVIDER_ID } from './lib/models.js'
+import { STATIC_MODELS, modelsFromSdk, describeModel, versionAtLeast, matchModel, contextWindowFor, PROVIDER_ID } from './lib/models.js'
 
 let n = 0; const ok = (name) => { n++; console.log(`  ok ${name}`) }
 
@@ -55,5 +55,21 @@ for (const s of STATIC_MODELS) {
   assert.ok(matchModel(live, s.id), `static id ${s.id} must resolve against the live list`)
 }
 ok('every STATIC_MODELS id resolves against the live list')
+
+// The context ring's divisor. A learned (result-reported) window wins; before any turn the CLI's
+// own `[1m]` suffix marks the 1M rows; everything else is the 200k default. The old flat 200_000
+// made a Fable ring read five times too full.
+assert.equal(contextWindowFor('claude-fable-5-1[1m]'), 1_000_000)
+assert.equal(contextWindowFor('opus[1m]'), 1_000_000)
+assert.equal(contextWindowFor('OPUS[1M]'), 1_000_000)
+assert.equal(contextWindowFor('sonnet'), 200_000)
+assert.equal(contextWindowFor('fable'), 200_000)
+assert.equal(contextWindowFor(undefined), 200_000)
+assert.equal(contextWindowFor('sonnet', 400_000), 400_000)
+assert.equal(contextWindowFor('opus[1m]', 0), 1_000_000)
+assert.equal(contextWindowFor('opus[1m]', -1), 1_000_000)
+assert.equal(contextWindowFor('opus[1m]', 1.5), 1_000_000)
+assert.equal(contextWindowFor('opus[1m]', 'x'), 1_000_000)
+ok('contextWindowFor: learned wins, [1m] is 1M, default 200k, junk ignored')
 
 console.log(`selftest.models: ${n} ok`)

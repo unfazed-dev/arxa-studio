@@ -17,6 +17,7 @@ import { fromClaude, fromLoop } from './pending.js'
 import { publishProviderStatus } from '../../provider-status/lib/index.js'
 import { rateLimitToStatus } from './rate-limit.js'
 import { fetchUsageStatuses } from './usage.js'
+import { contextWindowFor } from './models.js'
 
 const textOf = (msg) => (msg?.content ?? []).filter((b) => b.type === 'text').map((b) => b.text).join('\n')
 const resultText = (block) => (block.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join('\n')
@@ -73,7 +74,10 @@ export class ClaudeCodeAdapter extends LlmAdapter {
       id: row.id,
       name: row.name,
       description: describeModel(row, account),
-      context: { contextWindow: 200_000 },
+      // What dsh's context ring divides by. Learned from the last result's modelUsage when a
+      // turn has run on this row, else inferred from the id (`[1m]` = 1M). A flat 200_000 here
+      // made the Fable ring read five times too full.
+      context: { contextWindow: contextWindowFor(row.id, this.contextWindows?.get(row.id)) },
       ...(efforts.length ? { reasoning: { efforts: efforts.map((id) => ({ id, name: id })), defaultEffort: efforts.includes('high') ? 'high' : efforts[0] } } : {}),
     }
   }
@@ -264,6 +268,10 @@ export class ClaudeCodeAdapter extends LlmAdapter {
       // on why a `claude-code/*` event costs the whole log its readability. The mismatch still
       // reaches the user through the provider-status pill below, which is what they asked for.
       onAnswered: (model) => this.noteModelFallback(agent, modelId, model),
+      // The result's per-model context window, remembered under the row the turn ran on so the
+      // next resolveModel() (dsh re-resolves per turn and re-emits request/context on change)
+      // divides the context ring by the real number. Never worth the turn.
+      onModelUsage: (model, contextWindow) => { try { this.noteContextWindow(modelId, model, contextWindow) } catch {} },
       // A status update is never worth a user's turn. rateLimitToStatus/appendProviderStatus can
       // still throw on a payload the source-level clamp in rate-limit.js doesn't cover (e.g. a
       // malformed resetsAt) — that .parse() throw would otherwise propagate out of this
@@ -336,6 +344,17 @@ export class ClaudeCodeAdapter extends LlmAdapter {
         title: `asked for ${requested} — Claude Code answered with ${actual}`,
       })
     } catch { /* never worth the turn */ }
+  }
+
+  /** Remember a context window the SDK reported on a result, under both the row id the turn
+   * ran on (what resolveModel() looks up) and the API's own model stamp (in case a later probe
+   * list spells the row that way). Lazily built: the adapter's constructor is not the only
+   * place instances are made in the selftests, and a Map that appears on first use is one
+   * fewer field for a stand-in to forget. */
+  noteContextWindow (modelId, wireModel, contextWindow) {
+    if (!Number.isInteger(contextWindow) || contextWindow <= 0) return
+    this.contextWindows ??= new Map()
+    for (const key of [modelId, wireModel]) if (typeof key === 'string' && key) this.contextWindows.set(key, contextWindow)
   }
 
   /** Pull the plan's `/usage` windows from the live child and publish one status per limit.

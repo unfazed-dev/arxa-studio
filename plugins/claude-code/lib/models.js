@@ -28,6 +28,16 @@ export function modelsFromSdk (sdkModels) {
  * neither — the CLI's own session is the credential. Verified against the shipped CLI:
  * `claude auth login` (`claude auth --help`: login / logout / status). */
 export const SIGNIN_CMD = 'claude auth login'
+
+/** The context window dsh's context ring divides by. `supportedModels()` carries none; the only
+ * live source is `modelUsage[model].contextWindow` on each turn's result, which the adapter
+ * learns and passes in as `learned`. Before any turn has run, the CLI's own `[1m]` id suffix
+ * marks the 1M rows and everything else gets the 200k default. The old flat 200_000 made a
+ * Fable (`claude-fable-5-1[1m]`) ring read five times too full. */
+export function contextWindowFor (id, learned = undefined) {
+  if (Number.isInteger(learned) && learned > 0) return learned
+  return /\[1m\]/i.test(String(id ?? '')) ? 1_000_000 : 200_000
+}
 /** Where a user with no CLI at all has to start. */
 export const INSTALL_URL = 'https://docs.claude.com/en/docs/claude-code/setup'
 /** Named so the message can point somewhere, not just state a fact (F14). */

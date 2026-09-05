@@ -2098,3 +2098,23 @@ Expected: the composer pill reads "Claude NN%" right after the first Claude turn
 - D10 env scrub + `apiKeySource` refusal (Tasks 2, 6), rate limits published as `provider/status` and shown live in the composer pill for every provider (Tasks 13–14), Fable → `fallbackModel: 'opus'` (Task 9), no separate meter page. ✔
 
 Known ceilings, all marked in code comments or the status section: Windows unmeasured; nested subagent activity not rendered; the pill shows the latest status only (a fold, not a history), and a provider that never emits `provider/status` shows nothing; the dsh arxa-gate (`arxa-gate` row, tool names `write/edit/bash`) does not pre-check Claude's built-ins — approval + sandbox are the gates for those.
+
+### Task 14: Both rings live for every provider (2026-09-05)
+
+**Problem, as reported:** the composer's usage ring (5-hour / weekly) showed nothing until a Claude turn had run in *that* session, so it looked "activated only by limits"; and the context ring read far too full on Fable.
+
+**Root causes (from source, not memory):**
+- Usage: `adapter.refreshUsage()` publishes Claude's `/usage` windows only at turn start, keyed per session. The host `poller.ensure(sessionId, provider)` (`plugins/provider-status/lib/poller.js`) returned early for any provider not in the static `VENDORS` table, so picking Claude in a fresh session fetched nothing. `formatBadge`/`bindingStatus` never hide a level-`ok` status — the ring was empty for lack of data, not by design.
+- Context: `resolveModel()` advertised a flat `context: { contextWindow: 200_000 }`. The live Fable row is `claude-fable-5-1[1m]` (1M). dsh's `dsh-token-meter` already counts cache-read tokens in `pressureFrom`, so only the divisor was wrong. `supportedModels()` (SDK `ModelInfo`, `@anthropic-ai/claude-agent-sdk` 0.3.259) carries no window; the only live source is `modelUsage[model].contextWindow` on each turn's `result`.
+
+**Changes:**
+- `provider-status/lib/poller.js`: `READERS` + `registerUsageReader(provider, read)`; `read()` dispatches to a registered reader before the vendor table; `ensure()` admits registered providers. A reader returns `{ statuses, configured }`; a throw renders as `?`. Same TTL / reset-clamped cache.
+- `claude-code/lib/probe.js`: `warmStart()` (the startup handshake, shared) and `usage()` — signed-in check via the cached probe, then a warm child, `fetchUsageStatuses(warm.query(never))`, close. No turn, no tokens, same sandboxed spawner.
+- `claude-code/index.mjs`: `registerUsageReader(PROVIDER_ID, () => probe.usage())`.
+- `claude-code/lib/models.js`: `contextWindowFor(id, learned)` — learned value wins, else `[1m]` → 1_000_000, else 200_000.
+- `claude-code/lib/bridge.js`: `onModelUsage(model, contextWindow)` fired from the result's `modelUsage`.
+- `claude-code/lib/adapter.js`: `noteContextWindow()` records it under the row id the turn ran on; `resolveModel()` uses `contextWindowFor(row.id, learned)`. dsh re-resolves per turn and re-emits `request/context` on change (`dsh-agent-loop`), so the ring corrects from the next turn.
+
+**Docs consulted:** `node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts` (`Query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET`, `ModelUsage.contextWindow`, `ModelInfo`), `node_modules/@deepseek-ai/dsh-token-meter/lib/index.js` (`pressureFrom`, `request/context` fold), `dsh-agent-loop/lib/index.js:764`.
+
+**Ceiling, stated:** the `/usage` control request is marked experimental by the SDK; if it is renamed, `fetchUsageStatuses` already falls back to a plain `usage()` method and otherwise yields no statuses — the ring shows `?` (via the poller's "unrecognised response"), never a stale number.

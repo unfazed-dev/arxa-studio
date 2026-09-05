@@ -2,7 +2,7 @@
 // the payload fixtures here are the shapes observed live against real accounts, trimmed.
 import { strict as assert } from 'node:assert'
 import { zaiToStatuses, kimiToStatuses, deepseekToStatuses, brokenStatus, vendorError, PROVIDER_NAME } from './lib/quota.js'
-import { createQuotaPoller, VENDORS } from './lib/poller.js'
+import { createQuotaPoller, VENDORS, READERS, registerUsageReader } from './lib/poller.js'
 import { PROVIDER_STATUS_SCHEMA, bindingStatus } from './lib/status.js'
 
 let n = 0; const ok = (s) => { n++; console.log(`  ok ${s}`) }
@@ -118,7 +118,11 @@ const RESET_MS = 1_800_000_000_000
     // possible guarantee that nothing rides along into the client.
     assert.equal('detail' in s, false, `${s.kind} must not set detail`)
   }
-  assert.deepEqual(Object.keys(VENDORS).sort(), Object.keys(PROVIDER_NAME).sort(), 'every vendor has a display name and vice versa')
+  // PROVIDER_NAME is wider than VENDORS on purpose: reader-backed providers (claude-code) have no
+  // vendor URL but still need the name their `?` is titled with, so ring and error agree.
+  for (const id of Object.keys(VENDORS)) assert.ok(PROVIDER_NAME[id], `vendor ${id} has a display name`)
+  assert.equal(PROVIDER_NAME['claude-code'], 'Claude', 'the reader-backed provider is named like its ring')
+  for (const id of Object.keys(PROVIDER_NAME)) assert.ok(Object.hasOwn(VENDORS, id) || id === 'claude-code', `${id} is a vendor or a known reader`)
   for (const [id, v] of Object.entries(VENDORS)) {
     assert.ok(v.url.startsWith('https://'), `${id} must be fetched over TLS`)
     assert.equal(v.url.includes('?'), false, `${id}'s URL carries no query string, so nothing can be smuggled into one`)
@@ -337,6 +341,71 @@ const okRes = (body) => ({ ok: true, status: 200, json: async () => body })
   // Still floored: 45s in, the 30s minimum has passed but the clamp landed at reset+2s = 42s.
   assert.equal(calls, 2, 'the next read is pulled in to just after the window resets')
   ok('poller: cache expiry clamps to the next reset, floored so it cannot spin')
+}
+
+{
+  // Registered readers: the providers arxa DOES own the request path for (Claude). The poller
+  // consults them before the vendor table, through the same cache, and never touches fetch.
+  const claude = (kind, utilization) => ({
+    provider: 'claude-code', kind, level: 'ok', text: `Claude ${utilization}%`, utilization: utilization / 100, resetsAt: 1_000_000,
+  })
+  const readers = new Map()
+  let reads = 0, fetches = 0
+  readers.set('claude-code', async () => { reads++; return { statuses: [claude('five_hour', 25), claude('seven_day', 60)], configured: true } })
+  const published = []
+  const poller = createQuotaPoller({
+    credentials: creds(null),
+    publish: (sessionId, provider, statuses) => published.push([sessionId, provider, statuses]),
+    fetchImpl: async () => { fetches++; return okRes(zaiBody) },
+    now: () => 1000,
+    readers,
+  })
+  await poller.ensure('s1', 'claude-code')
+  assert.equal(reads, 1); assert.equal(fetches, 0, 'a reader never goes through fetch')
+  assert.deepEqual(published[0].slice(0, 2), ['s1', 'claude-code'])
+  assert.deepEqual(published[0][2].map((s) => s.text), ['Claude 25%', 'Claude 60%'])
+  await poller.ensure('s2', 'claude-code')
+  assert.equal(reads, 1, 'the reader is behind the same provider-keyed TTL')
+  ok('poller: a registered reader feeds the ring without a turn, through the same cache')
+
+  // A reader that throws is "reachable but failed": the `?`, replacing whatever was held.
+  readers.set('claude-code', async () => { throw new Error('child died') })
+  poller.reset(); published.length = 0
+  await poller.ensure('s1', 'claude-code')
+  assert.equal(published[0][2].length, 1)
+  assert.equal(published[0][2][0].text, '?')
+  assert.equal(published[0][2][0].kind, 'unavailable')
+  assert.match(published[0][2][0].title, /^Claude usage unavailable · unreachable$/)
+  ok('poller: a throwing reader renders as ? (unreachable), named like its ring')
+
+  // `configured: false` (signed out) is "no account here": nothing published but an empty set,
+  // so a ring from a previous sign-in disappears rather than lingering.
+  readers.set('claude-code', async () => ({ statuses: [], configured: false }))
+  poller.reset(); published.length = 0
+  await poller.ensure('s1', 'claude-code')
+  assert.deepEqual(published, [['s1', 'claude-code', []]])
+  ok('poller: a not-configured reader clears the ring, no ?')
+
+  // An empty-but-configured answer is a shape change: say so, do not show nothing.
+  readers.set('claude-code', async () => ({ statuses: [] }))
+  poller.reset(); published.length = 0
+  await poller.ensure('s1', 'claude-code')
+  assert.equal(published[0][2][0].text, '?')
+  assert.match(published[0][2][0].title, /unrecognised response/)
+  ok('poller: an empty configured read reports unrecognised response')
+
+  // The module-level registry is what plugins use; it must validate its arguments, and the
+  // default poller must see a registration made before it was constructed.
+  assert.throws(() => registerUsageReader('claude-code', 'nope'), TypeError)
+  assert.throws(() => registerUsageReader(42, () => {}), TypeError)
+  registerUsageReader('claude-code', async () => ({ statuses: [claude('five_hour', 5)], configured: true }))
+  assert.ok(READERS.has('claude-code'))
+  const dflt = createQuotaPoller({ credentials: creds(null), publish: (...a) => published.push(a), fetchImpl: async () => { fetches++ }, now: () => 1000 })
+  published.length = 0
+  await dflt.ensure('s9', 'claude-code')
+  assert.equal(published[0][2][0].text, 'Claude 5%'); assert.equal(fetches, 0)
+  READERS.delete('claude-code')
+  ok('poller: registerUsageReader validates and reaches the default poller')
 }
 
 console.log(`selftest.quota: ${n} ok`)

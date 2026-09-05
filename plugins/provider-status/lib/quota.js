@@ -190,7 +190,7 @@ export function brokenStatus (provider, name, reason) {
 }
 
 /** Provider id -> the display name its statuses use. One place, so a ring and its error agree. */
-export const PROVIDER_NAME = { zai: 'GLM', 'kimi-coding': 'Kimi', 'deepseek-official': 'DeepSeek' }
+export const PROVIDER_NAME = { zai: 'GLM', 'kimi-coding': 'Kimi', 'deepseek-official': 'DeepSeek', 'claude-code': 'Claude' }
 
 /**
  * A vendor's own error, when it ships one inside an HTTP 200.

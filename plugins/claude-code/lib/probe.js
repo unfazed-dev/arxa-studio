@@ -6,6 +6,7 @@
 import { delimiter, join, dirname } from 'node:path'
 import { existsSync } from 'node:fs'
 import { STATIC_MODELS, modelsFromSdk } from './models.js'
+import { fetchUsageStatuses } from './usage.js'
 
 export function resolveClaudeBinary ({ env, platform, arch, exists = existsSync, sdkRoot }) {
   const exe = platform === 'win32' ? 'claude.exe' : 'claude'
@@ -45,19 +46,7 @@ export class Probe {
     if (!this.binary) return { loggedIn: false, error: 'no claude binary on PATH and no bundled binary', models: STATIC_MODELS, checkedAt }
     let warm
     try {
-      // startup() spawns the CLI and completes the initialize handshake itself, which is what
-      // makes this bounded. The older pattern handed a never-yielding prompt to query() and
-      // waited for a `system/init` message — but the CLI does not emit init until a prompt
-      // actually arrives, so every probe stalled to its full timeout and reported a signed-in
-      // user as signed out, with the model picker falling back to STATIC_MODELS.
-      warm = await this.startup({
-        options: {
-          pathToClaudeCodeExecutable: this.binary, env: this.env, settingSources: [], persistSession: false,
-          systemPrompt: { type: 'custom', prompt: 'probe' }, permissionMode: 'default',
-          spawnClaudeCodeProcess: this.spawnClaudeCodeProcess,
-        },
-        initializeTimeoutMs: this.timeoutMs,
-      })
+      warm = await this.warmStart()
       // The prompt never yields, so no turn starts and no tokens are spent: accountInfo and
       // supportedModels are control requests over the channel startup() already opened.
       const q = warm.query(never)
@@ -73,6 +62,38 @@ export class Probe {
       }
     } catch (err) {
       return { loggedIn: false, error: String(err?.message ?? err), models: STATIC_MODELS, checkedAt }
+    } finally { try { warm?.close() } catch { /* already closed */ } }
+  }
+
+  /** startup() spawns the CLI and completes the initialize handshake itself, which is what
+   * makes this bounded. The older pattern handed a never-yielding prompt to query() and
+   * waited for a `system/init` message — but the CLI does not emit init until a prompt
+   * actually arrives, so every probe stalled to its full timeout and reported a signed-in
+   * user as signed out, with the model picker falling back to STATIC_MODELS. */
+  warmStart () {
+    return this.startup({
+      options: {
+        pathToClaudeCodeExecutable: this.binary, env: this.env, settingSources: [], persistSession: false,
+        systemPrompt: { type: 'custom', prompt: 'probe' }, permissionMode: 'default',
+        spawnClaudeCodeProcess: this.spawnClaudeCodeProcess,
+      },
+      initializeTimeoutMs: this.timeoutMs,
+    })
+  }
+
+  /** The plan's `/usage` windows WITHOUT a turn — the provider-status poller's reader for
+   * claude-code, so the ring is live the moment a Claude model is picked in any session.
+   * Reuses the probe's (cached) signed-in verdict first: a signed-out user costs no child and
+   * reads as "not configured" (no ring), not as a `?`. Anything else throws to the poller,
+   * which renders the `?`. Same warm handle, same sandboxed spawner, closed in finally. */
+  async usage () {
+    const account = await this.current()
+    if (!account.loggedIn) return { statuses: [], configured: false }
+    let warm
+    try {
+      warm = await this.warmStart()
+      const statuses = await fetchUsageStatuses(warm.query(never))
+      return { statuses, configured: true }
     } finally { try { warm?.close() } catch { /* already closed */ } }
   }
 

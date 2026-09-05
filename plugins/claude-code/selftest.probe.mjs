@@ -17,7 +17,7 @@ assert.equal(resolveClaudeBinary({ env: { PATH: '/nope' }, platform: 'linux', ar
 // that goes back to awaiting the message stream hangs here instead of passing — which is
 // exactly the regression that shipped, because the previous fake yielded an init the real
 // binary never sends.
-function fakeStartup ({ account = {}, models = [], fail, hang } = {}) {
+function fakeStartup ({ account = {}, models = [], fail, hang, usage } = {}) {
   const factory = async ({ options, initializeTimeoutMs }) => {
     factory.calls++; factory.lastOptions = options; factory.lastTimeoutMs = initializeTimeoutMs
     if (fail) throw new Error(fail)
@@ -28,11 +28,17 @@ function fakeStartup ({ account = {}, models = [], fail, hang } = {}) {
         [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
         accountInfo: async () => account,
         supportedModels: async () => models,
+        // The `/usage` control request the usage ring's turn-free reader calls.
+        usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => {
+          factory.usageCalls++
+          if (usage instanceof Error) throw usage
+          return usage
+        },
       }),
       close: () => { factory.closed++ },
     }
   }
-  factory.calls = 0; factory.closed = 0
+  factory.calls = 0; factory.closed = 0; factory.usageCalls = 0
   return factory
 }
 
@@ -122,5 +128,48 @@ ok('probe carries the injected spawnClaudeCodeProcess — the child starts confi
 // unconfined-launch path is unreachable rather than merely unused.
 assert.throws(() => new Probe({ startup, binary: '/opt/bin/claude', env: {} }), /spawnClaudeCodeProcess is required/)
 ok('Probe without a spawner throws at construction')
+
+// --- usage(): the usage ring's turn-free source
+{
+  const payload = {
+    rate_limits_available: true,
+    rate_limits: { five_hour: { utilization: 25, resets_at: '2026-09-05T12:00:00Z' }, seven_day: { utilization: 60, resets_at: '2026-09-09T00:00:00Z' } },
+  }
+  const s = fakeStartup({ account, models, usage: payload })
+  const p = new Probe({ startup: s, binary: '/opt/bin/claude', env: {}, spawnClaudeCodeProcess: versionSpawn(), now: () => 0 })
+  const r = await p.usage()
+  assert.equal(r.configured, true)
+  assert.deepEqual(r.statuses.map((x) => x.text), ['Claude 25%', 'Claude 60%'])
+  assert.ok(r.statuses.every((x) => x.provider === 'claude-code'), 'statuses carry the provider id the poller replaces by')
+  assert.equal(s.usageCalls, 1)
+  // One warm handle for the (cached) signed-in check, one for the usage read; both closed.
+  assert.equal(s.calls, 2); assert.equal(s.closed, 2)
+  ok('usage(): reads /usage off a warm child with no turn, closes the handle')
+
+  // Cached verdict: a second read within the TTL spawns exactly one more child, not two.
+  await p.usage()
+  assert.equal(s.calls, 3); assert.equal(s.closed, 3); assert.equal(s.usageCalls, 2)
+  ok('usage(): the signed-in check is served from the probe cache')
+
+  // Signed out: no ring and NO child — "not configured", not a `?`.
+  const out = fakeStartup({ fail: 'Not logged in · Please run /login', usage: payload })
+  const q = new Probe({ startup: out, binary: '/opt/bin/claude', env: {}, spawnClaudeCodeProcess: versionSpawn(), now: () => 0 })
+  assert.deepEqual(await q.usage(), { statuses: [], configured: false })
+  assert.equal(out.usageCalls, 0)
+  ok('usage(): signed out reads as not configured, spawns no usage child')
+
+  // No binary: same, without a startup at all.
+  const none = new Probe({ startup: fakeStartup({ account, models, usage: payload }), binary: undefined, env: {}, spawnClaudeCodeProcess: versionSpawn() })
+  assert.deepEqual(await none.usage(), { statuses: [], configured: false })
+  ok('usage(): no binary reads as not configured')
+
+  // The control request failing is the poller's `?`, and the handle still closes.
+  const boom = fakeStartup({ account, models, usage: new Error('usage unavailable') })
+  const b = new Probe({ startup: boom, binary: '/opt/bin/claude', env: {}, spawnClaudeCodeProcess: versionSpawn(), now: () => 0 })
+  const br = await b.usage()
+  assert.deepEqual(br.statuses, [], 'a rejected control request yields no statuses (poller renders ?)')
+  assert.equal(boom.closed, 2)
+  ok('usage(): a failed control request closes the handle and yields nothing')
+}
 
 console.log(`# ${passed} ok`)

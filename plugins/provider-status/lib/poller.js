@@ -1,9 +1,15 @@
 // Host-side quota reads for the providers arxa does NOT own the request path for.
 //
 // WHY A POLLER AT ALL: Claude publishes usage because arxa runs the child and can ask it
-// (`Query.usage_...()` at the end of a turn). zai, kimi-coding and deepseek-official are provider
+// (`Query.usage_...()` at the start of a turn). zai, kimi-coding and deepseek-official are provider
 // profiles consumed by dsh's own adapter — arxa never sees their responses, and dsh-llm surfaces
 // only error codes (RATE_LIMIT, QUOTA), never usage or headers. The numbers have to be fetched.
+//
+// WHY CLAUDE IS ALSO HERE (2026-09-05): turn-start publishing is per session, so a fresh session
+// with a Claude model picked showed NO ring until a turn had run — the ring looked "activated by
+// limits" when it was really activated by turns. Claude's plugin now registers a READER (see
+// `registerUsageReader`) that asks a warm child for `/usage` without a turn, and the same
+// read-through cache serves it. Every provider with a source is live the moment it is picked.
 //
 // WHY PULL, NOT A SCHEDULER: the browser already calls the `current` RPC every 60s and again the
 // moment the model picker changes provider. Refreshing on a timer when no browser is watching
@@ -42,6 +48,22 @@ export const VENDORS = {
   'deepseek-official': { ref: 'DEEPSEEK_API_KEY', url: 'https://api.deepseek.com/user/balance', map: deepseekToStatuses },
 }
 
+/**
+ * provider id -> reader, for the providers arxa DOES own the request path for. Registered by that
+ * provider's plugin (claude-code registers `probe.usage()`), so the ring is live the moment the
+ * model is picked rather than after the first turn of every session.
+ *
+ * A reader returns `{ statuses, configured }`: `configured: false` means "no account here" (no
+ * ring, no `?`); a throw means "reachable but failed" and renders as `?`. Module-level on purpose:
+ * plugin apply() order is not a contract, and the poller is built inside a deferred inject, so
+ * registration must be able to precede construction.
+ */
+export const READERS = new Map()
+export function registerUsageReader (provider, read) {
+  if (typeof provider !== 'string' || typeof read !== 'function') throw new TypeError('registerUsageReader(provider, read): string provider and function reader required')
+  READERS.set(provider, read)
+}
+
 const MINUTE = 60_000
 /** The idle floor: one read per provider per five minutes, however many sessions are open. */
 const TTL_MS = 5 * MINUTE
@@ -66,6 +88,7 @@ export function createQuotaPoller ({
   ttlMs = TTL_MS,
   timeoutMs = TIMEOUT_MS,
   coldWaitMs = COLD_WAIT_MS,
+  readers = READERS,
 } = {}) {
   // Keyed by PROVIDER, not session. A Z.ai quota is account-wide; keying this by session would
   // multiply the five-minute floor by the number of open tabs.
@@ -80,9 +103,25 @@ export function createQuotaPoller ({
     return Math.max(t + MIN_TTL_MS, Math.min(t + ttlMs, soonest ?? Infinity))
   }
 
+  /** A registered reader owns its own transport (Claude's spawns a sandboxed child with its own
+   *  timeout), so this only classifies the outcome the way the vendor path does. */
+  async function readViaReader (provider, reader, name) {
+    let statuses, configured
+    try {
+      ({ statuses = [], configured = true } = (await reader()) ?? {})
+    } catch (err) {
+      const reason = err?.name === 'TimeoutError' || err?.name === 'AbortError' ? 'timed out' : 'unreachable'
+      return { statuses: [brokenStatus(provider, name, reason)], configured: true }
+    }
+    if (!configured) return { statuses: [], configured: false }
+    return { statuses: statuses.length > 0 ? statuses : [brokenStatus(provider, name, 'unrecognised response')], configured: true }
+  }
+
   async function read (provider) {
-    const vendor = VENDORS[provider]
     const name = PROVIDER_NAME[provider] ?? provider
+    const reader = readers.get(provider)
+    if (reader !== undefined) return readViaReader(provider, reader, name)
+    const vendor = VENDORS[provider]
     let statuses
     try {
       const key = await credentials.resolve(vendor.ref)
@@ -137,7 +176,7 @@ export function createQuotaPoller ({
      * Awaiting a warm or stale refresh is how one hanging endpoint would stall the whole RPC.
      */
     async ensure (sessionId, provider) {
-      if (!Object.hasOwn(VENDORS, provider)) return
+      if (!Object.hasOwn(VENDORS, provider) && !readers.has(provider)) return
       const entry = cache.get(provider)
       if (entry !== undefined && entry.inflight === undefined && entry.expires > now()) return
       const inflight = refresh(sessionId, provider)

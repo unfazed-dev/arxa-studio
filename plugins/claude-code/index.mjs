@@ -10,6 +10,7 @@ import { scrubEnv } from './lib/env.js'
 import { makeSpawner } from './lib/spawn.js'
 import { PROVIDER_ID } from './lib/models.js'
 import { claudeAuthFlow, hideAnthropicOauth } from './lib/auth-flow.js'
+import { registerUsageReader } from '../provider-status/lib/poller.js'
 
 const require = createRequire(import.meta.url)
 const version = require(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'package.json')).version
@@ -43,6 +44,10 @@ export function apply (ctx, config = {}) {
   })
   const probe = new Probe({ startup, binary, env, spawnClaudeCodeProcess: probeSpawner })
   ctx.llm.registerAdapter([PROVIDER_ID], new ClaudeCodeAdapter({ query, probe, ctx, binary, env, version }))
+  // The usage ring's turn-free source: the provider-status poller asks this the moment a Claude
+  // model is picked (and every 60s while one is), so the 5-hour / weekly windows show in every
+  // session, not only after a turn has run in it. Same sandboxed probe child, no turn, no tokens.
+  registerUsageReader(PROVIDER_ID, () => probe.usage())
   // Deferred: fires if and when ctx.authorization exists. The model adapter above does not
   // depend on it — a user can pick a Claude model whether or not the login surface is mounted.
   ctx.inject(['authorization'], (authorized) => {

@@ -3,6 +3,7 @@ import { ClaudeCodeAdapter } from './lib/adapter.js'
 import { onProviderStatus } from '../provider-status/lib/index.js'
 import { fromClaude, fromLoop } from './lib/pending.js'
 import { MIRROR_TOOL_NAMES } from './lib/mirror-tools.js'
+import { contextWindowFor } from './lib/models.js'
 
 let passed = 0
 const ok = (msg) => { passed++; console.log(`ok ${passed} - ${msg}`) }
@@ -34,7 +35,9 @@ const statusLog = []
 onProviderStatus((_sessionId, data) => statusLog.push(data))
 const agent = {
   id: 'agent-1',
-  session: { header: { cwd: '/ws' }, events, append: (type, data) => { events.push({ type, data }); return { seq: events.length - 1 } } },
+  // dsh 0.1.2-rc.1 keys the session by `header.id`; publishProviderStatus refuses a session
+  // without one (a status keyed "undefined" is invisible to the RPC), so the fixture carries it.
+  session: { header: { id: 'sess-adapter-test', cwd: '/ws' }, events, append: (type, data) => { events.push({ type, data }); return { seq: events.length - 1 } } },
   ctx: { tools: { schemas: () => [{ name: 'gen_ui', description: 'card', parameters: { type: 'object', properties: {} } }, { name: 'Read', description: 'm', parameters: {} }] } },
 }
 let initiator = agent
@@ -67,8 +70,24 @@ ok('listModels carries tier label')
 
 const resolved = await mk([]).resolveModel('claude-code', 'fable')
 assert.deepEqual(resolved.reasoning, { efforts: [{ id: 'high', name: 'high' }], defaultEffort: 'high' })
-assert.deepEqual(resolved.context, { contextWindow: 200_000 })
+// The divisor of dsh's context ring: the id's own `[1m]` marks a 1M row, otherwise 200k, until a
+// turn has reported the real number (below).
+assert.deepEqual(resolved.context, { contextWindow: contextWindowFor(resolved.id) })
+assert.ok([200_000, 1_000_000].includes(resolved.context.contextWindow))
 ok('resolveModel efforts')
+
+{
+  // A result's modelUsage teaches the adapter the real window for the row the turn ran on, and
+  // the next resolveModel() divides by it. Garbage is ignored, never thrown on.
+  const a = mk([])
+  a.noteContextWindow(resolved.id, 'claude-fable-5-1', 0)
+  a.noteContextWindow(resolved.id, 'claude-fable-5-1', -5)
+  a.noteContextWindow(resolved.id, 'claude-fable-5-1', 'big')
+  assert.equal((await a.resolveModel('claude-code', 'fable')).context.contextWindow, contextWindowFor(resolved.id))
+  a.noteContextWindow(resolved.id, 'claude-fable-5-1', 1_000_000)
+  assert.equal((await a.resolveModel('claude-code', 'fable')).context.contextWindow, 1_000_000)
+  ok('resolveModel divides the context ring by the window the last result reported')
+}
 
 // --- first turn, fresh session: options assembled per D5/D7/D10
 {
