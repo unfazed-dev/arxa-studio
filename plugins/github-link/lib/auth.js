@@ -356,3 +356,36 @@ export async function deleteRepoApi({ owner, name, accessToken, fetch = globalTh
   if (res.status === 404) throw new Error('github-link: repo not found (404) — it may already be gone')
   throw new Error('github-link: repo deletion failed (' + res.status + ')')
 }
+
+/**
+ * DELETE /repos/{owner}/{repo}/git/refs/heads/{branch} (archives trash
+ * purge, 2026-09-05 grill): the remote half of deleting a parked session
+ * branch. 204 → deleted; 422 → the ref no longer exists (already gone —
+ * the purge's goal state, callers count it as done); 403 → permission.
+ * Branch names are hierarchical (`arxa/notes/x`), so slashes stay literal
+ * — URL-encoding them (%2F) also works but the literal form is the
+ * documented path shape.
+ */
+export async function deleteBranchApi({ owner, name, branch, accessToken, fetch = globalThis.fetch, apiBase = defaultApiBase() } = {}) {
+  if (!owner || !name) throw new Error('github-link: branch deletion needs owner and repo name')
+  if (!branch) throw new Error('github-link: branch deletion needs a branch name')
+  if (!accessToken) throw new Error('github-link: not linked (link before deleting a branch)')
+  const ref = String(branch)
+    .split('/')
+    .filter(Boolean)
+    .map(encodeURIComponent)
+    .join('/')
+  const res = await fetch(new URL('/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(name) + '/git/refs/heads/' + ref, apiBase), {
+    method: 'DELETE',
+    headers: {
+      accept: 'application/vnd.github+json',
+      authorization: 'Bearer ' + accessToken,
+      'user-agent': 'arxa-studio',
+    },
+  })
+  if (res.status === 204) return { deleted: true }
+  if (res.status === 422) return { deleted: true, alreadyGone: true }
+  if (res.status === 403) throw new Error('github-link: branch deletion refused (403) — the linked token lacks permission for this repo; re-link GitHub (Settings) to upgrade')
+  if (res.status === 404) throw new Error('github-link: repo not found (404) — it may already be gone')
+  throw new Error('github-link: branch deletion failed (' + res.status + ')')
+}

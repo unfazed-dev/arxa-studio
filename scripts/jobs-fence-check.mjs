@@ -26,7 +26,14 @@ import { dirname, join } from 'node:path'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const JOBS_LOCAL = join(ROOT, 'node_modules/@deepseek-ai/dsh-jobs-local/lib/index.js')
-const AGENT_TYPES = join(ROOT, 'node_modules/@deepseek-ai/dsh-agent/lib/types/runtime-types.d.ts')
+// dsh 0.1.2-rc.1 moved the session-identity `interface Agent { readonly id:
+// SessionId }` out of runtime-types.d.ts into types.d.ts — runtime-types now
+// keeps a DIFFERENT runtime-augmented Agent (options/session/inbox, no `id`),
+// so matching it first would assert the wrong face. Try the new home first.
+const AGENT_TYPES = [
+  join(ROOT, 'node_modules/@deepseek-ai/dsh-agent/lib/types/types.d.ts'),
+  join(ROOT, 'node_modules/@deepseek-ai/dsh-agent/lib/types/runtime-types.d.ts'),
+].find(existsSync)
 
 let failed = 0
 const ok = (label, cond, note = '') => {

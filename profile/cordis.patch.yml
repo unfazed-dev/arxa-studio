@@ -403,3 +403,17 @@
 - insert:
   - id: arxa-provider-status
     name: arxa-provider-status
+
+# arxa-specific: BrowserAuth launch-token publisher for the desktop shell
+# (2026-09-05). dsh 0.1.2-rc.1 401s the web UI ("dsh web authentication
+# required") until a browser exchanges the per-boot launch token for a signed
+# 30-day cookie — the CLI prints the tokenized URL for a human to click, and
+# the desktop webview has no human. This host-only plugin publishes
+# $DSH_HOME/desktop-session.json (token + authenticated URL) at every boot via
+# the connection service's public authenticatedUrl seam; the shell reads the
+# file and navigates tokenized once, minting the cookie on its own authority.
+# By PATH — host-only plugin, no client half (same shape as the arxa-sandbox
+# and github-link-signin rows).
+- insert:
+  - id: arxa-desktop-session
+    name: /Volumes/business_ssd/arxa_digital_solutions/arxa-studio/plugins/desktop-session/lib/index.js

@@ -14,20 +14,27 @@
  * The token is NEVER written to a file by this module.
  */
 
-import { execFile } from 'node:child_process'
+import { execFile, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import { promisify } from 'node:util'
 
 export const KEYCHAIN_SERVICE = 'arxa-studio'
 export const SECURITY_PATH = '/usr/bin/security'
 
+// Process-wide store for the memory fallback: a real keychain is shared by
+// every keyring instance in the process, and consumers (the link flow, the
+// service, tests) each build their own keyring — per-instance Maps would
+// make a stored token invisible to the next reader. Still process-lifetime
+// only; never a storage story.
+const MEMORY_STORE = new Map()
+
 function makeMemoryBackend() {
   console.warn(
     '[github-link] WARNING: no keyring backend available (no Tauri shell ' +
-    'bridge, no /usr/bin/security). The GitHub token will be held IN MEMORY ' +
-    'ONLY and lost when this process exits.'
+    'bridge, no usable /usr/bin/security keychain). The GitHub token will ' +
+    'be held IN MEMORY ONLY and lost when this process exits.'
   )
-  const mem = new Map()
+  const mem = MEMORY_STORE
   return {
     backend: 'memory',
     async setSecret(account, secret) { mem.set(account, secret) },
@@ -89,8 +96,31 @@ export function createKeyring({ bridge, securityPath = SECURITY_PATH, run } = {}
     return makeBridgeBackend(bridge)
   }
   const runner = run ?? promisify(execFile)
-  if (fs.existsSync(securityPath)) {
+  if (fs.existsSync(securityPath) && keychainUsable(securityPath)) {
     return makeSecurityBackend(securityPath, runner)
   }
   return makeMemoryBackend()
+}
+
+/**
+ * Usability probe, not existence: /usr/bin/security exists on every macOS —
+ * including service contexts (CI runners, launchd agents) where the user
+ * keychain is locked or interaction is refused and every
+ * add-generic-password fails. One throwaway round-trip up front routes those
+ * environments to the memory fallback instead of failing the first real
+ * store at runtime (seen on the self-hosted runner since 2026-09-02).
+ */
+function keychainUsable(securityPath) {
+  const probeAccount = '__keyring_probe__'
+  const setProbe = spawnSync(securityPath,
+    ['add-generic-password', '-s', KEYCHAIN_SERVICE, '-a', probeAccount, '-w', 'probe', '-U'],
+    { stdio: 'ignore' })
+  if (setProbe.error || setProbe.status !== 0) {
+    console.warn('[github-link] WARNING: /usr/bin/security exists but the keychain refused a probe write — using the in-memory fallback for this process.')
+    return false
+  }
+  spawnSync(securityPath,
+    ['delete-generic-password', '-s', KEYCHAIN_SERVICE, '-a', probeAccount],
+    { stdio: 'ignore' })
+  return true
 }

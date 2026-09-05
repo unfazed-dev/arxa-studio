@@ -57,7 +57,8 @@ if (mapAt < 0) throw new Error('QueueDock class map not found')
 const mapEnd = src.indexOf('};', mapAt)
 const mapBody = src.slice(mapAt + mapHead.length, mapEnd)
 const classMap = vm.runInNewContext('({' + mapBody + '})')
-const expectKeys = ['action', 'actions', 'chevron', 'count', 'dock', 'editor', 'header', 'lead', 'list', 'panel', 'preview', 'row']
+// dsh 0.1.2-rc.1: stock QueueDock grew attachment thumbnails → +thumb, +thumbs
+const expectKeys = ['action', 'actions', 'chevron', 'count', 'dock', 'editor', 'header', 'lead', 'list', 'panel', 'preview', 'row', 'thumb', 'thumbs']
 for (const k of expectKeys) if (!(k in classMap)) throw new Error('stock class map lost key ' + k)
 
 // ---- 3. identity rewrite ----------------------------------------------------

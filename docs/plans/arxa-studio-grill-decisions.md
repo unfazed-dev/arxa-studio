@@ -1278,3 +1278,37 @@ architecture; this grill settles the editor extension it never covered.
   buy more). Engine consequence: the install counter that gates OTA
   delivery must be server-side (Supabase, per org), not in the customer
   binary — the same fail-closed rule as the scaffold gate.
+
+- **D117 — The Archives row: every org's archived sessions, trash-tiered
+  deletion, one destructive door.** (2026-09-05 grill.) The sidebar gains
+  an Archives section directly ABOVE the Trash row (lifecycle order
+  top-down: tree → archives → trash), listing every org's archived
+  sessions grouped by org — D39's sanctioned browse face; active views
+  still never include archived rows. Entries carry exactly the trash row's
+  two-button shape: **Restore** (bare `reviveSession` — the worktree is
+  recreated from the parked branch, the row returns under its workspace;
+  no dsh attach, that is the row click's job) and **Move to Trash**
+  (reversible, normal ink). Archives never destroys. A trashed session is
+  a LOGICAL trash entry (`kind: "session"` in `<org>/.arxa/trash` — its
+  body is a registry row plus a parked branch, neither of which can move
+  into a directory); the branch parks, D40's never-auto-deleted holds.
+  The Trash row gains a Sessions group across ALL orgs (D82's own
+  principle: the destructive door is visible the moment it exists) with
+  Restore (row re-written verbatim, branch verified — loud typed refusals
+  for repo-gone and branch-gone) and **Delete forever**: the ONE
+  destructive door for a session, typed-name modal, remote-first branch
+  delete when the owning repo is published (failure keeps the entry,
+  idempotent retry; a live `prListForHead` check names the open PR the
+  deletion would close — the CI/CD integration point), then local branch
+  + squash-base ref + entry. Unpublished repos purge local-only, no link
+  required. Rejected: purging from the Archives row directly (two
+  destructive doors); remote-branch deletion at Move-to-Trash time
+  (unmerged branches may back open PRs — closing them must be a
+  deliberate, warned act). Consequences: folder-restore paths refuse
+  session entries loudly (`trash.restore` routes them, `projecttrash
+  .purge` refuses); the session-id mint feeds the trash's ghost rows so a
+  newborn session never collides with a parked branch (the collision was
+  live-caught in the probe — `worktree add` died on the re-minted name);
+  dsh's `archivedSessionIds` keeps its no-unarchive-API residue (D39
+  upstream note) — the arxa rows world ignores the set, so revived rows
+  render regardless.

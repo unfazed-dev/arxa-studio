@@ -69,6 +69,15 @@ vocabulary only.
   (dsh `archivedSessionIds`). Transcripts persist; the branch parks;
   the worktree is pruned. Revival recreates the worktree from the
   parked branch. (D39/D40)
+- **Archives row** — the sidebar section above Trash listing every
+  org's archived sessions grouped by org (D39's sanctioned browse
+  face). Entries Restore (bare revival) or Move to Trash — never
+  delete. (D117)
+- **Session trash entry** — the logical trash tier for sessions
+  (`kind: "session"` in `<org>/.arxa/trash`): manifest-only, no
+  payload move; the registry row leaves, the branch parks until the
+  trash's own purge (remote-first, open-PR-warned). Hard delete of a
+  session happens only from this tier. (D117)
 - **Template** — versioned data shipped inside the app describing the
   org tree (folders, initial files, repo boundaries). Scaffolding
   executes it and stamps the org with its version. (D44)

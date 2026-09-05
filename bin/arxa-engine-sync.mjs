@@ -47,6 +47,26 @@ export function hashDir (root) {
   return h.digest('hex').slice(0, 12)
 }
 
+/** Platform coherence invariant: synced plugin bytes are only meaningful
+ * against the platform they were built for. The 2026-09-05 incident — a dsh
+ * wave (0.1.1-rc.2 → 0.1.2-rc.1) changed client seed words (locale's external
+ * became "@deepseek-ai/dsh-client-store", seeded only by the new shell) and
+ * moved host services (sessionController, typertGateway). Syncing the
+ * regenerated plugins onto the OLD payload platform made every webview fail
+ * with "missed the module table", and the next engine boot crashed on
+ * services the old platform does not provide. A platform wave must advance
+ * the payload's node_modules WITH the plugins — scripts/pack-sidecar.mjs (or a
+ * full node_modules+plugins mirror) — never this plugin-only sync. Returns
+ * null when coherent, else why syncing must be refused. */
+export function platformSkew (repoRoot, engineStudio) {
+  const read = (p) => { try { return JSON.parse(readFileSync(p, 'utf8')) } catch { return null } }
+  const repoPin = read(join(repoRoot, 'package.json'))?.dependencies?.['@deepseek-ai/dsh'] ?? null
+  const engineVer = read(join(engineStudio, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'))?.version ?? null
+  if (repoPin === null || engineVer === null) return { repoPin, engineVer, reason: 'unverifiable' }
+  if (repoPin !== engineVer) return { repoPin, engineVer, reason: 'mismatch' }
+  return null
+}
+
 const main = () => {
   const repo = join(dirname(fileURLToPath(import.meta.url)), '..')
   const engineRoot = join(homedir(), '.arxa', 'engine')
@@ -54,6 +74,12 @@ const main = () => {
   if (!engines.length) { console.log('no engine payload found — nothing to sync'); return }
   const engine = engines.sort((a, b) => statSync(join(b, 'plugins')).mtimeMs - statSync(join(a, 'plugins')).mtimeMs)[0]
   console.log('engine payload: ' + engine)
+
+  const skew = platformSkew(repo, engine)
+  if (skew) {
+    console.error(`arxa-engine-sync: REFUSING to sync — repo pins @deepseek-ai/dsh ${skew.repoPin ?? 'unreadable'} but the payload carries ${skew.engineVer ?? 'unreadable'}. Plugin bytes are platform-keyed; syncing across a platform wave breaks the client module table and host service wiring (2026-09-05). Advance the whole payload instead: scripts/pack-sidecar.mjs (or mirror node_modules + plugins together).`)
+    process.exit(1)
+  }
 
   let changed = 0
   const sync = (label, src, dst) => {

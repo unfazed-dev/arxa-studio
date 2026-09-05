@@ -1,9 +1,14 @@
-// arxa-approvals exit checks (grill D60–D68):
-// a question/requested frame becomes a cairn-row-shaped approval record;
-// the mux replay of a known id never re-doors; question/resolved deletes;
-// decide shape-checks mirror the engine fence; the routes serve the list and
-// answer through apiProxy.respond with first-claimant-wins (second decide →
-// not-pending 409); the doorbell fires on first sight only and never throws.
+// arxa-approvals exit checks (grill D60–D68; 2026-09-05 amendment: dsh
+// 0.1.2-rc.1 removed apiProxy, so the fakes model the typert gateway's
+// $events world — waterfall frames, cancel frames, $events/result):
+// a `user-questions/request` waterfall frame becomes a cairn-row-shaped
+// approval record; the $events replay of a known id never re-doors; a
+// cancel frame (someone answered / ask aborted) deletes; decide
+// shape-checks are the whole fence now; the routes serve the list and
+// answer through '$events/result' with first-claimant-wins (a decide whose
+// delivery was cancelled → not-pending 409); the doorbell fires on first
+// sight only and never throws; jobs ride the jobs registry's
+// onJobsChanged snapshots.
 // Run: node plugins/approvals/selftest.mjs  (also rides scripts/ci.mjs)
 
 import assert from 'node:assert/strict'
@@ -19,29 +24,62 @@ import {
   mirrorOutConfig,
 } from './lib/index.js'
 
-const QUESTION_FRAME = (rpcId, sessionId = 'sess-1') => ({
-  rpcId,
-  payload: {
-    type: 'question/requested',
-    sessionId,
-    questions: [
-      {
-        id: 'q1',
-        question: 'Approve the deploy?',
-        header: 'Deploy',
-        options: [
-          { label: 'Approve', description: 'ship it' },
-          { label: 'Deny', description: 'hold' },
-        ],
-      },
+const QUESTIONS = [
+  {
+    id: 'q1',
+    question: 'Approve the deploy?',
+    header: 'Deploy',
+    options: [
+      { label: 'Approve', description: 'ship it' },
+      { label: 'Deny', description: 'hold' },
     ],
   },
+]
+
+// The $events wire shape (dsh-api-gateway openRemoteEvents → deliverRemoteEvent):
+// {type:'waterfall', event, eventId, agentId, request} — the projected
+// user-questions request carries `questions` (agent/signal stripped); the
+// agentId IS the asking session.
+const QUESTION_FRAME = (eventId, sessionId = 'sess-1') => ({
+  type: 'waterfall',
+  event: 'user-questions/request',
+  eventId,
+  agentId: sessionId,
+  request: { questions: QUESTIONS.map((q) => ({ ...q })) },
 })
 
-const JOBS_FRAME = (jobs, sessionId = 'sess-1') => ({
-  payload: { type: 'session/jobs', sessionId, jobs },
-})
+const CANCEL_FRAME = (eventId) => ({ type: 'cancel', eventId })
+
 const JOB = (id, status) => ({ id, kind: 'bash', label: 'job', status, startedAt: 1 })
+
+/** The fake typert gateway shared by every apply() harness. Models the REAL
+ * TypertGatewayService surface this plugin touches — including that
+ * openWireStream is an async METHOD returning a PROMISE of the generation's
+ * async iterator (dsh-api-gateway :581; the boot smoke caught the plugin
+ * feeding that promise straight into for-await, so the fake keeps the exact
+ * shape): ready frame first, then frames, the generation held open until
+ * abort. dispatchRpc('$events/result', …) → {ok:true}; the gateway's
+ * first-wins settle is modelled by feeding CANCEL_FRAMEs for anything the
+ * "browser" already answered. */
+const fakeGateway = (frames = [], dispatchLog = []) => ({
+  openWireStream: async (endpoint, payload, signal) => {
+    assert.equal(endpoint, '$events')
+    assert.deepEqual(payload, { args: {} })
+    return (async function* () {
+      yield { type: 'ready', clientId: 'client-1', host: { home: '/tmp/arxa-test' } }
+      for (const frame of frames) yield frame
+      await new Promise((resolve) => {
+        if (signal?.aborted) return resolve()
+        signal?.addEventListener?.('abort', () => resolve(), { once: true })
+      })
+    })()
+  },
+  dispatchRpc: async (endpoint, message) => {
+    assert.equal(endpoint, '$events/result')
+    dispatchLog.push(message)
+    return { ok: true, value: undefined }
+  },
+})
 
 // 1. Projection: a requested frame → a cairn-row-shaped record (D61/D64).
 {
@@ -58,8 +96,9 @@ const JOB = (id, status) => ({ id, kind: 'bash', label: 'job', status, startedAt
   assert.equal(record.questions.length, 1)
 }
 
-// 2. Folding: first sight doors; the mux replay of the same rpcId does NOT;
-//    resolved deletes; foreign frames are ignored.
+// 2. Folding: first sight doors; the $events replay of the same eventId does
+//    NOT; cancel deletes; foreign frames (other waterfall events, emits)
+//    are ignored.
 {
   const pending = new Map()
   const first = foldFrame(pending, QUESTION_FRAME('rpc-2'), 2000)
@@ -67,21 +106,23 @@ const JOB = (id, status) => ({ id, kind: 'bash', label: 'job', status, startedAt
   const replay = foldFrame(pending, QUESTION_FRAME('rpc-2'), 3000)
   assert.equal(replay, undefined, 'replay must not re-door')
   assert.equal(pending.get('rpc-2').raised_at, 2000, 'replay keeps the original raised_at')
-  foldFrame(pending, { rpcId: 'x', payload: { type: 'session/event', sessionId: 'sess-1' } })
-  assert.equal(pending.size, 1, 'session frames are not approvals')
-  foldFrame(pending, { rpcId: 'rpc-2', payload: { type: 'question/resolved', sessionId: 'sess-1', outcome: 'answered' } })
-  assert.equal(pending.size, 0, 'resolved deletes the record')
+  foldFrame(pending, { type: 'emit', event: 'api-session/added', args: [] })
+  assert.equal(pending.size, 1, 'emit frames are not approvals')
+  foldFrame(pending, { type: 'waterfall', event: 'approval/request', eventId: 'ap-1', agentId: 'sess-1', request: {} })
+  assert.equal(pending.size, 1, 'the sandbox-approval seam is not an arxa approval (D63)')
+  foldFrame(pending, CANCEL_FRAME('rpc-2'))
+  assert.equal(pending.size, 0, 'cancel deletes the record')
 }
 
-// 2b. Task folding: session/jobs snapshots ring ONLY first-sight terminal
-//     ids; running/stopping never ring; killed maps to failed; non-jobs
-//     frames are ignored.
+// 2b. Task folding: jobs.onJobsChanged snapshots ring ONLY first-sight
+//     terminal ids; running/stopping never ring; killed maps to failed;
+//     non-arrays are ignored.
 {
   const announced = new Set()
-  assert.deepEqual(foldJobsFrame(announced, JOBS_FRAME([JOB('j1', 'running'), JOB('j2', 'stopping')])), [])
-  assert.deepEqual(foldJobsFrame(announced, QUESTION_FRAME('rpc-9')), [], 'question frames are not jobs')
+  assert.deepEqual(foldJobsFrame(announced, [JOB('j1', 'running'), JOB('j2', 'stopping')]), [])
+  assert.deepEqual(foldJobsFrame(announced, undefined), [], 'no snapshot, no fold')
   assert.deepEqual(
-    foldJobsFrame(announced, JOBS_FRAME([JOB('j1', 'running'), JOB('j1b', 'completed'), JOB('j1c', 'failed'), JOB('j1d', 'killed')])),
+    foldJobsFrame(announced, [JOB('j1', 'running'), JOB('j1b', 'completed'), JOB('j1c', 'failed'), JOB('j1d', 'killed')]),
     [
       { id: 'j1b', outcome: 'completed' },
       { id: 'j1c', outcome: 'failed' },
@@ -89,30 +130,22 @@ const JOB = (id, status) => ({ id, kind: 'bash', label: 'job', status, startedAt
     ],
   )
   // Last-wins replay of the same snapshot must not re-buzz.
-  assert.deepEqual(foldJobsFrame(announced, JOBS_FRAME([JOB('j1b', 'completed')])), [])
+  assert.deepEqual(foldJobsFrame(announced, [JOB('j1b', 'completed')]), [])
   // A job that completes while unobserved rings on first terminal sight.
-  assert.deepEqual(foldJobsFrame(new Set(), JOBS_FRAME([JOB('late', 'completed')])), [{ id: 'late', outcome: 'completed' }])
+  assert.deepEqual(foldJobsFrame(new Set(), [JOB('late', 'completed')]), [{ id: 'late', outcome: 'completed' }])
 }
 
-// 3. decideEnvelope: a legal approval becomes the exact respond message the
-//    browser composer sends; shape violations fail with honest errors.
+// 3. decideEnvelope: a legal approval becomes the exact $events/result value
+//    the browser question composer resolves the waterfall with; shape
+//    violations fail with honest errors.
 {
   const record = approvalRecord(QUESTION_FRAME('rpc-3'), 4000)
   const good = decideEnvelope(record, { id: 'rpc-3', answers: [{ id: 'q1', selected: ['Approve'] }] })
   assert.equal(good.ok, true)
-  assert.deepEqual(good.message, {
-    rpcId: 'rpc-3',
-    result: {
-      ok: true,
-      value: {
-        sessionId: 'sess-1',
-        answer: { answers: [{ id: 'q1', selected: ['Approve'] }] },
-      },
-    },
-  })
+  assert.deepEqual(good.value, { answers: [{ id: 'q1', selected: ['Approve'] }] })
   const custom = decideEnvelope(record, { id: 'rpc-3', answers: [{ id: 'q1', selected: [], custom: 'later' }] })
   assert.equal(custom.ok, true)
-  assert.equal(custom.message.result.value.answer.answers[0].custom, 'later')
+  assert.equal(custom.value.answers[0].custom, 'later')
   assert.equal(decideEnvelope(record, { id: 'rpc-3', answers: [] }).error, 'every-question-must-be-answered')
   assert.equal(
     decideEnvelope(record, { id: 'rpc-3', answers: [{ id: 'q1', selected: ['Maybe'] }] }).error,
@@ -128,10 +161,28 @@ const JOB = (id, status) => ({ id, kind: 'bash', label: 'job', status, startedAt
   )
 }
 
-// 4. apply(): fake engine — mux frames flow in, routes serve the projection,
-//    decide → apiProxy.respond, first-claimant-wins, doorbell first-sight.
+// 4. apply(): fake engine — $events frames flow in (with the ready frame
+//    that names this generation's client), routes serve the projection,
+//    decide → '$events/result' with first-claimant-wins, doorbell
+//    first-sight, jobs ring through onJobsChanged snapshots.
 {
-  const frames = []
+  // The fake jobs registry (dsh-jobs-local's host face): onJobsChanged
+  // captures the listener and returns a disposer; list answers snapshots.
+  const jobsSnapshots = new Map()
+  let jobsListener = null
+  const jobs = {
+    onJobsChanged: (listener) => { jobsListener = listener; return () => { jobsListener = null } },
+    list: (owner) => jobsSnapshots.get(owner.id) ?? [],
+  }
+
+  const frames = [
+    QUESTION_FRAME('rpc-4'),
+    QUESTION_FRAME('rpc-4'), // replay must not re-door
+    QUESTION_FRAME('rpc-5', 'sess-2'),
+    // The "browser" answers rpc-5 first: the gateway settles it once and
+    // cancels OUR delivery — the phone's later decide must find nothing.
+    CANCEL_FRAME('rpc-5'),
+  ]
   const responded = []
   const doorbelled = []
   const taskDoorbelled = []
@@ -158,40 +209,40 @@ const JOB = (id, status) => ({ id, kind: 'bash', label: 'job', status, startedAt
     return req
   }
   const ctx = {
-    apiProxy: {
-      events: {
-        mux: async function* () {
-          yield QUESTION_FRAME('rpc-4')
-          yield QUESTION_FRAME('rpc-4') // replay must not re-door
-          yield QUESTION_FRAME('rpc-5', 'sess-2')
-          yield { payload: { type: 'session/jobs', sessionId: 'sess-1', jobs: [{ id: 'job-a', kind: 'bash', label: 'a', status: 'running', startedAt: 1 }] } }
-          yield { payload: { type: 'session/jobs', sessionId: 'sess-1', jobs: [
-            { id: 'job-a', kind: 'bash', label: 'a', status: 'completed', startedAt: 1, finishedAt: 2 },
-            { id: 'job-b', kind: 'bash', label: 'b', status: 'failed', startedAt: 1, finishedAt: 3 },
-          ] } }
-          yield { payload: { type: 'session/jobs', sessionId: 'sess-1', jobs: [{ id: 'job-a', kind: 'bash', label: 'a', status: 'completed', startedAt: 1, finishedAt: 2 }] } }
-        },
-      },
-      respond: async (message) => {
-        responded.push(message)
-        return message.rpcId === 'rpc-4' ? { accepted: true } : { accepted: false, reason: 'not-pending' }
-      },
-    },
+    typertGateway: fakeGateway(frames, responded),
+    get: (name) => (name === 'jobs' ? jobs : undefined),
     webServer: {
       register: (route) => routes.set(route.path, route.handler),
     },
-    effect: () => () => {},
+    // The real ctx.effect runs its callback at registration (the cordis
+    // Fiber effect contract) — the jobs rail registers through it, so the
+    // fake must invoke the callback, not just accept it.
+    effect: (fn) => {
+      const dispose = typeof fn === 'function' ? fn() : undefined
+      return () => { if (typeof dispose === 'function') dispose() }
+    },
   }
   apply(ctx, {
     doorbell: (record) => doorbelled.push(record.id),
     taskDoorbell: (finished) => taskDoorbelled.push(finished),
   })
   await new Promise((resolve) => setTimeout(resolve, 20))
+  // The jobs rail: same last-wins snapshot sequence the old session/jobs
+  // frames carried, now delivered by onJobsChanged(owner).
+  jobsSnapshots.set('sess-1', [{ id: 'job-a', kind: 'bash', label: 'a', status: 'running', startedAt: 1 }])
+  jobsListener({ id: 'sess-1' })
+  jobsSnapshots.set('sess-1', [
+    { id: 'job-a', kind: 'bash', label: 'a', status: 'completed', startedAt: 1, finishedAt: 2 },
+    { id: 'job-b', kind: 'bash', label: 'b', status: 'failed', startedAt: 1, finishedAt: 3 },
+  ])
+  jobsListener({ id: 'sess-1' })
+  jobsSnapshots.set('sess-1', [{ id: 'job-a', kind: 'bash', label: 'a', status: 'completed', startedAt: 1, finishedAt: 2 }])
+  jobsListener({ id: 'sess-1' })
 
   const listRes = resFor()
   await routes.get('/__arxa/approvals')({}, listRes)
   assert.equal(listRes.status, 200)
-  assert.deepEqual(listRes.body.approvals.map((a) => a.id), ['rpc-4', 'rpc-5'], 'oldest first')
+  assert.deepEqual(listRes.body.approvals.map((a) => a.id), ['rpc-4'], 'oldest first; the cancelled rpc-5 is gone')
   assert.deepEqual(doorbelled, ['rpc-4', 'rpc-5'], 'doorbell fires once per pending, replay excluded')
   assert.deepEqual(taskDoorbelled, [
     { id: 'job-a', outcome: 'completed' },
@@ -207,11 +258,15 @@ const JOB = (id, status) => ({ id, kind: 'bash', label: 'job', status, startedAt
   assert.equal(decided.status, 200)
   assert.equal(decided.body.ok, true)
   assert.equal(responded.length, 1)
-  assert.equal(responded[0].rpcId, 'rpc-4')
+  assert.deepEqual(responded[0], {
+    clientId: 'client-1',
+    eventId: 'rpc-4',
+    outcome: { kind: 'result', value: { answers: [{ id: 'q1', selected: ['Approve'] }] } },
+  }, 'decide settles through the exact $events/result wire shape')
 
   const listAfter = resFor()
   await routes.get('/__arxa/approvals')({}, listAfter)
-  assert.deepEqual(listAfter.body.approvals.map((a) => a.id), ['rpc-5'], 'decided approval leaves the list immediately')
+  assert.deepEqual(listAfter.body.approvals.map((a) => a.id), [], 'decided approval leaves the list immediately')
 
   const lost = resFor()
   await routes.get('/__arxa/approvals/action')(reqWith(JSON.stringify({
@@ -219,7 +274,7 @@ const JOB = (id, status) => ({ id, kind: 'bash', label: 'job', status, startedAt
     arg: { id: 'rpc-5', answers: [{ id: 'q1', selected: ['Deny'] }] },
   })), lost)
   await lost.done
-  assert.equal(lost.status, 409, 'a refused receipt (someone answered first) is a conflict')
+  assert.equal(lost.status, 409, 'a cancelled delivery (the browser answered first) is a conflict')
   assert.equal(lost.body.error, 'not-pending')
 
   const unknown = resFor()
@@ -279,9 +334,8 @@ const JOB = (id, status) => ({ id, kind: 'bash', label: 'job', status, startedAt
   // -- apply() against a fake ctx carrying both registration tables --
   const routes2 = new Map()
   const upgrades = new Map()
-  const emptyMux = async function* () {}
   const ctx2 = {
-    apiProxy: { events: { mux: emptyMux }, respond: async () => ({ accepted: true }) },
+    typertGateway: fakeGateway(),
     webServer: {
       register: (route) => routes2.set(route.path, route.handler),
       registerUpgrade: (route) => upgrades.set(route.path, route.handler),
@@ -362,7 +416,7 @@ const JOB = (id, status) => ({ id, kind: 'bash', label: 'job', status, startedAt
     dead.close()
     const routes3 = new Map()
     const deadCtx = {
-      apiProxy: { events: { mux: emptyMux }, respond: async () => ({ accepted: true }) },
+      typertGateway: fakeGateway(),
       webServer: {
         register: (route) => routes3.set(route.path, route.handler),
         registerUpgrade: () => () => {},
@@ -396,7 +450,7 @@ const JOB = (id, status) => ({ id, kind: 'bash', label: 'job', status, startedAt
     assert.deepEqual(okRes.body, { token: 'bootstrap-tok' })
 
     const noneCtx = {
-      apiProxy: { events: { mux: emptyMux }, respond: async () => ({ accepted: true }) },
+      typertGateway: fakeGateway(),
       webServer: {
         register: (route) => routes4.set(route.path, route.handler),
         registerUpgrade: () => () => {},
@@ -455,14 +509,7 @@ const JOB = (id, status) => ({ id, kind: 'bash', label: 'job', status, startedAt
   const routes5 = new Map()
   const mirrorOutSeen = []
   const mirrorOutCtx = {
-    apiProxy: {
-      events: {
-        mux: async function* () {
-          yield QUESTION_FRAME('rpc-8')
-        },
-      },
-      respond: async () => ({ accepted: true }),
-    },
+    typertGateway: fakeGateway([QUESTION_FRAME('rpc-8')]),
     webServer: { register: (route) => routes5.set(route.path, route.handler) },
     effect: () => () => {},
   }
@@ -482,7 +529,7 @@ const JOB = (id, status) => ({ id, kind: 'bash', label: 'job', status, startedAt
   const origFetch = globalThis.fetch
   globalThis.fetch = (...args) => { fetchCalls += 1; return origFetch(...args) }
   const quietCtx = {
-    apiProxy: { events: { mux: async function* () { yield QUESTION_FRAME('rpc-9') } }, respond: async () => ({ accepted: true }) },
+    typertGateway: fakeGateway([QUESTION_FRAME('rpc-9')]),
     webServer: { register: (route) => routes5.set(route.path, route.handler) },
     effect: () => () => {},
   }

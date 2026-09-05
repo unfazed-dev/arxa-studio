@@ -46,7 +46,7 @@ let clientParseErr = ''
 try { new vm.Script(client, { filename: 'lib/client.js' }) } catch (e) { clientParseErr = String(e) }
 check('client.js parses (syntax error = unloadable locale)', !clientParseErr, clientParseErr)
 check('headers: names its generator', client.includes('scripts/gen-locale.mjs'))
-check('headers: names dsh version', client.includes('0.1.1-rc.2'))
+check('headers: names dsh version', client.includes('0.1.2-rc.1'))
 check('headers: module id repainted', client.includes('id: "arxa-locale",') && !client.includes('id: "@deepseek-ai/dsh-client-locale",'))
 check('headers: class prefix repainted', client.includes('aXa_loc_row') && !client.includes('hVGvvW_'))
 
@@ -62,21 +62,34 @@ check('locales: common namespace registers en/pl/fr dicts',
   && /locale\.register\(COMMON_NS, \{\s*en: en\$1,\s*pl: pl\$1,\s*fr: fr\$1\s*\}\);/.test(client))
 check('locales: settings namespace registers en/pl/fr',
   client.includes('"language.title": "Język"') && client.includes('"language.title": "Langue"') && client.includes('"language.title": "Language"'))
-check('locales: common dicts complete (24 stock keys in each new language)',
-  ['"ok"', '"cancel"', '"close"', '"copy"', '"copied"', '"retry"', '"loading"', '"load.failed"', '"submit"', '"submitting"', '"next"', '"previous"', '"skip"', '"delete"', '"edit"', '"save"', '"search"', '"more"', '"collapse"', '"expand"', '"back"', '"unknown"', '"none"', '"truncated"']
+// [re-pinned 2026-09-05, dsh 0.1.2-rc.1] stock en key set grew 24 → 39 — the
+// completeness list tracks it so pl/fr must carry every stock key.
+check('locales: common dicts complete (39 stock keys in each new language)',
+  ['"ok"', '"cancel"', '"close"', '"copy"', '"copied"', '"copy.failed"', '"copy.value"', '"copy.json"', '"copy.path"', '"copy.prettyJson"', '"copy.compactJson"', '"copy.optionsHint"', '"retry"', '"loading"', '"load.failed"', '"submit"', '"submitting"', '"next"', '"previous"', '"skip"', '"delete"', '"edit"', '"save"', '"search"', '"more"', '"collapse"', '"expand"', '"back"', '"brand.localBuild"', '"unknown"', '"none"', '"truncated"', '"json.collapseNode"', '"json.expandNode"', '"json.label"', '"markdown.footnotes"', '"markdown.truncatedCharacters"', '"number.thousand"', '"number.million"']
     .every((k) => client.includes(k + ': "')))
 // No zh in CODE (comments may narrate the drop).
 const zhCode = client.split('\n').filter((l) => /\bzh\b/.test(l) && !/^\s*(\/\/|\*)/.test(l) && !l.trimStart().startsWith('/*'))
 check('locales: zh gone from code (comments may mention it)', zhCode.length === 0, zhCode.slice(0, 2).join(' | '))
 check('face: service name unchanged (stock consumers keep working)', client.includes('ctx.provide("locale", locale);'))
 check('face: FALLBACK_LOCALE stays en', client.includes('const FALLBACK_LOCALE = "en";'))
-check('face: lookup chain intact (active → en fallback)',
-  client.includes('locales?.get(this.snapshot.active)?.[key] ?? locales?.get("en")?.[key];'))
-check('face: browser-locale detection iterates LOCALES (pl/fr resolve automatically)',
-  client.includes('const match = LOCALES.find((locale) => locale.id === primary);'))
+// [re-anchored 2026-09-05, dsh 0.1.2-rc.1] stock generalized the lookup to a
+// declared fallback chain that always terminates at en (translate repeats the
+// walk in common before showing the key).
+check('face: lookup chain intact (active chain walks declared fallbacks to en; common repeats it)',
+  client.includes('const template = this.lookup(ns, key, chain) ?? (ns !== "common" ? this.lookup("common", key, chain) : void 0) ?? key;')
+  && client.includes('if (!seen.has(localeKey("en"))) chain.push("en");'))
+// [re-anchored 2026-09-05, dsh 0.1.2-rc.1] detection now takes the registered
+// list as a parameter and matches exact id, then primary subtag — pl/fr still
+// resolve automatically because they sit in that list.
+check('face: browser-locale detection iterates the registered list (pl/fr resolve automatically)',
+  client.includes('const match = locales.find((locale) => localeKey(locale.id).split("-")[0] === primary);'))
 check('face: Language row still registered into settings.general.item',
   client.includes('ctx.slots.inject("settings.general.item"') && client.includes('id: "language",'))
-check('face: inject set unchanged', client.includes('"settingsScope"') && client.includes('"connection"') && client.includes('"remote"'))
+// [re-anchored 2026-09-05, dsh 0.1.2-rc.1] stock dropped "connection" from
+// the inject set; "unchanged" means byte-equal to the stock array, now pinned
+// exactly (stronger than the old loose substring set).
+check('face: inject set unchanged (stock set: slots/remote/settingsScope)',
+  client.includes('const inject = [\n\t\t\t"slots",\n\t\t\t"remote",\n\t\t\t"settingsScope"\n\t\t];'))
 
 // ---- 4. drift gate -------------------------------------------------------------
 {
@@ -112,8 +125,9 @@ const hashPkg = (specifier, expected) => {
   return { ok: got === expected }
 }
 {
-  const s = hashPkg('@deepseek-ai/dsh-client-locale', 'e2541abb614319292d6d3f21cb72d12658a2509b811bffc2d1a99ca1880d07f0')
-  check('reference: dsh locale package byte-identical', s.ok, 'expected e2541abb…')
+  // [re-pinned 2026-09-05, dsh 0.1.2-rc.1 deliberate bump] package-tree sha256
+  const s = hashPkg('@deepseek-ai/dsh-client-locale', '97b19b1c42f2ad4eb42263ded5b08acb1900a1274b1c8594b252e1ea4ca17196')
+  check('reference: dsh locale package byte-identical', s.ok, 'expected 97b19b1c…')
 }
 
 // ---- 6. registration wired -------------------------------------------------------

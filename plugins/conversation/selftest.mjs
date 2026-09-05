@@ -1,7 +1,12 @@
 // arxa-conversation selftest — pure node, network-free (same discipline as
-// plugins/approvals/selftest.mjs). Run: node plugins/conversation/selftest.mjs
+// plugins/approvals/selftest.mjs). 2026-09-05 amendment: dsh 0.1.2-rc.1
+// removed apiProxy — the fakes model the successor surface (the
+// sessionController service called in-process, throwing RemoteError-code
+// errors; host session/event + api-session/* listeners; the typert
+// gateway's $events feed for question pings).
+// Run: node plugins/conversation/selftest.mjs
 import { strict as assert } from 'node:assert'
-import { foldHistory, foldMode, flattenSidebar, foldMuxEvent, renderTranscriptMarkdown, withRunning, apply } from './lib/index.js'
+import { foldHistory, foldMode, flattenSidebar, foldSessionEvent, SESSIONS_PING_EVENTS, renderTranscriptMarkdown, withRunning, apply } from './lib/index.js'
 
 let checks = 0
 const ok = (name) => { checks += 1; console.log('  ok', name) }
@@ -63,17 +68,45 @@ const PLUGIN = { kind: 'plugin', plugin: 'x', form: 'notice', summary: 'ctx' }
 }
 
 // ---- 3. route harness
-const makeCtx = ({ api, fetchImpl, sidebarUrl, agents, commands }) => {
+// The fake sessionController: plain methods, RemoteError-shaped rejections
+// ({code: 'session/…'} — the real service throws dsh-typert-protocol
+// RemoteErrors; only .code and .message matter to the routes).
+const remoteError = (code, message = code) => { const e = new Error(message); e.code = code; return e }
+const makeCtx = ({ sessionController, gateway, fetchImpl, sidebarUrl, agents, commands }) => {
   // Two tables, mirroring the real webserver: exact and prefixes are
   // separate Maps — a path may exist in both (list + per-session here).
+  // `fire` drives the host-event listeners the live rail registers on ctx.
   const routes = new Map()
+  const listeners = new Map()
   const ctx = {
     webServer: { register: (r) => routes.set(r.kind + ':' + r.path, r.handler) },
-    apiProxy: api,
+    on: (name, cb) => {
+      if (!listeners.has(name)) listeners.set(name, new Set())
+      listeners.get(name).add(cb)
+      return () => listeners.get(name)?.delete(cb)
+    },
   }
-  apply(ctx, { apiProxy: api, httpImpl: fetchImpl, sidebarUrl, agents, commands })
+  routes.fire = (name, ...args) => { for (const cb of [...(listeners.get(name) ?? [])]) cb(...args) }
+  apply(ctx, { sessionController, typertGateway: gateway, httpImpl: fetchImpl, sidebarUrl, agents, commands })
   return routes
 }
+// The fake typert gateway's $events carrier (the question-ping rail) —
+// faithful to the REAL surface: openWireStream is an async METHOD returning
+// a PROMISE of the generation's async iterator (dsh-api-gateway :581).
+const gatewayOf = (frames = []) => ({
+  openWireStream: async (endpoint, payload, signal) => {
+    assert.equal(endpoint, '$events')
+    assert.deepEqual(payload, { args: {} })
+    return (async function* () {
+      yield { type: 'ready', clientId: 'client-1', host: {} }
+      for (const frame of frames) yield frame
+      await new Promise((resolve) => {
+        if (signal?.aborted) return resolve()
+        signal?.addEventListener?.('abort', () => resolve(), { once: true })
+      })
+    })()
+  },
+})
 const fakeRes = () => {
   const res = { status: null, body: null, raw: null, headers: null, writes: [] }
   res.writeHead = (s, h) => { res.status = s; res.headers = h }
@@ -94,37 +127,40 @@ const fakeReq = (method, url, body) => ({
   },
 })
 const fakeReqCloseCbs = []
-const RPC_OK = (value) => ({ rpcId: 'r1', result: { ok: true, value } })
-const RPC_ERR = (code, message) => ({ rpcId: 'r1', result: { ok: false, error: { code, message, details: {} } } })
 
 // ---- 4. GET transcript happy path
 {
   const history = [
-    { event: ev('user/message', 2, 110, 'q', USER) },
-    { event: { type: 'assistant/message', seq: 5, time: 140, data: { message: { role: 'assistant', content: [{ type: 'text', text: 'a' }] } } } },
+    { type: 'event', event: ev('user/message', 2, 110, 'q', USER) },
+    { type: 'event', event: { type: 'assistant/message', seq: 5, time: 140, data: { message: { role: 'assistant', content: [{ type: 'text', text: 'a' }] } } } },
   ]
   const routes = makeCtx({
-    api: { sessions: { history: async (req) => { assert.deepEqual(req.payload, { sessionId: 's-1', maxMessages: 50 }); return RPC_OK({ events: history }) } } },
+    sessionController: {
+      page: async (request) => {
+        assert.deepEqual(request, { address: { kind: 'session', sessionId: 's-1' }, throughSeq: -1, maxMessages: 50 })
+        return { records: history, hasMore: false }
+      },
+    },
   })
   const res = fakeRes()
   await routes.get('prefix:/__arxa/conversations')(fakeReq('GET', '/__arxa/conversations/s-1/messages?limit=50'), res)
   assert.equal(res.status, 200)
   assert.equal(res.body.sessionId, 's-1')
   assert.deepEqual(res.body.messages.map((m) => m.text), ['q', 'a'])
-  ok('GET transcript: folds history through apiProxy, honors limit')
+  ok('GET transcript: folds a sessionController page, honors limit')
 }
 
 // ---- 5. GET transcript error mapping
 {
   const routes = makeCtx({
-    api: { sessions: { history: async () => RPC_ERR('session-not-found', 'gone') } },
+    sessionController: { page: async () => { throw remoteError('session/not-found', 'gone') } },
   })
   const res = fakeRes()
   await routes.get('prefix:/__arxa/conversations')(fakeReq('GET', '/__arxa/conversations/s-x/messages'), res)
   assert.equal(res.status, 404)
   assert.equal(res.body.error, 'no-such-session')
   const routes2 = makeCtx({
-    api: { sessions: { history: async () => { throw new Error('transport down') } } },
+    sessionController: { page: async () => { throw new Error('transport down') } },
   })
   const res2 = fakeRes()
   await routes2.get('prefix:/__arxa/conversations')(fakeReq('GET', '/__arxa/conversations/s-x/messages'), res2)
@@ -140,11 +176,9 @@ const RPC_ERR = (code, message) => ({ rpcId: 'r1', result: { ok: false, error: {
 {
   let seen
   const routes = makeCtx({
-    api: {
-      sessions: {
-        prompt: async (req) => { seen = req; return RPC_OK({ accepted: true }) },
-        history: async () => RPC_OK({ events: [] }),
-      },
+    sessionController: {
+      prompt: async (request) => { seen = request; return { accepted: true } },
+      page: async () => ({ records: [], hasMore: false }),
     },
   })
   const handler = routes.get('prefix:/__arxa/conversations')
@@ -152,9 +186,11 @@ const RPC_ERR = (code, message) => ({ rpcId: 'r1', result: { ok: false, error: {
   await handler(fakeReq('POST', '/__arxa/conversations/s-1/messages', JSON.stringify({ text: '  do the thing  ' })), res)
   assert.equal(res.status, 200)
   assert.deepEqual({ ok: res.body.ok, accepted: res.body.accepted }, { ok: true, accepted: true })
-  assert.equal(seen.payload.mode, 'queue')
-  assert.deepEqual(seen.payload.content, [{ type: 'text', text: 'do the thing' }])
-  assert.equal(typeof seen.rpcId, 'string')
+  assert.equal(typeof seen.requestId, 'string')
+  assert.equal(seen.sessionId, 's-1')
+  assert.equal(seen.mode, 'queue')
+  assert.deepEqual(seen.content, [{ type: 'text', text: 'do the thing' }])
+  assert.equal(res.body.rpcId, seen.requestId, 'the phone gets back the requestId the Host echoes as rpcId')
 
   const resTrim = fakeRes()
   await handler(fakeReq('POST', '/__arxa/conversations/s-1/messages', JSON.stringify({ text: 'x', mode: 'steer' })), resTrim)
@@ -172,14 +208,14 @@ const RPC_ERR = (code, message) => ({ rpcId: 'r1', result: { ok: false, error: {
 
 // ---- 7. POST send error mapping
 {
-  const mk = (promptImpl) => makeCtx({ api: { sessions: { prompt: promptImpl, history: async () => RPC_OK({ events: [] }) } } })
-  const notFound = mk(async () => RPC_ERR('session-not-found', 'gone'))
+  const mk = (promptImpl) => makeCtx({ sessionController: { prompt: promptImpl, page: async () => ({ records: [], hasMore: false }) } })
+  const notFound = mk(async () => { throw remoteError('session/not-found', 'gone') })
   const r1 = fakeRes()
   await notFound.get('prefix:/__arxa/conversations')(
     fakeReq('POST', '/__arxa/conversations/s-x/messages', JSON.stringify({ text: 'hi' })), r1)
   assert.equal(r1.status, 404); assert.equal(r1.body.error, 'no-such-session')
 
-  const busy = mk(async () => RPC_ERR('agent-busy', 'busy'))
+  const busy = mk(async () => { throw remoteError('session/agent-busy', 'busy') })
   const r2 = fakeRes()
   await busy.get('prefix:/__arxa/conversations')(
     fakeReq('POST', '/__arxa/conversations/s-x/messages', JSON.stringify({ text: 'hi' })), r2)
@@ -197,7 +233,7 @@ const RPC_ERR = (code, message) => ({ rpcId: 'r1', result: { ok: false, error: {
 {
   const snap = { orgs: [{ name: 'T', sessions: [{ id: 's-9', name: 'n', state: 'open' }] }] }
   const routes = makeCtx({
-    api: { sessions: {} },
+    sessionController: {},
     fetchImpl: async () => ({ ok: true, json: async () => snap }),
     sidebarUrl: 'http://127.0.0.1:1/__arxa/sidebar/state',
   })
@@ -208,7 +244,7 @@ const RPC_ERR = (code, message) => ({ rpcId: 'r1', result: { ok: false, error: {
   assert.equal(res.body.sessions[0].org, 'T')
 
   const down = makeCtx({
-    api: { sessions: {} },
+    sessionController: {},
     fetchImpl: async () => { throw new Error('refused') },
     sidebarUrl: 'http://127.0.0.1:1/__arxa/sidebar/state',
   })
@@ -229,22 +265,23 @@ const RPC_ERR = (code, message) => ({ rpcId: 'r1', result: { ok: false, error: {
   assert.equal(foldMode(entries), 'danger-full-access', 'LAST sandbox/mode wins')
   ok('foldMode: last event wins, null when never switched')
 
-  let modelsSeen
+  let catalogCalls = 0
   const routes = makeCtx({
-    api: {
-      sessions: {
-        models: async (req) => { modelsSeen = req.payload; return RPC_OK({ current: { provider: 'z', model: 'glm-5.2' }, groups: [], failures: [] }) },
-        prompt: async () => RPC_OK({ accepted: true }),
-        history: async () => RPC_OK({ events: [] }),
+    sessionController: {
+      modelCatalog: async () => {
+        catalogCalls += 1
+        return { default: { provider: 'z', model: 'glm-5.2' }, routableProviders: ['z'], groups: [] }
       },
+      prompt: async () => ({ accepted: true }),
+      page: async () => ({ records: [], hasMore: false }),
     },
   })
   const handler = routes.get('prefix:/__arxa/conversations')
   const resM = fakeRes()
   await handler(fakeReq('GET', '/__arxa/conversations/s-1/models'), resM)
   assert.equal(resM.status, 200)
-  assert.deepEqual(modelsSeen, { sessionId: 's-1' })
-  assert.equal(resM.body.current.model, 'glm-5.2')
+  assert.equal(catalogCalls, 1, 'the catalog is the Host-generation directory (no per-session call)')
+  assert.equal(resM.body.default.model, 'glm-5.2')
 
   const resBad = fakeRes()
   await handler(fakeReq('POST', '/__arxa/conversations/s-1/mode', JSON.stringify({ mode: 'sudo' })), resBad)
@@ -253,7 +290,7 @@ const RPC_ERR = (code, message) => ({ rpcId: 'r1', result: { ok: false, error: {
 
   const appended = []
   const setRoutes = makeCtx({
-    api: { sessions: {} },
+    sessionController: {},
     agents: {
       // LIVE path: the session's agent is resident — its session appends directly.
       get: (id) => id === 's-1' ? { session: { append: (type, data) => { appended.push(['live', type, data]) } } } : undefined,
@@ -283,7 +320,7 @@ const RPC_ERR = (code, message) => ({ rpcId: 'r1', result: { ok: false, error: {
   await setHandler(fakeReq('POST', '/__arxa/conversations/s-3/mode', JSON.stringify({ mode: 'read-only' })), resGone)
   assert.equal(resGone.status, 404)
   assert.equal(resGone.body.error, 'no-such-session')
-  ok('models proxy + mode validation + mode set (live, parked, gone)')
+  ok('model catalog + mode validation + mode set (live, parked, gone)')
 }
 
 // ---- 10. image attachments: fold carries ids, POST forwards parts, read route
@@ -311,7 +348,7 @@ const RPC_ERR = (code, message) => ({ rpcId: 'r1', result: { ok: false, error: {
   // POST /messages forwards image parts after the text part.
   let promptSeen
   const imgRoutes = makeCtx({
-    api: { sessions: { prompt: async (req) => { promptSeen = req; return RPC_OK({ accepted: true }) } } },
+    sessionController: { prompt: async (request) => { promptSeen = request; return { accepted: true } } },
   })
   const imgHandler = imgRoutes.get('prefix:/__arxa/conversations')
   const resImg = fakeRes()
@@ -320,7 +357,7 @@ const RPC_ERR = (code, message) => ({ rpcId: 'r1', result: { ok: false, error: {
     images: [{ mediaType: 'image/jpeg', data: 'aGVsbG8=' }],
   })), resImg)
   assert.equal(resImg.status, 200)
-  assert.deepEqual(promptSeen.payload.content, [
+  assert.deepEqual(promptSeen.content, [
     { type: 'text', text: 'shot from the site' },
     { type: 'image', mediaType: 'image/jpeg', data: 'aGVsbG8=' },
   ], 'image parts forwarded verbatim after the text')
@@ -332,47 +369,55 @@ const RPC_ERR = (code, message) => ({ rpcId: 'r1', result: { ok: false, error: {
   assert.equal(resBadImg.status, 400)
   assert.equal(resBadImg.body.error, 'malformed-image')
 
-  // GET attachment proxies the RPC; host refusals map honestly.
+  // GET attachment proxies the controller; host refusals map honestly.
   const attRoutes = makeCtx({
-    api: { sessions: { attachment: async (req) => {
-      assert.deepEqual(req.payload, { sessionId: 's-1', attachmentId: 'att-1' })
-      return RPC_OK({ attachment: { attachmentId: 'att-1', mediaType: 'image/jpeg' }, data: 'aGVsbG8=' })
-    } } },
+    sessionController: { attachment: async (request) => {
+      assert.deepEqual(request, { sessionId: 's-1', attachmentId: 'att-1' })
+      return { attachment: { attachmentId: 'att-1', mediaType: 'image/jpeg' }, data: 'aGVsbG8=' }
+    } },
   })
   const attHandler = attRoutes.get('prefix:/__arxa/conversations')
   const resAtt = fakeRes()
   await attHandler(fakeReq('GET', '/__arxa/conversations/s-1/attachments/att-1'), resAtt)
   assert.equal(resAtt.status, 200)
   assert.equal(resAtt.body.data, 'aGVsbG8=')
-  ok('image attachments: fold ids + POST forward + attachment read')
+
+  const attRefused = makeCtx({
+    sessionController: { attachment: async () => { throw remoteError('session/attachment-invalid', 'Image is not referenced by this session.') } },
+  })
+  const resAttRefused = fakeRes()
+  await attRefused.get('prefix:/__arxa/conversations')(
+    fakeReq('GET', '/__arxa/conversations/s-1/attachments/att-x'), resAttRefused)
+  assert.equal(resAttRefused.status, 404)
+  assert.equal(resAttRefused.body.error, 'attachment-not-found')
+  ok('image attachments: fold ids + POST forward + attachment read (+ refused)')
 }
 
-// ---- 11. foldMuxEvent: the phone's live-rail filter
+// ---- 11. foldSessionEvent: the phone's live-rail filter (the host
+//      session/event dispatch — no wire wrapper to unwrap anymore)
 {
-  assert.deepEqual(foldMuxEvent({ payload: { type: 'session/projection' } }), { type: 'sessions' })
   assert.deepEqual(
-    foldMuxEvent({ payload: { type: 'user/message', sessionId: 'arxa-s-1' } }),
+    foldSessionEvent('arxa-s-1', 'user/message'),
     { type: 'session', sessionId: 'arxa-s-1', reason: 'user/message' })
   assert.deepEqual(
-    foldMuxEvent({ payload: { type: 'turn/end', sessionId: 'arxa-s-2' } }),
+    foldSessionEvent('arxa-s-2', 'turn/end'),
     { type: 'session', sessionId: 'arxa-s-2', reason: 'turn/end' })
-  assert.equal(foldMuxEvent({ payload: { type: 'assistant/chunk', sessionId: 's' } }), null, 'chunks never ping — the phone re-pulls the fold')
-  assert.equal(foldMuxEvent({ payload: { type: 'tool/call', sessionId: 's' } }), null)
-  assert.equal(foldMuxEvent({ payload: { type: 'user/message' } }), null, 'no sessionId, no ping')
-  assert.equal(foldMuxEvent(null), null)
-  assert.equal(foldMuxEvent({ payload: {} }), null)
-  // the MEASURED wire shape: domain events ride the session/event wrapper
   assert.deepEqual(
-    foldMuxEvent({ payload: { type: 'session/event', sessionId: 'arxa-s-1', event: { type: 'turn/start', seq: 91, time: 1, data: { turn: 15 } } } }),
-    { type: 'session', sessionId: 'arxa-s-1', reason: 'turn/start' },
-    'wrapped domain event unwraps')
-  assert.deepEqual(
-    foldMuxEvent({ payload: { type: 'session/event', sessionId: 'arxa-s-1', event: { type: 'user/message', seq: 92, time: 2, data: { role: 'user', source: { kind: 'user' }, content: [] } } } }),
-    { type: 'session', sessionId: 'arxa-s-1', reason: 'user/message' })
-  assert.equal(
-    foldMuxEvent({ payload: { type: 'session/event', sessionId: 'arxa-s-1', event: { type: 'assistant/chunk', seq: 93, time: 3, data: {} } } }),
-    null, 'wrapped chunks still never ping')
-  ok('foldMuxEvent: projections + surface moves ping, noise dropped')
+    foldSessionEvent('arxa-s-1', 'question/requested'),
+    { type: 'session', sessionId: 'arxa-s-1', reason: 'question/requested' },
+    'question reasons stay phone surface (fed from the $events rail)')
+  assert.equal(foldSessionEvent('s', 'assistant/chunk'), null, 'chunks never ping — the phone re-pulls the fold')
+  assert.equal(foldSessionEvent('s', 'tool/call'), null)
+  assert.equal(foldSessionEvent('s', 'request/header'), null)
+  assert.equal(foldSessionEvent(null, 'turn/start'), null, 'no sessionId, no ping')
+  assert.equal(foldSessionEvent('s', null), null)
+  assert.equal(foldSessionEvent('s', ''), null)
+  // the sessions-list pings: the api-session emits (session/projection's
+  // successor) — membership, activity, running flag, failures.
+  assert.deepEqual(SESSIONS_PING_EVENTS, [
+    'api-session/added', 'api-session/removed', 'api-session/activity', 'api-session/status', 'api-session/error',
+  ])
+  ok('foldSessionEvent: surface moves ping, noise dropped, api-session list pings')
 }
 
 // ---- 12. renderTranscriptMarkdown: the export body
@@ -409,7 +454,7 @@ const RPC_ERR = (code, message) => ({ rpcId: 'r1', result: { ok: false, error: {
     },
   }
   const routes = makeCtx({
-    api: { sessions: {} },
+    sessionController: {},
     commands: registry,
     agents: {
       get: () => undefined,
@@ -458,15 +503,15 @@ const RPC_ERR = (code, message) => ({ rpcId: 'r1', result: { ok: false, error: {
 // ---- 14. export: markdown download route
 {
   const history = [
-    { event: ev('user/message', 1, 100, 'q', USER) },
-    { event: { type: 'assistant/message', seq: 2, time: 110, data: { message: { role: 'assistant', content: [{ type: 'text', text: 'a' }] } } } },
+    { type: 'event', event: ev('user/message', 1, 100, 'q', USER) },
+    { type: 'event', event: { type: 'assistant/message', seq: 2, time: 110, data: { message: { role: 'assistant', content: [{ type: 'text', text: 'a' }] } } } },
   ]
   const routes = makeCtx({
-    api: { sessions: { history: async (req) => {
-      if (req.payload.sessionId !== 's-1') return RPC_ERR('session-not-found', 'gone')
-      assert.deepEqual(req.payload, { sessionId: 's-1', maxMessages: 1000 })
-      return RPC_OK({ events: history })
-    } } },
+    sessionController: { page: async (request) => {
+      if (request.address.sessionId !== 's-1') throw remoteError('session/not-found', 'gone')
+      assert.deepEqual(request, { address: { kind: 'session', sessionId: 's-1' }, throughSeq: -1, maxMessages: 1000 })
+      return { records: history, hasMore: false }
+    } },
   })
   const handler = routes.get('prefix:/__arxa/conversations')
   const res = fakeRes()
@@ -481,15 +526,18 @@ const RPC_ERR = (code, message) => ({ rpcId: 'r1', result: { ok: false, error: {
   ok('export: markdown download headers + 404 mapping')
 }
 
-// ---- 15. SSE: subscribe, receive hello + folded ping, clean detach
+// ---- 15. SSE: subscribe, receive hello + folded pings from BOTH rails
+//      (host events AND the gateway $events question feed), clean detach
 {
-  let releaseFirst = null
-  const firstFrame = new Promise((resolve) => { releaseFirst = resolve })
-  async function* mux() {
-    yield { payload: { type: 'session/projection' } }
-    await firstFrame
-  }
-  const routes = makeCtx({ api: { sessions: {}, events: { mux: (_opts, signal) => mux() } } })
+  const routes = makeCtx({
+    sessionController: {},
+    gateway: gatewayOf([
+      // one question asked (waterfall frame) then answered elsewhere
+      // (cancel frame) — the $events question rail's full lifecycle
+      { type: 'waterfall', event: 'user-questions/request', eventId: 'ev-1', agentId: 'arxa-s-1', request: { questions: [] } },
+      { type: 'cancel', eventId: 'ev-1' },
+    ]),
+  })
   const handler = routes.get('prefix:/__arxa/conversations')
   const req = fakeReq('GET', '/__arxa/conversations/events')
   const res = fakeRes()
@@ -498,11 +546,19 @@ const RPC_ERR = (code, message) => ({ rpcId: 'r1', result: { ok: false, error: {
   assert.ok(String(res.headers['content-type']).includes('text/event-stream'))
   await new Promise((resolve) => setTimeout(resolve, 30))
   assert.ok(res.writes.some((w) => w.includes('hello')), 'hello announces the rail')
-  assert.ok(res.writes.some((w) => w.includes('"sessions"')), 'projection frame pinged through')
+  assert.ok(res.writes.some((w) => w.includes('question/requested')), 'a user-questions waterfall frame pings the asking session')
+  assert.ok(res.writes.some((w) => w.includes('question/resolved')), 'the cancel frame pings the resolution')
+  // host-event rail: an api-session emit moves the list, a domain event
+  // moves one conversation
+  routes.fire('api-session/added', 'arxa-s-9')
+  routes.fire('session/event', { id: 'arxa-s-1' }, { type: 'user/message', seq: 1, time: 1, data: {} })
+  routes.fire('session/event', { id: 'arxa-s-1' }, { type: 'assistant/chunk', seq: 2, time: 2, data: {} })
+  assert.ok(res.writes.some((w) => w.includes('"sessions"')), 'api-session emit pings the list')
+  assert.ok(res.writes.some((w) => w.includes('"user/message"')), 'a surface move pings its session')
+  assert.ok(!res.writes.some((w) => w.includes('"assistant/chunk"')), 'chunks stay filtered')
   for (const cb of fakeReqCloseCbs.splice(0)) cb()
-  releaseFirst()
   await new Promise((resolve) => setTimeout(resolve, 30))
-  ok('SSE: hello + live ping fanout + detach')
+  ok('SSE: hello + live ping fanout (both rails) + detach')
 }
 
 // ---- 16. foldHistory: thinking + tool surface (the phone's expandable rows)
@@ -567,31 +623,21 @@ const RPC_ERR = (code, message) => ({ rpcId: 'r1', result: { ok: false, error: {
 }
 
 // ---- 18. boot-start tracking: the running set works with ZERO subscribers
+//      (host session/event dispatch — no subscription stream involved)
 {
-  let gate = null
-  const gated = new Promise((resolve) => { gate = resolve })
-  async function* mux() {
-    yield { payload: { type: 'session/event', sessionId: 'arxa-s-live', event: { type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } } } }
-    await gated
-    yield { payload: { type: 'session/event', sessionId: 'arxa-s-live', event: { type: 'turn/end', seq: 2, time: 2, data: { turn: 1 } } } }
-    // block forever — a pending promise holds no event-loop handle, so the
-    // suite still exits cleanly (no dial-wait timer involved)
-    await new Promise(() => {})
-  }
   const snap = { orgs: [{ name: 'T', sessions: [{ id: 'live-1', name: 'n', state: 'open', dshSessionId: 'arxa-s-live' }] }] }
   const routes = makeCtx({
-    api: { sessions: {}, events: { mux: (_opts, signal) => mux() } },
+    sessionController: {},
     fetchImpl: async () => ({ ok: true, json: async () => snap }),
     sidebarUrl: 'http://127.0.0.1:1/__arxa/sidebar/state',
   })
-  // no SSE subscribe anywhere in this block — the tap must run from boot
-  await new Promise((resolve) => setTimeout(resolve, 30))
+  // no SSE subscribe anywhere in this block — the rail must run from boot
+  routes.fire('session/event', { id: 'arxa-s-live' }, { type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } })
   const res = fakeRes()
   await routes.get('exact:/__arxa/conversations')(fakeReq('GET', '/__arxa/conversations'), res)
   assert.equal(res.status, 200)
   assert.equal(res.body.sessions[0].running, true, 'turn tracked before any subscriber ever connected')
-  gate()
-  await new Promise((resolve) => setTimeout(resolve, 30))
+  routes.fire('session/event', { id: 'arxa-s-live' }, { type: 'turn/end', seq: 2, time: 2, data: { turn: 1 } })
   const res2 = fakeRes()
   await routes.get('exact:/__arxa/conversations')(fakeReq('GET', '/__arxa/conversations'), res2)
   assert.equal(res2.body.sessions[0].running, false, 'turn/end clears the flag')

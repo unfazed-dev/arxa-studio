@@ -9,7 +9,7 @@
  * keyring; no cloud database anywhere (CLAUDE.md boundary, D16).
  */
 
-import { getClientId, defaultApiBase, defaultTokenBase, linkViaBrowser, linkViaDevice, createPrivateRepoApi, renameRepoApi, repoNameAvailableApi, deleteRepoApi, refreshAccessToken, SCOPES, SHIPPED_CLIENT_ID, defaultOpen } from './auth.js'
+import { getClientId, defaultApiBase, defaultTokenBase, linkViaBrowser, linkViaDevice, createPrivateRepoApi, renameRepoApi, repoNameAvailableApi, deleteRepoApi, deleteBranchApi, refreshAccessToken, SCOPES, SHIPPED_CLIENT_ID, defaultOpen } from './auth.js'
 import { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prCommentApi, prUpdateApi, prStateApi,prChecksApi, workflowRunsApi, rerunRunApi, cancelRunApi, prConversationApi, setThreadResolvedApi, prThreadReplyApi, runJobsApi } from './frame.js'
 import { ensureRunner } from './runner.js'
 import { createKeyring } from './keyring.js'
@@ -280,6 +280,19 @@ export function createGithubLink({
     }
   }
 
+  /** Delete ONE branch on the remote (archives trash purge, 2026-09-05):
+    * the parked session branch's remote half. A missing ref (422) resolves
+    * alreadyGone — idempotent by design. 401 self-heals like deleteRepo. */
+  async function deleteBranch(owner, name, branch) {
+    const accessToken = await getToken()
+    try {
+      return await deleteBranchApi({ owner, name, branch, accessToken, fetch, apiBase })
+    } catch (err) {
+      if (!String(err?.message ?? err).includes('(401)')) throw err
+      return deleteBranchApi({ owner, name, branch, accessToken: await getToken(true), fetch, apiBase })
+    }
+  }
+
   /** Pre-flight (D80): is `name` free under `owner`? Throws when the
     * check cannot be answered — an unverifiable name is an error, never
     * a silent go. */
@@ -428,6 +441,7 @@ export function createGithubLink({
     renameRepo,
     repoNameTaken,
     deleteRepo,
+    deleteBranch,
     gitCredentials,
     wireFrame,
     ensureRunner: ensureRunnerFace,

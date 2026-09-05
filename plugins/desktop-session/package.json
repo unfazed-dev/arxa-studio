@@ -1,0 +1,11 @@
+{
+  "name": "arxa-desktop-session",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Publishes the engine's BrowserAuth launch token to $DSH_HOME/desktop-session.json so the desktop shell can mint its webview cookie without a human clicking a printed URL.",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js"
+  }
+}
