@@ -408,27 +408,35 @@ assert.throws(() => publishProviderStatus(session, { ...good, text: 'x'.repeat(8
   assert.ok(/--dsw-alias-label-tertiary/.test(clientSrc), 'the healthy arc is dsh\'s label-tertiary, the context ring\'s own fill tone')
   assert.ok(/strokeDasharray: '2 3'/.test(clientSrc), 'a balance-only status draws a dashed idle track, not a full one')
   assert.equal(/String\(Math\.round\(left \* 100\)\)/.test(clientSrc), false, 'no digits inside a 14px ring — the panel and tooltip carry the number')
-  assert.ok(/width: 28, height: 28, borderRadius: 999/.test(clientSrc), 'the trigger is ContextMeter\'s 28px round button')
+  assert.ok(/\.arxa-ps-trigger\{width:28px;height:28px;[^}]*border-radius:999px/.test(clientSrc), 'the trigger is ContextMeter\'s 28px round button')
+  assert.ok(/\.arxa-ps-trigger:hover[^{]*\{background:var\(--dsw-alias-interactive-bg-hover\)\}/.test(clientSrc), 'the trigger takes ContextMeter\'s hover wash')
+  assert.ok(/h\(P\.Tooltip, \{ label, side: 'top', delayMs: 200, disabled: open \}/.test(clientSrc), 'hover shows dsh\'s own Tooltip, ContextMeter\'s side and delay, muted while the card is open')
   // Balance and breakage both land here: no utilization means no arc, so the text has to carry
   // it or the composer shows a silent empty circle.
   assert.ok(/typeof x\.badge\.utilization !== 'number'/.test(clientSrc) && /h\('span', null, x\.badge\.text\)/.test(clientSrc), 'without a percentage the badge text renders beside a dashed ring')
   ok('ring structure: ContextMeter geometry and tokens, arc = used, dashed idle form, text fallback')
 
-  // One ring per window, a panel per click. The 5-hour and weekly windows are both live at once,
-  // and both are shown at once — nothing to cycle, nothing hidden behind a click.
+  // ONE ring, for the binding window; the card lists every live window (2026-09-06: two rings
+  // beside the context ring read as three limits, and the card already carries both numbers).
   assert.ok(/\[status, \.\.\.\(status\?\.others \?\? \[\]\)\]/.test(clientSrc), 'the rings come from the binding status plus its siblings')
-  assert.ok(/metered\.map\(\(x\) => h\(Meter/.test(clientSrc), 'every metered window gets its own trigger')
+  assert.ok(/h\(Meter, \{ window: focus\.w, badge: focus\.badge, open, onToggle/.test(clientSrc), 'exactly one trigger, for the binding window')
+  assert.equal((clientSrc.match(/h\(Meter, /g) ?? []).length, 1, 'no second ring')
+  assert.ok(/const focus = numeric\[0\]/.test(clientSrc), 'the ring shows the window the host folded as binding')
+  for (const cls of ['panel', 'header', 'percent', 'headline', 'figures', 'bar', 'segment', 'rows', 'row', 'swatch']) {
+    assert.ok(clientSrc.includes(`.arxa-ps-${cls}{`), `card CSS mirrors ContextMeter's ${cls} rule`)
+  }
+  assert.ok(/width:264px;box-shadow:var\(--dsw-elevation-prominent\)/.test(clientSrc) && /border-radius:12px;padding:12px;font-size:12px;line-height:20px/.test(clientSrc), 'the card is ContextMeter\'s 264px / 12px-radius / elevation-prominent card')
   assert.ok(/'aria-haspopup': 'dialog'/.test(clientSrc) && /'aria-expanded': open/.test(clientSrc), 'the trigger announces its panel')
   assert.ok(/role: 'dialog'/.test(clientSrc), 'the panel is a dialog')
   assert.ok(/e\.key === 'Escape'\) onClose\(\)/.test(clientSrc) && /addEventListener\('mousedown', onDown\)/.test(clientSrc), 'the panel closes on Escape and on an outside click')
   assert.ok(/removeEventListener\('keydown', onKey\); document\.removeEventListener\('mousedown', onDown\)/.test(clientSrc), 'the panel\'s document listeners are removed with it')
-  assert.ok(/setOpen\(null\) \}, \[activeProvider\]/.test(clientSrc), 'the panel closes on a provider switch — Claude\'s weekly panel means nothing for GLM')
-  assert.ok(/bottom: 'calc\(100% \+ 8px\)'/.test(clientSrc), 'the panel opens upward — the composer sits at the bottom of the viewport')
+  assert.ok(/setOpen\(false\) \}, \[activeProvider\]/.test(clientSrc), 'the panel closes on a provider switch — Claude\'s weekly panel means nothing for GLM')
+  assert.ok(/position:absolute;bottom:calc\(100% \+ 8px\);right:0/.test(clientSrc), 'the panel opens upward — the composer sits at the bottom of the viewport')
   // formatBadge retires a window once its reset passes and drops another provider's windows;
   // the rings must be derived from what it returns, not from the raw list, or a spent window
   // keeps a ring.
   assert.ok(/\.filter\(\(x\) => x\.badge !== undefined\)/.test(clientSrc), 'only windows formatBadge accepts get a ring')
-  ok('one ring per window, dialog panel, escape/outside/provider-switch close, expiry drop')
+  ok('one ring for the binding window, ContextMeter card CSS, escape/outside/provider-switch close, expiry drop')
 }
 
 rmSync(HOME, { recursive: true, force: true })

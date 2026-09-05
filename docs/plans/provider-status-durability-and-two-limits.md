@@ -237,3 +237,26 @@ composer, nowhere near dsh's context ring. Three separate mistakes:
 Known gap, not fixed here: on a cold desktop boot the Claude probe can take far longer than
 `COLD_WAIT_MS`; the vendor rows bind first, the Fable filter hides them, and the rings appear
 only when the retry ladder lands the Claude rows (measured 59 s after boot on 2026-09-06).
+
+## Ninth: one ring, and ContextMeter's card verbatim (2026-09-06)
+
+Report on the two-ring build: the 5-hour and weekly numbers are both in the card, so a second
+ring only adds a third circle to the row; the card looked hand-rolled next to the context card;
+and the ring had no hover behaviour.
+
+- **One ring**, for the window the host folds as binding (worst level, ties on utilization). The
+  card lists every live window (5-hour, Weekly, per-model "Fable weekly"). With a single ring in
+  the slot the trailing row's own 12px gap spaces model · context ring · usage ring · send evenly.
+- **Card = ContextMeter's stylesheet**, rule for rule (`JObwrW_*` in
+  `@deepseek-ai/dsh-client-ui-conversation` 0.1.2-rc.1, read from `lib/client.js`), injected once
+  as `arxa-ps-*` classes on dsh's tokens: 264px, radius 12, `--dsw-elevation-prominent`, header
+  (percent · headline · figures), 4px bar, `dl` rows with 8px swatches. Bar and swatches tint by
+  `RING_COLOR`, so amber/red in the card match the ring.
+- **Hover = dsh's `Tooltip`** from `@deepseek-ai/dsh-client-ui-primitives` (the pattern every
+  other arxa plugin client uses), same `side: 'top'`, `delayMs: 200`, disabled while the card is
+  open, plus the trigger's `:hover` wash. Label reads like the context ring's: "35% of 5-hour
+  window used".
+
+Verified on screen 03:28–03:30: row evenly spaced, hover wash on the trigger, card open with
+three rows. `selftest.mjs` pins one `Meter`, `numeric[0]` as the ring's window, the Tooltip
+props, and every `arxa-ps-*` class ContextMeter has.

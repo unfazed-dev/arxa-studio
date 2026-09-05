@@ -20,8 +20,9 @@
  * @deepseek-ai/dsh-client-ui-conversation 0.1.2-rc.1, the ring that sits beside the model picker):
  * a 28px round trigger holding a 14px ring, r=5.5, 2px stroke, track on --dsw-alias-border-l3, arc
  * on --dsw-alias-label-tertiary from twelve o'clock, and the arc measures what is USED so the two
- * rings read the same way. One trigger per live window -- 5-hour and weekly for Claude -- and a
- * click opens a panel laid out like the context meter's (headline / percent / bar / rows).
+ * rings read the same way. ONE ring, for the window the host says binds (worst of 5-hour /
+ * weekly / per-model); hover shows dsh's Tooltip, a click opens a card built from ContextMeter's
+ * own stylesheet (header / percent / bar / rows) that lists every live window.
  *
  * WIRING RULE (this is what made the pill vanish entirely on 2026-09-05): `exports.inject` is a
  * HARD GATE -- dsh's own contract calls it "service required before the companion can register".
@@ -38,6 +39,7 @@ window.__ModuleLoader__.load({
     Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' })
     const React = require('react')
     const h = React.createElement
+    const P = require('@deepseek-ai/dsh-client-ui-primitives')
 
     // Must equal lib/index.js RPC_CHANNEL. One segment only (dsh CHANNEL_PATTERN).
     const RPC_CHANNEL = '/arxa-provider-status'
@@ -96,6 +98,32 @@ window.__ModuleLoader__.load({
     const SIZE = 14, R = 5.5, MID = SIZE / 2
     const CIRC = 2 * Math.PI * R
 
+    // The card and trigger are ContextMeter's own stylesheet, rule for rule (JObwrW_* in
+    // dsh-client-ui-conversation 0.1.2-rc.1) on dsh's tokens, so the two cards are twins: same
+    // hover wash on the trigger, same 264px card, radius, elevation, header, bar and dl rows.
+    // Injected once, the way dsh injects module CSS: a tagged <style>, skipped if already present.
+    const CSS_TAG = 'arxa-provider-status'
+    const CSS = [
+      '.arxa-ps-root{display:inline-flex;align-items:center;position:relative;white-space:nowrap;font-size:11px;order:1}',
+      '.arxa-ps-trigger{width:28px;height:28px;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border:none;padding:0;border-radius:999px;flex:none;place-items:center;display:grid}',
+      '.arxa-ps-trigger:hover,.arxa-ps-trigger[aria-expanded="true"]{background:var(--dsw-alias-interactive-bg-hover)}',
+      '.arxa-ps-panel{z-index:100;box-sizing:border-box;background:var(--dsw-specific-menu);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);width:264px;box-shadow:var(--dsw-elevation-prominent);color:var(--dsw-alias-label-secondary);cursor:default;border:0;border-radius:12px;padding:12px;font-size:12px;line-height:20px;position:absolute;bottom:calc(100% + 8px);right:0}',
+      '.arxa-ps-header{align-items:center;gap:6px;display:flex}',
+      '.arxa-ps-figures{font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-primary);margin-left:auto;font-weight:500}',
+      '.arxa-ps-percent{color:var(--dsw-alias-label-primary);font-weight:500}',
+      '.arxa-ps-headline{color:var(--dsw-alias-label-tertiary)}',
+      '.arxa-ps-bar{background:var(--dsw-alias-interactive-bg-hover);border-radius:999px;gap:1px;height:4px;margin:10px 0 12px;display:flex;overflow:hidden}',
+      '.arxa-ps-segment{background:var(--meter-tint,var(--dsw-alias-label-tertiary));border-radius:1px;flex:none;min-width:2px;height:100%}',
+      '.arxa-ps-swatch{background:var(--meter-tint,var(--dsw-alias-label-tertiary));vertical-align:baseline;border-radius:2px;width:8px;height:8px;margin-right:6px;display:inline-block}',
+      '.arxa-ps-rows{margin:6px 0 0}',
+      '.arxa-ps-row{justify-content:space-between;align-items:center;gap:12px;padding:2px 0;display:flex}',
+      '.arxa-ps-row dt{color:var(--dsw-alias-label-secondary)}',
+      '.arxa-ps-row dd{font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-primary);margin:0}',
+    ].join('\n')
+    if (typeof document !== 'undefined' && document.querySelector(`style[data-plugin-css="${CSS_TAG}"]`) === null) {
+      const tag = document.createElement('style'); tag.dataset.pluginCss = CSS_TAG; tag.textContent = CSS; document.head.appendChild(tag)
+    }
+
     /**
      * The ring itself. Two circles: a full track, and an arc for the fraction USED, started at
      * twelve o'clock -- the same direction the context ring fills, so a glance reads both the
@@ -120,28 +148,37 @@ window.__ModuleLoader__.load({
       )
     }
 
-    // A window's human name for the panel. Claude's kinds are the SDK's; a kind this table does
-    // not know is shown as-is with its underscores lifted, never hidden.
-    const WINDOW_LABEL = { five_hour: '5-hour', seven_day: 'Weekly' }
-    const labelOf = (w) => WINDOW_LABEL[w.kind] ?? String(w.kind ?? '').replace(/_/g, ' ')
+    // A window's human name for the card. Claude's kinds are the SDK's, the polled vendors' are
+    // hour:5 / week:1, a per-model bucket (model_scoped:fable) shows its model name, and a kind
+    // this table does not know is shown as-is with its underscores lifted, never hidden.
+    const WINDOW_LABEL = { five_hour: '5-hour', 'hour:5': '5-hour', seven_day: 'Weekly', 'week:1': 'Weekly' }
+    const labelOf = (w) => {
+      const kind = String(w.kind ?? '')
+      if (kind in WINDOW_LABEL) return WINDOW_LABEL[kind]
+      const scoped = /^model_scoped:(.+)$/.exec(kind)
+      if (scoped) return scoped[1].charAt(0).toUpperCase() + scoped[1].slice(1) + ' weekly'
+      return kind.replace(/_/g, ' ')
+    }
     const percentOf = (w) => Math.min(100, Math.max(0, Math.round((w.utilization ?? 0) * 100)))
+    // Reads like ContextMeter's own "12% of context used".
+    const hoverLabel = (w) => `${percentOf(w)}% of ${labelOf(w)} window used`
 
-    /** ContextMeter's trigger: a 28px round button holding the ring. */
-    function Meter ({ badge, open, onToggle }) {
-      return h('button', {
-        type: 'button',
-        title: badge.title, 'aria-label': badge.title, 'aria-expanded': open, 'aria-haspopup': 'dialog',
-        onClick: onToggle,
-        style: {
-          width: 28, height: 28, borderRadius: 999, border: 'none', padding: 0, flex: 'none',
-          background: open ? HOVER : 'transparent', color: MUTED, cursor: 'pointer',
-          display: 'grid', placeItems: 'center',
-        },
-      }, h(Ring, { utilization: badge.utilization, level: badge.level }))
+    /** ContextMeter's trigger, verbatim: the 28px round button (its CSS above) holding the ring,
+     *  dsh's own Tooltip on hover -- same side, same 200 ms delay, muted while the card is open --
+     *  and a click for the card. */
+    function Meter ({ window: w, badge, open, onToggle }) {
+      const label = hoverLabel(w)
+      return h(P.Tooltip, { label, side: 'top', delayMs: 200, disabled: open },
+        h('button', {
+          type: 'button', className: 'arxa-ps-trigger',
+          'aria-label': label, 'aria-expanded': open, 'aria-haspopup': 'dialog',
+          onClick: onToggle,
+        }, h(Ring, { utilization: badge.utilization, level: badge.level })))
     }
 
-    /** ContextMeter's panel: headline / percent / bar, then one row per live window. Opens
-     *  UPWARD -- the composer sits at the bottom of the viewport, so downward would be off-screen. */
+    /** ContextMeter's card: header (percent · headline · figures), the bar, then one dl row per
+     *  live window with a swatch. Bar and swatches tint by RING_COLOR, so amber/red in the card
+     *  match the ring. Opens UPWARD -- the composer sits at the bottom of the viewport. */
     function Panel ({ windows, focus, now, onClose }) {
       const ref = React.useRef(null)
       React.useEffect(() => {
@@ -150,34 +187,24 @@ window.__ModuleLoader__.load({
         document.addEventListener('keydown', onKey); document.addEventListener('mousedown', onDown)
         return () => { document.removeEventListener('keydown', onKey); document.removeEventListener('mousedown', onDown) }
       }, [onClose])
-      const head = focus
-      const headPct = percentOf(head)
-      const rows = windows.map((w) => {
-        const pct = percentOf(w)
-        const reset = w.resetsAt !== undefined ? `resets in ${relative(w.resetsAt, now)}` : ''
-        return h('div', { key: w.kind, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '2px 0' } },
-          h('span', { style: { color: LABEL_2 } }, labelOf(w)),
-          h('span', { style: { color: LABEL, fontVariantNumeric: 'tabular-nums' } }, `${pct}% used`),
-          h('span', { style: { color: MUTED, whiteSpace: 'nowrap' } }, reset),
-        )
-      })
-      return h('div', {
-        ref, role: 'dialog', 'aria-label': head.title ?? head.text,
-        style: {
-          position: 'absolute', right: 0, bottom: 'calc(100% + 8px)', zIndex: 100, boxSizing: 'border-box', width: 264,
-          background: PANEL_BG, border: `1px solid ${PANEL_BORDER}`, borderRadius: 10, padding: '10px 12px',
-          boxShadow: 'var(--dsw-elevation-prominent, 0 8px 24px rgba(0,0,0,0.35))', color: LABEL, fontSize: 12, lineHeight: '18px',
-        },
-      },
-      h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 6 } },
-        h('span', { style: { color: MUTED } }, `${labelOf(head)} window`),
-        h('span', { style: { color: LABEL, fontWeight: 500 } }, `${headPct}%`),
-        h('span', { style: { color: MUTED } }, 'used'),
-      ),
-      h('div', { style: { height: 4, borderRadius: 2, background: TRACK, overflow: 'hidden', marginBottom: 8 } },
-        h('div', { style: { height: '100%', width: `${headPct}%`, background: RING_COLOR(head.utilization ?? 0), borderRadius: 2 } }),
-      ),
-      h('div', null, ...rows),
+      const pct = percentOf(focus)
+      const reset = (w) => (w.resetsAt !== undefined ? `resets in ${relative(w.resetsAt, now)}` : '')
+      const tint = (w) => ({ '--meter-tint': RING_COLOR(w.utilization ?? 0) })
+      return h('div', { ref, role: 'dialog', 'aria-label': hoverLabel(focus), className: 'arxa-ps-panel' },
+        h('div', { className: 'arxa-ps-header' },
+          h('span', { className: 'arxa-ps-percent' }, `${pct}%`),
+          h('span', { className: 'arxa-ps-headline' }, `of ${labelOf(focus)} window used`),
+          h('span', { className: 'arxa-ps-figures' }, reset(focus)),
+        ),
+        h('div', { className: 'arxa-ps-bar' },
+          pct > 0 ? h('div', { className: 'arxa-ps-segment', style: { width: `${pct}%`, ...tint(focus) } }) : null,
+        ),
+        h('dl', { className: 'arxa-ps-rows' },
+          ...windows.map((w) => h('div', { key: w.kind, className: 'arxa-ps-row' },
+            h('dt', null, h('span', { className: 'arxa-ps-swatch', 'aria-hidden': 'true', style: tint(w) }), labelOf(w)),
+            h('dd', null, [`${percentOf(w)}%`, reset(w)].filter(Boolean).join(' · ')),
+          )),
+        ),
       )
     }
 
@@ -200,7 +227,7 @@ window.__ModuleLoader__.load({
       React.useEffect(() => { pushSendAfter(rootRef.current) })
       const [status, setStatus] = React.useState(null)
       const [now, setNow] = React.useState(Date.now())
-      const [open, setOpen] = React.useState(null) // the kind whose panel is open, or null
+      const [open, setOpen] = React.useState(false)
       // The directory usually does NOT exist when this first renders: model-selection registers
       // after the composer mounts, and directoryFor() throws until the session is registered with
       // it. Hold what inject gave us, and re-resolve when the modelDirectories fiber fires
@@ -273,8 +300,8 @@ window.__ModuleLoader__.load({
       // WHICH binds; the siblings ride along structurally so each can have its own ring.
       const windows = [status, ...(status?.others ?? [])].filter(Boolean)
       // Close the panel on a provider switch: Claude's weekly panel is meaningless for GLM.
-      React.useEffect(() => { setOpen(null) }, [activeProvider])
-      const close = React.useCallback(() => setOpen(null), [])
+      React.useEffect(() => { setOpen(false) }, [activeProvider])
+      const close = React.useCallback(() => setOpen(false), [])
 
       // Only windows that format to something are live: formatBadge retires a window once its
       // reset passes and drops any that belong to another provider.
@@ -284,26 +311,22 @@ window.__ModuleLoader__.load({
       // keeps its text.
       const numeric = live.filter((x) => typeof x.badge.utilization === 'number')
       const textual = live.filter((x) => typeof x.badge.utilization !== 'number')
-      // Exactly two rings: the 5-hour window and the weekly one (2026-09-06, "should be only 2").
-      // Claude's kinds are five_hour / seven_day, the polled vendors' hour:5 / week:1. Every other
-      // numeric window — the per-model weekly Fable/Opus limits — is a panel row, not a ring: it
-      // is the same weekly allowance sliced by model, and a third ring read as a third limit.
-      const RING_RANK = { five_hour: 0, 'hour:5': 0, seven_day: 1, 'week:1': 1 }
-      const metered = numeric.filter((x) => x.w.kind in RING_RANK).sort((a, b) => RING_RANK[a.w.kind] - RING_RANK[b.w.kind])
-      const focus = numeric.find((x) => x.w.kind === open) ?? metered[0] ?? numeric[0]
+      // ONE ring (2026-09-06, "no need to have 2 of them rings"): the window the host says binds
+      // -- its fold picks the worst level, ties on utilization -- comes first in `windows`, so it
+      // is numeric[0]. The card lists every live window; the tooltip names the one on the ring.
+      const focus = numeric[0]
 
-      // `order: 1` + the ORDER_CSS rule below: the `conversation.input.right` slot renders BEFORE the
-      // model picker, and dsh has no slot between the picker and its context ring. The trailing
-      // group is a flex row, so the rings take order 1 and the send button (its last child) order
-      // 2, which lands the rings immediately right of the context ring: model · context · rings ·
-      // send. Structural selector on this element's own siblings — no hashed class, no locale.
-      return h('span', { ref: rootRef, 'data-arxa-provider-status': '', style: { position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 0, whiteSpace: 'nowrap', fontSize: 11, order: 1 } },
-        ...metered.map((x) => h(Meter, { key: x.w.kind, badge: x.badge, open: open === x.w.kind, onToggle: () => setOpen((o) => (o === x.w.kind ? null : x.w.kind)) })),
+      // `order:1` (root CSS) + pushSendAfter: the `conversation.input.right` slot renders BEFORE
+      // the model picker, and dsh has no slot between the picker and its context ring. The trailing
+      // group is a flex row with a 12px gap, so the ring takes order 1 and the send button (its
+      // last child) order 2: model · context ring · usage ring · send, evenly spaced by the row.
+      return h('span', { ref: rootRef, 'data-arxa-provider-status': '', className: 'arxa-ps-root' },
+        focus !== undefined ? h(Meter, { window: focus.w, badge: focus.badge, open, onToggle: () => setOpen((o) => !o) }) : null,
         ...textual.map((x) => h('span', {
           key: x.w.kind, title: x.badge.title, 'aria-label': x.badge.title, role: 'img',
           style: { display: 'inline-flex', alignItems: 'center', gap: 4, height: 28, padding: '0 6px', color: x.badge.level === 'limit' ? RED : MUTED },
         }, h(Ring, { utilization: undefined, level: x.badge.level }), h('span', null, x.badge.text))),
-        open !== null && focus !== undefined
+        open && focus !== undefined
           ? h(Panel, { windows: numeric.map((x) => x.w), focus: focus.w, now, onClose: close })
           : null,
       )
