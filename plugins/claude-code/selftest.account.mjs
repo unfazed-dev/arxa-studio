@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert'
 import { EventEmitter } from 'node:events'
-import { createAccountRpc, accountStatus, ACCOUNT_CHANNEL, SIGNOUT_ARGS } from './lib/account.js'
+import { createAccountRpc, accountStatus, ACCOUNT_CHANNEL, SIGNOUT_ARGS, LOGIN_TTL_MS } from './lib/account.js'
 import { ACCOUNT_KEY } from './lib/auth-flow.js'
 import { SIGNIN_CMD, INSTALL_URL } from './lib/models.js'
 
@@ -77,6 +77,69 @@ assert.equal(ACCOUNT_CHANNEL, '/arxa-claude-account'); assert.deepEqual(SIGNOUT_
   const r = await h('signout'); assert.equal(r.ok, false); assert.match(r.error.message, /no claude binary/)
   const u = await h('nope'); assert.equal(u.ok, false); assert.match(u.error.message, /unknown endpoint nope/)
   ok('no binary → refused without spawning; unknown endpoint → refused')
+}
+
+// ---- login / code / cancel: the CLI's paste-a-code flow, driven through the same spawner.
+function loginHarness ({ accounts, url = 'https://claude.com/cai/oauth/authorize?code=true&state=abc', exit = 0, err = '' }) {
+  let i = 0
+  const probeCalls = []
+  const probe = { current: async (force) => { probeCalls.push(force); const a = accounts[Math.min(i, accounts.length - 1)]; i++; return a } }
+  const records = []
+  const credentials = { modifyRecord: async (key, mutate) => { records.push(['set', key, await mutate(undefined)]) }, deleteRecord: async (key) => { records.push(['del', key]) } }
+  const spawned = []
+  const children = []
+  const spawn = ({ command, args, env }) => {
+    spawned.push({ command, args, env })
+    const child = new EventEmitter(); child.stdout = new EventEmitter(); child.stderr = new EventEmitter()
+    child.written = ''; child.killed = false
+    child.stdin = { write: (s) => { child.written += s; setTimeout(() => { if (err) child.stderr.emit('data', err); child.emit('exit', exit) }, 0) } }
+    child.kill = () => { child.killed = true; setTimeout(() => child.emit('exit', 143), 0) }
+    children.push(child)
+    setTimeout(() => { child.stdout.emit('data', 'Opening browser to sign in…\n'); child.stdout.emit('data', `If the browser didn't open, visit: ${url}\nPaste code here if prompted > `) }, 0)
+    return child
+  }
+  const timers = []
+  const handle = createAccountRpc({ probe, credentials, spawn, binary: () => '/bin/claude', env: { X: '1' }, setTimeout: (fn, ms) => { timers.push(ms); const t = setTimeout(fn, 10_000); t.unref(); return t }, clearTimeout })
+  return { handle, probeCalls, records, spawned, children, timers }
+}
+
+{
+  const h = loginHarness({ accounts: [OUT, IN] })
+  const s0 = await h.handle('status', {}); assert.equal(s0.value.pendingUrl, undefined)
+  const l = await h.handle('login')
+  assert.equal(l.ok, true); assert.match(l.value.url, /^https:\/\/claude\.com\/cai\/oauth\/authorize\?code=true/, 'the URL the CLI printed comes back verbatim')
+  assert.deepEqual(h.spawned, [{ command: '/bin/claude', args: ['auth', 'login'], env: { X: '1' } }], 'exact argv, plugin env, injected spawner (D5)')
+  const again = await h.handle('login'); assert.equal(again.value.url, l.value.url); assert.equal(h.spawned.length, 1, 'a second Sign in reuses the pending child')
+  assert.equal((await h.handle('status', {})).value.pendingUrl, l.value.url, 'status carries the pending URL so a reopened card can continue')
+  assert.equal(h.timers[0], LOGIN_TTL_MS, 'an unfinished login is reaped')
+  const c = await h.handle('code', { code: '  abc#def  ' })
+  assert.equal(c.ok, true); assert.equal(c.value.loggedIn, true, 'exit 0 → fresh probe → signed in')
+  assert.equal(h.children[0].written, 'abc#def\n', 'the code is trimmed and handed to the CLI\'s stdin with a newline')
+  assert.equal(h.probeCalls.at(-1), true, 'the post-login probe bypasses the TTL cache')
+  assert.deepEqual(h.records.at(-1), ['set', ACCOUNT_KEY, { kind: 'grant', payload: { email: 'e@x', subscriptionType: 'max', version: '2.1.261' } }], 'the grant follows the transition')
+  assert.equal((await h.handle('status', {})).value.pendingUrl, undefined, 'nothing pending once it finished')
+  ok('login → url; code → stdin, exit 0, forced probe, grant written; pending is reused and cleared')
+}
+
+{
+  const h = loginHarness({ accounts: [OUT], exit: 1, err: 'Invalid code\n' })
+  await h.handle('login')
+  const empty = await h.handle('code', { code: '   ' }); assert.equal(empty.ok, false); assert.match(empty.error.message, /paste the code/)
+  const bad = await h.handle('code', { code: 'nope' })
+  assert.equal(bad.ok, false); assert.match(bad.error.message, /sign-in failed: Invalid code/)
+  assert.deepEqual(h.records, [], 'a failed exchange writes nothing')
+  const none = await h.handle('code', { code: 'x' }); assert.equal(none.ok, false); assert.match(none.error.message, /no sign-in in progress/, 'the failed child is gone')
+  ok('code: a non-zero exit surfaces the CLI\'s words; empty and orphan codes are refused')
+}
+
+{
+  const h = loginHarness({ accounts: [OUT] })
+  await h.handle('login')
+  const r = await h.handle('cancel'); assert.deepEqual(r.value, { cancelled: true }); assert.equal(h.children[0].killed, true)
+  assert.deepEqual((await h.handle('cancel')).value, { cancelled: false })
+  await h.handle('login'); assert.equal(h.spawned.length, 2, 'after a cancel, Sign in starts a new child')
+  await h.handle('signout'); assert.equal(h.children[1].killed, true, 'sign out kills a pending login too')
+  ok('cancel kills the child; sign out cancels a pending login')
 }
 
 console.log(`selftest.account: ${n} ok`)

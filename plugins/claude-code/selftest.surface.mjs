@@ -24,8 +24,11 @@ ok(`host: ${PROVIDER_ID} is a configurable provider "${PROVIDER_NAME}" with sect
 assert.ok(client.includes(`const NS = '${NS}'`), 'client NS mirrors index.mjs')
 assert.ok(client.includes(`const ACCOUNT_CHANNEL = '${ACCOUNT_CHANNEL}'`), 'client channel mirrors lib/account.js')
 assert.ok(client.includes("name: 'settings.models.provider-card',\n        key: NS,"), 'the card registers on the keyed provider-card slot under NS')
-for (const ep of ["call('status', { force: false })", "call('status', { force: true })", "call('signout')"]) assert.ok(client.includes(ep), `client uses endpoint ${ep}`)
+for (const ep of ["call('status', { force })", "run('signout', {}", "run('login', {}", "run('code', { code }", "call('cancel')"]) assert.ok(client.includes(ep), `client uses endpoint ${ep}`)
 assert.ok(!/Check again/.test(client), 'no "check again" button — the row polls while signed out instead')
+assert.ok(client.includes("h(P.Modal, {\n        open: dialog === 'signout'") && client.includes("h(P.Modal, {\n        open: pendingUrl !== undefined"), 'both confirmations are the stock Modal, never inline in the head (the inline confirm broke the row)')
+assert.ok(client.includes("window.open(url, '_blank', 'noopener')"), 'the sign-in page opens the way the git card opens run links')
+assert.ok(client.includes("'Sign in'") && client.includes("'Sign out'"), 'one action: Sign in when out, Sign out when in')
 assert.ok(client.includes("Array.from(li.children).find((c) => c.classList.contains(C.head) && !c.contains(headRef.current))") && client.includes("stock.style.display = 'none'") && !client.includes('stock.hidden = true'), 'the stock head (its API-key dot and Edit) is hidden for this row only via an inline display (the [hidden] attribute loses to .rowHead{display:flex}), and restored on unmount')
 assert.ok(client.includes('className: `${C.dot} ${st.loggedIn ? C.dotOk : C.dotMissing}`'), 'the colour dot is the stock credential dot: green signed in, red signed out')
 assert.ok(!/auth login['"]?\s*\)|spawn|child_process/.test(client), 'D6: the browser half never starts a login')
@@ -43,7 +46,7 @@ let bundle
 try { bundle = req.resolve('@deepseek-ai/dsh-client-ui-settings-models/package.json') } catch {}
 if (bundle && existsSync(join(dirname(bundle), 'lib', 'client.js'))) {
   const src = readFileSync(join(dirname(bundle), 'lib', 'client.js'), 'utf8')
-  for (const cls of ['zGbnIq_rowHead', 'zGbnIq_rowIdentity', 'zGbnIq_rowName', 'zGbnIq_rowActions', 'zGbnIq_credentialDot', 'zGbnIq_credentialDotConfigured', 'zGbnIq_credentialDotMissing', 'zGbnIq_secondaryButton', 'zGbnIq_dangerButton']) {
+  for (const cls of ['zGbnIq_rowHead', 'zGbnIq_rowIdentity', 'zGbnIq_rowName', 'zGbnIq_rowActions', 'zGbnIq_credentialDot', 'zGbnIq_credentialDotConfigured', 'zGbnIq_credentialDotMissing', 'zGbnIq_secondaryButton', 'zGbnIq_dangerButton', 'zGbnIq_deleteDialog', 'zGbnIq_deleteConfirm', 'zGbnIq_input', 'zGbnIq_error']) {
     assert.ok(client.includes(cls), `client uses ${cls}`)
     assert.ok(src.includes(cls), `${cls} still exists in the installed settings-models bundle`)
   }

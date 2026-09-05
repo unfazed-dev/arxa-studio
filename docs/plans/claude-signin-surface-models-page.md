@@ -113,3 +113,29 @@ See the closing note appended after the relaunch.
 - Verified on screen after relaunch: four identical-looking rows, Claude's with
   the green dot and Sign out. The settings section (binary field) still seats the
   row; its stock Edit is hidden, not removed.
+
+### Follow-up 2 (2026-09-06): Sign in button, confirmations in the stock Modal
+
+- User tried Sign out: the inline confirm rendered inside the row's actions span and
+  squeezed the name onto two lines. And there was no way to START a sign-in.
+- **Confirmations** now open `P.Modal` with `P.Button` footers exactly like the stock
+  Delete dialog (`deleteDialog` / `deleteConfirm` classes). The head only ever holds
+  the name, the dot and ONE button.
+- **Sign in** (D6 amended, user direction): the host starts `claude auth login`
+  through the confining spawner. Without a TTY the CLI (2.1.261) prints
+  "If the browser didn't open, visit: <url>" and waits on "Paste code here if
+  prompted >" — the paste-a-code flow, redirect to platform.claude.com. The card
+  opens that URL with `window.open(_blank, noopener)` (the git card's own way) and
+  shows a Modal with a code field; the host writes the code to the child's stdin and
+  reports exit 0 (fresh forced probe, grant written) or the CLI's own failure text.
+  The CLI owns the OAuth exchange and the token; arxa relays a page and a code.
+  New endpoints `login` / `code` / `cancel`; `status` carries `pendingUrl`; a
+  pending login is reaped after 10 min and cancelled by Sign out.
+- **Verified**: unit tests with a fake child (selftest.account 9 ok); the real CLI
+  in a throwaway `CLAUDE_CONFIG_DIR` (login → URL in ~130 ms, second login reuses the
+  child, garbage code → "sign-in failed: Login failed: Request failed with status
+  code 400", state cleared, fresh login works, cancel kills); on screen after
+  relaunch the row and the Sign out modal. NOT exercised live: a full Sign in
+  (needs the user on the sign-in page) — the user's CLI was signed in again by then.
+- Open question for the live run: whether the CLI's own browser-open works under
+  the sandbox. If it does, the page opens twice (CLI + card). Harmless; noted.
