@@ -289,3 +289,8 @@ context ring's edge by ~2px.
 Also caught: a sandboxed patch had thrown silently, the old pin passed, and the unchanged file was
 synced — "tests green + synced" proved nothing. The re-run was chained with `&&` through the shell
 so a failing step stops the chain, and every live copy was grepped for the new value.
+
+### Ninth, follow-up 4: 12px, so the hover washes clear each other (2026-09-06)
+
+At 6px between circles the two 28px hover washes overlapped. `margin-left:-16px` now: 12px
+between the circles, still tighter than the row's own gap, washes just touching at most.
