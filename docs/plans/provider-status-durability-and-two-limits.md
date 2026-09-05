@@ -183,6 +183,33 @@ Rule that falls out: anything a plugin needs at load time must exist in **both**
 load-time read that can miss must degrade, never throw — a throw there is a no-boot, not a
 warning.
 
+## Seventh: the browser never named a provider, so the host never fetched (2026-09-06)
+
+With the pill mounted in `conversation.input.dock` and the store durable, the desktop still showed
+no ring for hours while a headless page against the same engine showed it. The store was the
+tell: the two real sessions had **zero rows**, and only `ensure` writes rows for a session.
+
+Three defects, all on the cold path, found by replaying the pill's exact RPC:
+
+1. **Props are computed once per mount, before `modelDirectories` exists.** The slot's
+   `inject(sessionId)` resolved `directory` at that moment — model-selection registers *after*
+   the composer mounts, so every real session got `undefined`, sent `provider: undefined`
+   forever, and the host's `if (provider !== undefined) ensure(...)` skipped the fetch for the
+   life of the window. Fix (`lib/client.js`): the fiber keeps a waiter set and wakes mounted
+   pills when the service lands; the pill re-resolves via `resolveDirectory`/`onModels` (plus a
+   1 s fallback tick, because `directoryFor()` also throws until the session is registered).
+2. **No provider must still fetch.** `index.js` now calls `poller.ensureAny(sessionId)` when
+   none is named — every registered reader + configured vendor, waits in parallel — so the
+   ring shows the moment the pill exists and the provider filter tightens it later.
+3. **The cold wait was shorter than the probe.** `COLD_WAIT_MS` was 1.5 s; a cold Claude probe
+   lands at ~2.5 s. First RPC answered `null`, the pill slept 60 s. Now 4 s (still under
+   `TIMEOUT_MS`), and the pill retries a null on a 3 s / 10 s / 30 s ladder before the tick.
+
+Proof after `engine-sync` + relaunch (02:46:18): within 8–12 s the store gained `claude-code`
+rows for both live sessions (`session-c6ccf05e…` 16:46:26Z, `…note-wt-260905-002` 16:46:30Z) —
+the sessions that had none for hours. Tests: `selftest.mjs` pins the re-resolver, the waiter
+wake, and the `ensureAny` branch; `selftest.quota.mjs` covers `ensureAny` cold/warm.
+
 ## Standing gaps
 
 - Status is per-machine and per-user, never shared. Intended.

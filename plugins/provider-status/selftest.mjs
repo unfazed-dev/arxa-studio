@@ -335,6 +335,15 @@ assert.throws(() => publishProviderStatus(session, { ...good, text: 'x'.repeat(8
   // it exists for is inert.
   assert.ok(/d\.load\(\)\.catch/.test(clientSrc), 'the pill must load the directory itself, not wait for the user to open the picker')
   assert.ok(/useEffect\(\(\) => \{ load\?\.\(\) \}/.test(clientSrc), 'load runs on mount, not during render')
+  // Props are computed ONCE per mount, and the composer mounts BEFORE model-selection registers.
+  // 2026-09-06: every real session's pill resolved `directory` pre-fiber (undefined), so no RPC
+  // ever carried a provider and the host skipped the fetch. The pill must re-resolve when the
+  // modelDirectories fiber fires, and the host must fetch even when no provider is named.
+  assert.ok(/resolveDirectory: \(\) => resolveDirectory\(sessionId\)/.test(clientSrc), 'the pill gets a re-resolver, not a one-shot directory')
+  assert.ok(/onModels: \(wake\) => \{ modelsWaiters\.add\(wake\)/.test(clientSrc), 'the modelDirectories fiber wakes mounted pills')
+  assert.ok(/for \(const wake of modelsWaiters\) wake\(\)/.test(clientSrc), 'the fiber actually calls the waiters when the service lands')
+  const hostSrc = await (await import('node:fs/promises')).readFile(new URL('./lib/index.js', import.meta.url), 'utf8')
+  assert.ok(/else await poller\.ensureAny\(sessionId\)/.test(hostSrc), 'a provider-less `current` must still warm the poller — that path was the blank ring')
 
   // lib/client.js duplicates formatBadge for the browser bundle (no module graph into lib/ from a
   // __ModuleLoader__ factory). Extract it and prove it agrees with the host copy, including the

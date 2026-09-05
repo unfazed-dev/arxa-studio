@@ -215,7 +215,13 @@ export function apply (ctx) {
     // The refresh trigger. arxa owns Claude's request path and asks it at turn end; it owns none of
     // the others, so their read hangs off the poll the browser is already doing. `ensure` respects
     // its own TTL and never awaits a warm or stale fetch, so this stays a cheap call.
-    if (provider !== undefined && poller !== undefined) await poller.ensure(sessionId, provider)
+    // No provider is the COMMON case, not the edge: model-selection resolves the session's directory
+    // lazily, so the pill's first calls (and, before 2026-09-06, all of them) carry none. Skipping
+    // `ensure` there is exactly what left the ring blank — warm every answerable provider instead.
+    if (poller !== undefined) {
+      if (provider !== undefined) await poller.ensure(sessionId, provider)
+      else await poller.ensureAny(sessionId)
+    }
     // Folded host-side: the browser copy of formatBadge stays a pure one-value function, and
     // the two-limit rule lives in exactly one place.
     return { ok: true, value: { status: bindingStatus(statusesFor(sessionId, provider)) ?? null } }

@@ -181,10 +181,33 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function ProviderStatusBadge ({ sessionId, connection, directory, load }) {
+    function ProviderStatusBadge ({ sessionId, connection, directory: initialDirectory, load: initialLoad, resolveDirectory, onModels }) {
       const [status, setStatus] = React.useState(null)
       const [now, setNow] = React.useState(Date.now())
       const [open, setOpen] = React.useState(null) // the kind whose panel is open, or null
+      // The directory usually does NOT exist when this first renders: model-selection registers
+      // after the composer mounts, and directoryFor() throws until the session is registered with
+      // it. Hold what inject gave us, and re-resolve when the modelDirectories fiber fires
+      // (onModels) or, failing that, on a slow tick. Without this the provider filter was inert
+      // for every real session (2026-09-06), and the host never fetched.
+      const [late, setLate] = React.useState(undefined)
+      React.useEffect(() => {
+        if (initialDirectory !== undefined || typeof resolveDirectory !== 'function') return
+        let stopped = false
+        const attempt = () => {
+          if (stopped) return true
+          const r = resolveDirectory()
+          if (r?.directory === undefined) return false
+          setLate(r)
+          return true
+        }
+        if (attempt()) return
+        const unsubscribe = onModels?.(attempt) ?? (() => {})
+        const timer = setInterval(() => { if (attempt()) clearInterval(timer) }, 1000)
+        return () => { stopped = true; unsubscribe(); clearInterval(timer) }
+      }, [initialDirectory, resolveDirectory, onModels])
+      const directory = initialDirectory ?? late?.directory
+      const load = initialLoad ?? late?.load
       // dsh's own picker loads the catalog only when it is OPENED, and `current` is null until
       // something loads it. Without this the ring would spend most of its life not knowing which
       // provider is selected, and the provider filter it exists for would be inert.
@@ -198,19 +221,36 @@ window.__ModuleLoader__.load({
       const activeProvider = selection?.current?.provider
 
       const refresh = React.useCallback(() => {
-        if (connection === undefined || sessionId === undefined) return
-        connection.call(RPC_CHANNEL, 'current', { sessionId, provider: activeProvider }).then(
-          (r) => { if (r && r.ok) { setStatus(r.value?.status ?? null); setNow(Date.now()) } },
-          () => {}, // a failed status fetch must never surface as a conversation error
+        if (connection === undefined || sessionId === undefined) return Promise.resolve(null)
+        return connection.call(RPC_CHANNEL, 'current', { sessionId, provider: activeProvider }).then(
+          (r) => {
+            if (!(r && r.ok)) return null
+            const next = r.value?.status ?? null
+            setStatus(next); setNow(Date.now())
+            return next
+          },
+          () => null, // a failed status fetch must never surface as a conversation error
         )
       }, [connection, sessionId, activeProvider])
 
       // Refetch on mount and on every provider switch, then on a slow tick. The tick also
       // re-renders the "resets in" text and retires a ring once its window passes.
+      // A null answer right after mount usually means the host's cold probe was still running
+      // when its bounded wait expired (measured 2026-09-06: first RPC null at 1.5 s, data landed
+      // at ~2.5 s, next ask a minute later). Retry on a short ladder before settling on the tick.
       React.useEffect(() => {
-        refresh()
-        const id = setInterval(refresh, 60_000)
-        return () => clearInterval(id)
+        let cancelled = false
+        const RETRY_MS = [3_000, 10_000, 30_000]
+        let step = 0
+        const pending = new Set()
+        const tick = () => refresh().then((next) => {
+          if (cancelled || next !== null || step >= RETRY_MS.length) return
+          const t = setTimeout(() => { pending.delete(t); tick() }, RETRY_MS[step++])
+          pending.add(t)
+        })
+        tick()
+        const id = setInterval(tick, 60_000)
+        return () => { cancelled = true; clearInterval(id); for (const t of pending) clearTimeout(t) }
       }, [refresh])
 
       // A provider's windows: the binding one first, then its siblings. The host folds to decide
@@ -250,7 +290,25 @@ window.__ModuleLoader__.load({
       // model-selection registers its service, and until then the ring renders with no provider
       // filter rather than not at all.
       let models
-      ctx.inject(['modelDirectories'], (scope) => { models = scope.modelDirectories })
+      const modelsWaiters = new Set()
+      ctx.inject(['modelDirectories'], (scope) => {
+        models = scope.modelDirectories
+        // Wake every mounted pill. A pill that rendered BEFORE this fiber fired is the common case,
+        // not the edge: the composer mounts before model-selection registers (measured 2026-09-06 —
+        // every real session's pill had resolved its props once, pre-fiber, and so never carried a
+        // provider; the host then skipped the fetch and the ring stayed blank for the window's life).
+        for (const wake of modelsWaiters) wake()
+      })
+      // Resolved on demand, guarded: directoryFor() throws for a session with no scope ("Unknown
+      // sessions fail loud") -- a subagent session, or one mid-teardown. A missing directory costs
+      // the provider filter, not the ring. load() is fire-and-forget: a catalog that fails to load
+      // costs the provider filter, never the ring and never a conversation error.
+      const resolveDirectory = (sessionId) => {
+        try {
+          const d = models?.directoryFor(sessionId)
+          return { directory: d?.store, load: d === undefined ? undefined : () => { d.load().catch(() => {}) } }
+        } catch { return { directory: undefined, load: undefined } }
+      }
 
       // `conversation.input.dock` is the composer's bottom row in dsh 0.1.2-rc.1 (Full access ·
       // path · model picker · context ring · send) — the row the git card and dsh's own queue
@@ -264,17 +322,12 @@ window.__ModuleLoader__.load({
         inject: (sessionId) => ({
           sessionId,
           connection: ctx.connection?.rpc,
-          // Resolved at render time, guarded: directoryFor() throws for a session with no scope
-          // ("Unknown sessions fail loud") -- a subagent session, or one mid-teardown. A missing
-          // directory costs the provider filter, not the ring.
-          ...(() => {
-            try {
-              const d = models?.directoryFor(sessionId)
-              // load() is fire-and-forget: a catalog that fails to load costs the provider filter,
-              // never the ring and never a conversation error.
-              return { directory: d?.store, load: d === undefined ? undefined : () => { d.load().catch(() => {}) } }
-            } catch { return { directory: undefined, load: undefined } }
-          })(),
+          // Resolved now if model-selection is already up. Props are computed ONCE per mount, so
+          // when it is not, the pill re-resolves itself through the two hooks below instead of
+          // living forever with the undefined this call returned.
+          ...resolveDirectory(sessionId),
+          resolveDirectory: () => resolveDirectory(sessionId),
+          onModels: (wake) => { modelsWaiters.add(wake); return () => { modelsWaiters.delete(wake) } },
         }),
       }, ProviderStatusBadge))
     }

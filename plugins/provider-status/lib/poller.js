@@ -72,7 +72,11 @@ const MIN_TTL_MS = 30_000
 /** An undocumented endpoint that hangs must not hold the ring hostage. */
 const TIMEOUT_MS = 6_000
 /** How long a COLD read may block the RPC before it answers with what little it has. */
-const COLD_WAIT_MS = 1_500
+// Measured 2026-09-06 against the packed desktop engine: a cold Claude probe (spawn the CLI, read
+// /usage) lands at ~2.5 s. At 1.5 s the first RPC answered null while the probe was still running,
+// and the browser then slept a full poll interval on an empty composer. 4 s covers the measured
+// cold path with margin and still sits under TIMEOUT_MS, so a hung endpoint cannot hold the RPC.
+const COLD_WAIT_MS = 4_000
 
 /**
  * @param credentials ctx.credentials (needs `resolve`).
@@ -175,7 +179,7 @@ export function createQuotaPoller ({
     return inflight
   }
 
-  return {
+  const api = {
     /**
      * Make sure the store is as current as the TTL allows, then resolve. Resolving does NOT mean a
      * fetch happened — on a warm cache it means no fetch was needed, and on a stale one it means
@@ -199,7 +203,21 @@ export function createQuotaPoller ({
       if (seen.has(provider)) return
       await Promise.race([inflight, new Promise((r) => setTimeout(r, coldWaitMs))])
     },
+    /**
+     * The browser does not always know the provider — dsh's model-selection resolves the session's
+     * directory lazily, and until it does the pill asks with no provider at all. Measured
+     * 2026-09-06: every real session sat on that path, so `ensure` never ran and the ring stayed
+     * blank for the life of the window. With no provider to filter on, warm every provider that
+     * can answer (registered readers + configured vendors); unconfigured vendors cache a cheap
+     * "not configured" and cost nothing after the first call. Waits run in parallel, so the
+     * bounded cold wait is paid once, not once per provider.
+     */
+    async ensureAny (sessionId) {
+      const providers = new Set([...readers.keys(), ...Object.keys(VENDORS)])
+      await Promise.all([...providers].map((provider) => api.ensure(sessionId, provider)))
+    },
     /** Test seam. */
     reset () { cache.clear(); seen.clear() },
   }
+  return api
 }

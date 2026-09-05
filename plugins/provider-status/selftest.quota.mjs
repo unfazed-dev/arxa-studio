@@ -408,4 +408,29 @@ const okRes = (body) => ({ ok: true, status: 200, json: async () => body })
   ok('poller: registerUsageReader validates and reaches the default poller')
 }
 
+{
+  // The browser's common case is NO provider: model-selection resolves the session's directory
+  // after the composer mounts. 2026-09-06: the RPC skipped `ensure` on that path, so no real
+  // session ever triggered a fetch and the ring stayed blank. `ensureAny` must warm every
+  // answerable provider in one call and be served from the cache on the next.
+  const published = []
+  let calls = 0
+  const poller = createQuotaPoller({
+    credentials: creds(),
+    publish: (sessionId, provider, statuses) => published.push([sessionId, provider, statuses]),
+    fetchImpl: async () => { calls++; return okRes(zaiBody) },
+    now: () => 1000,
+    readers: new Map(), // isolate from the module-level READERS other tests register into
+  })
+  assert.equal(typeof poller.ensureAny, 'function', 'poller exposes ensureAny for the no-provider RPC path')
+  await poller.ensureAny('s1')
+  assert.ok(published.some(([, p]) => p === 'zai'), 'ensureAny warms the configured vendor without being told which')
+  assert.ok(calls >= 1, 'ensureAny reaches the network on a cold cache')
+  const after = calls
+  await poller.ensureAny('s1'); await poller.ensureAny('s2')
+  assert.equal(calls, after, 'a warm cache serves every session without a second fetch')
+  assert.ok(published.some(([s, p]) => s === 's2' && p === 'zai'), 'a new session is handed the held statuses')
+  ok('poller: ensureAny warms every answerable provider when the browser sends none')
+}
+
 console.log(`selftest.quota: ${n} ok`)
