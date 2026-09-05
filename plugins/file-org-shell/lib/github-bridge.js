@@ -95,6 +95,24 @@ export function createGithubBridge(faces = {}) {
     }
   }
 
+  /** Delete ONE remote branch (archives trash purge): the parked session
+   * branch's remote half. 422/already-gone counts as done — the purge's
+   * goal state already holds. Same keep-the-entry-on-failure posture as
+   * deleteRepo. */
+  async function deleteBranch(owner, name, branch) {
+    if (typeof f.deleteBranch !== 'function') return { ok: false, reason: 'github-unavailable' }
+    try {
+      await f.deleteBranch(owner, name, branch)
+      return { ok: true }
+    } catch (err) {
+      const msg = String(err?.message ?? err)
+      if (msg.includes('422') || msg.includes('alreadyGone') || msg.includes('already gone')) {
+        return { ok: true, alreadyGone: true }
+      }
+      return { ok: false, reason: 'delete-failed', error: msg }
+    }
+  }
+
   /** Wire the CI frame (Part B S1): squash-only settings + branch
     * protection on a published repo. protection:'plan-limited' is the
     * measured free-plan state (S0 V1) — recorded, never fatal. */
@@ -179,7 +197,7 @@ export function createGithubBridge(faces = {}) {
     }
   }
 
-  return { status, createPrivateRepo, renameRepo, repoNameTaken, deleteRepo, wireFrame, ensureRunner, prCreate, prComment,prListForHead, prSquashMerge, prMerge, prState, prChecks, gitCredentials }
+  return { status, createPrivateRepo, renameRepo, repoNameTaken, deleteRepo, deleteBranch, wireFrame, ensureRunner, prCreate, prComment,prListForHead, prSquashMerge, prMerge, prState, prChecks, gitCredentials }
 }
 
 /**

@@ -24,7 +24,7 @@ export { scaffoldOrg } from '../../workspace/lib/scaffold.js'
 // in their project repo, so faces that show a whole org use the aggregate
 // (org rows first, then projects in slug order; every state, caller filters).
 export { listSessions, parkedSessions as listSessionsAcrossRepos } from '../../git-workspace/lib/sessions.js'
-export { listTrash, restoreFromTrash } from '../../workspace/lib/index.js'
+export { listTrash, restoreFromTrash, softDeleteSession, SESSION_TRASH_KIND } from '../../workspace/lib/index.js'
 // dsh bridge (Phase D, D71): injectable spawn/attach/list/archive faces with
 // a default loud no-op, plus the pure live-rows join and the registry
 // annotation the lifecycle uses to store dshSessionId.

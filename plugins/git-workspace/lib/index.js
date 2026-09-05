@@ -79,6 +79,9 @@ export {
   archiveSession,
   reviveSession,
   dropSession,
+  removeSessionRow,
+  restoreSessionRow,
+  dropSessionRefs,
   worktreeHealth,
 } from './sessions.js'
 export {

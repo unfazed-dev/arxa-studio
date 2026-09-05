@@ -194,6 +194,63 @@ export function softDelete(workspaceRoot, targetPath, { env = process.env, now =
   return { entryId, entryPath, origin }
 }
 
+/** Origin-manifest discriminator for session entries (2026-09-05 grill):
+ *  orgs/projects are physical folder moves; a session is a logical entry —
+ *  its body is a registry row plus a parked branch, neither of which can
+ *  move into a directory. */
+export const SESSION_TRASH_KIND = 'session'
+
+/**
+ * Session trash entry (archives tier): manifest-only marker, NO payload
+ * move. The registry row is removed by the caller (git-workspace
+ * `removeSessionRow`) AFTER this returns — the manifest snapshots it, so a
+ * crash between the two leaves a restorable entry rather than an orphan.
+ * The branch and squash-base ref stay in the owning repo until the trash's
+ * own purge deletes them (D40: never auto-deleted; D47: hard delete only
+ * from trash).
+ *
+ * @param {string} orgRoot the org folder — the trash scope root (D69)
+ * @param {{ repoPath: string, session: object }} repoPath is the session's
+ *   OWNING repo (the org root or a project repo — the aggregate row's
+ *   repoPath); session is the registry row about to be removed.
+ * @returns {{ entryId: string, entryPath: string, origin: object }}
+ */
+export function softDeleteSession(orgRoot, { repoPath, session, now = new Date() } = {}) {
+  if (!session || typeof session !== 'object' || typeof session.id !== 'string' || session.id === '') {
+    throw new TrashError('softDeleteSession: a session row with an id is required')
+  }
+  const org = path.resolve(orgRoot)
+  const repo = path.resolve(repoPath ?? org)
+  if (repo !== org && !isInside(org, repo)) {
+    throw new TrashError(`refusing to trash a session of ${repo} — outside the org root ${org}`)
+  }
+  // entryId carries the id's leaf only: ids may contain '/' (path-shaped
+  // pre-2026-09-03 rows) and a slash would nest the entry directory.
+  const leaf = String(session.id).split('/').pop() || 'session'
+  const base = `${fsStamp(now)}-session-${leaf}`
+  const root = trashRoot(org)
+  fs.mkdirSync(root, { recursive: true })
+  let entryId = base
+  for (let n = 2; fs.existsSync(path.join(root, entryId)); n++) entryId = `${base}-${n}`
+  const entryPath = path.join(root, entryId)
+  fs.mkdirSync(entryPath, { recursive: true })
+  const origin = {
+    version: 1,
+    kind: SESSION_TRASH_KIND,
+    entryId,
+    sessionId: session.id,
+    name: typeof session.name === 'string' && session.name !== '' ? session.name : session.id,
+    // '.' = the owning repo IS the org root; otherwise the project path.
+    repoPath: path.relative(org, repo) || '.',
+    branch: typeof session.branch === 'string' ? session.branch : null,
+    dshSessionId: typeof session.dshSessionId === 'string' ? session.dshSessionId : null,
+    session,
+    deletedAt: now.toISOString(),
+  }
+  fs.writeFileSync(path.join(entryPath, ORIGIN_MANIFEST), JSON.stringify(origin, null, 2) + '\n')
+  return { entryId, entryPath, origin }
+}
+
 /**
  * List trash entries, oldest first. Entries without a readable origin
  * manifest are surfaced with `origin: null` rather than hidden — the UI

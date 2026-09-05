@@ -324,7 +324,7 @@ export function assertSessionIdShape(id) {
  * in `RESTO/notes` are -001 and -002 whatever they are called. A number freed
  * by a drop is skipped, never reused — the registry is the authority.
  */
-export function mintSessionPath({ org, workspace, name, sessions, now = new Date() } = {}) {
+export function mintSessionPath({ org, workspace, name, sessions, ghosts, now = new Date() } = {}) {
   const orgSegment = String(org ?? '').trim()
   const ws = String(workspace ?? '').split('/').filter(Boolean).join('/')
   if (orgSegment === '') throw new TypeError('mintSessionPath: the org folder name is required')
@@ -339,7 +339,11 @@ export function mintSessionPath({ org, workspace, name, sessions, now = new Date
   const counter = new RegExp('^' + reEscape(dir) + '/[A-Za-z0-9._-]+-wt-' + stamp + '-(\\d+)$')
   const taken = new Set()
   let max = 0
-  for (const s of Array.isArray(sessions) ? sessions : []) {
+  // `ghosts` (2026-09-05 trash flow): registry-row snapshots of sessions
+  // parked in the org trash — their rows are gone but their BRANCHES still
+  // occupy the id namespace, so both counters must see them. A minted id
+  // that collides with a parked branch kills `worktree add` at birth.
+  for (const s of [...(Array.isArray(sessions) ? sessions : []), ...(Array.isArray(ghosts) ? ghosts : [])]) {
     if (!s || typeof s.id !== 'string') continue
     taken.add(s.id)
     const m = counter.exec(s.id)
@@ -708,4 +712,78 @@ export function dropSession(repoPath, id, env = process.env) {
   registry.sessions = registry.sessions.filter((s) => s.id !== id)
   writeRegistry(repoPath, registry, env)
   return { id, dropped: true, worktree: session.worktree, branch: session.branch }
+}
+
+// ---- archives → trash tier (D39/D40 + D47, 2026-09-05 grill) ---------------
+
+/**
+ * Remove ONLY the registry row — the archives row's Move-to-Trash half. The
+ * branch, the squash-base ref and (already pruned at archive time) the
+ * worktree stay untouched so the trash entry can restore the row or purge
+ * the refs later; D40's "never auto-deleted" holds until the trash's own
+ * purge door. The caller snapshots the returned row into the trash manifest
+ * FIRST (crash-safe: an entry without a row is restorable; a row without an
+ * entry is an orphan the archives row no longer lists).
+ *
+ * @returns the removed row (the trash manifest's payload).
+ */
+export function removeSessionRow(repoPath, id, env = process.env) {
+  repoPath = sessionRepoFor(repoPath, id, env) // D98 repo-discovery preamble
+  const registry = readRegistry(repoPath, env)
+  const session = registry.sessions.find((s) => s.id === id)
+  if (!session) throw new Error(`unknown session "${id}"`)
+  registry.sessions = registry.sessions.filter((s) => s.id !== id)
+  writeRegistry(repoPath, registry, env)
+  return session
+}
+
+/**
+ * Re-add a registry row verbatim — the trash's session-restore half. The
+ * branch never moved (only the row did), so restore is row bookkeeping, not
+ * git surgery; the caller verifies the branch first and refuses loudly when
+ * it is gone. A row with the same id (restored twice, hand-edited registry)
+ * is REPLACED, never duplicated.
+ *
+ * @returns the row as written.
+ */
+export function restoreSessionRow(repoPath, session, env = process.env) {
+  if (!session || typeof session !== 'object' || typeof session.id !== 'string' || session.id === '') {
+    throw new Error('restoreSessionRow: a session row with an id is required')
+  }
+  // sessionRepoFor cannot route a row that is not in any registry — the
+  // caller passes the OWNING repo path (recorded in the trash manifest).
+  const registry = readRegistry(repoPath, env)
+  registry.sessions = registry.sessions.filter((s) => s.id !== session.id)
+  registry.sessions.push(session)
+  writeRegistry(repoPath, registry, env)
+  return session
+}
+
+/**
+ * Drop a session's git refs when NO registry row exists anymore — the trash
+ * purge door. `dropSession` needs the row; by purge time the row lives only
+ * in the trash manifest. An optional `worktree` (the manifest snapshot's
+ * path) is force-removed first: an archived session's worktree is normally
+ * already pruned, but a crash between archive steps (or a hand-restored
+ * checkout) can leave one holding the branch checked out — and `branch -D`
+ * refuses a checked-out branch (seen in the 2026-09-05 selftest). Branch
+ * `-D` plus the squash-base ref delete, each reported honestly (false =
+ * already gone, never a throw — purge must not fail because a ref it was
+ * asked to remove is missing).
+ *
+ * @returns {{ id, branch, branchDropped, baseRefDropped }}
+ */
+export function dropSessionRefs(repoPath, { id, branch, worktree }, env = process.env) {
+  const out = { id, branch: branch ?? null, branchDropped: false, baseRefDropped: false }
+  if (worktree && fs.existsSync(worktree)) {
+    runGit(['worktree', 'remove', '--force', worktree], { cwd: repoPath, env, allowFail: true })
+    runGit(['worktree', 'prune'], { cwd: repoPath, env, allowFail: true })
+  }
+  if (typeof branch === 'string' && branch !== '') {
+    out.branchDropped = runGit(['branch', '-D', branch], { cwd: repoPath, env, allowFail: true }) !== null
+  }
+  if (typeof id === 'string' && id !== '') {
+    out.baseRefDropped = runGit(['update-ref', '-d', `${SESSION_BASE_PREFIX}${id}`], { cwd: repoPath, env, allowFail: true }) !== null
+  }
+  return out
 }

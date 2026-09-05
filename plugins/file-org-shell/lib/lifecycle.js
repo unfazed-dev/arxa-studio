@@ -42,6 +42,8 @@ import {
   listTrash,
   restoreFromTrash,
   softDelete,
+  softDeleteSession,
+  SESSION_TRASH_KIND,
   hardDelete,
   hardDeleteToken,
   renameInManifest,
@@ -87,6 +89,9 @@ import {
   reviewedTip,
   reviveSession,
   dropSession,
+  removeSessionRow,
+  restoreSessionRow,
+  dropSessionRefs,
   archiveSession as archiveSessionBranch,
   sessionStageBoundary,
   rekeySessionsProject,
@@ -175,6 +180,21 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
   // publishing never blocks or fails local project creation (CLAUDE.md
   // boundary: local-first, no cloud dependency for core function).
   const githubBridge = createGithubBridge(github)
+
+  /** Registry-row snapshots of sessions parked in the org trash (2026-09-05
+   *  archives grill). A trashed session's row is gone but its branch still
+   *  occupies the id namespace; minting feeds these ghosts so a newborn
+   *  session never collides with a parked branch. Read-only, always local,
+   *  degrades to [] when the trash is unreadable. */
+  const ghostSessions = (orgPath) => {
+    try {
+      return listTrash(orgPath)
+        .filter((e) => e.origin && e.origin.kind === SESSION_TRASH_KIND && e.origin.session)
+        .map((e) => e.origin.session)
+    } catch {
+      return []
+    }
+  }
 
   // ---- D73 publish half (grilled 2026-08-30): orgs AND projects publish.
   // The unit is the repo; the flow is always: linked? → repo exists?
@@ -1113,6 +1133,12 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           // token purge. The entry lives in THIS org's local trash.
           const entry = listTrash(resolved).find((e) => e.entryId === entryId)
           if (!entry) throw new Error('no-trash-entry: ' + entryId)
+          // 2026-09-05: session entries ride the same directory but a
+          // different verb — folder purge on one would drop the marker
+          // without touching the parked branch (quiet restore-loss).
+          if (entry.origin && entry.origin.kind === SESSION_TRASH_KIND) {
+            throw new Error('session-entry: use sessiontrash.purge for session entries')
+          }
           // D90: the link is required only when there IS a repo to delete.
           let repo = null
           if (entry.origin && entry.origin.slug) {
@@ -1280,6 +1306,14 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
             workspace: ws,
             name,
             sessions: allSessions(resolved, env),
+            // 2026-09-05 (trash-flow collision, seen in the archives
+            // probe): a trashed session's row is gone but its BRANCH still
+            // parks in the repo — an id minted off the registry alone can
+            // collide with it and `worktree add` dies ("a branch named X
+            // already exists"). Feed the trash's session ghosts (id+name
+            // snapshots) so both counters skip identities that are still
+            // parked. A purged session leaves the trash and its name frees.
+            ghosts: ghostSessions(resolved),
           })
           // orgPath: a project session's branch lives in the project repo, its
           // checkout under the ORG's single `.arxa/worktrees/` root.
@@ -1424,6 +1458,171 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           syncWipWatchPaths() // session set changed — re-watch
           return out
         },
+        /** ---- archives row (2026-09-05 grill) --------------------------------
+         * Archives never destroys: Restore = bare revival, Move-to-Trash =
+         * a logical entry (softDeleteSession) + registry-row removal. The
+         * destructive door lives in the TRASH (sessiontrash.purge), keeping
+         * D47's "hard delete only from trash" one-door law. */
+        async reviveSessionOnly(id) {
+          // Archives row Restore: git revival ONLY — no dsh attach, no
+          // retitle, no dropIfEmpty probing. The row reappears under its
+          // workspace (state open); the conversation attaches when the user
+          // clicks it (session.open → resumeSession, the existing path).
+          if (!hasHead(resolved, env)) {
+            throw new Error('initial-snapshot-pending: the first git snapshot of this organisation is still running — sessions unlock the moment it completes')
+          }
+          const out = reviveSession(resolved, id, env)
+          dshLive = await dshBridge.list()
+          syncWipWatchPaths() // session set changed — re-watch
+          return out
+        },
+        async trashArchivedSession(id, opts = {}) {
+          // Archives row Move-to-Trash. Only ARCHIVED sessions may enter —
+          // the live tree keeps its Archive menu, and a parked-but-unarchived
+          // session must not slip into the destructive tier unreviewed.
+          const row = allSessions(resolved, env).find((s) => s.id === id)
+          if (!row) throw new Error('unknown-session: ' + id)
+          if (row.state !== 'archived') {
+            throw new Error(`not-archived: session "${id}" is ${row.state} — archive it first (D47: the trash door opens only from the archives tier)`)
+          }
+          // Entry FIRST, row second (crash-safe ordering): an entry without
+          // a row is restorable; a row without an entry is an orphan.
+          const entry = softDeleteSession(resolved, { repoPath: row.repoPath, session: row })
+          const removed = removeSessionRow(row.repoPath, id, env)
+          try {
+            recordStage(row.repoPath ?? resolved, id, {
+              stage: 'trashed', actor: String(opts?.actor ?? 'arxa studio'),
+              detail: `entry ${entry.entryId} — branch parked until the trash purge (D40)`,
+            }, env)
+          } catch { /* bookkeeping never fails the move */ }
+          dshLive = await dshBridge.list()
+          syncWipWatchPaths() // session set changed — re-watch
+          return { entryId: entry.entryId, session: removed, branch: entry.origin.branch }
+        },
+        restoreSessionEntry(entryId) {
+          // Trash row → Archives: the registry row returns verbatim (state
+          // 'archived', exactly where it left). The branch never moved —
+          // but verify it still exists so restore never resurrects a row
+          // whose git body was deleted by hand.
+          const entry = listTrash(resolved).find((e) => e.entryId === entryId)
+          if (!entry) throw new Error('no-trash-entry: ' + entryId)
+          if (!entry.origin || entry.origin.kind !== SESSION_TRASH_KIND) {
+            throw new Error('not-a-session-entry: ' + entryId)
+          }
+          const repoPath = path.resolve(resolved, entry.origin.repoPath || '.')
+          if (!isRepo(repoPath)) {
+            throw new Error(`repo-gone: ${entry.origin.repoPath} no longer exists — the owning project may itself be in the trash (restore that first)`)
+          }
+          if (entry.origin.branch) {
+            const tip = runGit(['rev-parse', '--verify', entry.origin.branch], { cwd: repoPath, env, allowFail: true })
+            if (tip === null) {
+              throw new Error(`branch-gone: parked branch "${entry.origin.branch}" no longer exists in ${entry.origin.repoPath} — the session cannot be revived`)
+            }
+          }
+          const row = restoreSessionRow(repoPath, entry.origin.session, env)
+          const deleted = hardDelete(resolved, entryId, { confirm: hardDeleteToken(entryId) })
+          try {
+            recordStage(repoPath, row.id, {
+              stage: 'restored', actor: 'arxa studio',
+              detail: `restored from trash entry ${entryId} into the archives row`,
+            }, env)
+          } catch { /* bookkeeping never fails the restore */ }
+          return { sessionId: row.id, state: row.state ?? 'archived', deleted: deleted.deleted }
+        },
+        /** Purge-modal data (the CI/CD-aware half): what deleting forever
+         * actually touches — the parked branch, the owning repo's GitHub
+         * coordinates when published, and the OPEN PR riding that branch
+         * (deleting the branch closes it). Pure read; never blocks. */
+        async precheckSessionEntry(entryId) {
+          const entry = listTrash(resolved).find((e) => e.entryId === entryId)
+          if (!entry) throw new Error('no-trash-entry: ' + entryId)
+          if (!entry.origin || entry.origin.kind !== SESSION_TRASH_KIND) {
+            throw new Error('not-a-session-entry: ' + entryId)
+          }
+          const repoPath = path.resolve(resolved, entry.origin.repoPath || '.')
+          const out = {
+            entryId,
+            sessionId: entry.origin.sessionId,
+            name: entry.origin.name,
+            branch: entry.origin.branch,
+            repoPath: entry.origin.repoPath,
+            repoGone: !isRepo(repoPath),
+            repo: null,
+            openPr: null,
+          }
+          if (out.repoGone) return out // purge degrades to entry removal
+          const manifestFile = repoPath === path.resolve(resolved)
+            ? orgManifestPath(resolved)
+            : projectManifestPath(repoPath)
+          let manifest = {}
+          try { manifest = readManifest(manifestFile) } catch { /* unpublished repo — no remote half */ }
+          if (manifest?.repoOwner && manifest?.repoName && getOrigin(repoPath, env) !== null) {
+            out.repo = { owner: manifest.repoOwner, name: manifest.repoName }
+            // The live CI/CD check (the modal's warning line): an open PR
+            // backed by this branch closes the moment the branch dies.
+            const prs = await githubBridge.prListForHead(manifest.repoOwner, manifest.repoName, entry.origin.branch)
+            if (prs.ok && Array.isArray(prs.prs) && prs.prs.length > 0) {
+              const pr = prs.prs[0]
+              out.openPr = { number: pr.number ?? null, title: pr.title ?? null, url: pr.html_url ?? null }
+            }
+          }
+          return out
+        },
+        async purgeSessionEntry(entryId, opts = {}) {
+          // The ONE destructive door for a session (D47): remote-first when
+          // the owning repo is published and the branch still has a remote
+          // half, then the local refs, then the entry. A remote failure
+          // THROWS with the entry kept — idempotent retry, same posture as
+          // project purge. No origin → local-only, no link required.
+          const entry = listTrash(resolved).find((e) => e.entryId === entryId)
+          if (!entry) throw new Error('no-trash-entry: ' + entryId)
+          if (!entry.origin || entry.origin.kind !== SESSION_TRASH_KIND) {
+            throw new Error('not-a-session-entry: ' + entryId)
+          }
+          const repoPath = path.resolve(resolved, entry.origin.repoPath || '.')
+          const out = { entryId, sessionId: entry.origin.sessionId, remoteBranch: 'no-origin', refs: null, deleted: null }
+          if (!isRepo(repoPath)) {
+            // The owning project travelled into the trash whole — its
+            // branches ride the project entry and die with ITS purge. Here
+            // only the marker can go.
+            out.refs = { id: entry.origin.sessionId, branch: entry.origin.branch, branchDropped: false, baseRefDropped: false, repoGone: true }
+          } else {
+            if (entry.origin.branch && getOrigin(repoPath, env) !== null && !opts?.localOnly) {
+              const manifestFile = repoPath === path.resolve(resolved)
+                ? orgManifestPath(resolved)
+                : projectManifestPath(repoPath)
+              let manifest = {}
+              try { manifest = readManifest(manifestFile) } catch { /* unpublished — no remote coordinates */ }
+              if (manifest?.repoOwner && manifest?.repoName) {
+                const made = await githubBridge.deleteBranch(manifest.repoOwner, manifest.repoName, entry.origin.branch)
+                if (!made.ok) {
+                  throw new Error('purge incomplete: remote branch deletion failed (' + (made.error || made.reason) + ') — the trash entry was kept')
+                }
+                out.remoteBranch = made.alreadyGone ? 'already-gone' : 'deleted'
+              }
+            }
+            out.refs = dropSessionRefs(repoPath, {
+              id: entry.origin.sessionId,
+              branch: entry.origin.branch,
+              // The manifest snapshot's worktree: normally already pruned at
+              // archive time, but a crash between archive steps can leave it
+              // holding the branch checked out — dropSessionRefs removes it
+              // first so `branch -D` cannot be refused.
+              worktree: entry.origin.session?.worktree ?? null,
+            }, env)
+          }
+          out.deleted = hardDelete(resolved, entryId, { confirm: hardDeleteToken(entryId) })
+          try {
+            recordStage(repoPath, entry.origin.sessionId, {
+              stage: 'purged', actor: String(opts?.actor ?? 'arxa studio'),
+              result: 'ok',
+              detail: `branch ${entry.origin.branch ?? '(none)'} — remote: ${out.remoteBranch}`,
+            }, env)
+          } catch { /* bookkeeping never fails the purge */ }
+          dshLive = await dshBridge.list()
+          syncWipWatchPaths() // session set changed — re-watch
+          return out
+        },
         mergeSession(id, message) {
           reviveSession(resolved, id, env) // boundary requires an open session
           return sessionStageBoundary(resolved, id, { message, env })
@@ -1438,6 +1637,18 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
             const restored = []
             const failed = []
             for (const entry of listTrash(resolved)) {
+              // Session entries are NOT folder moves — routing one through
+              // restoreFromTrash would fail on its missing payload; route
+              // them to their own verb instead (all-at-once stays honest).
+              if (entry.origin && entry.origin.kind === SESSION_TRASH_KIND) {
+                try {
+                  const r = current.restoreSessionEntry(entry.entryId)
+                  restored.push({ entryId: entry.entryId, restoredPath: 'session:' + r.sessionId })
+                } catch (e) {
+                  failed.push({ entryId: entry.entryId, error: String(e?.message ?? e) })
+                }
+                continue
+              }
               try {
                 const r = restoreFromTrash(resolved, entry.entryId, { env, ...opts })
                 restored.push({ entryId: entry.entryId, restoredPath: r.restoredPath })
@@ -1446,6 +1657,12 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
               }
             }
             return { restored, failed }
+          }
+          // Single-entry restore: a session entry has its own verb (the
+          // payload is a registry row, not a folder).
+          const one = listTrash(resolved).find((e) => e.entryId === entryId)
+          if (one && one.origin && one.origin.kind === SESSION_TRASH_KIND) {
+            return current.restoreSessionEntry(entryId)
           }
           return restoreFromTrash(resolved, entryId, { env, ...opts })
         },
