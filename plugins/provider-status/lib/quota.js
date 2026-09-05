@@ -173,14 +173,17 @@ export function deepseekToStatuses (payload) {
   const live = funded.filter((f) => f.amount > 0)
   if (live.length === 0) {
     if (funded.length === 0) return []
-    return [{ provider: 'deepseek-official', kind: 'balance', level: 'limit', text: 'DeepSeek out of credit', title: 'DeepSeek balance · empty' }]
+    return [{ provider: 'deepseek-official', kind: 'balance', level: 'limit', text: 'Balance empty', title: 'DeepSeek balance · empty' }]
   }
   return live.map((f) => ({
     provider: 'deepseek-official',
     kind: `balance:${f.currency}`,
     // Balance is information, not a limit: there is no window and no threshold to warn against.
     level: 'info',
-    text: `DeepSeek ${f.shown}`,
+    // "Balance", not the vendor's name: the picker beside the pill already says DeepSeek, and a
+    // wallet is a different kind of thing from a window (2026-09-06). Any pay-as-you-go vendor
+    // added later reads the same way.
+    text: `Balance ${f.shown}`,
     title: `DeepSeek balance · ${f.shown}`,
   }))
 }

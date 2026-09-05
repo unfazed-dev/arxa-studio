@@ -518,51 +518,15 @@
 				"data-arxa-hero-guide": "",
 				children: [t("hero.guide")]
 			});
-			// Bound (2026-09-03): the crumb is rendered once, in the composer left
-			// zone (ArxaCrumbBar); the hero row is hidden by CSS. Keep a ref-bearing
-			// anchor so the data-arxa-empty effect above still finds the stack.
+			// Bound: nothing to say here. The composer crumb that used to mirror the
+			// path was dropped 2026-09-06 -- the git card above the composer already
+			// carries it. Keep a ref-bearing anchor so the data-arxa-empty effect
+			// above still finds the stack.
 			return (0, react_jsx_runtime.jsx)("span", {
 				ref,
 				"data-arxa-hero-anchor": "",
 				hidden: true
 			});
-		}
-		/** Cordis breadcrumb nav (org / dock / project / session / worktree) — shared by the
-		 * hero slot (ArxaHeroGuide, bound state) and the composer left zone (ArxaCrumbBar).
-		 * The hero slot is unmounted by dsh once a conversation is open (found live
-		 * 2026-09-02: no crumb on a resumed or freshly opened session), so the composer
-		 * registration is the one users actually see while working. */
-		const arxaCrumbNav = (t, org, current, ref) => {
-			const crumbs = arxaCrumbsFor(org, current) || [];
-			return (0, react_jsx_runtime.jsx)("nav", {
-				ref,
-				"data-arxa-crumbs": "",
-				"aria-label": t("crumbs.label"),
-				children: crumbs.map((c, i) => (0, react_jsx_runtime.jsxs)("span", {
-					"data-arxa-crumb-seg": "",
-					...c.keep ? { "data-keep": "" } : {},
-					children: [i > 0 ? (0, react_jsx_runtime.jsx)("span", {
-						"data-arxa-crumb-sep": "",
-						"aria-hidden": "true",
-						children: "/"
-					}) : null, (0, react_jsx_runtime.jsx)("span", {
-						"data-arxa-crumb": "",
-						...c.current ? {
-							"data-current": "",
-							"aria-current": "location"
-						} : {},
-						title: c.label,
-						children: c.label
-					})]
-				}, c.key))
-			});
-		};
-		function ArxaCrumbBar({ t }) {
-			const org = (0, react.useSyncExternalStore)(orgSubscribe, orgStore.get, orgStore.get);
-			const listSnap = (0, react.useSyncExternalStore)(arxaListSubscribe, arxaListGet, arxaListGet);
-			const current = listSnap ? listSnap.current : void 0;
-			if (current === void 0 || current === null) return null;
-			return arxaCrumbNav(t, org, current, null);
 		}
 		// Preset chip in the card's top-right corner (2026-09-03). The stock
 		// seat registers on conversation.hero.agentPreset — the hero ROW, above
@@ -1002,18 +966,6 @@
 				// inside the composer card (conversation.input.overlay) instead.
 				+ "[data-slot='conversation.hero.agentPreset']{display:none!important}"
 				+ "[data-arxa-empty] [data-arxa-hero-guide]{text-align:center;max-width:560px;margin:12px auto 0;font-size:13px;opacity:.78;line-height:1.7}"
-				// Q2/Q4 cordis crumb (stock crumbs/crumbSeg/crumbSep/crumb/crumbCurrent
-				// grammar, copied verbatim minus the click affordance): the crumb
-				// takes the row's free width, middle segments ellipsize, the last
-				// two (session + worktree) never shrink.
-				+ "[data-slot='conversation.input.left']{flex:1 1 auto;min-width:0;display:flex;align-items:center}"
-				+ "[data-arxa-crumbs]{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:4px;white-space:nowrap;overflow:hidden}"
-				+ "[data-arxa-crumb-seg]{display:inline-flex;align-items:center;gap:4px;min-width:0}"
-				+ "[data-arxa-crumb-seg][data-keep]{flex-shrink:0}"
-				+ "[data-arxa-crumb]{display:block;max-width:220px;color:var(--dsw-alias-label-tertiary);font-size:14px;line-height:20px;padding:4px 8px;border-radius:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
-				+ "[data-arxa-crumbs]>[data-arxa-crumb-seg]:first-child [data-arxa-crumb]{padding-left:0}"
-				+ "[data-arxa-crumb][data-current]{color:var(--dsw-alias-label-primary);font-weight:500}"
-				+ "[data-arxa-crumb-sep]{color:var(--dsw-alias-label-caption);font-size:14px;line-height:20px}"
 				// Q5 corner (2026-09-03): the chip sits INSIDE the card, top-right.
 				// The card's overlay anchor is a height:0 absolute strip at the card
 				// top (uV2eYG_overlayAnchor), so the corner positions itself; z-index
@@ -1195,52 +1147,6 @@
 		const arxaListGet = () => {
 			const s = arxaClientSessions;
 			return s && s.list && typeof s.list.getSnapshot === "function" ? s.list.getSnapshot() : null;
-		};
-		/** Crumb segments for the bound session (Q2, grilled 2026-09-02):
-		 * org / dock / project / session / worktree, read from the org tree —
-		 * read-only, navigation lives in the sidebar; the row tells the user
-		 * WHERE the thread lives. Container labels come from the emitted tree
-		 * rows when present (same words as the sidebar), raw path segments
-		 * otherwise. Null when the dsh current session is not an org row. */
-		const arxaCrumbsFor = (s, current) => {
-			if (!s || !Array.isArray(s.orgs)) return null;
-			let org = null;
-			let row = null;
-			for (const o of s.orgs) {
-				const hit = (o.sessions || []).find((x) => (current !== void 0 && current !== null && x.dshSessionId === current) || (s.currentSessionId && x.id === s.currentSessionId));
-				if (hit) {
-					org = o;
-					row = hit;
-					break;
-				}
-			}
-			if (!org || !row) return null;
-			const rows = Array.isArray(s.emit) ? s.emit : [];
-			const labelFor = (key, fallback) => {
-				const r = rows.find((x) => x && x.key === key);
-				return r && typeof r.label === "string" && r.label !== "" ? r.label : fallback;
-			};
-			const ws = typeof row.workspace === "string" ? row.workspace : "";
-			const parts = ws.split("/").filter(Boolean);
-			const out = [{ key: "org", label: org.name || org.id }];
-			let prefix = "";
-			parts.forEach((p, i) => {
-				prefix = prefix ? prefix + "/" + p : p;
-				out.push({ key: "ws" + i, label: labelFor(org.id + "|" + prefix, p) });
-			});
-			const wt = typeof row.worktree === "string" && row.worktree !== "" ? row.worktree.split("/").filter(Boolean).pop() : null;
-			const nm = row.name || row.id;
-			/* Q3 (2026-09-03): `name` now DEFAULTS TO THE ID, and the id is the
-			 * worktree directory name — so the old unconditional pair rendered
-			 * the same string twice (".../note-wt-260903-001/note-wt-260903-001").
-			 * The session segment earns its place only once a rename has actually
-			 * diverged it from the worktree; the worktree id stays pinned at the
-			 * tail either way, so the crumb always says which worktree you are in
-			 * even after the session is given a human name. */
-			if (!wt || nm !== wt) out.push({ key: "session", label: nm, keep: true });
-			if (wt) out.push({ key: "worktree", label: wt, keep: true, current: true });
-			else out[out.length - 1].current = true;
-			return out;
 		};
 		const orgUseWorkspaces = (sel) => useOrg((s) => sel(s.workspacesView));
 		const orgUseSessions = (sel) => useOrg((s) => sel(s.sessionsView));
@@ -2693,7 +2599,6 @@
 			"welcome.business": "arxa business",
 			"welcome.businessSoon": "arxa business (agency) — coming soon",
 			"tree.dock.projects": "Projects",
-			"crumbs.label": "Session location",
 			"agents.jobs.empty": "No background jobs",
 			"agents.jobs.emptyHint": "Background jobs appear here once one is started. Open the panel for details.",
 			"agents.subagents.empty": "No subagents",
@@ -2898,7 +2803,6 @@
 			"welcome.business": "arxa business",
 			"welcome.businessSoon": "arxa business (agencja) — wkrótce",
 			"tree.dock.projects": "Projekty",
-			"crumbs.label": "Położenie sesji",
 			"agents.jobs.empty": "Brak zadań w tle",
 			"agents.jobs.emptyHint": "Zadania w tle pojawią się tutaj po uruchomieniu. Otwórz panel, aby zobaczyć szczegóły.",
 			"agents.subagents.empty": "Brak podagentów",
@@ -3103,7 +3007,6 @@
 			"welcome.business": "arxa business",
 			"welcome.businessSoon": "arxa business (agence) — bientôt disponible",
 			"tree.dock.projects": "Projets",
-			"crumbs.label": "Emplacement de la session",
 			"agents.jobs.empty": "Aucune tâche en arrière-plan",
 			"agents.jobs.emptyHint": "Les tâches en arrière-plan apparaîtront ici une fois lancées. Ouvrez le panneau pour les détails.",
 			"agents.subagents.empty": "Aucun sous-agent",

@@ -322,3 +322,9 @@ The card showed no reset for either Kimi window while GLM's were fine. Live payl
 `num()` returned undefined and the reset was silently omitted. `toUnixSeconds` now parses a
 non-numeric string with `Date.parse` (garbage stays undefined, never 1970). `selftest.quota.mjs`
 pins the live shape for both windows (24 ok).
+
+## Twelfth (2026-09-06): "Balance", and one path, not two
+
+- **Wallet label.** DeepSeek's pill read `DeepSeek $9.56`. The picker beside it already says DeepSeek, and a wallet is a different kind of thing from a window, so the text is now `Balance $9.56` (`Balance empty` when spent). `lib/quota.js` deepseekToStatuses; the title keeps the vendor name for the tooltip. Any pay-as-you-go vendor added later reads the same way.
+- **Composer crumb dropped.** arxa-sidebar registered a breadcrumb (`RESTO / notes / note-wt-…`) in `conversation.input.left`; the git card above the composer already carries that path. Removed the registration (scripts/gen-workspace.mjs), the component + nav + segment builder + CSS + `crumbs.label` locale keys (lib/workspace-region.snippet.txt), regenerated `lib/client.js` with `node scripts/gen-workspace.mjs --write`. The hero-slot bound state keeps its hidden anchor so the empty-state effect still finds the stack.
+- **Tests.** selftest.quota pins `Balance $9.56` / `Balance empty`; arxa-sidebar selftest now asserts the crumb is absent and the drift gate is green.

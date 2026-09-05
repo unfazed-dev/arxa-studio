@@ -103,9 +103,8 @@ check('rows-c: row "+" closes the loop too (found live 2026-09-02) — create �
   client.includes('orgStore.mutate("workspace.new-session", { orgId: s.slice(0, i), workspace: s.slice(i + 1) }).then((row) => {')
   && client.includes('orgStore.mutate("session.open", { orgId: s.slice(0, i), sessionId: row.id })')
   && client.includes('return arxaOpenConversation(row.id); });'))
-check('crumbs: breadcrumb registered in the composer left zone too (2026-09-02) — the hero slot alone vanishes once a conversation opens',
-  client.includes('ctx.slots.inject("conversation.input.left"') && client.includes('id: "arxa-crumbs"') && client.includes('}, ArxaCrumbBar));')
-  && client.includes('function ArxaCrumbBar({ t })') && client.includes('if (current === void 0 || current === null) return null;'))
+check('crumbs: the composer crumb is GONE (2026-09-06) — the git card above the composer already carries the path, the second copy was noise',
+  !client.includes('conversation.input.left') && !client.includes('ArxaCrumbBar') && !client.includes('arxaCrumbsFor') && !client.includes('data-arxa-crumb'))
 check('rows-c: CTA gate is DECLARATIVE — levers read at render; the imperative DOM gate is gone (it lost the re-render race)',
   client.includes('window.__ARXA_SIDEBAR__?.ctaReady !== true') && client.includes('window.__ARXA_SIDEBAR__?.ctaTitle ?? void 0') && !client.includes('useSessionCtaGate'))
 check('rows-c: real session timestamps (the 56y bug fed ordinals as ages from 1970)',
@@ -210,13 +209,9 @@ check('content area: with NOTHING bound the text composer is hidden outright (20
   client.includes('[data-arxa-empty] [data-slot=') && client.includes('data-arxa-empty') && client.includes('const unbound = current === void 0 || current === null;'))
 // composer-resume-breadcrumb-sidebar-sync (grilled 2026-09-02, Q1–Q6)
 check('Q1: the "sessions start…" guide renders ONLY when nothing is bound — a bound session shows the crumb instead',
-  client.includes('if (unbound) return (0, react_jsx_runtime.jsxs)("div", {') && client.includes('const crumbs = arxaCrumbsFor(org, current) || [];'))
-check('Q2: the hero row carries a read-only cordis crumb (org / dock / project / session / worktree) and the stock picker button is hidden in EVERY state',
-  client.includes('"data-arxa-crumbs"') && client.includes('"aria-current": "location"') && client.includes('.wSkVaW_heroWorkspaceRow>button{display:none!important}') && !client.includes('[data-arxa-empty] .wSkVaW_heroWorkspaceRow>button'))
-check('Q2: crumb grammar is the stock crumbs/crumbSeg/crumbSep/crumb/crumbCurrent tokens (label-tertiary middle, label-primary current, label-caption separators)',
-  client.includes('[data-arxa-crumb]{display:block;max-width:220px;color:var(--dsw-alias-label-tertiary)') && client.includes('[data-arxa-crumb][data-current]{color:var(--dsw-alias-label-primary);font-weight:500}') && client.includes('[data-arxa-crumb-sep]{color:var(--dsw-alias-label-caption)'))
-check('Q4: the crumb takes the free width; session + worktree segments never shrink',
-  client.includes('[data-arxa-crumbs]{flex:1 1 auto;min-width:0') && client.includes('[data-arxa-crumb-seg][data-keep]{flex-shrink:0}'))
+  client.includes('if (unbound) return (0, react_jsx_runtime.jsxs)("div", {') && client.includes('"data-arxa-hero-anchor"'))
+check('Q2: the stock picker button is hidden in EVERY state',
+  client.includes('.wSkVaW_heroWorkspaceRow>button{display:none!important}') && !client.includes('[data-arxa-empty] .wSkVaW_heroWorkspaceRow>button'))
 check('Q5 (corner, 2026-09-03): the preset chip lives INSIDE the composer card top-right — ArxaPresetCorner re-renders the stock seat entry on conversation.input.overlay (locale settings.agentPreset), the hero-row copy is hidden in EVERY state, no hero-row margin rule survives',
   client.includes('function ArxaPresetCorner({ slots, t })')
   && client.includes('name: "conversation.input.overlay"') && client.includes('id: "arxa-preset-corner"') && client.includes('locale: "settings.agentPreset"')
@@ -277,8 +272,6 @@ check('S1/Q2: the mint reads the CROSS-REGISTRY aggregate — the id becomes the
   check('S1/Q3->Q9: when the caller names nothing, the registry name DEFAULTS TO THE LEAF of the id (one display name everywhere)',
     lifecycle.includes("name: typeof name === 'string' && name.trim() !== '' ? name.trim() : undefined,")
       && sessionsSrc.includes('name: name || sessionLeaf(id),'))
-  check('S1/Q3: the crumb collapses the duplicate tail — the session segment appears only once a rename diverges it from the worktree id',
-    client.includes('if (!wt || nm !== wt) out.push({') && client.includes('const nm = row.name || row.id;'))
   check('S1/item1: the resolved preset id rides on meta so it lands in the session HEADER and the stock AgentPresetLabel lights up',
     hostSrc.includes('meta: { cwd, ...(presetId === undefined ? {} : { agentPreset: presetId }) }')
       && hostSrc.includes('const resolved = await presets.resolve(undefined)')

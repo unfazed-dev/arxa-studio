@@ -86,11 +86,12 @@ const RESET_MS = 1_800_000_000_000
   // A BALANCE HAS NO DENOMINATOR. There is no allowance to divide by, so there is no arc — and
   // inventing one (say, against a historical high) would be a fabricated number on screen.
   assert.equal(list[0].utilization, undefined, 'no denominator means no utilization, which is what makes the ring go dashed')
-  assert.equal(list[0].text, 'DeepSeek $9.56')
+  assert.equal(list[0].text, 'Balance $9.56', 'a wallet says "Balance", not the vendor the picker already names')
   assert.equal(list[0].level, 'info', 'a balance is information; there is no threshold to warn against')
   assert.equal(list[0].kind, 'balance:USD')
   const spent = deepseekToStatuses({ balance_infos: [{ currency: 'USD', total_balance: '0' }] })
   assert.equal(spent[0].level, 'limit', 'a wallet empty in every currency is the one case that must show')
+  assert.equal(spent[0].text, 'Balance empty')
   assert.deepEqual(deepseekToStatuses({ balance_infos: [] }), [], 'no balances at all is "not configured", not "empty"')
   // Two funded currencies both have `utilization: undefined`, so the fold's tie-break sees 0 vs 0.
   // Which one binds must be the vendor's own order, not chance: the other is still reachable by
