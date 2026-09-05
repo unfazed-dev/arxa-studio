@@ -82,19 +82,13 @@ body, body[data-ds-dark-theme] {
    prefixes a sibling token. The child-SVG rule also stopped matching: the mark
    is DIV-wrapped now, not a direct child SVG. So: target the leaf that carries
    the wordmark text, and repaint the marks beside it.
-   Brand marks: the stock whale svg (fill=currentColor) renders in BOTH the
-   expanded header (_brandMark) and the collapsed rail (_railMark). Hide the
-   svg leaf and paint ours: the SAME glyph artwork in both places (identical
-   optical size), accent-tinted in both the header and the collapsed rail.
-   Mask + background-color so both re-tint live when the accent swatch
-   rewrites the deepseek tint vars — a background-image data URI is a baked
-   bitmap and cannot follow a var. */
-[class*="_brandMark"], [class*="_railMark"] {
-  width: 24px; height: 24px; flex: 0 0 auto;
-  background: var(--dsw-static-deepseek-450, #0EBAE4);
-  -webkit-mask: var(--arxa-brand-mark-white) center / contain no-repeat;
-          mask: var(--arxa-brand-mark-white) center / contain no-repeat;
-}
+   Brand marks: since dsh 0.1.2-rc.1 the expanded header (_brandMark) AND the
+   collapsed rail (_railMark) both render the sidebar.brand.mark slot
+   (dsh-client-ui-sidebar README, "Brand and New Session"), which ArxaBrandMark
+   below fills with a masked, accent-tinted span. Do NOT mask these containers
+   as well: a masked child inside a masked parent paints NOTHING in WKWebView
+   (2026-09-05, blank top-left corner while every computed style looked right).
+   The svg hide stays only as a belt for the unfilled-slot fallback whale. */
 [class*="_brandMark"] svg, [class*="_railMark"] svg { display: none !important; }
 [class*="_brandName"] > * { display: none !important; }
 [class*="_brandName"]::before {
