@@ -561,6 +561,17 @@ const clientSrc = fs.readFileSync(path2.join(here, 'lib', 'client.js'), 'utf8')
 assert.ok(clientSrc.includes("'.dart'"), '.dart joins the code lane')
 assert.ok(!clientSrc.includes('ArxaCM') && !clientSrc.includes('unifiedMergeView'),
   'nothing in the client reaches for CodeMirror any more')
+// Every bare `setX(` call must have a `setX]` useState behind it. The CodeMirror
+// removal deleted `previewHtml` but left `setPreviewHtml('')` in resetForOpen,
+// which runs BEFORE openArtifact sets phase:'loading' — so every file click
+// threw a ReferenceError into a `void` promise and the panel sat at the idle
+// hint with nothing on screen or in the log (2026-09-07).
+{
+  const declared = new Set([...clientSrc.matchAll(/,\s*(set[A-Z]\w*)\]/g)].map((m) => m[1]))
+  const called = new Set([...clientSrc.matchAll(/(?<![.\w])(set[A-Z]\w*)\(/g)].map((m) => m[1]))
+  const orphans = [...called].filter((n) => !declared.has(n) && n !== 'setTimeout')
+  assert.deepStrictEqual(orphans, [], 'every state setter the client calls is declared: ' + orphans.join(', '))
+}
 assert.ok(clientSrc.includes('diffOriginal: showDiff ?'),
   'and diff, like preview, is a PROP on the one CodeView — three tabs in one part, not three React subtrees')
 assert.match(clientSrc, /ensureVendor\('icons\.js', 'ArxaIcons'\)/, 'client loads the material icon subset')

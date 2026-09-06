@@ -1408,7 +1408,7 @@ window.__ModuleLoader__.load({
       const resetForOpen = () => {
         setDirty(false); setSavePhase('idle'); setSaveNote(''); mtimeRef.current = null
         setShowSource(false); setShowDiff(false); setMainText(''); setChip(null); setTimeline([]); setVersionOpen(false)
-        setCopied(false); setPreviewHtml('')
+        setCopied(false)
         if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null }
       }
 
