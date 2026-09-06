@@ -809,7 +809,16 @@ the editor uses.
   gained. The user rules on whether markdown/yaml formatting is worth keeping a
   2.1 MB bundle for.
 - **Bundle size.** dist was 15 MB before 7.0, 29 MB after it, and **33 MB**
-  after 7.1. It ships in the engine payload.
+  after 7.1. It ships in the engine payload. Against that, `lib/vendor/` lost
+  **1.03 MB of committed bundles** (`markdown.js` 146 KB + `codemirror.js`
+  886 KB) and `lib/vendor-build` lost 23 dependencies.
+- **The media lanes stay as they are.** `image`, `audio` and `video` render with
+  `<img>` / `<audio>` / `<video>` against the org origin. `media-preview` is
+  proven to work (7.1-bis) and would add zoom and a transparency checkerboard for
+  images — but every one of those files would first have to be copied into the
+  in-memory overlay filesystem. For a video that is a straight regression, and
+  for an image it buys a widget. Streaming from the origin is the right call;
+  this is a deliberate stop, not an oversight.
 
 #### 7.4 Dirty state and autosave (was phase 5)
 
@@ -818,6 +827,15 @@ needs, and it is also what owns dirty state. A write-through VS Code filesystem
 provider over `/__arxa/artifacts/write` replaces the hand-rolled save path.
 
 ---
+
+### Where phase 7 stands
+
+| | |
+|---|---|
+| **Adopted** | editor part, webviews, custom editors, markdown preview, diff editor, tabs, settings-driven layout, extension host |
+| **Deleted** | `markdown.js`, `codemirror.js`, the 2026 theme port, 23 vendor-build deps, `DiffView`, the palette state and vars |
+| **Kept, with a reason** | `pdf.js` (VS Code ships no PDF viewer), `prettier.js` (markdown/yaml have no server), `icons.js` + Fira Code (the studio's own chrome), the `<img>`/`<audio>`/`<video>` lanes (streaming beats an in-memory copy) |
+| **Open for the user** | whether markdown/yaml formatting is worth keeping a 2.1 MB bundle for — see the table in 7.3 |
 
 ## Carried unknowns (from the grill, still open)
 
