@@ -326,6 +326,27 @@
       out.diffTyped = dmod.getModel().getValue() !== before
       if (out.diffTyped) dmod.trigger('arxa-probe', 'undo', null)
     }
+    // …and it must SURVIVE a settings write. VS Code recomputes an editor's
+    // options on every configuration change, deriving readOnly from the input
+    // (writable overlay -> false), so a one-shot updateOptions could be undone
+    // by the very next write. openFile's ResizeObserver writes layoutFor on
+    // every width-shape change, and the diff tab is live while that happens —
+    // so narrowing the part is the real path, not a contrived one.
+    const partW = document.getElementById('part')
+    partW.style.right = 'auto'
+    partW.style.width = '400px'   // crosses minimap/wordWrap/folding/lineNumbers
+    await settle(1500)
+    out.diffModRO2 = dmod != null ? !!dmod.getOption(m.monaco.editor.EditorOption.readOnly) : null
+    if (dmod != null) {
+      const before2 = dmod.getModel().getValue()
+      dmod.focus()
+      dmod.trigger('arxa-probe', 'type', { text: 'ZZ' })
+      out.diffTyped2 = dmod.getModel().getValue() !== before2
+      if (out.diffTyped2) dmod.trigger('arxa-probe', 'undo', null)
+    }
+    partW.style.width = ''
+    partW.style.right = '0'
+    await settle(500)
     const info3 = await m.editorPartInfo()
     out.diffPane = info3.paneId
     out.diffTabs = document.querySelectorAll('#part .tab').length
@@ -443,6 +464,9 @@
       // The read-only back door: see the diff step.
       'out.diffModRO === true',
       'out.diffTyped === false',
+      // …and still read-only after a settings write reaches the live diff.
+      'out.diffModRO2 === true',
+      'out.diffTyped2 === false',
       // The LSP lane, end to end in a browser: client started, the document VS
       // Code created was synced, and the server's diagnostic became a marker on
       // the model. A source pin alone once let this whole function be deleted.
@@ -480,6 +504,7 @@
     closedTabs: out.closedTabs, reopenText: out.reopenText, afterChange: out.afterChange,
     diffPane: out.diffPane, diffTabs: out.diffTabs, diffMarks: out.diffMarks,
     diffModRO: out.diffModRO, diffTyped: out.diffTyped,
+    diffModRO2: out.diffModRO2, diffTyped2: out.diffTyped2,
     lspStarted: out.lspStarted, lspMarkers: out.lspMarkers, lspSource: out.lspSource, lspLangs: out.lspLangs,
     dirtyBefore: out.dirtyBefore, dialogs: out.dialogs, afterConflict: out.afterConflict,
   }, null, 1)
