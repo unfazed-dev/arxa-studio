@@ -764,8 +764,15 @@ assert.ok(clientSrc.includes("await M.openDiff(uri, diffOriginal, {"),
 // The chat session id and the worktree registry id differ (traced 2026-09-07:
 // every session open missed and fell back to the org copy). The resolver
 // takes either, so the viewer's mirrored session reaches its worktree.
-assert.ok(fs.readFileSync(path2.join(here, 'lib', 'write-api.js'), 'utf8').includes("(r.id === worktreeId || r.dshSessionId === worktreeId)"),
-  'resolveWorktree matches the dsh session id as well as the registry id')
+{
+  const wa = fs.readFileSync(path2.join(here, 'lib', 'write-api.js'), 'utf8')
+  assert.ok(wa.includes("(r.id === worktreeId || r.dshSessionId === worktreeId)"),
+    'resolveWorktree matches the dsh session id as well as the registry id')
+  assert.ok(wa.includes('? row.worktree') && wa.includes('return { repoPath, worktreePath, worktree: worktreePath }'),
+    'resolveWorktree takes the path from the registry row and returns it under both names wt-api and write-api read')
+  const wt = fs.readFileSync(path2.join(here, 'lib', 'wt-api.js'), 'utf8')
+  assert.ok(!wt.includes("/[/\\\\]/.test(worktreeId)"), 'resolveWorktreeFile no longer refuses the slash every registry id carries')
+}
 // First-click cost: the bundle and VS Code's boot are warmed after startup.
 assert.ok(clientSrc.includes("'arxa-av: warm editor'") && clientSrc.includes('M.start(document.createElement(\'div\'))'),
   'the editor bundle is warmed before the first click')

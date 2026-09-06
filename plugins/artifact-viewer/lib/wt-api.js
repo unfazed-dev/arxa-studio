@@ -57,7 +57,10 @@ function runGit(cwd, args) {
  * absolute relPath is accepted only when it lives inside THIS worktree —
  * it is then re-based onto the root, so the escape checks stay in force. */
 export async function resolveWorktreeFile({ env, orgPath, worktreeId, relPath }) {
-  if (typeof worktreeId !== 'string' || worktreeId === '' || /[/\\]/.test(worktreeId)) {
+  // Registry ids carry slashes (`RESTO/notes/note-wt-…`). The id is a lookup
+  // key, never a path segment — resolveWorktree takes the path from the row —
+  // so only the shapes that could never be an id are refused.
+  if (typeof worktreeId !== 'string' || worktreeId === '' || worktreeId.includes('\\') || path.isAbsolute(worktreeId) || /(^|\/)\.\.(\/|$)/.test(worktreeId)) {
     throw Object.assign(new Error('bad session'), { code: 'BAD' })
   }
   if (typeof relPath !== 'string' || relPath === '') throw Object.assign(new Error('bad path'), { code: 'BAD' })

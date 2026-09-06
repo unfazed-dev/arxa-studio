@@ -52,8 +52,15 @@ export async function resolveWorktree({ env = process.env, orgPath, worktreeId }
     try { rows = listSessions(repoPath, env) } catch { continue }
     const row = rows.find((r) => r && (r.id === worktreeId || r.dshSessionId === worktreeId) && r.state === 'open')
     if (!row) continue
-    const worktreePath = path.join(repoPath, ...SESSIONS_DIR.split('/'), worktreeId)
-    if (fs.existsSync(worktreePath)) return { repoPath, worktreePath }
+    // The path comes from the REGISTRY ROW, never from the caller's id: the
+    // row is what git-workspace wrote, and the id may be the dsh form that
+    // names no directory. `worktree` is returned under both names because
+    // wt-api read `found.worktree` while this returned `worktreePath` — the
+    // session read lane threw on every call and 404'd (traced 2026-09-07).
+    const worktreePath = typeof row.worktree === 'string' && row.worktree !== ''
+      ? row.worktree
+      : path.join(repoPath, ...SESSIONS_DIR.split('/'), row.id)
+    if (fs.existsSync(worktreePath)) return { repoPath, worktreePath, worktree: worktreePath }
   }
   return null
 }
