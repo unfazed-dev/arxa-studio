@@ -353,6 +353,57 @@
     // The inline diff paints inserted/deleted line decorations; without them
     // this would be two editors showing the same thing.
     out.diffMarks = document.querySelectorAll('#part .monaco-editor .line-insert, #part .monaco-editor .line-delete, #part .monaco-editor .char-insert, #part .monaco-editor .char-delete').length
+
+    // ---- the PRODUCT's container shape -----------------------------------
+    // Everything above mounts into #part, which is position:absolute;inset:0 and
+    // toggles display:none -> block. That toggle is a size CHANGE, so the
+    // ResizeObserver _attachPart installs always fires with a real box.
+    // client.js does none of that: the host div is a flex child that already has
+    // its final size when the part is appended. _attachPart NEVER calls
+    // layoutPart itself, so if that shape does not produce a resize callback
+    // with a real box, the part is laid out at 0 and stays there — a blank pane.
+    out.step = 'product-shape'
+    const wrap = document.createElement('div')
+    wrap.style.cssText = 'position:absolute;left:0;top:0;width:900px;height:500px;display:flex;flex-direction:column'
+    const inner = document.createElement('div')
+    // .aXa_av_editorWrap + .aXa_av_monaco, verbatim from client.js
+    inner.className = 'aXa_av_monaco'
+    inner.style.cssText = 'flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column'
+    // client.js also ships this rule, written when .monaco-editor was the DIRECT
+    // child of the host (monaco.editor.create). Under the editor part it is
+    // buried under .part > .content > grid > group > .editor-container, so
+    // height:100% resolves against a DIFFERENT parent than it used to.
+    const prodCss = document.createElement('style')
+    prodCss.textContent = '.aXa_av_monaco .monaco-editor{height:100%}'
+    document.head.appendChild(prodCss)
+    const host = document.createElement('div')
+    host.style.cssText = 'flex:1;min-height:0'   // .aXa_av_lspHost
+    inner.appendChild(host)
+    wrap.appendChild(inner)
+    document.body.appendChild(wrap)
+    out.hostBox = Math.round(host.getBoundingClientRect().width) + 'x' + Math.round(host.getBoundingClientRect().height)
+    await m.attachEditorPart(host)
+    // The PRODUCT opens the file's REAL absolute path (client.js passes absPath
+    // so the language server's diagnostics land on a path it has heard of).
+    // Every probe above uses '/spike/main.rs' — synthetic, shallow, and not a
+    // path any file service could resolve anywhere else. This is the one
+    // difference the harness has never covered.
+    const ABS = '/Volumes/business_ssd/RESTO/projects/kitchen-project/06-build/application/backoffice/lib/menu.dart'
+    const habs = await m.openFile(host, ABS, DART, { editable: true })
+    await settle(2500)
+    out.absOpened = habs != null && habs.model != null
+    out.absText = habs && habs.model ? habs.model.getValue().slice(0, 14) : ''
+    const infoAbs = await m.editorPartInfo()
+    out.absPane = infoAbs.paneId
+    out.absRes = infoAbs.openRes || ''
+    out.absLines = host.querySelectorAll('.view-line').length
+    const partEl2 = host.querySelector('.part')
+    const edEl2 = host.querySelector('.monaco-editor')
+    const r1 = partEl2 ? partEl2.getBoundingClientRect() : null
+    const r2 = edEl2 ? edEl2.getBoundingClientRect() : null
+    out.prodPartBox = r1 ? Math.round(r1.width) + 'x' + Math.round(r1.height) : 'NO PART'
+    out.prodEdBox = r2 ? Math.round(r2.width) + 'x' + Math.round(r2.height) : 'NO EDITOR'
+    out.prodLines = host.querySelectorAll('.view-line').length
   } catch (e) { out.partErr = String(e && e.message || e) }
   out.step = 'done'
 
@@ -467,6 +518,12 @@
       // …and still read-only after a settings write reaches the live diff.
       'out.diffModRO2 === true',
       'out.diffTyped2 === false',
+      // The product's own container shape and its REAL absolute file path.
+      'out.prodPartBox === out.hostBox',
+      'out.absOpened === true',
+      'out.absLines > 0',
+      "out.absPane === 'workbench.editors.files.textFileEditor'",
+      "out.absRes.indexOf('menu.dart') !== -1",
       // The LSP lane, end to end in a browser: client started, the document VS
       // Code created was synced, and the server's diagnostic became a marker on
       // the model. A source pin alone once let this whole function be deleted.
@@ -505,6 +562,8 @@
     diffPane: out.diffPane, diffTabs: out.diffTabs, diffMarks: out.diffMarks,
     diffModRO: out.diffModRO, diffTyped: out.diffTyped,
     diffModRO2: out.diffModRO2, diffTyped2: out.diffTyped2,
+    hostBox: out.hostBox, prodPartBox: out.prodPartBox, prodEdBox: out.prodEdBox, prodLines: out.prodLines,
+    absOpened: out.absOpened, absText: out.absText, absPane: out.absPane, absRes: out.absRes, absLines: out.absLines,
     lspStarted: out.lspStarted, lspMarkers: out.lspMarkers, lspSource: out.lspSource, lspLangs: out.lspLangs,
     dirtyBefore: out.dirtyBefore, dialogs: out.dialogs, afterConflict: out.afterConflict,
   }, null, 1)
