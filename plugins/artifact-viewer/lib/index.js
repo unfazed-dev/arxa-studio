@@ -21,6 +21,10 @@ const { default: z } = await fromDsh('@deepseek-ai/schemastery', 'lib/index.mjs'
 import { createOrgServer } from './org-server.js'
 import { startOrgFollow, readOpenOrg } from './follow.js'
 import { createWriteApi, createMainVersionRoute, createVersionRoute, resolveWorktree } from './write-api.js'
+// Diagnostic (2026-09-07): the sync-spawn wrapper in apply(). `cp` is the CJS
+// module object, the one whose properties can be reassigned.
+import cp from 'node:child_process'
+import { syncBuiltinESMExports } from 'node:module'
 import { createWorktreeRoute, createTreeRoute, createSessionChangesRoute, resolveWorktreeFile } from './wt-api.js'
 import { createOrgWatcher, createEventsRoute } from './watcher.js'
 import { TOKEN_TTL_CEILING_SECONDS, issueToken, loadOrCreateSecret, readVerifyFor, verifyToken } from './tokens.js'
@@ -362,6 +366,30 @@ export function apply(ctx, config) {
       path: '/__arxa/artifacts/main-version',
       handler: (req, res) => { void mainVersion.handle(req, res) },
     })
+    // Name the blocker (2026-09-07). The lag sampler below measured 600-900ms
+    // stalls once a second from +3s to +12s after boot. A synchronous spawn is
+    // the usual shape of that, so every execFileSync/spawnSync/execSync over
+    // 50ms logs its command and caller for the first 60s. Builtin ESM named
+    // imports are live bindings; syncBuiltinESMExports() carries the wrap to
+    // them. Diagnostic — remove once the blocker is moved off the boot path.
+    try {
+      const t0 = Date.now()
+      for (const name of ['execFileSync', 'spawnSync', 'execSync']) {
+        const orig = cp[name]
+        cp[name] = function (...args) {
+          const s = Date.now()
+          try { return orig.apply(this, args) } finally {
+            const took = Date.now() - s
+            if (took > 50 && Date.now() - t0 < 60000) {
+              const cmd = [args[0], ...(Array.isArray(args[1]) ? args[1] : [])].join(' ').slice(0, 90)
+              const caller = (new Error().stack || '').split('\n').slice(2, 4).map((l) => l.trim().replace(/^at /, '').replace(/.*\/plugins\//, 'plugins/')).join(' <- ')
+              console.log('[arxa-artifact-viewer] sync-spawn ' + took + 'ms at +' + ((Date.now() - t0) / 1000).toFixed(1) + 's ' + cmd + ' | ' + caller)
+            }
+          }
+        }
+      }
+      syncBuiltinESMExports()
+    } catch { /* diagnostic only */ }
     // Event-loop lag after boot (2026-09-07). The first click's token and read
     // routes took 0.6s and 1.0s on the live host while the same calls take
     // <30ms in isolation: the request was WAITING, not working. This names
