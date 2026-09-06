@@ -12,6 +12,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
+import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -31,13 +32,22 @@ const TYPES = {
   '.woff2': 'font/woff2', '.svg': 'image/svg+xml', '.png': 'image/png',
 }
 
+// The harness page is served from MEMORY, and its screenshot goes to a temp
+// dir: dist/ is the shipped bundle (pack-sidecar tars it into the payload and
+// the vendor route serves every name in it), so a check artefact written there
+// would become a shipped file.
 const css = fs.readdirSync(dist).find((f) => f.endsWith('.css'))
-fs.writeFileSync(path.join(dist, 'spike.html'),
-  fs.readFileSync(path.join(here, 'src', 'spike.html'), 'utf8').replace('__CSS__', PREFIX + css))
+const page = fs.readFileSync(path.join(here, 'src', 'spike.html'), 'utf8').replace('__CSS__', PREFIX + css)
+const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-monaco-check-'))
 
 const server = http.createServer((req, res) => {
   const rel = new URL(req.url, 'http://x').pathname.replace(PREFIX, '')
-  const file = path.join(dist, path.basename(rel || 'spike.html'))
+  const name = path.basename(rel || 'spike.html')
+  if (name === 'spike.html') {
+    res.writeHead(200, { 'content-type': 'text/html' })
+    return res.end(page)
+  }
+  const file = path.join(dist, name)
   if (!fs.existsSync(file)) { res.writeHead(404); return res.end('not found') }
   res.writeHead(200, { 'content-type': TYPES[path.extname(file)] ?? 'application/octet-stream' })
   fs.createReadStream(file).pipe(res)
@@ -45,7 +55,7 @@ const server = http.createServer((req, res) => {
 
 server.listen(0, '127.0.0.1', () => {
   const url = `http://127.0.0.1:${server.address().port}${PREFIX}spike.html`
-  const png = path.join(dist, 'spike.png')
+  const png = path.join(outDir, 'spike.png')
   // execFile, NOT execFileSync: the sync form blocks this process's event
   // loop, so the server above can never answer the lens's requests and every
   // run dies on a Page.navigate timeout.

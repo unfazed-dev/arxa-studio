@@ -508,6 +508,43 @@ const vpng = await req(vport, '/prettier.png')
 assert.equal(vpng.status, 200, 'vendor route serves prettier.png')
 assert.equal(vpng.headers['content-type'], 'image/png', 'png content-type')
 assert.ok(!fs.existsSync(path2.join(vendorDir, 'themes.js')), 'no separate themes bundle (single @codemirror instance)')
+
+// ---- G12: the route serves the Monaco build dir too -----------------------
+// monaco-build/dist is ~200 flat files built at pack time and gitignored, so
+// this drives a FAKE second dir: the real one is absent in a fresh checkout
+// and a test that needs it would be red on any machine that has not built.
+const fakeMonaco = fs.mkdtempSync(path2.join(os.tmpdir(), 'arxa-monaco-'))
+fs.writeFileSync(path2.join(fakeMonaco, 'arxa-monaco.js'), 'export const openFile = 1\n')
+fs.writeFileSync(path2.join(fakeMonaco, 'onig-a1b2c3d4.wasm'), Buffer.from([0x00, 0x61, 0x73, 0x6d]))
+fs.writeFileSync(path2.join(fakeMonaco, 'style-Ab3dEf9h.css'), 'body{}')
+fs.writeFileSync(path2.join(fakeMonaco, 'rust.tmLanguage-Zz9yXw8v.json'), '{}')
+fs.writeFileSync(path2.join(fakeMonaco, 'webWorkerExtensionHostIframe.html'), '<!doctype html>')
+const vrMon = createVendorRoutes({ vendorDirs: [vendorDir, fakeMonaco] })
+const vhttpMon = http.createServer((rq, rs) => { void vrMon.handle(rq, rs) })
+await new Promise((r2) => vhttpMon.listen(0, '127.0.0.1', r2))
+const vportMon = vhttpMon.address().port
+assert.equal((await req(vportMon, '/codemirror.js')).status, 200, 'first dir still served')
+assert.equal((await req(vportMon, '/arxa-monaco.js')).status, 200, 'second dir served (the monaco entry)')
+// THE phase-1 blocker: WebAssembly.instantiateStreaming rejects any
+// content-type but application/wasm, so the oniguruma TextMate engine — and
+// with it every grammar — dies if this row is missing. The route used to
+// default everything to text/javascript.
+const vwasm = await req(vportMon, '/onig-a1b2c3d4.wasm')
+assert.equal(vwasm.headers['content-type'], 'application/wasm', 'wasm typed for instantiateStreaming')
+assert.equal((await req(vportMon, '/style-Ab3dEf9h.css')).headers['content-type'], 'text/css; charset=utf-8')
+assert.equal((await req(vportMon, '/rust.tmLanguage-Zz9yXw8v.json')).headers['content-type'], 'application/json; charset=utf-8')
+assert.equal((await req(vportMon, '/webWorkerExtensionHostIframe.html')).headers['content-type'], 'text/html; charset=utf-8')
+// Content-hashed names cache forever; stable ones must not, or a rebuilt
+// bundle would never be picked up.
+assert.match(vwasm.headers['cache-control'], /immutable/, 'hashed chunk is immutable')
+assert.equal((await req(vportMon, '/arxa-monaco.js')).headers['cache-control'], 'no-store', 'stable entry name stays no-store')
+assert.equal((await req(vportMon, '/codemirror.js')).headers['cache-control'], 'no-store', 'committed vendor bundle stays no-store')
+// The traversal guard must hold PER DIR — a name that escapes one root must
+// not be admitted because it happens to sit inside another.
+assert.ok([403, 404].includes((await req(vportMon, '/%2e%2e/index.js')).status), 'traversal still refused with two dirs')
+assert.equal((await req(vportMon, '/nothing-here.js')).status, 404, 'unknown name 404s across both dirs')
+vhttpMon.close()
+fs.rmSync(fakeMonaco, { recursive: true, force: true })
 const vThemes = fs.readFileSync(path2.join(vendorDir, 'codemirror.js'), 'utf8')
 assert.ok(vThemes.includes('ArxaTheme='), 'codemirror bundle sets ArxaTheme')
 assert.ok(vThemes.includes('2026 Dark') && vThemes.includes('2026 Light'), 'both 2026 palettes vendored')

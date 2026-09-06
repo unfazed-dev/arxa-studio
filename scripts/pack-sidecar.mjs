@@ -65,6 +65,16 @@ if (!existsSync(join(parentDir, arxaGateRel))) {
   console.error(`pack-sidecar: missing sibling ${arxaGateRel}`)
   process.exit(1)
 }
+// The artifact viewer's Monaco/VS Code bundle is a build product of a SEPARATE
+// npm root and is gitignored, so a checkout has plugins/ but no dist/ — and the
+// viewer would ship with every monaco chunk 404ing. Refuse rather than pack a
+// viewer that cannot open a file. Not built here: `npm ci` there installs 383
+// packages / 1.3 GB and needs network, which packing must not require.
+const monacoDist = 'plugins/artifact-viewer/lib/monaco-build/dist/arxa-monaco.js'
+if (!existsSync(join(studioRoot, monacoDist))) {
+  console.error(`pack-sidecar: missing ${monacoDist} — run \`npm ci && npm run build\` in plugins/artifact-viewer/lib/monaco-build first`)
+  process.exit(1)
+}
 
 const work = mkdtempSync(join(tmpdir(), 'arxa-sidecar-'))
 try {
@@ -91,6 +101,11 @@ try {
   const tarball = join(work, 'payload.tar.gz')
   console.log('pack-sidecar: creating payload.tar.gz (node_modules + plugins + node runtime)…')
   const tar = spawnSync('/usr/bin/tar', [
+    // plugins/ is tarred whole, and monaco-build carries 1.3 GB of build-time
+    // node_modules (vite, rolldown, the @codingame stack) that exists only to
+    // produce dist/. Without this the payload grows by that entire tree.
+    // Excludes must precede the file list for bsdtar.
+    '--exclude', '*/lib/monaco-build/node_modules',
     '-czf', tarball,
     '-C', stage, '.',
     '-C', parentDir,

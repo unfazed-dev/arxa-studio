@@ -132,9 +132,33 @@ export function createTokenRoutes({ env = process.env, secret, getSettings, getO
   return { handle }
 }
 
-/** Serves the vendored IIFE bundles from lib/vendor/ on the studio origin.
- *  GET/HEAD only; basename-pinned (no subpaths, no traversal). */
-export function createVendorRoutes({ vendorDir }) {
+/** Every type the two bundles actually emit, measured from the real output —
+ *  NOT a guess. The route used to default everything to text/javascript, which
+ *  a .wasm cannot survive: WebAssembly.instantiateStreaming rejects any
+ *  content-type but application/wasm, so the TextMate oniguruma engine (2 .wasm
+ *  files) would fail outright and every grammar with it. The rest are typed
+ *  because "works by accident under a lenient fetch" is not a contract. */
+const EXT_TYPES = {
+  '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8',
+  '.json': 'application/json; charset=utf-8', '.map': 'application/json; charset=utf-8',
+  '.code-snippets': 'application/json; charset=utf-8', '.tmLanguage': 'application/json; charset=utf-8',
+  '.wasm': 'application/wasm',
+  '.ttf': 'font/ttf', '.woff': 'font/woff', '.woff2': 'font/woff2',
+  '.svg': 'image/svg+xml', '.png': 'image/png',
+  '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8',
+}
+
+/** Serves browser bundles on the studio origin from one or more FLAT dirs:
+ *  lib/vendor/ (committed IIFE builds — lib/vendor.js) and the Monaco/VS Code
+ *  build output (monaco-build/dist, ~200 files, gitignored, built at pack time).
+ *  GET/HEAD only; basename-pinned (no subpaths, no traversal).
+ *
+ *  Two dirs rather than one merged one: dist/ is a build product of a separate
+ *  npm root and lib/vendor/ is committed, so merging them would drop 200
+ *  untracked files into a tracked directory. */
+export function createVendorRoutes({ vendorDir, vendorDirs }) {
+  const dirs = (vendorDirs ?? [vendorDir]).filter(Boolean)
   return {
     async handle(req, res) {
       try {
@@ -143,16 +167,26 @@ export function createVendorRoutes({ vendorDir }) {
           return res.end('GET only')
         }
         const name = path.basename(decodeURIComponent(new URL(req.url, 'http://x').pathname))
-        const file = path.join(vendorDir, name)
-        if (!file.startsWith(vendorDir + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
+        // The traversal guard is per-dir on purpose: checking a name against a
+        // joined list would let it escape one root while satisfying another.
+        let file
+        for (const dir of dirs) {
+          const f = path.join(dir, name)
+          if (f.startsWith(dir + path.sep) && fs.existsSync(f) && fs.statSync(f).isFile()) { file = f; break }
+        }
+        if (file === void 0) {
           res.writeHead(404, { 'content-type': 'text/plain' })
           return res.end('not found')
         }
-        const EXT_TYPES = { '.woff2': 'font/woff2', '.png': 'image/png' }
         const ctype = EXT_TYPES[name.slice(name.lastIndexOf('.'))] || 'text/javascript; charset=utf-8'
         res.writeHead(200, {
           'content-type': ctype,
-          'cache-control': 'no-store',
+          // Content-hashed names (vite's [name]-[hash]) can never change under
+          // one url, so they cache forever; everything else stays no-store so a
+          // rebuilt vendor bundle is picked up on reload.
+          'cache-control': /-[A-Za-z0-9_-]{8}\.[^.]+$/.test(name)
+            ? 'public, max-age=31536000, immutable'
+            : 'no-store',
         })
         if (req.method === 'HEAD') return res.end()
         fs.createReadStream(file).pipe(res)
@@ -222,8 +256,16 @@ export function apply(ctx, config) {
     })
     // Vendored browser bundles (committed build products — lib/vendor.js):
     // served on the TRUSTED studio origin so the client can <script> them in.
-    const vendorDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor')
-    const vendorRoutes = createVendorRoutes({ vendorDir })
+    const libDir = path.dirname(fileURLToPath(import.meta.url))
+    const vendorRoutes = createVendorRoutes({
+      vendorDirs: [
+        path.join(libDir, 'vendor'),
+        // Built by monaco-build at pack time (G12), gitignored, absent in a
+        // fresh checkout until `npm run build` there — the route just 404s the
+        // monaco chunks until it exists, it does not fail to start.
+        path.join(libDir, 'monaco-build', 'dist'),
+      ],
+    })
     ctx.webServer?.register?.({
       path: '/__arxa/artifacts/vendor',
       handler: (req, res) => { void vendorRoutes.handle(req, res) },

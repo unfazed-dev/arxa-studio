@@ -206,22 +206,56 @@ Each phase = one commit, verified on screen before the next starts.
 
 ### Phase 1 — Monaco code lane
 
-**First task, before any client change: make the bundle exist on other
-machines.** `dist/` is gitignored, and nothing builds it yet.
-`bin/arxa-engine-sync.mjs` content-hashes each plugin dir and copies it, so a
-viewer whose Monaco bundle lives only in an untracked `dist/` syncs as *absent*
-— the lane would 404 everywhere but this checkout. `scripts/pack-sidecar.mjs`
-likewise does not know to run `vite build`. Both need wiring in this phase, not
-later:
+#### 1a. Delivery plumbing — **DONE** (`8949286`, this commit)
 
-- `pack-sidecar.mjs` runs `npm ci && npm run build` in `monaco-build/` (or
-  refuses to pack if `dist/` is stale) before staging plugins.
-- `arxa-engine-sync.mjs` includes `lib/monaco-build/dist` in the hash and copy.
-- The vendor route's `vendorDir` gains a second directory, or `dist/` is copied
-  into `lib/vendor/` at build time — one flat dir either way.
-- `EXT_TYPES` grows the MIME rows listed above. `.wasm` is a hard blocker.
+The bundle had to exist on other machines before any client change, and the
+survey found a bug that had **already shipped**.
 
-Then the lane itself: replace the CodeMirror `code` and `text` lanes. Services: base, host, files,
+**`bin/arxa-engine-sync.mjs` put 1.3 GB into a live engine payload.** `hashDir`
+skips `node_modules`; the `cpSync` on the very next line did not. So what landed
+in `~/.arxa/engine/<sha>/arxa-studio` was not what the hash certified, and
+because the hash never walked those bytes, nothing could report the difference.
+monaco-build is simply the first plugin dir to carry a nested `node_modules`;
+any plugin with one trips it. One `SKIP` list now drives both the walk and the
+copy. `selftest.engine-sync.mjs` asserts the landed tree hashes equal to the
+source and carries no `node_modules` — verified red with the filter removed.
+Fixed **as its own commit**: it is independently true and would be invisible to
+anyone bisecting for it inside a Monaco change.
+
+The rest, then:
+
+- **`pack-sidecar.mjs` refuses to pack** when `monaco-build/dist/arxa-monaco.js`
+  is missing, naming the build command. It does **not** run `npm ci` itself —
+  that installs 383 packages / 1.3 GB and needs network, which packing must not
+  require. It also `--exclude`s `*/lib/monaco-build/node_modules` from the
+  payload tar: `plugins/` is tarred whole, so without it the payload took that
+  entire tree. Measured: 0 `node_modules` entries, 206 `dist/` entries, 36 MB.
+- **The vendor route takes `vendorDirs`**, an ordered list — `lib/vendor/` plus
+  `monaco-build/dist`. Not merged into one dir: `dist/` is a gitignored build
+  product of a separate npm root and merging would drop 200 untracked files into
+  a tracked directory. The traversal guard runs **per dir**; a joined-list check
+  would let a name escape one root while satisfying another.
+- **`EXT_TYPES` grew every row the real output emits.** `.wasm` was the blocker
+  it looks like: `WebAssembly.instantiateStreaming` rejects any content-type but
+  `application/wasm`, so the oniguruma TextMate engine — and every grammar with
+  it — dies without that row. Hashed chunks now answer `immutable`; stable names
+  stay `no-store`.
+- Verified against the **real** build, not a fixture: all **205 files in `dist/`
+  reachable**, `.wasm`/`.css`/`.ttf`/`.json`/`.html` each correctly typed.
+- `check.mjs` now serves its harness page from memory and writes its screenshot
+  to a temp dir. It used to write `spike.html`/`spike.png` into `dist/`, which
+  is the shipped bundle — check artefacts would have become shipped files.
+
+**Divergence from the sketch above:** `dist/` stays where Vite writes it rather
+than moving to a `lib/monaco/` sibling. Vite disables `emptyOutDir` when `outDir`
+is outside the project root, so a moved output would accumulate stale chunks
+across builds. Pointing the route at `monaco-build/dist` needs no file move, no
+vite change and no `check.mjs` change, and the tar exclude was required either
+way.
+
+#### 1b. The lane itself — next
+
+Replace the CodeMirror `code` and `text` lanes. Services: base, host, files,
 configuration, theme, textmate, languages, keybindings, quickaccess. Themes come
 from `theme-defaults` (real VS Code theme JSON, retiring the hand-compiled
 HighlightStyle table in `vendor.js`). `editor.fontFamily` keeps Fira Code.
