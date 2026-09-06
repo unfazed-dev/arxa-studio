@@ -361,10 +361,18 @@ export async function rerunRunApi({ owner, name, runId, failedOnly = false, acce
       'X-GitHub-Api-Version': '2022-11-28',
     },
   })
-  // 403 here is usually "this run is not re-runnable yet" (still in progress),
-  // which is a state answer, not an auth problem — say so rather than sending
-  // the user to re-link.
-  if (!res.ok) throw new Error('github-link: workflow rerun failed (' + res.status + ')')
+  // 403 here is "this run is not re-runnable yet", not an auth problem —
+  // measured 2026-09-06: the same run 403s while in_progress and 201s once it
+  // settles. The comment already said to say so; the message still relayed a
+  // bare status, which reads like a dead grant and sends the user off to
+  // re-link a perfectly good one.
+  if (!res.ok) {
+    const why = await res.json().then((b) => (typeof b?.message === 'string' ? b.message : ''), () => '')
+    if (res.status === 403) {
+      throw new Error('github-link: this run cannot be re-run until it finishes' + (why ? ' (' + why + ')' : ''))
+    }
+    throw new Error('github-link: workflow rerun failed (' + res.status + (why ? ': ' + why : '') + ')')
+  }
   return { ok: true, runId, failedOnly }
 }
 

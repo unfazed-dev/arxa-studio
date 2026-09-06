@@ -759,7 +759,15 @@ export function apply(ctx) {
               // D98: same as card.pr.create — the org manifest is the wrong
               // source for a project session's PR. Loud, not silently wrong.
               const manifest = await repoFor(s)
-              const prs = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
+              // 'all', not the default 'open' (2026-09-06, found by the live
+              // card smoke). The approve row has THREE states — an open PR
+              // shows Merge, a MERGED one shows Mint, neither shows Create
+              // PR — but listing only open PRs meant the row went straight
+              // from Merge to "no PR" the instant a merge landed. The Mint
+              // branch could therefore never render at all. card.pr.comment
+              // already reasons this way, for the same reason ("stage
+              // comments outlive the PR's open state").
+              const prs = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch, 'all').catch(() => [])
               // Q8 (2026-09-03): checks are read for the BRANCH whether or not
               // a PR exists. Since ci.yml v4 watches arxa/**, a stage
               // boundary push runs frame-check with no PR attached — the card
@@ -774,7 +782,7 @@ export function apply(ctx) {
                 const checks = await g.prChecks(manifest.repoOwner, manifest.repoName, s.branch).catch(() => noChecks)
                 return { ok: true, pr: null, checks, runs: await runsFor(), branch: s.branch }
               }
-              const pr = prs[0]
+              const pr = prs.find((p) => p.state === 'open') ?? prs[0]
               const checks = await g.prChecks(manifest.repoOwner, manifest.repoName, pr.head?.sha ?? s.branch).catch(() => noChecks)
               // Record a SETTLED result only, and only when it differs from the
               // last one recorded. card.pr.status is polled — every 15s in the
@@ -789,7 +797,10 @@ export function apply(ctx) {
                   }, { next: checks.state === 'green' ? 'merge when reviewed' : 'fix the failing check' })
                 }
               }
-              return { ok: true, pr: { number: pr.number, url: pr.html_url, state: pr.state }, checks, runs: await runsFor(), branch: s.branch }
+              // GitHub's PR state is only open|closed — never 'merged' — so
+              // the merged signal has to be carried explicitly or the client's
+              // prMerged branch (and with it Mint) stays dead.
+              return { ok: true, merged: Boolean(pr.merged_at), pr: { number: pr.number, url: pr.html_url, state: pr.state }, checks, runs: await runsFor(), branch: s.branch }
             },
             /** Q8: run control from the card. Both take the run id the status
               * call already surfaced, so the UI never has to guess one. */
