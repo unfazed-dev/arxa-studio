@@ -577,10 +577,20 @@ assert.ok(clientSrc.includes("'.dart'"), '.dart joins the code lane')
 assert.match(clientSrc, /ensureVendor\('codemirror\.js', 'ArxaCM'\)[\s\S]{0,120}CM\.ArxaTheme/, 'palette read from the single CM bundle')
 assert.match(clientSrc, /ensureVendor\('icons\.js', 'ArxaIcons'\)/, 'client loads the material icon subset')
 assert.match(clientSrc, /ensureVendor\('prettier\.js', 'ArxaPrettier'\)/, 'prettier stays lazy (loaded only on format)')
-assert.ok(clientSrc.includes('CM.langForExt(ext)'), 'language routing rides the bundle map')
+// G7 phase 1b: the editable lane is Monaco/VS Code, not CodeMirror. Language
+// now comes from the uri (the VS Code grammar extensions resolve it), so the
+// old `CM.langForExt(ext)` pin is gone with the code it pinned. DiffView is
+// still CodeMirror — its pins below stay.
+assert.ok(clientSrc.includes("import(VENDOR('arxa-monaco.js'))"), 'monaco bundle loaded by dynamic import (ESM + workers, not a script tag)')
+assert.match(clientSrc, /M\.openFile\(ref\.current, '\/' \+ relPath, text/, 'editable lane opens the file in monaco, keyed by its path')
+assert.ok(clientSrc.includes('onChange: () => { if (onDirty) onDirty() }'), 'dirty state rides the monaco model')
+assert.ok(clientSrc.includes('M.setTheme(dark)'), 'palette flip reaches an already-open monaco editor')
+assert.ok(clientSrc.includes('if (dead) { handle.dispose(); handle = null; return }'), 'an editor created after unmount is disposed, not leaked into a detached node')
+assert.ok(clientSrc.includes('docRef.current.getText()'), 'save reads the live monaco document')
+assert.ok(clientSrc.includes('view.replaceRange('), 'format writes one minimal edit (cursor + undo survive)')
 assert.ok(clientSrc.includes('detectIndent('), 'indentation detected per file (VS Code detectIndentation)')
 assert.ok(clientSrc.includes('FORMAT_EXTS'), 'format-visible extension list present')
-assert.ok(clientSrc.includes("'Shift-Alt-F'"), 'VS Code format chord bound')
+assert.match(clientSrc, /KeyMod\.Shift \| M\.monaco\.KeyMod\.Alt \| M\.monaco\.KeyCode\.KeyF/, 'VS Code format chord bound')
 assert.match(clientSrc, /IconEnhanceOutline16/, 'format action uses the enhance glyph')
 assert.ok(clientSrc.includes('aXa_av_palMd'), 'markdown preview adopts the palette chrome')
 assert.ok(clientSrc.includes("'--aXa_av_pal-bg'"), 'palette CSS vars set on the root')

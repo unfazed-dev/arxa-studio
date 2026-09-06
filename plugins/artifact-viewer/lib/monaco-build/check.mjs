@@ -59,9 +59,32 @@ server.listen(0, '127.0.0.1', () => {
   // execFile, NOT execFileSync: the sync form blocks this process's event
   // loop, so the server above can never answer the lens's requests and every
   // run dies on a Page.navigate timeout.
-  execFile('arxa', ['lens', 'check', url, png, '1400', '900', '15000',
+  execFile('arxa', ['lens', 'check', url, png, '1400', '900', '30000',
     '--selector=.monaco-editor',
-    "--expect=window.__spike.editor === true && window.__spike.lines === 12 && window.__spike.lang === 'rust' && window.__spike.tokens > 20",
+    // Every claim phase 1 rests on, asserted in the browser. The reopen and
+    // worker rows exist because both were previously written on faith: the
+    // overlay stacked per open (stale text on the second visit to a path), and
+    // nothing had ever asked getWorker for a label.
+    '--expect=' + [
+      "window.__spike.step === 'done'",   // the page ran to the end
+      'window.__spike.error === undefined',
+      'window.__spike.editor === true',
+      'window.__spike.lines === 12',
+      "window.__spike.lang === 'rust'",
+      'window.__spike.tokens > 20',
+      "window.__spike.lang2 === 'dart'",          // a second extension's grammar
+      "window.__spike.reopenLang === 'rust'",
+      'window.__spike.reopenFresh === true',      // reopen shows the NEW bytes
+      'window.__spike.reopenNoStale === true',    // and not the old ones
+      'window.__spike.edited === true',           // replaceRange (format action)
+      'window.__spike.onChangeFired === true',    // onChange (dirty tracking)
+      'window.__spike.diffChanges > 0',           // the editor worker answered
+      // MEASURED labels, not guessed — the first map keyed a label monaco
+      // never asks for, and only the ?? fallback hid it.
+      "window.__spike.workerLabels.includes('editorWorkerService')",
+      "window.__spike.workerLabels.includes('TextMateWorker')",
+      'window.__spike.themeFlipped === true',     // live dark/light flip
+    ].join(' && '),
   ], { encoding: 'utf8' }, (err, stdout, stderr) => {
     server.close()
     const out = (stdout ?? '') + (stderr ?? '')

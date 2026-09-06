@@ -253,9 +253,61 @@ across builds. Pointing the route at `monaco-build/dist` needs no file move, no
 vite change and no `check.mjs` change, and the tar exclude was required either
 way.
 
-#### 1b. The lane itself — next
+#### 1b. The editable lane is Monaco — **DONE**
 
-Two things carried out of 1a that 1b must not skip:
+`CodeView` — the surface behind `code`, `text` and markdown source — is now real
+VS Code. `DiffView` stays on CodeMirror this commit: Monaco's `DiffEditor` is a
+different UX (side-by-side vs the current inline merge) and deserves its own
+visual pass, and the CodeMirror bundle is loaded anyway for the markdown
+preview's fence parsers.
+
+**The seam.** `docRef.current` had seven consumers reading
+`.state.doc.toString()`. It now holds the bundle's own handle —
+`getText` / `replaceRange` / `dispose` — deliberately NOT a monaco object, so
+phases 4-6 do not become a rewrite of all seven. One `docText()` accessor
+serves the read sites; two of them run during **render** (markdown preview, diff
+surface), so it answers with the loaded bytes before the bundle has landed
+rather than throwing.
+
+**Three things were wrong and only the browser said so:**
+
+1. **A provider per open file does not work.** `registerFileSystemOverlay(1, fsp)`
+   STACKS, so the second open of a path left the first overlay in place and
+   `createModelReference` returned the first model with its stale text.
+2. **Disposing the overlay to compensate is worse.** The text-file service still
+   holds the uri and reloads it, so closing a file produced `Unable to resolve
+   nonexistent file` and the next open threw. Fixed by ONE provider and ONE
+   overlay for the page, files added to it, models cached.
+3. **`registerFile` throws on a uri it already holds** rather than replacing, so
+   fresh bytes on a reopen arrive through the model (`setValue`), not by
+   re-registering.
+
+**The worker label map was wrong.** Phase 0 recorded it as "written but not
+exercised", and it was also *incorrect*: monaco asks for `editorWorkerService`
+and `TextMateWorker`. The map keyed the editor worker as `TextEditorWorker` —
+a label nothing ever requests — so that entry was dead and only the `??`
+fallback kept it working. Both real labels are now keyed and **asserted by
+name**, because `workerAsked === true` alone cannot tell the map from its
+fallback.
+
+**The check is now 16 assertions in the browser**, not one: open rust → switch
+to dart (a second extension's grammar) → reopen rust with CHANGED bytes (the
+stale-model regression) → `replaceRange` + `onChange` (format and dirty state)
+→ a diff that forces the editor worker → the live dark/light flip. A
+single-file green never covered any of this.
+
+`arxa-engine-sync` now warns when `dist/` is missing (pack-sidecar refuses; a
+dev sync only warns, since the rest of the payload is still worth advancing).
+
+**Still open in the lane:** verified on screen by the user is the remaining
+step. `files.autoSave`, the PDF extension and prettier→VS Code formatting stay
+where the plan already puts them (phases 4-5).
+
+#### Carried from 1a — now resolved
+
+Both things 1a handed forward were done above: the engine-sync `dist/` warning,
+and the worker routing, which turned out to be wrong rather than merely
+untested. Original notes:
 
 - **`arxa-engine-sync` has no equivalent of pack-sidecar's refusal.** If `dist/`
   is absent (fresh checkout, never built) the sync copies the plugin as normal

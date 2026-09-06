@@ -130,6 +130,14 @@ const main = () => {
   for (const p of readdirSync(join(repo, 'plugins'))) {
     sync('plugins/' + p, join(repo, 'plugins', p), join(engine, 'plugins', p))
   }
+  // The artifact viewer's editable lane import()s the Monaco bundle, which is a
+  // build product of a separate npm root and gitignored — so a checkout that
+  // has never run that build syncs a viewer whose editor 404s with nothing
+  // saying why. pack-sidecar REFUSES in this case; a dev sync only warns,
+  // because everything else in the payload is still worth advancing.
+  if (!existsSync(join(repo, 'plugins', 'artifact-viewer', 'lib', 'monaco-build', 'dist', 'arxa-monaco.js'))) {
+    console.log('note: plugins/artifact-viewer/lib/monaco-build/dist is missing — the viewer\'s editor will not load. Build it with `npm ci && npm run build` in that directory.')
+  }
   // profile/ was never copied, so a profile row added in the repo (the authorization
   // seam, the github-link sign-in row) never reached a user's payload — the sidecar
   // reseeds the shared profile from HERE on every launch.

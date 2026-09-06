@@ -1,15 +1,83 @@
 <!doctype html><meta charset="utf-8"><title>monaco spike</title>
 <link rel="stylesheet" href="__CSS__">
-<style>html,body{margin:0;height:100%}#ed{position:absolute;inset:0}</style>
+<style>html,body{margin:0;height:100%}#ed{position:absolute;inset:0}#diff{position:absolute;left:-9999px;width:800px;height:300px}</style>
 <div id="ed"></div>
+<div id="diff"></div>
 <script type="module">
+  const RS = 'use std::collections::HashMap;\n\n/// squares 1..=n\nfn squares(n: i32) -> HashMap<i32, i32> {\n    (1..=n).map(|x| (x, x * x)).collect()\n}\n\nfn main() {\n    let m = squares(5);\n    println!("{:?}", m.get(&3));\n}\n'
+  const DART = 'void main() {\n  final xs = <int>[1, 2, 3];\n  print(xs.map((x) => x * x).toList());\n}\n'
+  const RS2 = RS.replace('squares(5)', 'squares(9)')
+  const el = document.getElementById('ed')
+  const settle = (ms) => new Promise((r) => setTimeout(r, ms))
+  // Published IMMEDIATELY and mutated in place: if a step hangs or throws, the
+  // lens still sees how far the page got instead of `__spike is undefined`.
+  const out = { step: 'start' }
+  window.__spike = out
+  window.addEventListener('error', (e) => { out.error = String(e.message) })
+
   const m = await import('/__arxa/artifacts/vendor/arxa-monaco.js')
-  const h = await m.openFile(document.getElementById('ed'), '/spike/main.rs',
-    'use std::collections::HashMap;\n\n/// squares 1..=n\nfn squares(n: i32) -> HashMap<i32, i32> {\n    (1..=n).map(|x| (x, x * x)).collect()\n}\n\nfn main() {\n    let m = squares(5);\n    println!("{:?}", m.get(&3));\n}\n')
-  await new Promise((r) => setTimeout(r, 2500))
-  window.__spike = { editor: !!h.editor, lines: h.editor.getModel().getLineCount(),
-    lang: h.editor.getModel().getLanguageId(),
-    langs: m.monaco.languages.getLanguages().length,
-    bg: getComputedStyle(document.querySelector('.monaco-editor')).getPropertyValue('--vscode-editor-background') || '',
-    tokens: document.querySelectorAll('.monaco-editor .view-line span').length }
+
+  out.step = 'open-rust'
+  // 1. open a rust file
+  let h = await m.openFile(el, '/spike/main.rs', RS, { onChange: () => { out.changed = true } })
+  await settle(2500)
+  out.editor = !!h.editor
+  out.lines = h.model.getLineCount()
+  out.lang = h.model.getLanguageId()
+  out.tokens = document.querySelectorAll('.monaco-editor .view-line span').length
+  out.langs = m.monaco.languages.getLanguages().length
+
+  out.step = 'switch-dart'
+  // 2. switch to a DIFFERENT file — a second language, from a second extension
+  h.dispose()
+  h = await m.openFile(el, '/spike/main.dart', DART)
+  await settle(1200)
+  out.lang2 = h.model.getLanguageId()
+
+  out.step = 'reopen-rust'
+  // 3. come back to the FIRST path with CHANGED bytes. The overlay used to
+  //    stack per open, so createModelReference handed back the first model and
+  //    this showed the ORIGINAL text. This is the reopen regression.
+  h.dispose()
+  h = await m.openFile(el, '/spike/main.rs', RS2, { onChange: () => { out.changed = true } })
+  await settle(1200)
+  out.reopenLang = h.model.getLanguageId()
+  out.reopenFresh = h.model.getValue().includes('squares(9)')
+  out.reopenNoStale = !h.model.getValue().includes('squares(5)')
+
+  out.step = 'adapter-edit'
+  // 4. the adapter the client drives: getText + replaceRange (what the
+  //    prettier format action uses) must keep the model in step.
+  const before = h.getText()
+  const at = before.indexOf('squares(9)')
+  h.replaceRange(at, at + 10, 'squares(7)')
+  out.edited = h.getText().includes('squares(7)')
+  out.onChangeFired = out.changed === true
+
+  out.step = 'editor-worker'
+  // 5. force an EDITOR-WORKER round trip. Nothing in the spike had ever asked
+  //    MonacoEnvironment.getWorker for a label, so the label map was written
+  //    on faith. Diff computation runs in TextEditorWorker.
+  const de = m.monaco.editor.createDiffEditor(document.getElementById('diff'), { automaticLayout: false })
+  de.setModel({
+    original: m.monaco.editor.createModel(RS, 'rust'),
+    modified: m.monaco.editor.createModel(RS2, 'rust'),
+  })
+  for (let i = 0; i < 60 && !(de.getLineChanges() || []).length; i++) await settle(100)
+  out.diffChanges = (de.getLineChanges() || []).length
+  out.workerLabels = (self.__arxaWorkerLabels || []).join(',')
+  out.workerAsked = (self.__arxaWorkerLabels || []).length > 0
+
+  out.step = 'theme-flip'
+  // 6. the theme flip must reach an already-open editor
+  const bgOf = () => getComputedStyle(document.querySelector('.monaco-editor')).getPropertyValue('--vscode-editor-background').trim()
+  out.bg = bgOf()
+  m.setTheme(false)
+  await settle(1200)
+  out.bgLight = bgOf()
+  out.themeFlipped = out.bgLight !== '' && out.bgLight !== out.bg
+  m.setTheme(true)
+  await settle(800)
+
+  out.step = 'done'
 </script>

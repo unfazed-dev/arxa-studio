@@ -541,6 +541,17 @@ window.__ModuleLoader__.load({
       return loadedVendors[name]
     }
 
+    /** The Monaco/VS Code bundle. A dynamic import(), NOT a <script> tag like
+     *  ensureVendor above: this graph is ESM and spawns workers, which an IIFE
+     *  cannot be. Built by lib/monaco-build and served off the same vendor
+     *  route. Absent in a checkout that has never run its build — the caller
+     *  surfaces the load error in the editor pane rather than blanking it. */
+    let monacoMod = null
+    function ensureMonaco() {
+      monacoMod ??= import(VENDOR('arxa-monaco.js'))
+      return monacoMod
+    }
+
     // ---- VS Code 2026 palette + formatting plumbing (grilled 2026-09-03) -----
     // The editor surfaces adopt the vendored 2026 Dark/Light port (themes.js)
     // following the dsh shell's dark flag (body[data-ds-dark-theme]); every
@@ -646,51 +657,44 @@ window.__ModuleLoader__.load({
     }
 
     // ---- lane components ------------------------------------------------------
+    /** The editable surface: real VS Code (Monaco + the built-in grammar
+     *  extensions), replacing CodeMirror for code, text and markdown source.
+     *
+     *  `docRef.current` holds the bundle's handle, not a monaco object. Five
+     *  call sites in Panel read the live document through it, and keeping the
+     *  seam narrow is what stops phases 4-6 from rewriting all of them. */
     function CodeView({ relPath, text, editable, docRef, onDirty }) {
       const ref = React.useRef(null)
       React.useEffect(() => {
         let dead = false
-        let view = null
+        let handle = null
         let unwatch = null
         ;(async () => {
-          // ONE bundle: ArxaTheme rides the codemirror IIFE — a separate
-          // themes.js would carry a second @codemirror/state and every
-          // extension would fail EditorView's instanceof check (measured
-          // live 2026-09-03).
-          const CM = await ensureVendor('codemirror.js', 'ArxaCM')
-          const TH = CM.ArxaTheme
+          const M = await ensureMonaco()
           if (dead || !ref.current) return
-          const ext = (relPath.match(/\.([a-z0-9]+)$/i) || ['', ''])[1].toLowerCase()
-          // Theme + indentation sit in compartments: the dark/light flip
-          // reconfigures live without rebuilding the editor.
-          const themeComp = new CM.Compartment()
-          const indentComp = new CM.Compartment()
-          const pal = (dark) => {
-            const t = TH[dark ? 'dark' : 'light']
-            return [t.theme, CM.syntaxHighlighting(t.highlight)]
-          }
-          const indent = detectIndent(text)
-          const extensions = [
-            ...CM.basicSetup,
-            themeComp.of(pal(isDarkMode())),
-            indentComp.of([CM.indentUnit.of(indent.unit), CM.EditorState.tabSize.of(indent.size)]),
-            CM.keymap.of([{
-              key: 'Shift-Alt-F',
-              run: () => { if (formatActionRef.current) { void formatActionRef.current(); return true } return false },
-            }]),
-            CM.EditorView.editable.of(!!editable),
-            CM.EditorState.readOnly.of(!editable),
-            CM.EditorView.updateListener.of((u) => { if (u.docChanged && onDirty) onDirty() }),
-          ]
-          const lang = CM.langForExt(ext)
-          if (lang) extensions.push(lang)
-          view = new CM.EditorView({ state: CM.EditorState.create({ doc: text, extensions }), parent: ref.current })
-          if (docRef) docRef.current = view
-          unwatch = watchPalette((dark) => {
-            if (view) view.dispatch({ effects: themeComp.reconfigure(pal(dark)) })
+          handle = await M.openFile(ref.current, '/' + relPath, text, {
+            editable: !!editable,
+            dark: isDarkMode(),
+            onChange: () => { if (onDirty) onDirty() },
           })
-        })().catch((e) => { if (ref.current) ref.current.textContent = String(e) })
-        return () => { dead = true; if (unwatch) unwatch(); if (view) view.destroy(); if (docRef) docRef.current = null }
+          // The await above can outlive the effect: dispose what we just made
+          // rather than leaking an editor into a detached container.
+          if (dead) { handle.dispose(); handle = null; return }
+          if (docRef) docRef.current = handle
+          // Shift-Alt-F stays wired to the prettier action for now; VS Code's
+          // own format command takes over in phase 4.
+          handle.editor.addCommand(
+            M.monaco.KeyMod.Shift | M.monaco.KeyMod.Alt | M.monaco.KeyCode.KeyF,
+            () => { if (formatActionRef.current) void formatActionRef.current() },
+          )
+          unwatch = watchPalette((dark) => { M.setTheme(dark) })
+        })().catch((e) => { if (ref.current) ref.current.textContent = String(e && e.message || e) })
+        return () => {
+          dead = true
+          if (unwatch) unwatch()
+          if (handle) handle.dispose()
+          if (docRef) docRef.current = null
+        }
       }, [relPath, text, editable])
       return h('div', { className: 'aXa_av_editorWrap', ref })
     }
@@ -1163,6 +1167,14 @@ window.__ModuleLoader__.load({
       const openWorktreeRef = React.useRef(null)
       React.useEffect(() => { dirtyRef.current = dirty }, [dirty])
 
+      /** The live document, or the loaded bytes when no editor is mounted yet.
+       *  Two of its callers run during RENDER (the markdown preview, the diff
+       *  surface), so it has to answer before the editor bundle has finished
+       *  loading — never throw here. */
+      const docText = () => {
+        try { return docRef.current ? docRef.current.getText() : state.text } catch { return state.text }
+      }
+
       const lane = state.kind ? state.kind.lane : null
       const editableLane = EDITABLE_LANES.has(lane)
       const canEdit = editableLane && !state.readOnly && !!session
@@ -1174,7 +1186,7 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         if (lane !== 'markdown' || showSource || !window.ArxaMD) return
         try {
-          const text = docRef.current ? docRef.current.state.doc.toString() : state.text
+          const text = docText()
           if (text != null) setPreviewHtml(window.ArxaMD.render(text))
         } catch { /* preview is best-effort */ }
       }, [lane, showSource, mdReady, state.text, pal])
@@ -1427,7 +1439,7 @@ window.__ModuleLoader__.load({
             body: JSON.stringify({
               worktreeId: session.id,
               relPath: state.relPath,
-              content: docRef.current.state.doc.toString(),
+              content: docRef.current.getText(),
               ...(!force && mtimeRef.current != null ? { expectedMtimeMs: mtimeRef.current } : {}),
             }),
           })
@@ -1513,7 +1525,7 @@ window.__ModuleLoader__.load({
         if (!view || !formatExt) return
         try {
           const PT = await ensureVendor('prettier.js', 'ArxaPrettier')
-          const before = view.state.doc.toString()
+          const before = view.getText()
           const indent = detectIndent(before)
           const out = await PT.format(before, formatExt, { tabWidth: indent.size, useTabs: indent.unit === '\t' })
           if (out === before) return
@@ -1524,7 +1536,7 @@ window.__ModuleLoader__.load({
           while (p < minLen && before[p] === out[p]) p++
           let s = 0
           while (s < minLen - p && before[before.length - 1 - s] === out[out.length - 1 - s]) s++
-          view.dispatch({ changes: { from: p, to: before.length - s, insert: out.slice(p, out.length - s) } })
+          view.replaceRange(p, before.length - s, out.slice(p, out.length - s))
         } catch (e) {
           setSaveNote(t('format.failed') + ' ' + String((e && e.message) || e))
           setSavePhase('error')
@@ -1536,7 +1548,7 @@ window.__ModuleLoader__.load({
       })
 
       const doCopy = () => {
-        const text = docRef.current ? docRef.current.state.doc.toString() : state.text
+        const text = docText()
         if (text == null) return
         void P.writeClipboard(text).then((ok) => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1600) } })
       }
@@ -1634,7 +1646,7 @@ window.__ModuleLoader__.load({
 
         let surface = null
         if (showDiff && editableLane) {
-          surface = h(DiffView, { relPath: state.relPath, original: mainText, text: (docRef.current && canEdit) ? docRef.current.state.doc.toString() : state.text })
+          surface = h(DiffView, { relPath: state.relPath, original: mainText, text: canEdit ? docText() : state.text })
         } else if (lane === 'markdown' && !showSource) {
           surface = h('div', { className: 'aXa_av_scroll' + (pal ? ' aXa_av_palMd' : '') },
             h('div', { className: 'aXa_av_md', dangerouslySetInnerHTML: { __html: previewHtml || (window.ArxaMD ? window.ArxaMD.render(state.text) : '<em>' + t('loading') + '</em>') } }))
