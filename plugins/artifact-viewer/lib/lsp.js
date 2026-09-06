@@ -241,7 +241,17 @@ export function createLspBridge ({
     }
     let child
     try {
-      child = spawn(cmd, def.args, { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] })
+      child = spawn(cmd, def.args, {
+        cwd: root,
+        // The CHILD needs the toolchain PATH too, not just the lookup that
+        // found it. rust-analyzer shells out to `cargo` (metadata, check) for
+        // every diagnostic, and cargo is in the same directory the engine's
+        // own PATH cannot see — measured: `cargo` is missing under
+        // /usr/bin:/bin:/usr/sbin:/sbin. Left alone the server starts, answers
+        // initialize, holds a healthy socket and never reports anything.
+        env: extra === '' ? env : { ...env, PATH: [env.PATH, extra].filter(Boolean).join(path.delimiter) },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
     } catch {
       stats.spawnFailed++
       return null

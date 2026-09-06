@@ -180,6 +180,42 @@ await refuses('a file with no project manifest above it', { exists: () => false 
   assert.deepEqual(spawned, ['/opt/mine/ra'], 'ARXA_LSP_RUST overrides the row')
   b.stopAll('test')
   ok('ARXA_LSP_<LANG> overrides the built-in command')
+
+  // The CHILD gets the toolchain PATH too. rust-analyzer shells out to cargo
+  // for every diagnostic, and cargo sits in the same directory the engine's own
+  // PATH cannot see — measured: `cargo` is missing under launchd's PATH. Without
+  // this the server starts, answers initialize, and reports nothing forever.
+  const opts = []
+  const c = createLspBridge({
+    secret: SECRET, getOrgPath: () => ORG, shellPath: '/opt/toolchain/bin',
+    env: { PATH: '/usr/bin' }, exists: () => true,
+    spawn: (_cmd, _args, o) => {
+      opts.push(o)
+      return { stdout: { on: () => {} }, stderr: { on: () => {} }, stdin: { write: () => {} }, on: () => {}, kill: () => {} }
+    },
+    servers: { rust: { exts: ['.rs'], cmd: 'rust-analyzer', args: [] } },
+  })
+  c.ensureServer(ORG, 'rust', '/opt/toolchain/bin')
+  assert.equal(opts[0].env.PATH, '/usr/bin:/opt/toolchain/bin',
+    'the child inherits the engine PATH PLUS the toolchain PATH')
+  assert.equal(opts[0].cwd, ORG)
+  c.stopAll('test')
+
+  // No extra PATH to add: the env is passed through untouched, not rebuilt.
+  const passthrough = []
+  const baseEnv = { PATH: '/usr/bin', SOMETHING: 'kept' }
+  const d = createLspBridge({
+    secret: SECRET, getOrgPath: () => ORG, shellPath: '', env: baseEnv, exists: () => true,
+    spawn: (_cmd, _args, o) => {
+      passthrough.push(o)
+      return { stdout: { on: () => {} }, stderr: { on: () => {} }, stdin: { write: () => {} }, on: () => {}, kill: () => {} }
+    },
+    servers: { rust: { exts: ['.rs'], cmd: 'rust-analyzer', args: [] } },
+  })
+  d.ensureServer(ORG, 'rust')
+  assert.equal(passthrough[0].env, baseEnv, 'with nothing to add the env is passed straight through')
+  d.stopAll('test')
+  ok('the language server child is spawned with the toolchain on its PATH')
 }
 
 // ---- reading the login shell's PATH ----------------------------------------

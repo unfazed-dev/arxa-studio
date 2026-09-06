@@ -447,10 +447,24 @@ dart          -> engine PATH: null | + shell PATH: /Users/unfazed-mac/fvm/defaul
 rust-analyzer -> engine PATH: null | + shell PATH: /Volumes/developer_ssd/dev/.cargo/bin/rust-analyzer
 ```
 
-**41 assertions** now: the missing-binary case split in two (not on the PATH →
+The same bug lives one layer down: the **child** inherits the engine's stripped
+PATH unless told otherwise, and `rust-analyzer` shells out to `cargo` (metadata,
+check) for every diagnostic. Measured: `cargo` is missing under
+`/usr/bin:/bin:/usr/sbin:/sbin`. Left alone the server starts, answers
+`initialize`, holds a healthy socket and reports nothing forever — a worse
+failure than the one above, and the live test cannot catch it because the test
+process has the full shell PATH. The child is now spawned with
+`PATH = engine PATH + toolchain PATH`; with nothing to add, the env is passed
+straight through rather than rebuilt.
+
+`SHELL` was confirmed present in the live engine environment (`/bin/zsh`), so
+the probe is reachable there; `readShellPath` still answers `''` rather than
+throwing if it ever is not.
+
+**42 assertions** now: the missing-binary case split in two (not on the PATH →
 never reaches spawn; resolved but broken → still fails asynchronously and is not
-cached), plus marker fencing against a shell that prints noise, plus the real
-login shell on this machine.
+cached), marker fencing against a shell that prints noise, the real login shell
+on this machine, and the child's own PATH.
 
 #### 2c. The rest of the languages + install flow — NEXT
 
