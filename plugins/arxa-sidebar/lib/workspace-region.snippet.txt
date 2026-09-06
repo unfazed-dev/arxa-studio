@@ -1708,7 +1708,10 @@
 			// rowX 30), so the top-level listing starts at 0 and each nested
 			// dir level adds one 14px step — file text lands exactly in the
 			// dock text column (2026-09-01 alignment report).
-			const childStyle = (d) => ({ marginLeft: (Math.max(0, d - 1) * 14) + "px" });
+			// The step STOPS at 8 (2026-09-06): the tree is unbounded, so an
+			// unbounded indent would walk the name column off a narrow sidebar.
+			// Depths 1-9 are untouched, so the measured alignment above stands.
+			const childStyle = (d) => ({ marginLeft: (Math.min(Math.max(0, d - 1), 8) * 14) + "px" });
 			const openFile = (relPath) => {
 				try { window.dispatchEvent(new CustomEvent("arxa-av-open", { detail: { relPath } })); } catch { /* no bridge — ignore */ }
 			};
@@ -1754,7 +1757,15 @@
 				entry.status === "error" ? statusRow(depth, /no org open/i.test(entry.error || "") ? orgT("files.openHint") : entry.error) : null,
 				entry.status === "ready" && entry.dirs.length === 0 && entry.files.length === 0 ? statusRow(depth, orgT("files.empty")) : null,
 				entry.status === "ready" ? entry.files.map((f) => fileRow(dir ? dir + "/" + f : f, f, depth)) : null,
-				entry.status === "ready" && depth < 5 ? entry.dirs.filter((sub) => !(hideDirs && hideDirs[sub])).map((sub) => dirRow(sub, depth)) : null
+				// NO depth ceiling (2026-09-06 bug): `depth < 5` dropped every
+				// subfolder from the fifth level down — silently, with the files
+				// beside them still listed, so a folder did not look missing, it
+				// looked empty. A Flutter app lives at
+				// projects/<p>/06-build/application/<app>/lib/..., which starts at
+				// depth 5, so its whole source tree was unreachable in the sidebar.
+				// Nothing recurses on its own here — a level is fetched only when
+				// the user clicks it open — so there was never runaway work to cap.
+				entry.status === "ready" ? entry.dirs.filter((sub) => !(hideDirs && hideDirs[sub])).map((sub) => dirRow(sub, depth)) : null
 			] });
 		}
 				/** Create-organisation modal (Q3, webview-safe): replaces window.prompt,

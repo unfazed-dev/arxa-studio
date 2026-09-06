@@ -617,6 +617,10 @@ check('files: ArxaDirRows mounts inline on container rows (files-only — their 
   client.includes('function ArxaDirRows') && client.includes('mode: "files-only"') && client.includes('d.kind === "dock" ? d.slug : "projects/" + d.slug'))
 check('files: leaf worktrees list their content in place (ARXA_LEAF_FILES, full mode, dirs expandable)',
   client.includes('ARXA_LEAF_FILES(group),') && client.includes('mode: "full"') && client.includes('if (ARXA_IS_CONTAINER_GROUP(group.workspaceId)) return null;'))
+check('files: NO fixed depth ceiling — folders keep expanding however deep (a Flutter app sits at projects/<p>/06-build/application/<app>/lib/src/…, past the old depth<5 cut, and its files were unreachable)',
+  !/&& depth < \d/.test(client) && client.includes('entry.status === "ready" ? entry.dirs.filter((sub) => !(hideDirs && hideDirs[sub])).map((sub) => dirRow(sub, depth)) : null'))
+check('files: the INDENT is what is bounded, not the tree — the step stops at 8 so a deep row keeps its name column',
+  client.includes('marginLeft: (Math.min(Math.max(0, d - 1), 8) * 14) + "px"'))
 check('files: lazy tree route + one fresh-token 403 retry + arxa-av-open bridge unchanged',
   client.includes('"/__arxa/artifacts/tree?dir="') && client.includes('scope: "tree-read"') && client.includes('window.dispatchEvent(new CustomEvent("arxa-av-open", { detail: { relPath } }))'))
 check('files: expanding an org row opens the org (tree-read rides the open handle) + human hint when it is not open',
