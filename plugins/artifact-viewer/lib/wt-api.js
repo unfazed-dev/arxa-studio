@@ -100,8 +100,11 @@ export function createWorktreeRoute({ env = process.env, secret }) {
       if (!ok.ok) return deny(res, 403, 'missing or invalid token (' + (ok.reason || '?') + ')')
       const open = readOpenOrg(env)
       let file
+      const t0 = Date.now()
       try {
         file = await resolveWorktreeFile({ env, orgPath: open ? open.orgPath : null, worktreeId: session, relPath })
+        // Server-side cost only; the trace line on the client shows the wait.
+        if (Date.now() - t0 > 100) console.log('[arxa-artifact-viewer] wt-read resolve took ' + (Date.now() - t0) + 'ms ' + String(relPath).slice(0, 80))
       } catch (err) {
         const map = { BAD: 400, ESCAPE: 403, NO_SESSION: 404, NOT_FILE: 404 }
         const code = map[err.code] || 500

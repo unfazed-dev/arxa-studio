@@ -362,6 +362,23 @@ export function apply(ctx, config) {
       path: '/__arxa/artifacts/main-version',
       handler: (req, res) => { void mainVersion.handle(req, res) },
     })
+    // Event-loop lag after boot (2026-09-07). The first click's token and read
+    // routes took 0.6s and 1.0s on the live host while the same calls take
+    // <30ms in isolation: the request was WAITING, not working. This names
+    // the moment the loop was blocked; the lines around it name the blocker.
+    // Samples for 30s after boot, logs any stall over 100ms, then stops.
+    {
+      const t0 = Date.now()
+      let last = Date.now()
+      const iv = setInterval(() => {
+        const now = Date.now()
+        const lag = now - last - 250
+        if (lag > 100) console.log('[arxa-artifact-viewer] loop-lag ' + lag + 'ms at +' + ((now - t0) / 1000).toFixed(1) + 's')
+        last = now
+        if (now - t0 > 30000) clearInterval(iv)
+      }, 250)
+      iv.unref?.()
+    }
     // Click-to-paint trace (2026-09-07): the client posts one JSON line per
     // open and it lands in the engine log, where a slow first load can be
     // read phase by phase. Same-origin POST only, body capped, nothing stored.
