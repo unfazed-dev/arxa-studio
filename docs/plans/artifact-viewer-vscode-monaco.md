@@ -466,19 +466,83 @@ never reaches spawn; resolved but broken → still fails asynchronously and is n
 cached), marker fencing against a shell that prints noise, the real login shell
 on this machine, and the child's own PATH.
 
-#### 2c. The rest of the languages + install flow — NEXT
+#### 2c. The rest of the languages + install door — DONE
+
+Rows added: **typescript** (`.ts .tsx .mts .cts .js .jsx .mjs .cjs`), **html**,
+**css** (`.css .scss .less`), **json** (`.json .jsonc`). All four are npm
+packages, so `npm` on the row is both the install instruction and the marker
+that an Install door may offer them; dart and rust carry no `npm` and are
+locate-only, which is the plan's own carve-out.
+
+**Install** = `npm install --prefix <arxa home>/lsp` — npm is already on the
+machine and does its own integrity checking, so there is no download, extract or
+hash-pinning code here to get wrong. Its own prefix, never a global install: it
+must not change what the user's `npm -g` holds, and it has to be removable by
+deleting one directory. `resolveBin` searches that directory FIRST, so what the
+Install door just put there is never shadowed by a stale global. Nothing installs
+on its own — the route runs only because a person pressed the button, and it
+refuses any language without an npm row.
+
+Four things measured rather than assumed, each of which would have shipped a
+dead row:
+
+1. **The npm servers are `#!/usr/bin/env node` scripts.** Under the engine's own
+   PATH that shebang dies with `env: node: No such file or directory` — an
+   instant exit that looks like a healthy spawn, not a missing binary. `childPath`
+   now ends with `dirname(process.execPath)`, so arxa's own node is the last
+   resort and a machine with no node installed at all still runs them.
+2. **`typescript@7` is the native rewrite.** Its `lib/` holds `tsc.js` and
+   `getExePath.js` and no `tsserver.js` at all, and `typescript-language-server`
+   drives tsserver. Unpinned, npm installs 7 and every `.ts` file silently gets
+   nothing. The row pins `typescript@^5`.
+3. **There is no `--tsserver-path` flag.** Read out of the installed `cli.mjs`,
+   the whole CLI is `--stdio` and `--log-level`; the knob is
+   `initializationOptions.tsserver.fallbackPath`, and `findTypescriptVersion()`
+   tries the user path, then the WORKSPACE, then the fallback — so a project with
+   its own TypeScript still uses it and arxa's copy only fills the gap. The host
+   computes it (only it knows where arxa installed one) and the editor sends it.
+4. **One server owns several monaco language ids.** A `.js` file is language
+   `javascript`, not `typescript`; the css server owns scss and less, the json
+   server owns jsonc. A selector of just the row name would have connected a
+   client that then ignored every `.js`, `.scss` and `.jsonc` document it was
+   started for.
+
+**`projectRootFor` gained a fallback.** html, css and json normally have no
+manifest above them, and a loose `.ts` analyses fine on its own — denying those
+would have made "no diagnostics" the normal case for three of the five languages.
+With `rootFallback`, a file with no manifest roots at its own directory; the org
+bound still applies first, so the fallback can never point outside the open org.
+
+**The editor ASKS instead of reading the close code.** `/lsp/status` reports
+availability per language. The host accepts the upgrade FIRST and only then
+closes 4004 when there is no binary, so "did the socket open" and "is there a
+server" are different questions and the close arrives too late to decide whether
+to offer an Install. Status carries `installable` too, so dart and rust get a
+sentence ("install its SDK") rather than a download button.
+
+`lsp-install` is its own token class: a leaked `lsp` token starts a server the
+user already has, and must not be able to put new software on the machine. One
+npm per language at a time, so a double-click cannot run two into one prefix.
+
+**51 assertions**, including a LIVE `typescript-language-server` answering
+`initialize` through the bridge on a loose `.ts` with no manifest, asserted to be
+rooted at the file's own folder. That block is gated on the binary resolving, so
+CI never downloads from npm — it becomes a real check the moment the Install door
+has run once.
+
+#### Still open after 2c
 
 `MonacoLanguageClient` 10.7.0 takes `{ id, name, clientOptions, messageTransports }`
 — confirmed from the installed types, not from memory.
 
-`typescript-language-server` and `vscode-langservers-extracted` (html/css/json)
-are still absent from this machine, so their rows and the Install flow land
-together — a routing row for a server nobody can start just buys a socket that
-closes 4004.
+**Unverified on screen:** the Install strip and the four new languages are proven
+host-side (51 assertions, one of them a live server) and by static pins on the
+client. Whether the strip renders where it should, and whether underlines appear
+for a `.ts`/`.html`/`.css`/`.json` file, needs a restart and a look.
 
-**Unverified on screen:** everything in 2b above is proven host-side and by
-static pins on the client. Whether diagnostics actually appear under the cursor
-needs a reload and a real Rust or Dart file in an open org.
+`eslint` is deliberately not a row: `vscode-langservers-extracted` ships
+`vscode-eslint-language-server`, but it needs an eslint config resolved out of
+the project, which is a different problem from the four here.
 
 Original plan below.
 

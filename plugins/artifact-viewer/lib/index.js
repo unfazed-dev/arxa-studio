@@ -23,8 +23,8 @@ import { startOrgFollow, readOpenOrg } from './follow.js'
 import { createWriteApi, createMainVersionRoute, createVersionRoute, resolveWorktree } from './write-api.js'
 import { createWorktreeRoute, createTreeRoute, createSessionChangesRoute, resolveWorktreeFile } from './wt-api.js'
 import { createOrgWatcher, createEventsRoute } from './watcher.js'
-import { TOKEN_TTL_CEILING_SECONDS, issueToken, loadOrCreateSecret, readVerifyFor } from './tokens.js'
-import { createLspBridge } from './lsp.js'
+import { TOKEN_TTL_CEILING_SECONDS, issueToken, loadOrCreateSecret, readVerifyFor, verifyToken } from './tokens.js'
+import { createLspBridge, installArgv, installServer, resolveBin, LANG_SERVERS } from './lsp.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -119,6 +119,15 @@ export function createTokenRoutes({ env = process.env, secret, getSettings, getO
         const openL = readOpenOrg(env)
         if (!openL) return json(res, 403, { error: 'no org open' })
         const token = issueToken({ secret, scope: 'lsp', orgPath: openL.orgPath, ttlSeconds: ttl })
+        return json(res, 200, { token })
+      }
+      if (body.scope === 'lsp-install') {
+        // A SEPARATE class from 'lsp' again: that one starts a server the user
+        // already has, this one puts new software on their machine. Same org
+        // binding, different authority — a leaked 'lsp' token must not install.
+        const openI = readOpenOrg(env)
+        if (!openI) return json(res, 403, { error: 'no org open' })
+        const token = issueToken({ secret, scope: 'lsp-install', orgPath: openI.orgPath, ttlSeconds: ttl })
         return json(res, 200, { token })
       }
       if (body.scope === 'tree-read') {
@@ -388,6 +397,92 @@ export function apply(ctx, config) {
     ctx.webServer?.register?.({
       path: '/__arxa/artifacts/session-changes',
       handler: (req, res) => { void changesRoute.handle(req, res) },
+    })
+    // 2c install door. NEVER automatic — nothing calls this except a person
+    // pressing Install on a language whose row carries an npm package. One
+    // install per language at a time: a double-click must not run two npm
+    // processes into the same prefix.
+    const installing = new Map()
+    const installHandler = async (req, res) => {
+      const json2 = (s, b) => {
+        res.writeHead(s, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+        res.end(JSON.stringify(b))
+      }
+      try {
+        if (req.method !== 'POST') return json2(405, { error: 'POST only' })
+        let body = {}
+        try { body = JSON.parse((await readBody(req)) || '{}') } catch { return json2(400, { error: 'bad json' }) }
+        const openI = readOpenOrg(process.env)
+        if (!openI) return json2(403, { error: 'no org open' })
+        if (!verifyToken(body.avt, { secret, scope: 'lsp-install', orgPath: openI.orgPath }).ok) {
+          return json2(403, { error: 'missing or invalid token' })
+        }
+        const lang = typeof body.lang === 'string' ? body.lang : ''
+        if (installArgv(lang) === null) {
+          // dart and rust land here on purpose: they are locate-only, and the
+          // copy must not pretend arxa can fetch them.
+          return json2(400, { error: 'not installable', locateOnly: LANG_SERVERS[lang] !== undefined })
+        }
+        let run = installing.get(lang)
+        if (run === undefined) {
+          run = installServer({
+            lang,
+            extraPath: await lspBridge.extraPath(),
+            log: (m) => console.log('[arxa-artifact-viewer] ' + m),
+          }).finally(() => installing.delete(lang))
+          installing.set(lang, run)
+        }
+        const out = await run
+        return json2(out.ok ? 200 : 500, out)
+      } catch {
+        try { res.writeHead(500, { 'content-type': 'application/json' }); res.end('{"error":"internal error"}') } catch { /* socket gone */ }
+      }
+    }
+    ctx.webServer?.register?.({
+      path: '/__arxa/artifacts/lsp/install',
+      handler: (req, res) => { void installHandler(req, res) },
+    })
+    // Which languages can actually serve. The editor asks this instead of
+    // reading the socket's close code: the host accepts the upgrade FIRST and
+    // only then closes 4004, so "did it open" and "is there a server" are two
+    // different questions and the close arrives too late to answer the second.
+    const statusHandler = async (req, res) => {
+      const json2 = (s, b) => {
+        res.writeHead(s, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+        res.end(JSON.stringify(b))
+      }
+      try {
+        const openS = readOpenOrg(process.env)
+        if (!openS) return json2(403, { error: 'no org open' })
+        const url = new URL(req.url ?? '/', 'http://x')
+        if (!verifyToken(url.searchParams.get('avt'), { secret, scope: 'lsp', orgPath: openS.orgPath }).ok) {
+          return json2(403, { error: 'missing or invalid token' })
+        }
+        const extraPath = await lspBridge.extraPath()
+        const langs = {}
+        for (const [lang, def] of Object.entries(LANG_SERVERS)) {
+          const cmd = process.env['ARXA_LSP_' + lang.toUpperCase()] || def.cmd
+          langs[lang] = {
+            available: resolveBin(cmd, { env: process.env, extraPath }) !== null,
+            // false for dart and rust: their servers ship with a toolchain, so
+            // the copy must say "install the SDK", never offer a download.
+            installable: Array.isArray(def.npm) && def.npm.length > 0,
+            cmd: def.cmd,
+            // Handshake options the editor must send verbatim. Computed here
+            // because only the host knows where arxa installed things —
+            // typescript-language-server refuses to start without being told
+            // where a compiler is.
+            init: typeof def.initOptions === 'function' ? def.initOptions(process.env) : null,
+          }
+        }
+        return json2(200, { langs })
+      } catch {
+        try { res.writeHead(500, { 'content-type': 'application/json' }); res.end('{"error":"internal error"}') } catch { /* socket gone */ }
+      }
+    }
+    ctx.webServer?.register?.({
+      path: '/__arxa/artifacts/lsp/status',
+      handler: (req, res) => { void statusHandler(req, res) },
     })
   } catch (err) {
     console.error('[arxa-artifact-viewer] startup failed: ' + (err && err.message))

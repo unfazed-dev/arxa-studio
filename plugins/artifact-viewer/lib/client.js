@@ -44,7 +44,28 @@ window.__ModuleLoader__.load({
     // Mirrors LANG_SERVERS in lib/lsp.js. Only languages with a server that has
     // actually been RUN — an entry here for a server the host cannot start just
     // buys a socket that closes 4004.
-    const LSP_LANGS = { '.rs': 'rust', '.dart': 'dart' }
+    const LSP_LANGS = {
+      '.rs': 'rust', '.dart': 'dart',
+      '.ts': 'typescript', '.tsx': 'typescript', '.mts': 'typescript', '.cts': 'typescript',
+      '.js': 'typescript', '.jsx': 'typescript', '.mjs': 'typescript', '.cjs': 'typescript',
+      '.html': 'html', '.htm': 'html',
+      '.css': 'css', '.scss': 'css', '.less': 'css',
+      '.json': 'json', '.jsonc': 'json',
+    }
+    /** The monaco language ids each server owns. One server, several ids:
+     *  typescript-language-server serves javascript too, the css server serves
+     *  scss and less, the json server serves jsonc. */
+    const LSP_SELECTORS = {
+      typescript: ['typescript', 'javascript', 'typescriptreact', 'javascriptreact'],
+      css: ['css', 'scss', 'less'],
+      json: ['json', 'jsonc'],
+    }
+    /** What the Install strip calls each language, and what to say when arxa
+     *  cannot fetch it. dart and rust ship inside a toolchain — offering a
+     *  download for either would be a lie. */
+    const LSP_NAMES = {
+      rust: 'Rust', dart: 'Dart', typescript: 'TypeScript', html: 'HTML', css: 'CSS', json: 'JSON',
+    }
     const EDITABLE_LANES = new Set(['markdown', 'code', 'text'])
     const AUTOSAVE_MS = 1500
     const NS = 'arxa-artifact-viewer'
@@ -104,7 +125,13 @@ window.__ModuleLoader__.load({
       + '.aXa_av_editorWrap .cm-editor{height:100%;background:var(--aXa_av_pal-bg,var(--dsw-alias-bg-base))}'
       // Monaco scrolls itself and sizes to the container; the wrapper's
       // overflow:auto would add a second scrollbar around it.
-      + '.aXa_av_monaco{overflow:hidden}'
+      + '.aXa_av_monaco{overflow:hidden;display:flex;flex-direction:column}'
+      + '.aXa_av_lspHost{flex:1;min-height:0}'
+      + '.aXa_av_lspBar{flex:none;display:flex;gap:8px;align-items:center;padding:4px 10px;font-size:12px;'
+      + 'border-bottom:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary)}'
+      + '.aXa_av_lspBar button{font:inherit;cursor:pointer;padding:1px 8px;border-radius:5px;'
+      + 'border:1px solid var(--dsw-alias-border-l2);background:transparent;color:inherit}'
+      + '.aXa_av_lspBar button[disabled]{opacity:.5;cursor:default}'
       + '.aXa_av_monaco .monaco-editor{height:100%}'
       + '.aXa_av_editorWrap .cm-editor.cm-focused{outline:none}'
       // Editor font (2026-09-01): the fallback is an explicit Fira-free
@@ -674,6 +701,42 @@ window.__ModuleLoader__.load({
      *  seam narrow is what stops phases 4-6 from rewriting all of them. */
     function CodeView({ relPath, absPath, session, text, editable, docRef, onDirty }) {
       const ref = React.useRef(null)
+      // null while the language service is fine (or irrelevant); a row from
+      // /lsp/status when there is no server for this file's language.
+      const [lsp, setLsp] = React.useState(null)
+      const connectLsp = React.useCallback(async (lang, token, init) => {
+        const M = await ensureMonaco()
+        const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + LSP_ROUTE
+        return M.connectLanguageServer(lang, { url: wsUrl, token, relPath, session,
+          selector: LSP_SELECTORS[lang] || [lang], init: init || null })
+      }, [relPath, session])
+      const installLsp = React.useCallback(async () => {
+        if (!lsp) return
+        const lang = lsp.lang
+        setLsp((cur) => (cur ? { ...cur, busy: true, error: null } : cur))
+        try {
+          const { token } = await fetchTokenRaw({ scope: 'lsp-install' })
+          const res = await fetch(LSP_ROUTE + '/install', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ lang, avt: token }),
+          })
+          const body = await res.json().catch(() => ({}))
+          if (!res.ok || !body.ok) {
+            setLsp((cur) => (cur ? { ...cur, busy: false, error: body.reason || body.error || ('install ' + res.status) } : cur))
+            return
+          }
+          // Installed: the strip goes away and the service starts on this file
+          // — no reopen, because the model is already the right one.
+          setLsp(null)
+          const { token: t2 } = await fetchTokenRaw({ scope: 'lsp' })
+          const st2 = await fetch(LSP_ROUTE + '/status?avt=' + encodeURIComponent(t2))
+            .then((r) => (r.ok ? r.json() : null)).catch(() => null)
+          await connectLsp(lang, t2, st2 && st2.langs && st2.langs[lang] ? st2.langs[lang].init : null)
+        } catch (e) {
+          setLsp((cur) => (cur ? { ...cur, busy: false, error: String((e && e.message) || e) } : cur))
+        }
+      }, [lsp, connectLsp])
       React.useEffect(() => {
         let dead = false
         let handle = null
@@ -719,8 +782,16 @@ window.__ModuleLoader__.load({
               try {
                 const { token } = await fetchTokenRaw({ scope: 'lsp' })
                 if (dead) return
-                const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + LSP_ROUTE
-                await M.connectLanguageServer(lang, { url: wsUrl, token, relPath, session })
+                // ASK before connecting. The host accepts the upgrade first and
+                // only then closes 4004 when there is no binary, so the close
+                // code cannot answer "is there a server" in time to decide
+                // whether to offer an Install.
+                const st = await fetch(LSP_ROUTE + '/status?avt=' + encodeURIComponent(token))
+                  .then((r) => (r.ok ? r.json() : null)).catch(() => null)
+                if (dead) return
+                const row = st && st.langs ? st.langs[lang] : null
+                if (row && row.available === false) { setLsp({ lang, ...row }); return }
+                await connectLsp(lang, token, row && row.init)
               } catch { /* no language service; the editor is unaffected */ }
             })()
           }
@@ -732,7 +803,25 @@ window.__ModuleLoader__.load({
           if (docRef) docRef.current = null
         }
       }, [relPath, absPath, session, text, editable])
-      return h('div', { className: 'aXa_av_editorWrap aXa_av_monaco', ref })
+      // The strip keeps its slot whether or not it is showing: React
+      // reconciles these children by position, and letting the host div move
+      // from index 1 to index 0 would unmount the live editor.
+      return h('div', { className: 'aXa_av_editorWrap aXa_av_monaco' },
+        lsp ? h('div', { className: 'aXa_av_lspBar' }, [
+          h('span', { key: 't' }, lsp.installable
+            ? 'No ' + (LSP_NAMES[lsp.lang] || lsp.lang) + ' language server.'
+            : 'No ' + (LSP_NAMES[lsp.lang] || lsp.lang) + ' language server — install its SDK (' + lsp.cmd + ') to get one.'),
+          lsp.installable
+            ? h('button', {
+              key: 'b',
+              type: 'button',
+              disabled: !!lsp.busy,
+              onClick: installLsp,
+            }, lsp.busy ? 'Installing…' : 'Install')
+            : null,
+          lsp.error ? h('span', { key: 'e', style: { opacity: 0.8 } }, lsp.error) : null,
+        ]) : null,
+        h('div', { className: 'aXa_av_lspHost', ref }))
     }
 
     function DiffView({ relPath, original, text }) {

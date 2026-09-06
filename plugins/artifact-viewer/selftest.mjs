@@ -633,12 +633,46 @@ assert.ok(hostSrc.includes('absPath: wtAbs'), 'the worktree token route returns 
 assert.ok(hostSrc.includes("path: '/__arxa/artifacts/lsp'"), 'the lsp socket is registered as an upgrade route')
 assert.ok(hostSrc.includes("lspBridge.stopAll('org-switch')"), 'an org switch stops every language server')
 assert.ok(hostSrc.includes('resolveAbs: async ({ relPath, session, orgPath })'), 'the HOST resolves paths — the client never names one')
-assert.ok(lspSrc.includes('const root = projectRootFor(absFile, orgPath, servers[lang].rootMarkers, exists)'),
+assert.ok(lspSrc.includes('const root = projectRootFor(absFile, orgPath, servers[lang].rootMarkers, exists,'),
   'the server is rooted at the project, not the org (an org has no Cargo.toml, so it would report nothing)')
+assert.ok(lspSrc.includes('{ fallbackToFileDir: servers[lang].rootFallback === true }'),
+  'a language with no manifest (html, css, json, a loose .ts) roots at the file\'s own directory instead of being denied')
 assert.ok(clientSrc.includes("M.openFile(ref.current, absPath || ('/' + relPath), text"), 'the model is keyed on the real path, falling back to the relative one')
 assert.ok(clientSrc.includes("fetchTokenRaw({ scope: 'lsp' })"), 'the socket uses the separate lsp token class')
-assert.ok(clientSrc.includes('M.connectLanguageServer(lang, { url: wsUrl, token, relPath, session })'),
+assert.ok(clientSrc.includes('M.connectLanguageServer(lang, { url: wsUrl, token, relPath, session,'),
   'the editor attaches a language client, passing the session so a worktree file resolves')
+
+// ---- 2c: the rest of the languages + the Install door -----------------------
+assert.ok(hostSrc.includes("path: '/__arxa/artifacts/lsp/install'") && hostSrc.includes("path: '/__arxa/artifacts/lsp/status'"),
+  'the install door and the status face are both registered')
+assert.ok(hostSrc.includes("body.scope === 'lsp-install'"),
+  'installing has its own token class — a leaked lsp token starts a server, it must not put new software on the machine')
+assert.ok(hostSrc.includes("scope: 'lsp-install', orgPath: openI.orgPath") && hostSrc.includes('const installing = new Map()'),
+  'the install door is org-bound and runs one npm per language at a time')
+assert.ok(!hostSrc.includes('void installServer(') && hostSrc.includes('installArgv(lang) === null'),
+  'nothing installs on its own: the door refuses any language without an npm row (dart and rust are locate-only)')
+for (const ext of ["'.ts'", "'.tsx'", "'.js'", "'.html'", "'.css'", "'.scss'", "'.json'"]) {
+  assert.ok(clientSrc.includes(ext + ':'), 'the client routes ' + ext + ' to a language server')
+}
+assert.ok(clientSrc.includes("fetch(LSP_ROUTE + '/status?avt='"),
+  'the editor ASKS whether a server exists before connecting — the 4004 close arrives after the socket opens, too late to decide')
+assert.ok(clientSrc.includes("fetchTokenRaw({ scope: 'lsp-install' })") && clientSrc.includes("LSP_ROUTE + '/install'"),
+  'the Install button is the only thing that installs')
+assert.ok(clientSrc.includes('lsp.installable') && clientSrc.includes('install its SDK'),
+  'a locate-only language gets a sentence, not a download button')
+assert.ok(clientSrc.includes("h('div', { className: 'aXa_av_lspHost', ref })"),
+  'the editor host keeps a stable child slot, so showing the strip cannot unmount a live editor')
+const entrySrc2c = fs.readFileSync(path2.join(here, 'lib', 'monaco-build', 'src', 'entry.mjs'), 'utf8')
+assert.ok(entrySrc2c.includes('(selector ?? [lang]).map((language) => ({ language }))'),
+  'one server can own several monaco language ids (js for the ts server, scss/less for css, jsonc for json)')
+assert.ok(entrySrc2c.includes('initializationOptions: init ?? undefined'),
+  'the handshake options the host computed reach the language client')
+assert.ok(hostSrc.includes("init: typeof def.initOptions === 'function' ? def.initOptions(process.env) : null"),
+  'the host computes them — only it knows where arxa installed a compiler')
+assert.ok(lspSrc.includes("npm: ['typescript-language-server', 'typescript@^5']"),
+  'typescript is pinned to 5: 7 is the native rewrite with no tsserver.js, and an unpinned install kills the row silently')
+assert.ok(lspSrc.includes('tsserver: { fallbackPath:'),
+  'the ts server is told where a compiler is, as a FALLBACK so a project\'s own typescript still wins')
 assert.match(clientSrc, /catch \{ \/\* no language service; the editor is unaffected \*\/ \}/,
   'a missing language service NEVER fails the open — the editor works without one')
 assert.ok(entrySrc.includes("['arxa-lsp', token]"), 'the bundle sends the token as a subprotocol (a browser cannot set headers)')

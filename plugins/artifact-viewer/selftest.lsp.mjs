@@ -21,7 +21,7 @@ import { spawnSync } from 'node:child_process'
 import { WebSocketServer, WebSocket } from 'ws'
 import {
   LANG_SERVERS, langForPath, createFrameReader, frame, tokenFromProtocols, createLspBridge, projectRootFor,
-  resolveBin, readShellPath,
+  resolveBin, readShellPath, lspHome, installArgv, childPath,
 } from './lib/lsp.js'
 import { issueToken } from './lib/tokens.js'
 
@@ -143,6 +143,83 @@ await refuses('a language nothing serves', { lang: 'cobol' })
 await refuses('a path the host cannot resolve', { relPath: '' })
 await refuses('a file with no project manifest above it', { exists: () => false })
 
+// ---- 2c: the rest of the languages -----------------------------------------
+{
+  for (const [ext, lang] of [
+    ['.ts', 'typescript'], ['.tsx', 'typescript'], ['.mts', 'typescript'], ['.cts', 'typescript'],
+    ['.js', 'typescript'], ['.jsx', 'typescript'], ['.mjs', 'typescript'], ['.cjs', 'typescript'],
+    ['.html', 'html'], ['.htm', 'html'],
+    ['.css', 'css'], ['.scss', 'css'], ['.less', 'css'],
+    ['.json', 'json'], ['.jsonc', 'json'],
+    ['.rs', 'rust'], ['.dart', 'dart'],
+  ]) assert.equal(langForPath('x' + ext), lang, ext + ' routes to ' + lang)
+  assert.equal(langForPath('x.py'), null, 'a language with no row is still no error')
+  ok('typescript/js, html, css and json route to their servers')
+
+  // These four are Node programs with a `#!/usr/bin/env node` shebang. Measured:
+  // under the engine's PATH that shebang dies with "env: node: No such file or
+  // directory" — not an ENOENT on the server itself, so it would read as a
+  // healthy spawn that instantly exited.
+  for (const lang of ['typescript', 'html', 'css', 'json']) {
+    assert.ok(Array.isArray(LANG_SERVERS[lang].npm) && LANG_SERVERS[lang].npm.length > 0,
+      lang + ' is installable')
+    assert.deepEqual(LANG_SERVERS[lang].args, ['--stdio'])
+  }
+  assert.equal(LANG_SERVERS.dart.npm, undefined,
+    'dart ships inside the SDK — there is no download, only locating one')
+  assert.equal(LANG_SERVERS.rust.npm, undefined, 'rust-analyzer is not an npm package')
+  ok('the installable rows are exactly the npm ones; dart and rust are locate-only')
+
+  // typescript-language-server ships no compiler: it looks for `typescript` in
+  // the WORKSPACE and refuses to start without one ("Could not find a valid
+  // TypeScript installation ... Exiting" — measured). Its resolution order,
+  // read out of the installed cli.mjs, is user path -> workspace -> fallback,
+  // so arxa's copy fills the gap without overriding a project's own compiler.
+  assert.deepEqual(
+    LANG_SERVERS.typescript.initOptions({ ARXA_HOME: '/tmp/h' }),
+    { tsserver: { fallbackPath: path.join('/tmp/h', 'lsp', 'node_modules', 'typescript', 'lib', 'tsserver.js') } })
+  assert.ok(LANG_SERVERS.typescript.npm.includes('typescript@^5'),
+    'typescript is PINNED to 5: 7 is the native rewrite and ships no tsserver.js, so an unpinned install silently kills the row')
+  for (const lang of ['html', 'css', 'json']) {
+    assert.equal(LANG_SERVERS[lang].initOptions, undefined, lang + ' needs no initialization options')
+  }
+  ok('the typescript row carries a compiler fallback and pins the compiler major')
+}
+
+// ---- where an arxa-installed server lives ----------------------------------
+{
+  assert.equal(lspHome({ ARXA_HOME: '/tmp/h' }), path.join('/tmp/h', 'lsp'))
+  const argv = installArgv('typescript', LANG_SERVERS, { ARXA_HOME: '/tmp/h' })
+  assert.equal(argv.cmd, 'npm')
+  assert.ok(argv.args.includes('--prefix') && argv.args.includes(path.join('/tmp/h', 'lsp')))
+  assert.ok(argv.args.includes('typescript-language-server') && argv.args.includes('typescript@^5'))
+  assert.equal(installArgv('dart', LANG_SERVERS, {}), null, 'dart has nothing to install')
+  assert.equal(installArgv('cobol', LANG_SERVERS, {}), null)
+  ok('installArgv installs into <arxa home>/lsp and refuses a locate-only language')
+
+  // arxa's own copy WINS over whatever a shell exports: a stale global server
+  // must not shadow the one the Install button just put there.
+  const arxaBin = path.join('/tmp/h', 'lsp', 'node_modules', '.bin')
+  const found = resolveBin('typescript-language-server', {
+    env: { ARXA_HOME: '/tmp/h', PATH: '/usr/bin' },
+    extraPath: '/somebody/global/bin',
+    exists: (f) => f === path.join(arxaBin, 'typescript-language-server') ||
+                   f === '/somebody/global/bin/typescript-language-server',
+  })
+  assert.equal(found, path.join(arxaBin, 'typescript-language-server'))
+  ok("arxa's own lsp directory is searched before the shell PATH")
+}
+
+// ---- the child's PATH ------------------------------------------------------
+{
+  const p = childPath({ ARXA_HOME: '/tmp/h', PATH: '/usr/bin' }, '/shell/bin').split(path.delimiter)
+  assert.ok(p.includes('/usr/bin') && p.includes('/shell/bin'))
+  assert.ok(p.includes(path.join('/tmp/h', 'lsp', 'node_modules', '.bin')))
+  assert.ok(p.includes(path.dirname(process.execPath)),
+    "arxa's own node is the last resort, so `#!/usr/bin/env node` resolves even with no node installed")
+  ok('the child PATH carries the toolchain, arxa\'s installed servers, and a node')
+}
+
 // ---- finding the binary at all --------------------------------------------
 // The engine is launched by the desktop, not from a shell: its PATH is
 // launchd's default and holds no toolchain. Measured on the build machine:
@@ -196,12 +273,14 @@ await refuses('a file with no project manifest above it', { exists: () => false 
     servers: { rust: { exts: ['.rs'], cmd: 'rust-analyzer', args: [] } },
   })
   c.ensureServer(ORG, 'rust', '/opt/toolchain/bin')
-  assert.equal(opts[0].env.PATH, '/usr/bin:/opt/toolchain/bin',
-    'the child inherits the engine PATH PLUS the toolchain PATH')
+  assert.ok(opts[0].env.PATH.startsWith('/usr/bin:/opt/toolchain/bin'),
+    'the child inherits the engine PATH PLUS the toolchain PATH, in that order')
+  assert.equal(opts[0].env.PATH, childPath({ PATH: '/usr/bin' }, '/opt/toolchain/bin'))
   assert.equal(opts[0].cwd, ORG)
   c.stopAll('test')
 
-  // No extra PATH to add: the env is passed through untouched, not rebuilt.
+  // No toolchain PATH to add: the rest of the env still survives, and the
+  // child still gets arxa's own directories (a node for the npm servers).
   const passthrough = []
   const baseEnv = { PATH: '/usr/bin', SOMETHING: 'kept' }
   const d = createLspBridge({
@@ -213,7 +292,9 @@ await refuses('a file with no project manifest above it', { exists: () => false 
     servers: { rust: { exts: ['.rs'], cmd: 'rust-analyzer', args: [] } },
   })
   d.ensureServer(ORG, 'rust')
-  assert.equal(passthrough[0].env, baseEnv, 'with nothing to add the env is passed straight through')
+  assert.equal(passthrough[0].env.SOMETHING, 'kept', 'the rest of the environment survives')
+  assert.equal(passthrough[0].env.PATH, childPath(baseEnv, ''))
+  assert.ok(passthrough[0].env.PATH.includes(path.dirname(process.execPath)))
   d.stopAll('test')
   ok('the language server child is spawned with the toolchain on its PATH')
 }
@@ -239,6 +320,24 @@ await refuses('a file with no project manifest above it', { exists: () => false 
   assert.ok(typeof real === 'string')
   if (real === '') console.log('  NOTE  login shell reported no PATH (SHELL unset or shell failed)')
   else ok('the real login shell PATH resolved (' + real.split(':').length + ' entries)')
+}
+
+// ---- a loose file is not an error -------------------------------------------
+// html, css and json normally have NO manifest above them. projectRootFor
+// answering null there would deny every such file with 'no-project-root'.
+{
+  const org = '/org'
+  const none = () => false
+  assert.equal(projectRootFor('/org/a/b/x.html', org, [], none), null,
+    'no markers and no fallback is still null (the old contract holds)')
+  assert.equal(projectRootFor('/org/a/b/x.html', org, [], none, { fallbackToFileDir: true }),
+    '/org/a/b', "with the fallback, a loose file roots at its own directory")
+  assert.equal(projectRootFor('/org/a/b/x.ts', org, ['tsconfig.json'],
+    (f) => f === '/org/a/tsconfig.json', { fallbackToFileDir: true }), '/org/a',
+    'a real manifest still beats the fallback')
+  assert.equal(projectRootFor('/elsewhere/x.html', org, [], none, { fallbackToFileDir: true }), null,
+    'the fallback is still BOUNDED by the org — a file outside it roots nowhere')
+  ok('a file with no manifest roots at its own directory, never outside the org')
 }
 
 // ---- a missing binary is a clean answer, not a crash -----------------------
@@ -286,6 +385,72 @@ await refuses('a file with no project manifest above it', { exists: () => false 
   assert.equal(bridge.running.size, 0)
   assert.equal(killed.length, 1)
   ok('an org switch kills the language server (no process holding a closed org)')
+}
+
+// ---- LIVE: a real typescript-language-server, if one is installed -----------
+// Gated on the binary rather than skipped outright: CI must not download from
+// npm, but the moment the Install door has run once this becomes a real check.
+{
+  const tsBin = resolveBin('typescript-language-server', { env: process.env, extraPath: await readShellPath({}) })
+  if (tsBin === null) {
+    console.log('  SKIP  live typescript-language-server — not installed (press Install, or run installServer)')
+  } else {
+    const liveOrg = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-lsp-ts-'))
+    // NO tsconfig and NO package.json on purpose: a loose .ts file is the
+    // normal case, and it must root at its own directory rather than be denied.
+    fs.mkdirSync(path.join(liveOrg, 'notes'), { recursive: true })
+    fs.writeFileSync(path.join(liveOrg, 'notes', 'loose.ts'), 'const n: number = "no"\n')
+
+    const bridge = createLspBridge({
+      secret: SECRET,
+      getOrgPath: () => liveOrg,
+      resolveAbs: async ({ relPath, orgPath }) => path.join(orgPath, relPath),
+    })
+    const wss = new WebSocketServer({
+      noServer: true,
+      handleProtocols: (protocols) => (protocols.has('arxa-lsp') ? 'arxa-lsp' : false),
+    })
+    const server = http.createServer()
+    server.on('upgrade', (req, socket, head) => bridge.handleUpgrade(req, socket, head, wss))
+    await new Promise((r) => server.listen(0, '127.0.0.1', r))
+    const port = server.address().port
+    const liveToken = issueToken({ secret: SECRET, scope: 'lsp', orgPath: liveOrg })
+    const ws = new WebSocket(
+      'ws://127.0.0.1:' + port + '/__arxa/artifacts/lsp?lang=typescript&path=' + encodeURIComponent('notes/loose.ts'),
+      ['arxa-lsp', liveToken])
+    const reply = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('typescript-language-server did not answer initialize in 30s')), 30_000)
+      ws.on('message', (data) => {
+        const msg = JSON.parse(data.toString('utf8'))
+        if (msg.id === 1) { clearTimeout(timer); resolve(msg) }
+      })
+      ws.on('error', (e) => { clearTimeout(timer); reject(e) })
+      ws.on('open', () => {
+        ws.send(JSON.stringify({
+          jsonrpc: '2.0', id: 1, method: 'initialize',
+          params: {
+            processId: null,
+            rootUri: null,
+            capabilities: {},
+            // The same options the editor sends: without the compiler fallback
+            // this server refuses to start on a file outside a node project.
+            initializationOptions: LANG_SERVERS.typescript.initOptions(process.env),
+          },
+        }))
+      })
+    })
+    assert.ok(reply.result && reply.result.capabilities,
+      'a real LSP payload came back' + (reply.error ? ' — got: ' + reply.error.message : ''))
+    ok('LIVE: typescript-language-server answered initialize through the bridge')
+    assert.equal([...bridge.running.keys()][0], path.join(liveOrg, 'notes') + '\0typescript',
+      'a loose .ts with no manifest rooted at its own directory, not nowhere')
+    ok('LIVE: the no-manifest fallback roots the server at the file\'s folder')
+    bridge.stopAll('test-over')
+    await new Promise((r) => setTimeout(r, 200))
+    server.close()
+    try { ws.close() } catch {}
+    fs.rmSync(liveOrg, { recursive: true, force: true })
+  }
 }
 
 // ---- LIVE: a real rust-analyzer answers initialize over a real socket -------

@@ -12,6 +12,7 @@
 // session cannot outlive the host by holding a socket open.
 import { spawn as nodeSpawn, execFile } from 'node:child_process'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { verifyToken } from './tokens.js'
 
@@ -42,7 +43,105 @@ export const LANG_SERVERS = {
     cmd: 'dart',
     args: ['language-server', '--protocol=lsp'],
     rootMarkers: ['pubspec.yaml'],
+    // No `npm`: the Dart language server ships INSIDE the Dart/Flutter SDK.
+    // There is nothing to download — an install door here could only locate an
+    // SDK the user already has, which is what resolveBin already does.
   },
+  // The four below are npm packages, so `npm` is both the install instruction
+  // and the marker that an Install door may offer them. They are Node programs
+  // with a `#!/usr/bin/env node` shebang, which is why childPath() must carry a
+  // node: measured, under the engine's own PATH the shebang dies with
+  // "env: node: No such file or directory" — an instant exit that looks like a
+  // healthy spawn, not like a missing binary.
+  typescript: {
+    exts: ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'],
+    cmd: 'typescript-language-server',
+    args: ['--stdio'],
+    // `typescript@^5`, PINNED. typescript@7 is the native rewrite: its lib/ holds
+    // tsc.js and getExePath.js and no tsserver.js at all, and this server drives
+    // tsserver. Unpinned, npm installs 7 and every .ts file gets nothing.
+    npm: ['typescript-language-server', 'typescript@^5'],
+    // The server ships no compiler — it looks for `typescript` IN THE WORKSPACE
+    // and refuses to start without one. Measured, verbatim:
+    //   "Could not find a valid TypeScript installation. Please ensure that the
+    //    \"typescript\" dependency is installed in the workspace or that a valid
+    //    `tsserver.path` is specified. Exiting."
+    // So a loose .ts file outside a node project would never get a server.
+    //
+    // Read out of the installed cli.mjs rather than from memory: there is NO
+    // --tsserver-path flag (the whole CLI is --stdio and --log-level); the knob
+    // is initializationOptions, and findTypescriptVersion() tries the user path,
+    // then the WORKSPACE, then this fallback. So a project with its own
+    // TypeScript still uses it — arxa's copy only fills the gap.
+    initOptions: (env = process.env) => ({
+      tsserver: { fallbackPath: path.join(lspHome(env), 'node_modules', 'typescript', 'lib', 'tsserver.js') },
+    }),
+    rootMarkers: ['tsconfig.json', 'jsconfig.json', 'package.json'],
+    rootFallback: true,
+  },
+  html: {
+    exts: ['.html', '.htm'],
+    cmd: 'vscode-html-language-server',
+    args: ['--stdio'],
+    npm: ['vscode-langservers-extracted'],
+    rootMarkers: [],
+    rootFallback: true,
+  },
+  css: {
+    exts: ['.css', '.scss', '.less'],
+    cmd: 'vscode-css-language-server',
+    args: ['--stdio'],
+    npm: ['vscode-langservers-extracted'],
+    rootMarkers: [],
+    rootFallback: true,
+  },
+  json: {
+    exts: ['.json', '.jsonc'],
+    cmd: 'vscode-json-language-server',
+    args: ['--stdio'],
+    npm: ['vscode-langservers-extracted'],
+    rootMarkers: [],
+    rootFallback: true,
+  },
+}
+
+/** Where arxa keeps the language servers it installed itself.
+ *
+ *  Its own prefix, never a global npm install: arxa must not change what the
+ *  user's own `npm -g` holds, and an arxa-installed server has to be
+ *  removable by deleting one directory. */
+export function lspHome (env = process.env) {
+  return path.join(env.ARXA_HOME || path.join(os.homedir(), '.arxa'), 'lsp')
+}
+
+const lspBinDir = (env) => path.join(lspHome(env), 'node_modules', '.bin')
+
+/** The npm command that installs one language's server, or null when the
+ *  language is locate-only (dart, rust) or unknown. */
+export function installArgv (lang, servers = LANG_SERVERS, env = process.env) {
+  const def = servers[lang]
+  if (def === void 0 || !Array.isArray(def.npm) || def.npm.length === 0) return null
+  return {
+    cmd: 'npm',
+    args: ['install', '--prefix', lspHome(env), '--no-audit', '--no-fund', ...def.npm],
+  }
+}
+
+/** The PATH a language server child runs with.
+ *
+ *  Three things it needs that the engine's own PATH does not have: the user's
+ *  toolchain (rust-analyzer runs `cargo` for every diagnostic), whatever arxa
+ *  installed itself, and a `node` for the `#!/usr/bin/env node` shebangs.
+ *  arxa's own node goes LAST — a user's node wins, but a machine with no node
+ *  installed at all still runs the npm servers. */
+export function childPath (env = process.env, extraPath = '') {
+  const dirs = [
+    ...String(env.PATH ?? '').split(path.delimiter),
+    ...String(extraPath ?? '').split(path.delimiter),
+    lspBinDir(env),
+    path.dirname(process.execPath),
+  ].filter(Boolean)
+  return [...new Set(dirs)].join(path.delimiter)
 }
 
 /** The nearest PROJECT root above `absFile`, or null.
@@ -60,20 +159,28 @@ export const LANG_SERVERS = {
  *  Session worktrees live at <repo>/.arxa/worktrees/<id>, INSIDE the org, so
  *  the same walk finds the project copy inside the worktree — which is the
  *  right root for a file being edited there. */
-export function projectRootFor (absFile, orgRoot, markers, exists = (p) => fs.existsSync(p)) {
-  if (!Array.isArray(markers) || markers.length === 0) return null
+export function projectRootFor (absFile, orgRoot, markers, exists = (p) => fs.existsSync(p),
+  { fallbackToFileDir = false } = {}) {
   const root = path.resolve(orgRoot)
-  let dir = path.dirname(path.resolve(absFile))
-  if (dir !== root && !dir.startsWith(root + path.sep)) return null
-  for (;;) {
-    for (const marker of markers) {
-      if (exists(path.join(dir, marker))) return dir
+  const fileDir = path.dirname(path.resolve(absFile))
+  if (fileDir !== root && !fileDir.startsWith(root + path.sep)) return null
+  if (Array.isArray(markers) && markers.length > 0) {
+    let dir = fileDir
+    for (;;) {
+      for (const marker of markers) {
+        if (exists(path.join(dir, marker))) return dir
+      }
+      if (dir === root) break
+      const up = path.dirname(dir)
+      if (up === dir) break
+      dir = up
     }
-    if (dir === root) return null
-    const up = path.dirname(dir)
-    if (up === dir) return null
-    dir = up
   }
+  // html, css and json normally have NO manifest above them, and a loose .ts
+  // still analyses fine on its own. Denying those would make "no diagnostics"
+  // the normal case for three of the five languages. The fallback is still
+  // inside the org — the bounds check above already ran.
+  return fallbackToFileDir ? fileDir : null
 }
 
 /** The language id for a path, or null when nothing serves it. */
@@ -150,6 +257,9 @@ export function resolveBin (cmd, { env = process.env, exists = fs.existsSync, ex
   if (typeof cmd !== 'string' || cmd === '') return null
   if (cmd.includes(path.sep)) return exists(cmd) ? cmd : null
   const dirs = [
+    // arxa's own installed servers come FIRST: what the Install door just put
+    // there must not be shadowed by a stale global of the same name.
+    lspBinDir(env),
     ...String(env.PATH ?? '').split(path.delimiter),
     ...String(extraPath ?? '').split(path.delimiter),
   ].filter(Boolean)
@@ -181,6 +291,38 @@ export function readShellPath ({ env = process.env, run = execFile, timeoutMs = 
           resolve(m === null ? '' : m[1])
         })
     } catch { resolve('') }
+  })
+}
+
+/** Install one language's server into arxa's own prefix.
+ *
+ *  NEVER automatic (the plan's rule): a caller reaches this only because a
+ *  person pressed Install. npm does its own integrity checking, so there is no
+ *  download, extract or hash code here to get wrong — and npm itself has to be
+ *  resolved the same way the servers are, because it is under nvm on this
+ *  machine and invisible to the engine's PATH. */
+export async function installServer ({
+  lang, servers = LANG_SERVERS, env = process.env, spawn = nodeSpawn, extraPath = '', log = () => {},
+}) {
+  const argv = installArgv(lang, servers, env)
+  if (argv === null) return { ok: false, reason: 'not-installable' }
+  const npm = resolveBin(argv.cmd, { env, extraPath })
+  if (npm === null) return { ok: false, reason: 'npm-not-found' }
+  try { fs.mkdirSync(lspHome(env), { recursive: true }) } catch { return { ok: false, reason: 'home-unwritable' } }
+  log('lsp: installing ' + lang + ' (' + argv.args.slice(-2).join(' ') + ')')
+  return new Promise((resolve) => {
+    let out = ''
+    let child
+    try {
+      child = spawn(npm, argv.args, { env: { ...env, PATH: childPath(env, extraPath) }, stdio: ['ignore', 'pipe', 'pipe'] })
+    } catch { return resolve({ ok: false, reason: 'spawn-failed' }) }
+    child.stdout.on('data', (d) => { out += d })
+    child.stderr.on('data', (d) => { out += d })
+    child.on('error', () => resolve({ ok: false, reason: 'spawn-failed' }))
+    child.on('exit', (code) => {
+      log('lsp: install ' + lang + ' exited ' + code)
+      resolve(code === 0 ? { ok: true } : { ok: false, reason: 'npm-exit-' + code, output: out.slice(-2000) })
+    })
   })
 }
 
@@ -243,13 +385,13 @@ export function createLspBridge ({
     try {
       child = spawn(cmd, def.args, {
         cwd: root,
-        // The CHILD needs the toolchain PATH too, not just the lookup that
-        // found it. rust-analyzer shells out to `cargo` (metadata, check) for
-        // every diagnostic, and cargo is in the same directory the engine's
-        // own PATH cannot see — measured: `cargo` is missing under
+        // The CHILD needs its own PATH, not just the lookup that found it.
+        // rust-analyzer shells out to `cargo` (metadata, check) for every
+        // diagnostic, and the npm servers are `#!/usr/bin/env node` scripts —
+        // measured, neither cargo nor node is reachable from the engine's own
         // /usr/bin:/bin:/usr/sbin:/sbin. Left alone the server starts, answers
         // initialize, holds a healthy socket and never reports anything.
-        env: extra === '' ? env : { ...env, PATH: [env.PATH, extra].filter(Boolean).join(path.delimiter) },
+        env: { ...env, PATH: childPath(env, extra) },
         stdio: ['pipe', 'pipe', 'pipe'],
       })
     } catch {
@@ -317,7 +459,8 @@ export function createLspBridge ({
     // The project root, not the org: an arxa org holds notes and meetings as
     // well as code, so a server rooted there would find no manifest and report
     // nothing at all — with no error to explain the silence.
-    const root = projectRootFor(absFile, orgPath, servers[lang].rootMarkers, exists)
+    const root = projectRootFor(absFile, orgPath, servers[lang].rootMarkers, exists,
+      { fallbackToFileDir: servers[lang].rootFallback === true })
     if (root === null) return deny('no-project-root')
 
     const extra = await extraPath()
@@ -344,5 +487,5 @@ export function createLspBridge ({
     })
   }
 
-  return { handleUpgrade, stopAll, ensureServer, stats: () => ({ ...stats }), running }
+  return { handleUpgrade, stopAll, ensureServer, stats: () => ({ ...stats }), running, extraPath }
 }

@@ -283,7 +283,7 @@ export async function openFile (container, uriPath, text, opts = {}) {
  *  into an error. The returned promise resolves to false when no service could
  *  be attached, so the caller can say so if it wants to. */
 const langClients = new Map()
-export async function connectLanguageServer (lang, { url, token, relPath, session = null } = {}) {
+export async function connectLanguageServer (lang, { url, token, relPath, session = null, selector = null, init = null } = {}) {
   if (langClients.has(lang)) return true
   await start()
   const q = new URLSearchParams({ lang, path: relPath ?? '' })
@@ -302,7 +302,16 @@ export async function connectLanguageServer (lang, { url, token, relPath, sessio
     id: 'arxa-' + lang,
     name: 'arxa ' + lang,
     clientOptions: {
-      documentSelector: [{ language: lang }],
+      // ONE server can own SEVERAL monaco language ids — typescript-language-server
+      // serves javascript too, the css server serves scss and less, the json
+      // server serves jsonc. A selector of just `lang` would connect a client
+      // that then ignores every .js, .scss and .jsonc document it was started
+      // for, with no error to show for it.
+      documentSelector: (selector ?? [lang]).map((language) => ({ language })),
+      // Handshake options the HOST computed — typescript-language-server
+      // refuses to start unless it is told where a compiler is, and only the
+      // host knows where arxa put one.
+      initializationOptions: init ?? undefined,
       // The server decides its own root (the host resolved the project
       // directory); the client must not fight it with a second opinion.
       workspaceFolder: undefined,
