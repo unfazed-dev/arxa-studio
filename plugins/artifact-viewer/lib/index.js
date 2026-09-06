@@ -382,7 +382,7 @@ export function apply(ctx, config) {
             const took = Date.now() - s
             if (took > 50 && Date.now() - t0 < 60000) {
               const cmd = [args[0], ...(Array.isArray(args[1]) ? args[1] : [])].join(' ').slice(0, 90)
-              const caller = (new Error().stack || '').split('\n').slice(2, 4).map((l) => l.trim().replace(/^at /, '').replace(/.*\/plugins\//, 'plugins/')).join(' <- ')
+              const caller = (new Error().stack || '').split('\n').slice(2, 7).map((l) => l.trim().replace(/^at /, '').replace(/.*\/plugins\//, 'plugins/')).join(' <- ')
               console.log('[arxa-artifact-viewer] sync-spawn ' + took + 'ms at +' + ((Date.now() - t0) / 1000).toFixed(1) + 's ' + cmd + ' | ' + caller)
             }
           }
