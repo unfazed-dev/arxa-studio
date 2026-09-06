@@ -132,31 +132,8 @@ window.__ModuleLoader__.load({
       + 'border:1px solid var(--dsw-alias-border-l2);background:transparent;color:inherit}'
       + '.aXa_av_lspBar button[disabled]{opacity:.5;cursor:default}'
       + '.aXa_av_monaco .monaco-editor{height:100%}'
-      + '.aXa_av_editorWrap .cm-editor.cm-focused{outline:none}'
-      // Editor font (2026-09-01): the fallback is an explicit Fira-free
-      // default stack, NOT --ds-font-family-code — that token lists
-      // "Fira Code" third, and with "SF Mono" unresolvable in WKWebView +
-      // JetBrains Mono absent it resolved to system Fira Code, making the
-      // Default pill render Fira (toggle = visual no-op; width-probed).
-      + '.aXa_av_editorWrap .cm-content{font-family:var(--arxa-editor-font,"SF Mono",ui-monospace,"JetBrains Mono",Consolas,"Liberation Mono",Menlo,monospace)}'
       + '.aXa_av_fileIcon{flex:none;width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center}'
       + '.aXa_av_fileIcon svg{width:16px;height:16px;display:block}'
-      // Markdown preview adopts the 2026 chrome too (grilled 2026-09-03):
-      // palette vars arrive inline on the root; fallbacks keep dsh tokens.
-      + '.aXa_av_md{padding:12px 16px;line-height:1.6;font-size:14px;color:var(--dsw-alias-label-primary)}'
-      + '.aXa_av_md h1,.aXa_av_md h2,.aXa_av_md h3,.aXa_av_md h4{line-height:1.3;margin:1.1em 0 .5em;color:var(--dsw-alias-label-primary)}'
-      + '.aXa_av_md h1:first-child,.aXa_av_md h2:first-child,.aXa_av_md h3:first-child{margin-top:0}'
-      + '.aXa_av_md p{margin:.5em 0}'
-      + '.aXa_av_md a{color:var(--dsw-alias-brand-primary)}'
-      + '.aXa_av_md code{font-family:var(--ds-font-family-code);font-size:12.5px;background:var(--dsw-alias-bg-layer-2);border-radius:4px;padding:1px 5px}'
-      + '.aXa_av_md pre{background:var(--dsw-alias-markdown-code-block);border-radius:8px;padding:10px 12px;overflow:auto;margin:.6em 0}'
-      + '.aXa_av_md pre code{background:transparent;padding:0}'
-      + '.aXa_av_md blockquote{margin:.6em 0;padding:2px 12px;border-left:3px solid var(--dsw-alias-border-l3);color:var(--dsw-alias-label-secondary)}'
-      + '.aXa_av_md ul,.aXa_av_md ol{padding-left:22px;margin:.5em 0}'
-      + '.aXa_av_md table{border-collapse:collapse;margin:.6em 0}'
-      + '.aXa_av_md th,.aXa_av_md td{border:1px solid var(--dsw-alias-border-l2);padding:4px 10px}'
-      + '.aXa_av_md hr{border:none;border-top:1px solid var(--dsw-alias-border-l2);margin:1em 0}'
-      + '.aXa_av_md img{max-width:100%}'
       + '.aXa_av_media{padding:12px;display:flex;justify-content:center}'
       + '.aXa_av_media img{max-width:100%;border-radius:8px;border:1px solid var(--dsw-alias-border-l2)}'
       + '.aXa_av_media audio,.aXa_av_media video{width:100%}'
@@ -244,8 +221,6 @@ window.__ModuleLoader__.load({
       'guard.tooLarge': 'File is {size} MB — over the {cap} MB edit cap; read-only',
       'guard.binary': 'Binary file — view only',
       'guard.noOrg': 'Open an organisation to edit this file',
-      'action.source': 'Source',
-      'action.preview': 'Preview',
       'action.diff': 'Diff vs main',
       'action.format': 'Format document (Shift+Alt+F)',
       'action.prettier.on': 'Prettier: on',
@@ -342,8 +317,6 @@ window.__ModuleLoader__.load({
       'guard.tooLarge': 'Plik ma {size} MB — powyżej limitu edycji {cap} MB; tylko do odczytu',
       'guard.binary': 'Plik binarny — tylko podgląd',
       'guard.noOrg': 'Otwórz organizację, aby edytować ten plik',
-      'action.source': 'Źródło',
-      'action.preview': 'Podgląd',
       'action.diff': 'Diff względem main',
       'action.format': 'Formatuj dokument (Shift+Alt+F)',
       'action.prettier.on': 'Prettier: włączony',
@@ -441,8 +414,6 @@ window.__ModuleLoader__.load({
       'guard.tooLarge': 'Le fichier fait {size} Mo — au-delà de la limite d’édition de {cap} Mo ; lecture seule',
       'guard.binary': 'Fichier binaire — aperçu seul',
       'guard.noOrg': 'Ouvrez une organisation pour modifier ce fichier',
-      'action.source': 'Source',
-      'action.preview': 'Aperçu',
       'action.diff': 'Diff vs main',
       'action.format': 'Formatter le document (Maj+Alt+F)',
       'action.prettier.on': 'Prettier : activé',
@@ -690,7 +661,7 @@ window.__ModuleLoader__.load({
      *  `docRef.current` holds the bundle's handle, not a monaco object. Five
      *  call sites in Panel read the live document through it, and keeping the
      *  seam narrow is what stops phases 4-6 from rewriting all of them. */
-    function CodeView({ relPath, absPath, session, text, editable, docRef, onDirty, preview, diffOriginal }) {
+    function CodeView({ relPath, absPath, session, text, editable, docRef, onDirty, diffOriginal }) {
       const ref = React.useRef(null)
       // The uri the part currently holds, and a counter that ticks when it
       // lands. The mode effect below needs both: what to open, and a signal that
@@ -754,7 +725,12 @@ window.__ModuleLoader__.load({
             // .cm-content. Monaco has to be TOLD its font (it measures glyph
             // width from it), so the var is read and passed instead.
             fontFamily: getComputedStyle(document.documentElement)
-              .getPropertyValue('--arxa-editor-font').trim() || 'Fira Code',
+              // The fallback is the same explicit Fira-free stack the
+              // CodeMirror rule carried (2026-09-03): the dsh code token lists
+              // Fira Code third and resolves to it in WKWebView, which made the
+              // Default pill render Fira and the font toggle a visual no-op.
+              .getPropertyValue('--arxa-editor-font').trim()
+              || '"SF Mono", ui-monospace, "JetBrains Mono", Consolas, "Liberation Mono", Menlo, monospace',
             onChange: () => { if (onDirty) onDirty() },
           })
           // The await above can outlive the effect: dispose what we just made
@@ -802,32 +778,38 @@ window.__ModuleLoader__.load({
           if (docRef) docRef.current = null
         }
       }, [relPath, absPath, session, text, editable])
-      // Source, rendered preview and diff are all TABS in one editor part, not
-      // three React subtrees: every one of them is an editor input on the same
-      // file. So the mode is a command, and switching keeps the model, the undo
-      // history and the language client alive. Re-opening the input that is
-      // already up is a focus, so this is safe to run whenever it re-fires.
+      // Source and diff are both TABS in one editor part, not two React
+      // subtrees: each is an editor input on the same file. So the mode is a
+      // command, and switching keeps the model, the undo history and the
+      // language client alive. Re-opening the input that is already up is a
+      // focus, so this is safe to run whenever it re-fires.
+      //
+      // There is no rendered markdown preview (2026-09-07): it was VS Code's
+      // webview, and it put a second, washed-out copy of every .md next to the
+      // Monaco one. Markdown is source in Monaco, like every other file.
       React.useEffect(() => {
         const uri = openedRef.current
         if (!uri || opened === 0) return
         void (async () => {
           const M = await ensureMonaco()
           if (diffOriginal != null) {
+            // Side-by-side or inline is VS Code's own call, made on every
+            // layout from its 900px breakpoint — so maximising the pane flips
+            // the diff to two columns, and narrowing it flips back. Forcing it
+            // from the pane width at open froze the first decision.
             await M.openDiff(uri, diffOriginal, {
-              // Side by side needs room; below this it is two useless columns.
-              sideBySide: (ref.current ? ref.current.getBoundingClientRect().width : 0) >= 800,
               // The diff button is gated on the lane, not on canEdit, so a
               // read-only file can reach it — and the modified side is the same
               // model auto-save watches.
               editable,
             })
-          } else if (preview) {
-            await M.showMarkdownPreview(uri)
           } else {
-            await M.openEditor(uri)
+            // Unpinned, like the open itself: a pinned tab outlives the file
+            // switch, and the strip filled with every file ever clicked.
+            await M.openEditor(uri, { pinned: false })
           }
         })().catch(() => { /* a mode switch is not worth an error surface */ })
-      }, [opened, preview, diffOriginal, editable])
+      }, [opened, diffOriginal, editable])
 
       // The strip keeps its slot whether or not it is showing: React
       // reconciles these children by position, and letting the host div move
@@ -1243,7 +1225,6 @@ window.__ModuleLoader__.load({
       const [dirty, setDirty] = React.useState(false)
       const [savePhase, setSavePhase] = React.useState('idle') // idle|saving|saved|error|conflict
       const [saveNote, setSaveNote] = React.useState('')
-      const [showSource, setShowSource] = React.useState(false)
       const [showDiff, setShowDiff] = React.useState(false)
       const [mainText, setMainText] = React.useState('')
       const [chip, setChip] = React.useState(null)
@@ -1274,8 +1255,8 @@ window.__ModuleLoader__.load({
       React.useEffect(() => { dirtyRef.current = dirty }, [dirty])
 
       /** The live document, or the loaded bytes when no editor is mounted yet.
-       *  Two of its callers run during RENDER (the markdown preview, the diff
-       *  surface), so it has to answer before the editor bundle has finished
+       *  One of its callers runs during RENDER (the diff surface), so it has
+       *  to answer before the editor bundle has finished
        *  loading — never throw here. */
       const docText = () => {
         try { return docRef.current ? docRef.current.getText() : state.text } catch { return state.text }
@@ -1357,7 +1338,7 @@ window.__ModuleLoader__.load({
         if (frameProps.close) frameProps.close()
         setOpen(false); setState({ phase: 'idle' }); setSession(null)
         setDirty(false); setSavePhase('idle'); setSaveNote('')
-        setShowSource(false); setShowDiff(false); setChip(null); setTimeline([])
+        setShowDiff(false); setChip(null); setTimeline([])
         wtRef.current = null
         // state.phase is a dep on purpose: the insight guard above reads it,
         // and without it a panel that BECAME an insight after the last session
@@ -1407,7 +1388,7 @@ window.__ModuleLoader__.load({
 
       const resetForOpen = () => {
         setDirty(false); setSavePhase('idle'); setSaveNote(''); mtimeRef.current = null
-        setShowSource(false); setShowDiff(false); setMainText(''); setChip(null); setTimeline([]); setVersionOpen(false)
+        setShowDiff(false); setMainText(''); setChip(null); setTimeline([]); setVersionOpen(false)
         setCopied(false)
         if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null }
       }
@@ -1642,7 +1623,6 @@ window.__ModuleLoader__.load({
           state.phase === 'ready' && state.url && h(P.Tooltip, { label: t('action.download'), delayMs: 500, side: 'bottom' },
             h('a', { className: 'aXa_av_iconBtn', href: state.url, download: filename || true, target: '_blank', rel: 'noreferrer', 'aria-label': t('action.download') },
               h(P.IconDownloadOutline16, { size: 14 }))),
-          state.phase === 'ready' && lane === 'markdown' && iconBtn('source', showSource ? t('action.preview') : t('action.source'), () => setShowSource((v) => !v), P.IconCodeOutline16, { on: showSource }),
           state.phase === 'ready' && editableLane && h(P.Tooltip, { key: 'prettier', label: prettierOn ? t('action.prettier.on') : t('action.prettier.off'), delayMs: 500, side: 'bottom' },
             h('button', {
               className: 'aXa_av_iconBtn', onClick: togglePrettier,
@@ -1691,12 +1671,10 @@ window.__ModuleLoader__.load({
 
         let surface = null
         if (editableLane) {
-          // Markdown is not a separate surface any more. Rendered preview and
-          // source are two editor inputs on ONE file inside VS Code's editor
-          // part, so the toggle is a prop, not a different React subtree — and
-          // the preview is VS Code's own, not the vendored markdown-it bundle.
+          // Markdown is not a separate surface: it is source in Monaco like
+          // any other file, and the diff is an editor input on the same file
+          // inside VS Code's editor part — a prop, not another React subtree.
           surface = h(CodeView, { relPath: state.relPath, absPath: state.absPath, session: state.wt ?? null, text: state.text, editable: canEdit, docRef, onDirty,
-            preview: lane === 'markdown' && !showSource,
             diffOriginal: showDiff ? (mainText ?? '') : null })
         } else if (lane === 'image') {
           surface = h('div', { className: 'aXa_av_scroll' }, h('div', { className: 'aXa_av_media' }, h('img', { src: state.url, alt: state.relPath })))

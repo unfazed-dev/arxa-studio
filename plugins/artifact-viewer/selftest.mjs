@@ -707,8 +707,17 @@ assert.ok(entrySrc2c.includes("original: { resource: monaco.Uri.file(origPath) }
   'the diff is VS Code\'s diff editor, with the original side on its OWN uri so it cannot collide with the open file')
 assert.ok(entrySrc2c.includes("runCommand('markdown.showPreview')"),
   'the rendered preview is VS Code\'s, opened as an editor input in the part')
-assert.ok(clientSrc.includes("preview: lane === 'markdown' && !showSource"),
-  'and the source/preview toggle is a PROP on the one CodeView — both are inputs on the same file, not different React subtrees')
+// No rendered markdown preview (2026-09-07): it was a second, washed-out copy
+// of every .md beside the Monaco one. Markdown is source in Monaco.
+assert.ok(!clientSrc.includes('showMarkdownPreview') && !clientSrc.includes('showSource'),
+  'the client never opens the webview preview or offers a source/preview toggle')
+// A pinned tab outlives the file switch; the strip filled with every file
+// ever clicked. Both opens are unpinned, like VS Code's own explorer click.
+assert.ok(clientSrc.includes('M.openEditor(uri, { pinned: false })'),
+  'the source view opens unpinned so the tab strip does not accumulate')
+// Nothing of CodeMirror or markdown-it is left in the stylesheet.
+assert.ok(!/'\.cm-|aXa_av_md\b|aXa_av_pal/.test(clientSrc),
+  'no CodeMirror or markdown-it selectors survive in the client stylesheet')
 assert.ok(entrySrc2c.includes('getKeybindingsServiceOverride()'),
   'the keybindings service is what supplies Shift-Alt-F now that the client no longer binds it')
 assert.ok(entrySrc2c.includes("'editor.minimap.enabled': width >= 700"),
@@ -764,8 +773,9 @@ assert.ok(entrySrc.includes("mod.updateOptions({ readOnly: !editable, domReadOnl
   'the diff honours read-only on its modified side')
 assert.ok(/openDiff \(uriPath, originalText, \{ sideBySide = null, editable = true \}/.test(entrySrc),
   'openDiff takes the editable flag')
-assert.ok(/sideBySide: \(ref\.current[\s\S]{0,300}?\n\s+editable,\n/.test(clientSrc),
-  'the client hands the diff the same editable flag the code editor got')
+assert.ok(/await M\.openDiff\(uri, diffOriginal, \{[\s\S]{0,400}?\n\s+editable,\n/.test(clientSrc)
+  && !clientSrc.includes('sideBySide:'),
+  'the client hands the diff the editable flag and leaves side-by-side to VS Code\'s own breakpoint')
 assert.ok(clientSrc.includes('data-arxa-vendor'), 'vendor script tags marked for cross-loader reuse')
 // Prettier viewer toggle: ON by default, persisted, gates every format path.
 assert.ok(clientSrc.includes("'arxa.av.prettier'"), 'prettier toggle persists its choice')
@@ -997,20 +1007,17 @@ off()
 w11.stop()
 console.log('arxa-artifact-viewer selftest: GREEN (watcher + SSE)');
 
-// ---- editor-font consumption (2026-09-03): the cm-content rule's fallback
-// must ride the REAL dsh mono token (--ds-font-family-code). --dsw-font-mono
-// never existed; a var() chain ending in an undefined token is invalid at
-// computed-value time, the declaration dies, and CM's built-in monospace
-// inherits — the editor-font setting silently did nothing.
-assert.ok(!clientSrc.includes('--dsw-font-mono'), 'no phantom --dsw-font-mono token in the viewer css')
-// 2026-09-01: the fallback must NOT be --ds-font-family-code either — that
-// token lists "Fira Code" third, and with "SF Mono" unresolvable in WKWebView
-// + JetBrains Mono absent it resolved to the system-installed Fira Code:
-// the Default pill rendered Fira and the font toggle was a visual no-op
-// (render-truthed by in-app width probe: token == "Fira Code" at 366.61px).
-// The editor default is an explicit Fira-free stack landing on Menlo.
-assert.ok(clientSrc.includes('font-family:var(--arxa-editor-font,"SF Mono",ui-monospace,"JetBrains Mono",Consolas,"Liberation Mono",Menlo,monospace)'), 'cm-content consumes the editor-font var with a Fira-free default fallback')
-assert.ok(!clientSrc.includes('var(--arxa-editor-font,var(--ds-font-family-code))'), 'editor fallback no longer rides the Fira-containing dsh token')
+// ---- editor-font consumption (2026-09-03, moved to Monaco 2026-09-07) ----
+// Monaco measures glyph width from the font it is TOLD, so the var is read
+// and passed to openFile. Its fallback is an explicit Fira-free stack landing
+// on Menlo: the dsh code token lists "Fira Code" third, and with "SF Mono"
+// unresolvable in WKWebView + JetBrains Mono absent it resolved to the
+// system-installed Fira Code — the Default pill rendered Fira and the font
+// toggle was a visual no-op (render-truthed by in-app width probe).
+assert.ok(/getPropertyValue\('--arxa-editor-font'\)\.trim\(\)\s*\|\| '"SF Mono", ui-monospace, "JetBrains Mono", Consolas, "Liberation Mono", Menlo, monospace'/.test(clientSrc),
+  'openFile consumes the editor-font var with a Fira-free default fallback')
+assert.ok(!clientSrc.includes("|| 'Fira Code'") && !clientSrc.includes('var(--arxa-editor-font,var(--ds-font-family-code))'),
+  'editor fallback is neither Fira nor the Fira-containing dsh token')
 
 // ---- Task 11b: worktree-lane events (?session= binds a per-connection watcher)
 {
