@@ -844,6 +844,15 @@ synced, diagnostic applied — the whole path, in a browser.
 
 Verified it can fail: changing the stub's diagnostic `source` turns the check RED.
 
+#### 7.6 One conflict prompt, not two
+
+The viewer has its own conflict banner. VS Code's text-file service has its own
+opinions about a file changing on disk under unsaved edits, and two prompts for
+one event would be a regression. Measured rather than assumed: with edits in the
+model and new bytes written to the provider, **no VS Code dialog appears and the
+user's edits are kept**. The viewer's banner stays the only prompt. Pinned in the
+spike (`dialogs === 0`, `afterConflict` still starts with the edit).
+
 ### Where phase 7 stands
 
 | | |

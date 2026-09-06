@@ -723,6 +723,8 @@ assert.ok(checkSrc.includes('WebSocketServer') && checkSrc.includes("method: 'te
   'the check harness runs a stub language server')
 assert.ok(spikeSrc.includes("out.lspMarkers > 0") && spikeSrc.includes("out.lspSource === 'arxa-stub'"),
   'and asserts the server\'s diagnostic became a MARKER on the model — client started, document synced, diagnostic applied')
+assert.ok(spikeSrc.includes('out.dialogs === 0') && spikeSrc.includes("out.afterConflict.startsWith('EDITED')"),
+  'an external change under unsaved edits raises NO VS Code dialog and keeps the edits — the viewer\'s conflict banner stays the only prompt')
 assert.match(clientSrc, /IconEnhanceOutline16/, 'format action uses the enhance glyph')
 // The 2026 palette vars are gone with CodeMirror: they existed to make the CM
 // editor and the markdown preview match, and VS Code paints both from its own

@@ -273,6 +273,22 @@
     await settle(1500)
     out.afterChange = viewText().slice(0, 12)
 
+    // ---- external change on a DIRTY file ---------------------------------
+    // The viewer has its own conflict banner. VS Code's text-file service has
+    // opinions about a file changing on disk under unsaved edits too, and two
+    // prompts for one event would be a regression. Measured, not assumed.
+    out.step = 'dirty-conflict'
+    const dh = await m.openFile(partEl, '/spike/notes.md', '# Changed\n\nnew bytes from disk\n')
+    dh.editor.executeEdits('spike', [{
+      range: new m.monaco.Range(1, 1, 1, 1), text: 'EDITED ',
+    }])
+    await settle(400)
+    out.dirtyBefore = dh.getText().startsWith('EDITED')
+    await m.updateFile('/spike/notes.md', '# Third\n\nbytes changed on disk\n')
+    await settle(2000)
+    out.dialogs = document.querySelectorAll('.monaco-dialog-box, .dialog-message').length
+    out.afterConflict = dh.getText().slice(0, 14)
+
     // ---- the LANGUAGE CLIENT ---------------------------------------------
     // Against a stub server on this origin (see check.mjs). This is the only
     // browser proof the LSP lane survived moving off standalone editors: the
@@ -416,7 +432,13 @@
       'out.lspStarted === true',
       "out.lspLangs === 'markdown'",
       'out.lspMarkers > 0',
-      "out.lspSource === 'arxa-stub'"
+      "out.lspSource === 'arxa-stub'",
+      // External change under UNSAVED edits: VS Code must not raise a second
+      // prompt on top of the viewer's own conflict banner, and must not throw
+      // the user's edits away. Measured: no dialog, edits kept.
+      'out.dirtyBefore === true',
+      'out.dialogs === 0',
+      "out.afterConflict.startsWith('EDITED')"
   ]) {
     let ok = false
     try { ok = !!new Function('out', 'return (' + src + ')')(out) } catch (e) { ok = false }
@@ -426,7 +448,7 @@
   // which probe failed is to paint the values into the page and read them off
   // the capture. Same technique that found scss/less opening as plaintext.
   const dump = document.createElement('pre')
-  dump.style.cssText = 'position:absolute;inset:0;z-index:99999;background:#111;color:#0f0;font:16px/1.5 monospace;padding:16px;margin:0;white-space:pre-wrap'
+  dump.style.cssText = 'position:absolute;inset:0;z-index:99999;background:#111;color:#0f0;font:13px/1.35 monospace;padding:16px;margin:0;white-space:pre-wrap'
   dump.textContent = 'FAILED (' + out.fail.length + '):\n' + out.fail.join('\n') + '\n\n' + JSON.stringify({
     partMounted: out.partMounted, partBox: out.partBox, partChrome: out.partChrome,
     vsOpened: out.vsOpened, vsTabs: out.vsTabs, vsText: out.vsText, vsOpenErr: out.vsOpenErr,
@@ -441,6 +463,7 @@
     closedTabs: out.closedTabs, reopenText: out.reopenText, afterChange: out.afterChange,
     diffPane: out.diffPane, diffTabs: out.diffTabs, diffMarks: out.diffMarks,
     lspStarted: out.lspStarted, lspMarkers: out.lspMarkers, lspSource: out.lspSource, lspLangs: out.lspLangs,
+    dirtyBefore: out.dirtyBefore, dialogs: out.dialogs, afterConflict: out.afterConflict,
   }, null, 1)
   if (location.search.includes('dump')) document.body.appendChild(dump)
 </script>
