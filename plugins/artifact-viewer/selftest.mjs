@@ -683,6 +683,17 @@ assert.ok(!/\?worker'$/m.test(entrySrc2c),
 assert.ok(entrySrc2c.includes("import '@codingame/monaco-vscode-scss-default-extension'") &&
   entrySrc2c.includes("import '@codingame/monaco-vscode-less-default-extension'"),
   'scss and less are separate grammars from css — without them those files open as plaintext and the css client is sent nothing')
+// ---- phase 7.1: the editor part -----------------------------------------
+assert.ok(entrySrc2c.includes("import getViewsServiceOverride, { attachPart, Parts } from '@codingame/monaco-vscode-views-service-override'"),
+  'the views service override is in the graph — it is what carries webviews and custom editors')
+assert.ok(entrySrc2c.includes('attachPart(Parts.EDITOR_PART, container)'),
+  'ONE part is attached. attachPart takes a single part, so no activity bar, sidebar, panel or status bar comes with it')
+assert.ok(entrySrc2c.includes('groups.mainPart.activeGroup'),
+  'files open into the MAIN part group — IEditorGroupsService spans every part and its active group is not necessarily the attached one')
+assert.ok(/unhandledrejection/.test(entrySrc2c) && /'Canceled'/.test(entrySrc2c),
+  'cancellation is swallowed: VS Code signals it by rejecting, and the markdown preview does it on every open')
+assert.ok(entrySrc2c.includes("if (s === 'Canceled' || s === 'CodeExpectedError') ev.preventDefault()"),
+  'and ONLY cancellation is swallowed — loosening this guard would hide every real rejection from the lens')
 assert.ok(entrySrc2c.includes('initializationOptions: init ?? undefined'),
   'the handshake options the host computed reach the language client')
 assert.ok(hostSrc.includes("init: typeof def.initOptions === 'function' ? def.initOptions(process.env) : null"),

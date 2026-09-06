@@ -1,7 +1,8 @@
 <!doctype html><meta charset="utf-8"><title>monaco spike</title>
-<style>html,body{margin:0;height:100%}#ed{position:absolute;inset:0}#diff{position:absolute;left:-9999px;width:800px;height:300px}</style>
+<style>html,body{margin:0;height:100%}#ed{position:absolute;inset:0}#diff{position:absolute;left:-9999px;width:800px;height:300px}#part{position:absolute;inset:0;display:none}#part.on{display:block}</style>
 <div id="ed"></div>
 <div id="diff"></div>
+<div id="part"></div>
 <script type="module">
   const RS = 'use std::collections::HashMap;\n\n/// squares 1..=n\nfn squares(n: i32) -> HashMap<i32, i32> {\n    (1..=n).map(|x| (x, x * x)).collect()\n}\n\n// a deliberately long line so word wrap has something to act on: lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor\nfn main() {\n    let m = squares(5);\n    println!("{:?}", m.get(&3));\n}\n'
   const DART = 'void main() {\n  final xs = <int>[1, 2, 3];\n  print(xs.map((x) => x * x).toList());\n}\n'
@@ -13,6 +14,12 @@
   const out = { step: 'start' }
   window.__spike = out
   window.addEventListener('error', (e) => { out.error = String(e.message) })
+  // Which STEP produces the stray rejection? The console shows the stack but
+  // not the moment, and the whole point is to know what to stop doing.
+  out.rejects = []
+  window.addEventListener('unhandledrejection', (e) => {
+    out.rejects.push(out.step + '=' + String((e.reason && (e.reason.name || e.reason.message)) ?? e.reason))
+  })
 
   const m = await import('/__arxa/artifacts/vendor/arxa-monaco.js')
 
@@ -134,11 +141,12 @@
   }
   // Phase 3 probe: what does the markdown extension actually give us?
   out.step = 'markdown-probe'
+  let mdHandle = null
   try {
     h.dispose()   // the resize block left an editor in the container
-    const mh = await m.openFile(el, '/spike/notes.md', '# Title\n\nsome *text* and a [link](x.md)\n\n```rs\nfn f(){}\n```\n')
+    mdHandle = await m.openFile(el, '/spike/notes.md', '# Title\n\nsome *text* and a [link](x.md)\n\n```rs\nfn f(){}\n```\n')
     await settle(1500)
-    out.mdLang = mh.model.getLanguageId()
+    out.mdLang = mdHandle.model.getLanguageId()
     out.mdTokens = document.querySelectorAll('.monaco-editor .view-line span').length
     out.mdColoured = new Set([...document.querySelectorAll('.monaco-editor .view-line span')]
       .map((n) => getComputedStyle(n).color)).size
@@ -153,5 +161,91 @@
   out.step = 'ext-host'
   await settle(3000)
   out.extHostFrames = document.querySelectorAll('iframe').length
+
+  // ---- the EDITOR PART ---------------------------------------------------
+  // Everything above drives a bare monaco editor over a model. This drives VS
+  // Code: hand it a uri, let it pick the editor. It is the only way a webview
+  // (markdown preview) or a custom editor (media-preview's png viewer) can
+  // ever open, and it is the thing the plan claimed would cost the whole
+  // workbench chrome. attachPart takes ONE part.
+  out.step = 'attach-part'
+  try {
+    // BOTH standalone editors must go first. wrapOpenEditor looks for an
+    // existing StandaloneEditor whose model uri matches the resource and, if it
+    // finds one, focuses THAT and never touches the editor part — measured: the
+    // file landed in standalone group -4 while the part's group 0 stayed empty.
+    // The two lanes cannot share a uri, which is the whole reason the code lane
+    // has to move off monaco.editor.create.
+    h.dispose()
+    if (mdHandle) mdHandle.dispose()
+    // Let the teardown settle before attaching the part. Disposing a standalone
+    // editor cancels its in-flight work, and VS Code signals cancellation by
+    // rejecting; attaching and opening in the same tick raced that rejection
+    // into an unhandled `Canceled: Canceled` about half the time.
+    await settle(500)
+    el.style.display = 'none'
+    const partEl = document.getElementById('part')
+    partEl.className = 'on'
+    await m.attachEditorPart(partEl)
+    await settle(800)
+    // No chrome came with it: the pane must not sprout an activity bar,
+    // a sidebar, a panel or a status bar.
+    // The other parts get CONSTRUCTED by the layout whether or not they are
+    // attached; what matters is whether any of them paints. Measure the box,
+    // not the existence of a node.
+    out.partChrome = ['activitybar', 'sidebar', 'panel', 'statusbar']
+      .filter((k) => [...document.querySelectorAll('.part.' + k)]
+        .some((n) => n.getBoundingClientRect().width > 0 && n.getBoundingClientRect().height > 0))
+    out.partMounted = partEl.querySelector('.part.editor') !== null
+    const pe = partEl.querySelector('.part.editor')
+    out.partBox = pe ? Math.round(pe.getBoundingClientRect().width) + 'x' + Math.round(pe.getBoundingClientRect().height) : 'none'
+
+    out.step = 'open-through-vscode'
+    try { out.vsPane = String(await m.openEditor('/spike/notes.md')) }
+    catch (e) { out.vsOpenErr = String(e && e.message || e) }
+    await settle(2500)
+    out.vsOpened = document.querySelector('#part .monaco-editor') !== null
+    out.vsTabs = document.querySelectorAll('#part .tabs-container .tab').length
+    out.vsText = (document.querySelector('#part .monaco-editor .view-lines')?.innerText ?? '').slice(0, 40)
+    try { Object.assign(out, await m.editorPartInfo()) } catch (e) { out.infoErr = String(e && e.message || e) }
+    const pEl = document.getElementById('part')
+    out.partHtml = (pEl.innerHTML || '').length
+    // querySelector does not pierce a shadow root, and monaco-vscode-api puts
+    // the workbench in one for style isolation. Walk both.
+    const roots = [document]
+    for (const n of document.querySelectorAll('*')) if (n.shadowRoot) roots.push(n.shadowRoot)
+    out.shadowRoots = roots.length - 1
+    out.anyEditor = roots.some((r) => r.querySelector('.monaco-editor') !== null)
+    out.anyTab = roots.reduce((a, r) => a + r.querySelectorAll('.tab').length, 0)
+    out.partClasses = [...pEl.querySelectorAll('*')].slice(0, 14).map((n) => n.className && String(n.className).slice(0, 28)).filter(Boolean).join('|')
+
+    out.step = 'markdown-preview'
+    const before = document.querySelectorAll('iframe').length
+    await m.runCommand('markdown.showPreview')
+    await settle(4000)
+    out.previewFrames = document.querySelectorAll('iframe').length - before
+    // A webview is an iframe whose document actually rendered the markdown.
+    // Counting frames alone would pass on an empty one.
+    out.previewTitle = [...document.querySelectorAll('iframe')]
+      .map((f) => { try { return f.contentDocument?.body?.innerText ?? '' } catch { return '' } })
+      .some((t) => t.includes('Title'))
+  } catch (e) { out.partErr = String(e && e.message || e) }
   out.step = 'done'
+  // --expect reports one boolean for the whole run, so the only way to SEE
+  // which probe failed is to paint the values into the page and read them off
+  // the capture. Same technique that found scss/less opening as plaintext.
+  const dump = document.createElement('pre')
+  dump.style.cssText = 'position:absolute;inset:0;z-index:99999;background:#111;color:#0f0;font:16px/1.5 monospace;padding:16px;margin:0;white-space:pre-wrap'
+  dump.textContent = JSON.stringify({
+    partMounted: out.partMounted, partBox: out.partBox, partChrome: out.partChrome,
+    vsOpened: out.vsOpened, vsTabs: out.vsTabs, vsText: out.vsText, vsOpenErr: out.vsOpenErr,
+    vsPane: out.vsPane, editors: out.editors, active: out.active, partHtml: out.partHtml, infoErr: out.infoErr,
+    shadowRoots: out.shadowRoots, anyEditor: out.anyEditor, anyTab: out.anyTab,
+    paneId: out.paneId, groups: out.groups, parts: out.parts, mainGroups: out.mainGroups, openRes: out.openRes,
+    groupActive: out.groupActive, notices: out.notices,
+    previewFrames: out.previewFrames, previewTitle: out.previewTitle,
+    extHostFrames: out.extHostFrames, partErr: out.partErr, mdErr: out.mdErr, error: out.error,
+    rejects: out.rejects,
+  }, null, 1)
+  if (location.search.includes('dump')) document.body.appendChild(dump)
 </script>

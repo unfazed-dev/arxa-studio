@@ -638,19 +638,48 @@ moment `views` is adopted, because two workbench layout services would be live.
 No stable `monaco-languageclient` targets 36.x (11.0.0-next targets `^35`), so
 the override is the only route.
 
-#### 7.1 The editor part
+#### 7.1 The editor part — **DONE in the bundle, measured**
 
-`views-service-override` + `attachPart(Parts.EDITOR_PART, container)`. This is
-what brings **webviews and custom editors**, and with them the markdown preview,
-media preview, and VS Code's own editor-open plumbing. Only the editor part is
-attached — no activity bar, sidebar, panel or status bar.
+`views-service-override` + `attachPart(Parts.EDITOR_PART, container)`, plus the
+thirteen services the part reaches for while it renders (base, host, environment,
+lifecycle, log, storage, notifications, dialogs, working-copy, bulk-edit, markers,
+preferences, outline). Derived by booting and reading what was missing, not
+copied from the demo — the demo also turns on terminal, debug, scm, chat and
+notebooks, none of which a docked artifact pane uses.
 
-Cost: `openFile(container, path, text)` currently calls
-`monaco.editor.create(container, { model })` directly. Under the editor part,
-files open through `IEditorService.openEditor({ resource })`. The handle
-contract `client.js` drives (`getText`, `replaceRange`, `focus`, `dispose`,
-`onChange`) has to be rebuilt over the editor part. That is the real work of
-this phase.
+Verified in the check harness, and visible in the capture: **two tabs
+(`notes.md`, `Preview notes.md`) and VS Code's own markdown preview rendering
+inside a webview** — h1, italics, a live link, and a fenced rust block
+highlighted.
+
+Three things had to be measured, none of which were guessable:
+
+1. **`attachPart` brings no chrome.** `partChrome` — the parts that actually
+   paint a box — is `[]`. The claim that adopting `views` costs the whole
+   workbench layout was wrong.
+2. **A standalone editor wins over the part, forever.** `wrapOpenEditor` in the
+   api's `service-override/tools/editor.js` looks for an existing
+   `StandaloneEditor` whose model uri equals the resource, and if it finds one
+   it focuses THAT and never touches the editor part. First run: the file landed
+   in standalone group `-4` while the part's group `0` painted `content empty`,
+   with no error anywhere. **The two lanes cannot share a uri**, which is
+   precisely why `openFile`'s `monaco.editor.create` has to go.
+3. **`IEditorGroupsService` spans every part.** `openEditor` with no group picks
+   the service's active group, not the attached part's. Files now open into
+   `groups.mainPart.activeGroup` explicitly.
+
+And one behaviour that will outlive the spike: **VS Code signals cancellation by
+rejecting**, and the markdown preview leaves exactly one such rejection unhandled
+on every open. It reaches the page as `unhandledrejection`, which
+`setUnexpectedErrorHandler` never sees, and the lens fails any console error. A
+listener now calls `preventDefault()` for `Canceled`/`CodeExpectedError` and
+nothing else, so every real rejection still fails the build.
+
+Still to do: `openFile(container, path, text)` calls
+`monaco.editor.create(container, { model })` directly, and the handle contract
+`client.js` drives (`getText`, `replaceRange`, `focus`, `dispose`, `onChange`)
+has to be rebuilt over the editor part. Per finding 2 this is not optional —
+while the standalone editor exists, no preview can ever open for that file.
 
 #### 7.2 Deletions, each only after its replacement is green on screen
 
@@ -674,8 +703,8 @@ it can only go once the preview is a webview.
   yaml, toml and every other extension in `FORMAT_EXTS` lose Shift-Alt-F when
   `prettier.js` goes. Either keep prettier for those, or accept the loss —
   decide with the measured list in hand, not now.
-- **Bundle size.** dist was 15 MB before 7.0 and is **29 MB** after. It ships in
-  the engine payload. Measure again after 7.1 and put the number in the summary.
+- **Bundle size.** dist was 15 MB before 7.0, 29 MB after it, and **33 MB**
+  after 7.1. It ships in the engine payload.
 
 #### 7.4 Dirty state and autosave (was phase 5)
 

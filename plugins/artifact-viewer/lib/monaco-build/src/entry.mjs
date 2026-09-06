@@ -7,7 +7,8 @@ import * as monaco from 'monaco-editor'
 import editorWorkerUrl from './editor.worker.js?worker&url'
 import extHostWorkerUrl from './extensionHost.worker.js?worker&url'
 import textmateWorkerUrl from './textmate.worker.js?worker&url'
-import { initialize } from '@codingame/monaco-vscode-api'
+import { initialize, getService, IEditorService, ICommandService, INotificationService, IEditorGroupsService } from '@codingame/monaco-vscode-api'
+import { setUnexpectedErrorHandler } from '@codingame/monaco-vscode-api/monaco'
 import getConfigurationServiceOverride, { updateUserConfiguration } from '@codingame/monaco-vscode-configuration-service-override'
 import getThemeServiceOverride from '@codingame/monaco-vscode-theme-service-override'
 import getTextmateServiceOverride from '@codingame/monaco-vscode-textmate-service-override'
@@ -22,6 +23,29 @@ import getModelServiceOverride from '@codingame/monaco-vscode-model-service-over
 import getFilesServiceOverride, {
   RegisteredFileSystemProvider, RegisteredMemoryFile, registerFileSystemOverlay,
 } from '@codingame/monaco-vscode-files-service-override'
+// The editor PART. attachPart takes ONE part, so this brings VS Code's editor
+// area and nothing else — no activity bar, no sidebar, no panel, no status bar.
+// It is also what carries webviews and custom editors: the markdown preview and
+// media-preview are editor inputs, and without the part there is nowhere for
+// them to open.
+import getViewsServiceOverride, { attachPart, Parts } from '@codingame/monaco-vscode-views-service-override'
+// Everything below is a service the editor part reaches for while it renders.
+// The set was derived by booting and reading what initialize() said was
+// missing, not guessed from the demo's list — the demo turns on terminal,
+// debug, scm, chat and notebooks, none of which a docked artifact pane uses.
+import getBaseServiceOverride from '@codingame/monaco-vscode-base-service-override'
+import getHostServiceOverride from '@codingame/monaco-vscode-host-service-override'
+import getEnvironmentServiceOverride from '@codingame/monaco-vscode-environment-service-override'
+import getLifecycleServiceOverride from '@codingame/monaco-vscode-lifecycle-service-override'
+import getLogServiceOverride from '@codingame/monaco-vscode-log-service-override'
+import getStorageServiceOverride from '@codingame/monaco-vscode-storage-service-override'
+import getNotificationsServiceOverride from '@codingame/monaco-vscode-notifications-service-override'
+import getDialogsServiceOverride from '@codingame/monaco-vscode-dialogs-service-override'
+import getWorkingCopyServiceOverride from '@codingame/monaco-vscode-working-copy-service-override'
+import getBulkEditServiceOverride from '@codingame/monaco-vscode-bulk-edit-service-override'
+import getMarkersServiceOverride from '@codingame/monaco-vscode-markers-service-override'
+import getPreferencesServiceOverride from '@codingame/monaco-vscode-preferences-service-override'
+import getOutlineServiceOverride from '@codingame/monaco-vscode-outline-service-override'
 
 // Grammars + themes ship as npm-published built-in extensions at the same
 // version — no .vsix sourcing, no network at pack time (G9).
@@ -48,6 +72,10 @@ import '@codingame/monaco-vscode-markdown-basics-default-extension'
 // below. With it on, this extension activates clean and its document-link
 // provider underlines markdown links — visible in the check capture.
 import '@codingame/monaco-vscode-markdown-language-features-default-extension'
+import '@codingame/monaco-vscode-markdown-math-default-extension'
+// customEditors — i.e. webviews — for images, audio and video. Only reachable
+// once the editor part exists.
+import '@codingame/monaco-vscode-media-preview-default-extension'
 
 // Phase 2 (LSP over the host's registerUpgrade websocket) rides these — pulled
 // into the graph now so the spike's size number is the honest one.
@@ -129,6 +157,20 @@ export function start (container, { fontFamily = 'Fira Code', dark = true } = {}
       getWorkerOptions: () => ({ type: 'module' }),
     }
     await initialize({
+      ...getBaseServiceOverride(),
+      ...getLogServiceOverride(),
+      ...getEnvironmentServiceOverride(),
+      ...getHostServiceOverride(),
+      ...getLifecycleServiceOverride(),
+      ...getStorageServiceOverride(),
+      ...getNotificationsServiceOverride(),
+      ...getDialogsServiceOverride(),
+      ...getWorkingCopyServiceOverride(),
+      ...getBulkEditServiceOverride(),
+      ...getMarkersServiceOverride(),
+      ...getPreferencesServiceOverride(),
+      ...getOutlineServiceOverride(),
+      ...getViewsServiceOverride(),
       ...getConfigurationServiceOverride(),
       ...getThemeServiceOverride(),
       ...getTextmateServiceOverride(),
@@ -151,6 +193,32 @@ export function start (container, { fontFamily = 'Fira Code', dark = true } = {}
       // therefore SAME-ORIGIN with the studio — extension code runs with the
       // studio's origin, which is a trust boundary worth naming.
       ...getExtensionsServiceOverride({ enableWorkerExtensionHost: true }),
+    // The workbench container. document.body, not the viewer pane: VS Code
+    // hangs context menus, hovers and notification toasts off it, and a pane
+    // that is routinely dragged to a few hundred pixels would clip all three.
+    // The parts themselves go wherever attachEditorPart() puts them.
+    }, document.body, {})
+    // VS Code signals cancellation by THROWING, and its default unexpected-error
+    // handler re-raises onto window.onerror. Closing an editor cancels whatever
+    // that editor had in flight, so a plain file switch can surface as
+    // `Canceled: Canceled` with no fault behind it — measured, intermittently,
+    // in the check harness. Swallow exactly that and nothing else: every other
+    // unexpected error still reaches the console, where the lens fails on it.
+    // ...and the same signal reaches the page as an UNHANDLED REJECTION, which
+    // setUnexpectedErrorHandler never sees. Measured: opening the markdown
+    // preview rejects one internal promise with Canceled every single run.
+    // preventDefault only for cancellation — anything else still lands in the
+    // console, where the lens fails the build on it.
+    self.addEventListener('unhandledrejection', (ev) => {
+      const r = ev.reason
+      const s = String((r && (r.name || r.message)) ?? '')
+      if (s === 'Canceled' || s === 'CodeExpectedError') ev.preventDefault()
+    })
+    setUnexpectedErrorHandler((e) => {
+      const name = e && (e.name ?? '')
+      const msg = e && (e.message ?? '')
+      if (name === 'Canceled' || name === 'CodeExpectedError' || msg === 'Canceled') return
+      console.error(e)
     })
     applyTheme(fontFamily)
   })()
@@ -302,7 +370,16 @@ export async function openFile (container, uriPath, text, opts = {}) {
       // life of the page (see `open` above) — disposing the model ref makes the
       // text-file service reload a uri whose file is still registered, and
       // keeping it is what lets undo history survive a round trip.
-      editor.dispose()
+      //
+      // The try/catch is not defensive padding: once the workbench services are
+      // in play, tearing an editor down cancels whatever it had in flight and
+      // VS Code signals cancellation by THROWING. Closing a file would then
+      // raise `Canceled: Canceled` out of dispose(). Cancellation is swallowed;
+      // anything else still throws.
+      try { editor.dispose() } catch (e) {
+        const s = String((e && (e.name || e.message)) ?? '')
+        if (s !== 'Canceled' && s !== 'CodeExpectedError') throw e
+      }
     },
   }
 }
@@ -369,6 +446,79 @@ export async function connectLanguageServer (lang, { url, token, relPath, sessio
     langClients.delete(lang)
     return false
   }
+}
+
+/** Put a file in the overlay filesystem WITHOUT opening an editor for it.
+ *
+ *  The editor part resolves a uri through the file service, so a file has to
+ *  exist before openEditor() can be asked for it. openFile() registers as a
+ *  side effect of opening; this is the same registration on its own. */
+export async function registerFile (uriPath, text) {
+  await start()
+  acquire(uriPath, text)
+}
+
+/** Mount VS Code's editor part in `container`.
+ *
+ *  This is the surface every non-text viewer arrives on: the markdown preview
+ *  and media-preview's image/audio/video editors are editor INPUTS, and an
+ *  input needs a part to open into. Returns the part's disposable.
+ *
+ *  ponytail: one part for the page, attached on first use. attachPart can be
+ *  called again with a new container (the demo does exactly that when the
+ *  sidebar changes side), so a remount is a re-attach, not a teardown. */
+let editorPart = null
+export async function attachEditorPart (container) {
+  await start(container)
+  editorPart = attachPart(Parts.EDITOR_PART, container)
+  return editorPart
+}
+
+/** Open `uriPath` through VS Code's editor service.
+ *
+ *  Different from openFile(): that one creates a bare monaco editor over a
+ *  model and is what the code lane still drives. This one hands the uri to VS
+ *  Code and lets it choose the editor — a text editor for source, media-preview's
+ *  custom editor for a png, whatever a future extension registers. */
+export async function openEditor (uriPath, { pinned = true, readOnly = false } = {}) {
+  const editorService = await getService(IEditorService)
+  // openEditor(input, options, group) — the third argument is the GROUP, not
+  // more options. Passing an options bag there resolves to undefined and opens
+  // nothing, with no error to show for it.
+  // Open into the MAIN part's active group explicitly. IEditorGroupsService
+  // spans every part (main plus any auxiliary window), and openEditor with no
+  // group picks the service's active one — which is not necessarily the group
+  // inside the part that was attached. Measured: the file opened into a group
+  // holding 1 editor while the active group held 0 and painted `content empty`.
+  const groups = await getService(IEditorGroupsService)
+  return editorService.openEditor({
+    resource: monaco.Uri.file(uriPath),
+    options: { pinned, ...(readOnly ? { readOnly: true } : {}) },
+  }, groups.mainPart.activeGroup)
+}
+
+/** Editor-part diagnostics for the spike harness. Not used by the viewer. */
+export async function editorPartInfo () {
+  const editorService = await getService(IEditorService)
+  const groups = await getService(IEditorGroupsService)
+  const notifications = await getService(INotificationService)
+  return {
+    editors: editorService.count,
+    active: String(editorService.activeEditor?.resource ?? 'none'),
+    paneId: String(editorService.activeEditorPane?.getId() ?? 'none'),
+    groups: groups.groups.map((g) => g.id + ':' + g.count + ':' + (g.element?.isConnected ? 'dom' : 'off')).join(' '),
+    parts: groups.parts.length,
+    mainGroups: groups.mainPart.groups.map((g) => g.id + ':' + g.count).join(' '),
+    openRes: editorService.editors.map((e) => String(e.resource)).join(' '),
+    groupActive: String(groups.activeGroup?.activeEditor?.resource ?? 'none'),
+    notices: (notifications.model?.notifications ?? []).map((n) => String(n.message?.linkedText?.toString?.() ?? n.message)).join(' | '),
+  }
+}
+
+/** Run a VS Code command — `markdown.showPreview` and friends. */
+export async function runCommand (id, ...args) {
+  const commandService = await getService(ICommandService)
+  return commandService.executeCommand(id, ...args)
 }
 
 /** Which languages currently have a live server, for the client to show. */

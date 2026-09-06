@@ -56,14 +56,26 @@ const server = http.createServer((req, res) => {
   fs.createReadStream(file).pipe(res)
 })
 
+// `node check.mjs --dump <out.png>` runs the same page with ?dump, which paints
+// every probe value into the document, and captures it WITHOUT --expect. That is
+// the only way to see WHICH assertion failed: --expect collapses the whole run
+// to one boolean, so a red check names nothing.
+const DUMP = process.argv.includes('--dump')
+// --shot is --dump without the value overlay: the same full-page capture, but
+// showing what the page actually LOOKS like. A webview is a cross-origin
+// iframe, so its contents can only be verified by eye.
+const SHOT = process.argv.includes('--shot')
+const dumpPng = DUMP || SHOT ? process.argv[process.argv.indexOf(DUMP ? '--dump' : '--shot') + 1] : null
+
 server.listen(0, '127.0.0.1', () => {
-  const url = `http://127.0.0.1:${server.address().port}${PREFIX}spike.html`
-  const png = path.join(outDir, 'spike.png')
+  const url = `http://127.0.0.1:${server.address().port}${PREFIX}spike.html` + (DUMP ? '?dump' : '')
+  const png = (DUMP || SHOT) && dumpPng ? dumpPng : path.join(outDir, 'spike.png')
   // execFile, NOT execFileSync: the sync form blocks this process's event
   // loop, so the server above can never answer the lens's requests and every
   // run dies on a Page.navigate timeout.
-  execFile('arxa', ['lens', 'check', url, png, '1400', '900', '30000',
-    '--selector=.monaco-editor',
+  const args = ['lens', 'check', url, png, '1400', '900', '30000']
+  if (!DUMP && !SHOT) args.push('--selector=.monaco-editor')
+  execFile('arxa', DUMP || SHOT ? args : [...args,
     // Every claim phase 1 rests on, asserted in the browser. The reopen and
     // worker rows exist because both were previously written on faith: the
     // overlay stacked per open (stale text on the second visit to a path), and
@@ -124,7 +136,24 @@ server.listen(0, '127.0.0.1', () => {
       // silently off while { url, options } was passed to an override that
       // destructures { enableWorkerExtensionHost, iframeAlternateDomain }.
       'window.__spike.mdErr === undefined',
-      'window.__spike.extHostFrames >= 1'
+      'window.__spike.extHostFrames >= 1',
+      // Phase 7.1: VS Code's editor part, attached alone.
+      'window.__spike.partErr === undefined',
+      'window.__spike.partMounted === true',
+      // attachPart takes ONE part. The plan once claimed adopting views meant
+      // the whole workbench chrome in the docked pane; nothing else may paint.
+      'window.__spike.partChrome.length === 0',
+      // The file opens through IEditorService into VS Code's real file editor,
+      // in the MAIN part's group — not the standalone group wrapOpenEditor
+      // reuses when a monaco.editor.create editor already holds the uri.
+      'window.__spike.vsOpened === true',
+      "window.__spike.paneId === 'workbench.editors.files.textFileEditor'",
+      "window.__spike.mainGroups === '0:1'",
+      'window.__spike.vsTabs === 1',
+      // A webview. This is the whole point of the part.
+      'window.__spike.previewFrames === 1',
+      // Cancellation is swallowed on purpose; nothing ELSE may be rejecting.
+      "window.__spike.rejects.every((r) => r.endsWith('=Canceled'))"
     ].join(' && '),
   ], { encoding: 'utf8' }, (err, stdout, stderr) => {
     server.close()
