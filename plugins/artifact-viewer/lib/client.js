@@ -668,6 +668,11 @@ window.__ModuleLoader__.load({
       // opening is now possible.
       const openedRef = React.useRef(null)
       const [opened, setOpened] = React.useState(0)
+      // The open effect reads the text through a ref so a `text` change does
+      // not re-open the file: re-opening with the loaded bytes wiped what the
+      // user had typed (2026-09-07). Disk changes take the effect below.
+      const textRef = React.useRef(text)
+      textRef.current = text
       // null while the language service is fine (or irrelevant); a row from
       // /lsp/status when there is no server for this file's language.
       const [lsp, setLsp] = React.useState(null)
@@ -718,7 +723,7 @@ window.__ModuleLoader__.load({
           // does not exist. Falls back to the relative path when there is no
           // absPath — the editor works either way, only the language service
           // needs the real identity.
-          handle = await M.openFile(ref.current, absPath || ('/' + relPath), text, {
+          handle = await M.openFile(ref.current, absPath || ('/' + relPath), textRef.current, {
             editable: !!editable,
             dark: isDarkMode(),
             // The viewer's font choice reached CodeMirror through a css var on
@@ -777,7 +782,17 @@ window.__ModuleLoader__.load({
           if (handle) handle.dispose()
           if (docRef) docRef.current = null
         }
-      }, [relPath, absPath, session, text, editable])
+      }, [relPath, absPath, session, editable])
+      // Bytes changed on disk under a CLEAN buffer — the watcher push and
+      // reload-theirs are the only writers of `text` after the open. Push them
+      // into the open document. Guarded on the uri: at a file switch `text`
+      // changes before the new open lands, and the old document must not get
+      // the new file's bytes.
+      React.useEffect(() => {
+        const uri = absPath || ('/' + relPath)
+        if (opened === 0 || openedRef.current !== uri) return
+        ensureMonaco().then((M) => M.updateFile(uri, text)).catch(() => { /* the open effect owns errors */ })
+      }, [text])
       // Source and diff are both TABS in one editor part, not two React
       // subtrees: each is an editor input on the same file. So the mode is a
       // command, and switching keeps the model, the undo history and the
@@ -1674,7 +1689,10 @@ window.__ModuleLoader__.load({
           // Markdown is not a separate surface: it is source in Monaco like
           // any other file, and the diff is an editor input on the same file
           // inside VS Code's editor part — a prop, not another React subtree.
-          surface = h(CodeView, { relPath: state.relPath, absPath: state.absPath, session: state.wt ?? null, text: state.text, editable: canEdit, docRef, onDirty,
+          // Keyed: the notes above it come and go (the "saved" note lands
+          // 1.5s after the first keystroke), and an unkeyed sibling shifting
+          // index is a remount of the live editor.
+          surface = h(CodeView, { key: 'surface', relPath: state.relPath, absPath: state.absPath, session: state.wt ?? null, text: state.text, editable: canEdit, docRef, onDirty,
             diffOriginal: showDiff ? (mainText ?? '') : null })
         } else if (lane === 'image') {
           surface = h('div', { className: 'aXa_av_scroll' }, h('div', { className: 'aXa_av_media' }, h('img', { src: state.url, alt: state.relPath })))

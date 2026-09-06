@@ -343,7 +343,16 @@ export async function openFile (container, uriPath, text, opts = {}) {
   await start(container, { fontFamily, dark })
   applyTheme(fontFamily)
   await attachEditorPart(container)
-  await syncFile(uriPath, text)
+  // Sync only a NEW load. A re-open (the client remounts its CodeView when a
+  // note appears above the editor, 1.5s after the first keystroke) passes the
+  // same text it loaded before, and the document on screen is newer by then:
+  // pushing those bytes back wiped what the user had typed (measured:
+  // remount-keeps-edit). A second visit with different bytes from disk is a
+  // new load and must show them (measured: reopen-rust). The last load per
+  // file is the tell; updateFile() records its bytes the same way.
+  if (!open.has(uriPath)) acquire(uriPath, text)
+  else if (loaded.get(uriPath) !== text) await syncFile(uriPath, text)
+  loaded.set(uriPath, text)
   writeConfig(layoutFor(container.getBoundingClientRect().width))
   const pane = await openEditor(uriPath, { pinned: false })
   // A text file gives an ICodeEditor; media-preview's image editor gives a
@@ -427,6 +436,9 @@ async function closeWebviews () {
   }
   if (doomed.length) await editorService.closeEditors(doomed)
 }
+
+/** The bytes each open file was last LOADED with — see openFile. */
+const loaded = new Map()
 
 /** Bring the overlay filesystem in line with the bytes the host just read.
  *
@@ -533,6 +545,7 @@ export async function closeAll () {
 export async function updateFile (uriPath, text) {
   await start()
   await syncFile(uriPath, text)
+  loaded.set(uriPath, text)
 }
 
 /** Open VS Code's diff editor: `uriPath` against `originalText`.

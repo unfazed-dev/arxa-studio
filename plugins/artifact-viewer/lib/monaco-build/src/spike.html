@@ -424,6 +424,24 @@
     // The host moves away from 0,0 first: the preview iframe lives in a
     // position:fixed overlay on document.body, and a fixed box with no anchor
     // lands at the page's top-left — which in the studio is the sidebar.
+    // ---- typed text must survive a remount -------------------------------
+    // The panel remounts the CodeView when a note appears above it (the
+    // "saved" note, 1.5s after the first keystroke), and the remount calls
+    // openFile again with the text it LOADED, not the text on screen.
+    out.step = 'remount-keeps-edit'
+    const hk = await m.openFile(host, ABS, DART, { editable: true })
+    await settle(500)
+    hk.editor.focus()
+    hk.editor.trigger('spike', 'type', { text: 'TYPED ' })
+    await settle(1800)   // past any auto-save VS Code might run
+    out.typedSeen = hk.getText().startsWith('TYPED ')
+    hk.dispose()
+    const hk2 = await m.openFile(host, ABS, DART, { editable: true })
+    await settle(800)
+    out.remountKeeps = hk2.getText().startsWith('TYPED ')
+    out.remountText = hk2.getText().slice(0, 12)
+    hk2.dispose()
+
     out.step = 'product-flow'
     wrap.style.left = '300px'; wrap.style.top = '80px'
     const flow = {}
@@ -641,6 +659,9 @@
       "out.flow.backTop === 'iframe'",
       "out.flow.dartTop === 'editor'",
       'out.flow.stray.length === 0',
+      // What the user typed is still there after the panel remounts the editor.
+      'out.typedSeen === true',
+      'out.remountKeeps === true',
       // Two columns even in a 700px pane, and painted marks in both diffs.
       'out.flow.diffSbs === true',
       'out.flow.diffWidth < 800',
@@ -692,6 +713,6 @@
   }, null, 1)
   if (location.search.includes('dump')) document.body.appendChild(dump)
   try {
-    await fetch('report', { method: 'POST', body: JSON.stringify({ step: out.step, fail: out.fail, flow: out.flow, diffInsBg: out.diffInsBg, diffDelBg: out.diffDelBg, partErr: out.partErr, error: out.error }) })
+    await fetch('report', { method: 'POST', body: JSON.stringify({ step: out.step, fail: out.fail, flow: out.flow, typedSeen: out.typedSeen, remountKeeps: out.remountKeeps, remountText: out.remountText, diffInsBg: out.diffInsBg, diffDelBg: out.diffDelBg, partErr: out.partErr, error: out.error }) })
   } catch { /* the harness may not be listening */ }
 </script>

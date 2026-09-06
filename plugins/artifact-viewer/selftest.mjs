@@ -761,6 +761,15 @@ assert.ok(clientSrc.includes("await M.openDiff(uri, diffOriginal, {"),
 // is writable, so VS Code hands it over editable. Without this the diff writes
 // files the code editor refuses to let you type in (proved in spike.html:
 // diffModRO/diffTyped).
+// Typed text must survive a re-open (2026-09-07): the panel remounted the
+// CodeView when the "saved" note appeared, and openFile pushed the LOADED
+// bytes back over the document. Register once; disk changes use updateFile.
+assert.ok(entrySrc.includes('else if (loaded.get(uriPath) !== text) await syncFile(uriPath, text)'),
+  'openFile syncs only a NEW load; a re-open with the same loaded bytes leaves the document alone')
+assert.ok(/\}, \[relPath, absPath, session, editable\]\)/.test(clientSrc) && clientSrc.includes('M.updateFile(uri, text)'),
+  'the client does not re-open on a text change; a clean-buffer disk change goes through updateFile')
+assert.ok(clientSrc.includes("h(CodeView, { key: 'surface'"),
+  'the editor surface is keyed so a note appearing above it cannot remount it')
 // The markdown preview is a fixed overlay on document.body anchored to its
 // pane; when the CodeView host unmounts (the loading hint between two files)
 // the anchor is gone and the iframe lands at the page's top-left. Measured
