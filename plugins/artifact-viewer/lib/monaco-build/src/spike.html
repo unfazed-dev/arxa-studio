@@ -272,6 +272,20 @@
     await m.updateFile('/spike/notes.md', '# Changed\n\nnew bytes from disk\n')
     await settle(1500)
     out.afterChange = viewText().slice(0, 12)
+
+    // ---- the DIFF editor --------------------------------------------------
+    // Replaces CodeMirror's unifiedMergeView. Both sides are resources, so the
+    // original gets its own uri — a second model on the file's own uri would
+    // collide with the one the editor already holds.
+    out.step = 'diff'
+    await m.openDiff('/spike/notes.md', '# Title\n\nold bytes\n', { sideBySide: false })
+    await settle(2000)
+    const info3 = await m.editorPartInfo()
+    out.diffPane = info3.paneId
+    out.diffTabs = document.querySelectorAll('#part .tab').length
+    // The inline diff paints inserted/deleted line decorations; without them
+    // this would be two editors showing the same thing.
+    out.diffMarks = document.querySelectorAll('#part .monaco-editor .line-insert, #part .monaco-editor .line-delete, #part .monaco-editor .char-insert, #part .monaco-editor .char-delete').length
   } catch (e) { out.partErr = String(e && e.message || e) }
   out.step = 'done'
 
@@ -374,7 +388,12 @@
       "out.reopenText.startsWith('# Title')",
       // Bytes changed underneath an OPEN editor reach it with no reload call:
       // the fs provider fires the change and VS Code re-reads.
-      "out.afterChange.startsWith('# Changed')"
+      "out.afterChange.startsWith('# Changed')",
+      // The diff editor, which replaced CodeMirror's unifiedMergeView. Marks,
+      // not just a pane id: two editors showing the same text would still be a
+      // diff editor.
+      "out.diffPane === 'workbench.editors.textDiffEditor'",
+      'out.diffMarks > 0'
   ]) {
     let ok = false
     try { ok = !!new Function('out', 'return (' + src + ')')(out) } catch (e) { ok = false }
@@ -397,6 +416,7 @@
     rejects: out.rejects,
     pngBytes: out.pngBytes, imgPane: out.imgPane, imgActive: out.imgActive, imgFrames: out.imgFrames,
     closedTabs: out.closedTabs, reopenText: out.reopenText, afterChange: out.afterChange,
+    diffPane: out.diffPane, diffTabs: out.diffTabs, diffMarks: out.diffMarks,
   }, null, 1)
   if (location.search.includes('dump')) document.body.appendChild(dump)
 </script>

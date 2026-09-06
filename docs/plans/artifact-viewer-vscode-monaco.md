@@ -747,12 +747,31 @@ Two harness fixes came out of it, both worth keeping:
 | vendored bundle | size | replaced by | site in `lib/client.js` |
 |---|---|---|---|
 | ~~`markdown.js`~~ | ~~146 KB~~ | **DONE** — VS Code's preview webview | deleted |
-| `codemirror.js` | 886 KB | monaco's diff editor (`createDiffEditor`) | `:838` `:854` `:1621` |
+| ~~`codemirror.js`~~ | ~~886 KB~~ | **DONE** — VS Code's diff editor | deleted |
 | `prettier.js` | 2.1 MB | LSP formatting (`textDocument/formatting`) | `:1652` |
 | `pdf.js` + worker | 1.7 MB | **nothing — stays** | `:878` |
 
-`codemirror.js` carries `ArxaTheme`, which also themes the markdown preview, so
-it can only go once the preview is a webview.
+#### 7.2-b codemirror.js is gone — **DONE**
+
+Its last two readers were `DiffView` and the 2026 palette. The diff is now VS
+Code's own diff editor, opened as an editor input like everything else, with the
+original side on its own `<path>.arxa-main` uri (a second model on the file's own
+uri would collide with the one the editor holds) and a `label` so the tab does
+not leak that scratch name. Inline below 800px, side-by-side above — the same
+reasoning as the minimap in `layoutFor`.
+
+What it replaced it with is bigger than a swap: the capture shows word-level
+insert/delete highlighting, the next/previous-change toolbar, whitespace and
+swap-sides controls, and the change overview in the right gutter.
+`unifiedMergeView` had none of that.
+
+The 2026 palette went with it. It existed because CM6 has no TextMate engine, so
+`lib/vendor.js` compiled `tokenColors` from the vendored VS Code theme JSONs into
+static CM6 `HighlightStyle` specs. VS Code's own build has the engine and paints
+its own themes, so the whole port — `stripJSONC`, the scope→tag map,
+`readTheme`, `buildThemesEntry`, `CM_LINES`, `CM_ENTRY`, the two theme JSONs and
+21 `@codemirror/*` dependencies — is deleted. `watchPalette` stays: it is what
+tells VS Code which theme to use.
 
 #### 7.2-a markdown.js is gone — **DONE**
 

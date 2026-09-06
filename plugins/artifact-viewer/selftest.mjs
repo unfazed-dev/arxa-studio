@@ -475,8 +475,11 @@ const vendorDir = path2.join(here, 'lib', 'vendor')
 // markdown.js is GONE: the rendered preview is VS Code's own webview now, which
 // is better than markdown-it ever was (its stylesheet, math, checkboxes, and
 // fences highlighted by the same grammars the editor uses) and needs no bundle.
-for (const f of ['codemirror.js', 'pdf.js', 'pdf.worker.js',
-  'prettier.js', 'icons.js']) {
+// codemirror.js is GONE too. Its last two readers were the diff surface and the
+// 2026 palette; the diff is VS Code's diff editor now, and VS Code paints its
+// own theme. What remains vendored is what VS Code has no answer for: a PDF
+// viewer, prettier for markdown/yaml, the material icon set and the font.
+for (const f of ['pdf.js', 'pdf.worker.js', 'prettier.js', 'icons.js']) {
   assert.ok(fs.existsSync(path2.join(vendorDir, f)), 'vendored bundle present: ' + f)
   const bytes = fs.readFileSync(path2.join(vendorDir, f))
   assert.ok(bytes.length > 50_000, f + ' is a real bundle (' + bytes.length + ' bytes)')
@@ -486,17 +489,14 @@ const vr = createVendorRoutes({ vendorDir })
 const vhttp = http.createServer((rq, rs) => { void vr.handle(rq, rs) })
 await new Promise((r2) => vhttp.listen(0, '127.0.0.1', r2))
 const vport = vhttp.address().port
-const vget = await req(vport, '/codemirror.js')
-assert.equal(vget.status, 200, 'vendor route serves codemirror.js')
+const vget = await req(vport, '/prettier.js')
+assert.equal(vget.status, 200, 'vendor route serves prettier.js')
 assert.equal(vget.headers['content-type'], 'text/javascript; charset=utf-8')
 assert.ok(vget.body.startsWith('/* arxa-artifact-viewer vendored bundle'), 'provenance banner served')
-assert.equal((await req(vport, '/codemirror.js', { method: 'POST' })).status, 405, 'vendor route GET-only')
+assert.equal((await req(vport, '/prettier.js', { method: 'POST' })).status, 405, 'vendor route GET-only')
 const vt = await req(vport, '/%2e%2e/index.js')
 assert.ok(vt.status === 404 || vt.status === 403, 'vendor traversal refused, got ' + vt.status)
-// 2026 editor (grilled 2026-09-03): theme port, lazy prettier, icon subset,
-// Fira Code woff2 with a real font content-type. ArxaTheme rides INSIDE the
-// codemirror bundle — a second IIFE would duplicate @codemirror/state and
-// break every extension instanceof check (measured live 2026-09-03).
+// Lazy prettier, icon subset, Fira Code woff2 with a real font content-type.
 const vfont = await req(vport, '/fira-code-latin.woff2')
 assert.equal(vfont.status, 200, 'fira-code woff2 served')
 assert.equal(vfont.headers['content-type'], 'font/woff2', 'woff2 content-type')
@@ -509,7 +509,8 @@ assert.ok(vpngBuf[0] === 0x89 && vpngBuf[1] === 0x50 && vpngBuf[2] === 0x4e, 'pr
 const vpng = await req(vport, '/prettier.png')
 assert.equal(vpng.status, 200, 'vendor route serves prettier.png')
 assert.equal(vpng.headers['content-type'], 'image/png', 'png content-type')
-assert.ok(!fs.existsSync(path2.join(vendorDir, 'themes.js')), 'no separate themes bundle (single @codemirror instance)')
+assert.ok(!fs.existsSync(path2.join(vendorDir, 'themes.js')) && !fs.existsSync(path2.join(vendorDir, 'codemirror.js')),
+  'no CodeMirror and no separate themes bundle — VS Code owns the editor, the diff and the palette')
 
 // ---- G12: the route serves the Monaco build dir too -----------------------
 // monaco-build/dist is ~200 flat files built at pack time and gitignored, so
@@ -525,7 +526,7 @@ const vrMon = createVendorRoutes({ vendorDirs: [vendorDir, fakeMonaco] })
 const vhttpMon = http.createServer((rq, rs) => { void vrMon.handle(rq, rs) })
 await new Promise((r2) => vhttpMon.listen(0, '127.0.0.1', r2))
 const vportMon = vhttpMon.address().port
-assert.equal((await req(vportMon, '/codemirror.js')).status, 200, 'first dir still served')
+assert.equal((await req(vportMon, '/prettier.js')).status, 200, 'first dir still served')
 assert.equal((await req(vportMon, '/arxa-monaco.js')).status, 200, 'second dir served (the monaco entry)')
 // THE phase-1 blocker: WebAssembly.instantiateStreaming rejects any
 // content-type but application/wasm, so the oniguruma TextMate engine — and
@@ -540,29 +541,13 @@ assert.equal((await req(vportMon, '/webWorkerExtensionHostIframe.html')).headers
 // bundle would never be picked up.
 assert.match(vwasm.headers['cache-control'], /immutable/, 'hashed chunk is immutable')
 assert.equal((await req(vportMon, '/arxa-monaco.js')).headers['cache-control'], 'no-store', 'stable entry name stays no-store')
-assert.equal((await req(vportMon, '/codemirror.js')).headers['cache-control'], 'no-store', 'committed vendor bundle stays no-store')
+assert.equal((await req(vportMon, '/prettier.js')).headers['cache-control'], 'no-store', 'committed vendor bundle stays no-store')
 // The traversal guard must hold PER DIR — a name that escapes one root must
 // not be admitted because it happens to sit inside another.
 assert.ok([403, 404].includes((await req(vportMon, '/%2e%2e/index.js')).status), 'traversal still refused with two dirs')
 assert.equal((await req(vportMon, '/nothing-here.js')).status, 404, 'unknown name 404s across both dirs')
 vhttpMon.close()
 fs.rmSync(fakeMonaco, { recursive: true, force: true })
-const vThemes = fs.readFileSync(path2.join(vendorDir, 'codemirror.js'), 'utf8')
-assert.ok(vThemes.includes('ArxaTheme='), 'codemirror bundle sets ArxaTheme')
-assert.ok(vThemes.includes('2026 Dark') && vThemes.includes('2026 Light'), 'both 2026 palettes vendored')
-assert.ok(vThemes.includes('#121314'), '2026 Dark editor background in palette')
-assert.ok(vThemes.includes('#ff7b72'), 'GitHub keyword red in palette')
-assert.ok(vThemes.includes('cm-selectionBackground') && vThemes.includes('cm-gutters'), 'editor chrome mapped')
-const vCM = fs.readFileSync(path2.join(vendorDir, 'codemirror.js'), 'utf8')
-for (const key of ['langForExt', 'syntaxHighlighting', 'Compartment', 'indentUnit', 'legacy']) {
-  assert.ok(vCM.includes(key), 'ArxaCM exports ' + key)
-}
-// `parsers:` is NOT asserted any more — it existed only to feed the vendored
-// markdown preview's highlighter, which VS Code's webview replaced. It still
-// ships inside codemirror.js and goes when that bundle does.
-for (const key of ['resolveTag:', 'highlightTree:']) {
-  assert.ok(vCM.includes(key), 'ArxaCM exports ' + key)
-}
 const vPrettier = fs.readFileSync(path2.join(vendorDir, 'prettier.js'), 'utf8')
 assert.ok(vPrettier.includes('window.ArxaPrettier=') && vPrettier.includes('parserForExt'), 'prettier bundle shape')
 assert.ok(vPrettier.includes('typescript') && vPrettier.includes('scss'), 'prettier parser coverage')
@@ -574,7 +559,10 @@ await new Promise((r2) => vhttp.close(r2))
 const clientSrc = fs.readFileSync(path2.join(here, 'lib', 'client.js'), 'utf8')
 // 2026 editor client contracts (grilled 2026-09-03).
 assert.ok(clientSrc.includes("'.dart'"), '.dart joins the code lane')
-assert.match(clientSrc, /ensureVendor\('codemirror\.js', 'ArxaCM'\)[\s\S]{0,120}CM\.ArxaTheme/, 'palette read from the single CM bundle')
+assert.ok(!clientSrc.includes('ArxaCM') && !clientSrc.includes('unifiedMergeView'),
+  'nothing in the client reaches for CodeMirror any more')
+assert.ok(clientSrc.includes('diffOriginal: showDiff ?'),
+  'and diff, like preview, is a PROP on the one CodeView — three tabs in one part, not three React subtrees')
 assert.match(clientSrc, /ensureVendor\('icons\.js', 'ArxaIcons'\)/, 'client loads the material icon subset')
 assert.match(clientSrc, /ensureVendor\('prettier\.js', 'ArxaPrettier'\)/, 'prettier stays lazy (loaded only on format)')
 // G7 phase 1b: the editable lane is Monaco/VS Code, not CodeMirror. Language
@@ -704,6 +692,8 @@ assert.ok(entrySrc2c.includes("if (s === 'Canceled' || s === 'CodeExpectedError'
   'and ONLY cancellation is swallowed — loosening this guard would hide every real rejection from the lens')
 assert.ok(!fs.existsSync(path2.join(here, 'lib', 'vendor', 'markdown.js')) && !clientSrc.includes('ArxaMD'),
   'nothing loads the vendored markdown bundle any more')
+assert.ok(entrySrc2c.includes("original: { resource: monaco.Uri.file(origPath) }"),
+  'the diff is VS Code\'s diff editor, with the original side on its OWN uri so it cannot collide with the open file')
 assert.ok(entrySrc2c.includes("runCommand('markdown.showPreview')"),
   'the rendered preview is VS Code\'s, opened as an editor input in the part')
 assert.ok(clientSrc.includes("preview: lane === 'markdown' && !showSource"),
@@ -727,15 +717,17 @@ assert.match(clientSrc, /catch \{ \/\* no language service; the editor is unaffe
 assert.ok(entrySrc.includes("['arxa-lsp', token]"), 'the bundle sends the token as a subprotocol (a browser cannot set headers)')
 assert.ok(entrySrc.includes('if (langClients.has(lang)) return true'), 'one language client per language, not one per file opened')
 assert.match(clientSrc, /IconEnhanceOutline16/, 'format action uses the enhance glyph')
-assert.ok(clientSrc.includes('aXa_av_palMd'), 'markdown preview adopts the palette chrome')
-assert.ok(clientSrc.includes("'--aXa_av_pal-bg'"), 'palette CSS vars set on the root')
+// The 2026 palette vars are gone with CodeMirror: they existed to make the CM
+// editor and the markdown preview match, and VS Code paints both from its own
+// theme. watchPalette stays — it is what tells VS Code which theme to use.
 assert.ok(clientSrc.includes('data-ds-dark-theme'), 'palette follows the dsh dark flag')
 assert.ok(clientSrc.includes('--arxa-editor-font'), 'editor font follows the settings choice')
 assert.ok(clientSrc.includes('aXa_av_fileIcon'), 'viewer title carries the material file icon')
 // 2026-09-03 sweep fixes.
-assert.ok(clientSrc.includes('unwatchPal'), 'panel palette subscription unsubscribes on remount')
-assert.match(clientSrc, /h\(DiffView, \{ relPath: state\.relPath/, 'diff surface receives the file identity')
-assert.ok(clientSrc.includes('langComp.of(CM.langForExt(relPath)'), 'diff pane colors by language')
+// DiffView is gone: the diff is an editor input in the part, addressed by uri,
+// so "receives the file identity" is now structural rather than a prop.
+assert.ok(clientSrc.includes("await M.openDiff(uri, diffOriginal, {"),
+  'the diff opens through VS Code, which colours both sides from the same grammar the editor uses')
 assert.ok(clientSrc.includes('data-arxa-vendor'), 'vendor script tags marked for cross-loader reuse')
 // Prettier viewer toggle: ON by default, persisted, gates every format path.
 assert.ok(clientSrc.includes("'arxa.av.prettier'"), 'prettier toggle persists its choice')

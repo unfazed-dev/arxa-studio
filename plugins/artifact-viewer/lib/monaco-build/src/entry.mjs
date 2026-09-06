@@ -506,6 +506,31 @@ export async function updateFile (uriPath, text) {
   await syncFile(uriPath, text)
 }
 
+/** Open VS Code's diff editor: `uriPath` against `originalText`.
+ *
+ *  The original side gets its OWN uri (`<path>.arxa-main`) rather than being a
+ *  detached model: the diff editor takes two resources, and a second model on
+ *  the file's own uri would collide with the one the editor already holds.
+ *
+ *  Narrow panes get the inline view — side-by-side in a 300px pane is two
+ *  useless columns. Same reasoning as the minimap in layoutFor. */
+export async function openDiff (uriPath, originalText, { sideBySide = null } = {}) {
+  const origPath = uriPath + '.arxa-main'
+  await syncFile(origPath, originalText)
+  if (sideBySide !== null) writeConfig({ 'diffEditor.renderSideBySide': sideBySide })
+  const editorService = await getService(IEditorService)
+  const groups = await getService(IEditorGroupsService)
+  const name = uriPath.slice(uriPath.lastIndexOf('/') + 1)
+  return editorService.openEditor({
+    original: { resource: monaco.Uri.file(origPath) },
+    modified: { resource: monaco.Uri.file(uriPath) },
+    // Without a label the tab reads `notes.md.arxa-main ↔ notes.md`, which
+    // leaks the scratch uri the original side needs.
+    label: 'main ↔ ' + name,
+    options: { pinned: false },
+  }, groups.mainPart.activeGroup)
+}
+
 /** Show VS Code's rendered markdown preview for `uriPath`, as its own tab.
  *
  *  The preview is a WEBVIEW, and a webview is an editor input — which is why it

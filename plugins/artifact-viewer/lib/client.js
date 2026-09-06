@@ -121,8 +121,7 @@ window.__ModuleLoader__.load({
       + '.aXa_av_note[data-tone=warn]{border-color:var(--dsw-alias-state-warn-primary);color:var(--dsw-alias-state-warn-label)}'
       + '.aXa_av_conflict{margin:8px 12px 0;padding:8px 10px;border-radius:8px;border:1px solid var(--dsw-alias-state-error-primary);background:var(--dsw-alias-bg-layer-1);display:flex;align-items:center;gap:8px;flex-wrap:wrap}'
       + '.aXa_av_conflictText{flex:1;min-width:140px;font-size:12px;line-height:17px;color:var(--dsw-alias-label-error)}'
-      + '.aXa_av_editorWrap{flex:1;min-height:0;overflow:auto;border-top:1px solid var(--dsw-alias-border-l2);background:var(--aXa_av_pal-bg,var(--dsw-alias-bg-base))}'
-      + '.aXa_av_editorWrap .cm-editor{height:100%;background:var(--aXa_av_pal-bg,var(--dsw-alias-bg-base))}'
+      + '.aXa_av_editorWrap{flex:1;min-height:0;overflow:auto;border-top:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base)}'
       // Monaco scrolls itself and sizes to the container; the wrapper's
       // overflow:auto would add a second scrollbar around it.
       + '.aXa_av_monaco{overflow:hidden;display:flex;flex-direction:column}'
@@ -144,9 +143,6 @@ window.__ModuleLoader__.load({
       + '.aXa_av_fileIcon svg{width:16px;height:16px;display:block}'
       // Markdown preview adopts the 2026 chrome too (grilled 2026-09-03):
       // palette vars arrive inline on the root; fallbacks keep dsh tokens.
-      + '.aXa_av_palMd{background:var(--aXa_av_pal-bg,var(--dsw-alias-bg-base))}'
-      + '.aXa_av_palMd .aXa_av_md{color:var(--aXa_av_pal-fg,var(--dsw-alias-label-primary))}'
-      + '.aXa_av_palMd .aXa_av_md pre{background:var(--aXa_av_pal-code,var(--dsw-alias-markdown-code-block))}'
       + '.aXa_av_md{padding:12px 16px;line-height:1.6;font-size:14px;color:var(--dsw-alias-label-primary)}'
       + '.aXa_av_md h1,.aXa_av_md h2,.aXa_av_md h3,.aXa_av_md h4{line-height:1.3;margin:1.1em 0 .5em;color:var(--dsw-alias-label-primary)}'
       + '.aXa_av_md h1:first-child,.aXa_av_md h2:first-child,.aXa_av_md h3:first-child{margin-top:0}'
@@ -694,11 +690,13 @@ window.__ModuleLoader__.load({
      *  `docRef.current` holds the bundle's handle, not a monaco object. Five
      *  call sites in Panel read the live document through it, and keeping the
      *  seam narrow is what stops phases 4-6 from rewriting all of them. */
-    function CodeView({ relPath, absPath, session, text, editable, docRef, onDirty, preview }) {
+    function CodeView({ relPath, absPath, session, text, editable, docRef, onDirty, preview, diffOriginal }) {
       const ref = React.useRef(null)
-      // The uri the part currently holds — set once the file is open, so the
-      // preview toggle below knows what to re-open and does nothing before then.
+      // The uri the part currently holds, and a counter that ticks when it
+      // lands. The mode effect below needs both: what to open, and a signal that
+      // opening is now possible.
       const openedRef = React.useRef(null)
+      const [opened, setOpened] = React.useState(0)
       // null while the language service is fine (or irrelevant); a row from
       // /lsp/status when there is no server for this file's language.
       const [lsp, setLsp] = React.useState(null)
@@ -772,7 +770,7 @@ window.__ModuleLoader__.load({
           // lane that covers markdown and yaml, which no server does.
           unwatch = watchPalette((dark) => { M.setTheme(dark) })
           openedRef.current = absPath || ('/' + relPath)
-          if (preview) await M.showMarkdownPreview(openedRef.current)
+          setOpened((n) => n + 1)
           // Language service, best effort and always last: the editor is fully
           // usable without one, so nothing here may fail the open. A file with
           // no server, no project manifest, or no installed binary simply gets
@@ -804,20 +802,28 @@ window.__ModuleLoader__.load({
           if (docRef) docRef.current = null
         }
       }, [relPath, absPath, session, text, editable])
-      // Source <-> preview is a TAB SWITCH inside the editor part, not a swap of
-      // React subtrees: both are editor inputs on the same file. Skipped on the
-      // first run, because the open effect above already put the right one up.
-      const firstToggle = React.useRef(true)
+      // Source, rendered preview and diff are all TABS in one editor part, not
+      // three React subtrees: every one of them is an editor input on the same
+      // file. So the mode is a command, and switching keeps the model, the undo
+      // history and the language client alive. Re-opening the input that is
+      // already up is a focus, so this is safe to run whenever it re-fires.
       React.useEffect(() => {
-        if (firstToggle.current) { firstToggle.current = false; return }
         const uri = openedRef.current
-        if (!uri) return
+        if (!uri || opened === 0) return
         void (async () => {
           const M = await ensureMonaco()
-          if (preview) await M.showMarkdownPreview(uri)
-          else await M.openEditor(uri)
-        })().catch(() => { /* the toggle is not worth an error surface */ })
-      }, [preview])
+          if (diffOriginal != null) {
+            await M.openDiff(uri, diffOriginal, {
+              // Side by side needs room; below this it is two useless columns.
+              sideBySide: (ref.current ? ref.current.getBoundingClientRect().width : 0) >= 800,
+            })
+          } else if (preview) {
+            await M.showMarkdownPreview(uri)
+          } else {
+            await M.openEditor(uri)
+          }
+        })().catch(() => { /* a mode switch is not worth an error surface */ })
+      }, [opened, preview, diffOriginal])
 
       // The strip keeps its slot whether or not it is showing: React
       // reconciles these children by position, and letting the host div move
@@ -838,46 +844,6 @@ window.__ModuleLoader__.load({
           lsp.error ? h('span', { key: 'e', style: { opacity: 0.8 } }, lsp.error) : null,
         ]) : null,
         h('div', { className: 'aXa_av_lspHost', ref }))
-    }
-
-    function DiffView({ relPath, original, text }) {
-      const ref = React.useRef(null)
-      React.useEffect(() => {
-        let dead = false
-        let view = null
-        let unwatch = null
-        ;(async () => {
-          // ONE bundle: ArxaTheme rides the codemirror IIFE — a separate
-          // themes.js would carry a second @codemirror/state and every
-          // extension would fail EditorView's instanceof check (measured
-          // live 2026-09-03).
-          const CM = await ensureVendor('codemirror.js', 'ArxaCM')
-          const TH = CM.ArxaTheme
-          if (dead || !ref.current) return
-          const themeComp = new CM.Compartment()
-          const langComp = new CM.Compartment()
-          const pal = (dark) => {
-            const t = TH[dark ? 'dark' : 'light']
-            return [t.theme, CM.syntaxHighlighting(t.highlight)]
-          }
-          const extensions = [
-            ...CM.basicSetup,
-            themeComp.of(pal(isDarkMode())),
-            langComp.of(CM.langForExt(relPath) || []),
-            CM.EditorView.editable.of(false),
-            CM.unifiedMergeView({ original, highlightChanges: true }),
-          ]
-          view = new CM.EditorView({
-            state: CM.EditorState.create({ doc: text, extensions }),
-            parent: ref.current,
-          })
-          unwatch = watchPalette((dark) => {
-            if (view) view.dispatch({ effects: themeComp.reconfigure(pal(dark)) })
-          })
-        })().catch(() => {})
-        return () => { dead = true; if (unwatch) unwatch(); if (view) view.destroy() }
-      }, [relPath, original, text])
-      return h('div', { className: 'aXa_av_editorWrap', ref })
     }
 
     function PdfView({ url, t }) {
@@ -1290,9 +1256,6 @@ window.__ModuleLoader__.load({
         try { localStorage.setItem('arxa.av.prettier', next ? 'on' : 'off') } catch { /* storage optional */ }
         return next
       })
-      // Active 2026 palette (null until themes.js resolves) — feeds the
-      // palette CSS vars on the root and the preview surface classes.
-      const [pal, setPal] = React.useState(null)
       const [changes, setChanges] = React.useState([])
       const docRef = React.useRef(null)
       const mtimeRef = React.useRef(null)
@@ -1596,26 +1559,9 @@ window.__ModuleLoader__.load({
         })()
       }
 
-      // ---- 2026 palette + format action ---------------------------------------
-      React.useEffect(() => {
-        let dead = false
-        let unwatchPal = null
-        ensureVendor('codemirror.js', 'ArxaCM').then((CM) => {
-          if (dead) return
-          const TH = CM.ArxaTheme
-          if (!TH) return
-          setPal(TH[isDarkMode() ? 'dark' : 'light'])
-          // The seat REMOUNTS this panel on every session transition — each
-          // mount must unsubscribe, or the module-level subscriber set grows
-          // one stale closure per transition (leak + setState-on-unmounted).
-          unwatchPal = watchPalette((dark) => {
-            const t = TH[dark ? 'dark' : 'light']
-            setPal(t)
-          })
-        }).catch(() => { /* palette is progressive enhancement */ })
-        return () => { dead = true; if (unwatchPal) unwatchPal() }
-      }, [])
-
+      // The 2026 palette effect is gone with CodeMirror. It read ArxaTheme out of
+      // the CM bundle to theme the editor, the markdown preview and the pane
+      // background; VS Code paints all three itself now, from its own theme.
       const filename = state.relPath ? state.relPath.split('/').pop() : null
       const formatExt = filename && editableLane ? filename.split('.').pop().toLowerCase() : null
       const canFormat = !!(state.phase === 'ready' && canEdit && formatExt && FORMAT_EXTS.has(formatExt) && prettierOn)
@@ -1740,15 +1686,14 @@ window.__ModuleLoader__.load({
         }
 
         let surface = null
-        if (showDiff && editableLane) {
-          surface = h(DiffView, { relPath: state.relPath, original: mainText, text: canEdit ? docText() : state.text })
-        } else if (editableLane) {
+        if (editableLane) {
           // Markdown is not a separate surface any more. Rendered preview and
           // source are two editor inputs on ONE file inside VS Code's editor
           // part, so the toggle is a prop, not a different React subtree — and
           // the preview is VS Code's own, not the vendored markdown-it bundle.
           surface = h(CodeView, { relPath: state.relPath, absPath: state.absPath, session: state.wt ?? null, text: state.text, editable: canEdit, docRef, onDirty,
-            preview: lane === 'markdown' && !showSource })
+            preview: lane === 'markdown' && !showSource,
+            diffOriginal: showDiff ? (mainText ?? '') : null })
         } else if (lane === 'image') {
           surface = h('div', { className: 'aXa_av_scroll' }, h('div', { className: 'aXa_av_media' }, h('img', { src: state.url, alt: state.relPath })))
         } else if (lane === 'audio') {
@@ -1765,12 +1710,7 @@ window.__ModuleLoader__.load({
         body = h(React.Fragment, null, ...notes, surface)
       }
 
-      const palVars = pal ? {
-        '--aXa_av_pal-bg': pal.bg,
-        '--aXa_av_pal-fg': pal.fg,
-        '--aXa_av_pal-code': pal.codeBg,
-      } : undefined
-      return h('div', { className: 'aXa_av_root', style: palVars }, header, h('div', { className: 'aXa_av_body' }, body))
+      return h('div', { className: 'aXa_av_root' }, header, h('div', { className: 'aXa_av_body' }, body))
     }
 
     // ---- apply: registration + every side effect inside ctx.effect -----------
