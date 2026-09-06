@@ -761,6 +761,15 @@ assert.ok(clientSrc.includes("await M.openDiff(uri, diffOriginal, {"),
 // is writable, so VS Code hands it over editable. Without this the diff writes
 // files the code editor refuses to let you type in (proved in spike.html:
 // diffModRO/diffTyped).
+// Decision B (2026-09-07): with a session current, a tree open shows the
+// SESSION's copy of the file — where the viewer's own saves land (D38) — and
+// falls back to the org copy quietly when the session has none.
+assert.ok(clientSrc.includes("const sid = p.sessionId || store.getSnapshot().sessionId || null")
+  && clientSrc.includes("openWorktreeRef.current(sid, p.relPath, { quiet: true })"),
+  'a plain tree open routes through the current session worktree with a quiet org fallback')
+assert.ok(/const openWorktree = async \(sessionId, relPath, \{ quiet = false \} = \{\}\)/.test(clientSrc)
+  && clientSrc.includes("if (!quiet) setState({ phase: 'error'"),
+  'openWorktree can fail quietly so the fallback does not flash an error')
 // Typed text must survive a re-open (2026-09-07): the panel remounted the
 // CodeView when the "saved" note appeared, and openFile pushed the LOADED
 // bytes back over the document. Register once; disk changes use updateFile.

@@ -1306,8 +1306,15 @@ window.__ModuleLoader__.load({
           setState({ phase: 'insight', view: p.view, sessionId: p.sessionId || null, orgId: p.orgId || null, rows: p.rows || null })
           return
         }
-        if (p.sessionId && p.relPath) {
-          void Promise.resolve(openWorktreeRef.current && openWorktreeRef.current(p.sessionId, p.relPath)).then((ok) => {
+        // Decision B (2026-09-07): a plain tree open goes through the CURRENT
+        // session's copy when there is a session. That copy is where this
+        // viewer's own saves land (D38: main is never edited directly), so it
+        // is the only one that shows the user's edits — opening the org copy
+        // made a saved edit look lost on the next click. A file the session
+        // has no copy of (untracked in the org) falls back to the org lane.
+        const sid = p.sessionId || store.getSnapshot().sessionId || null
+        if (sid && p.relPath) {
+          void Promise.resolve(openWorktreeRef.current && openWorktreeRef.current(sid, p.relPath, { quiet: true })).then((ok) => {
             if (ok) return
             void (openArtifactRef.current && openArtifactRef.current(p.relPath))
           })
@@ -1465,7 +1472,7 @@ window.__ModuleLoader__.load({
         }
       }
 
-      const openWorktree = async (sessionId, relPath) => {
+      const openWorktree = async (sessionId, relPath, { quiet = false } = {}) => {
         if (!sessionId || !relPath) return false
         resetForOpen()
         setOpen(true)
@@ -1490,7 +1497,9 @@ window.__ModuleLoader__.load({
           setState({ phase: 'ready', kind, relPath, url, wt: sessionId })
           return true
         } catch (e) {
-          setState({ phase: 'error', relPath, note: t('error.load', { path: relPath, reason: String(e && e.message || e) }) })
+          // quiet: the caller has an org-lane fallback, and a file the session
+          // has no copy of must not flash an error on its way there.
+          if (!quiet) setState({ phase: 'error', relPath, note: t('error.load', { path: relPath, reason: String(e && e.message || e) }) })
           return false
         }
       }
