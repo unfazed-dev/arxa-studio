@@ -18,7 +18,12 @@
   // lens still sees how far the page got instead of `__spike is undefined`.
   const out = { step: 'start' }
   window.__spike = out
-  window.addEventListener('error', (e) => { out.error = String(e.message) })
+  window.addEventListener('error', (e) => {
+    // WebKit reports this benign observer warning through onerror; Chrome
+    // never does. It is not a fault — the loop just ran out of frame budget.
+    if (/ResizeObserver loop/.test(String(e.message))) return
+    out.error = String(e.message)
+  })
   // Which STEP produces the stray rejection? The console shows the stack but
   // not the moment, and the whole point is to know what to stop doing.
   out.rejects = []
@@ -376,7 +381,7 @@
     const prodCss = document.createElement('style')
     prodCss.textContent = '.aXa_av_monaco .monaco-editor{height:100%}'
     document.head.appendChild(prodCss)
-    const host = document.createElement('div')
+    let host = document.createElement('div')
     host.style.cssText = 'flex:1;min-height:0'   // .aXa_av_lspHost
     inner.appendChild(host)
     wrap.appendChild(inner)
@@ -404,6 +409,88 @@
     out.prodPartBox = r1 ? Math.round(r1.width) + 'x' + Math.round(r1.height) : 'NO PART'
     out.prodEdBox = r2 ? Math.round(r2.width) + 'x' + Math.round(r2.height) : 'NO EDITOR'
     out.prodLines = host.querySelectorAll('.view-line').length
+
+    // ---- the PRODUCT's markdown flow, sampled every frame -----------------
+    // client.js opens an .md as source, then flips it to the rendered preview
+    // (a webview), and both the diff and the next file start from THAT state.
+    // The host moves away from 0,0 first: the preview iframe lives in a
+    // position:fixed overlay on document.body, and a fixed box with no anchor
+    // lands at the page's top-left — which in the studio is the sidebar.
+    out.step = 'product-flow'
+    wrap.style.left = '300px'; wrap.style.top = '80px'
+    const flow = {}
+    out.flow = flow
+    const stray = []
+    let sampling = true
+    const sample = () => {
+      if (!sampling) return
+      const hr = host.getBoundingClientRect()
+      for (const f of document.querySelectorAll('iframe')) {
+        const r = f.getBoundingClientRect()
+        if (r.width > 0 && r.height > 0 && f.checkVisibility({ visibilityProperty: true })
+            && (r.left < hr.left - 2 || r.top < hr.top - 2 || r.right > hr.right + 2 || r.bottom > hr.bottom + 2)) {
+          const key = out.step + ' ' + Math.round(r.left) + ',' + Math.round(r.top) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height)
+          if (!stray.includes(key)) stray.push(key)
+        }
+      }
+      requestAnimationFrame(sample)
+    }
+    requestAnimationFrame(sample)
+    // What is actually painted at the host's centre — a webview iframe, the
+    // diff, a text editor, or something else.
+    const onTop = () => {
+      const hr = host.getBoundingClientRect()
+      const el = document.elementFromPoint(hr.left + hr.width / 2, hr.top + hr.height / 2)
+      if (!el) return 'none'
+      if (el.tagName === 'IFRAME') return 'iframe'
+      if (el.closest('.monaco-diff-editor')) return 'diff'
+      if (el.closest('.monaco-editor')) return 'editor'
+      return el.tagName + '.' + el.className
+    }
+    const MD1 = '/Volumes/business_ssd/RESTO/Notes/autumn-menu.md'
+    const MD2 = '/Volumes/business_ssd/RESTO/Notes/allergen-policy.md'
+    out.step = 'flow-md1'
+    const hmd1 = await m.openFile(host, MD1, '# Autumn\n\nfirst body\n', { editable: true })
+    await m.showMarkdownPreview(MD1)
+    await settle(3000)
+    flow.md1Top = onTop()
+    // Between two files the product shows a loading hint, which UNMOUNTS the
+    // CodeView: its host leaves the DOM while the preview webview is still
+    // claimed, and the remount hands the part a NEW host. Measured live
+    // (2026-09-07, Chrome and WebKit): the preview iframe sat at 0,0 300x150
+    // for the whole gap — the studio's sidebar corner.
+    out.step = 'flow-gap'
+    hmd1.dispose()   // the CodeView effect cleanup runs at unmount
+    wrap.remove()
+    await settle(600)
+    document.body.appendChild(wrap)
+    const oldHost = host
+    host = document.createElement('div')
+    host.style.cssText = oldHost.style.cssText
+    oldHost.replaceWith(host)
+    out.step = 'flow-md2'
+    const hmd2 = await m.openFile(host, MD2, '# Allergen\n\nsecond body\n', { editable: true })
+    await m.showMarkdownPreview(MD2)
+    await settle(3000)
+    flow.md2Top = onTop()
+    flow.md2Pane = (await m.editorPartInfo()).paneId
+    out.step = 'flow-diff'
+    await m.openDiff(MD2, '# Allergen\n\nold body\n', { sideBySide: false, editable: true })
+    await settle(2500)
+    flow.diffTop = onTop()
+    flow.diffPane = (await m.editorPartInfo()).paneId
+    out.step = 'flow-back'
+    await m.showMarkdownPreview(MD2)
+    await settle(2500)
+    flow.backTop = onTop()
+    out.step = 'flow-dart'
+    hmd2.dispose()
+    await m.openFile(host, ABS, DART, { editable: true })
+    await settle(2500)
+    flow.dartTop = onTop()
+    flow.dartPane = (await m.editorPartInfo()).paneId
+    sampling = false
+    flow.stray = stray.slice(0, 10)
   } catch (e) { out.partErr = String(e && e.message || e) }
   out.step = 'done'
 
@@ -524,6 +611,16 @@
       'out.absLines > 0',
       "out.absPane === 'workbench.editors.files.textFileEditor'",
       "out.absRes.indexOf('menu.dart') !== -1",
+      // The product's markdown flow: preview on top, the diff on top of the
+      // preview, back to the preview, then a code file — and NO frame in which
+      // a preview iframe is painted outside the host, including the unmount gap
+      // between two files.
+      "out.flow.md1Top === 'iframe'",
+      "out.flow.md2Top === 'iframe'",
+      "out.flow.diffTop === 'diff'",
+      "out.flow.backTop === 'iframe'",
+      "out.flow.dartTop === 'editor'",
+      'out.flow.stray.length === 0',
       // The LSP lane, end to end in a browser: client started, the document VS
       // Code created was synced, and the server's diagnostic became a marker on
       // the model. A source pin alone once let this whole function be deleted.
@@ -568,4 +665,7 @@
     dirtyBefore: out.dirtyBefore, dialogs: out.dialogs, afterConflict: out.afterConflict,
   }, null, 1)
   if (location.search.includes('dump')) document.body.appendChild(dump)
+  try {
+    await fetch('report', { method: 'POST', body: JSON.stringify({ step: out.step, fail: out.fail, flow: out.flow, partErr: out.partErr, error: out.error }) })
+  } catch { /* the harness may not be listening */ }
 </script>

@@ -752,6 +752,14 @@ assert.ok(clientSrc.includes("await M.openDiff(uri, diffOriginal, {"),
 // is writable, so VS Code hands it over editable. Without this the diff writes
 // files the code editor refuses to let you type in (proved in spike.html:
 // diffModRO/diffTyped).
+// The markdown preview is a fixed overlay on document.body anchored to its
+// pane; when the CodeView host unmounts (the loading hint between two files)
+// the anchor is gone and the iframe lands at the page's top-left. Measured
+// live in Chrome and WebKit, 2026-09-07. Disposing the handle must close it.
+assert.ok(/dispose: \(\) => \{[\s\S]{0,1200}?void closeWebviews\(\)/.test(entrySrc),
+  'disposing a file handle closes the preview webview whose anchor is about to leave the DOM')
+assert.ok(entrySrc.includes("editor.typeId === 'workbench.editors.webviewInput'"),
+  'closeWebviews targets webview inputs, not the text editors that keep undo history')
 assert.ok(entrySrc.includes("mod.updateOptions({ readOnly: !editable, domReadOnly: !editable })"),
   'the diff honours read-only on its modified side')
 assert.ok(/openDiff \(uriPath, originalText, \{ sideBySide = null, editable = true \}/.test(entrySrc),

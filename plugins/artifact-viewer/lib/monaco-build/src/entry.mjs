@@ -389,6 +389,16 @@ export async function openFile (container, uriPath, text, opts = {}) {
       live = false
       if (sub) sub.dispose()
       ro.disconnect()
+      // The markdown preview is a webview: an iframe in a position:fixed
+      // overlay on document.body, anchored to its pane with CSS anchor
+      // positioning. The client disposes this handle when its host UNMOUNTS
+      // (a loading hint sits between two files), and an anchor that has left
+      // the DOM resolves to nothing — the overlay falls back to the page's
+      // top-left at the iframe default of 300x150, which in the studio is the
+      // sidebar. Measured live in Chrome and WebKit, 2026-09-07. The preview is
+      // a derived view of this file, so close it here; showMarkdownPreview
+      // recreates it on the next open.
+      void closeWebviews()
       // The EDITOR is not disposed here. It belongs to the editor part, which
       // owns its own lifecycle — and the part is what keeps the tab, so tearing
       // it down on every React unmount would close the file the user is looking
@@ -397,6 +407,19 @@ export async function openFile (container, uriPath, text, opts = {}) {
       // trip. closeAll() is the explicit way to clear the part.
     },
   }
+}
+
+/** Close every webview editor (the markdown preview) in the main part. */
+async function closeWebviews () {
+  const editorService = await getService(IEditorService)
+  const groups = await getService(IEditorGroupsService)
+  const doomed = []
+  for (const g of groups.mainPart.groups) {
+    for (const editor of g.editors) {
+      if (editor.typeId === 'workbench.editors.webviewInput') doomed.push({ editor, groupId: g.id })
+    }
+  }
+  if (doomed.length) await editorService.closeEditors(doomed)
 }
 
 /** Bring the overlay filesystem in line with the bytes the host just read.

@@ -47,6 +47,19 @@ const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-monaco-check-'))
 const server = http.createServer((req, res) => {
   const rel = new URL(req.url, 'http://x').pathname.replace(PREFIX, '')
   const name = path.basename(rel || 'spike.html')
+  // The page POSTs its probe values here at the end of the run. --expect
+  // collapses to one boolean and --dump paints a PNG; this is the text form,
+  // so a red check can be read without opening an image.
+  if (req.method === 'POST' && name === 'report') {
+    let body = ''
+    req.on('data', (c) => { body += c })
+    req.on('end', () => {
+      fs.writeFileSync(path.join(outDir, 'report.json'), body)
+      console.log('report: ' + body)
+      res.writeHead(204); res.end()
+    })
+    return
+  }
   if (name === 'spike.html') {
     res.writeHead(200, { 'content-type': 'text/html' })
     return res.end(page)
@@ -67,6 +80,10 @@ const DUMP = process.argv.includes('--dump')
 // iframe, so its contents can only be verified by eye.
 const SHOT = process.argv.includes('--shot')
 const dumpPng = DUMP || SHOT ? process.argv[process.argv.indexOf(DUMP ? '--dump' : '--shot') + 1] : null
+// --webkit runs the same page in a WKWebView (tools/wk.swift) instead of the
+// lens's Chrome. The desktop studio IS a WebKit webview, and the markdown
+// preview flash of 2026-09-07 never reproduced in Chrome.
+const WEBKIT = process.argv.includes('--webkit')
 
 // A STUB language server on the same origin.
 //
@@ -113,11 +130,35 @@ server.on('upgrade', (rq, socket, head) => {
 
 server.listen(0, '127.0.0.1', () => {
   const url = `http://127.0.0.1:${server.address().port}${PREFIX}spike.html` + (DUMP ? '?dump' : '')
+  if (WEBKIT) {
+    const src = path.join(here, 'tools', 'wk.swift')
+    const bin = path.join(here, 'tools', 'wk')
+    const stale = !fs.existsSync(bin) || fs.statSync(bin).mtimeMs < fs.statSync(src).mtimeMs
+    const run = () => execFile(bin, [url, '150'], { encoding: 'utf8' }, (err, stdout, stderr) => {
+      server.close()
+      const line = (stdout ?? '').split('\n').find((l) => l.startsWith('RESULT: ')) ?? ''
+      let res = null
+      try { res = JSON.parse(line.slice(8)) } catch { /* timeout or crash */ }
+      if (err || !res || res.fail.length) {
+        console.error(line || (stderr ?? '').trim() || String(err))
+        console.error('check (webkit): RED')
+        process.exitCode = 1
+        return
+      }
+      console.log('check (webkit): GREEN — ' + res.ua)
+    })
+    if (!stale) return run()
+    execFile('swiftc', ['-O', '-o', bin, src], { encoding: 'utf8' }, (err, _o, stderr) => {
+      if (err) { console.error(stderr); console.error('check (webkit): swiftc failed'); process.exitCode = 1; server.close(); return }
+      run()
+    })
+    return
+  }
   const png = (DUMP || SHOT) && dumpPng ? dumpPng : path.join(outDir, 'spike.png')
   // execFile, NOT execFileSync: the sync form blocks this process's event
   // loop, so the server above can never answer the lens's requests and every
   // run dies on a Page.navigate timeout.
-  const args = ['lens', 'check', url, png, '1400', '900', '45000']
+  const args = ['lens', 'check', url, png, '1400', '900', '75000']
   if (!DUMP && !SHOT) args.push('--selector=.monaco-editor')
   execFile('arxa', DUMP || SHOT ? args : [...args,
     // Every claim phase 1 rests on, asserted in the browser. The reopen and
