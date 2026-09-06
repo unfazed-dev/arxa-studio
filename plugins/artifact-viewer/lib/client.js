@@ -53,8 +53,11 @@ window.__ModuleLoader__.load({
       let cur = null
       const now = () => Math.round(performance.now())
       return {
-        begin (relPath) {
-          cur = { relPath, t0: now(), marks: [], bundleWarm: !!monacoMod }
+        /** t0 is the CLICK (the ingress listener stamps it into the store
+         *  payload); the panel may not even be mounted yet at that point. */
+        begin (relPath, t0 = now(), mounted = true) {
+          cur = { relPath, t0, marks: [], bundleWarm: !!monacoMod }
+          if (!mounted) cur.marks.push('panel-mounted=' + (now() - t0))
         },
         mark (name) { if (cur) cur.marks.push(name + '=' + (now() - cur.t0)) },
         end (outcome) {
@@ -1327,9 +1330,16 @@ window.__ModuleLoader__.load({
       // Store ingress: a pending open arrives from apply()'s listener (chips,
       // file rows, gen-ui, the produced-file observer). Consumed HERE, when
       // the panel demonstrably exists — the cold-open race is structural now.
+      // The first open after a mount: the click happened while the panel was
+      // NOT mounted (the column was closed), so its payload was waiting.
+      const mountedAtRef = React.useRef(Math.round(performance.now()))
       React.useEffect(() => {
         const p = store.consume()
         if (!p) return
+        if (p.relPath && p.t0 != null) {
+          trace.begin(p.relPath, p.t0)
+          trace.mark('panel-mounted=' + (mountedAtRef.current - p.t0) + ' consumed')
+        }
         if (p.kind === 'insight') {
           setOpen(true)
           setState({ phase: 'insight', view: p.view, sessionId: p.sessionId || null, orgId: p.orgId || null, rows: p.rows || null })
@@ -1342,7 +1352,7 @@ window.__ModuleLoader__.load({
         // made a saved edit look lost on the next click. A file the session
         // has no copy of (untracked in the org) falls back to the org lane.
         const sid = p.sessionId || store.getSnapshot().sessionId || null
-        if (p.relPath) trace.begin(p.relPath)
+        if (p.relPath && p.t0 == null) trace.begin(p.relPath)
         if (sid && p.relPath) {
           void Promise.resolve(openWorktreeRef.current && openWorktreeRef.current(sid, p.relPath, { quiet: true })).then((ok) => {
             if (ok) return
@@ -1812,7 +1822,7 @@ window.__ModuleLoader__.load({
             store.request({ kind: 'insight', view: detail.view, sessionId: detail.sessionId || null, orgId: detail.orgId || null })
           } else {
             if (!detail.relPath) return
-            store.request({ sessionId: detail.sessionId || null, relPath: detail.relPath })
+            store.request({ sessionId: detail.sessionId || null, relPath: detail.relPath, t0: Math.round(performance.now()) })
           }
           try { if (ctx.layout && typeof ctx.layout.openViewer === 'function') ctx.layout.openViewer() } catch { /* face not wired yet */ }
         }

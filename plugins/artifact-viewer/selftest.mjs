@@ -98,7 +98,7 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   assert.doesNotMatch(t5code, /__ARXA_AV_CHIP_INTERCEPT__|__ARXA_SESSIONS__|__ARXA_AV_DEBUG__/,
     'window debug globals are gone (ctx.effect disposal replaces the install-once flag)')
   assert.match(t5client, /function createAvStore\(\)/, 'ingress store exists')
-  assert.match(t5client, /store\.request\(\{ sessionId: detail\.sessionId \|\| null, relPath: detail\.relPath \}\)/, 'apply() parks opens in the store')
+  assert.match(t5client, /store\.request\(\{ sessionId: detail\.sessionId \|\| null, relPath: detail\.relPath, t0: Math\.round\(performance\.now\(\)\) \}\)/, 'apply() parks opens in the store, stamped with the click time')
   assert.match(t5client, /store\.consume\(\)/, 'the mounted panel consumes the pending open')
   assert.match(t5client, /ctx\.layout\.openViewer\(\)/, 'the listener opens the column through the layout face')
   assert.match(t5client, /sessions\.list\.subscribe/, 'session tracking subscribes the dsh sessions snapshot store')
