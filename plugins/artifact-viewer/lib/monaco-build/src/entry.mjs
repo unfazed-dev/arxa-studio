@@ -39,9 +39,24 @@ import '@codingame/monaco-vscode-css-default-extension'
 // id, so the css server would have started and then been sent nothing.
 import '@codingame/monaco-vscode-scss-default-extension'
 import '@codingame/monaco-vscode-less-default-extension'
-import '@codingame/monaco-vscode-markdown-language-features-default-extension'
-import '@codingame/monaco-vscode-markdown-math-default-extension'
-import '@codingame/monaco-vscode-media-preview-default-extension'
+import '@codingame/monaco-vscode-markdown-basics-default-extension'
+// markdown-language-features, markdown-math and media-preview are NOT here.
+// Measured, in order:
+//   1. with only the features extension, a .md file opened as `plaintext` —
+//      it is markdown-BASICS that declares the language and its grammar.
+//   2. adding the grammar made the features extension finally activate
+//      (onLanguage:markdown) and it failed immediately:
+//        Failed to construct 'Worker': Script at
+//        'extension-file://vscode.markdown-language-features/extension/dist/
+//         browser/serverWorkerMain.js' cannot be accessed from origin ...
+//      It needs extension-host worker plumbing this build does not have.
+//   3. media-preview declares `customEditors`, which are WEBVIEWS. There is no
+//      webview-service-override at 36.2.7 — webviews live in the `views`
+//      family, i.e. the whole VS Code workbench layout.
+// So the markdown PREVIEW and the media preview stay on the vendored
+// markdown-it + DOMPurify bundle until a workbench adoption is on the table.
+// Shipping the feature extensions anyway bought one console error per markdown
+// file and nothing else.
 
 // Phase 2 (LSP over the host's registerUpgrade websocket) rides these — pulled
 // into the graph now so the spike's size number is the honest one.

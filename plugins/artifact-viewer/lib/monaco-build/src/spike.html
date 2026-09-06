@@ -132,5 +132,18 @@
       mdl.dispose()
     } catch (e) { out.ids[ext] = 'ERR:' + String(e && e.message || e) }
   }
+  // Phase 3 probe: what does the markdown extension actually give us?
+  out.step = 'markdown-probe'
+  try {
+    h.dispose()   // the resize block left an editor in the container
+    const mh = await m.openFile(el, '/spike/notes.md', '# Title\n\nsome *text* and a [link](x.md)\n\n```rs\nfn f(){}\n```\n')
+    await settle(1500)
+    out.mdLang = mh.model.getLanguageId()
+    out.mdTokens = document.querySelectorAll('.monaco-editor .view-line span').length
+    out.mdColoured = new Set([...document.querySelectorAll('.monaco-editor .view-line span')]
+      .map((n) => getComputedStyle(n).color)).size
+    // left OPEN on purpose: the final capture then shows a real markdown file
+    // with its grammar, instead of a blank page.
+  } catch (e) { out.mdErr = String(e && e.message || e) }
   out.step = 'done'
 </script>

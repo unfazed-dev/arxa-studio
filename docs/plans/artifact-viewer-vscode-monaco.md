@@ -568,12 +568,46 @@ Original plan below.
   ships inside the Dart/Flutter SDK, so the button can only *locate* an
   installed SDK on PATH — there is no download path and the copy must say so.
 
-### Phase 3 — markdown + media (G9)
+### Phase 3 — markdown + media (G9) — PARTLY BLOCKED
 
-`markdown-language-features` (+ `markdown-math`) takes the markdown lane;
-`media-preview` takes image / audio / video. Retires `markdown.js` (markdown-it
-+ DOMPurify). html/mdx stay in the sandboxed iframe on the org origin — that is
-the D7 wall and it does not move.
+**Delivered: markdown finally has a grammar.** Probing the running editor for
+`getLanguageId()` of a `.md` file returned **`plaintext`** — the build carried
+`markdown-language-features` (the feature layer) but not
+`markdown-basics`, which is what declares the language and its grammar. So every
+markdown source view was uncoloured, and nothing could attach to it. Adding
+`markdown-basics` fixes it, and the capture shows more than markdown-it ever
+did: headings, emphasis and links coloured, and a fenced ```` ```rs ```` block
+highlighted as Rust through VS Code's embedded-language injection.
+
+**Blocked: the previews.** Adding the grammar made
+`markdown-language-features` finally activate (`onLanguage:markdown`) and it
+failed immediately:
+
+```
+Activating extension 'vscode.markdown-language-features' failed:
+Failed to construct 'Worker': Script at
+'extension-file://vscode.markdown-language-features/extension/dist/browser/
+ serverWorkerMain.js' cannot be accessed from origin 'http://127.0.0.1:…'
+```
+
+It needs extension-host worker plumbing this build does not have.
+`media-preview` is blocked differently and harder: it declares `customEditors`,
+which are **webviews**, and there is no `webview-service-override` at 36.2.7
+(E404) — webviews live in the `views` family, i.e. the whole VS Code workbench
+layout. Adopting that is not a phase, it is a rewrite of the docked pane.
+
+All three (`markdown-language-features`, `markdown-math`, `media-preview`) are
+therefore **removed from the build**, not left in hopefully: each bought a
+console error or a promise of an editor that can never open. `markdown.js`
+(markdown-it + DOMPurify) **stays** for the rendered preview, and the phase 6
+deletion that assumed it would go is blocked with it.
+
+html/mdx stay in the sandboxed iframe on the org origin — that is the D7 wall
+and it does not move.
+
+**Open decision for the user:** adopt the VS Code workbench (`views` family) to
+unlock webviews — markdown preview, media preview, and the phase 4 PDF viewer
+all sit behind that one door — or keep the vendored renderers.
 
 ### Phase 4 — PDF + formatting
 

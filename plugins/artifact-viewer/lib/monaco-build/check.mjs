@@ -76,6 +76,10 @@ server.listen(0, '127.0.0.1', () => {
       "window.__spike.lang === 'rust'",
       'window.__spike.tokens > 20',
       "window.__spike.lang2 === 'dart'",          // a second extension's grammar
+      // markdown was opening as `plaintext` — the grammar extension was missing
+      // while the FEATURE extension was present, which looks like markdown is
+      // handled and is not.
+      "window.__spike.mdLang === 'markdown'",
       // 2c: every extension an LSP row claims must resolve to a real language
       // id. `plaintext` would be a row that starts a server and syncs nothing.
       "window.__spike.ids.ts === 'typescript'",

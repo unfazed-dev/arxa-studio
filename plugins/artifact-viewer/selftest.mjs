@@ -665,6 +665,12 @@ assert.ok(clientSrc.includes("h('div', { className: 'aXa_av_lspHost', ref })"),
 const entrySrc2c = fs.readFileSync(path2.join(here, 'lib', 'monaco-build', 'src', 'entry.mjs'), 'utf8')
 assert.ok(entrySrc2c.includes('(selector ?? [lang]).map((language) => ({ language }))'),
   'one server can own several monaco language ids (js for the ts server, scss/less for css, jsonc for json)')
+assert.ok(entrySrc2c.includes("import '@codingame/monaco-vscode-markdown-basics-default-extension'"),
+  'markdown has a GRAMMAR: with only the feature extension a .md file opened as plaintext')
+assert.ok(!entrySrc2c.includes('markdown-language-features') || entrySrc2c.includes('// '),
+  'the markdown feature extension is not imported — it cannot construct its worker in this build')
+assert.ok(!/^import '@codingame\/monaco-vscode-(markdown-language-features|markdown-math|media-preview)-default-extension'/m.test(entrySrc2c),
+  'no extension is imported that needs webviews or an extension-host worker — each bought a console error and nothing else')
 assert.ok(entrySrc2c.includes("import '@codingame/monaco-vscode-scss-default-extension'") &&
   entrySrc2c.includes("import '@codingame/monaco-vscode-less-default-extension'"),
   'scss and less are separate grammars from css — without them those files open as plaintext and the css client is sent nothing')
