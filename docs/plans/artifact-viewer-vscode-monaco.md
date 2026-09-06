@@ -206,7 +206,7 @@ Each phase = one commit, verified on screen before the next starts.
 
 ### Phase 1 — Monaco code lane
 
-#### 1a. Delivery plumbing — **DONE** (`8949286`, this commit)
+#### 1a. Delivery plumbing — **DONE** (`8949286` + `38561a6`)
 
 The bundle had to exist on other machines before any client change, and the
 survey found a bug that had **already shipped**.
@@ -255,7 +255,19 @@ way.
 
 #### 1b. The lane itself — next
 
-Replace the CodeMirror `code` and `text` lanes. Services: base, host, files,
+Two things carried out of 1a that 1b must not skip:
+
+- **`arxa-engine-sync` has no equivalent of pack-sidecar's refusal.** If `dist/`
+  is absent (fresh checkout, never built) the sync copies the plugin as normal
+  and the monaco chunks 404 at runtime with nothing saying why. Packed builds are
+  guarded; synced dev builds are not. It only bites once `client.js` actually
+  `import()`s `arxa-monaco.js`, which is 1b — so the warning lands with the lane.
+- **The worker-label routing is still written on faith.** The phase-0 green run
+  requested no workers at all, so `MonacoEnvironment.getWorker`'s label map has
+  never executed. 1b's screen check must force an editor-worker round trip — a
+  diff, or find-all-references — or this stays untested behind a green.
+
+Then: replace the CodeMirror `code` and `text` lanes. Services: base, host, files,
 configuration, theme, textmate, languages, keybindings, quickaccess. Themes come
 from `theme-defaults` (real VS Code theme JSON, retiring the hand-compiled
 HighlightStyle table in `vendor.js`). `editor.fontFamily` keeps Fira Code.
