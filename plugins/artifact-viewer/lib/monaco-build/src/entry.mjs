@@ -6,6 +6,7 @@
 import * as monaco from 'monaco-editor'
 import EditorWorker from './editor.worker.js?worker'
 import extHostWorkerUrl from './extensionHost.worker.js?worker&url'
+import TextMateWorker from './textmate.worker.js?worker'
 import { initialize } from '@codingame/monaco-vscode-api'
 import getConfigurationServiceOverride, { updateUserConfiguration } from '@codingame/monaco-vscode-configuration-service-override'
 import getThemeServiceOverride from '@codingame/monaco-vscode-theme-service-override'
@@ -14,6 +15,10 @@ import getLanguagesServiceOverride from '@codingame/monaco-vscode-languages-serv
 import getKeybindingsServiceOverride from '@codingame/monaco-vscode-keybindings-service-override'
 import getQuickAccessServiceOverride from '@codingame/monaco-vscode-quickaccess-service-override'
 import getExtensionsServiceOverride from '@codingame/monaco-vscode-extensions-service-override'
+// The real ITextModelService lives HERE, not in the files override. Without
+// it monaco falls back to the standalone service, whose createModelReference
+// rejects with "Model not found" for any uri it did not create itself.
+import getModelServiceOverride from '@codingame/monaco-vscode-model-service-override'
 import getFilesServiceOverride, {
   RegisteredFileSystemProvider, RegisteredMemoryFile, registerFileSystemOverlay,
 } from '@codingame/monaco-vscode-files-service-override'
@@ -44,7 +49,18 @@ import { toSocket, WebSocketMessageReader, WebSocketMessageWriter } from 'vscode
 let started = null
 export function start (container, { fontFamily = 'Fira Code', dark = true } = {}) {
   started ??= (async () => {
-    self.MonacoEnvironment = { getWorker: () => new EditorWorker() }
+    // getWorker is asked for SEVERAL labels, not just the editor's. Handing
+    // the editor worker to every label is what produced
+    // "Missing method $init on worker thread channel default".
+    const workers = { TextEditorWorker: EditorWorker, TextMateWorker }
+    self.__arxaWorkerLabels = []
+    self.MonacoEnvironment = {
+      getWorker: (_id, label) => {
+        self.__arxaWorkerLabels.push(label)
+        const W = workers[label] ?? EditorWorker
+        return new W()
+      },
+    }
     await initialize({
       ...getConfigurationServiceOverride(),
       ...getThemeServiceOverride(),
@@ -53,6 +69,7 @@ export function start (container, { fontFamily = 'Fira Code', dark = true } = {}
       ...getKeybindingsServiceOverride(),
       ...getQuickAccessServiceOverride({ isKeybindingConfigurationVisible: () => true, shouldUseGlobalPicker: () => true }),
       ...getFilesServiceOverride(),
+      ...getModelServiceOverride(),
       ...getExtensionsServiceOverride({ url: extHostWorkerUrl, options: { type: 'module' } }),
     })
     updateUserConfiguration(JSON.stringify({
@@ -69,7 +86,12 @@ export async function openFile (container, uriPath, text) {
   const fsp = new RegisteredFileSystemProvider(false)
   fsp.registerFile(new RegisteredMemoryFile(uri, text))
   const overlay = registerFileSystemOverlay(1, fsp)
-  const ref = await monaco.editor.createModelReference(uri)
+  // Second argument writes the content into the virtual filesystem first.
+  // The overlay alone was not enough here — createModelReference threw
+  // "Model not found". Phase 1 needs the overlay anyway (write-through
+  // provider, phase 5), so this is a spike shortcut, not the final shape.
+  // ponytail: 2-arg form for the spike; the overlay path is phase 1's problem.
+  const ref = await monaco.editor.createModelReference(uri, text)
   const editor = monaco.editor.create(container, { model: ref.object.textEditorModel, automaticLayout: true })
   return { editor, ref, dispose: () => { editor.dispose(); ref.dispose(); overlay.dispose() } }
 }

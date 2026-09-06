@@ -21,12 +21,22 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     assetsInlineLimit: 0, // a data: URI can't be served by the vendor route either
+    cssCodeSplit: false,
     rollupOptions: {
+      // An application entry has its exports tree-shaken away (nothing imports
+      // them at build time): the bundle built clean and then threw "openFile is
+      // not a function" in the browser. build.lib fixes that but ALSO turns off
+      // code splitting — one 45.7 MB chunk the browser cannot parse inside the
+      // lens's 30 s navigate budget. preserveEntrySignatures keeps the exports
+      // AND the split. Both failures exited 0; only the lens saw them.
+      preserveEntrySignatures: 'strict',
       input: { 'arxa-monaco': 'src/entry.mjs' },
       output: {
         format: 'es',
         dir: 'dist',
-        entryFileNames: '[name]-[hash].js',
+        // Stable entry name: client.js import()s this path directly and the
+        // vendor route already answers no-store, so there is nothing to bust.
+        entryFileNames: 'arxa-monaco.js',
         chunkFileNames: '[name]-[hash].js',
         assetFileNames: flat,
       },

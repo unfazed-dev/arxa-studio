@@ -98,22 +98,43 @@ one. Verified present at `36.2.7`:
 already uses), and it stays behind the existing pdf.js lane until the worker-host
 test passes.
 
-### 0.4 How big is the bundle? — **MEASURED: 30 MB on disk, 8.5 MB gzipped**
+### 0.4 How big is the bundle, and does it RUN? — **31 MB / 8.5 MB gzipped, and yes**
 
-The spike builds. `plugins/artifact-viewer/lib/monaco-build/` is an isolated npm
-root (same reason `vendor-build` is isolated): 382 packages, 1.3 GB of
-`node_modules`, `vite build` in 1.2 s.
+`plugins/artifact-viewer/lib/monaco-build/` is an isolated npm root (same reason
+`vendor-build` is isolated): 383 packages, 1.3 GB of `node_modules`, `vite build`
+in ~1.2 s.
 
 | | |
 |---|---|
-| `dist/` on disk | **30 MB**, 201 files, **0 subdirectories** ✅ |
+| `dist/` on disk | **31 MB**, 203 files, **0 subdirectories** ✅ |
 | gzipped (what `payload.tar.gz` costs) | **8.5 MB** |
-| source maps inside it | 8.2 MB — droppable, takes disk to ~22 MB |
+| source maps inside it | 8.2 MB — droppable, takes disk to ~23 MB |
 | committed vendor today (retired by phase 6) | 4.9 MB |
 
-Largest pieces: the main chunk 8.7 MB, `editor` 3.4 MB, `extensionHost.worker`
+Largest pieces: the entry 8.7 MB, `editor` 3.4 MB, `extensionHost.worker`
 1.9 MB, the markdown extension 1.9 MB, `serverWorkerMain` 1.1 MB, oniguruma
 wasm 467 KB.
+
+**It executes.** `node check.mjs` serves `dist/` on a throwaway port and drives
+it with `arxa lens check`; console and page errors auto-fail the lens. Green:
+Monaco boots, a `.rs` file resolves to language `rust` (so the VS Code Rust
+grammar extension actually loaded), Dark Modern paints `rgb(31,31,31)`, the
+minimap and indent guides render, zero console errors.
+
+That check is committed, because **three separate defects all exited 0**:
+
+1. An application entry has its exports tree-shaken away — the bundle built
+   clean and then threw `openFile is not a function` in the browser.
+2. `build.lib` fixes the exports but silently turns **off code splitting**: one
+   45.7 MB chunk that the browser cannot parse inside a 30 s navigate budget.
+   `rollupOptions.preserveEntrySignatures: 'strict'` keeps both.
+3. The real `ITextModelService` lives in
+   `@codingame/monaco-vscode-model-service-override`, **not** in the files
+   override. Without it Monaco silently falls back to the standalone service,
+   whose `createModelReference` rejects every uri with `Model not found`.
+
+None of the three is visible from a build exit code. Phase 1 keeps this check
+running.
 
 **This is the product call.** The desktop sidecar grows by roughly 8.5 MB
 compressed, net of the ~5 MB of vendor bundles phase 6 deletes. The number goes
@@ -133,6 +154,13 @@ Build gotchas found and fixed in the spike, so phase 1 does not rediscover them:
 - `base: '/__arxa/artifacts/vendor/'` is pinned in the vite config so emitted
   worker and asset URLs point at the route that serves them.
 - `assetsInlineLimit: 0` — a `data:` URI cannot be served by the vendor route.
+- `MonacoEnvironment.getWorker` is asked for **several labels**, not just the
+  editor's. Returning the editor worker for every label gives
+  `Missing method $init on worker thread channel default`. The entry routes
+  `TextEditorWorker` / `TextMateWorker` and records unrequested labels in
+  `self.__arxaWorkerLabels` — **the green run requested none**, so the routing
+  itself is written but not yet exercised. Phase 1 must open a file that forces
+  an editor-worker round trip (a diff, or a find-all-references).
 
 `node_modules/` and `dist/` are gitignored; **the lockfile is committed** — G12
 keeps build script + lockfile in the repo and nothing else.
@@ -178,7 +206,22 @@ Each phase = one commit, verified on screen before the next starts.
 
 ### Phase 1 — Monaco code lane
 
-Replace the CodeMirror `code` and `text` lanes. Services: base, host, files,
+**First task, before any client change: make the bundle exist on other
+machines.** `dist/` is gitignored, and nothing builds it yet.
+`bin/arxa-engine-sync.mjs` content-hashes each plugin dir and copies it, so a
+viewer whose Monaco bundle lives only in an untracked `dist/` syncs as *absent*
+— the lane would 404 everywhere but this checkout. `scripts/pack-sidecar.mjs`
+likewise does not know to run `vite build`. Both need wiring in this phase, not
+later:
+
+- `pack-sidecar.mjs` runs `npm ci && npm run build` in `monaco-build/` (or
+  refuses to pack if `dist/` is stale) before staging plugins.
+- `arxa-engine-sync.mjs` includes `lib/monaco-build/dist` in the hash and copy.
+- The vendor route's `vendorDir` gains a second directory, or `dist/` is copied
+  into `lib/vendor/` at build time — one flat dir either way.
+- `EXT_TYPES` grows the MIME rows listed above. `.wasm` is a hard blocker.
+
+Then the lane itself: replace the CodeMirror `code` and `text` lanes. Services: base, host, files,
 configuration, theme, textmate, languages, keybindings, quickaccess. Themes come
 from `theme-defaults` (real VS Code theme JSON, retiring the hand-compiled
 HighlightStyle table in `vendor.js`). `editor.fontFamily` keeps Fira Code.

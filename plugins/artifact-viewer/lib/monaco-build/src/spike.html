@@ -1,0 +1,15 @@
+<!doctype html><meta charset="utf-8"><title>monaco spike</title>
+<link rel="stylesheet" href="__CSS__">
+<style>html,body{margin:0;height:100%}#ed{position:absolute;inset:0}</style>
+<div id="ed"></div>
+<script type="module">
+  const m = await import('/__arxa/artifacts/vendor/arxa-monaco.js')
+  const h = await m.openFile(document.getElementById('ed'), '/spike/main.rs',
+    'use std::collections::HashMap;\n\n/// squares 1..=n\nfn squares(n: i32) -> HashMap<i32, i32> {\n    (1..=n).map(|x| (x, x * x)).collect()\n}\n\nfn main() {\n    let m = squares(5);\n    println!("{:?}", m.get(&3));\n}\n')
+  await new Promise((r) => setTimeout(r, 2500))
+  window.__spike = { editor: !!h.editor, lines: h.editor.getModel().getLineCount(),
+    lang: h.editor.getModel().getLanguageId(),
+    langs: m.monaco.languages.getLanguages().length,
+    bg: getComputedStyle(document.querySelector('.monaco-editor')).getPropertyValue('--vscode-editor-background') || '',
+    tokens: document.querySelectorAll('.monaco-editor .view-line span').length }
+</script>
