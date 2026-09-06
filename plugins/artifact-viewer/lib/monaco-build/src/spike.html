@@ -310,8 +310,22 @@
     // original gets its own uri — a second model on the file's own uri would
     // collide with the one the editor already holds.
     out.step = 'diff'
-    await m.openDiff('/spike/notes.md', '# Title\n\nold bytes\n', { sideBySide: false })
+    const diffPane = await m.openDiff('/spike/notes.md', '# Title\n\nold bytes\n', { sideBySide: false, editable: false })
     await settle(2000)
+    // A read-only file must stay read-only in the DIFF too. The modified side is
+    // the file's own model, and onChange/auto-save watch that model — so if the
+    // flag stops at the code editor, the diff becomes a back door that writes.
+    const dctl = diffPane != null && typeof diffPane.getControl === 'function' ? diffPane.getControl() : null
+    const dmod = dctl != null && typeof dctl.getModifiedEditor === 'function' ? dctl.getModifiedEditor() : null
+    out.diffModRO = dmod != null ? !!dmod.getOption(m.monaco.editor.EditorOption.readOnly) : null
+    if (dmod != null) {
+      // `type` is the USER's path and honours readOnly; executeEdits bypasses it.
+      const before = dmod.getModel().getValue()
+      dmod.focus()
+      dmod.trigger('arxa-probe', 'type', { text: 'ZZ' })
+      out.diffTyped = dmod.getModel().getValue() !== before
+      if (out.diffTyped) dmod.trigger('arxa-probe', 'undo', null)
+    }
     const info3 = await m.editorPartInfo()
     out.diffPane = info3.paneId
     out.diffTabs = document.querySelectorAll('#part .tab').length
@@ -426,6 +440,9 @@
       // diff editor.
       "out.diffPane === 'workbench.editors.textDiffEditor'",
       'out.diffMarks > 0',
+      // The read-only back door: see the diff step.
+      'out.diffModRO === true',
+      'out.diffTyped === false',
       // The LSP lane, end to end in a browser: client started, the document VS
       // Code created was synced, and the server's diagnostic became a marker on
       // the model. A source pin alone once let this whole function be deleted.
@@ -462,6 +479,7 @@
     pngBytes: out.pngBytes, imgPane: out.imgPane, imgActive: out.imgActive, imgFrames: out.imgFrames,
     closedTabs: out.closedTabs, reopenText: out.reopenText, afterChange: out.afterChange,
     diffPane: out.diffPane, diffTabs: out.diffTabs, diffMarks: out.diffMarks,
+    diffModRO: out.diffModRO, diffTyped: out.diffTyped,
     lspStarted: out.lspStarted, lspMarkers: out.lspMarkers, lspSource: out.lspSource, lspLangs: out.lspLangs,
     dirtyBefore: out.dirtyBefore, dialogs: out.dialogs, afterConflict: out.afterConflict,
   }, null, 1)

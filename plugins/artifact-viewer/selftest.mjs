@@ -737,6 +737,16 @@ assert.ok(clientSrc.includes('aXa_av_fileIcon'), 'viewer title carries the mater
 // so "receives the file identity" is now structural rather than a prop.
 assert.ok(clientSrc.includes("await M.openDiff(uri, diffOriginal, {"),
   'the diff opens through VS Code, which colours both sides from the same grammar the editor uses')
+// The diff's modified side is the file's OWN model, and the overlay file system
+// is writable, so VS Code hands it over editable. Without this the diff writes
+// files the code editor refuses to let you type in (proved in spike.html:
+// diffModRO/diffTyped).
+assert.ok(entrySrc.includes("mod.updateOptions({ readOnly: !editable, domReadOnly: !editable })"),
+  'the diff honours read-only on its modified side')
+assert.ok(/openDiff \(uriPath, originalText, \{ sideBySide = null, editable = true \}/.test(entrySrc),
+  'openDiff takes the editable flag')
+assert.ok(/sideBySide: \(ref\.current[\s\S]{0,300}?\n\s+editable,\n/.test(clientSrc),
+  'the client hands the diff the same editable flag the code editor got')
 assert.ok(clientSrc.includes('data-arxa-vendor'), 'vendor script tags marked for cross-loader reuse')
 // Prettier viewer toggle: ON by default, persisted, gates every format path.
 assert.ok(clientSrc.includes("'arxa.av.prettier'"), 'prettier toggle persists its choice')

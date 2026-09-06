@@ -816,6 +816,10 @@ window.__ModuleLoader__.load({
             await M.openDiff(uri, diffOriginal, {
               // Side by side needs room; below this it is two useless columns.
               sideBySide: (ref.current ? ref.current.getBoundingClientRect().width : 0) >= 800,
+              // The diff button is gated on the lane, not on canEdit, so a
+              // read-only file can reach it — and the modified side is the same
+              // model auto-save watches.
+              editable,
             })
           } else if (preview) {
             await M.showMarkdownPreview(uri)
@@ -823,7 +827,7 @@ window.__ModuleLoader__.load({
             await M.openEditor(uri)
           }
         })().catch(() => { /* a mode switch is not worth an error surface */ })
-      }, [opened, preview, diffOriginal])
+      }, [opened, preview, diffOriginal, editable])
 
       // The strip keeps its slot whether or not it is showing: React
       // reconciles these children by position, and letting the host div move

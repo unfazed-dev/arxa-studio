@@ -514,14 +514,14 @@ export async function updateFile (uriPath, text) {
  *
  *  Narrow panes get the inline view — side-by-side in a 300px pane is two
  *  useless columns. Same reasoning as the minimap in layoutFor. */
-export async function openDiff (uriPath, originalText, { sideBySide = null } = {}) {
+export async function openDiff (uriPath, originalText, { sideBySide = null, editable = true } = {}) {
   const origPath = uriPath + '.arxa-main'
   await syncFile(origPath, originalText)
   if (sideBySide !== null) writeConfig({ 'diffEditor.renderSideBySide': sideBySide })
   const editorService = await getService(IEditorService)
   const groups = await getService(IEditorGroupsService)
   const name = uriPath.slice(uriPath.lastIndexOf('/') + 1)
-  return editorService.openEditor({
+  const pane = await editorService.openEditor({
     original: { resource: monaco.Uri.file(origPath) },
     modified: { resource: monaco.Uri.file(uriPath) },
     // Without a label the tab reads `notes.md.arxa-main ↔ notes.md`, which
@@ -529,6 +529,15 @@ export async function openDiff (uriPath, originalText, { sideBySide = null } = {
     label: 'main ↔ ' + name,
     options: { pinned: false },
   }, groups.mainPart.activeGroup)
+  // VS Code decides readOnly from the file system provider, and our overlay
+  // provider is writable — so the modified side comes up editable no matter how
+  // the file was opened. It is the file's OWN model, which onChange and the
+  // 1.5s auto-save both watch, so leaving it writable makes the diff a back
+  // door that saves a file the code editor refused to let you type in.
+  const ctl = pane != null && typeof pane.getControl === 'function' ? pane.getControl() : null
+  const mod = ctl != null && typeof ctl.getModifiedEditor === 'function' ? ctl.getModifiedEditor() : null
+  if (mod != null) mod.updateOptions({ readOnly: !editable, domReadOnly: !editable })
+  return pane
 }
 
 /** Show VS Code's rendered markdown preview for `uriPath`, as its own tab.
