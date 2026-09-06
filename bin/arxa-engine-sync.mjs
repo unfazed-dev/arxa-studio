@@ -12,7 +12,7 @@
 // (kill its dsh child — the desktop app's heartbeat watchdog respawns it).
 import { readdirSync, readFileSync, rmSync, cpSync, existsSync, statSync } from 'node:fs'
 import { execSync } from 'node:child_process'
-import { join, dirname, relative } from 'node:path'
+import { join, dirname, relative, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
@@ -32,13 +32,16 @@ import { createHash } from 'node:crypto'
  *
  * Hashing content costs a few ms per plugin and cannot be forgotten.
  */
+/** What a synced plugin does NOT include. hashDir and the copy MUST agree on
+ * this — see SKIP's use in sync(). node_modules is a build product, not source:
+ * hashing it is slow and its churn would force a full recopy on every run. */
+export const SKIP = (name) => name === 'node_modules' || name === '.git'
+
 export function hashDir (root) {
   const h = createHash('sha256')
   const walk = (dir) => {
     for (const e of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : 1)) {
-      // node_modules is a build product, not source: hashing it is slow and its
-      // churn would force a full recopy on every run.
-      if (e.name === 'node_modules' || e.name === '.git') continue
+      if (SKIP(e.name)) continue
       const p = join(dir, e.name)
       if (e.isDirectory()) { walk(p); continue }
       h.update(relative(root, p)); h.update(readFileSync(p))
@@ -46,6 +49,17 @@ export function hashDir (root) {
   }
   walk(root)
   return h.digest('hex').slice(0, 12)
+}
+
+/** Replace `dst` with exactly the tree hashDir walked — SAME skip list, so the
+ * two cannot disagree. Shipped without the filter and they did: hashDir ignored
+ * node_modules while the copy took it, so plugins/artifact-viewer/lib/monaco-build
+ * put 1.3 GB of build-time node_modules into a live engine payload — and because
+ * the hash never saw those bytes, nothing ever reported it. Any plugin with a
+ * nested node_modules trips this; monaco-build was only the first to have one. */
+export function copyTree (src, dst) {
+  rmSync(dst, { recursive: true, force: true })
+  cpSync(src, dst, { recursive: true, filter: (s) => !SKIP(basename(s)) })
 }
 
 /** Platform coherence invariant: synced plugin bytes are only meaningful
@@ -109,7 +123,7 @@ const main = () => {
     if (!existsSync(src)) return
     const rh = hashDir(src); const eh = existsSync(dst) ? hashDir(dst) : null
     if (rh === eh) return
-    rmSync(dst, { recursive: true, force: true }); cpSync(src, dst, { recursive: true })
+    copyTree(src, dst)
     console.log('synced ' + label + ': ' + (eh ?? 'MISSING') + ' -> ' + rh); changed++
   }
 
