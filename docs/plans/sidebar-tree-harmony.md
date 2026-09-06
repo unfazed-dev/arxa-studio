@@ -64,11 +64,17 @@ artifact viewer are separate commits.
   never reopen a collapsed org.
 - **`dirRow`**: dsh `IconFolderOpen16` / `IconFolderClose16`. `matIcons` keeps
   file rows only.
-- **CSS**: the current session's row gets an accent dot, painted as a
-  `background-image` radial gradient rather than a pseudo-element — `::before`
-  and `::after` on `.sessionRow` are taken by the drag markers. Selector carries
-  one extra step of specificity (`div.aXa_wsr_sessionRow.aXa_wsr_selected`) so
-  it does not depend on style-tag order.
+- **`ARXA_SESSION_DOT`**: the current session's row carries an accent dot as a
+  REAL row child, appended LAST by gen splice 6g so it holds one position
+  whether the row is showing its timestamp or (on hover) its ellipsis menu. dsh
+  row grammar: the reserved `dot` slot class, the row's own 6px step for the
+  gap, 6px round in the accent the folder glyph above it wears. Not a
+  `StateDot` — that primitive's states are done/error/ongoing, the RUN state
+  that already occupies the row's left slot.
+  The first attempt painted it as a `background-image` gradient (2026-09-06,
+  corrected on review): a background sits UNDER the row's content, so it could
+  only ever live in the padding and would have collided with the timestamp. A
+  marker that needs its own gap has to take up layout space.
 
 ### Generator — `scripts/gen-workspace.mjs`
 

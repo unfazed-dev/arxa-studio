@@ -172,6 +172,26 @@ const SESSION_ROW = 'className: clsx(Rows_module_css_default.sessionRow, selecte
 if (!out.includes(SESSION_ROW) || out.indexOf(SESSION_ROW) !== out.lastIndexOf(SESSION_ROW)) throw new Error('session row anchor missing/dup — stock shape moved?')
 out = out.replace(SESSION_ROW, '"data-session-id": node.id, ' + SESSION_ROW)
 
+// 6g. (G3, grilled 2026-09-06) the row of the CURRENT conversation carries
+//     an accent dot at its right edge — the folder glyph above it already
+//     lights through the stock folderActive rule, and this is the same mark
+//     one level down. Appended as the LAST child of the row so it holds one
+//     position whether the row shows its timestamp or (on hover) its menu.
+const SESSION_ROW_END = [
+  T(6) + '})',
+  T(5) + ']',
+  T(4) + '}),',
+  T(4) + 'content: (0, react_jsx_runtime.jsx)(SessionHoverContent, {',
+].join('\n')
+if (!out.includes(SESSION_ROW_END) || out.indexOf(SESSION_ROW_END) !== out.lastIndexOf(SESSION_ROW_END)) throw new Error('session row end anchor missing/dup — stock shape moved?')
+out = out.replace(SESSION_ROW_END, [
+  T(6) + '}),',
+  T(6) + 'ARXA_SESSION_DOT(selected)',
+  T(5) + ']',
+  T(4) + '}),',
+  T(4) + 'content: (0, react_jsx_runtime.jsx)(SessionHoverContent, {',
+].join('\n'))
+
 // 6z. (D83) the trash surface rides the GROUPED tree's tail: injected as
 //      the last child of the treeBody (after the org-groups list, before
 //      the fade) so it sits DIRECTLY under the last org row always —

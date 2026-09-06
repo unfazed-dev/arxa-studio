@@ -79,8 +79,20 @@ check('G2 leaf: a LEAF ancestor opens from the mirrored dsh view store',
 check('G3 glyph: the stock folderActive rule survives the transform',
   client.includes('const active = group.expanded && group.containsCurrent;')
   && client.includes('active && Rows_module_css_default.folderActive'))
-check('G3 dot: the current session row is marked without a pseudo-element',
-  client.includes('div.aXa_wsr_sessionRow.aXa_wsr_selected{background-color:'))
+// The dot is a REAL row child, LAST in the children array, so it holds one
+// position whether the row shows its timestamp or (on hover) its menu. The
+// first attempt was a background gradient: it paints UNDER the row's content,
+// so it could only live in the padding and would have hit the timestamp.
+check('G3 dot: the current session row is marked in the stock dot slot',
+  client.includes('const ARXA_SESSION_DOT = (selected) =>')
+  && client.includes('clsx(Rows_module_css_default.dot, "aXa_arxaCurrentDot")')
+  && client.includes('.aXa_arxaCurrentDot{width:6px;height:6px;flex:none;margin-left:6px'))
+check('G3 dot: it is the LAST child of the session row (pinned right)',
+  client.includes('ARXA_SESSION_DOT(selected)\n' + '\t'.repeat(5) + ']'))
+check('G3 dot: no gradient left painting under the row content',
+  !client.includes('div.aXa_wsr_sessionRow.aXa_wsr_selected'))
+check('G3 dot: its label is translated in all 3 dictionaries',
+  client.split('"rows.current":').length - 1 === 3)
 
 // ---- 3. rows-world content ----------------------------------------------------
 check('rows: org store present', client.includes('function createOrgStore()'))

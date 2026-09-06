@@ -1003,14 +1003,14 @@
 				+ ".aXa_agentNote{padding:3px 6px;font-size:11px;color:var(--dsw-alias-label-caption);white-space:normal}"
 				+ ".aXa_agentDetails{margin-top:2px;background:none;border:0;border-top:1px solid var(--dsw-alias-border-l2);padding:5px 6px 2px;font:inherit;font-size:11px;color:var(--dsw-alias-label-tertiary);cursor:pointer;text-align:left}"
 				+ ".aXa_agentDetails:hover{color:var(--dsw-alias-label-primary)}"
-				// G3 (grilled 2026-09-06): the row the current session lives on gets
-				// an accent dot beside the stock selected background — the folder
-				// glyph above it already lights (dsh folderActive), so the pair reads
-				// as "this branch, this row". Painted as a background gradient, NOT a
-				// pseudo-element: ::before and ::after on .sessionRow are taken by the
-				// drag markers. The extra `div` step outranks the stock rule without
-				// depending on which style tag lands last.
-				+ "div.aXa_wsr_sessionRow.aXa_wsr_selected{background-color:var(--dsw-alias-interactive-bg-hover);background-image:radial-gradient(circle at 3px 50%,var(--dsw-alias-state-business-primary) 0 2.5px,transparent 2.6px);background-repeat:no-repeat}"
+				// G3 (grilled 2026-09-06, placement fixed on review): the current
+				// session's dot is a REAL row child at the right edge — see
+				// ARXA_SESSION_DOT. Only its ink lives here. 6px round, the accent the
+				// folder glyph above it wears (folderActive), and the dsh row's own
+				// 6px step for the gap. The first attempt painted it as a background
+				// gradient, which sits UNDER the row's content: it could only ever
+				// live in the padding and would have collided with the timestamp.
+				+ ".aXa_arxaCurrentDot{width:6px;height:6px;flex:none;margin-left:6px;border-radius:50%;background:var(--dsw-alias-state-business-primary)}"
 				+ ".uV2eYG_root:not(.uV2eYG_hero) [data-arxa-preset-corner]{display:none}"
 				+ ".uV2eYG_hero [data-composer-card] :is(.uV2eYG_input,.uV2eYG_mirror,.uV2eYG_backdrop){box-sizing:border-box;padding-right:var(--arxa-preset-inset,120px)}";
 			document.head.appendChild(tag);
@@ -1119,6 +1119,20 @@
 		 * files belong inside the tree under the owning row). ArxaDirRows +
 		 * ARXA_LEAF_FILES render inline instead; the tree-read route and the
 		 * arxa-av-open bridge are unchanged. */
+		/** G3: the row of the conversation you are IN, marked at its RIGHT
+		 * edge — the same "you are here" the folder glyph above it wears
+		 * (dsh folderActive). dsh row grammar: the reserved `dot` slot class,
+		 * the row's own 6px step for the gap, and LAST child so the mark
+		 * holds one position whether the row is showing its timestamp or, on
+		 * hover, its ellipsis menu. Not a StateDot — that primitive's states
+		 * are done/error/ongoing (the RUN state, already on the left slot),
+		 * and this says something else entirely. */
+		const ARXA_SESSION_DOT = (selected) => selected !== true ? null : (0, react_jsx_runtime.jsx)("span", {
+			className: clsx(Rows_module_css_default.dot, "aXa_arxaCurrentDot"),
+			role: "img",
+			"aria-label": orgT("rows.current"),
+			title: orgT("rows.current"),
+		}, "arxa-current");
 		const ARXA_SELECT_WS = (workspaceId) => {
 			const { orgId, ws } = wsParts(workspaceId);
 			if (ws !== "") orgStore.selectRow({ orgId, rowId: ws });
@@ -2608,6 +2622,7 @@
 			"disconnect.doneKept": "Disconnected — repositories kept on GitHub.",
 			"disconnect.doneRemoved": "Disconnected — removed from GitHub: {repos}",
 			"rows.ghSynced": "Synced with GitHub",
+			"rows.current": "You are here",
 			"org.create.ghToggle": "Publish to GitHub",
 			"org.create.ghOnHint": "A private GitHub repository is created and kept in sync.",
 			"org.create.ghOffHint": "This organisation stays on this device only. Connect it later from its menu.",
@@ -2812,6 +2827,7 @@
 			"disconnect.doneKept": "Odłączono — repozytoria zachowane na GitHub.",
 			"disconnect.doneRemoved": "Odłączono — usunięto z GitHub: {repos}",
 			"rows.ghSynced": "Zsynchronizowano z GitHub",
+			"rows.current": "Tu jesteś",
 			"org.create.ghToggle": "Opublikuj na GitHub",
 			"org.create.ghOnHint": "Zostaje utworzone prywatne repozytorium GitHub i jest na bieżąco synchronizowane.",
 			"org.create.ghOffHint": "Ta organizacja pozostaje tylko na tym urządzeniu. Połącz ją później z jej menu.",
@@ -3016,6 +3032,7 @@
 			"disconnect.doneKept": "Déconnecté — dépôts conservés sur GitHub.",
 			"disconnect.doneRemoved": "Déconnecté — supprimés de GitHub : {repos}",
 			"rows.ghSynced": "Synchronisé avec GitHub",
+			"rows.current": "Vous êtes ici",
 			"org.create.ghToggle": "Publier sur GitHub",
 			"org.create.ghOnHint": "Un dépôt GitHub privé est créé et synchronisé en continu.",
 			"org.create.ghOffHint": "Cette organisation reste uniquement sur cet appareil. Connectez-la plus tard depuis son menu.",
