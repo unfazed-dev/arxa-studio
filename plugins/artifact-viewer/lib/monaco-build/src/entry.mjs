@@ -237,6 +237,12 @@ const userConfig = {
   // Files open by SIDEBAR selection, so the same tab is reused as the user
   // moves between artifacts; a preview or a second pin opens its own.
   'workbench.editor.enablePreview': true,
+  // Always two columns. VS Code's default drops to the inline view below
+  // 900px, and the viewer pane usually IS below 900px — so every diff came up
+  // as one column with two line-number gutters and read as "not a diff"
+  // (2026-09-07). Maximising the pane is the user's move, not a mode switch.
+  'diffEditor.renderSideBySide': true,
+  'diffEditor.useInlineViewWhenSpaceIsLimited': false,
 }
 function writeConfig (patch) {
   Object.assign(userConfig, patch)

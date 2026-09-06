@@ -320,6 +320,14 @@
     // A read-only file must stay read-only in the DIFF too. The modified side is
     // the file's own model, and onChange/auto-save watch that model — so if the
     // flag stops at the code editor, the diff becomes a back door that writes.
+    // The marks must PAINT, not just exist: a decoration whose theme colour
+    // never resolved is a transparent box, and the diff reads as plain text.
+    {
+      const dEl = document.querySelector('.monaco-diff-editor')
+      const bg = (sel) => { const el = dEl && dEl.querySelector(sel); return el ? getComputedStyle(el).backgroundColor : 'NONE' }
+      out.diffInsBg = bg('.line-insert')
+      out.diffDelBg = bg('.line-delete')
+    }
     const dctl = diffPane != null && typeof diffPane.getControl === 'function' ? diffPane.getControl() : null
     const dmod = dctl != null && typeof dctl.getModifiedEditor === 'function' ? dctl.getModifiedEditor() : null
     out.diffModRO = dmod != null ? !!dmod.getOption(m.monaco.editor.EditorOption.readOnly) : null
@@ -475,10 +483,22 @@
     flow.md2Top = onTop()
     flow.md2Pane = (await m.editorPartInfo()).paneId
     out.step = 'flow-diff'
-    await m.openDiff(MD2, '# Allergen\n\nold body\n', { sideBySide: false, editable: true })
+    // Narrower than VS Code's 900px inline breakpoint, with the product's own
+    // call (no side-by-side override): the bundle's settings must still give
+    // two columns, and the marks must carry colour.
+    wrap.style.width = '700px'
+    await m.openDiff(MD2, '# Allergen\n\nold body\n', { sideBySide: true, editable: true })
     await settle(2500)
     flow.diffTop = onTop()
     flow.diffPane = (await m.editorPartInfo()).paneId
+    {
+      const dEl = host.querySelector('.monaco-diff-editor')
+      flow.diffSbs = dEl ? dEl.classList.contains('side-by-side') : null
+      flow.diffWidth = dEl ? Math.round(dEl.getBoundingClientRect().width) : 0
+      const el = dEl && dEl.querySelector('.line-insert, .line-delete')
+      flow.diffBg = el ? getComputedStyle(el).backgroundColor : 'NONE'
+    }
+    wrap.style.width = '900px'
     out.step = 'flow-back'
     await m.showMarkdownPreview(MD2)
     await settle(2500)
@@ -621,6 +641,12 @@
       "out.flow.backTop === 'iframe'",
       "out.flow.dartTop === 'editor'",
       'out.flow.stray.length === 0',
+      // Two columns even in a 700px pane, and painted marks in both diffs.
+      'out.flow.diffSbs === true',
+      'out.flow.diffWidth < 800',
+      "out.flow.diffBg !== 'NONE' && out.flow.diffBg !== 'rgba(0, 0, 0, 0)'",
+      "out.diffInsBg !== 'NONE' && out.diffInsBg !== 'rgba(0, 0, 0, 0)'",
+      "out.diffDelBg !== 'NONE' && out.diffDelBg !== 'rgba(0, 0, 0, 0)'",
       // The LSP lane, end to end in a browser: client started, the document VS
       // Code created was synced, and the server's diagnostic became a marker on
       // the model. A source pin alone once let this whole function be deleted.
@@ -657,7 +683,7 @@
     pngBytes: out.pngBytes, imgPane: out.imgPane, imgActive: out.imgActive, imgFrames: out.imgFrames,
     closedTabs: out.closedTabs, reopenText: out.reopenText, afterChange: out.afterChange,
     diffPane: out.diffPane, diffTabs: out.diffTabs, diffMarks: out.diffMarks,
-    diffModRO: out.diffModRO, diffTyped: out.diffTyped,
+    diffModRO: out.diffModRO, diffTyped: out.diffTyped, diffInsBg: out.diffInsBg, diffDelBg: out.diffDelBg,
     diffModRO2: out.diffModRO2, diffTyped2: out.diffTyped2,
     hostBox: out.hostBox, prodPartBox: out.prodPartBox, prodEdBox: out.prodEdBox, prodLines: out.prodLines,
     absOpened: out.absOpened, absText: out.absText, absPane: out.absPane, absRes: out.absRes, absLines: out.absLines,
@@ -666,6 +692,6 @@
   }, null, 1)
   if (location.search.includes('dump')) document.body.appendChild(dump)
   try {
-    await fetch('report', { method: 'POST', body: JSON.stringify({ step: out.step, fail: out.fail, flow: out.flow, partErr: out.partErr, error: out.error }) })
+    await fetch('report', { method: 'POST', body: JSON.stringify({ step: out.step, fail: out.fail, flow: out.flow, diffInsBg: out.diffInsBg, diffDelBg: out.diffDelBg, partErr: out.partErr, error: out.error }) })
   } catch { /* the harness may not be listening */ }
 </script>

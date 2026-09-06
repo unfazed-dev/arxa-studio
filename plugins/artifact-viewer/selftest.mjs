@@ -771,6 +771,11 @@ assert.ok(entrySrc.includes("editor.typeId === 'workbench.editors.webviewInput'"
   'closeWebviews targets webview inputs, not the text editors that keep undo history')
 assert.ok(entrySrc.includes("mod.updateOptions({ readOnly: !editable, domReadOnly: !editable })"),
   'the diff honours read-only on its modified side')
+// Always two columns: VS Code's default falls to the inline view below
+// 900px, and the viewer pane usually is — one column with two line-number
+// gutters read as "not a diff" (2026-09-07).
+assert.ok(entrySrc.includes("'diffEditor.useInlineViewWhenSpaceIsLimited': false"),
+  'the bundle keeps the diff side by side in a narrow pane')
 assert.ok(/openDiff \(uriPath, originalText, \{ sideBySide = null, editable = true \}/.test(entrySrc),
   'openDiff takes the editable flag')
 assert.ok(/await M\.openDiff\(uri, diffOriginal, \{[\s\S]{0,400}?\n\s+editable,\n/.test(clientSrc)
