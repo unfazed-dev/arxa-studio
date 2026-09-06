@@ -828,6 +828,22 @@ provider over `/__arxa/artifacts/write` replaces the hand-rolled save path.
 
 ---
 
+#### 7.5 The LSP lane, proven in a browser
+
+The language client attaches by `documentSelector` on language id, and documents
+are now created by VS Code's `textFileEditor` instead of `monaco.editor.create`.
+Nothing proved a client still syncs one in that lane — and `connectLanguageServer`
+had already been deleted once by an editing slip, caught only by a source pin on
+a string.
+
+`check.mjs` now runs a **stub language server** on the same origin: it answers
+`initialize`, waits for the `didOpen` the client should send for the open file,
+and publishes one diagnostic back. The spike asserts the diagnostic became a
+**marker on the model**, with the stub's own `source`. Client started, document
+synced, diagnostic applied — the whole path, in a browser.
+
+Verified it can fail: changing the stub's diagnostic `source` turns the check RED.
+
 ### Where phase 7 stands
 
 | | |

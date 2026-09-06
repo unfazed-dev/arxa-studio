@@ -14,6 +14,7 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
+import { WebSocketServer } from 'ws'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const dist = path.join(here, 'dist')
@@ -66,6 +67,49 @@ const DUMP = process.argv.includes('--dump')
 // iframe, so its contents can only be verified by eye.
 const SHOT = process.argv.includes('--shot')
 const dumpPng = DUMP || SHOT ? process.argv[process.argv.indexOf(DUMP ? '--dump' : '--shot') + 1] : null
+
+// A STUB language server on the same origin.
+//
+// The LSP lane is the one thing the browser check could never see: the client
+// attaches by documentSelector on language id, and files now open through VS
+// Code's textFileEditor instead of a standalone editor. Nothing proved a
+// language client still syncs a document in that lane — and connectLanguageServer
+// was in fact deleted once by an editing mistake, caught only by a source pin.
+//
+// So: answer initialize, wait for the didOpen the client should send for the
+// open file, and publish one diagnostic back. If a marker lands on the model,
+// the whole path is real — client started, document synced, diagnostics applied.
+const wss = new WebSocketServer({ noServer: true, handleProtocols: () => 'arxa-lsp' })
+server.on('upgrade', (rq, socket, head) => {
+  if (!new URL(rq.url, 'http://x').pathname.endsWith('/lsp-stub')) return socket.destroy()
+  wss.handleUpgrade(rq, socket, head, (ws) => {
+    // vscode-ws-jsonrpc frames one JSON message per websocket message — no
+    // Content-Length headers, unlike the stdio transport the real host uses.
+    ws.on('message', (data) => {
+      let msg
+      try { msg = JSON.parse(String(data)) } catch { return }
+      if (msg.method === 'initialize') {
+        ws.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { capabilities: { textDocumentSync: 1 } } }))
+      } else if (msg.method === 'shutdown') {
+        ws.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: null }))
+      } else if (msg.method === 'textDocument/didOpen') {
+        ws.send(JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'textDocument/publishDiagnostics',
+          params: {
+            uri: msg.params.textDocument.uri,
+            diagnostics: [{
+              range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } },
+              severity: 1,
+              source: 'arxa-stub',
+              message: 'stub diagnostic',
+            }],
+          },
+        }))
+      }
+    })
+  })
+})
 
 server.listen(0, '127.0.0.1', () => {
   const url = `http://127.0.0.1:${server.address().port}${PREFIX}spike.html` + (DUMP ? '?dump' : '')

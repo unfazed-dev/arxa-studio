@@ -716,6 +716,13 @@ assert.match(clientSrc, /catch \{ \/\* no language service; the editor is unaffe
   'a missing language service NEVER fails the open — the editor works without one')
 assert.ok(entrySrc.includes("['arxa-lsp', token]"), 'the bundle sends the token as a subprotocol (a browser cannot set headers)')
 assert.ok(entrySrc.includes('if (langClients.has(lang)) return true'), 'one language client per language, not one per file opened')
+// The LSP lane is now proven in a BROWSER, not only by these string pins. A
+// splice deleted connectLanguageServer once and the build stayed green, because
+// nothing in the bundle imports it — only client.js does, at runtime.
+assert.ok(checkSrc.includes('WebSocketServer') && checkSrc.includes("method: 'textDocument/publishDiagnostics'"),
+  'the check harness runs a stub language server')
+assert.ok(spikeSrc.includes("out.lspMarkers > 0") && spikeSrc.includes("out.lspSource === 'arxa-stub'"),
+  'and asserts the server\'s diagnostic became a MARKER on the model — client started, document synced, diagnostic applied')
 assert.match(clientSrc, /IconEnhanceOutline16/, 'format action uses the enhance glyph')
 // The 2026 palette vars are gone with CodeMirror: they existed to make the CM
 // editor and the markdown preview match, and VS Code paints both from its own

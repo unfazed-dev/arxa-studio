@@ -273,6 +273,22 @@
     await settle(1500)
     out.afterChange = viewText().slice(0, 12)
 
+    // ---- the LANGUAGE CLIENT ---------------------------------------------
+    // Against a stub server on this origin (see check.mjs). This is the only
+    // browser proof the LSP lane survived moving off standalone editors: the
+    // client matches on language id, and the document it has to sync is now
+    // created by VS Code's textFileEditor, not by monaco.editor.create.
+    out.step = 'lsp'
+    out.lspStarted = await m.connectLanguageServer('markdown', {
+      url: 'ws://' + location.host + '/__arxa/artifacts/vendor/lsp-stub',
+      token: 'stub', relPath: 'notes.md', selector: ['markdown'],
+    })
+    await settle(2500)
+    const mk = m.monaco.editor.getModelMarkers({ resource: m.monaco.Uri.file('/spike/notes.md') })
+    out.lspMarkers = mk.length
+    out.lspSource = mk.length > 0 ? String(mk[0].source ?? '') : ''
+    out.lspLangs = m.languageServers().join(',')
+
     // ---- the DIFF editor --------------------------------------------------
     // Replaces CodeMirror's unifiedMergeView. Both sides are resources, so the
     // original gets its own uri — a second model on the file's own uri would
@@ -393,7 +409,14 @@
       // not just a pane id: two editors showing the same text would still be a
       // diff editor.
       "out.diffPane === 'workbench.editors.textDiffEditor'",
-      'out.diffMarks > 0'
+      'out.diffMarks > 0',
+      // The LSP lane, end to end in a browser: client started, the document VS
+      // Code created was synced, and the server's diagnostic became a marker on
+      // the model. A source pin alone once let this whole function be deleted.
+      'out.lspStarted === true',
+      "out.lspLangs === 'markdown'",
+      'out.lspMarkers > 0',
+      "out.lspSource === 'arxa-stub'"
   ]) {
     let ok = false
     try { ok = !!new Function('out', 'return (' + src + ')')(out) } catch (e) { ok = false }
@@ -417,6 +440,7 @@
     pngBytes: out.pngBytes, imgPane: out.imgPane, imgActive: out.imgActive, imgFrames: out.imgFrames,
     closedTabs: out.closedTabs, reopenText: out.reopenText, afterChange: out.afterChange,
     diffPane: out.diffPane, diffTabs: out.diffTabs, diffMarks: out.diffMarks,
+    lspStarted: out.lspStarted, lspMarkers: out.lspMarkers, lspSource: out.lspSource, lspLangs: out.lspLangs,
   }, null, 1)
   if (location.search.includes('dump')) document.body.appendChild(dump)
 </script>
