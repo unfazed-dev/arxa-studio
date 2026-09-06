@@ -329,6 +329,72 @@ Diff lane moves to Monaco's `DiffEditor` (retires `@codemirror/merge`).
 
 ### Phase 2 — LSP bridge (G8, G11)
 
+#### 2a. The host bridge — **DONE**
+
+`lib/lsp.js` + `selftest.lsp.mjs` (26 assertions). Everything below is proven
+against a REAL `rust-analyzer`, which answers `initialize` through the socket.
+
+**Why the browser check cannot reach this.** monaco-build's `check.mjs` serves
+`dist/` from a throwaway static server — no host, no `ctx.webServer`, no
+`registerUpgrade`, no spawner. The bridge is the first thing in this branch the
+lens cannot test at all, so it gets a host selftest instead. Said plainly rather
+than left as an implied gap.
+
+**Auth was the constraint that shaped the route.** A browser `WebSocket` cannot
+set headers, so `x-arxa-write-token` — the pattern every other viewer route uses
+— does not transfer. The token rides `Sec-WebSocket-Protocol` instead: the
+client offers `['arxa-lsp', <token>]` and the server accepts only the marker
+back, so the token is never echoed and never lands in a URL that gets logged.
+This works because the token is `base64url + '.'`, every character of which is a
+legal protocol token — asserted, because a single illegal character would make
+browsers fail the handshake silently.
+
+A **separate `lsp` scope**, bound to the open org exactly like `tree-read`. Not
+reusing `read`: this token opens a socket that spawns a process, so a leaked
+per-file read token must not be able to do it. Proven refused: no org, no token,
+a forged token, a token for a different org, a `read` token presented as an
+`lsp` one, and an unserved language.
+
+**Framing is byte-counted, not character-counted.** LSP's `Content-Length` is in
+bytes; any non-ascii in a message (an accented path, a diagnostic quoting the
+user's source) makes byte and character length disagree, and a character-counting
+reader desynchronises the stream permanently. Asserted with a multi-byte body,
+with frames delivered one byte at a time.
+
+**Lifecycle.** One server per (org, language), spawned lazily, killed on org
+switch through the same `onServing` signal the watcher already uses — verified
+that signal is reachable rather than assumed. The child deliberately OUTLIVES
+its last socket so reopening a file does not pay for a cold rust-analyzer index
+again; the org switch is what ends it. A missing binary fails asynchronously
+(ENOENT on the error event, not a throw) and is not cached as running.
+
+`ws` is now a direct dependency — it was transitive, which meant an unrelated
+bump could remove it. Confirmed present in the payload tar (21 entries), not
+assumed.
+
+**Rows only for servers that have been RUN**: rust and dart. The plan also names
+`typescript-language-server` and `vscode-langservers-extracted`, neither
+installed on this machine — a routing row nobody has ever exercised is a
+liability, not a head start, so they arrive with the install flow in 2c.
+
+#### 2b. Connecting the editor — NEXT, and it has a real design question
+
+The socket works; the editor is not yet attached to it. The blocker is **file
+identity**: the editor currently opens models at `/<relPath>`, but a language
+server needs the real on-disk path or every diagnostic, hover and definition
+lands on the wrong file. Fixing it means the viewer must know the absolute path
+of what it opened — easy for an org file (the token route already knows the org
+root) and less so for a session worktree file, which resolves through a
+different path. That is its own change and its own commit.
+
+`MonacoLanguageClient` 10.7.0 takes `{ id, name, clientOptions, messageTransports }`
+— confirmed from the installed types, not from memory.
+
+#### 2c. The rest of the languages + install flow
+
+Original plan below.
+
+
 - Host: `registerUpgrade({ path: '/__arxa/artifacts/lsp' })`. One server per
   language per open org, spawned **lazily on first file of that language**,
   rooted at the org folder, through the confining spawner, **killed on org

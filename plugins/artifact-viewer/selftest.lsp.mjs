@@ -1,0 +1,188 @@
+#!/usr/bin/env node
+/**
+ * artifact-viewer — the LSP bridge (G8).
+ *
+ * Why this is a HOST test and not part of the lens check: monaco-build's
+ * check.mjs serves dist/ from a throwaway static server. It has no host, no
+ * ctx.webServer, no registerUpgrade and no spawner, so the bridge is the first
+ * thing in this branch the browser check cannot reach at all. Everything the
+ * socket does is proven here instead.
+ *
+ * The last block drives a REAL rust-analyzer through a REAL WebSocket and
+ * asserts it answers `initialize`. It skips (loudly) when the binary is absent,
+ * because CI on another machine must not go red for a toolchain choice.
+ */
+import assert from 'node:assert/strict'
+import http from 'node:http'
+import { spawnSync } from 'node:child_process'
+import { WebSocketServer, WebSocket } from 'ws'
+import {
+  LANG_SERVERS, langForPath, createFrameReader, frame, tokenFromProtocols, createLspBridge,
+} from './lib/lsp.js'
+import { issueToken } from './lib/tokens.js'
+
+let n = 0
+const ok = (s) => { n++; console.log('  ok ' + s) }
+const SECRET = 'test-secret-for-the-lsp-bridge'
+const ORG = '/tmp/arxa-lsp-selftest-org'
+
+// ---- routing ---------------------------------------------------------------
+assert.equal(langForPath('src/main.rs'), 'rust'); ok('.rs routes to rust')
+assert.equal(langForPath('lib/widget.dart'), 'dart'); ok('.dart routes to dart')
+assert.equal(langForPath('notes/readme.md'), null); ok('an unserved extension routes to NOTHING (the editor still opens)')
+assert.equal(langForPath('Makefile'), null); ok('a file with no extension does not crash the router')
+assert.equal(langForPath('SRC/MAIN.RS'), 'rust'); ok('extension match is case-insensitive')
+
+// ---- framing ---------------------------------------------------------------
+// THE bug this reader exists to avoid: Content-Length counts BYTES. A body
+// with any non-ascii character makes byte length and string length disagree,
+// and a character-counting reader desynchronises the stream permanently —
+// every message after the first accented path is garbage.
+{
+  const got = []
+  const read = createFrameReader((m) => got.push(m))
+  const body = JSON.stringify({ msg: 'diagnostics for café — naïve ✓' })
+  assert.ok(Buffer.byteLength(body, 'utf8') > body.length, 'the fixture really is multi-byte')
+  read(frame(body))
+  assert.deepEqual(got, [body]); ok('a multi-byte body round-trips (byte-counted, not char-counted)')
+}
+{
+  const got = []
+  const read = createFrameReader((m) => got.push(m))
+  const buf = Buffer.concat([frame('{"a":1}'), frame('{"b":2}')])
+  // Deliver ONE BYTE AT A TIME: a real stdout stream splits wherever it likes,
+  // including mid-header and mid-body.
+  for (const byte of buf) read(Buffer.from([byte]))
+  assert.deepEqual(got, ['{"a":1}', '{"b":2}']); ok('frames split across arbitrary chunk boundaries reassemble')
+}
+{
+  const got = []
+  const read = createFrameReader((m) => got.push(m))
+  read(Buffer.concat([frame('{"a":1}'), frame('{"b":2}'), frame('{"c":3}')]))
+  assert.equal(got.length, 3); ok('three frames in one chunk all surface')
+}
+
+// ---- the subprotocol token trick -------------------------------------------
+const goodToken = issueToken({ secret: SECRET, scope: 'lsp', orgPath: ORG })
+assert.equal(tokenFromProtocols('arxa-lsp, ' + goodToken), goodToken); ok('the token is read out of Sec-WebSocket-Protocol')
+assert.equal(tokenFromProtocols(goodToken + ', arxa-lsp'), null); ok('a list not led by the marker is refused')
+assert.equal(tokenFromProtocols(''), null); ok('an empty protocol list is refused')
+assert.equal(tokenFromProtocols(undefined), null); ok('a missing protocol header is refused')
+// The whole point of the subprotocol carrier: every character of the token has
+// to be legal there, or a browser silently fails the handshake.
+assert.match(goodToken, /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/); ok('the token is subprotocol-safe (base64url + dot, no padding)')
+
+// ---- deny-default at the upgrade -------------------------------------------
+function fakeSocket () {
+  const s = { written: '', destroyed: false }
+  s.write = (d) => { s.written += d; return true }
+  s.destroy = () => { s.destroyed = true }
+  s.on = () => s
+  s.once = () => s
+  return s
+}
+const neverUpgrade = { handleUpgrade: () => { throw new Error('handshake must not be reached') } }
+
+function refuses (what, { org = ORG, token = goodToken, lang = 'rust' }) {
+  const bridge = createLspBridge({
+    secret: SECRET, getOrgPath: () => org,
+    spawn: () => { throw new Error('must not spawn on a refused upgrade') },
+  })
+  const sock = fakeSocket()
+  bridge.handleUpgrade(
+    { url: '/__arxa/artifacts/lsp?lang=' + lang, headers: { 'sec-websocket-protocol': token === null ? '' : 'arxa-lsp, ' + token } },
+    sock, Buffer.alloc(0), neverUpgrade,
+  )
+  assert.ok(sock.destroyed, what + ': socket destroyed')
+  assert.match(sock.written, /^HTTP\/1\.1 403/, what + ': answered 403')
+  assert.equal(bridge.stats().refused, 1, what + ': counted as refused')
+  ok('refused — ' + what)
+}
+refuses('no org open', { org: null })
+refuses('no token', { token: null })
+refuses('a forged token', { token: 'not.atoken' })
+refuses('a token for a DIFFERENT org', { token: issueToken({ secret: SECRET, scope: 'lsp', orgPath: '/somewhere/else' }) })
+refuses('a read token used as an lsp token', { token: issueToken({ secret: SECRET, scope: 'read', orgPath: ORG, relPath: 'a.rs' }) })
+refuses('a language nothing serves', { lang: 'cobol' })
+
+// ---- a missing binary is a clean answer, not a crash -----------------------
+{
+  const bridge = createLspBridge({
+    secret: SECRET, getOrgPath: () => ORG,
+    servers: { ghost: { exts: ['.ghost'], cmd: 'definitely-not-a-real-binary-xyz', args: [] } },
+  })
+  const entry = bridge.ensureServer(ORG, 'ghost')
+  // spawn() itself succeeds; ENOENT arrives asynchronously on the error event.
+  await new Promise((r) => setTimeout(r, 300))
+  assert.equal(bridge.running.size, 0, 'the dead child is not left in the table')
+  assert.equal(bridge.stats().spawnFailed, 1)
+  ok('a missing language-server binary fails cleanly and is not cached as running')
+  if (entry) { try { entry.child.kill() } catch {} }
+}
+
+// ---- org switch kills the server -------------------------------------------
+{
+  const killed = []
+  const fakeChild = () => ({
+    stdout: { on: () => {} }, stderr: { on: () => {} }, stdin: { write: () => {} },
+    on: () => {}, kill: () => killed.push(1),
+  })
+  const bridge = createLspBridge({
+    secret: SECRET, getOrgPath: () => ORG, spawn: fakeChild,
+    servers: { rust: { exts: ['.rs'], cmd: 'x', args: [] } },
+  })
+  bridge.ensureServer(ORG, 'rust')
+  assert.equal(bridge.running.size, 1)
+  bridge.stopAll('org-switch')
+  assert.equal(bridge.running.size, 0)
+  assert.equal(killed.length, 1)
+  ok('an org switch kills the language server (no process holding a closed org)')
+}
+
+// ---- LIVE: a real rust-analyzer answers initialize over a real socket -------
+const haveRa = spawnSync('rust-analyzer', ['--version'], { encoding: 'utf8' }).status === 0
+if (!haveRa) {
+  console.log('  SKIP  live rust-analyzer round trip — binary not on PATH')
+} else {
+  const bridge = createLspBridge({ secret: SECRET, getOrgPath: () => process.cwd() })
+  const wss = new WebSocketServer({
+    noServer: true,
+    handleProtocols: (protocols) => (protocols.has('arxa-lsp') ? 'arxa-lsp' : false),
+  })
+  const server = http.createServer()
+  server.on('upgrade', (req, socket, head) => bridge.handleUpgrade(req, socket, head, wss))
+  await new Promise((r) => server.listen(0, '127.0.0.1', r))
+  const port = server.address().port
+  const liveToken = issueToken({ secret: SECRET, scope: 'lsp', orgPath: process.cwd() })
+
+  const ws = new WebSocket('ws://127.0.0.1:' + port + '/__arxa/artifacts/lsp?lang=rust', ['arxa-lsp', liveToken])
+  const reply = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('rust-analyzer did not answer initialize in 30s')), 30_000)
+    ws.on('message', (data) => {
+      const msg = JSON.parse(data.toString('utf8'))
+      if (msg.id === 1) { clearTimeout(timer); resolve(msg) }
+    })
+    ws.on('error', (e) => { clearTimeout(timer); reject(e) })
+    ws.on('open', () => {
+      ws.send(JSON.stringify({
+        jsonrpc: '2.0', id: 1, method: 'initialize',
+        params: { processId: process.pid, rootUri: null, capabilities: {} },
+      }))
+    })
+  })
+  assert.equal(ws.protocol, 'arxa-lsp'); ok('the server accepted ONLY the marker subprotocol (the token is never echoed)')
+  assert.ok(reply.result && reply.result.capabilities, 'initialize returned capabilities')
+  ok('LIVE: rust-analyzer answered initialize through the bridge')
+  assert.ok(reply.result.capabilities.textDocumentSync !== undefined, 'the answer is a real LSP capability set')
+  ok('LIVE: the capabilities are a real LSP payload, not an echo')
+  assert.equal(bridge.stats().accepted, 1)
+  assert.equal(bridge.stats().spawned, 1)
+  ok('LIVE: exactly one server spawned for one socket')
+
+  ws.close()
+  bridge.stopAll('selftest-done')
+  await new Promise((r) => server.close(r))
+  assert.equal(bridge.running.size, 0); ok('LIVE: the real child is reaped')
+}
+
+console.log('selftest.lsp: ' + n + ' ok')

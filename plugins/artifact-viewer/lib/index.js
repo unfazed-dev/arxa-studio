@@ -24,6 +24,7 @@ import { createWriteApi, createMainVersionRoute, createVersionRoute, resolveWork
 import { createWorktreeRoute, createTreeRoute, createSessionChangesRoute, resolveWorktreeFile } from './wt-api.js'
 import { createOrgWatcher, createEventsRoute } from './watcher.js'
 import { TOKEN_TTL_CEILING_SECONDS, issueToken, loadOrCreateSecret, readVerifyFor } from './tokens.js'
+import { createLspBridge } from './lsp.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -98,6 +99,15 @@ export function createTokenRoutes({ env = process.env, secret, getSettings, getO
           }
         }
         const token = issueToken({ secret, scope: body.scope, worktreeId: body.worktreeId, relPath: body.scope === 'wt-read' ? body.relPath : null, ttlSeconds: ttl })
+        return json(res, 200, { token })
+      }
+      if (body.scope === 'lsp') {
+        // Bound to the open org, like tree-read. A SEPARATE class from read on
+        // purpose: this token opens a socket that spawns a language server, so
+        // a leaked per-file read token must not be able to do it.
+        const openL = readOpenOrg(env)
+        if (!openL) return json(res, 403, { error: 'no org open' })
+        const token = issueToken({ secret, scope: 'lsp', orgPath: openL.orgPath, ttlSeconds: ttl })
         return json(res, 200, { token })
       }
       if (body.scope === 'tree-read') {
@@ -245,7 +255,16 @@ export function apply(ctx, config) {
   try {
     const secret = loadOrCreateSecret(process.env)
     const watcher = createOrgWatcher({ intervalMs: 250 })
-    const started = ensureFollow(secret, (orgPath) => watcher.setRoot(orgPath))
+    // The LSP bridge needs the SAME org signal the watcher uses. onServing
+    // fires on mount and on every switch, so a language server rooted at the
+    // old org is killed the moment a new one is served — a server that outlived
+    // the switch would be a process holding a handle on a folder the user
+    // believes they closed.
+    let lspBridge = null
+    const started = ensureFollow(secret, (orgPath) => {
+      watcher.setRoot(orgPath)
+      if (lspBridge) lspBridge.stopAll('org-switch')
+    })
     const routes = createTokenRoutes({
       env: process.env, secret, getSettings: currentSettings,
       getOrigin: () => started.current()?.origin ?? null,
@@ -270,6 +289,36 @@ export function apply(ctx, config) {
       path: '/__arxa/artifacts/vendor',
       handler: (req, res) => { void vendorRoutes.handle(req, res) },
     })
+    // LSP bridge (G8). registerUpgrade is exact-path and single-owner; the
+    // engine tracks upgraded sockets and awaits them on shutdown, so no
+    // language server session can outlive the host holding a socket.
+    // `ws` is imported lazily: a host without it must still boot the viewer.
+    lspBridge = createLspBridge({
+      secret,
+      getOrgPath: () => readOpenOrg(process.env)?.orgPath ?? null,
+      log: (m) => console.log('[arxa-artifact-viewer] ' + m),
+    })
+    if (ctx.webServer?.registerUpgrade) {
+      let wssPromise = null
+      const getWss = () => {
+        wssPromise ??= import('ws').then((m) => new m.WebSocketServer({
+          noServer: true,
+          // The client offers ['arxa-lsp', <token>]; only the marker is ever
+          // accepted back, so the token never appears in the response.
+          handleProtocols: (protocols) => (protocols.has('arxa-lsp') ? 'arxa-lsp' : false),
+        }))
+        return wssPromise
+      }
+      ctx.webServer.registerUpgrade({
+        path: '/__arxa/artifacts/lsp',
+        handler: (req, socket, head) => {
+          getWss().then(
+            (wss) => lspBridge.handleUpgrade(req, socket, head, wss),
+            () => { try { socket.destroy() } catch {} },
+          )
+        },
+      })
+    }
     const writeApi = createWriteApi({ env: process.env, secret, getSettings: currentSettings })
     ctx.webServer?.register?.({
       path: '/__arxa/artifacts/write',

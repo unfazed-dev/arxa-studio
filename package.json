@@ -19,6 +19,7 @@
     "@deepseek-ai/dsh-headless": "0.1.2-rc.1",
     "@deepseek-ai/dsh-web-app": "0.1.2-rc.1",
     "@modelcontextprotocol/sdk": "1.30.0",
+    "ws": "^8.21.3",
     "zod": "4.4.3"
   },
   "devDependencies": {
