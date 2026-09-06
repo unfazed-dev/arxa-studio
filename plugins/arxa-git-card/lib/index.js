@@ -949,6 +949,29 @@ export function apply(ctx) {
               if (!g) return { ok: false, reason: 'unlinked' }
               return g.ensureRunner(manifest.repoOwner, manifest.repoName)
             },
+            /** G6 (grilled 2026-09-06): the card's own re-link door. When
+              * GitHub revokes the grant, every push, PR and merge here dies
+              * with `github-unavailable` — and the card is the surface the
+              * user is standing on when it happens, so the recovery has to be
+              * reachable from it rather than only from the sidebar's org
+              * modal. Same pair the sidebar serves at account level, on the
+              * card's one route: `link` LONG-POLLS until GitHub confirms the
+              * device flow (no timeout on this route — the sidebar's identical
+              * call has always worked this way), and `device` is polled
+              * meanwhile for the one-time code to put on screen. No early
+              * placement needed, unlike the sidebar's: the card renders
+              * nothing without an open org, so the guard above is never in
+              * the way. */
+            'card.github.link': async () => {
+              const g = await getGithub().catch(() => null)
+              if (!g) throw new Error('github-unavailable')
+              return g.link()
+            },
+            'card.github.device': async () => {
+              const g = await getGithub().catch(() => null)
+              if (!g) throw new Error('github-unavailable')
+              return typeof g.deviceCode === 'function' ? g.deviceCode() : null
+            },
             /** A3: insight column, right-panel surfaces (D101/D105). Each
               * degrades to an 'unavailable' shape rather than throwing when
               * its backend export has not landed yet — a missing export

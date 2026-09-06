@@ -7,7 +7,7 @@
  * longer own any card.* / insight.* action. Behaviour lives in
  * selftest.actions.mjs. Run: node plugins/arxa-git-card/selftest.mjs
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -73,9 +73,66 @@ check('client: tree mirrors QueueDock — dock > panel > header[lead,count,chevr
 check('client: seat-aware status with org fallback; commit/push+PR/merge ride the one host route',
   clientSrc.includes("CARD_ROUTE = '/__arxa/git-card/action'") && clientSrc.includes("post('card.status'") && clientSrc.includes('session-not-found') && ["post('card.commit'", "post('card.push'", "post('card.pr.create'", "post('card.pr.status'", "post('card.pr.merge'"].every((s) => clientSrc.includes(s)))
 
-check('card: the detail line names the re-link, in all three dictionaries (client half)',
-  clientSrc.includes("status.github.relinkRequired") && clientSrc.includes("t('git.relink')") &&
-  (clientSrc.match(/'git\.relink':/g) || []).length === 3)
+// ---- G4 / G5 / G6 (grilled 2026-09-06) ------------------------------------
+// docs/plans/git-card-confirmations-icons-relink.md
+
+// G5. `Icon(name, fallback)` falls back SILENTLY, so a glyph that does not
+// exist has always rendered as something else and nothing said so. Two did:
+// IconGitBranchOutline14 (the card head) and IconUploadOutline16 (Mint). Pin
+// every name the card asks for against the primitives the frontend actually
+// ships. The bundle filename carries a build hash, so it is globbed — and a
+// haystack that cannot be found is a RED check, never a silently skipped one.
+const assetsDir = join(here, '..', '..', 'node_modules', '@deepseek-ai', 'dsh-web-frontend', 'dist', 'assets')
+let bundleName
+try { bundleName = readdirSync(assetsDir).find((f) => /^index-.*\.js$/.test(f)) } catch { bundleName = undefined }
+check('G5 icons: the shipped primitives bundle is findable (the haystack for the pin below)',
+  bundleName !== undefined, 'no index-*.js under ' + assetsDir)
+if (bundleName !== undefined) {
+  const shipped = new Set(readFileSync(join(assetsDir, bundleName), 'utf8').match(/Icon[A-Za-z0-9]+/g) || [])
+  const named = [...new Set((clientSrc.match(/Icon\('[A-Za-z0-9]+', '[A-Za-z0-9]+'/g) || [])
+    .flatMap((m) => (m.match(/'[A-Za-z0-9]+'/g) || []).map((s) => s.slice(1, -1))))]
+  const missing = named.filter((n) => !shipped.has(n))
+  check('G5 icons: every glyph the card names exists — no silent fallback ships again',
+    named.length >= 14 && missing.length === 0, 'named ' + named.length + ', missing: ' + missing.join(', '))
+}
+check('G5 icons: one glyph per meaning — refresh and check stop standing in for five things each',
+  ["Icon('IconDownloadOutline16'", "Icon('IconPlayOutline16'", "Icon('IconSparkle16'", "Icon('IconListPenOutline16'",
+    "Icon('IconSendOutline16'", "Icon('IconGoalOutline16'", "Icon('IconStopFill16'", "Icon('IconRightUpOutline16'",
+    "Icon('IconRefreshOutline14'", "Icon('IconLinkOutline16'"].every((s) => clientSrc.includes(s)))
+check('G5 icons: the two names that never existed are gone',
+  !clientSrc.includes('IconGitBranchOutline14') && !clientSrc.includes('IconUploadOutline16'))
+
+// G4. The four moves that are hard to walk back pause on the stock Modal.
+check('G4: merge, integrate, finish and mint ask before acting',
+  ["onClick: ask('merge', mergePr)", "onClick: ask('mint', mint)", "onClick: ask('integrate',", "onClick: ask('finish',"]
+    .every((s) => clientSrc.includes(s)) && clientSrc.includes('h(P.Modal, {'))
+check('G4: commit and create-PR keep text entry as the pause; cancel-CI stays one click',
+  clientSrc.includes("onClick: () => setEditing({ kind: 'commit', text: '' })")
+  && clientSrc.includes("onClick: () => setEditing({ kind: 'pr', text: '' })")
+  && clientSrc.includes('onClick: cancelCi'))
+check('G4: a dialog holds the card open, like an editor or a busy action',
+  clientSrc.includes('|| confirm !== null || relink !== null'))
+check('G4: confirm copy in all three dictionaries',
+  ['git.confirm.merge.title', 'git.confirm.integrate.body', 'git.confirm.finish.ok', 'git.confirm.mint.title']
+    .every((k) => (clientSrc.split("'" + k + "':").length - 1) === 3))
+
+// G6. The expired grant becomes a door instead of a sentence, and the
+// GitHub-backed controls hide rather than throw github-unavailable.
+check('G6: the card serves its own device flow (host half)',
+  ["'card.github.link'", "'card.github.device'"].every((a) => hostSrc().includes(a))
+  && hostSrc().includes('g.link()') && hostSrc().includes('g.deviceCode()'))
+check('G6: the status row grows a re-link action that runs the device flow',
+  clientSrc.includes('const startRelink = ()') && clientSrc.includes("post('card.github.link')")
+  && clientSrc.includes("post('card.github.device')") && clientSrc.includes('relinkRequired ? relinkAction() : null'))
+check('G6: GitHub-backed controls are HIDDEN while the grant is dead, never left to throw',
+  clientSrc.includes('runnerAsleep && !relinkRequired ? wakeAction() : null')
+  && clientSrc.includes(': relinkRequired ? [] : ['))
+check('G6: the approve row keeps its place and says what is wrong',
+  clientSrc.includes("status.github.relinkRequired")
+  && clientSrc.includes("const prText = relinkRequired ? t('git.relinkNeeded')"))
+check('G6: relink copy in all three dictionaries',
+  ['git.relink', 'git.relinkNeeded', 'git.relink.title', 'git.relink.open', 'git.relink.failed']
+    .every((k) => (clientSrc.split("'" + k + "':").length - 1) === 3))
 check('client: renders nothing without an org (no-org-open / no-workspace / sidebar-not-ready), like the empty queue',
   clientSrc.includes('no-org-open|no-workspace|sidebar-not-ready') && clientSrc.includes('if (absent || status === null) return null'))
 // Q8 (2026-09-03): the card CONTROLS the run, it does not merely report it.

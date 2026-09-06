@@ -59,7 +59,7 @@ const en = {
   'git.runner.asleep': 'runner asleep',
   'git.runner.unknown': 'runner unknown',
   'git.mainRed': 'main is red',
-  'git.relink': 're-link GitHub — the session expired',
+  'git.relink': 'Re-link GitHub',
   'git.wake': 'Wake the runner',
   'git.wakeStarted': 'Waking the runner — checks resume when it reports in.',
   'git.wakeManual': 'Start it by hand: run svc.sh start in ~/.arxa/runners/<owner>__<name>. {reason}',
@@ -71,6 +71,29 @@ const en = {
   'git.mint': 'Mint a version',
   'git.minted': 'Minted {chip}',
   'git.mintFailed': 'Mint failed: {reason}',
+  // G4 (grilled 2026-09-06): the four moves that are hard to walk back ask
+  // first. Commit and Create PR already pause for text; Cancel CI is undone
+  // by re-running.
+  'git.confirm.integrate.title': 'Integrate main into this session?',
+  'git.confirm.integrate.body': 'Merges the current main into this session\u2019s worktree. A conflict stops the merge half-done — you finish it from the card before anything else can land.',
+  'git.confirm.integrate.ok': 'Integrate main',
+  'git.confirm.finish.title': 'Finish integrating?',
+  'git.confirm.finish.body': 'Commits the merge that is in progress. Resolve every conflict in the worktree first.',
+  'git.confirm.finish.ok': 'Finish integrating',
+  'git.confirm.merge.title': 'Merge this pull request into main?',
+  'git.confirm.merge.body': 'Squash-merges the pull request. Main moves for everyone, and the card has no undo for it.',
+  'git.confirm.merge.ok': 'Merge pull request',
+  'git.confirm.mint.title': 'Mint a version?',
+  'git.confirm.mint.body': 'Stamps a version on this merged seat. A version is a public record — the next one goes forward, never over this one.',
+  'git.confirm.mint.ok': 'Mint a version',
+  // G6: the expired grant used to be a sentence nobody could act on.
+  'git.relinkNeeded': 'GitHub sign-in expired',
+  'git.relink.title': 'Re-link GitHub',
+  'git.relink.desc': 'Enter this one-time code at github.com/login/device — your browser should have opened there.',
+  'git.relink.open': 'Open github.com/login/device',
+  'git.relink.starting': 'Starting…',
+  'git.relink.done': 'GitHub re-linked',
+  'git.relink.failed': 'Re-link failed: {reason}',
 }
 const pl = {
   'git.head': '{branch} · {summary}',
@@ -126,7 +149,7 @@ const pl = {
   'git.runner.unknown': 'runner nieznany',
   'git.mainRed': 'main czerwony',
   // TODO native review: machine-drafted.
-  'git.relink': 'połącz ponownie GitHub — sesja wygasła',
+  'git.relink': 'Połącz ponownie GitHub',
   'git.wake': 'Obudź runnera',
   'git.wakeStarted': 'Budzenie runnera — kontrole wznowią się, gdy się zgłosi.',
   'git.wakeManual': 'Uruchom ręcznie: svc.sh start w ~/.arxa/runners/<owner>__<name>. {reason}',
@@ -138,6 +161,25 @@ const pl = {
   'git.mint': 'Wybij wersję',
   'git.minted': 'Wybito {chip}',
   'git.mintFailed': 'Wybicie nie powiodło się: {reason}',
+  'git.confirm.integrate.title': 'Scalić main do tej sesji?',
+  'git.confirm.integrate.body': 'Scala bieżący main do drzewa roboczego tej sesji. Konflikt zatrzyma scalanie w połowie — dokończysz je z karty, zanim cokolwiek innego wejdzie.',
+  'git.confirm.integrate.ok': 'Scal main',
+  'git.confirm.finish.title': 'Dokończyć scalanie?',
+  'git.confirm.finish.body': 'Zatwierdza trwające scalanie. Najpierw rozwiąż wszystkie konflikty w drzewie roboczym.',
+  'git.confirm.finish.ok': 'Dokończ scalanie',
+  'git.confirm.merge.title': 'Scalić ten pull request do main?',
+  'git.confirm.merge.body': 'Scala pull requesta jednym commitem. Main przesuwa się dla wszystkich, a karta tego nie cofnie.',
+  'git.confirm.merge.ok': 'Scal pull requesta',
+  'git.confirm.mint.title': 'Wybić wersję?',
+  'git.confirm.mint.body': 'Stempluje wersję na scalonym miejscu. Wersja to zapis publiczny — następna idzie do przodu, nigdy po tej.',
+  'git.confirm.mint.ok': 'Wybij wersję',
+  'git.relinkNeeded': 'Sesja GitHub wygasła',
+  'git.relink.title': 'Połącz ponownie GitHub',
+  'git.relink.desc': 'Wpisz ten jednorazowy kod na github.com/login/device — przeglądarka powinna już tam być.',
+  'git.relink.open': 'Otwórz github.com/login/device',
+  'git.relink.starting': 'Uruchamianie…',
+  'git.relink.done': 'GitHub połączony ponownie',
+  'git.relink.failed': 'Ponowne połączenie nie powiodło się: {reason}',
 }
 const fr = {
   'git.head': '{branch} · {summary}',
@@ -193,7 +235,7 @@ const fr = {
   'git.runner.unknown': 'runner inconnu',
   'git.mainRed': 'main est rouge',
   // TODO native review: machine-drafted.
-  'git.relink': 'reconnectez GitHub — la session a expiré',
+  'git.relink': 'Reconnecter GitHub',
   'git.wake': 'Réveiller le runner',
   'git.wakeStarted': 'Réveil du runner — les contrôles reprennent dès qu’il répond.',
   'git.wakeManual': 'Lancez-le à la main : svc.sh start dans ~/.arxa/runners/<owner>__<name>. {reason}',
@@ -205,6 +247,25 @@ const fr = {
   'git.mint': 'Frapper une version',
   'git.minted': 'Version {chip} frappée',
   'git.mintFailed': 'Échec de la frappe : {reason}',
+  'git.confirm.integrate.title': 'Intégrer main dans cette session ?',
+  'git.confirm.integrate.body': 'Fusionne le main actuel dans l’arbre de travail de cette session. Un conflit arrête la fusion à mi-chemin — vous la terminez depuis la carte avant que quoi que ce soit d’autre puisse arriver.',
+  'git.confirm.integrate.ok': 'Intégrer main',
+  'git.confirm.finish.title': 'Terminer l’intégration ?',
+  'git.confirm.finish.body': 'Valide la fusion en cours. Résolvez d’abord tous les conflits dans l’arbre de travail.',
+  'git.confirm.finish.ok': 'Terminer l’intégration',
+  'git.confirm.merge.title': 'Fusionner cette pull request dans main ?',
+  'git.confirm.merge.body': 'Fusionne la pull request en un seul commit. Main avance pour tout le monde, et la carte ne l’annule pas.',
+  'git.confirm.merge.ok': 'Fusionner la pull request',
+  'git.confirm.mint.title': 'Frapper une version ?',
+  'git.confirm.mint.body': 'Appose une version sur ce siège fusionné. Une version est un enregistrement public — la suivante avance, elle ne recouvre jamais celle-ci.',
+  'git.confirm.mint.ok': 'Frapper une version',
+  'git.relinkNeeded': 'Session GitHub expirée',
+  'git.relink.title': 'Reconnecter GitHub',
+  'git.relink.desc': 'Saisissez ce code à usage unique sur github.com/login/device — votre navigateur devrait déjà y être.',
+  'git.relink.open': 'Ouvrir github.com/login/device',
+  'git.relink.starting': 'Démarrage…',
+  'git.relink.done': 'GitHub reconnecté',
+  'git.relink.failed': 'Échec de la reconnexion : {reason}',
 }
 
 /** Every read and write goes through the one host route. `arg.sessionId`
@@ -235,6 +296,10 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
   const [busy, setBusy] = React.useState(null)
   const [seatSession, setSeatSession] = React.useState(sessionId || null)
   const [mintChip, setMintChip] = React.useState(null)
+  // G4: the move waiting on a yes — { key, title, body, ok, run } | null.
+  const [confirm, setConfirm] = React.useState(null)
+  // G6: the device-flow conversation — null | { starting } | { userCode, verificationUri }.
+  const [relink, setRelink] = React.useState(null)
   const listId = React.useId()
   const alive = React.useRef(true)
   React.useEffect(() => () => { alive.current = false }, [])
@@ -292,7 +357,7 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
 
   if (absent || status === null) return null
 
-  const interactionActive = editing !== null || busy !== null
+  const interactionActive = editing !== null || busy !== null || confirm !== null || relink !== null
   const expanded = !collapsed || interactionActive
   const dirty = status.dirty
   const changed = dirty ? dirty.staged + dirty.unstaged + dirty.untracked : null
@@ -321,11 +386,14 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
   const checkState = checks ? (checks.asleep ? 'asleep' : String(checks.state || 'unknown')) : 'none'
   const runnerAsleep = frame.runner === 'asleep' || checkState === 'asleep'
   const sessionSeat = Boolean(status.seat && status.seat.kind === 'session')
+  const relinkRequired = Boolean(status.github && status.github.relinkRequired)
   // Leads the detail line: when GitHub has revoked the grant every push, PR
   // and merge on this card fails, and before 2026-09-04 it failed as a bare
   // 401 with nothing naming the one recovery. This is the surface the user is
   // actually standing on when that happens — the sidebar's org modal is not.
-  if (status.github && status.github.relinkRequired) detailParts.push(t('git.relink'))
+  // G6 (2026-09-06): the line says WHAT is wrong; the fix is a button in the
+  // status row (relinkAction). A recovery you can only read was the bug.
+  if (relinkRequired) detailParts.push(t('git.relinkNeeded'))
   if (status.localOnly) detailParts.push(t('git.localOnly'))
   if (frame.wired) detailParts.push(t(frame.wired === 'ok' ? 'git.frame.wired' : 'git.frame.missing'))
   // host says 'ok' (manifest.frameRunner) or 'online' (live probe) — both are up
@@ -448,11 +516,50 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
       } catch (e) { notify('error', t('git.draftFailed', { reason: reasonOf(e) })) }
     })
   }
+  /** G4 (grilled 2026-09-06): the four moves that are hard to walk back —
+   * merge, integrate, finish, mint — set this instead of acting, and the one
+   * stock Modal below asks. Same grammar as the sidebar's Delete and the
+   * Claude row's Sign out; the copy per key lives in the dictionaries. */
+  const ask = (key, go) => () => setConfirm({
+    key,
+    title: t('git.confirm.' + key + '.title'),
+    body: t('git.confirm.' + key + '.body'),
+    ok: t('git.confirm.' + key + '.ok'),
+    go,
+  })
+  const confirmGo = () => { const c = confirm; setConfirm(null); if (c) c.go() }
+  /** G6: the device flow, the sidebar's relink verbatim — card.github.link
+   * LONG-POLLS until GitHub confirms, while card.github.device is polled
+   * meanwhile for the one-time code to show. Both ride the card's own route:
+   * its host already holds the same getGithub the sidebar does, so the card
+   * keeps its one-wire property instead of reaching across. */
+  const startRelink = () => {
+    if (relink !== null) return
+    setRelink({ starting: true })
+    const poll = window.setInterval(() => {
+      post('card.github.device').then((d) => { if (alive.current && d && d.userCode) setRelink(d) }, () => {})
+    }, 700)
+    post('card.github.link').then(() => {
+      window.clearInterval(poll)
+      if (!alive.current) return
+      setRelink(null)
+      notify('info', t('git.relink.done'))
+      load(); if (pr !== void 0) loadPr()
+    }, (e) => {
+      window.clearInterval(poll)
+      if (!alive.current) return
+      setRelink(null)
+      notify('error', t('git.relink.failed', { reason: reasonOf(e) }))
+    })
+  }
   /** Insight links: right-panel surfaces owned by artifact-viewer (A3). */
   const openInsight = (view) => {
     try { window.dispatchEvent(new CustomEvent('arxa-av-open', { detail: { kind: 'insight', view, sessionId: seatSession } })) } catch { /* no bridge */ }
   }
-  const wakeAction = () => action('wake', t('git.wake'), Icon('IconTriangleRightFill14', 'IconRefreshOutline16', 14), { onClick: wake })
+  const wakeAction = () => action('wake', t('git.wake'), Icon('IconPlayOutline16', 'IconTriangleRightFill14', 14), { onClick: wake })
+  // A thunk, like wakeAction: `action` is declared BELOW, so an eager const
+  // here would hit the TDZ and blank the whole card.
+  const relinkAction = () => action('relink', t('git.relink'), Icon('IconLinkOutline16', 'IconLinkOutline14', 14), { onClick: startRelink })
 
   const action = (key, label, icon, opts) => h(P.Tooltip, { key, label, side: 'bottom', delayMs: 500 },
     h('button', {
@@ -480,7 +587,10 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
     h('div', { className: S.actions },
       [
         action('refresh', t('git.refresh'), Icon('IconRefreshOutline16', 'IconRefreshOutline16', 14), { onClick: () => { load(); if (pr !== void 0) loadPr() } }),
-        runnerAsleep ? wakeAction() : null,
+        // G6: the one door that works while the grant is dead. Waking the
+        // runner needs GitHub too, so it stays out of the way until then.
+        relinkRequired ? relinkAction() : null,
+        runnerAsleep && !relinkRequired ? wakeAction() : null,
         sessionSeat ? action('insight-streak', t('git.insight.streak'), Icon('IconChecklistOutline14', 'IconInspectOutline12', 14), { onClick: () => openInsight('streak') }) : null,
         sessionSeat ? action('insight-review', t('git.insight.review'), Icon('IconQueueOutline14', 'IconInspectOutline12', 14), { onClick: () => openInsight('review') }) : null,
         sessionSeat ? action('insight-sessions', t('git.insight.sessions'), Icon('IconBrowseOutline16', 'IconInspectOutline12', 14), { onClick: () => openInsight('sessions') }) : null,
@@ -489,11 +599,11 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
         // that would start a merge already in progress.
         sessionSeat && status.integrate && status.integrate.integrating
           ? action('integrate-finish', t('git.integrate.finish'), Icon('IconCheckOutline16', 'IconCheckOutline16', 14), {
-            onClick: () => run('integrate', async () => { await post('card.integrate.finish', seatArg()); load() }),
+            onClick: ask('finish', () => run('integrate', async () => { await post('card.integrate.finish', seatArg()); load() })),
           })
           : (sessionSeat && status.integrate && status.integrate.behind > 0
-            ? action('integrate', t('git.integrate'), Icon('IconRefreshOutline16', 'IconRefreshOutline16', 14), {
-              onClick: () => run('integrate', async () => { await post('card.integrate', seatArg()); load() }),
+            ? action('integrate', t('git.integrate'), Icon('IconDownloadOutline16', 'IconRefreshOutline16', 14), {
+              onClick: ask('integrate', () => run('integrate', async () => { await post('card.integrate', seatArg()); load() })),
             })
             : null),
       ])))
@@ -513,15 +623,18 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
       committing
         ? editActions(commit)
         : [
-          canCommit ? action('draft', t('git.askDraft'), Icon('IconEnhanceOutline16', 'IconEditOutline16', 14), { onClick: askDraft }) : null,
-          action('commit', t('git.commit'), Icon('IconCheckOutline16', 'IconCheckOutline16', 14), { disabled: !canCommit, onClick: () => setEditing({ kind: 'commit', text: '' }) }),
+          canCommit ? action('draft', t('git.askDraft'), Icon('IconSparkle16', 'IconEnhanceOutline16', 14), { onClick: askDraft }) : null,
+          action('commit', t('git.commit'), Icon('IconListPenOutline16', 'IconCheckOutline16', 14), { disabled: !canCommit, onClick: () => setEditing({ kind: 'commit', text: '' }) }),
         ])))
   // 3. Approve — session seats of a linked org only
   if (status.seat && status.seat.kind === 'session' && status.linked && !status.localOnly) {
     const prAny = pr && pr.ok && pr.pr
     const prMerged = Boolean(prAny && (pr.merged || pr.pr.state === 'merged'))
     const prOpen = Boolean(prAny && !prMerged)
-    const prText = pr === void 0 ? t('git.loading')
+    // G6: while the grant is dead every GitHub read below is a 401, so the
+    // row says the one true thing and keeps its place in the card.
+    const prText = relinkRequired ? t('git.relinkNeeded')
+      : pr === void 0 ? t('git.loading')
       : pr && pr.ok === false ? pr.reason
       : prAny ? t('git.pr.open', { n: pr.pr.number, state: pr.pr.state })
         + (checkState !== 'none' ? ' · ' + t('git.pr.checks', { state: checkState === 'asleep' ? t('git.runner.asleep') : checkState }) : '')
@@ -535,26 +648,47 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
       h('div', { className: S.actions },
         titling
           ? editActions(createPr)
-          : [
+          : relinkRequired ? [] : [
             action('pr-refresh', t('git.pr.refresh'), Icon('IconRefreshOutline16', 'IconRefreshOutline16', 14), { onClick: loadPr }),
             checkState === 'asleep' ? wakeAction() : null,
             // Q8: the run itself is controllable from the card. All three
             // appear only once a run exists on this branch; re-run waits for
             // it to finish and cancel waits for it to be live, so the pair is
             // never both-enabled on the same run.
-            latestRun ? action('ci-rerun', t('git.ci.rerun'), Icon('IconRefreshOutline16', 'IconRefreshOutline16', 14), { disabled: runLive, onClick: rerunCi }) : null,
-            latestRun ? action('ci-cancel', t('git.ci.cancel'), Icon('IconCloseOutline16', 'IconCloseFill14', 14), { disabled: !runLive, onClick: cancelCi }) : null,
-            latestRun && latestRun.url ? action('ci-open', t('git.ci.open'), Icon('IconBrowseOutline16', 'IconInspectOutline12', 14), { onClick: openRun }) : null,
+            latestRun ? action('ci-rerun', t('git.ci.rerun'), Icon('IconRefreshOutline14', 'IconRefreshOutline16', 14), { disabled: runLive, onClick: rerunCi }) : null,
+            latestRun ? action('ci-cancel', t('git.ci.cancel'), Icon('IconStopFill16', 'IconCloseOutline16', 14), { disabled: !runLive, onClick: cancelCi }) : null,
+            latestRun && latestRun.url ? action('ci-open', t('git.ci.open'), Icon('IconRightUpOutline16', 'IconBrowseOutline16', 14), { onClick: openRun }) : null,
             // Merge is the one irreversible button: green checks AND an open PR.
             prOpen
-              ? action('merge', t('git.pr.merge'), Icon('IconCheckOutline16', 'IconCheckOutline16', 14), { disabled: !(pr.checks && pr.checks.state === 'green' && pr.pr.state === 'open'), onClick: mergePr })
+              ? action('merge', t('git.pr.merge'), Icon('IconCheckOutline16', 'IconCheckOutline16', 14), { disabled: !(pr.checks && pr.checks.state === 'green' && pr.pr.state === 'open'), onClick: ask('merge', mergePr) })
               : prMerged
-                ? action('mint', t('git.mint'), Icon('IconUploadOutline16', 'IconPlusOutline16', 14), { onClick: mint })
-                : action('pr-create', t('git.pr.create'), Icon('IconPlusOutline16', 'IconPlusOutline16', 14), { disabled: pr === void 0, onClick: () => setEditing({ kind: 'pr', text: '' }) }),
+                ? action('mint', t('git.mint'), Icon('IconGoalOutline16', 'IconPlusOutline16', 14), { onClick: ask('mint', mint) })
+                : action('pr-create', t('git.pr.create'), Icon('IconSendOutline16', 'IconPlusOutline16', 14), { disabled: pr === void 0, onClick: () => setEditing({ kind: 'pr', text: '' }) }),
           ])))
   }
 
-  return h('div', { className: S.dock, 'data-git-dock': '' },
+  const confirmModal = confirm === null ? null : h(P.Modal, {
+    open: true, onClose: () => setConfirm(null),
+    title: confirm.title, description: confirm.body, closeLabel: t('git.cancel'),
+    footer: h(React.Fragment, null,
+      h(P.Button, { variant: 'outline', autoFocus: true, onClick: () => setConfirm(null) }, t('git.cancel')),
+      h(P.Button, { variant: 'outline', onClick: confirmGo }, confirm.ok)),
+  })
+  const relinkModal = relink === null ? null : h(P.Modal, {
+    open: true, onClose: () => setRelink(null),
+    title: t('git.relink.title'), description: t('git.relink.desc'), closeLabel: t('git.cancel'),
+    footer: h(P.Button, { variant: 'outline', onClick: () => setRelink(null) }, t('git.cancel')),
+  }, h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-start' } },
+    h('code', { style: { fontSize: '18px', letterSpacing: '2px' } }, relink.userCode || t('git.relink.starting')),
+    relink.verificationUri
+      ? h('a', {
+        href: relink.verificationUri, target: '_blank', rel: 'noreferrer',
+        onClick: (event) => { event.preventDefault(); window.open(relink.verificationUri, '_blank', 'noopener') },
+      }, t('git.relink.open'))
+      : null))
+
+  return h(React.Fragment, null,
+    h('div', { className: S.dock, 'data-git-dock': '' },
     h('div', { className: S.panel },
       h('button', {
         type: 'button', className: S.header, 'aria-controls': listId, 'aria-expanded': expanded,
@@ -562,8 +696,9 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
         disabled: interactionActive,
         onClick: () => { setCollapsed((value) => !value) },
       },
-        h('span', { className: S.lead, 'aria-hidden': true }, Icon('IconGitBranchOutline14', 'IconBranchOutline16', 14)),
+        h('span', { className: S.lead, 'aria-hidden': true }, Icon('IconBranchOutline16', 'IconBranchOutline16', 14)),
         h('span', { className: S.count }, t('git.head', { branch, summary })),
         h('span', { className: S.chevron, 'aria-hidden': true }, expanded ? Icon('IconChevronDownOutline14', 'IconChevronDownOutline14') : Icon('IconChevronUpOutline14', 'IconChevronUpOutline14'))),
-      h('ul', { id: listId, className: S.list, hidden: !expanded }, expanded ? rows : null)))
+      h('ul', { id: listId, className: S.list, hidden: !expanded }, expanded ? rows : null))),
+    confirmModal, relinkModal)
 }
