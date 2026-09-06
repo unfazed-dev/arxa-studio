@@ -590,7 +590,13 @@ assert.ok(clientSrc.includes('docRef.current.getText()'), 'save reads the live m
 assert.ok(clientSrc.includes('view.replaceRange('), 'format writes one minimal edit (cursor + undo survive)')
 assert.ok(clientSrc.includes('detectIndent('), 'indentation detected per file (VS Code detectIndentation)')
 assert.ok(clientSrc.includes('FORMAT_EXTS'), 'format-visible extension list present')
-assert.match(clientSrc, /KeyMod\.Shift \| M\.monaco\.KeyMod\.Alt \| M\.monaco\.KeyCode\.KeyF/, 'VS Code format chord bound')
+// Shift-Alt-F is NOT rebound in the client any more. addCommand exists only on
+// a STANDALONE editor, and files now open in VS Code's editor part, whose
+// control is a plain ICodeEditor — the old binding would throw on every open.
+// The chord still works, from the keybindings service, mapped to
+// editor.action.formatDocument, i.e. through the language server.
+assert.ok(!/KeyMod\.Shift \| M\.monaco\.KeyMod\.Alt/.test(clientSrc),
+  'the client does not rebind Shift-Alt-F — addCommand does not exist on the editor part\'s control')
 // THE 2026-09-06 regression: monaco shipped with NO stylesheet. There is no
 // index.html in that build, so vite emits the css as a bare asset and nothing
 // links it — the editor's lines escaped their container and painted across the
@@ -607,7 +613,9 @@ assert.ok(entrySrc.includes('await ensureStyles()'), 'and does it before any edi
 assert.ok(viteSrc.includes("'arxa-monaco.css'"), 'the stylesheet gets a STABLE name (content-hashed, nothing could reference it)')
 assert.ok(!/rel=["']stylesheet/.test(spikeSrc) && !/__CSS__/.test(checkSrc),
   'the check harness must NOT supply the stylesheet — doing so is what hid this bug')
-assert.ok(spikeSrc.includes('out.contained') && checkSrc.includes('window.__spike.contained === true'),
+assert.ok(checkSrc.includes("Array.isArray(window.__spike.fail) && window.__spike.fail.length === 0"),
+  'check.mjs asserts ONE thing: that the page found nothing wrong, and reads as red when the page never got that far. --expect collapses to a single boolean, so the terms live where they can be named')
+assert.ok(spikeSrc.includes('out.contained') && spikeSrc.includes('out.contained === true'),
   'the check asserts the editor renders INSIDE its container')
 assert.ok(clientSrc.includes('aXa_av_monaco'), 'the monaco lane has its own wrapper class (monaco owns its scrolling)')
 assert.ok(clientSrc.includes("getPropertyValue('--arxa-editor-font')"), 'the editor font setting is PASSED to monaco (it measures glyph width from it)')
@@ -618,7 +626,7 @@ assert.ok(entrySrc.includes('function layoutFor ('), 'narrow-pane shape is a sin
 assert.ok(entrySrc.includes('new ResizeObserver'), 'the shape is re-applied as the pane resizes')
 assert.ok(entrySrc.includes('if (key === shape) return'), 'a drag does not push an updateOptions per frame')
 assert.ok(entrySrc.includes('ro.disconnect()'), 'the resize observer is disconnected with the editor')
-assert.ok(checkSrc.includes('window.__spike.narrowMinimap === false') && checkSrc.includes('window.__spike.narrowWraps === true'),
+assert.ok(spikeSrc.includes('out.narrowMinimap === false') && spikeSrc.includes('out.narrowWraps === true'),
   'the check proves the narrow shape in a browser, not just that the code exists')
 
 // ---- G8/G11: file identity is what makes the language service land ---------
@@ -694,6 +702,12 @@ assert.ok(/unhandledrejection/.test(entrySrc2c) && /'Canceled'/.test(entrySrc2c)
   'cancellation is swallowed: VS Code signals it by rejecting, and the markdown preview does it on every open')
 assert.ok(entrySrc2c.includes("if (s === 'Canceled' || s === 'CodeExpectedError') ev.preventDefault()"),
   'and ONLY cancellation is swallowed — loosening this guard would hide every real rejection from the lens')
+assert.ok(entrySrc2c.includes('getKeybindingsServiceOverride()'),
+  'the keybindings service is what supplies Shift-Alt-F now that the client no longer binds it')
+assert.ok(entrySrc2c.includes("'editor.minimap.enabled': width >= 700"),
+  'the narrow-pane shape moved to settings.json — the editor part owns editor construction, so create-options no longer reach it')
+assert.ok(entrySrc2c.includes('function writeConfig (patch)') && !/updateUserConfiguration\(JSON\.stringify\(\{/.test(entrySrc2c),
+  'and every setting goes through ONE object: updateUserConfiguration REPLACES the document, so a second writer would drop the theme')
 assert.ok(entrySrc2c.includes('initializationOptions: init ?? undefined'),
   'the handshake options the host computed reach the language client')
 assert.ok(hostSrc.includes("init: typeof def.initOptions === 'function' ? def.initOptions(process.env) : null"),

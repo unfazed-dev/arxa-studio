@@ -350,8 +350,13 @@
       // reuses when a monaco.editor.create editor already holds the uri.
       'out.vsOpened === true',
       "out.paneId === 'workbench.editors.files.textFileEditor'",
-      "out.mainGroups === '0:1'",
-      'out.vsTabs === 1',
+      // TWO editors, not one, and that is the point: the spike opens main.rs,
+      // reopens it, then dart, then markdown — four opens — and VS Code's
+      // preview tab is reused for all but the one that was EDITED (editing pins
+      // a preview tab). Tabs track what the user is doing instead of piling up
+      // one per file the sidebar touches.
+      "out.mainGroups === '0:2'",
+      'out.vsTabs === 2',
       // A webview. This is the whole point of the part.
       'out.previewFrames === 1',
       // Cancellation is swallowed on purpose; nothing ELSE may be rejecting.

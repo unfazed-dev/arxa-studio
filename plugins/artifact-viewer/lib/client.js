@@ -627,11 +627,6 @@ window.__ModuleLoader__.load({
       return () => paletteSubs.delete(fn)
     }
 
-    // One panel at a time owns the Shift-Alt-F action; CodeView's keymap
-    // routes through this ref so the handler stays in the Panel (which owns
-    // save state and notes).
-    const formatActionRef = { current: null }
-
     function FileIcon({ name }) {
       const [svg, setSvg] = React.useState(null)
       React.useEffect(() => {
@@ -765,12 +760,13 @@ window.__ModuleLoader__.load({
           // rather than leaking an editor into a detached container.
           if (dead) { handle.dispose(); handle = null; return }
           if (docRef) docRef.current = handle
-          // Shift-Alt-F stays wired to the prettier action for now; VS Code's
-          // own format command takes over in phase 4.
-          handle.editor.addCommand(
-            M.monaco.KeyMod.Shift | M.monaco.KeyMod.Alt | M.monaco.KeyCode.KeyF,
-            () => { if (formatActionRef.current) void formatActionRef.current() },
-          )
+          // Shift-Alt-F is NOT rebound here any more. addCommand only exists on
+          // a standalone editor, and the file now opens in VS Code's editor
+          // part, whose control is a plain ICodeEditor. It does not need one:
+          // the keybindings service already maps Shift-Alt-F to
+          // editor.action.formatDocument, which formats through the language
+          // server. The toolbar Format button still runs prettier — that is the
+          // lane that covers markdown and yaml, which no server does.
           unwatch = watchPalette((dark) => { M.setTheme(dark) })
           // Language service, best effort and always last: the editor is fully
           // usable without one, so nothing here may fail the open. A file with
@@ -1667,11 +1663,6 @@ window.__ModuleLoader__.load({
           setSavePhase('error')
         }
       }
-      React.useEffect(() => {
-        formatActionRef.current = canFormat ? doFormat : null
-        return () => { if (formatActionRef.current === doFormat) formatActionRef.current = null }
-      })
-
       const doCopy = () => {
         const text = docText()
         if (text == null) return

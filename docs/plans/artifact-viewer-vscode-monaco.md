@@ -675,11 +675,45 @@ on every open. It reaches the page as `unhandledrejection`, which
 listener now calls `preventDefault()` for `Canceled`/`CodeExpectedError` and
 nothing else, so every real rejection still fails the build.
 
-Still to do: `openFile(container, path, text)` calls
-`monaco.editor.create(container, { model })` directly, and the handle contract
-`client.js` drives (`getText`, `replaceRange`, `focus`, `dispose`, `onChange`)
-has to be rebuilt over the editor part. Per finding 2 this is not optional —
-while the standalone editor exists, no preview can ever open for that file.
+#### 7.1-ter The code lane moved onto the part — **DONE**
+
+`openFile()` no longer calls `monaco.editor.create`. It attaches the part, syncs
+the file into the overlay filesystem, and opens through `IEditorService`; the
+handle `client.js` drives (`editor`, `model`, `getText`, `replaceRange`, `focus`,
+`dispose`, `onChange`) is unchanged, so no call site moved. Every phase-1
+assertion — line count, grammar, reopen with fresh bytes, the editor worker, the
+theme flip, containment, and all four narrow-pane breakpoints — is still green,
+now running through VS Code's `textFileEditor`.
+
+Four things changed shape underneath:
+
+- **The narrow-pane table speaks settings.json.** The part owns editor
+  construction, so `minimap`/`wordWrap`/`folding`/`glyphMargin`/`lineNumbers`/
+  `scrollbar.horizontal` became `editor.*` settings written on container resize.
+  `lineDecorationsWidth` had no setting and was dropped — it was 10px of
+  padding, and nothing asserted it.
+- **One config object.** `updateUserConfiguration` REPLACES the whole document,
+  so theme, font and shape all patch a single `userConfig` and re-write it. The
+  first version lost the colour theme on every resize.
+- **`dispose()` no longer disposes the editor.** The part owns it, and the part
+  is what holds the tab — tearing it down on a React unmount would close the file
+  the user is reading. `closeAll()` is the explicit clear.
+- **`Shift-Alt-F` is not rebound.** `addCommand` exists only on a standalone
+  editor. The chord now comes from the keybindings service as
+  `editor.action.formatDocument`, i.e. through the language server;
+  `formatActionRef` in `client.js` went with it.
+
+Tabs stay, at the user's call: the markdown preview and every media preview
+arrive AS tabs, so hiding them would remove the only way back to the source. With
+`workbench.editor.enablePreview` on, sidebar selection reuses one preview tab and
+only an edited or pinned file keeps its own — the spike opens four files and ends
+with two tabs.
+
+**The near-miss worth recording:** the splice that moved `openFile` onto the part
+deleted `connectLanguageServer` — the entire phase-2 LSP lane — and the build
+stayed green, because nothing in the bundle imports it; only `client.js` does, at
+runtime. `selftest.mjs` caught it on a `documentSelector` pin. Source pins are
+what stand between a silent deletion and a shipped one.
 
 #### 7.1-bis Custom editors, and the file cycle — **DONE, measured**
 

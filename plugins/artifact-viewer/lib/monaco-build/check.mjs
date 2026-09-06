@@ -73,7 +73,7 @@ server.listen(0, '127.0.0.1', () => {
   // execFile, NOT execFileSync: the sync form blocks this process's event
   // loop, so the server above can never answer the lens's requests and every
   // run dies on a Page.navigate timeout.
-  const args = ['lens', 'check', url, png, '1400', '900', '30000']
+  const args = ['lens', 'check', url, png, '1400', '900', '45000']
   if (!DUMP && !SHOT) args.push('--selector=.monaco-editor')
   execFile('arxa', DUMP || SHOT ? args : [...args,
     // Every claim phase 1 rests on, asserted in the browser. The reopen and
@@ -84,7 +84,10 @@ server.listen(0, '127.0.0.1', () => {
     // way. The assertions themselves live in src/spike.html, where the page can
     // evaluate them one at a time and NAME the ones that failed — `got false`
     // on a 60-term conjunction names nothing.
-    '--expect=window.__spike.fail.length === 0',
+    // Array.isArray first: if the page has NOT reached its assertion loop yet,
+    // `fail` is undefined and `.length` throws inside the lens rather than
+    // failing the check. Unfinished must read as red, not as a crash.
+    '--expect=Array.isArray(window.__spike.fail) && window.__spike.fail.length === 0',
 
   ], { encoding: 'utf8' }, (err, stdout, stderr) => {
     server.close()

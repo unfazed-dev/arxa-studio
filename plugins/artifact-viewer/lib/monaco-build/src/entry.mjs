@@ -225,11 +225,29 @@ export function start (container, { fontFamily = 'Fira Code', dark = true } = {}
   return started.then(() => container)
 }
 
+/** The user settings.json this bundle owns.
+ *
+ *  updateUserConfiguration REPLACES the whole document, so there is exactly one
+ *  object and every writer patches it. Two writers used to be enough (theme,
+ *  font); the narrow-pane shape is a third, and the first version of that lost
+ *  the theme on every resize. */
+const userConfig = {
+  'editor.fontFamily': 'Fira Code, monospace',
+  'workbench.colorTheme': 'Default Dark Modern',
+  // Files open by SIDEBAR selection, so the same tab is reused as the user
+  // moves between artifacts; a preview or a second pin opens its own.
+  'workbench.editor.enablePreview': true,
+}
+function writeConfig (patch) {
+  Object.assign(userConfig, patch)
+  updateUserConfiguration(JSON.stringify(userConfig))
+}
+
 function applyTheme (fontFamily = 'Fira Code') {
-  updateUserConfiguration(JSON.stringify({
+  writeConfig({
     'editor.fontFamily': fontFamily + ', monospace',
     'workbench.colorTheme': themeDark ? 'Default Dark Modern' : 'Default Light Modern',
-  }))
+  })
 }
 
 /** Live dark/light flip. The viewer's palette can change under an open editor
@@ -272,8 +290,11 @@ function acquire (uriPath, text) {
     // ("file 'file:///…' already exists") rather than replacing it. Fresh bytes
     // on a reopen therefore arrive through the model (setValue in openFile),
     // not by re-registering — the model is what the editor reads anyway.
-    fsp.registerFile(new RegisteredMemoryFile(uri, text))
-    e = { uri, ref: null }
+    // Held, not discarded: a reopen after an external change has to compare the
+    // stored bytes with the caller's and write only when they differ.
+    const file = new RegisteredMemoryFile(uri, text)
+    fsp.registerFile(file)
+    e = { uri, ref: null, file }
     open.set(uriPath, e)
   }
   return e
@@ -294,17 +315,16 @@ function acquire (uriPath, text) {
  *  build a preference system now. */
 function layoutFor (width) {
   return {
-    minimap: { enabled: width >= 700 },
+    'editor.minimap.enabled': width >= 700,
     // Below this a horizontal scrollbar is the only way to read a long line,
     // and in a narrow pane that is a worse trade than wrapping.
-    wordWrap: width < 620 ? 'on' : 'off',
-    folding: width >= 460,
-    glyphMargin: width >= 460,
-    lineNumbers: width >= 360 ? 'on' : 'off',
-    lineDecorationsWidth: width >= 460 ? 10 : 0,
+    'editor.wordWrap': width < 620 ? 'on' : 'off',
+    'editor.folding': width >= 460,
+    'editor.glyphMargin': width >= 460,
+    'editor.lineNumbers': width >= 360 ? 'on' : 'off',
     // Nothing to scroll horizontally once wrapped; the extra track just eats
     // a line of height.
-    scrollbar: { horizontal: width < 620 ? 'hidden' : 'auto' },
+    'editor.scrollbar.horizontal': width < 620 ? 'hidden' : 'auto',
   }
 }
 
@@ -315,27 +335,29 @@ function layoutFor (width) {
 export async function openFile (container, uriPath, text, opts = {}) {
   const { editable = true, onChange = null, fontFamily = 'Fira Code', dark = true } = opts
   await start(container, { fontFamily, dark })
-  const e = acquire(uriPath, text)
-  e.ref ??= await monaco.editor.createModelReference(e.uri, text)
-  const model = e.ref.object.textEditorModel
-  // The caller owns the bytes on disk; the model is only a view of them. A
-  // reopen after an external change arrives with new text and the same uri.
-  if (model.getValue() !== text) model.setValue(text)
-  const editor = monaco.editor.create(container, {
-    model, automaticLayout: true, readOnly: !editable, domReadOnly: !editable,
-    // Per-editor, NOT through start()'s user configuration: start() runs once
-    // and the viewer's font setting can change between files. Monaco measures
-    // character width from the font it is TOLD about, so overriding this with
-    // css instead would misplace the cursor.
-    fontFamily: fontFamily + ', monospace',
-    ...layoutFor(container.getBoundingClientRect().width),
-  })
+  applyTheme(fontFamily)
+  await attachEditorPart(container)
+  await syncFile(uriPath, text)
+  writeConfig(layoutFor(container.getBoundingClientRect().width))
+  const pane = await openEditor(uriPath, { pinned: false })
+  // A text file gives an ICodeEditor; media-preview's image editor gives a
+  // webview and no control at all. The caller only opens code here, but a
+  // handle that assumes a control would throw on the first .png someone routes
+  // through by mistake.
+  const editor = pane != null && typeof pane.getControl === 'function' ? pane.getControl() : null
+  const model = editor != null && typeof editor.getModel === 'function' ? editor.getModel() : null
+  if (editor != null && typeof editor.updateOptions === 'function') {
+    // Read-only is a property of THIS view, not of the file: the same path is
+    // editable in the org lane and read-only in a worktree diff. Setting it on
+    // the provider or through files.readonlyInclude would be global.
+    editor.updateOptions({ readOnly: !editable, domReadOnly: !editable })
+  }
 
-  // Re-apply on every container resize. automaticLayout already keeps the
-  // editor the right SIZE; this is what changes its SHAPE as the pane narrows.
-  // Guarded on the computed values, not the pixel width, so a drag does not
-  // push an updateOptions per frame.
-  let shape = ''
+  // Re-apply the shape on every container resize. The editor part follows its
+  // container's SIZE on its own; this is what changes its SHAPE as the pane
+  // narrows. Guarded on the computed values, not the pixel width, so a drag
+  // does not write settings.json once per frame.
+  let shape = JSON.stringify(layoutFor(container.getBoundingClientRect().width))
   const ro = new ResizeObserver((entries) => {
     const w = entries[0]?.contentRect?.width ?? 0
     if (w === 0) return                      // a hidden pane measures 0
@@ -343,45 +365,151 @@ export async function openFile (container, uriPath, text, opts = {}) {
     const key = JSON.stringify(next)
     if (key === shape) return
     shape = key
-    editor.updateOptions(next)
+    writeConfig(next)
   })
   ro.observe(container)
-  const sub = onChange ? model.onDidChangeContent(() => onChange()) : null
+  const sub = onChange && model ? model.onDidChangeContent(() => onChange()) : null
   let live = true
   return {
     editor,
     model,
-    getText: () => model.getValue(),
+    getText: () => (model ? model.getValue() : ''),
     /** Replace [from, to) with `insert`, keeping cursor and undo history —
      *  what the prettier format action needs (it computes one minimal edit). */
     replaceRange: (from, to, insert) => {
+      if (editor == null || model == null) return
       editor.executeEdits('arxa-format', [{
         range: monaco.Range.fromPositions(model.getPositionAt(from), model.getPositionAt(to)),
         text: insert,
       }])
     },
-    focus: () => editor.focus(),
+    focus: () => { if (editor != null) editor.focus() },
     dispose: () => {
       if (!live) return
       live = false
       if (sub) sub.dispose()
       ro.disconnect()
-      // Only the EDITOR goes. The model and its registered file stay for the
-      // life of the page (see `open` above) — disposing the model ref makes the
-      // text-file service reload a uri whose file is still registered, and
-      // keeping it is what lets undo history survive a round trip.
-      //
-      // The try/catch is not defensive padding: once the workbench services are
-      // in play, tearing an editor down cancels whatever it had in flight and
-      // VS Code signals cancellation by THROWING. Closing a file would then
-      // raise `Canceled: Canceled` out of dispose(). Cancellation is swallowed;
-      // anything else still throws.
-      try { editor.dispose() } catch (e) {
-        const s = String((e && (e.name || e.message)) ?? '')
-        if (s !== 'Canceled' && s !== 'CodeExpectedError') throw e
-      }
+      // The EDITOR is not disposed here. It belongs to the editor part, which
+      // owns its own lifecycle — and the part is what keeps the tab, so tearing
+      // it down on every React unmount would close the file the user is looking
+      // at. The registered file and its model stay for the life of the page
+      // (see `open` above), which is what lets undo history survive a round
+      // trip. closeAll() is the explicit way to clear the part.
     },
   }
+}
+
+/** Bring the overlay filesystem in line with the bytes the host just read.
+ *
+ *  Registering is once-per-uri (registerFile THROWS on a uri the provider
+ *  already holds), so a reopen writes instead. The comparison matters: the
+ *  effect that calls this re-runs on every `text` change, and writing
+ *  unconditionally would discard whatever the user had typed since. */
+async function syncFile (uriPath, text) {
+  const existing = open.get(uriPath)
+  if (existing === void 0) { acquire(uriPath, text); return }
+  const bytes = new TextEncoder().encode(text)
+  const held = await existing.file.read()
+  if (held.length === bytes.length && held.every((b, i) => b === bytes[i])) return
+  await fsp.writeFile(existing.uri, bytes, { create: false, overwrite: true, unlock: false, atomic: false })
+}
+
+/** Put a file in the overlay filesystem WITHOUT opening an editor for it.
+ *
+ *  The editor part resolves a uri through the file service, so a file has to
+ *  exist before openEditor() can be asked for it. openFile() registers as a
+ *  side effect of opening; this is the same registration on its own. */
+export async function registerFile (uriPath, text) {
+  await start()
+  acquire(uriPath, text)
+}
+
+/** Mount VS Code's editor part in `container`.
+ *
+ *  This is the surface every non-text viewer arrives on: the markdown preview
+ *  and media-preview's image/audio/video editors are editor INPUTS, and an
+ *  input needs a part to open into. Returns the part's disposable.
+ *
+ *  ponytail: one part for the page, attached on first use. attachPart can be
+ *  called again with a new container (the demo does exactly that when the
+ *  sidebar changes side), so a remount is a re-attach, not a teardown. */
+let editorPart = null
+let editorPartHost = null
+export async function attachEditorPart (container) {
+  await start(container)
+  // Guarded: openFile() calls this on every open, and attachPart installs a
+  // fresh ResizeObserver each time. Re-attaching to a NEW container is still
+  // supported — that is a remount, not a teardown.
+  if (editorPartHost === container) return editorPart
+  if (editorPart !== null) editorPart.dispose()
+  editorPartHost = container
+  editorPart = attachPart(Parts.EDITOR_PART, container)
+  return editorPart
+}
+
+/** Open `uriPath` through VS Code's editor service.
+ *
+ *  Different from openFile(): that one creates a bare monaco editor over a
+ *  model and is what the code lane still drives. This one hands the uri to VS
+ *  Code and lets it choose the editor — a text editor for source, media-preview's
+ *  custom editor for a png, whatever a future extension registers. */
+export async function openEditor (uriPath, { pinned = true, readOnly = false } = {}) {
+  const editorService = await getService(IEditorService)
+  // openEditor(input, options, group) — the third argument is the GROUP, not
+  // more options. Passing an options bag there resolves to undefined and opens
+  // nothing, with no error to show for it.
+  // Open into the MAIN part's active group explicitly. IEditorGroupsService
+  // spans every part (main plus any auxiliary window), and openEditor with no
+  // group picks the service's active one — which is not necessarily the group
+  // inside the part that was attached. Measured: the file opened into a group
+  // holding 1 editor while the active group held 0 and painted `content empty`.
+  const groups = await getService(IEditorGroupsService)
+  return editorService.openEditor({
+    resource: monaco.Uri.file(uriPath),
+    options: { pinned, ...(readOnly ? { readOnly: true } : {}) },
+  }, groups.mainPart.activeGroup)
+}
+
+/** Editor-part diagnostics for the spike harness. Not used by the viewer. */
+export async function editorPartInfo () {
+  const editorService = await getService(IEditorService)
+  const groups = await getService(IEditorGroupsService)
+  const notifications = await getService(INotificationService)
+  return {
+    editors: editorService.count,
+    active: String(editorService.activeEditor?.resource ?? 'none'),
+    paneId: String(editorService.activeEditorPane?.getId() ?? 'none'),
+    groups: groups.groups.map((g) => g.id + ':' + g.count + ':' + (g.element?.isConnected ? 'dom' : 'off')).join(' '),
+    parts: groups.parts.length,
+    mainGroups: groups.mainPart.groups.map((g) => g.id + ':' + g.count).join(' '),
+    openRes: editorService.editors.map((e) => String(e.resource)).join(' '),
+    groupActive: String(groups.activeGroup?.activeEditor?.resource ?? 'none'),
+    notices: (notifications.model?.notifications ?? []).map((n) => String(n.message?.linkedText?.toString?.() ?? n.message)).join(' | '),
+  }
+}
+
+/** Close every editor in the part.
+ *
+ *  The viewer shows ONE artifact at a time and drives its own file selection
+ *  from the sidebar, so tabs must not accumulate behind it. */
+export async function closeAll () {
+  const groups = await getService(IEditorGroupsService)
+  for (const g of groups.mainPart.groups) await g.closeAllEditors()
+}
+
+/** Replace an already-registered file's bytes — an external change on disk.
+ *
+ *  registerFile() can only be called once per uri (registerFile THROWS on a uri
+ *  the provider already holds), so a changed file arrives here. */
+export async function updateFile (uriPath, text) {
+  await start()
+  await syncFile(uriPath, text)
+}
+
+/** Run a VS Code command — `markdown.showPreview` and friends. */
+export async function runCommand (id, ...args) {
+  const commandService = await getService(ICommandService)
+  return commandService.executeCommand(id, ...args)
 }
 
 /** Attach a language server to the editor over the host's LSP socket.
@@ -446,100 +574,6 @@ export async function connectLanguageServer (lang, { url, token, relPath, sessio
     langClients.delete(lang)
     return false
   }
-}
-
-/** Put a file in the overlay filesystem WITHOUT opening an editor for it.
- *
- *  The editor part resolves a uri through the file service, so a file has to
- *  exist before openEditor() can be asked for it. openFile() registers as a
- *  side effect of opening; this is the same registration on its own. */
-export async function registerFile (uriPath, text) {
-  await start()
-  acquire(uriPath, text)
-}
-
-/** Mount VS Code's editor part in `container`.
- *
- *  This is the surface every non-text viewer arrives on: the markdown preview
- *  and media-preview's image/audio/video editors are editor INPUTS, and an
- *  input needs a part to open into. Returns the part's disposable.
- *
- *  ponytail: one part for the page, attached on first use. attachPart can be
- *  called again with a new container (the demo does exactly that when the
- *  sidebar changes side), so a remount is a re-attach, not a teardown. */
-let editorPart = null
-export async function attachEditorPart (container) {
-  await start(container)
-  editorPart = attachPart(Parts.EDITOR_PART, container)
-  return editorPart
-}
-
-/** Open `uriPath` through VS Code's editor service.
- *
- *  Different from openFile(): that one creates a bare monaco editor over a
- *  model and is what the code lane still drives. This one hands the uri to VS
- *  Code and lets it choose the editor — a text editor for source, media-preview's
- *  custom editor for a png, whatever a future extension registers. */
-export async function openEditor (uriPath, { pinned = true, readOnly = false } = {}) {
-  const editorService = await getService(IEditorService)
-  // openEditor(input, options, group) — the third argument is the GROUP, not
-  // more options. Passing an options bag there resolves to undefined and opens
-  // nothing, with no error to show for it.
-  // Open into the MAIN part's active group explicitly. IEditorGroupsService
-  // spans every part (main plus any auxiliary window), and openEditor with no
-  // group picks the service's active one — which is not necessarily the group
-  // inside the part that was attached. Measured: the file opened into a group
-  // holding 1 editor while the active group held 0 and painted `content empty`.
-  const groups = await getService(IEditorGroupsService)
-  return editorService.openEditor({
-    resource: monaco.Uri.file(uriPath),
-    options: { pinned, ...(readOnly ? { readOnly: true } : {}) },
-  }, groups.mainPart.activeGroup)
-}
-
-/** Editor-part diagnostics for the spike harness. Not used by the viewer. */
-export async function editorPartInfo () {
-  const editorService = await getService(IEditorService)
-  const groups = await getService(IEditorGroupsService)
-  const notifications = await getService(INotificationService)
-  return {
-    editors: editorService.count,
-    active: String(editorService.activeEditor?.resource ?? 'none'),
-    paneId: String(editorService.activeEditorPane?.getId() ?? 'none'),
-    groups: groups.groups.map((g) => g.id + ':' + g.count + ':' + (g.element?.isConnected ? 'dom' : 'off')).join(' '),
-    parts: groups.parts.length,
-    mainGroups: groups.mainPart.groups.map((g) => g.id + ':' + g.count).join(' '),
-    openRes: editorService.editors.map((e) => String(e.resource)).join(' '),
-    groupActive: String(groups.activeGroup?.activeEditor?.resource ?? 'none'),
-    notices: (notifications.model?.notifications ?? []).map((n) => String(n.message?.linkedText?.toString?.() ?? n.message)).join(' | '),
-  }
-}
-
-/** Close every editor in the part.
- *
- *  The viewer shows ONE artifact at a time and drives its own file selection
- *  from the sidebar, so tabs must not accumulate behind it. */
-export async function closeAll () {
-  const groups = await getService(IEditorGroupsService)
-  for (const g of groups.mainPart.groups) await g.closeAllEditors()
-}
-
-/** Replace an already-registered file's bytes — an external change on disk.
- *
- *  registerFile() can only be called once per uri (registerFile THROWS on a uri
- *  the provider already holds), so a changed file arrives here. */
-export async function updateFile (uriPath, text) {
-  await start()
-  const e = open.get(uriPath)
-  if (e === void 0) return registerFile(uriPath, text)
-  const bytes = typeof text === 'string' ? new TextEncoder().encode(text) : text
-  await fsp.writeFile(e.uri, bytes, { create: false, overwrite: true, unlock: false, atomic: false })
-}
-
-/** Run a VS Code command — `markdown.showPreview` and friends. */
-export async function runCommand (id, ...args) {
-  const commandService = await getService(ICommandService)
-  return commandService.executeCommand(id, ...args)
 }
 
 /** Which languages currently have a live server, for the client to show. */
