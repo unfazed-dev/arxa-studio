@@ -669,6 +669,36 @@ export function apply(ctx, opts = {}) {
     }
   }
 
+  // Readiness for the desktop splash (2026-09-07, docs/plans/
+  // studio-startup-ready-when-open.md). The shell used to lift "Getting things
+  // ready…" the moment the port answered, which is BEFORE plugins apply — the
+  // user then watched the app load. 200 once the org shell (the heaviest
+  // import on the boot path) is loaded, or there is no workspace to load;
+  // 503 while it is still importing. The org itself opens on the client's
+  // first action, so it is deliberately NOT part of this gate — waiting for
+  // it here would wait forever. CORS `*` on this one boolean so the shell's
+  // own page (a different origin) can read the status.
+  ctx.webServer.register({
+    name: 'arxa-ready',
+    path: '/__arxa/ready',
+    kind: 'exact',
+    handler: async (req, res) => {
+      let ready = false
+      try {
+        const l = await getLifecycle()
+        let root = null
+        try { root = shell?.loadWorkspaceRoot?.() ?? null } catch { root = null }
+        ready = l !== null || !root
+      } catch { ready = false }
+      res.writeHead(ready ? 200 : 503, {
+        'content-type': 'application/json',
+        'cache-control': 'no-store',
+        'access-control-allow-origin': '*',
+      })
+      res.end(JSON.stringify({ ready }))
+    },
+  })
+
   ctx.webServer.register({
     name: 'arxa-sidebar-state',
     path: '/__arxa/sidebar/state',
