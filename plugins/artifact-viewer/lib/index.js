@@ -362,6 +362,24 @@ export function apply(ctx, config) {
       path: '/__arxa/artifacts/main-version',
       handler: (req, res) => { void mainVersion.handle(req, res) },
     })
+    // Click-to-paint trace (2026-09-07): the client posts one JSON line per
+    // open and it lands in the engine log, where a slow first load can be
+    // read phase by phase. Same-origin POST only, body capped, nothing stored.
+    ctx.webServer?.register?.({
+      path: '/__arxa/artifacts/trace',
+      handler: (req, res) => {
+        if (req.method !== 'POST') { res.writeHead(405); return res.end() }
+        let body = ''
+        req.on('data', (c) => { if (body.length < 4096) body += c })
+        req.on('end', () => {
+          try {
+            const t = JSON.parse(body)
+            console.log('[arxa-artifact-viewer] trace ' + String(t.relPath).slice(0, 120) + ' ' + t.outcome + ' ' + t.totalMs + 'ms bundle=' + (t.bundleWarm ? 'warm' : 'cold') + ' ' + String(t.marks).slice(0, 400))
+          } catch { /* not ours */ }
+          res.writeHead(204); res.end()
+        })
+      },
+    })
     const versionRoute = createVersionRoute({ env: process.env, secret })
     ctx.webServer?.register?.({
       path: '/__arxa/artifacts/version',

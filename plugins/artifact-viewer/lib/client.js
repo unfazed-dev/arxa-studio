@@ -41,6 +41,30 @@ window.__ModuleLoader__.load({
     const EVENTS_ROUTE = '/__arxa/artifacts/events'
     const VENDOR = (n) => '/__arxa/artifacts/vendor/' + n
     const LSP_ROUTE = '/__arxa/artifacts/lsp'
+    const TRACE_ROUTE = '/__arxa/artifacts/trace'
+
+    /** Where a click's time goes, one engine-log line per open (2026-09-07).
+     *  The harness measures a first open at ~0.5s and the user sees seconds;
+     *  the phases here are the ones the harness cannot see: the click reaching
+     *  the panel, the routes, the bundle import, the boot, the paint. Marks
+     *  are relative to the click; the line is posted when the editor paints
+     *  or the open fails. Best effort: never blocks or throws. */
+    const trace = (() => {
+      let cur = null
+      const now = () => Math.round(performance.now())
+      return {
+        begin (relPath) {
+          cur = { relPath, t0: now(), marks: [], bundleWarm: !!monacoMod }
+        },
+        mark (name) { if (cur) cur.marks.push(name + '=' + (now() - cur.t0)) },
+        end (outcome) {
+          if (!cur) return
+          const line = { relPath: cur.relPath, outcome, totalMs: now() - cur.t0, bundleWarm: cur.bundleWarm, marks: cur.marks.join(' ') }
+          cur = null
+          try { void fetch(TRACE_ROUTE, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(line), keepalive: true }) } catch {}
+        },
+      }
+    })()
     // Mirrors LANG_SERVERS in lib/lsp.js. Only languages with a server that has
     // actually been RUN — an entry here for a server the host cannot start just
     // buys a socket that closes 4004.
@@ -714,7 +738,9 @@ window.__ModuleLoader__.load({
         let handle = null
         let unwatch = null
         ;(async () => {
+          trace.mark('codeview')
           const M = await ensureMonaco()
+          trace.mark('import')
           if (dead || !ref.current) return
           // The model is keyed on the file's REAL path when the host resolved
           // one. That is what makes a language server's diagnostics land on the
@@ -738,9 +764,12 @@ window.__ModuleLoader__.load({
               || '"SF Mono", ui-monospace, "JetBrains Mono", Consolas, "Liberation Mono", Menlo, monospace',
             onChange: () => { if (onDirty) onDirty() },
           })
+          trace.mark('open')
           // The await above can outlive the effect: dispose what we just made
           // rather than leaking an editor into a detached container.
           if (dead) { handle.dispose(); handle = null; return }
+          // Painted = the first frame after the part laid the editor out.
+          requestAnimationFrame(() => requestAnimationFrame(() => trace.end('painted')))
           if (docRef) docRef.current = handle
           // Shift-Alt-F is NOT rebound here any more. addCommand only exists on
           // a standalone editor, and the file now opens in VS Code's editor
@@ -775,7 +804,7 @@ window.__ModuleLoader__.load({
               } catch { /* no language service; the editor is unaffected */ }
             })()
           }
-        })().catch((e) => { if (ref.current) ref.current.textContent = String(e && e.message || e) })
+        })().catch((e) => { trace.end('editor-error'); if (ref.current) ref.current.textContent = String(e && e.message || e) })
         return () => {
           dead = true
           if (unwatch) unwatch()
@@ -1313,6 +1342,7 @@ window.__ModuleLoader__.load({
         // made a saved edit look lost on the next click. A file the session
         // has no copy of (untracked in the org) falls back to the org lane.
         const sid = p.sessionId || store.getSnapshot().sessionId || null
+        if (p.relPath) trace.begin(p.relPath)
         if (sid && p.relPath) {
           void Promise.resolve(openWorktreeRef.current && openWorktreeRef.current(sid, p.relPath, { quiet: true })).then((ok) => {
             if (ok) return
@@ -1444,8 +1474,10 @@ window.__ModuleLoader__.load({
         setOpen(true)
         wtRef.current = null
         setState({ phase: 'loading', relPath })
+        trace.mark('org:loading')
         try {
           const { token, origin, absPath } = await fetchToken(relPath)
+          trace.mark('token')
           const url = origin + '/' + encodeURI(relPath) + '?avt=' + encodeURIComponent(token)
           const kind = kindFor(relPath)
           void (async () => {
@@ -1461,13 +1493,17 @@ window.__ModuleLoader__.load({
             if (!r.ok) throw new Error('fetch ' + r.status)
             const len = Number(r.headers.get('content-length') || '0')
             const text = await r.text()
+            trace.mark('bytes')
             const edit = await applyEditability(kind, relPath, text, len, null)
+            trace.mark('session')
             setSession(edit.session)
             setState({ phase: 'ready', kind, relPath, url, text, absPath, readOnly: edit.readOnly, guardNote: edit.guardNote })
           } else {
             setState({ phase: 'ready', kind, relPath, url })
+            trace.end('ready:' + kind.lane)
           }
         } catch (e) {
+          trace.end('error')
           setState({ phase: 'error', relPath, note: t('error.load', { path: relPath, reason: String(e && e.message || e) }) })
         }
       }
@@ -1477,11 +1513,13 @@ window.__ModuleLoader__.load({
         resetForOpen()
         setOpen(true)
         setState({ phase: 'loading', relPath })
+        trace.mark('wt:loading')
         wtRef.current = { sessionId }
         try {
           const prebound = { id: sessionId, name: sessionId }
           setSession(prebound)
           const { token, absPath } = await fetchTokenRaw({ scope: 'wt-read', worktreeId: sessionId, relPath })
+          trace.mark('token')
           const url = '/__arxa/artifacts/wt?session=' + encodeURIComponent(sessionId) + '&path=' + encodeURIComponent(relPath) + '&avt=' + encodeURIComponent(token)
           const kind = kindFor(relPath)
           if (EDITABLE_LANES.has(kind.lane)) {
@@ -1489,14 +1527,17 @@ window.__ModuleLoader__.load({
             if (!r.ok) throw new Error('fetch ' + r.status)
             const len = Number(r.headers.get('content-length') || '0')
             const text = await r.text()
+            trace.mark('bytes')
             const edit = await applyEditability(kind, relPath, text, len, prebound)
             setSession(edit.session)
             setState({ phase: 'ready', kind, relPath, url, text, absPath, readOnly: edit.readOnly, guardNote: edit.guardNote, wt: sessionId })
             return true
           }
           setState({ phase: 'ready', kind, relPath, url, wt: sessionId })
+          trace.end('ready:' + kind.lane)
           return true
         } catch (e) {
+          trace.mark('wt:miss')
           // quiet: the caller has an org-lane fallback, and a file the session
           // has no copy of must not flash an error on its way there.
           if (!quiet) setState({ phase: 'error', relPath, note: t('error.load', { path: relPath, reason: String(e && e.message || e) }) })

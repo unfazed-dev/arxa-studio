@@ -761,6 +761,11 @@ assert.ok(clientSrc.includes("await M.openDiff(uri, diffOriginal, {"),
 // is writable, so VS Code hands it over editable. Without this the diff writes
 // files the code editor refuses to let you type in (proved in spike.html:
 // diffModRO/diffTyped).
+// Click-to-paint trace (2026-09-07): one engine-log line per open, with the
+// phases the harness cannot see. Stays until the slow first load is explained.
+assert.ok(clientSrc.includes("const TRACE_ROUTE = '/__arxa/artifacts/trace'") && clientSrc.includes("trace.end('painted')"),
+  'the client traces a click through to the painted editor')
+assert.ok(fs.readFileSync(path2.join(here, 'lib', 'index.js'), 'utf8').includes("path: '/__arxa/artifacts/trace'"), 'the host logs the trace line')
 // Decision B (2026-09-07): with a session current, a tree open shows the
 // SESSION's copy of the file — where the viewer's own saves land (D38) — and
 // falls back to the org copy quietly when the session has none.
