@@ -130,6 +130,23 @@ check('G6: GitHub-backed controls are HIDDEN while the grant is dead, never left
 check('G6: the approve row keeps its place and says what is wrong',
   clientSrc.includes("status.github.relinkRequired")
   && clientSrc.includes("const prText = relinkRequired ? t('git.relinkNeeded')"))
+// The dialog the user could not close (reported 2026-09-06). These pin the
+// WIRING; the reopen loop itself is a timing behaviour no static check can
+// see, so selftest.relink.mjs drives the real functions against a real clock.
+check('G6 fix: Cancel goes through stopRelink, which kills the poll and drops the run token',
+  clientSrc.includes('const stopRelink = ()')
+  && clientSrc.includes('relinkRun.current = null')
+  && /stopRelink = \(\) => \{[^}]*clearInterval/s.test(clientSrc))
+check('G6 fix: BOTH ways out of the modal use it — the X and the button',
+  clientSrc.includes('onClose: stopRelink') && clientSrc.includes('onClick: stopRelink'))
+check('G6 fix: a late poll tick cannot write state for a flow that was cancelled',
+  clientSrc.includes('relinkRun.current === run && d && d.userCode'))
+check('G6 fix: the unmount effect clears the timer, not just the alive flag',
+  /alive\.current = false\s*\n\s*const run = relinkRun\.current/.test(clientSrc))
+check('G6 fix: the host runs ONE device flow at a time (GitHub slow_down + one deviceCode slot)',
+  hostSrc().includes('let linkInFlight = null')
+  && hostSrc().includes('linkInFlight = Promise.resolve(g.link()).finally('))
+
 check('G6: relink copy in all three dictionaries',
   ['git.relink', 'git.relinkNeeded', 'git.relink.title', 'git.relink.open', 'git.relink.failed']
     .every((k) => (clientSrc.split("'" + k + "':").length - 1) === 3))

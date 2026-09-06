@@ -183,6 +183,15 @@ async function reviewFor({ g, gw, owner, name, branch, sid, fresh }) {
 }
 
 export function apply(ctx) {
+  /** The in-flight device flow, or null. Plugin scope on purpose: the action
+   * table below is rebuilt per REQUEST, so a per-table variable would dedupe
+   * nothing. A second concurrent flow is not merely untidy — GitHub answers
+   * competing polls on one client id with `slow_down` and caps verification
+   * submissions at 50/hour/app, and github-link keeps exactly ONE
+   * `lastDeviceCode` slot, so flow B would overwrite the code flow A is
+   * showing on screen. */
+  let linkInFlight = null
+
   const json = (res, body) => {
     res.writeHead(200, {
       'content-type': 'application/json',
@@ -965,7 +974,12 @@ export function apply(ctx) {
             'card.github.link': async () => {
               const g = await getGithub().catch(() => null)
               if (!g) throw new Error('github-unavailable')
-              return g.link()
+              // A second caller JOINS the running flow instead of starting a
+              // competing one (see linkInFlight above).
+              if (linkInFlight === null) {
+                linkInFlight = Promise.resolve(g.link()).finally(() => { linkInFlight = null })
+              }
+              return linkInFlight
             },
             'card.github.device': async () => {
               const g = await getGithub().catch(() => null)

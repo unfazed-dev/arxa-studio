@@ -302,7 +302,16 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
   const [relink, setRelink] = React.useState(null)
   const listId = React.useId()
   const alive = React.useRef(true)
-  React.useEffect(() => () => { alive.current = false }, [])
+  // The live device flow, or null: { poll }. A REF, not state — Cancel has to
+  // stop the poll synchronously, and a late tick has to be able to tell "my
+  // flow" from "the flow the user already dismissed".
+  const relinkRun = React.useRef(null)
+  React.useEffect(() => () => {
+    alive.current = false
+    const run = relinkRun.current
+    relinkRun.current = null
+    if (run) window.clearInterval(run.poll)
+  }, [])
 
   const seatArg = () => (seatSession ? { sessionId: seatSession } : {})
 
@@ -533,21 +542,49 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
    * meanwhile for the one-time code to show. Both ride the card's own route:
    * its host already holds the same getGithub the sidebar does, so the card
    * keeps its one-wire property instead of reaching across. */
+  /** Cancel: stop the poll, drop the run token, close. Shipped 2026-09-06
+   * without this and the dialog could not be closed — the poll below was
+   * cleared only when card.github.link SETTLED, and that long-polls until
+   * GitHub confirms, so Cancel closed the modal for one tick and the next
+   * 700ms tick reopened it. The `if` guard in startRelink then swallowed
+   * every further click. Dropping the token is what makes late writers
+   * no-ops; clearing the interval is what stops them happening at all.
+   *
+   * What this does NOT do is stop the flow on GitHub's side: the host is
+   * still polling, and there is no cancel in the device grant. That flow
+   * dies on its own when the device code expires (900s, per GitHub's device
+   * flow docs). The host-side dedupe is what keeps a re-click from racing
+   * it — see card.github.link. */
+  const stopRelink = () => {
+    const run = relinkRun.current
+    relinkRun.current = null
+    if (run) window.clearInterval(run.poll)
+    setRelink(null)
+  }
   const startRelink = () => {
-    if (relink !== null) return
+    if (relinkRun.current !== null) return
+    const run = { poll: 0 }
+    relinkRun.current = run
     setRelink({ starting: true })
-    const poll = window.setInterval(() => {
-      post('card.github.device').then((d) => { if (alive.current && d && d.userCode) setRelink(d) }, () => {})
+    run.poll = window.setInterval(() => {
+      post('card.github.device').then((d) => {
+        if (alive.current && relinkRun.current === run && d && d.userCode) setRelink(d)
+      }, () => {})
     }, 700)
     post('card.github.link').then(() => {
-      window.clearInterval(poll)
+      window.clearInterval(run.poll)
+      const mine = relinkRun.current === run
+      if (mine) relinkRun.current = null
       if (!alive.current) return
-      setRelink(null)
-      notify('info', t('git.relink.done'))
+      // The grant really did change, so the card reloads either way; only the
+      // dialog and the toast belong to whoever was still watching.
+      if (mine) { setRelink(null); notify('info', t('git.relink.done')) }
       load(); if (pr !== void 0) loadPr()
     }, (e) => {
-      window.clearInterval(poll)
-      if (!alive.current) return
+      window.clearInterval(run.poll)
+      const mine = relinkRun.current === run
+      if (mine) relinkRun.current = null
+      if (!alive.current || !mine) return
       setRelink(null)
       notify('error', t('git.relink.failed', { reason: reasonOf(e) }))
     })
@@ -675,9 +712,9 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
       h(P.Button, { variant: 'outline', onClick: confirmGo }, confirm.ok)),
   })
   const relinkModal = relink === null ? null : h(P.Modal, {
-    open: true, onClose: () => setRelink(null),
+    open: true, onClose: stopRelink,
     title: t('git.relink.title'), description: t('git.relink.desc'), closeLabel: t('git.cancel'),
-    footer: h(P.Button, { variant: 'outline', onClick: () => setRelink(null) }, t('git.cancel')),
+    footer: h(P.Button, { variant: 'outline', autoFocus: true, onClick: stopRelink }, t('git.cancel')),
   }, h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-start' } },
     h('code', { style: { fontSize: '18px', letterSpacing: '2px' } }, relink.userCode || t('git.relink.starting')),
     relink.verificationUri
