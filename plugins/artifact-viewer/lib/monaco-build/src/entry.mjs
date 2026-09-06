@@ -4,9 +4,9 @@
 // route on the STUDIO origin, and loaded by lib/client.js with a dynamic
 // import(). Never a <script> tag: this graph is ESM with workers.
 import * as monaco from 'monaco-editor'
-import EditorWorker from './editor.worker.js?worker'
+import editorWorkerUrl from './editor.worker.js?worker&url'
 import extHostWorkerUrl from './extensionHost.worker.js?worker&url'
-import TextMateWorker from './textmate.worker.js?worker'
+import textmateWorkerUrl from './textmate.worker.js?worker&url'
 import { initialize } from '@codingame/monaco-vscode-api'
 import getConfigurationServiceOverride, { updateUserConfiguration } from '@codingame/monaco-vscode-configuration-service-override'
 import getThemeServiceOverride from '@codingame/monaco-vscode-theme-service-override'
@@ -40,23 +40,14 @@ import '@codingame/monaco-vscode-css-default-extension'
 import '@codingame/monaco-vscode-scss-default-extension'
 import '@codingame/monaco-vscode-less-default-extension'
 import '@codingame/monaco-vscode-markdown-basics-default-extension'
-// markdown-language-features, markdown-math and media-preview are NOT here.
-// Measured, in order:
-//   1. with only the features extension, a .md file opened as `plaintext` —
-//      it is markdown-BASICS that declares the language and its grammar.
-//   2. adding the grammar made the features extension finally activate
-//      (onLanguage:markdown) and it failed immediately:
-//        Failed to construct 'Worker': Script at
-//        'extension-file://vscode.markdown-language-features/extension/dist/
-//         browser/serverWorkerMain.js' cannot be accessed from origin ...
-//      It needs extension-host worker plumbing this build does not have.
-//   3. media-preview declares `customEditors`, which are WEBVIEWS. There is no
-//      webview-service-override at 36.2.7 — webviews live in the `views`
-//      family, i.e. the whole VS Code workbench layout.
-// So the markdown PREVIEW and the media preview stay on the vendored
-// markdown-it + DOMPurify bundle until a workbench adoption is on the table.
-// Shipping the feature extensions anyway bought one console error per markdown
-// file and nothing else.
+// The FEATURE layer on top of the grammar. It was removed once, on the reading
+// that it needed extension-host plumbing this build did not have. It did not:
+// the build was calling getExtensionsServiceOverride({ url, options }) against
+// an override that destructures { enableWorkerExtensionHost, iframeAlternateDomain },
+// so the extension host was simply never switched on. See the initialize() call
+// below. With it on, this extension activates clean and its document-link
+// provider underlines markdown links — visible in the check capture.
+import '@codingame/monaco-vscode-markdown-language-features-default-extension'
 
 // Phase 2 (LSP over the host's registerUpgrade websocket) rides these — pulled
 // into the graph now so the spike's size number is the honest one.
@@ -118,14 +109,24 @@ export function start (container, { fontFamily = 'Fira Code', dark = true } = {}
     // is never requested — that entry was dead and only the ?? fallback below
     // kept it working. The fallback stays, deliberately: an unknown label is
     // better served by the editor worker than by nothing.
-    const workers = { editorWorkerService: EditorWorker, TextMateWorker }
+    // getWorkerUrl, NOT getWorker. The webworker extension host runs inside an
+    // iframe and constructs its own worker there: it needs a URL it can pass
+    // across the frame boundary, and an object from this realm is useless to it.
+    // getWorker also cannot serve `extensionHostWorkerMain` at all.
+    const workerUrls = {
+      editorWorkerService: editorWorkerUrl,
+      extensionHostWorkerMain: extHostWorkerUrl,
+      TextMateWorker: textmateWorkerUrl,
+    }
     self.__arxaWorkerLabels = []
     self.MonacoEnvironment = {
-      getWorker: (_id, label) => {
+      getWorkerUrl: (_id, label) => {
         self.__arxaWorkerLabels.push(label)
-        const W = workers[label] ?? EditorWorker
-        return new W()
+        // An unknown label is still better served by the editor worker than by
+        // nothing — same deliberate fallback the constructor map had.
+        return workerUrls[label] ?? editorWorkerUrl
       },
+      getWorkerOptions: () => ({ type: 'module' }),
     }
     await initialize({
       ...getConfigurationServiceOverride(),
@@ -136,7 +137,20 @@ export function start (container, { fontFamily = 'Fira Code', dark = true } = {}
       ...getQuickAccessServiceOverride({ isKeybindingConfigurationVisible: () => true, shouldUseGlobalPicker: () => true }),
       ...getFilesServiceOverride(),
       ...getModelServiceOverride(),
-      ...getExtensionsServiceOverride({ url: extHostWorkerUrl, options: { type: 'module' } }),
+      // MEASURED: at 36.2.7 this override destructures
+      // { enableWorkerExtensionHost, iframeAlternateDomain } — the { url, options }
+      // shape it was called with for the whole of phase 1-2 destructured to
+      // undefined, so the webworker extension host was silently OFF. That, not
+      // webviews, is what made markdown-language-features fail to construct its
+      // own Worker: with no host iframe there is no origin its extension files
+      // can be fetched from.
+      //
+      // iframeAlternateDomain is NOT set: the studio is served from a loopback
+      // origin and `{{uuid}}.127.0.0.1` is not a resolvable hostname, so there
+      // is no alternate domain to move the host to. The extension host iframe is
+      // therefore SAME-ORIGIN with the studio — extension code runs with the
+      // studio's origin, which is a trust boundary worth naming.
+      ...getExtensionsServiceOverride({ enableWorkerExtensionHost: true }),
     })
     applyTheme(fontFamily)
   })()

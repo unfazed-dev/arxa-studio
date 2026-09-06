@@ -667,8 +667,19 @@ assert.ok(entrySrc2c.includes('(selector ?? [lang]).map((language) => ({ languag
   'one server can own several monaco language ids (js for the ts server, scss/less for css, jsonc for json)')
 assert.ok(entrySrc2c.includes("import '@codingame/monaco-vscode-markdown-basics-default-extension'"),
   'markdown has a GRAMMAR: with only the feature extension a .md file opened as plaintext')
-assert.ok(!/^import '@codingame\/monaco-vscode-(markdown-language-features|markdown-math|media-preview)-default-extension'/m.test(entrySrc2c),
-  'no extension is imported that needs webviews or an extension-host worker — each bought a console error and nothing else')
+assert.ok(entrySrc2c.includes("import '@codingame/monaco-vscode-markdown-language-features-default-extension'"),
+  'the markdown FEATURE layer is back: it never needed plumbing, only an extension host that was switched on')
+// The three lines below are one fact: at 36.2.7 the extensions override
+// destructures { enableWorkerExtensionHost, iframeAlternateDomain }, so the
+// { url, options } call this build shipped for phases 1-2 left the extension
+// host OFF and every extension with real code inert. getWorker cannot replace
+// getWorkerUrl either — the host runs in an iframe and needs a URL to cross it.
+assert.ok(entrySrc2c.includes('getExtensionsServiceOverride({ enableWorkerExtensionHost: true })'),
+  'the webworker extension host is switched ON — { url, options } destructured to undefined and ran no extension at all')
+assert.ok(entrySrc2c.includes('getWorkerUrl: (_id, label)') && entrySrc2c.includes('getWorkerOptions:'),
+  'workers are handed to monaco as URLs — the extension host iframe cannot receive a Worker object from this realm')
+assert.ok(!/\?worker'$/m.test(entrySrc2c),
+  'every worker is imported as ?worker&url, not ?worker')
 assert.ok(entrySrc2c.includes("import '@codingame/monaco-vscode-scss-default-extension'") &&
   entrySrc2c.includes("import '@codingame/monaco-vscode-less-default-extension'"),
   'scss and less are separate grammars from css — without them those files open as plaintext and the css client is sent nothing')

@@ -118,7 +118,13 @@ server.listen(0, '127.0.0.1', () => {
       'window.__spike.narrowMinimap === false',
       'window.__spike.narrowWraps === true',
       'window.__spike.tinyLineNumbers === 0',     // line numbers off when tiny
-      'window.__spike.restoredMinimap === true'
+      'window.__spike.restoredMinimap === true',
+      // Phase 3: the markdown open itself must not throw, and the webworker
+      // extension host must actually be running — it is the thing that was
+      // silently off while { url, options } was passed to an override that
+      // destructures { enableWorkerExtensionHost, iframeAlternateDomain }.
+      'window.__spike.mdErr === undefined',
+      'window.__spike.extHostFrames >= 1'
     ].join(' && '),
   ], { encoding: 'utf8' }, (err, stdout, stderr) => {
     server.close()

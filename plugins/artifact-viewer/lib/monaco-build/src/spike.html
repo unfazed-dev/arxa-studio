@@ -145,5 +145,13 @@
     // left OPEN on purpose: the final capture then shows a real markdown file
     // with its grammar, instead of a blank page.
   } catch (e) { out.mdErr = String(e && e.message || e) }
+  // Did the WEBWORKER EXTENSION HOST actually start? It runs inside an iframe.
+  // No iframe means no extension code ever runs — which is exactly how
+  // markdown-language-features looked "installed" while doing nothing at all.
+  // Give activation (onLanguage:markdown fires from the open above) time to
+  // either work or throw; a throw lands in the console and the lens fails it.
+  out.step = 'ext-host'
+  await settle(3000)
+  out.extHostFrames = document.querySelectorAll('iframe').length
   out.step = 'done'
 </script>

@@ -568,67 +568,120 @@ Original plan below.
   ships inside the Dart/Flutter SDK, so the button can only *locate* an
   installed SDK on PATH — there is no download path and the copy must say so.
 
-### Phase 3 — markdown + media (G9) — PARTLY BLOCKED
+### Phase 3 — markdown grammar — DONE (`f1b227f`)
 
-**Delivered: markdown finally has a grammar.** Probing the running editor for
-`getLanguageId()` of a `.md` file returned **`plaintext`** — the build carried
-`markdown-language-features` (the feature layer) but not
-`markdown-basics`, which is what declares the language and its grammar. So every
-markdown source view was uncoloured, and nothing could attach to it. Adding
-`markdown-basics` fixes it, and the capture shows more than markdown-it ever
-did: headings, emphasis and links coloured, and a fenced ```` ```rs ```` block
+Probing the running editor for `getLanguageId()` of a `.md` file returned
+**`plaintext`** — the build carried `markdown-language-features` (the feature
+layer) but not `markdown-basics`, which is what declares the language and its
+grammar. Adding it fixes colouring and shows more than markdown-it ever did:
+headings, emphasis and links coloured, and a fenced ```` ```rs ```` block
 highlighted as Rust through VS Code's embedded-language injection.
 
-**Blocked: the previews.** Adding the grammar made
-`markdown-language-features` finally activate (`onLanguage:markdown`) and it
-failed immediately:
+#### Two claims in the first draft of this section were WRONG
 
-```
-Activating extension 'vscode.markdown-language-features' failed:
-Failed to construct 'Worker': Script at
-'extension-file://vscode.markdown-language-features/extension/dist/browser/
- serverWorkerMain.js' cannot be accessed from origin 'http://127.0.0.1:…'
-```
+1. *"there is no `webview-service-override` at 36.2.7, so webviews mean the
+   whole VS Code workbench layout — adopting that is a rewrite of the docked
+   pane."* The E404 is real; the conclusion is not. `views-service-override`
+   exports `attachPart(part, container)`, which takes **one** part. Attaching
+   `Parts.EDITOR_PART` alone renders no activity bar, sidebar, panel or status
+   bar. The pane keeps its shape.
+2. *"`markdown-language-features` needs extension-host worker plumbing this
+   build does not have."* It needed a **config fix**, not plumbing — see below.
 
-It needs extension-host worker plumbing this build does not have.
-`media-preview` is blocked differently and harder: it declares `customEditors`,
-which are **webviews**, and there is no `webview-service-override` at 36.2.7
-(E404) — webviews live in the `views` family, i.e. the whole VS Code workbench
-layout. Adopting that is not a phase, it is a rewrite of the docked pane.
+### Phase 7 — full VS Code adoption (user directive, 2026-09-06)
 
-All three (`markdown-language-features`, `markdown-math`, `media-preview`) are
-therefore **removed from the build**, not left in hopefully: each bought a
-console error or a promise of an editor that can never open. `markdown.js`
-(markdown-it + DOMPurify) **stays** for the rendered preview, and the phase 6
-deletion that assumed it would go is blocked with it.
+> "adopt all of vscode remove the previous stuff - have monaco manage all"
 
-html/mdx stay in the sandboxed iframe on the org origin — that is the D7 wall
-and it does not move.
+#### 7.0 The extension host was silently OFF — **DONE, measured**
 
-**Open decision for the user:** adopt the VS Code workbench (`views` family) to
-unlock webviews — markdown preview, media preview, and the phase 4 PDF viewer
-all sit behind that one door — or keep the vendored renderers.
+`getExtensionsServiceOverride({ url, options })` is what phases 1-2 called. At
+36.2.7 that override destructures
+`{ enableWorkerExtensionHost, iframeAlternateDomain }`, so both arguments
+landed as `undefined`, `enableWorkerExtensionHost` was falsy, and
+`extHostWorkerUrl` was dead code that nothing ever read. **No extension host
+ran.** Grammars and themes still worked because they are declarative — the
+textmate service reads them straight out of the extension's files — so the
+build looked healthy and every extension with actual code was inert.
 
-### Phase 4 — PDF + formatting
+That, not webviews, is what killed `markdown-language-features`.
 
-PDF: `tomoki1207.pdf` .vsix, sha256-pinned, **only if** the worker extension
-host runs it. pdf.js stays until then. Formatting: `prettier-vscode` web build
-replaces the 2.1 MB vendored `prettier.js`; Shift-Alt-F routes through VS Code's
-format command instead of `formatActionRef`.
+Fixed by three coupled changes:
 
-### Phase 5 — autosave + dirty state
+- `getExtensionsServiceOverride({ enableWorkerExtensionHost: true })`.
+- `MonacoEnvironment.getWorker` → `getWorkerUrl` / `getWorkerOptions`. The
+  extension host runs in an **iframe** and constructs its own worker there: it
+  needs a URL that crosses the frame boundary, and a `Worker` object from this
+  realm cannot. `getWorker` can never serve `extensionHostWorkerMain`.
+- All three workers imported as `?worker&url`, not `?worker`.
 
-A write-through VS Code filesystem provider over the existing
-`/__arxa/artifacts/write` route, so VS Code models own dirty state. `files.autoSave`
-if monaco-vscode-api honours the setting override; otherwise a 1 s
-`afterDelay`-equivalent debounce. **Unverified — it is on the carried-items list.**
+Verified on screen: the extension-host iframe exists, `markdown-language-features`
+activates with no console error, and `[link](x.md)` renders **underlined** in the
+capture — an underline is the extension's document-link provider, which the
+grammar alone cannot draw.
 
-### Phase 6 — vendor cleanup
+`iframeAlternateDomain` is deliberately **not** set. The studio is served from a
+loopback origin and `{{uuid}}.127.0.0.1` is not a resolvable hostname, so there
+is no alternate domain to move the host to. **The extension host iframe is
+same-origin with the studio, and extension code now actually runs.** That was a
+carried unknown; it is now a stated trust boundary.
 
-Delete `lib/vendor/codemirror.js`, `markdown.js`, `prettier.js`, `pdf.js`,
-`pdf.worker.js` and the parts of `lib/vendor.js` that built them. `icons.js`
-(Material icons, used by the sidebar too) and the Fira Code woff2 stay. Net
-repo change should be a **reduction** — the monaco bundle is not committed.
+#### 7.0-bis The dependency tree carried two major versions — **DONE**
+
+`monaco-languageclient@10.7.0` pins `^25.1.2` for **thirty** `@codingame/*`
+packages. The committed lockfile therefore held 710 entries at `25.1.2` and 26
+nested duplicate trees, including a second `extensions-service-override` and a
+second `views-service-override`. Harmless while nothing imported them; fatal the
+moment `views` is adopted, because two workbench layout services would be live.
+
+`overrides` widened from 2 entries to 32, forcing every `@codingame/*` to
+`36.2.7`. Install drops **376 packages → 124**, zero duplicates, zero `25.1.2`.
+No stable `monaco-languageclient` targets 36.x (11.0.0-next targets `^35`), so
+the override is the only route.
+
+#### 7.1 The editor part
+
+`views-service-override` + `attachPart(Parts.EDITOR_PART, container)`. This is
+what brings **webviews and custom editors**, and with them the markdown preview,
+media preview, and VS Code's own editor-open plumbing. Only the editor part is
+attached — no activity bar, sidebar, panel or status bar.
+
+Cost: `openFile(container, path, text)` currently calls
+`monaco.editor.create(container, { model })` directly. Under the editor part,
+files open through `IEditorService.openEditor({ resource })`. The handle
+contract `client.js` drives (`getText`, `replaceRange`, `focus`, `dispose`,
+`onChange`) has to be rebuilt over the editor part. That is the real work of
+this phase.
+
+#### 7.2 Deletions, each only after its replacement is green on screen
+
+| vendored bundle | size | replaced by | site in `lib/client.js` |
+|---|---|---|---|
+| `markdown.js` | 146 KB | markdown preview webview | `:1404` |
+| `codemirror.js` | 886 KB | monaco's diff editor (`createDiffEditor`) | `:838` `:854` `:1621` |
+| `prettier.js` | 2.1 MB | LSP formatting (`textDocument/formatting`) | `:1652` |
+| `pdf.js` + worker | 1.7 MB | **nothing — stays** | `:878` |
+
+`codemirror.js` carries `ArxaTheme`, which also themes the markdown preview, so
+it can only go once the preview is a webview.
+
+#### 7.3 What "remove the previous stuff" cannot cover
+
+- **PDF.** VS Code ships no built-in PDF viewer. `tomoki1207.pdf` is a
+  marketplace `.vsix` with no npm mirror; it would need vendoring with a sha256
+  pin. `pdf.js` **stays** — deleting it would silently remove a working feature.
+- **Formatting without a server.** LSP formatting only covers languages with a
+  running server: rust, dart, ts/js, html, css/scss/less, json/jsonc. Markdown,
+  yaml, toml and every other extension in `FORMAT_EXTS` lose Shift-Alt-F when
+  `prettier.js` goes. Either keep prettier for those, or accept the loss —
+  decide with the measured list in hand, not now.
+- **Bundle size.** dist was 15 MB before 7.0 and is **29 MB** after. It ships in
+  the engine payload. Measure again after 7.1 and put the number in the summary.
+
+#### 7.4 Dirty state and autosave (was phase 5)
+
+Folds in here: `working-copy-service-override` is what the editor part already
+needs, and it is also what owns dirty state. A write-through VS Code filesystem
+provider over `/__arxa/artifacts/write` replaces the hand-rolled save path.
 
 ---
 
