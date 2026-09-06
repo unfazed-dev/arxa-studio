@@ -46,11 +46,47 @@ import { toSocket, WebSocketMessageReader, WebSocketMessageWriter } from 'vscode
 // chunk's URL, which is what the extensions override wants (WorkerConfig.url).
 // Both resolve against vite.config's `base` — pinned to the vendor route.
 
+/** Load the bundle's OWN stylesheet.
+ *
+ *  Nothing else will. There is no index.html in this build, so vite emits the
+ *  css as a bare asset with no <link> generated for it, and the host page
+ *  (lib/client.js) has no way to know its name. Shipped without this and monaco
+ *  rendered completely unstyled: the editor's lines escaped their container and
+ *  painted across the top-left of the whole app, while the viewer pane sat
+ *  black. The check harness was injecting the <link> itself, so it stayed green
+ *  the entire time — see check.mjs.
+ *
+ *  Resolved from import.meta.url, not from a hardcoded route, so the bundle
+ *  works wherever it is served. Awaited: mounting an editor before the
+ *  stylesheet applies is the same flash of broken layout, briefly. */
+function ensureStyles () {
+  const href = new URL('arxa-monaco.css', import.meta.url).href
+  const existing = document.querySelector('link[data-arxa-monaco]')
+  if (existing) return existing.__arxaLoaded ?? Promise.resolve()
+  return new Promise((resolve) => {
+    const link = document.createElement('link')
+    link.rel = 'stylesheet'
+    link.href = href
+    link.dataset.arxaMonaco = '1'
+    // Resolve either way: a missing stylesheet is a visible bug, not a reason
+    // to leave the caller hanging forever with no editor at all.
+    const done = () => resolve()
+    link.addEventListener('load', done, { once: true })
+    link.addEventListener('error', done, { once: true })
+    link.__arxaLoaded = new Promise((r) => {
+      link.addEventListener('load', r, { once: true })
+      link.addEventListener('error', r, { once: true })
+    })
+    document.head.appendChild(link)
+  })
+}
+
 let started = null
 let themeDark = true
 export function start (container, { fontFamily = 'Fira Code', dark = true } = {}) {
   themeDark = dark
   started ??= (async () => {
+    await ensureStyles()
     // getWorker is asked for SEVERAL labels, not just the editor's. Handing
     // the editor worker to every label is what produced
     // "Missing method $init on worker thread channel default".
@@ -155,6 +191,11 @@ export async function openFile (container, uriPath, text, opts = {}) {
   if (model.getValue() !== text) model.setValue(text)
   const editor = monaco.editor.create(container, {
     model, automaticLayout: true, readOnly: !editable, domReadOnly: !editable,
+    // Per-editor, NOT through start()'s user configuration: start() runs once
+    // and the viewer's font setting can change between files. Monaco measures
+    // character width from the font it is TOLD about, so overriding this with
+    // css instead would misplace the cursor.
+    fontFamily: fontFamily + ', monospace',
   })
   const sub = onChange ? model.onDidChangeContent(() => onChange()) : null
   let live = true

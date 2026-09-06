@@ -36,8 +36,11 @@ const TYPES = {
 // dir: dist/ is the shipped bundle (pack-sidecar tars it into the payload and
 // the vendor route serves every name in it), so a check artefact written there
 // would become a shipped file.
-const css = fs.readdirSync(dist).find((f) => f.endsWith('.css'))
-const page = fs.readFileSync(path.join(here, 'src', 'spike.html'), 'utf8').replace('__CSS__', PREFIX + css)
+// NOTE: the harness deliberately does NOT inject the bundle's stylesheet. It
+// used to, and that hid a shipped bug: client.js never loaded the CSS either,
+// so the real viewer painted its editor unstyled across the whole page while
+// this check stayed green. The bundle must bring its own stylesheet.
+const page = fs.readFileSync(path.join(here, 'src', 'spike.html'), 'utf8')
 const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-monaco-check-'))
 
 const server = http.createServer((req, res) => {
@@ -84,6 +87,8 @@ server.listen(0, '127.0.0.1', () => {
       "window.__spike.workerLabels.includes('editorWorkerService')",
       "window.__spike.workerLabels.includes('TextMateWorker')",
       'window.__spike.themeFlipped === true',     // live dark/light flip
+      'window.__spike.styled === true',           // the bundle loaded its OWN css
+      'window.__spike.contained === true',        // and the editor stayed in its box
     ].join(' && '),
   ], { encoding: 'utf8' }, (err, stdout, stderr) => {
     server.close()

@@ -1,5 +1,4 @@
 <!doctype html><meta charset="utf-8"><title>monaco spike</title>
-<link rel="stylesheet" href="__CSS__">
 <style>html,body{margin:0;height:100%}#ed{position:absolute;inset:0}#diff{position:absolute;left:-9999px;width:800px;height:300px}</style>
 <div id="ed"></div>
 <div id="diff"></div>
@@ -79,5 +78,13 @@
   m.setTheme(true)
   await settle(800)
 
+  // The user's bug, asserted as geometry: with no stylesheet the editor's
+  // lines escape the container and paint at the top-left of the PAGE.
+  const box = el.getBoundingClientRect()
+  const lines = document.querySelector('.monaco-editor .view-lines')
+  const lb = lines ? lines.getBoundingClientRect() : null
+  out.contained = !!lb && lb.left >= box.left - 1 && lb.top >= box.top - 1 &&
+    lb.right <= box.right + 1 && lb.width > 0
+  out.styled = !!lines && getComputedStyle(document.querySelector('.monaco-editor')).position !== 'static'
   out.step = 'done'
 </script>

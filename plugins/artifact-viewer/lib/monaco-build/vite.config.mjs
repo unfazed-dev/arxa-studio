@@ -38,7 +38,15 @@ export default defineConfig({
         // vendor route already answers no-store, so there is nothing to bust.
         entryFileNames: 'arxa-monaco.js',
         chunkFileNames: '[name]-[hash].js',
-        assetFileNames: flat,
+        // The ONE stylesheet (cssCodeSplit: false) gets a stable name so the
+        // entry can inject it by name at runtime. Nothing emits an index.html
+        // here, so no <link> is generated for us — and without the stylesheet
+        // monaco renders unstyled across the whole page, which is exactly how
+        // it shipped once. Everything else stays content-hashed.
+        assetFileNames: (info) =>
+          (info.names ?? [info.name]).some((n) => n && n.endsWith('.css'))
+            ? 'arxa-monaco.css'
+            : flat,
       },
     },
   },

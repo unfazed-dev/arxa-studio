@@ -591,6 +591,26 @@ assert.ok(clientSrc.includes('view.replaceRange('), 'format writes one minimal e
 assert.ok(clientSrc.includes('detectIndent('), 'indentation detected per file (VS Code detectIndentation)')
 assert.ok(clientSrc.includes('FORMAT_EXTS'), 'format-visible extension list present')
 assert.match(clientSrc, /KeyMod\.Shift \| M\.monaco\.KeyMod\.Alt \| M\.monaco\.KeyCode\.KeyF/, 'VS Code format chord bound')
+// THE 2026-09-06 regression: monaco shipped with NO stylesheet. There is no
+// index.html in that build, so vite emits the css as a bare asset and nothing
+// links it — the editor's lines escaped their container and painted across the
+// top-left of the whole app while the viewer pane sat black. It stayed green
+// because the CHECK HARNESS was injecting the <link> itself. Three pins, one
+// per way it could come back:
+const mbDir = path2.join(here, 'lib', 'monaco-build')
+const entrySrc = fs.readFileSync(path2.join(mbDir, 'src', 'entry.mjs'), 'utf8')
+const viteSrc = fs.readFileSync(path2.join(mbDir, 'vite.config.mjs'), 'utf8')
+const checkSrc = fs.readFileSync(path2.join(mbDir, 'check.mjs'), 'utf8')
+const spikeSrc = fs.readFileSync(path2.join(mbDir, 'src', 'spike.html'), 'utf8')
+assert.match(entrySrc, /new URL\('arxa-monaco\.css', import\.meta\.url\)/, 'the bundle loads its OWN stylesheet, resolved from its own url')
+assert.ok(entrySrc.includes('await ensureStyles()'), 'and does it before any editor mounts')
+assert.ok(viteSrc.includes("'arxa-monaco.css'"), 'the stylesheet gets a STABLE name (content-hashed, nothing could reference it)')
+assert.ok(!/rel=["']stylesheet/.test(spikeSrc) && !/__CSS__/.test(checkSrc),
+  'the check harness must NOT supply the stylesheet — doing so is what hid this bug')
+assert.ok(spikeSrc.includes('out.contained') && checkSrc.includes('window.__spike.contained === true'),
+  'the check asserts the editor renders INSIDE its container')
+assert.ok(clientSrc.includes('aXa_av_monaco'), 'the monaco lane has its own wrapper class (monaco owns its scrolling)')
+assert.ok(clientSrc.includes("getPropertyValue('--arxa-editor-font')"), 'the editor font setting is PASSED to monaco (it measures glyph width from it)')
 assert.match(clientSrc, /IconEnhanceOutline16/, 'format action uses the enhance glyph')
 assert.ok(clientSrc.includes('aXa_av_palMd'), 'markdown preview adopts the palette chrome')
 assert.ok(clientSrc.includes("'--aXa_av_pal-bg'"), 'palette CSS vars set on the root')

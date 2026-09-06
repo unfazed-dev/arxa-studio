@@ -97,6 +97,10 @@ window.__ModuleLoader__.load({
       + '.aXa_av_conflictText{flex:1;min-width:140px;font-size:12px;line-height:17px;color:var(--dsw-alias-label-error)}'
       + '.aXa_av_editorWrap{flex:1;min-height:0;overflow:auto;border-top:1px solid var(--dsw-alias-border-l2);background:var(--aXa_av_pal-bg,var(--dsw-alias-bg-base))}'
       + '.aXa_av_editorWrap .cm-editor{height:100%;background:var(--aXa_av_pal-bg,var(--dsw-alias-bg-base))}'
+      // Monaco scrolls itself and sizes to the container; the wrapper's
+      // overflow:auto would add a second scrollbar around it.
+      + '.aXa_av_monaco{overflow:hidden}'
+      + '.aXa_av_monaco .monaco-editor{height:100%}'
       + '.aXa_av_editorWrap .cm-editor.cm-focused{outline:none}'
       // Editor font (2026-09-01): the fallback is an explicit Fira-free
       // default stack, NOT --ds-font-family-code — that token lists
@@ -675,6 +679,11 @@ window.__ModuleLoader__.load({
           handle = await M.openFile(ref.current, '/' + relPath, text, {
             editable: !!editable,
             dark: isDarkMode(),
+            // The viewer's font choice reached CodeMirror through a css var on
+            // .cm-content. Monaco has to be TOLD its font (it measures glyph
+            // width from it), so the var is read and passed instead.
+            fontFamily: getComputedStyle(document.documentElement)
+              .getPropertyValue('--arxa-editor-font').trim() || 'Fira Code',
             onChange: () => { if (onDirty) onDirty() },
           })
           // The await above can outlive the effect: dispose what we just made
@@ -696,7 +705,7 @@ window.__ModuleLoader__.load({
           if (docRef) docRef.current = null
         }
       }, [relPath, text, editable])
-      return h('div', { className: 'aXa_av_editorWrap', ref })
+      return h('div', { className: 'aXa_av_editorWrap aXa_av_monaco', ref })
     }
 
     function DiffView({ relPath, original, text }) {
