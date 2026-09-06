@@ -1,0 +1,44 @@
+{
+  "name": "arxa-artifact-viewer-monaco-build",
+  "private": true,
+  "type": "module",
+  "description": "Isolated dev-time sources for the Monaco/VS Code viewer bundle (G7-G12). npm install HERE — root npm operations never see this dir (same reason as vendor-build). Output goes to dist/ and is NOT committed: pack-sidecar builds it into the engine payload (G12); the lockfile IS committed so the build is reproducible.",
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@codingame/monaco-vscode-api": "36.2.7",
+    "@codingame/monaco-vscode-editor-api": "36.2.7",
+    "@codingame/monaco-vscode-configuration-service-override": "36.2.7",
+    "@codingame/monaco-vscode-extensions-service-override": "36.2.7",
+    "@codingame/monaco-vscode-files-service-override": "36.2.7",
+    "@codingame/monaco-vscode-keybindings-service-override": "36.2.7",
+    "@codingame/monaco-vscode-languages-service-override": "36.2.7",
+    "@codingame/monaco-vscode-quickaccess-service-override": "36.2.7",
+    "@codingame/monaco-vscode-textmate-service-override": "36.2.7",
+    "@codingame/monaco-vscode-theme-service-override": "36.2.7",
+    "@codingame/monaco-vscode-css-default-extension": "36.2.7",
+    "@codingame/monaco-vscode-dart-default-extension": "36.2.7",
+    "@codingame/monaco-vscode-html-default-extension": "36.2.7",
+    "@codingame/monaco-vscode-javascript-default-extension": "36.2.7",
+    "@codingame/monaco-vscode-json-default-extension": "36.2.7",
+    "@codingame/monaco-vscode-markdown-language-features-default-extension": "36.2.7",
+    "@codingame/monaco-vscode-markdown-math-default-extension": "36.2.7",
+    "@codingame/monaco-vscode-media-preview-default-extension": "36.2.7",
+    "@codingame/monaco-vscode-rust-default-extension": "36.2.7",
+    "@codingame/monaco-vscode-theme-defaults-default-extension": "36.2.7",
+    "@codingame/monaco-vscode-typescript-basics-default-extension": "36.2.7",
+    "monaco-languageclient": "10.7.0",
+    "vscode-ws-jsonrpc": "3.5.0",
+    "monaco-editor": "npm:@codingame/monaco-vscode-editor-api@36.2.7",
+    "vscode": "npm:@codingame/monaco-vscode-extension-api@36.2.7"
+  },
+  "devDependencies": {
+    "@codingame/monaco-vscode-rollup-vsix-plugin": "36.2.7",
+    "vite": "8.2.2"
+  },
+  "overrides": {
+    "monaco-editor": "npm:@codingame/monaco-vscode-editor-api@36.2.7",
+    "vscode": "npm:@codingame/monaco-vscode-extension-api@36.2.7"
+  }
+}
