@@ -18,7 +18,15 @@
  * (arxa-cicd-card-<timestamp>), a temp ARXA_HOME and a temp workspace root.
  * It never touches an existing repository or the user's real orgs.
  *
- *   node scripts/card-cicd-smoke.mjs --yes [--keep]
+ *   node scripts/card-cicd-smoke.mjs --yes [--keep] [--project]
+ *
+ * --project runs the OTHER half of the model. An arxa org and an arxa project
+ * each get their OWN GitHub repo, and a session's PR goes to whichever repo
+ * its workspace routes to — card.pr.* read project.json for a project seat and
+ * org.json otherwise (repoFor). Without --project this exercises the org path
+ * only, which is half the code. --project also uses arxa's REAL publish and
+ * REAL naming (repo = the org/project slug) instead of a throwaway name, so
+ * the result looks like what a user would actually get.
  *
  * --keep leaves the repo on GitHub so the whole history can be read back.
  * Exit 0 = every assertion held.
@@ -36,6 +44,9 @@ if (!argv.includes('--yes')) {
   process.exit(2)
 }
 const keep = argv.includes('--keep')
+const projectMode = argv.includes('--project')
+const ORG_NAME = 'Arxa Smoke Org'
+const PROJECT_NAME = 'Arxa Smoke Project'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(here, '..')
@@ -69,6 +80,9 @@ console.log(`\ncard CI/CD smoke\nrepo: ${repoUrl}  (private${keep ? ', KEPT for 
 
 // ---- the github service, over arxa's OWN transport -------------------------
 const frame = await import(P('github-link', 'lib', 'frame.js'))
+// createPrivateRepoApi lives in auth.js, not frame.js — the first --project
+// run failed with "createPrivateRepoApi missing" for exactly this reason.
+const auth = await import(P('github-link', 'lib', 'auth.js'))
 const apiBase = 'https://api.github.com'
 const wrap = (fn) => (args) => fn({ ...args, accessToken, fetch: globalThis.fetch, apiBase })
 const github = {
@@ -91,10 +105,28 @@ const github = {
     `${apiBase}/repos/${o}/${n}/git/refs/heads/${branch}`,
     { method: 'DELETE', headers: { accept: 'application/vnd.github+json', authorization: 'Bearer ' + accessToken, 'user-agent': 'arxa-studio' } },
   ).then((r) => ({ ok: r.status === 204 || r.status === 422 })),
-  // No self-hosted runner exists for a fresh throwaway repo, so this is what
-  // the real service reports when the runner has never registered. The wake
-  // path is asserted on its REFUSAL rather than pretended green.
-  ensureRunner: async () => { throw new Error('no self-hosted runner registered for this repo') },
+  // --project drives arxa's REAL publish, which needs these three.
+  createPrivateRepo: (name) => wrap(auth.createPrivateRepoApi)({ name }),
+  repoNameTaken: async (name) => {
+    const r = await fetch(`${apiBase}/repos/${owner}/${name}`, { headers: { accept: 'application/vnd.github+json', authorization: 'Bearer ' + accessToken, 'user-agent': 'arxa-studio' } })
+    return r.status === 200
+  },
+  // Settings matter (they decide which merge methods GitHub allows, and
+  // card.pr.merge once 405'd on a squash-only repo). Protection needs a paid
+  // plan on private repos, so it is allowed to fail without failing publish —
+  // which is exactly how the real bridge treats it.
+  wireFrame: async (o, n, payload) => {
+    try { await wrap(frame.settingsApi)({ owner: o, name: n, ...(payload?.settings ?? {}) }) } catch { /* best effort */ }
+    try {
+      const protection = await wrap(frame.protectionApi)({ owner: o, name: n, ...(payload?.protection ?? {}) })
+      return { ok: true, protection }
+    } catch (e) { return { ok: true, protection: 'unavailable: ' + String(e?.message ?? e).slice(0, 80) } }
+  },
+  // NEVER actually register a runner: that would install a self-hosted runner
+  // on this machine as a side effect of a smoke test. A clean refusal is
+  // recorded in the manifest (frameRunner) and publish continues, which is
+  // also the state card.runner.wake is asserted against below.
+  ensureRunner: async () => ({ ok: false, reason: 'skipped-by-smoke' }),
 }
 
 // The workflow the PR will actually run. `quick` proves green; `hold` runs
@@ -117,13 +149,17 @@ jobs:
 `
 
 let created = false
+let seatOwner = owner
+let seatRepo = repoName
 try {
   // ---- 1. the throwaway remote --------------------------------------------
   // No --add-readme: an initial commit on the remote shares no history with
   // the org repo and every PR then 422s.
-  sh('gh', ['repo', 'create', `${owner}/${repoName}`, '--private'])
-  created = true
-  check('a throwaway private repo exists on GitHub', true)
+  if (!projectMode) {
+    sh('gh', ['repo', 'create', `${owner}/${repoName}`, '--private'])
+    created = true
+    check('a throwaway private repo exists on GitHub', true)
+  }
 
   // ---- 2. a real org + a real session, wired to that remote ----------------
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-card-home-'))
@@ -149,30 +185,88 @@ try {
     { action, arg })
   const val = (r) => r?.result ?? r
 
-  await act('org.create', { name: 'Card Smoke Co', link: false })
-  const org = (await call('/__arxa/sidebar/state', {})).orgs.find((o) => o.open)
-  const manifestPath = path.join(org.path, 'org.json')
-  fs.writeFileSync(manifestPath, JSON.stringify({
-    ...JSON.parse(fs.readFileSync(manifestPath, 'utf8')),
-    repoOwner: owner, repoName, localOnly: false,
-  }, null, 2))
-  const authRemote = `https://${owner}:${accessToken}@github.com/${owner}/${repoName}.git`
-  sh('git', ['-C', org.path, 'remote', 'add', 'origin', `${repoUrl}.git`])
+  // The repo the SESSION's PR will land in. For an org seat that is the org
+  // repo; for a project seat it is the project's own, which is the whole
+  // point of --project (repoFor picks project.json over org.json).
+  let workspace = 'notes'
+  let org
 
-  // The workflow must be on the BASE branch for pull_request to trigger it.
-  fs.mkdirSync(path.join(org.path, '.github', 'workflows'), { recursive: true })
-  fs.writeFileSync(path.join(org.path, '.github', 'workflows', 'ci.yml'), WORKFLOW)
-  sh('git', ['-C', org.path, 'add', '.github'])
-  sh('git', ['-C', org.path, 'commit', '-m', 'ci: add the workflow the card checks read'])
-  sh('git', ['-C', org.path, 'push', authRemote, 'main:refs/heads/main'])
+  if (projectMode) {
+    // arxa's REAL publish: it names the repo after the slug and pushes the
+    // org's own history into it. No hand-written manifest anywhere.
+    await act('org.create', { name: ORG_NAME, link: true })
+    org = (await call('/__arxa/sidebar/state', {})).orgs.find((o) => o.open)
+    // org.create with link:true only GATES on a linked account — it does not
+    // publish. github.publish is the separate action that creates the repo.
+    const publishedOrg = await act('github.publish', { orgId: org.id })
+    const orgM = JSON.parse(fs.readFileSync(path.join(org.path, 'org.json'), 'utf8'))
+    check('the ORG published to a repo arxa named after it',
+      orgM.repoOwner === owner && typeof orgM.repoName === 'string' && orgM.repoName !== '',
+      JSON.stringify({ repoOwner: orgM.repoOwner, repoName: orgM.repoName, publish: JSON.stringify(publishedOrg).slice(0, 140) }))
+    created = true
+
+    const made = await act('project.create', { orgId: org.id, name: PROJECT_NAME })
+    const projectSlug = val(made)?.slug ?? val(made)?.project?.slug
+    check('a project was created inside the org', typeof projectSlug === 'string' && projectSlug !== '',
+      JSON.stringify(made).slice(0, 260))
+    const connected = await act('project.connect', { orgId: org.id, projectSlug })
+    const projPath = path.join(org.path, 'projects', projectSlug)
+    const projM = JSON.parse(fs.readFileSync(path.join(projPath, 'project.json'), 'utf8'))
+    check('the PROJECT published to its OWN repo, separate from the org\'s',
+      projM.repoOwner === owner && typeof projM.repoName === 'string'
+      && projM.repoName !== '' && projM.repoName !== orgM.repoName,
+      JSON.stringify({ org: orgM.repoName, project: projM.repoName, connected: JSON.stringify(connected).slice(0, 120) }))
+    seatOwner = projM.repoOwner
+    seatRepo = projM.repoName
+
+    // The workflow goes on the PROJECT repo's base branch — that is where a
+    // project session's PR is opened, not the org repo.
+    const projRemote = `https://${owner}:${accessToken}@github.com/${seatOwner}/${seatRepo}.git`
+    fs.mkdirSync(path.join(projPath, '.github', 'workflows'), { recursive: true })
+    fs.writeFileSync(path.join(projPath, '.github', 'workflows', 'ci.yml'), WORKFLOW)
+    sh('git', ['-C', projPath, 'add', '.github'])
+    sh('git', ['-C', projPath, 'commit', '-m', 'ci: add the workflow the card checks read'])
+    sh('git', ['-C', projPath, 'push', projRemote, 'main:refs/heads/main'])
+
+    // Read a real container off disk rather than hard-coding one: the fixed
+    // project vocabulary has changed twice (v2 -> v3 -> v4), so a literal
+    // would rot. (workspacesView is a CLIENT store, not host state — asking
+    // the host for it returns nothing, which is how the first pass here
+    // silently fell back.)
+    const prefix = 'projects/' + projectSlug + '/'
+    const containers = fs.readdirSync(projPath, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+      .map((e) => e.name).sort()
+    check('the project scaffolded its fixed containers, which are its workspaces',
+      containers.length > 0, 'containers: ' + JSON.stringify(containers))
+    workspace = prefix + (containers.includes('notes') ? 'notes' : containers[0])
+    console.log('  project workspace for the session: ' + workspace +
+      '   (of ' + containers.length + ': ' + containers.join(', ') + ')')
+  } else {
+    await act('org.create', { name: 'Card Smoke Co', link: false })
+    org = (await call('/__arxa/sidebar/state', {})).orgs.find((o) => o.open)
+    const manifestPath = path.join(org.path, 'org.json')
+    fs.writeFileSync(manifestPath, JSON.stringify({
+      ...JSON.parse(fs.readFileSync(manifestPath, 'utf8')),
+      repoOwner: owner, repoName, localOnly: false,
+    }, null, 2))
+    const authRemote = `https://${owner}:${accessToken}@github.com/${owner}/${repoName}.git`
+    sh('git', ['-C', org.path, 'remote', 'add', 'origin', `${repoUrl}.git`])
+    fs.mkdirSync(path.join(org.path, '.github', 'workflows'), { recursive: true })
+    fs.writeFileSync(path.join(org.path, '.github', 'workflows', 'ci.yml'), WORKFLOW)
+    sh('git', ['-C', org.path, 'add', '.github'])
+    sh('git', ['-C', org.path, 'commit', '-m', 'ci: add the workflow the card checks read'])
+    sh('git', ['-C', org.path, 'push', authRemote, 'main:refs/heads/main'])
+  }
   check('the base branch and its workflow are on the remote',
-    ghJson(['api', `repos/${owner}/${repoName}/branches/main`, '--jq', '{n:.name}'])?.n === 'main')
+    ghJson(['api', `repos/${seatOwner}/${seatRepo}/branches/main`, '--jq', '{n:.name}'])?.n === 'main')
 
   // ---- 3. card.status on a fresh seat --------------------------------------
-  const sess = await act('workspace.new-session', { orgId: org.id, workspace: 'notes' })
+  const sess = await act('workspace.new-session', { orgId: org.id, workspace })
   const sid = sess.result?.id
   check('a new session/worktree was minted with an org-led path identity',
-    sess.ok === true && String(sid ?? '').includes('/notes/'), JSON.stringify(sess).slice(0, 200))
+    sess.ok === true && String(sid ?? '').includes('/' + workspace.split('/')[0] + '/'),
+    'workspace=' + workspace + ' ' + JSON.stringify(sess).slice(0, 200))
   const gwlib = await import(P('git-workspace', 'lib', 'sessions.js'))
   const row = gwlib.parkedSessions(org.path, process.env).find((s) => s.id === sid)
   const wt = row?.worktree
@@ -199,7 +293,8 @@ try {
     Boolean(pb?.pr?.number), 'pr=' + JSON.stringify(pb?.pr) + ' reason=' + String(pb?.prReason))
   const prNumber = pb?.pr?.number
   if (!prNumber) throw new Error('no PR opened — the CI assertions all need one')
-  console.log(`\n  → PR: ${repoUrl}/pull/${prNumber}\n`)
+  const seatUrl = `https://github.com/${seatOwner}/${seatRepo}`
+  console.log(`\n  → PR: ${seatUrl}/pull/${prNumber}\n`)
 
   // ---- 5. the checks the card reads are a REAL Actions run ------------------
   const statusUntil = async (want, timeoutMs) => {
@@ -272,8 +367,13 @@ try {
   // ---- 8. integrate main into the session branch ---------------------------
   // Give main something to integrate, or the action is a no-op and proves
   // nothing about the path the user actually hits after someone else merges.
-  sh('git', ['-C', org.path, 'commit', '--allow-empty', '-m', 'chore: move main under the session'])
-  sh('git', ['-C', org.path, 'push', authRemote, 'main:refs/heads/main'])
+  // The seat's repo, not the org's: a project session's main lives in the
+  // project checkout. row.repoPath is whatever repo the seat actually routes
+  // to, which is the same thing repoFor() resolves on the host.
+  const seatRepoPath = row.repoPath ?? org.path
+  const seatRemote = `https://${owner}:${accessToken}@github.com/${seatOwner}/${seatRepo}.git`
+  sh('git', ['-C', seatRepoPath, 'commit', '--allow-empty', '-m', 'chore: move main under the session'])
+  sh('git', ['-C', seatRepoPath, 'push', seatRemote, 'main:refs/heads/main'])
   const integrated = await act('card.integrate', { sessionId: sid }); live('card.integrate')
   check('card.integrate brings main into the session worktree',
     integrated.ok === true, JSON.stringify(integrated).slice(0, 300))
@@ -299,15 +399,15 @@ try {
   const merged = await act('card.pr.merge', { sessionId: sid })
   check('card.pr.merge merges once — and only once — the run is green',
     merged.ok === true && val(merged)?.ok !== false, JSON.stringify(merged).slice(0, 300))
-  const prAfter = ghJson(['api', `repos/${owner}/${repoName}/pulls/${prNumber}`, '--jq', '{state:.state,merged:.merged,sha:.merge_commit_sha}'])
+  const prAfter = ghJson(['api', `repos/${seatOwner}/${seatRepo}/pulls/${prNumber}`, '--jq', '{state:.state,merged:.merged,sha:.merge_commit_sha}'])
   check('GitHub itself reports the PR merged, not just arxa',
     prAfter?.merged === true && prAfter?.state === 'closed', JSON.stringify(prAfter))
   check('the work is on main at the remote',
-    (ghJson(['api', `repos/${owner}/${repoName}/contents/note.md?ref=main`, '--jq', '{n:.name}'])?.n) === 'note.md')
+    (ghJson(['api', `repos/${seatOwner}/${seatRepo}/contents/note.md?ref=main`, '--jq', '{n:.name}'])?.n) === 'note.md')
 
   // ---- 10. cleanup ---------------------------------------------------------
-  await github.deleteBranch(owner, repoName, row.branch)
-  const branchGone = ghJson(['api', `repos/${owner}/${repoName}/branches/${row.branch}`, '--jq', '{n:.name}'])
+  await github.deleteBranch(seatOwner, seatRepo, row.branch)
+  const branchGone = ghJson(['api', `repos/${seatOwner}/${seatRepo}/branches/${row.branch}`, '--jq', '{n:.name}'])
   check('the session branch is cleaned off the remote after the merge', branchGone?.n === undefined, JSON.stringify(branchGone))
 
   // ---- 11. the actions a throwaway repo CANNOT exercise --------------------
@@ -339,10 +439,11 @@ try {
     minted !== undefined && minted.ok !== undefined, JSON.stringify(minted).slice(0, 240))
 
   console.log('\n--- what to look at on GitHub ---')
-  console.log('repo     : ' + repoUrl)
-  console.log('the PR   : ' + repoUrl + '/pull/' + prNumber)
-  console.log('commits  : ' + repoUrl + '/commits/main')
-  console.log('actions  : ' + repoUrl + '/actions')
+  if (projectMode) console.log('org repo : https://github.com/' + owner + '/' + ORG_NAME.replace(/ /g, '-') + '   (the org\'s own repo)')
+  console.log('repo     : ' + seatUrl + (projectMode ? '   (the PROJECT repo — its own, not the org\'s)' : ''))
+  console.log('the PR   : ' + seatUrl + '/pull/' + prNumber)
+  console.log('commits  : ' + seatUrl + '/commits/main')
+  console.log('actions  : ' + seatUrl + '/actions')
   console.log('\nactions driven LIVE through the card route (' + covered.length + '):')
   console.log('  ' + covered.join('\n  '))
 } catch (err) {

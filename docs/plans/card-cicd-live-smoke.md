@@ -114,6 +114,51 @@ quietly redefined:
   the explicit path is only reached when that failed. `cicd-smoke.mjs` L3
   already covers it.
 
+## The project path (`--project`)
+
+Added after the first run, because the org path is only half the model and the
+repo it produced looked orphaned on GitHub.
+
+**How arxa's model actually maps to GitHub.** An arxa org gets one repo named
+after its slug; an arxa project inside that org gets its **own** repo, also
+named after its slug. Both sit flat under the linked personal account
+(`repoOwner: creds.login`). The org/project nesting is arxa's structure on
+disk — GitHub only ever sees a flat list.
+
+**Which repo a PR lands in** is decided by `repoFor(s)`: a project seat reads
+`project.json`, anything else reads `org.json`. That is a genuinely separate
+branch of the code, and the org-only run never touched it.
+
+`--project` therefore uses arxa's REAL publish and REAL naming rather than a
+throwaway name: `org.create` → `github.publish` → `project.create` →
+`project.connect`, then the full cycle from a session inside a project
+container. Result — the same 15 card actions, all green, with the PR on the
+**project's** repo and a branch name that carries the whole identity:
+
+    arxa/Arxa-Smoke-Org/projects/Arxa-Smoke-Project/notes/note-wt-260906-001
+
+Three things the first `--project` attempt got wrong, all mine, all now fixed
+in the script:
+
+- `createPrivateRepoApi` lives in `auth.js`, not `frame.js`.
+- `org.create({ link: true })` only **gates** on a linked account; it does not
+  publish. `github.publish` is the separate action that creates the repo.
+- `workspacesView` is a CLIENT store, not host state, so asking the host for
+  the project's workspaces returned nothing and the code silently fell back to
+  a hard-coded container. It now reads the containers off disk — verified
+  against the published project: all ten of the v3 set
+  (`00-moodboard` … `08-deploy`, `notes`).
+
+**`ensureRunner` is stubbed to refuse**, deliberately: the real one would
+install a self-hosted runner on this machine as a side effect of a smoke test.
+Publish records the refusal in `frameRunner` and continues, which is also the
+state `card.runner.wake` is asserted against.
+
+**Branch protection is best-effort.** It needs a paid plan on private repos, so
+`wireFrame` records it as unavailable rather than failing the publish. Repo
+*settings* are applied, because those decide which merge methods GitHub allows
+and `card.pr.merge` once 405'd on a squash-only repo.
+
 ## Result
 
 `card cicd smoke: ALL GREEN` — 27 assertions.
