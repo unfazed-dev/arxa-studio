@@ -6,7 +6,7 @@
 // via -c. All state stays inside the workspace tree; nothing
 // machine-global is read or written.
 
-import { execFileSync, spawnSync } from 'node:child_process'
+import { execFile, execFileSync, spawnSync } from 'node:child_process'
 import os from 'node:os'
 import { ensureGit, gitBin } from './probe.js'
 
@@ -104,6 +104,33 @@ export function runGitProbe(args, { cwd, identity = STAGE_IDENTITY, env = proces
  *
  * @param {{ cwd: string, identity?: {name:string,email:string}, env?: object, allowFail?: boolean, timeout?: number }} opts
  */
+/** runGit without the freeze: the same git, args, env, identity and error
+ * shape, but the process runs on the event loop's terms. For the remote
+ * calls (fetch/push) on the org-open path — measured 2026-09-07: 8 fetches
+ * + 2 pushes to GitHub at 0.3–0.95s each blocked the host for ~10s after
+ * boot, and every request in that window waited. Resolves null on failure
+ * when `allowFail`, rejects with the runGit message otherwise. */
+export function runGitAsync(args, { cwd, identity = STAGE_IDENTITY, env = process.env, allowFail = false, timeout, objectDir } = {}) {
+  ensureGit(env)
+  const perRepo = ['-c', `safe.directory=${cwd}`]
+  return new Promise((resolve, reject) => {
+    execFile(gitBin(env), [...PINNED, ...perRepo, ...args], {
+      cwd,
+      env: childEnv(identity, env, objectDir),
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      ...(Number.isFinite(timeout) && timeout > 0 ? { timeout, killSignal: 'SIGKILL' } : {}),
+    }, (err, stdout, stderr) => {
+      if (!err) return resolve(String(stdout).trim())
+      if (allowFail) return resolve(null)
+      const detail = stderr ? String(stderr).trim() : err.message
+      const e = new Error(`git ${args[0]} failed in ${cwd}: ${detail}`)
+      e.cause = err
+      reject(e)
+    })
+  })
+}
+
 export function runGit(args, { cwd, identity = STAGE_IDENTITY, env = process.env, allowFail = false, timeout, objectDir } = {}) {
   ensureGit(env)
   // Global config is nulled above, which also disables any user

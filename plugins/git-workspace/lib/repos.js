@@ -9,7 +9,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFileSync, spawn } from 'node:child_process'
-import { runGit, STAGE_IDENTITY } from './run.js'
+import { runGit, STAGE_IDENTITY, runGitAsync } from './run.js'
 import { ensureGit, gitBin } from './probe.js'
 
 // Pinned config for DETACHED git workers, same surface as run.js's -c
@@ -307,6 +307,25 @@ export function pushRepo(dir, url, env = process.env) {
   return { ref, output }
 }
 
+/** pushRepo with the network call off the event loop (see runGitAsync). The
+ * ref reads stay synchronous — they are local and take milliseconds. */
+export async function pushRepoAsync(dir, url, env = process.env) {
+  if (typeof url !== 'string' || url.trim() === '') {
+    throw new TypeError('pushRepoAsync: url must be a non-empty string')
+  }
+  let ref = runGit(['symbolic-ref', '--short', 'HEAD'], { cwd: dir, env, allowFail: true })
+  if (!ref || ref.startsWith('arxa/')) {
+    ref = runGit(['show-ref', '--verify', '--hash', 'refs/heads/main'], { cwd: dir, env, allowFail: true }) !== null
+      ? 'main'
+      : 'master'
+  }
+  const output = await runGitAsync(['push', url, 'refs/heads/' + ref + ':refs/heads/' + ref], {
+    cwd: dir,
+    env: { ...env, GIT_TERMINAL_PROMPT: '0' },
+  })
+  return { ref, output }
+}
+
 /** Read the URL of the `origin` remote, or null when absent (allowFail). */
 export function getOrigin(dir, env = process.env) {
   return runGit(['remote', 'get-url', 'origin'], { cwd: dir, env, allowFail: true })
@@ -352,6 +371,21 @@ export function fetchRepo(dir, url, env = process.env, { timeout } = {}) {
   // (run.js documents the 6-minute freeze that taught us). Default stays
   // unbounded so existing callers are unchanged; the 30s status poll passes one.
   const out = runGit(['fetch', url, '+refs/heads/main:refs/remotes/origin/main'], {
+    cwd: dir,
+    env: { ...env, GIT_TERMINAL_PROMPT: '0' },
+    allowFail: true,
+    timeout,
+  })
+  return out !== null || runGit(['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main'], { cwd: dir, env, allowFail: true }) !== null
+}
+
+/** fetchRepo with the network call off the event loop (see runGitAsync).
+ * Same contract: true when the fetch succeeded or origin/main already exists. */
+export async function fetchRepoAsync(dir, url, env = process.env, { timeout } = {}) {
+  if (typeof url !== 'string' || url.trim() === '') {
+    throw new TypeError('fetchRepoAsync: url must be a non-empty string')
+  }
+  const out = await runGitAsync(['fetch', url, '+refs/heads/main:refs/remotes/origin/main'], {
     cwd: dir,
     env: { ...env, GIT_TERMINAL_PROMPT: '0' },
     allowFail: true,

@@ -73,6 +73,10 @@ import {
   setOrigin,
   getOrigin,
   pushRepo,
+  // 2026-09-07: the remote calls on the org-open heal/sync path run off the
+  // event loop — see runGitAsync. Same results, the host stays responsive.
+  fetchRepoAsync,
+  pushRepoAsync,
   spawnSnapshotOrgRepo,
   snapshotWorkerLive,
   listSessions,
@@ -228,14 +232,14 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     const creds = await githubBridge.gitCredentials()
     if (!creds || !creds.ok) return { ok: false, reason: 'no-creds' }
     try {
-      pushRepo(repoPath, pushUrlFor(repoUrl, creds), env)
+      await pushRepoAsync(repoPath, pushUrlFor(repoUrl, creds), env)
       return { ok: true, refreshed: false }
     } catch (err) {
       if (!AUTH_FAILURE_RE.test(String(err?.message ?? err))) throw err
       const fresh = await githubBridge.gitCredentials(true).catch(() => null)
       if (!fresh || !fresh.ok) throw err
       try {
-        pushRepo(repoPath, pushUrlFor(repoUrl, fresh), env)
+        await pushRepoAsync(repoPath, pushUrlFor(repoUrl, fresh), env)
         return { ok: true, refreshed: true }
       } catch { throw err }
     }
@@ -524,7 +528,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       const creds = await githubBridge.gitCredentials()
       if (!creds || !creds.ok) return 'no-creds'
       const url = pushUrlFor(manifest.repoUrl, creds)
-      if (!fetchRepo(repoPath, url, env)) return 'fetch-failed'
+      if (!(await fetchRepoAsync(repoPath, url, env))) return 'fetch-failed'
       /** A sync that reaches a healthy end state must CLEAR a stale failure.
        * Without this one blip left `publish-failed: … Invalid username or
        * token` on the manifest forever, so the org read as broken long after
@@ -661,13 +665,13 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
               manifest.repoName = target
               manifest.repoRenamePending = undefined
               try { setOrigin(repoPath, made.repo.repoUrl, env) } catch { /* best-effort */ }
-              pushRepo(repoPath, pushUrlFor(made.repo.repoUrl, creds), env)
+              await pushRepoAsync(repoPath, pushUrlFor(made.repo.repoUrl, creds), env)
               await wireFrameOnce(repoPath, kind)
               return { ok: true, skipped: 'published', slug, repoUrl: made.repo.repoUrl }
             }
             annotate({ githubStatus: 'publish-failed: repo rename failed: ' + String(made.error ?? made.reason ?? 'unknown') + ' — pending flag kept' })
           }
-          pushRepo(repoPath, pushUrlFor(manifest.repoUrl, creds), env)
+          await pushRepoAsync(repoPath, pushUrlFor(manifest.repoUrl, creds), env)
         }
       } catch (err) {
         annotate({ githubStatus: 'publish-failed: sync push failed: ' + String(err?.message ?? err) })
@@ -694,7 +698,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       }
       const creds = await githubBridge.gitCredentials()
       if (!creds.ok) throw new Error(creds.reason ?? 'github-unavailable')
-      pushRepo(repoPath, pushUrlFor(repoUrl, creds), env)
+      await pushRepoAsync(repoPath, pushUrlFor(repoUrl, creds), env)
       annotate({
         repoUrl,
         repoOwner: creds.login,
