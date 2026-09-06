@@ -176,6 +176,35 @@ function acquire (uriPath, text) {
   return e
 }
 
+/** What the editor should look like at a given container width.
+ *
+ *  The viewer is a side pane, not a window: it is routinely dragged down to a
+ *  few hundred pixels, and at that size the minimap and the gutters cost more
+ *  than they give while long lines run off the side with no way back. VS Code
+ *  itself only adapts the minimap, but VS Code's editor is rarely this narrow.
+ *
+ *  Breakpoints are container width in CSS px, chosen against the real chrome:
+ *  the minimap is ~110px, the folding + glyph gutter ~22px, line numbers ~40px.
+ *
+ *  ponytail: fixed thresholds, no setting. If someone wants the minimap back at
+ *  600px, that is a viewer preference passed through openFile — not a reason to
+ *  build a preference system now. */
+function layoutFor (width) {
+  return {
+    minimap: { enabled: width >= 700 },
+    // Below this a horizontal scrollbar is the only way to read a long line,
+    // and in a narrow pane that is a worse trade than wrapping.
+    wordWrap: width < 620 ? 'on' : 'off',
+    folding: width >= 460,
+    glyphMargin: width >= 460,
+    lineNumbers: width >= 360 ? 'on' : 'off',
+    lineDecorationsWidth: width >= 460 ? 10 : 0,
+    // Nothing to scroll horizontally once wrapped; the extra track just eats
+    // a line of height.
+    scrollbar: { horizontal: width < 620 ? 'hidden' : 'auto' },
+  }
+}
+
 /** Open `uriPath` in `container` and return the handle lib/client.js drives.
  *  Deliberately NOT a monaco object: the client holds one `docRef` that five
  *  call sites read, and leaking monaco's shape there would make phase 4-6 a
@@ -196,7 +225,24 @@ export async function openFile (container, uriPath, text, opts = {}) {
     // character width from the font it is TOLD about, so overriding this with
     // css instead would misplace the cursor.
     fontFamily: fontFamily + ', monospace',
+    ...layoutFor(container.getBoundingClientRect().width),
   })
+
+  // Re-apply on every container resize. automaticLayout already keeps the
+  // editor the right SIZE; this is what changes its SHAPE as the pane narrows.
+  // Guarded on the computed values, not the pixel width, so a drag does not
+  // push an updateOptions per frame.
+  let shape = ''
+  const ro = new ResizeObserver((entries) => {
+    const w = entries[0]?.contentRect?.width ?? 0
+    if (w === 0) return                      // a hidden pane measures 0
+    const next = layoutFor(w)
+    const key = JSON.stringify(next)
+    if (key === shape) return
+    shape = key
+    editor.updateOptions(next)
+  })
+  ro.observe(container)
   const sub = onChange ? model.onDidChangeContent(() => onChange()) : null
   let live = true
   return {
@@ -216,6 +262,7 @@ export async function openFile (container, uriPath, text, opts = {}) {
       if (!live) return
       live = false
       if (sub) sub.dispose()
+      ro.disconnect()
       // Only the EDITOR goes. The model and its registered file stay for the
       // life of the page (see `open` above) — disposing the model ref makes the
       // text-file service reload a uri whose file is still registered, and

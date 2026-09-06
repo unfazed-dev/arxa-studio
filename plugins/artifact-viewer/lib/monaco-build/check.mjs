@@ -72,7 +72,7 @@ server.listen(0, '127.0.0.1', () => {
       "window.__spike.step === 'done'",   // the page ran to the end
       'window.__spike.error === undefined',
       'window.__spike.editor === true',
-      'window.__spike.lines === 12',
+      'window.__spike.lines === 13',
       "window.__spike.lang === 'rust'",
       'window.__spike.tokens > 20',
       "window.__spike.lang2 === 'dart'",          // a second extension's grammar
@@ -89,6 +89,16 @@ server.listen(0, '127.0.0.1', () => {
       'window.__spike.themeFlipped === true',     // live dark/light flip
       'window.__spike.styled === true',           // the bundle loaded its OWN css
       'window.__spike.contained === true',        // and the editor stayed in its box
+      'window.__spike.resizeShrank === true',     // follows the container when it shrinks
+      'window.__spike.resizeRestored === true',   // and when it grows back
+      // Narrow-pane shape: the minimap and gutters get out of the way and long
+      // lines wrap instead of running off the side.
+      'window.__spike.wideMinimap === true',
+      'window.__spike.wideNoWrap === true',
+      'window.__spike.narrowMinimap === false',
+      'window.__spike.narrowWraps === true',
+      'window.__spike.tinyLineNumbers === 0',     // line numbers off when tiny
+      'window.__spike.restoredMinimap === true'
     ].join(' && '),
   ], { encoding: 'utf8' }, (err, stdout, stderr) => {
     server.close()

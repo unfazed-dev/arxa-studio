@@ -611,6 +611,15 @@ assert.ok(spikeSrc.includes('out.contained') && checkSrc.includes('window.__spik
   'the check asserts the editor renders INSIDE its container')
 assert.ok(clientSrc.includes('aXa_av_monaco'), 'the monaco lane has its own wrapper class (monaco owns its scrolling)')
 assert.ok(clientSrc.includes("getPropertyValue('--arxa-editor-font')"), 'the editor font setting is PASSED to monaco (it measures glyph width from it)')
+// The viewer is a SIDE PANE, routinely dragged narrow. automaticLayout keeps
+// the editor the right size; layoutFor changes its shape so the minimap and
+// gutters get out of the way and long lines wrap instead of running off.
+assert.ok(entrySrc.includes('function layoutFor ('), 'narrow-pane shape is a single table, not scattered conditionals')
+assert.ok(entrySrc.includes('new ResizeObserver'), 'the shape is re-applied as the pane resizes')
+assert.ok(entrySrc.includes('if (key === shape) return'), 'a drag does not push an updateOptions per frame')
+assert.ok(entrySrc.includes('ro.disconnect()'), 'the resize observer is disconnected with the editor')
+assert.ok(checkSrc.includes('window.__spike.narrowMinimap === false') && checkSrc.includes('window.__spike.narrowWraps === true'),
+  'the check proves the narrow shape in a browser, not just that the code exists')
 assert.match(clientSrc, /IconEnhanceOutline16/, 'format action uses the enhance glyph')
 assert.ok(clientSrc.includes('aXa_av_palMd'), 'markdown preview adopts the palette chrome')
 assert.ok(clientSrc.includes("'--aXa_av_pal-bg'"), 'palette CSS vars set on the root')
