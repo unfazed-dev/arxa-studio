@@ -1806,6 +1806,19 @@ window.__ModuleLoader__.load({
         })
       }, 'arxa-av: session mirror')
 
+      // Warm the editor before the first click. Traced 2026-09-07: a cold first
+      // open cost ~1s, of which the bundle import and VS Code's boot were
+      // ~600ms; every later open was ~0.2s. Deferred so it never competes with
+      // the shell's own startup; a click before it lands just waits on the same
+      // promise. The container is a throwaway — the workbench mounts on
+      // document.body and the editor part attaches to the real host at open.
+      ctx.effect(() => {
+        const id = setTimeout(() => {
+          ensureMonaco().then((M) => M.start(document.createElement('div'))).catch(() => { /* the open path reports */ })
+        }, 1500)
+        return () => clearTimeout(id)
+      }, 'arxa-av: warm editor')
+
       // Public ingress: ONE listener for 'arxa-av-open' (sidebar file rows,
       // gen-ui cards, the chip interceptor and the produced-file observer all
       // dispatch it). Parks the payload in the store and opens the column —

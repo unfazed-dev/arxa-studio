@@ -31,6 +31,10 @@ async function gw() {
 const RESERVED = ['.arxa/', '.git/', 'account/']
 
 /** Resolve a worktreeId against the open org: the org repo itself plus every
+ *  project repo. Matches the registry id (`RESTO/notes/note-wt-…`) OR the
+ *  dsh session id the chat runs under (`arxa-RESTO-notes-note-wt-…`): the
+ *  viewer mirrors the latter, and matching only the former made every
+ *  session open miss and fall back to the org copy (traced 2026-09-07).
  * project repo under projects/* (D37 nested repos). Loud null when unknown. */
 export async function resolveWorktree({ env = process.env, orgPath, worktreeId }) {
   const gwMod = await gw()
@@ -46,7 +50,7 @@ export async function resolveWorktree({ env = process.env, orgPath, worktreeId }
   for (const repoPath of candidates) {
     let rows = []
     try { rows = listSessions(repoPath, env) } catch { continue }
-    const row = rows.find((r) => r && r.id === worktreeId && r.state === 'open')
+    const row = rows.find((r) => r && (r.id === worktreeId || r.dshSessionId === worktreeId) && r.state === 'open')
     if (!row) continue
     const worktreePath = path.join(repoPath, ...SESSIONS_DIR.split('/'), worktreeId)
     if (fs.existsSync(worktreePath)) return { repoPath, worktreePath }

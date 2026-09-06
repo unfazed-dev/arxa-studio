@@ -31,11 +31,24 @@
     out.rejects.push(out.step + '=' + String((e.reason && (e.reason.name || e.reason.message)) ?? e.reason))
   })
 
+  // Where the first open's time goes: fetch+parse of the bundle, VS Code's
+  // boot (services, extension host, grammars), then the open itself. The
+  // second open is what every later click costs.
+  const now = () => Math.round(performance.now())
+  const t = {}
+  out.t = t
+  let tm = now()
   const m = await import('/__arxa/artifacts/vendor/arxa-monaco.js')
+  t.importMs = now() - tm
 
   out.step = 'open-rust'
+  tm = now()
+  await m.start(el)
+  t.bootMs = now() - tm
   // 1. open a rust file
+  tm = now()
   let h = await m.openFile(el, '/spike/main.rs', RS, { onChange: () => { out.changed = true } })
+  t.firstOpenMs = now() - tm
   await settle(2500)
   out.editor = !!h.editor
   out.lines = h.model.getLineCount()
@@ -46,7 +59,9 @@
   out.step = 'switch-dart'
   // 2. switch to a DIFFERENT file — a second language, from a second extension
   h.dispose()
+  tm = now()
   h = await m.openFile(el, '/spike/main.dart', DART)
+  t.secondOpenMs = now() - tm
   await settle(1200)
   out.lang2 = h.model.getLanguageId()
 
@@ -713,6 +728,6 @@
   }, null, 1)
   if (location.search.includes('dump')) document.body.appendChild(dump)
   try {
-    await fetch('report', { method: 'POST', body: JSON.stringify({ step: out.step, fail: out.fail, flow: out.flow, typedSeen: out.typedSeen, remountKeeps: out.remountKeeps, remountText: out.remountText, diffInsBg: out.diffInsBg, diffDelBg: out.diffDelBg, partErr: out.partErr, error: out.error }) })
+    await fetch('report', { method: 'POST', body: JSON.stringify({ step: out.step, fail: out.fail, t: out.t, flow: out.flow, typedSeen: out.typedSeen, remountKeeps: out.remountKeeps, remountText: out.remountText, diffInsBg: out.diffInsBg, diffDelBg: out.diffDelBg, partErr: out.partErr, error: out.error }) })
   } catch { /* the harness may not be listening */ }
 </script>

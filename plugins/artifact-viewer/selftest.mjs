@@ -761,6 +761,14 @@ assert.ok(clientSrc.includes("await M.openDiff(uri, diffOriginal, {"),
 // is writable, so VS Code hands it over editable. Without this the diff writes
 // files the code editor refuses to let you type in (proved in spike.html:
 // diffModRO/diffTyped).
+// The chat session id and the worktree registry id differ (traced 2026-09-07:
+// every session open missed and fell back to the org copy). The resolver
+// takes either, so the viewer's mirrored session reaches its worktree.
+assert.ok(fs.readFileSync(path2.join(here, 'lib', 'write-api.js'), 'utf8').includes("(r.id === worktreeId || r.dshSessionId === worktreeId)"),
+  'resolveWorktree matches the dsh session id as well as the registry id')
+// First-click cost: the bundle and VS Code's boot are warmed after startup.
+assert.ok(clientSrc.includes("'arxa-av: warm editor'") && clientSrc.includes('M.start(document.createElement(\'div\'))'),
+  'the editor bundle is warmed before the first click')
 // Click-to-paint trace (2026-09-07): one engine-log line per open, with the
 // phases the harness cannot see. Stays until the slow first load is explained.
 assert.ok(clientSrc.includes("const TRACE_ROUTE = '/__arxa/artifacts/trace'") && clientSrc.includes("trace.end('painted')"),
