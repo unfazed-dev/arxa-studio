@@ -9,6 +9,11 @@
   const RS2 = RS.replace('squares(5)', 'squares(9)')
   const el = document.getElementById('ed')
   const settle = (ms) => new Promise((r) => setTimeout(r, ms))
+  // monaco paints every space in .view-lines as U+00A0, so innerText never
+  // matches a plain-space prefix. Cost two red assertions that were both
+  // describing correct behaviour.
+  const viewText = () => (document.querySelector('#part .monaco-editor .view-lines')?.innerText ?? '')
+    .replace(/\u00a0/g, ' ')
   // Published IMMEDIATELY and mutated in place: if a step hangs or throws, the
   // lens still sees how far the page got instead of `__spike is undefined`.
   const out = { step: 'start' }
@@ -206,7 +211,7 @@
     await settle(2500)
     out.vsOpened = document.querySelector('#part .monaco-editor') !== null
     out.vsTabs = document.querySelectorAll('#part .tabs-container .tab').length
-    out.vsText = (document.querySelector('#part .monaco-editor .view-lines')?.innerText ?? '').slice(0, 40)
+    out.vsText = viewText().slice(0, 40)
     try { Object.assign(out, await m.editorPartInfo()) } catch (e) { out.infoErr = String(e && e.message || e) }
     const pEl = document.getElementById('part')
     out.partHtml = (pEl.innerHTML || '').length
@@ -229,14 +234,153 @@
     out.previewTitle = [...document.querySelectorAll('iframe')]
       .map((f) => { try { return f.contentDocument?.body?.innerText ?? '' } catch { return '' } })
       .some((t) => t.includes('Title'))
+    // ---- a CUSTOM EDITOR: media-preview's image viewer -------------------
+    // A binary file, drawn here rather than shipped: RegisteredMemoryFile takes
+    // string | Uint8Array, and the whole question is whether a non-text file can
+    // reach a webview-backed custom editor at all. It is the same door the PDF
+    // question sits behind.
+    out.step = 'image-preview'
+    const cv = document.createElement('canvas')
+    cv.width = 64; cv.height = 64
+    const cx = cv.getContext('2d')
+    cx.fillStyle = '#e0562d'; cx.fillRect(0, 0, 64, 64)
+    cx.fillStyle = '#ffffff'; cx.fillRect(16, 16, 32, 32)
+    const blob = await new Promise((r) => cv.toBlob(r, 'image/png'))
+    const bytes = new Uint8Array(await blob.arrayBuffer())
+    out.pngBytes = bytes.length
+    await m.registerFile('/spike/pic.png', bytes)
+    const framesBeforeImg = document.querySelectorAll('iframe').length
+    await m.openEditor('/spike/pic.png')
+    await settle(3000)
+    const info2 = await m.editorPartInfo()
+    out.imgPane = info2.paneId
+    out.imgActive = info2.active
+    out.imgFrames = document.querySelectorAll('iframe').length - framesBeforeImg
+
+    // ---- close / reopen / external change --------------------------------
+    // The one-overlay finding (registerFileSystemOverlay stacks; disposing it
+    // breaks reload) was measured against createModelReference, not against the
+    // text-file service the part uses. The viewer switches files constantly, so
+    // this cycle is the normal path, not an edge.
+    out.step = 'cycle'
+    await m.closeAll()
+    await settle(400)
+    out.closedTabs = document.querySelectorAll('#part .tab').length
+    await m.openEditor('/spike/notes.md')
+    await settle(1200)
+    out.reopenText = viewText().slice(0, 12)
+    await m.updateFile('/spike/notes.md', '# Changed\n\nnew bytes from disk\n')
+    await settle(1500)
+    out.afterChange = viewText().slice(0, 12)
   } catch (e) { out.partErr = String(e && e.message || e) }
   out.step = 'done'
+
+  // ---- the assertions -----------------------------------------------------
+  // They live here, not in check.mjs, because --expect collapses to ONE boolean:
+  // a 60-term conjunction that comes back false names nothing. Evaluated one at
+  // a time so `out.fail` is the list of what actually broke, and --dump paints
+  // it. check.mjs asserts only `out.fail.length === 0`.
+  out.fail = []
+  for (const src of [
+
+      "out.step === 'done'",   // the page ran to the end
+      'out.error === undefined',
+      'out.editor === true',
+      'out.lines === 13',
+      "out.lang === 'rust'",
+      'out.tokens > 20',
+      "out.lang2 === 'dart'",          // a second extension's grammar
+      // markdown was opening as `plaintext` — the grammar extension was missing
+      // while the FEATURE extension was present, which looks like markdown is
+      // handled and is not.
+      "out.mdLang === 'markdown'",
+      // 2c: every extension an LSP row claims must resolve to a real language
+      // id. `plaintext` would be a row that starts a server and syncs nothing.
+      "out.ids.ts === 'typescript'",
+      "out.ids.tsx === 'typescriptreact'",
+      "out.ids.mts === 'typescript'",
+      "out.ids.cts === 'typescript'",
+      "out.ids.js === 'javascript'",
+      "out.ids.jsx === 'javascriptreact'",
+      "out.ids.mjs === 'javascript'",
+      "out.ids.cjs === 'javascript'",
+      "out.ids.html === 'html'",
+      "out.ids.css === 'css'",
+      "out.ids.scss === 'scss'",
+      "out.ids.less === 'less'",
+      "out.ids.json === 'json'",
+      "out.ids.jsonc === 'jsonc'",
+      "out.reopenLang === 'rust'",
+      'out.reopenFresh === true',      // reopen shows the NEW bytes
+      'out.reopenNoStale === true',    // and not the old ones
+      'out.edited === true',           // replaceRange (format action)
+      'out.onChangeFired === true',    // onChange (dirty tracking)
+      'out.diffChanges > 0',           // the editor worker answered
+      // MEASURED labels, not guessed — the first map keyed a label monaco
+      // never asks for, and only the ?? fallback hid it.
+      "out.workerLabels.includes('editorWorkerService')",
+      "out.workerLabels.includes('TextMateWorker')",
+      'out.themeFlipped === true',     // live dark/light flip
+      'out.styled === true',           // the bundle loaded its OWN css
+      'out.contained === true',        // and the editor stayed in its box
+      'out.resizeShrank === true',     // follows the container when it shrinks
+      'out.resizeRestored === true',   // and when it grows back
+      // Narrow-pane shape: the minimap and gutters get out of the way and long
+      // lines wrap instead of running off the side.
+      'out.wideMinimap === true',
+      'out.wideNoWrap === true',
+      'out.narrowMinimap === false',
+      'out.narrowWraps === true',
+      'out.tinyLineNumbers === 0',     // line numbers off when tiny
+      'out.restoredMinimap === true',
+      // Phase 3: the markdown open itself must not throw, and the webworker
+      // extension host must actually be running — it is the thing that was
+      // silently off while { url, options } was passed to an override that
+      // destructures { enableWorkerExtensionHost, iframeAlternateDomain }.
+      'out.mdErr === undefined',
+      'out.extHostFrames >= 1',
+      // Phase 7.1: VS Code's editor part, attached alone.
+      'out.partErr === undefined',
+      'out.partMounted === true',
+      // attachPart takes ONE part. The plan once claimed adopting views meant
+      // the whole workbench chrome in the docked pane; nothing else may paint.
+      'out.partChrome.length === 0',
+      // The file opens through IEditorService into VS Code's real file editor,
+      // in the MAIN part's group — not the standalone group wrapOpenEditor
+      // reuses when a monaco.editor.create editor already holds the uri.
+      'out.vsOpened === true',
+      "out.paneId === 'workbench.editors.files.textFileEditor'",
+      "out.mainGroups === '0:1'",
+      'out.vsTabs === 1',
+      // A webview. This is the whole point of the part.
+      'out.previewFrames === 1',
+      // Cancellation is swallowed on purpose; nothing ELSE may be rejecting.
+      "out.rejects.every((r) => r.endsWith('=Canceled'))",
+      // A CUSTOM EDITOR over binary bytes: media-preview's image viewer, on a
+      // png built in the page. RegisteredMemoryFile takes string | Uint8Array,
+      // so a non-text artifact can reach a webview-backed editor.
+      'out.pngBytes > 0',
+      "out.imgPane === 'WebviewEditor'",
+      "out.imgActive === 'file:///spike/pic.png'",
+      // close -> reopen -> external change. The viewer switches files
+      // constantly, so this cycle is the normal path, not an edge — and the
+      // one-overlay finding was measured against the OLD lane.
+      'out.closedTabs === 0',
+      "out.reopenText.startsWith('# Title')",
+      // Bytes changed underneath an OPEN editor reach it with no reload call:
+      // the fs provider fires the change and VS Code re-reads.
+      "out.afterChange.startsWith('# Changed')"
+  ]) {
+    let ok = false
+    try { ok = !!new Function('out', 'return (' + src + ')')(out) } catch (e) { ok = false }
+    if (!ok) out.fail.push(src)
+  }
   // --expect reports one boolean for the whole run, so the only way to SEE
   // which probe failed is to paint the values into the page and read them off
   // the capture. Same technique that found scss/less opening as plaintext.
   const dump = document.createElement('pre')
   dump.style.cssText = 'position:absolute;inset:0;z-index:99999;background:#111;color:#0f0;font:16px/1.5 monospace;padding:16px;margin:0;white-space:pre-wrap'
-  dump.textContent = JSON.stringify({
+  dump.textContent = 'FAILED (' + out.fail.length + '):\n' + out.fail.join('\n') + '\n\n' + JSON.stringify({
     partMounted: out.partMounted, partBox: out.partBox, partChrome: out.partChrome,
     vsOpened: out.vsOpened, vsTabs: out.vsTabs, vsText: out.vsText, vsOpenErr: out.vsOpenErr,
     vsPane: out.vsPane, editors: out.editors, active: out.active, partHtml: out.partHtml, infoErr: out.infoErr,
@@ -246,6 +390,8 @@
     previewFrames: out.previewFrames, previewTitle: out.previewTitle,
     extHostFrames: out.extHostFrames, partErr: out.partErr, mdErr: out.mdErr, error: out.error,
     rejects: out.rejects,
+    pngBytes: out.pngBytes, imgPane: out.imgPane, imgActive: out.imgActive, imgFrames: out.imgFrames,
+    closedTabs: out.closedTabs, reopenText: out.reopenText, afterChange: out.afterChange,
   }, null, 1)
   if (location.search.includes('dump')) document.body.appendChild(dump)
 </script>

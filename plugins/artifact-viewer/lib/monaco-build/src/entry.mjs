@@ -515,6 +515,27 @@ export async function editorPartInfo () {
   }
 }
 
+/** Close every editor in the part.
+ *
+ *  The viewer shows ONE artifact at a time and drives its own file selection
+ *  from the sidebar, so tabs must not accumulate behind it. */
+export async function closeAll () {
+  const groups = await getService(IEditorGroupsService)
+  for (const g of groups.mainPart.groups) await g.closeAllEditors()
+}
+
+/** Replace an already-registered file's bytes — an external change on disk.
+ *
+ *  registerFile() can only be called once per uri (registerFile THROWS on a uri
+ *  the provider already holds), so a changed file arrives here. */
+export async function updateFile (uriPath, text) {
+  await start()
+  const e = open.get(uriPath)
+  if (e === void 0) return registerFile(uriPath, text)
+  const bytes = typeof text === 'string' ? new TextEncoder().encode(text) : text
+  await fsp.writeFile(e.uri, bytes, { create: false, overwrite: true, unlock: false, atomic: false })
+}
+
 /** Run a VS Code command — `markdown.showPreview` and friends. */
 export async function runCommand (id, ...args) {
   const commandService = await getService(ICommandService)

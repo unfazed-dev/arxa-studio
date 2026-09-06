@@ -681,6 +681,33 @@ Still to do: `openFile(container, path, text)` calls
 has to be rebuilt over the editor part. Per finding 2 this is not optional —
 while the standalone editor exists, no preview can ever open for that file.
 
+#### 7.1-bis Custom editors, and the file cycle — **DONE, measured**
+
+`media-preview`'s image viewer opens a png built in the page:
+`RegisteredMemoryFile` takes `string | Uint8Array`, so a binary artifact reaches
+a webview-backed custom editor. `paneId` is `WebviewEditor`, and the capture
+shows the image centred with `spike > pic.png` breadcrumbs. **That is the same
+door the PDF question sits behind** — a `.vsix` custom editor would open the
+same way.
+
+The file cycle the viewer actually drives — close everything, reopen, then
+change the bytes underneath an open editor — works: `closeAll()` leaves zero
+tabs, reopening shows the file, and **an external change reaches the open editor
+with no reload call at all**, because the fs provider fires the change and VS
+Code re-reads. The D86 external-change lane becomes a `writeFile` on the
+provider.
+
+Two harness fixes came out of it, both worth keeping:
+
+- `--expect` collapses to ONE boolean, so a 60-term conjunction that comes back
+  false names nothing. The assertions moved into `src/spike.html`, which
+  evaluates them one at a time into `out.fail`; `check.mjs` asserts only
+  `out.fail.length === 0`, and `--dump` paints the failing list. It found its own
+  first bug immediately.
+- That bug: **monaco renders every space in `.view-lines` as U+00A0**, so
+  `innerText.startsWith('# Title')` is false for text that reads `# Title`. Two
+  assertions were red about correct behaviour.
+
 #### 7.2 Deletions, each only after its replacement is green on screen
 
 | vendored bundle | size | replaced by | site in `lib/client.js` |
@@ -698,11 +725,19 @@ it can only go once the preview is a webview.
 - **PDF.** VS Code ships no built-in PDF viewer. `tomoki1207.pdf` is a
   marketplace `.vsix` with no npm mirror; it would need vendoring with a sha256
   pin. `pdf.js` **stays** — deleting it would silently remove a working feature.
-- **Formatting without a server.** LSP formatting only covers languages with a
-  running server: rust, dart, ts/js, html, css/scss/less, json/jsonc. Markdown,
-  yaml, toml and every other extension in `FORMAT_EXTS` lose Shift-Alt-F when
-  `prettier.js` goes. Either keep prettier for those, or accept the loss —
-  decide with the measured list in hand, not now.
+- **Formatting.** The concrete diff, `FORMAT_EXTS` in `client.js` against the
+  server table in `lsp.js`:
+
+  | | extensions |
+  |---|---|
+  | formatted today, and a server covers it | `js` `mjs` `cjs` `jsx` `ts` `tsx` `json` `jsonc` `css` `scss` |
+  | formatted today, **no server — would be lost** | `md` `yaml` `yml` |
+  | not formatted today, a server would add it | `rs` `dart` `html` `htm` `less` |
+
+  So retiring the 2.1 MB `prettier.js` loses formatting for **markdown, yaml and
+  yml**, and gains it for **rust, dart, html and less**. Net three lost, five
+  gained. The user rules on whether markdown/yaml formatting is worth keeping a
+  2.1 MB bundle for.
 - **Bundle size.** dist was 15 MB before 7.0, 29 MB after it, and **33 MB**
   after 7.1. It ships in the engine payload.
 

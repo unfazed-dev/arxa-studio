@@ -80,81 +80,12 @@ server.listen(0, '127.0.0.1', () => {
     // worker rows exist because both were previously written on faith: the
     // overlay stacked per open (stale text on the second visit to a path), and
     // nothing had ever asked getWorker for a label.
-    '--expect=' + [
-      "window.__spike.step === 'done'",   // the page ran to the end
-      'window.__spike.error === undefined',
-      'window.__spike.editor === true',
-      'window.__spike.lines === 13',
-      "window.__spike.lang === 'rust'",
-      'window.__spike.tokens > 20',
-      "window.__spike.lang2 === 'dart'",          // a second extension's grammar
-      // markdown was opening as `plaintext` — the grammar extension was missing
-      // while the FEATURE extension was present, which looks like markdown is
-      // handled and is not.
-      "window.__spike.mdLang === 'markdown'",
-      // 2c: every extension an LSP row claims must resolve to a real language
-      // id. `plaintext` would be a row that starts a server and syncs nothing.
-      "window.__spike.ids.ts === 'typescript'",
-      "window.__spike.ids.tsx === 'typescriptreact'",
-      "window.__spike.ids.mts === 'typescript'",
-      "window.__spike.ids.cts === 'typescript'",
-      "window.__spike.ids.js === 'javascript'",
-      "window.__spike.ids.jsx === 'javascriptreact'",
-      "window.__spike.ids.mjs === 'javascript'",
-      "window.__spike.ids.cjs === 'javascript'",
-      "window.__spike.ids.html === 'html'",
-      "window.__spike.ids.css === 'css'",
-      "window.__spike.ids.scss === 'scss'",
-      "window.__spike.ids.less === 'less'",
-      "window.__spike.ids.json === 'json'",
-      "window.__spike.ids.jsonc === 'jsonc'",
-      "window.__spike.reopenLang === 'rust'",
-      'window.__spike.reopenFresh === true',      // reopen shows the NEW bytes
-      'window.__spike.reopenNoStale === true',    // and not the old ones
-      'window.__spike.edited === true',           // replaceRange (format action)
-      'window.__spike.onChangeFired === true',    // onChange (dirty tracking)
-      'window.__spike.diffChanges > 0',           // the editor worker answered
-      // MEASURED labels, not guessed — the first map keyed a label monaco
-      // never asks for, and only the ?? fallback hid it.
-      "window.__spike.workerLabels.includes('editorWorkerService')",
-      "window.__spike.workerLabels.includes('TextMateWorker')",
-      'window.__spike.themeFlipped === true',     // live dark/light flip
-      'window.__spike.styled === true',           // the bundle loaded its OWN css
-      'window.__spike.contained === true',        // and the editor stayed in its box
-      'window.__spike.resizeShrank === true',     // follows the container when it shrinks
-      'window.__spike.resizeRestored === true',   // and when it grows back
-      // Narrow-pane shape: the minimap and gutters get out of the way and long
-      // lines wrap instead of running off the side.
-      'window.__spike.wideMinimap === true',
-      'window.__spike.wideNoWrap === true',
-      'window.__spike.narrowMinimap === false',
-      'window.__spike.narrowWraps === true',
-      'window.__spike.tinyLineNumbers === 0',     // line numbers off when tiny
-      'window.__spike.restoredMinimap === true',
-      // Phase 3: the markdown open itself must not throw, and the webworker
-      // extension host must actually be running — it is the thing that was
-      // silently off while { url, options } was passed to an override that
-      // destructures { enableWorkerExtensionHost, iframeAlternateDomain }.
-      'window.__spike.mdErr === undefined',
-      'window.__spike.extHostFrames >= 1',
-      // Phase 7.1: VS Code's editor part, attached alone.
-      'window.__spike.partErr === undefined',
-      'window.__spike.partMounted === true',
-      // attachPart takes ONE part. The plan once claimed adopting views meant
-      // the whole workbench chrome in the docked pane; nothing else may paint.
-      'window.__spike.partChrome.length === 0',
-      // The file opens through IEditorService into VS Code's real file editor,
-      // in the MAIN part's group — not the standalone group wrapOpenEditor
-      // reuses when a monaco.editor.create editor already holds the uri.
-      'window.__spike.vsOpened === true',
-      "window.__spike.paneId === 'workbench.editors.files.textFileEditor'",
-      "window.__spike.mainGroups === '0:1'",
-      'window.__spike.vsTabs === 1',
-      // A webview. This is the whole point of the part.
-      'window.__spike.previewFrames === 1',
-      // Cancellation is swallowed on purpose; nothing ELSE may be rejecting.
-      "window.__spike.rejects.every((r) => r.endsWith('=Canceled'))"
-    ].join(' && '),
+    // ONE expression, because --expect collapses to a single boolean either
+    // way. The assertions themselves live in src/spike.html, where the page can
+    // evaluate them one at a time and NAME the ones that failed — `got false`
+    // on a 60-term conjunction names nothing.
+    '--expect=window.__spike.fail.length === 0',
+
   ], { encoding: 'utf8' }, (err, stdout, stderr) => {
     server.close()
     const out = (stdout ?? '') + (stderr ?? '')
