@@ -582,7 +582,7 @@ assert.match(clientSrc, /ensureVendor\('prettier\.js', 'ArxaPrettier'\)/, 'prett
 // old `CM.langForExt(ext)` pin is gone with the code it pinned. DiffView is
 // still CodeMirror — its pins below stay.
 assert.ok(clientSrc.includes("import(VENDOR('arxa-monaco.js'))"), 'monaco bundle loaded by dynamic import (ESM + workers, not a script tag)')
-assert.match(clientSrc, /M\.openFile\(ref\.current, '\/' \+ relPath, text/, 'editable lane opens the file in monaco, keyed by its path')
+assert.ok(clientSrc.includes('M.openFile(ref.current,'), 'editable lane opens the file in monaco (keyed by the real path — see the G8 block)')
 assert.ok(clientSrc.includes('onChange: () => { if (onDirty) onDirty() }'), 'dirty state rides the monaco model')
 assert.ok(clientSrc.includes('M.setTheme(dark)'), 'palette flip reaches an already-open monaco editor')
 assert.ok(clientSrc.includes('if (dead) { handle.dispose(); handle = null; return }'), 'an editor created after unmount is disposed, not leaked into a detached node')
@@ -620,6 +620,29 @@ assert.ok(entrySrc.includes('if (key === shape) return'), 'a drag does not push 
 assert.ok(entrySrc.includes('ro.disconnect()'), 'the resize observer is disconnected with the editor')
 assert.ok(checkSrc.includes('window.__spike.narrowMinimap === false') && checkSrc.includes('window.__spike.narrowWraps === true'),
   'the check proves the narrow shape in a browser, not just that the code exists')
+
+// ---- G8/G11: file identity is what makes the language service land ---------
+// A monaco model keyed at /<relPath> names a path no language server has ever
+// heard of, so every diagnostic, hover and definition would be attributed to a
+// file that does not exist. The host resolves the real path (it already does,
+// for its own path checks) and hands it back with the token.
+const hostSrc = fs.readFileSync(path2.join(here, 'lib', 'index.js'), 'utf8')
+const lspSrc = fs.readFileSync(path2.join(here, 'lib', 'lsp.js'), 'utf8')
+assert.ok(hostSrc.includes("absPath: absOf(open.orgPath, body.relPath)"), 'the read token route returns the file\'s real path')
+assert.ok(hostSrc.includes('absPath: wtAbs'), 'the worktree token route returns it too (resolveWorktreeFile already knew it)')
+assert.ok(hostSrc.includes("path: '/__arxa/artifacts/lsp'"), 'the lsp socket is registered as an upgrade route')
+assert.ok(hostSrc.includes("lspBridge.stopAll('org-switch')"), 'an org switch stops every language server')
+assert.ok(hostSrc.includes('resolveAbs: async ({ relPath, session, orgPath })'), 'the HOST resolves paths — the client never names one')
+assert.ok(lspSrc.includes('const root = projectRootFor(absFile, orgPath, servers[lang].rootMarkers, exists)'),
+  'the server is rooted at the project, not the org (an org has no Cargo.toml, so it would report nothing)')
+assert.ok(clientSrc.includes("M.openFile(ref.current, absPath || ('/' + relPath), text"), 'the model is keyed on the real path, falling back to the relative one')
+assert.ok(clientSrc.includes("fetchTokenRaw({ scope: 'lsp' })"), 'the socket uses the separate lsp token class')
+assert.ok(clientSrc.includes('M.connectLanguageServer(lang, { url: wsUrl, token, relPath, session })'),
+  'the editor attaches a language client, passing the session so a worktree file resolves')
+assert.match(clientSrc, /catch \{ \/\* no language service; the editor is unaffected \*\/ \}/,
+  'a missing language service NEVER fails the open — the editor works without one')
+assert.ok(entrySrc.includes("['arxa-lsp', token]"), 'the bundle sends the token as a subprotocol (a browser cannot set headers)')
+assert.ok(entrySrc.includes('if (langClients.has(lang)) return true'), 'one language client per language, not one per file opened')
 assert.match(clientSrc, /IconEnhanceOutline16/, 'format action uses the enhance glyph')
 assert.ok(clientSrc.includes('aXa_av_palMd'), 'markdown preview adopts the palette chrome')
 assert.ok(clientSrc.includes("'--aXa_av_pal-bg'"), 'palette CSS vars set on the root')

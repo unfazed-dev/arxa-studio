@@ -377,20 +377,55 @@ assumed.
 installed on this machine — a routing row nobody has ever exercised is a
 liability, not a head start, so they arrive with the install flow in 2c.
 
-#### 2b. Connecting the editor — NEXT, and it has a real design question
+#### 2b. File identity + the editor connected — **DONE**
 
-The socket works; the editor is not yet attached to it. The blocker is **file
-identity**: the editor currently opens models at `/<relPath>`, but a language
-server needs the real on-disk path or every diagnostic, hover and definition
-lands on the wrong file. Fixing it means the viewer must know the absolute path
-of what it opened — easy for an org file (the token route already knows the org
-root) and less so for a session worktree file, which resolves through a
-different path. That is its own change and its own commit.
+**The model is keyed on the file's REAL path.** A model at `/<relPath>` names a
+path no language server has ever heard of, so every diagnostic, hover and
+definition would be attributed to a file that does not exist. The host already
+resolved the real path for its own path checks in both lanes — the org lane
+computed `abs` to validate it, and the worktree lane called
+`resolveWorktreeFile` and threw the answer away. Both now hand it back with the
+token, so the client never joins path fragments itself.
+
+**The server is rooted at the PROJECT, not the org.** This is the difference
+between the language service working and silently doing nothing: an arxa org
+holds notes, meetings and projects, so it has no `Cargo.toml` at its root and a
+server started there reports nothing at all, with no error to explain the
+silence. `projectRootFor` walks up from the file to the nearest manifest,
+**bounded by the org root** — a manifest above the open org must never become a
+server root. Session worktrees live at `<repo>/.arxa/worktrees/<id>`, inside the
+org, so the same walk finds the project copy inside the worktree, which is the
+right root for a file being edited there.
+
+The client names a **relative** path and (for a worktree file) a session; the
+host says where that is. Nothing the client sends is used as a filesystem path.
+
+**Failure is silent by design.** No server for the language, no manifest above
+the file, no installed binary — each closes the socket and the editor carries on
+exactly as before. A language service must never turn opening a file into an
+error.
+
+**36 assertions**, ending with a real `rust-analyzer` in a real temp cargo
+project, asserted to be rooted at `projects/demo` rather than the org above it.
+
+Two of the edits that built this **silently did nothing** and were caught only
+because the live test went red: the file used a NUL key separator where the
+patch expected a space, so `createLspBridge`'s new parameters and `ensureServer`'s
+rename were both no-ops. Every patch here now asserts it matched.
+
+#### 2c. The rest of the languages + install flow — NEXT
 
 `MonacoLanguageClient` 10.7.0 takes `{ id, name, clientOptions, messageTransports }`
 — confirmed from the installed types, not from memory.
 
-#### 2c. The rest of the languages + install flow
+`typescript-language-server` and `vscode-langservers-extracted` (html/css/json)
+are still absent from this machine, so their rows and the Install flow land
+together — a routing row for a server nobody can start just buys a socket that
+closes 4004.
+
+**Unverified on screen:** everything in 2b above is proven host-side and by
+static pins on the client. Whether diagnostics actually appear under the cursor
+needs a reload and a real Rust or Dart file in an open org.
 
 Original plan below.
 

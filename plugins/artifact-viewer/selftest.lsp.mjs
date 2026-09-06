@@ -14,10 +14,13 @@
  */
 import assert from 'node:assert/strict'
 import http from 'node:http'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { WebSocketServer, WebSocket } from 'ws'
 import {
-  LANG_SERVERS, langForPath, createFrameReader, frame, tokenFromProtocols, createLspBridge,
+  LANG_SERVERS, langForPath, createFrameReader, frame, tokenFromProtocols, createLspBridge, projectRootFor,
 } from './lib/lsp.js'
 import { issueToken } from './lib/tokens.js'
 
@@ -32,6 +35,37 @@ assert.equal(langForPath('lib/widget.dart'), 'dart'); ok('.dart routes to dart')
 assert.equal(langForPath('notes/readme.md'), null); ok('an unserved extension routes to NOTHING (the editor still opens)')
 assert.equal(langForPath('Makefile'), null); ok('a file with no extension does not crash the router')
 assert.equal(langForPath('SRC/MAIN.RS'), 'rust'); ok('extension match is case-insensitive')
+
+// ---- the project root, not the org -----------------------------------------
+// An arxa org holds notes, meetings and projects. A server rooted at the org
+// finds no Cargo.toml and reports NOTHING, with no error to explain the
+// silence — so the root has to be the directory holding the manifest.
+{
+  const has = (set) => (p) => set.includes(p)
+  assert.equal(
+    projectRootFor('/org/projects/app/src/main.rs', '/org', ['Cargo.toml'], has(['/org/projects/app/Cargo.toml'])),
+    '/org/projects/app'); ok('the root is the nearest directory with a manifest, not the org')
+  assert.equal(
+    projectRootFor('/org/notes/scratch.rs', '/org', ['Cargo.toml'], has([])),
+    null); ok('a loose file with no project above it gets NO server (rather than a useless one)')
+  // Bounded by the org: a manifest above the open org must never become a root,
+  // or opening one file could root a language server anywhere up the filesystem.
+  assert.equal(
+    projectRootFor('/org/a/main.rs', '/org', ['Cargo.toml'], has(['/Cargo.toml', '/org/../Cargo.toml'])),
+    null); ok('the walk stops at the org root — a manifest ABOVE it is never used')
+  assert.equal(
+    projectRootFor('/elsewhere/main.rs', '/org', ['Cargo.toml'], has(['/elsewhere/Cargo.toml'])),
+    null); ok('a file outside the open org is refused outright')
+  // Worktrees live at <repo>/.arxa/worktrees/<id>, inside the org, so the same
+  // walk finds the project copy INSIDE the worktree — the right root for a file
+  // being edited there, not the main checkout's.
+  assert.equal(
+    projectRootFor('/org/.arxa/worktrees/s1/projects/app/src/m.rs', '/org', ['Cargo.toml'],
+      has(['/org/projects/app/Cargo.toml', '/org/.arxa/worktrees/s1/projects/app/Cargo.toml'])),
+    '/org/.arxa/worktrees/s1/projects/app'); ok('a worktree file roots at the worktree copy, not the main checkout')
+  assert.equal(LANG_SERVERS.rust.rootMarkers[0], 'Cargo.toml'); ok('rust roots on Cargo.toml')
+  assert.equal(LANG_SERVERS.dart.rootMarkers[0], 'pubspec.yaml'); ok('dart roots on pubspec.yaml')
+}
 
 // ---- framing ---------------------------------------------------------------
 // THE bug this reader exists to avoid: Content-Length counts BYTES. A body
@@ -83,14 +117,15 @@ function fakeSocket () {
 }
 const neverUpgrade = { handleUpgrade: () => { throw new Error('handshake must not be reached') } }
 
-function refuses (what, { org = ORG, token = goodToken, lang = 'rust' }) {
+async function refuses (what, { org = ORG, token = goodToken, lang = 'rust', relPath = 'a.rs', exists = () => true }) {
   const bridge = createLspBridge({
-    secret: SECRET, getOrgPath: () => org,
+    secret: SECRET, getOrgPath: () => org, exists,
+    resolveAbs: async ({ relPath: r }) => (r === '' ? null : ORG + '/' + r),
     spawn: () => { throw new Error('must not spawn on a refused upgrade') },
   })
   const sock = fakeSocket()
-  bridge.handleUpgrade(
-    { url: '/__arxa/artifacts/lsp?lang=' + lang, headers: { 'sec-websocket-protocol': token === null ? '' : 'arxa-lsp, ' + token } },
+  await bridge.handleUpgrade(
+    { url: '/__arxa/artifacts/lsp?lang=' + lang + '&path=' + relPath, headers: { 'sec-websocket-protocol': token === null ? '' : 'arxa-lsp, ' + token } },
     sock, Buffer.alloc(0), neverUpgrade,
   )
   assert.ok(sock.destroyed, what + ': socket destroyed')
@@ -98,12 +133,14 @@ function refuses (what, { org = ORG, token = goodToken, lang = 'rust' }) {
   assert.equal(bridge.stats().refused, 1, what + ': counted as refused')
   ok('refused — ' + what)
 }
-refuses('no org open', { org: null })
-refuses('no token', { token: null })
-refuses('a forged token', { token: 'not.atoken' })
-refuses('a token for a DIFFERENT org', { token: issueToken({ secret: SECRET, scope: 'lsp', orgPath: '/somewhere/else' }) })
-refuses('a read token used as an lsp token', { token: issueToken({ secret: SECRET, scope: 'read', orgPath: ORG, relPath: 'a.rs' }) })
-refuses('a language nothing serves', { lang: 'cobol' })
+await refuses('no org open', { org: null })
+await refuses('no token', { token: null })
+await refuses('a forged token', { token: 'not.atoken' })
+await refuses('a token for a DIFFERENT org', { token: issueToken({ secret: SECRET, scope: 'lsp', orgPath: '/somewhere/else' }) })
+await refuses('a read token used as an lsp token', { token: issueToken({ secret: SECRET, scope: 'read', orgPath: ORG, relPath: 'a.rs' }) })
+await refuses('a language nothing serves', { lang: 'cobol' })
+await refuses('a path the host cannot resolve', { relPath: '' })
+await refuses('a file with no project manifest above it', { exists: () => false })
 
 // ---- a missing binary is a clean answer, not a crash -----------------------
 {
@@ -144,7 +181,21 @@ const haveRa = spawnSync('rust-analyzer', ['--version'], { encoding: 'utf8' }).s
 if (!haveRa) {
   console.log('  SKIP  live rust-analyzer round trip — binary not on PATH')
 } else {
-  const bridge = createLspBridge({ secret: SECRET, getOrgPath: () => process.cwd() })
+  // A REAL cargo project in a temp org: rust-analyzer rooted anywhere else
+  // finds no manifest and answers nothing, which is the whole point of
+  // projectRootFor. The org is the parent; the project sits inside it, exactly
+  // as an arxa org holds projects/<name>.
+  const liveOrg = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-lsp-org-'))
+  const proj = path.join(liveOrg, 'projects', 'demo')
+  fs.mkdirSync(path.join(proj, 'src'), { recursive: true })
+  fs.writeFileSync(path.join(proj, 'Cargo.toml'), '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n')
+  fs.writeFileSync(path.join(proj, 'src', 'main.rs'), 'fn main() { println!("hi"); }\n')
+
+  const bridge = createLspBridge({
+    secret: SECRET,
+    getOrgPath: () => liveOrg,
+    resolveAbs: async ({ relPath, orgPath }) => path.join(orgPath, relPath),
+  })
   const wss = new WebSocketServer({
     noServer: true,
     handleProtocols: (protocols) => (protocols.has('arxa-lsp') ? 'arxa-lsp' : false),
@@ -153,9 +204,11 @@ if (!haveRa) {
   server.on('upgrade', (req, socket, head) => bridge.handleUpgrade(req, socket, head, wss))
   await new Promise((r) => server.listen(0, '127.0.0.1', r))
   const port = server.address().port
-  const liveToken = issueToken({ secret: SECRET, scope: 'lsp', orgPath: process.cwd() })
+  const liveToken = issueToken({ secret: SECRET, scope: 'lsp', orgPath: liveOrg })
 
-  const ws = new WebSocket('ws://127.0.0.1:' + port + '/__arxa/artifacts/lsp?lang=rust', ['arxa-lsp', liveToken])
+  const ws = new WebSocket(
+    'ws://127.0.0.1:' + port + '/__arxa/artifacts/lsp?lang=rust&path=' + encodeURIComponent('projects/demo/src/main.rs'),
+    ['arxa-lsp', liveToken])
   const reply = await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('rust-analyzer did not answer initialize in 30s')), 30_000)
     ws.on('message', (data) => {
@@ -178,11 +231,16 @@ if (!haveRa) {
   assert.equal(bridge.stats().accepted, 1)
   assert.equal(bridge.stats().spawned, 1)
   ok('LIVE: exactly one server spawned for one socket')
+  // THE point of projectRootFor: the server is rooted at the cargo project,
+  // not at the org that merely contains it.
+  assert.equal([...bridge.running.keys()][0], proj + '\0rust')
+  ok('LIVE: rooted at the cargo project, not the org above it')
 
   ws.close()
   bridge.stopAll('selftest-done')
   await new Promise((r) => server.close(r))
   assert.equal(bridge.running.size, 0); ok('LIVE: the real child is reaped')
+  fs.rmSync(liveOrg, { recursive: true, force: true })
 }
 
 console.log('selftest.lsp: ' + n + ' ok')

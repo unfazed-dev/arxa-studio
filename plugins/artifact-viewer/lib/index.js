@@ -65,6 +65,15 @@ function readBody(req) {
  * and their target validation happens again at write time (D81).
  * Factory shape keeps this testable without an engine.
  */
+/** A relPath's real location inside the open org, or null if it escapes. */
+function absOf(orgPath, relPath) {
+  try {
+    const rootReal = fs.realpathSync(path.resolve(orgPath))
+    const abs = path.resolve(rootReal, path.normalize(relPath))
+    return (abs === rootReal || abs.startsWith(rootReal + path.sep)) ? abs : null
+  } catch { return null }
+}
+
 export function createTokenRoutes({ env = process.env, secret, getSettings, getOrigin = () => null }) {
   function json(res, status, body) {
     res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' })
@@ -85,6 +94,7 @@ export function createTokenRoutes({ env = process.env, secret, getSettings, getO
       }
       if (body.scope === 'wt-read' || body.scope === 'changes-read') {
         // D89 worktree read classes — validated here, validated again at the lane.
+        let wtAbs = null
         if (typeof body.worktreeId !== 'string' || body.worktreeId === '') {
           return json(res, 400, { error: 'worktreeId required' })
         }
@@ -92,14 +102,15 @@ export function createTokenRoutes({ env = process.env, secret, getSettings, getO
           if (typeof body.relPath !== 'string' || body.relPath === '') return json(res, 400, { error: 'relPath required' })
           try {
             const open0 = readOpenOrg(env)
-            await resolveWorktreeFile({ env, orgPath: open0 ? open0.orgPath : null, worktreeId: body.worktreeId, relPath: body.relPath })
+            const r0 = await resolveWorktreeFile({ env, orgPath: open0 ? open0.orgPath : null, worktreeId: body.worktreeId, relPath: body.relPath })
+            wtAbs = r0.abs
           } catch (err) {
             const map = { BAD: 400, ESCAPE: 403, NO_SESSION: 404, NOT_FILE: 404 }
             return json(res, map[err.code] || 404, { error: 'unresolvable worktree file' })
           }
         }
         const token = issueToken({ secret, scope: body.scope, worktreeId: body.worktreeId, relPath: body.scope === 'wt-read' ? body.relPath : null, ttlSeconds: ttl })
-        return json(res, 200, { token })
+        return json(res, 200, { token, absPath: wtAbs })
       }
       if (body.scope === 'lsp') {
         // Bound to the open org, like tree-read. A SEPARATE class from read on
@@ -134,7 +145,11 @@ export function createTokenRoutes({ env = process.env, secret, getSettings, getO
       const token = issueToken({ secret, scope: 'read', relPath: body.relPath, orgPath: open.orgPath, ttlSeconds: ttl })
       const origin = getOrigin()
       if (!origin) return json(res, 503, { error: 'org server not up yet — retry' })
-      return json(res, 200, { token, origin })
+      // absPath is the file's REAL identity. The editor keys its model on it so
+      // a language server's diagnostics land on the right file — a model at
+      // /<relPath> would put every underline on a path the server never heard
+      // of. Resolved here, server-side, exactly like the path check above.
+      return json(res, 200, { token, origin, absPath: absOf(open.orgPath, body.relPath) })
     } catch (err) {
       return json(res, 500, { error: 'internal error' })
     }
@@ -296,6 +311,15 @@ export function apply(ctx, config) {
     lspBridge = createLspBridge({
       secret,
       getOrgPath: () => readOpenOrg(process.env)?.orgPath ?? null,
+      // The client names a file it already holds a token for; the HOST says
+      // where that file is. Nothing the client sends is used as a path.
+      resolveAbs: async ({ relPath, session, orgPath }) => {
+        if (session) return (await resolveWorktreeFile({ env: process.env, orgPath, worktreeId: session, relPath })).abs
+        const rootReal = fs.realpathSync(path.resolve(orgPath))
+        const abs = path.resolve(rootReal, path.normalize(relPath))
+        if (abs !== rootReal && !abs.startsWith(rootReal + path.sep)) return null
+        return abs
+      },
       log: (m) => console.log('[arxa-artifact-viewer] ' + m),
     })
     if (ctx.webServer?.registerUpgrade) {

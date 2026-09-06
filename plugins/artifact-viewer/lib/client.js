@@ -40,6 +40,11 @@ window.__ModuleLoader__.load({
     const SIDEBAR_ROUTE = '/__arxa/sidebar/action'
     const EVENTS_ROUTE = '/__arxa/artifacts/events'
     const VENDOR = (n) => '/__arxa/artifacts/vendor/' + n
+    const LSP_ROUTE = '/__arxa/artifacts/lsp'
+    // Mirrors LANG_SERVERS in lib/lsp.js. Only languages with a server that has
+    // actually been RUN — an entry here for a server the host cannot start just
+    // buys a socket that closes 4004.
+    const LSP_LANGS = { '.rs': 'rust', '.dart': 'dart' }
     const EDITABLE_LANES = new Set(['markdown', 'code', 'text'])
     const AUTOSAVE_MS = 1500
     const NS = 'arxa-artifact-viewer'
@@ -667,7 +672,7 @@ window.__ModuleLoader__.load({
      *  `docRef.current` holds the bundle's handle, not a monaco object. Five
      *  call sites in Panel read the live document through it, and keeping the
      *  seam narrow is what stops phases 4-6 from rewriting all of them. */
-    function CodeView({ relPath, text, editable, docRef, onDirty }) {
+    function CodeView({ relPath, absPath, session, text, editable, docRef, onDirty }) {
       const ref = React.useRef(null)
       React.useEffect(() => {
         let dead = false
@@ -676,7 +681,14 @@ window.__ModuleLoader__.load({
         ;(async () => {
           const M = await ensureMonaco()
           if (dead || !ref.current) return
-          handle = await M.openFile(ref.current, '/' + relPath, text, {
+          // The model is keyed on the file's REAL path when the host resolved
+          // one. That is what makes a language server's diagnostics land on the
+          // right file: a model at /<relPath> names a path the server has never
+          // heard of, so every underline would be attributed to a file that
+          // does not exist. Falls back to the relative path when there is no
+          // absPath — the editor works either way, only the language service
+          // needs the real identity.
+          handle = await M.openFile(ref.current, absPath || ('/' + relPath), text, {
             editable: !!editable,
             dark: isDarkMode(),
             // The viewer's font choice reached CodeMirror through a css var on
@@ -697,6 +709,21 @@ window.__ModuleLoader__.load({
             () => { if (formatActionRef.current) void formatActionRef.current() },
           )
           unwatch = watchPalette((dark) => { M.setTheme(dark) })
+          // Language service, best effort and always last: the editor is fully
+          // usable without one, so nothing here may fail the open. A file with
+          // no server, no project manifest, or no installed binary simply gets
+          // no diagnostics.
+          const lang = LSP_LANGS[(relPath.match(/\.[a-z]+$/i) || [''])[0].toLowerCase()]
+          if (lang && absPath) {
+            void (async () => {
+              try {
+                const { token } = await fetchTokenRaw({ scope: 'lsp' })
+                if (dead) return
+                const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + LSP_ROUTE
+                await M.connectLanguageServer(lang, { url: wsUrl, token, relPath, session })
+              } catch { /* no language service; the editor is unaffected */ }
+            })()
+          }
         })().catch((e) => { if (ref.current) ref.current.textContent = String(e && e.message || e) })
         return () => {
           dead = true
@@ -704,7 +731,7 @@ window.__ModuleLoader__.load({
           if (handle) handle.dispose()
           if (docRef) docRef.current = null
         }
-      }, [relPath, text, editable])
+      }, [relPath, absPath, session, text, editable])
       return h('div', { className: 'aXa_av_editorWrap aXa_av_monaco', ref })
     }
 
@@ -1377,7 +1404,7 @@ window.__ModuleLoader__.load({
         wtRef.current = null
         setState({ phase: 'loading', relPath })
         try {
-          const { token, origin } = await fetchToken(relPath)
+          const { token, origin, absPath } = await fetchToken(relPath)
           const url = origin + '/' + encodeURI(relPath) + '?avt=' + encodeURIComponent(token)
           const kind = kindFor(relPath)
           void (async () => {
@@ -1395,7 +1422,7 @@ window.__ModuleLoader__.load({
             const text = await r.text()
             const edit = await applyEditability(kind, relPath, text, len, null)
             setSession(edit.session)
-            setState({ phase: 'ready', kind, relPath, url, text, readOnly: edit.readOnly, guardNote: edit.guardNote })
+            setState({ phase: 'ready', kind, relPath, url, text, absPath, readOnly: edit.readOnly, guardNote: edit.guardNote })
           } else {
             setState({ phase: 'ready', kind, relPath, url })
           }
@@ -1413,7 +1440,7 @@ window.__ModuleLoader__.load({
         try {
           const prebound = { id: sessionId, name: sessionId }
           setSession(prebound)
-          const { token } = await fetchTokenRaw({ scope: 'wt-read', worktreeId: sessionId, relPath })
+          const { token, absPath } = await fetchTokenRaw({ scope: 'wt-read', worktreeId: sessionId, relPath })
           const url = '/__arxa/artifacts/wt?session=' + encodeURIComponent(sessionId) + '&path=' + encodeURIComponent(relPath) + '&avt=' + encodeURIComponent(token)
           const kind = kindFor(relPath)
           if (EDITABLE_LANES.has(kind.lane)) {
@@ -1423,7 +1450,7 @@ window.__ModuleLoader__.load({
             const text = await r.text()
             const edit = await applyEditability(kind, relPath, text, len, prebound)
             setSession(edit.session)
-            setState({ phase: 'ready', kind, relPath, url, text, readOnly: edit.readOnly, guardNote: edit.guardNote, wt: sessionId })
+            setState({ phase: 'ready', kind, relPath, url, text, absPath, readOnly: edit.readOnly, guardNote: edit.guardNote, wt: sessionId })
             return true
           }
           setState({ phase: 'ready', kind, relPath, url, wt: sessionId })
@@ -1660,7 +1687,7 @@ window.__ModuleLoader__.load({
           surface = h('div', { className: 'aXa_av_scroll' + (pal ? ' aXa_av_palMd' : '') },
             h('div', { className: 'aXa_av_md', dangerouslySetInnerHTML: { __html: previewHtml || (window.ArxaMD ? window.ArxaMD.render(state.text) : '<em>' + t('loading') + '</em>') } }))
         } else if (editableLane) {
-          surface = h(CodeView, { relPath: state.relPath, text: state.text, editable: canEdit, docRef, onDirty })
+          surface = h(CodeView, { relPath: state.relPath, absPath: state.absPath, session: state.wt ?? null, text: state.text, editable: canEdit, docRef, onDirty })
         } else if (lane === 'image') {
           surface = h('div', { className: 'aXa_av_scroll' }, h('div', { className: 'aXa_av_media' }, h('img', { src: state.url, alt: state.relPath })))
         } else if (lane === 'audio') {

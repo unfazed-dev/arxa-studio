@@ -272,4 +272,64 @@ export async function openFile (container, uriPath, text, opts = {}) {
   }
 }
 
+/** Attach a language server to the editor over the host's LSP socket.
+ *
+ *  One client per language for the life of the page. The socket is opened with
+ *  ['arxa-lsp', token] as its subprotocol list — a browser cannot set headers
+ *  on a WebSocket, so that is how the host's token travels.
+ *
+ *  Every failure here is SILENT by design: the editor is fully usable without a
+ *  language server, and a missing rust-analyzer must not degrade opening a file
+ *  into an error. The returned promise resolves to false when no service could
+ *  be attached, so the caller can say so if it wants to. */
+const langClients = new Map()
+export async function connectLanguageServer (lang, { url, token, relPath, session = null } = {}) {
+  if (langClients.has(lang)) return true
+  await start()
+  const q = new URLSearchParams({ lang, path: relPath ?? '' })
+  if (session) q.set('session', session)
+  const socket = new WebSocket(url + '?' + q.toString(), ['arxa-lsp', token])
+  const opened = await new Promise((resolve) => {
+    socket.addEventListener('open', () => resolve(true), { once: true })
+    // 4004 is the host saying "no server for this" — not an error, just no
+    // service. Any other close before open is equally not worth a dialog.
+    socket.addEventListener('close', () => resolve(false), { once: true })
+    socket.addEventListener('error', () => resolve(false), { once: true })
+  })
+  if (!opened) return false
+  const rpc = toSocket(socket)
+  const client = new MonacoLanguageClient({
+    id: 'arxa-' + lang,
+    name: 'arxa ' + lang,
+    clientOptions: {
+      documentSelector: [{ language: lang }],
+      // The server decides its own root (the host resolved the project
+      // directory); the client must not fight it with a second opinion.
+      workspaceFolder: undefined,
+      errorHandler: { error: () => ({ action: 1 }), closed: () => ({ action: 1 }) },
+    },
+    messageTransports: {
+      reader: new WebSocketMessageReader(rpc),
+      writer: new WebSocketMessageWriter(rpc),
+    },
+  })
+  socket.addEventListener('close', () => {
+    langClients.delete(lang)
+    try { client.stop() } catch {}
+  }, { once: true })
+  langClients.set(lang, client)
+  try {
+    await client.start()
+    return true
+  } catch {
+    langClients.delete(lang)
+    return false
+  }
+}
+
+/** Which languages currently have a live server, for the client to show. */
+export function languageServers () {
+  return [...langClients.keys()]
+}
+
 export { monaco, MonacoLanguageClient, toSocket, WebSocketMessageReader, WebSocketMessageWriter }
