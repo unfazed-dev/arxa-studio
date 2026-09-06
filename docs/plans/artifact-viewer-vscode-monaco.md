@@ -413,6 +413,45 @@ because the live test went red: the file used a NUL key separator where the
 patch expected a space, so `createLspBridge`'s new parameters and `ensureServer`'s
 rename were both no-ops. Every patch here now asserts it matched.
 
+#### 2b-bis. Finding the binary at all — DONE
+
+Measured before handing the user a test to run: **the engine cannot see either
+language server.** `ps eww -p <engine pid>` reports its entire PATH as
+`/usr/bin:/bin:/usr/sbin:/sbin` — launchd's default, because the desktop
+launches the engine and a GUI process inherits no shell environment. On this
+machine `dart` lives under fvm (`~/fvm/default/bin`) and `rust-analyzer` under a
+CARGO_HOME on a different volume (`/Volumes/developer_ssd/dev/.cargo/bin`), so a
+hardcoded list of well-known directories would have found NEITHER.
+
+Left alone, 2b does everything right and then spawns a binary that is not there:
+ENOENT on the async error event, socket closed 4004, no diagnostics, and nothing
+anywhere saying why — indistinguishable from a broken bridge.
+
+`resolveBin(cmd, { env, exists, extraPath })` searches, in order: an absolute
+override taken as given, the engine's own PATH, then the login shell's PATH.
+`readShellPath()` runs `$SHELL -lic 'printf "@ARXA_PATH@%s@END@" "$PATH"'` —
+**interactive** because PATH is set in `.zshrc` as often as in `.zprofile`, and
+**marker-fenced** because an interactive shell also prints banners, greetings
+and a prompt. Plain-ASCII markers, not `\x01`: POSIX printf is not required to
+understand hex escapes. It is probed at most once per bridge and off the first
+upgrade, not at startup, so a slow shell cannot delay the engine booting; a
+shell that hangs, fails or throws yields `''`, never an exception.
+`ARXA_LSP_RUST` / `ARXA_LSP_DART` override everything — the knob for a toolchain
+no shell exports either.
+
+Proven end to end under the engine's exact environment
+(`env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin SHELL=/bin/zsh`):
+
+```
+dart          -> engine PATH: null | + shell PATH: /Users/unfazed-mac/fvm/default/bin/dart
+rust-analyzer -> engine PATH: null | + shell PATH: /Volumes/developer_ssd/dev/.cargo/bin/rust-analyzer
+```
+
+**41 assertions** now: the missing-binary case split in two (not on the PATH →
+never reaches spawn; resolved but broken → still fails asynchronously and is not
+cached), plus marker fencing against a shell that prints noise, plus the real
+login shell on this machine.
+
 #### 2c. The rest of the languages + install flow — NEXT
 
 `MonacoLanguageClient` 10.7.0 takes `{ id, name, clientOptions, messageTransports }`

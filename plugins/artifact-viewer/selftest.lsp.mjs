@@ -21,6 +21,7 @@ import { spawnSync } from 'node:child_process'
 import { WebSocketServer, WebSocket } from 'ws'
 import {
   LANG_SERVERS, langForPath, createFrameReader, frame, tokenFromProtocols, createLspBridge, projectRootFor,
+  resolveBin, readShellPath,
 } from './lib/lsp.js'
 import { issueToken } from './lib/tokens.js'
 
@@ -142,17 +143,92 @@ await refuses('a language nothing serves', { lang: 'cobol' })
 await refuses('a path the host cannot resolve', { relPath: '' })
 await refuses('a file with no project manifest above it', { exists: () => false })
 
+// ---- finding the binary at all --------------------------------------------
+// The engine is launched by the desktop, not from a shell: its PATH is
+// launchd's default and holds no toolchain. Measured on the build machine:
+// dart under fvm, rust-analyzer under a CARGO_HOME on another volume.
+{
+  const seen = new Set(['/opt/tools/dart'])
+  const exists = (p) => seen.has(p)
+  const env = { PATH: '/usr/bin:/bin' }
+  assert.equal(resolveBin('dart', { env, exists }), null,
+    'launchd PATH alone finds nothing — this is the bug being fixed')
+  assert.equal(resolveBin('dart', { env, exists, extraPath: '/opt/tools' }), '/opt/tools/dart',
+    'the login shell PATH is what finds it')
+  assert.equal(resolveBin('dart', { env: { PATH: '/opt/tools' }, exists }), '/opt/tools/dart')
+  assert.equal(resolveBin('/opt/tools/dart', { env, exists }), '/opt/tools/dart',
+    'an absolute override is taken as given')
+  assert.equal(resolveBin('/nope/dart', { env, exists }), null,
+    'an absolute override that is not there is null, not a spawn')
+  assert.equal(resolveBin('', { env, exists }), null)
+  assert.equal(resolveBin(undefined, { env, exists }), null)
+  ok('resolveBin searches the engine PATH, then the login-shell PATH, and honours an absolute override')
+
+  // ARXA_LSP_<LANG> beats the row's own command.
+  const spawned = []
+  const b = createLspBridge({
+    secret: SECRET, getOrgPath: () => ORG, shellPath: '',
+    env: { PATH: '/usr/bin', ARXA_LSP_RUST: '/opt/mine/ra' },
+    exists: (p) => p === '/opt/mine/ra',
+    spawn: (cmd) => {
+      spawned.push(cmd)
+      return { stdout: { on: () => {} }, stderr: { on: () => {} }, stdin: { write: () => {} }, on: () => {}, kill: () => {} }
+    },
+    servers: { rust: { exts: ['.rs'], cmd: 'rust-analyzer', args: [] } },
+  })
+  b.ensureServer(ORG, 'rust')
+  assert.deepEqual(spawned, ['/opt/mine/ra'], 'ARXA_LSP_RUST overrides the row')
+  b.stopAll('test')
+  ok('ARXA_LSP_<LANG> overrides the built-in command')
+}
+
+// ---- reading the login shell's PATH ----------------------------------------
+{
+  assert.equal(await readShellPath({ env: {} }), '', 'no SHELL is not an error')
+  const noisy = 'Welcome to your shell!\nnvm: v24\n@ARXA_PATH@/a/bin:/b/bin@END@\n$ '
+  assert.equal(
+    await readShellPath({ env: { SHELL: '/bin/zsh' }, run: (_c, _a, _o, cb) => cb(null, noisy) }),
+    '/a/bin:/b/bin',
+    'a banner, a greeting and a prompt around the value do not corrupt it')
+  assert.equal(
+    await readShellPath({ env: { SHELL: '/bin/zsh' }, run: (_c, _a, _o, cb) => cb(new Error('timeout'), '') }),
+    '', 'a shell that hangs or fails yields no extra PATH, not a crash')
+  assert.equal(
+    await readShellPath({ env: { SHELL: '/bin/zsh' }, run: () => { throw new Error('spawn blew up') } }),
+    '', 'a spawn that throws yields no extra PATH')
+  ok('readShellPath fences the value with markers and never throws')
+
+  // The real shell on this machine — proves the marker trick against a real rc file.
+  const real = await readShellPath({})
+  assert.ok(typeof real === 'string')
+  if (real === '') console.log('  NOTE  login shell reported no PATH (SHELL unset or shell failed)')
+  else ok('the real login shell PATH resolved (' + real.split(':').length + ' entries)')
+}
+
 // ---- a missing binary is a clean answer, not a crash -----------------------
 {
+  // (a) not on the PATH at all: refused before a process is ever created.
   const bridge = createLspBridge({
-    secret: SECRET, getOrgPath: () => ORG,
+    secret: SECRET, getOrgPath: () => ORG, shellPath: '',
+    spawn: () => { throw new Error('must not spawn a binary that was not found') },
     servers: { ghost: { exts: ['.ghost'], cmd: 'definitely-not-a-real-binary-xyz', args: [] } },
   })
-  const entry = bridge.ensureServer(ORG, 'ghost')
-  // spawn() itself succeeds; ENOENT arrives asynchronously on the error event.
-  await new Promise((r) => setTimeout(r, 300))
-  assert.equal(bridge.running.size, 0, 'the dead child is not left in the table')
+  assert.equal(bridge.ensureServer(ORG, 'ghost'), null)
+  assert.equal(bridge.running.size, 0)
   assert.equal(bridge.stats().spawnFailed, 1)
+  ok('a language-server binary that is not on the PATH never reaches spawn')
+
+  // (b) resolved but broken: ENOENT arrives ASYNCHRONOUSLY on the error event,
+  // so the synchronous try/catch around spawn is not enough on its own.
+  const b2 = createLspBridge({
+    secret: SECRET, getOrgPath: () => ORG, shellPath: '',
+    exists: () => true,   // pretend it resolved; the real spawn still fails
+    servers: { ghost: { exts: ['.ghost'], cmd: 'definitely-not-a-real-binary-xyz', args: [] } },
+  })
+  const entry = b2.ensureServer(ORG, 'ghost')
+  await new Promise((r) => setTimeout(r, 300))
+  assert.equal(b2.running.size, 0, 'the dead child is not left in the table')
+  assert.equal(b2.stats().spawnFailed, 1)
   ok('a missing language-server binary fails cleanly and is not cached as running')
   if (entry) { try { entry.child.kill() } catch {} }
 }
@@ -165,7 +241,7 @@ await refuses('a file with no project manifest above it', { exists: () => false 
     on: () => {}, kill: () => killed.push(1),
   })
   const bridge = createLspBridge({
-    secret: SECRET, getOrgPath: () => ORG, spawn: fakeChild,
+    secret: SECRET, getOrgPath: () => ORG, spawn: fakeChild, exists: () => true, shellPath: '',
     servers: { rust: { exts: ['.rs'], cmd: 'x', args: [] } },
   })
   bridge.ensureServer(ORG, 'rust')
