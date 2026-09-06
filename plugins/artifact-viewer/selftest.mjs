@@ -472,7 +472,10 @@ console.log('arxa-artifact-viewer selftest: GREEN (tokens + route)');
 // ---- Task 4: vendored bundles exist + vendor route serves them ------------
 import { createVendorRoutes } from './lib/index.js'
 const vendorDir = path2.join(here, 'lib', 'vendor')
-for (const f of ['codemirror.js', 'markdown.js', 'pdf.js', 'pdf.worker.js',
+// markdown.js is GONE: the rendered preview is VS Code's own webview now, which
+// is better than markdown-it ever was (its stylesheet, math, checkboxes, and
+// fences highlighted by the same grammars the editor uses) and needs no bundle.
+for (const f of ['codemirror.js', 'pdf.js', 'pdf.worker.js',
   'prettier.js', 'icons.js']) {
   assert.ok(fs.existsSync(path2.join(vendorDir, f)), 'vendored bundle present: ' + f)
   const bytes = fs.readFileSync(path2.join(vendorDir, f))
@@ -487,7 +490,6 @@ const vget = await req(vport, '/codemirror.js')
 assert.equal(vget.status, 200, 'vendor route serves codemirror.js')
 assert.equal(vget.headers['content-type'], 'text/javascript; charset=utf-8')
 assert.ok(vget.body.startsWith('/* arxa-artifact-viewer vendored bundle'), 'provenance banner served')
-assert.equal((await req(vport, '/markdown.js')).status, 200)
 assert.equal((await req(vport, '/codemirror.js', { method: 'POST' })).status, 405, 'vendor route GET-only')
 const vt = await req(vport, '/%2e%2e/index.js')
 assert.ok(vt.status === 404 || vt.status === 403, 'vendor traversal refused, got ' + vt.status)
@@ -555,11 +557,12 @@ const vCM = fs.readFileSync(path2.join(vendorDir, 'codemirror.js'), 'utf8')
 for (const key of ['langForExt', 'syntaxHighlighting', 'Compartment', 'indentUnit', 'legacy']) {
   assert.ok(vCM.includes(key), 'ArxaCM exports ' + key)
 }
-for (const key of ['parsers:', 'resolveTag:', 'highlightTree:']) {
-  assert.ok(vCM.includes(key), 'ArxaCM exports ' + key + ' (single lezer instance for the md preview)')
+// `parsers:` is NOT asserted any more — it existed only to feed the vendored
+// markdown preview's highlighter, which VS Code's webview replaced. It still
+// ships inside codemirror.js and goes when that bundle does.
+for (const key of ['resolveTag:', 'highlightTree:']) {
+  assert.ok(vCM.includes(key), 'ArxaCM exports ' + key)
 }
-const vMD = fs.readFileSync(path2.join(vendorDir, 'markdown.js'), 'utf8')
-assert.ok(!vMD.includes('pythonLanguage') && !vMD.includes('@lezer/highlight'), 'md bundle carries no second lezer/parsers copy')
 const vPrettier = fs.readFileSync(path2.join(vendorDir, 'prettier.js'), 'utf8')
 assert.ok(vPrettier.includes('window.ArxaPrettier=') && vPrettier.includes('parserForExt'), 'prettier bundle shape')
 assert.ok(vPrettier.includes('typescript') && vPrettier.includes('scss'), 'prettier parser coverage')
@@ -568,10 +571,7 @@ assert.ok(vIcons.includes('window.ArxaIcons=') && vIcons.includes('folder-open')
 assert.ok(vIcons.includes('width="16" height="16"'), 'material SVGs pinned to 16px')
 assert.ok(/#[0-9a-fA-F]{6}/.test(vIcons), 'material icons carry brand colors (full color)')
 await new Promise((r2) => vhttp.close(r2))
-// Markdown lane contract: the view reads window.ArxaMD, so the client must
-// actually kick the vendored markdown.js load (else the placeholder hangs).
 const clientSrc = fs.readFileSync(path2.join(here, 'lib', 'client.js'), 'utf8')
-assert.ok(clientSrc.includes("ensureVendor('markdown.js', 'ArxaMD')"), 'client loads the vendored markdown bundle (window.ArxaMD)')
 // 2026 editor client contracts (grilled 2026-09-03).
 assert.ok(clientSrc.includes("'.dart'"), '.dart joins the code lane')
 assert.match(clientSrc, /ensureVendor\('codemirror\.js', 'ArxaCM'\)[\s\S]{0,120}CM\.ArxaTheme/, 'palette read from the single CM bundle')
@@ -702,6 +702,12 @@ assert.ok(/unhandledrejection/.test(entrySrc2c) && /'Canceled'/.test(entrySrc2c)
   'cancellation is swallowed: VS Code signals it by rejecting, and the markdown preview does it on every open')
 assert.ok(entrySrc2c.includes("if (s === 'Canceled' || s === 'CodeExpectedError') ev.preventDefault()"),
   'and ONLY cancellation is swallowed — loosening this guard would hide every real rejection from the lens')
+assert.ok(!fs.existsSync(path2.join(here, 'lib', 'vendor', 'markdown.js')) && !clientSrc.includes('ArxaMD'),
+  'nothing loads the vendored markdown bundle any more')
+assert.ok(entrySrc2c.includes("runCommand('markdown.showPreview')"),
+  'the rendered preview is VS Code\'s, opened as an editor input in the part')
+assert.ok(clientSrc.includes("preview: lane === 'markdown' && !showSource"),
+  'and the source/preview toggle is a PROP on the one CodeView — both are inputs on the same file, not different React subtrees')
 assert.ok(entrySrc2c.includes('getKeybindingsServiceOverride()'),
   'the keybindings service is what supplies Shift-Alt-F now that the client no longer binds it')
 assert.ok(entrySrc2c.includes("'editor.minimap.enabled': width >= 700"),
@@ -730,12 +736,11 @@ assert.ok(clientSrc.includes('aXa_av_fileIcon'), 'viewer title carries the mater
 assert.ok(clientSrc.includes('unwatchPal'), 'panel palette subscription unsubscribes on remount')
 assert.match(clientSrc, /h\(DiffView, \{ relPath: state\.relPath/, 'diff surface receives the file identity')
 assert.ok(clientSrc.includes('langComp.of(CM.langForExt(relPath)'), 'diff pane colors by language')
-assert.ok(clientSrc.includes('window.ArxaMD.setParsers'), 'preview highlighter fed from the single CM instance')
 assert.ok(clientSrc.includes('data-arxa-vendor'), 'vendor script tags marked for cross-loader reuse')
 // Prettier viewer toggle: ON by default, persisted, gates every format path.
 assert.ok(clientSrc.includes("'arxa.av.prettier'"), 'prettier toggle persists its choice')
 assert.ok(clientSrc.includes("!== 'off'"), 'prettier defaults ON (unset key = on)')
-assert.ok(clientSrc.includes('FORMAT_EXTS.has(formatExt) && prettierOn'), 'prettier toggle gates the format action (button + Shift-Alt-F)')
+assert.ok(clientSrc.includes('FORMAT_EXTS.has(formatExt) && prettierOn'), 'prettier toggle gates the format BUTTON (Shift-Alt-F is VS Code\'s now)')
 assert.ok(clientSrc.includes("'aria-pressed'"), 'prettier toggle exposes pressed state')
 assert.ok(clientSrc.includes('aXa_av_prettierMark'), 'prettier brand chip rides the top bar')
 assert.ok(clientSrc.includes("'action.prettier.off'"), 'prettier toggle locales wired')

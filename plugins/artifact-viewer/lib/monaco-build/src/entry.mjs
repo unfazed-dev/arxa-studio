@@ -506,6 +506,18 @@ export async function updateFile (uriPath, text) {
   await syncFile(uriPath, text)
 }
 
+/** Show VS Code's rendered markdown preview for `uriPath`, as its own tab.
+ *
+ *  The preview is a WEBVIEW, and a webview is an editor input — which is why it
+ *  needs the editor part and could not exist before it. It replaces the vendored
+ *  markdown-it + DOMPurify bundle and brings what that never had: VS Code's own
+ *  stylesheet, math, checkboxes, and code fences highlighted by the same
+ *  grammars the editor uses. */
+export async function showMarkdownPreview (uriPath) {
+  await openEditor(uriPath, { pinned: false })
+  await runCommand('markdown.showPreview')
+}
+
 /** Run a VS Code command — `markdown.showPreview` and friends. */
 export async function runCommand (id, ...args) {
   const commandService = await getService(ICommandService)

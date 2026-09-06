@@ -694,8 +694,11 @@ window.__ModuleLoader__.load({
      *  `docRef.current` holds the bundle's handle, not a monaco object. Five
      *  call sites in Panel read the live document through it, and keeping the
      *  seam narrow is what stops phases 4-6 from rewriting all of them. */
-    function CodeView({ relPath, absPath, session, text, editable, docRef, onDirty }) {
+    function CodeView({ relPath, absPath, session, text, editable, docRef, onDirty, preview }) {
       const ref = React.useRef(null)
+      // The uri the part currently holds — set once the file is open, so the
+      // preview toggle below knows what to re-open and does nothing before then.
+      const openedRef = React.useRef(null)
       // null while the language service is fine (or irrelevant); a row from
       // /lsp/status when there is no server for this file's language.
       const [lsp, setLsp] = React.useState(null)
@@ -768,6 +771,8 @@ window.__ModuleLoader__.load({
           // server. The toolbar Format button still runs prettier — that is the
           // lane that covers markdown and yaml, which no server does.
           unwatch = watchPalette((dark) => { M.setTheme(dark) })
+          openedRef.current = absPath || ('/' + relPath)
+          if (preview) await M.showMarkdownPreview(openedRef.current)
           // Language service, best effort and always last: the editor is fully
           // usable without one, so nothing here may fail the open. A file with
           // no server, no project manifest, or no installed binary simply gets
@@ -799,6 +804,21 @@ window.__ModuleLoader__.load({
           if (docRef) docRef.current = null
         }
       }, [relPath, absPath, session, text, editable])
+      // Source <-> preview is a TAB SWITCH inside the editor part, not a swap of
+      // React subtrees: both are editor inputs on the same file. Skipped on the
+      // first run, because the open effect above already put the right one up.
+      const firstToggle = React.useRef(true)
+      React.useEffect(() => {
+        if (firstToggle.current) { firstToggle.current = false; return }
+        const uri = openedRef.current
+        if (!uri) return
+        void (async () => {
+          const M = await ensureMonaco()
+          if (preview) await M.showMarkdownPreview(uri)
+          else await M.openEditor(uri)
+        })().catch(() => { /* the toggle is not worth an error surface */ })
+      }, [preview])
+
       // The strip keeps its slot whether or not it is showing: React
       // reconciles these children by position, and letting the host div move
       // from index 1 to index 0 would unmount the live editor.
@@ -1274,8 +1294,6 @@ window.__ModuleLoader__.load({
       // palette CSS vars on the root and the preview surface classes.
       const [pal, setPal] = React.useState(null)
       const [changes, setChanges] = React.useState([])
-      const [mdReady, setMdReady] = React.useState(false)
-      const [previewHtml, setPreviewHtml] = React.useState('')
       const docRef = React.useRef(null)
       const mtimeRef = React.useRef(null)
       const dirtyRef = React.useRef(false)
@@ -1299,18 +1317,6 @@ window.__ModuleLoader__.load({
       const lane = state.kind ? state.kind.lane : null
       const editableLane = EDITABLE_LANES.has(lane)
       const canEdit = editableLane && !state.readOnly && !!session
-
-      // Preview reflects the EDITED doc: refreshed from the CM buffer every
-      // time the source view closes (and once the markdown bundle lands).
-      // `pal` is a dependency because the palette effect also delivers the
-      // parsers — without it, a fast first render freezes token-less fences.
-      React.useEffect(() => {
-        if (lane !== 'markdown' || showSource || !window.ArxaMD) return
-        try {
-          const text = docText()
-          if (text != null) setPreviewHtml(window.ArxaMD.render(text))
-        } catch { /* preview is best-effort */ }
-      }, [lane, showSource, mdReady, state.text, pal])
 
       // D82 cap from the host settings namespace when available.
       React.useEffect(() => {
@@ -1391,26 +1397,6 @@ window.__ModuleLoader__.load({
         // change would be judged by a stale closure and closed.
       }, [snap.sessionId, open, refreshChanges, state.phase])
       React.useEffect(() => { void refreshChanges() }, [refreshChanges])
-
-      // Markdown lane: kick the vendored markdown-it+DOMPurify bundle.
-      React.useEffect(() => {
-        if (mdReady || lane !== 'markdown' || state.phase !== 'ready') return
-        if (window.ArxaMD) { setMdReady(true); return }
-        let live = true
-        ensureVendor('markdown.js', 'ArxaMD').then(() => {
-          if (!live) return
-          // Preview token coloring rides the SAME lezer instance as the
-          // editor — a second @lezer/highlight would break tag identity.
-          if (window.ArxaMD && window.ArxaCM && typeof window.ArxaMD.setParsers === 'function') {
-            window.ArxaMD.setParsers(window.ArxaCM)
-            if (typeof window.ArxaMD.setTheme === 'function' && window.ArxaCM.ArxaTheme) {
-              window.ArxaMD.setTheme(window.ArxaCM.ArxaTheme[isDarkMode() ? 'dark' : 'light'])
-            }
-          }
-          setMdReady(true)
-        }).catch(() => {})
-        return () => { live = false }
-      }, [mdReady, lane, state.phase])
 
       // D86 external-change push. Org lane: the org watcher. Worktree lane:
       // the same route with ?session= (host watches the worktree for this
@@ -1625,14 +1611,7 @@ window.__ModuleLoader__.load({
           unwatchPal = watchPalette((dark) => {
             const t = TH[dark ? 'dark' : 'light']
             setPal(t)
-            // Theme swap = stylesheet swap only (span classes are stable).
-            if (window.ArxaMD && typeof window.ArxaMD.setTheme === 'function') window.ArxaMD.setTheme(t)
           })
-          // md preview may have loaded first — feed it the engine either way.
-          if (window.ArxaMD && typeof window.ArxaMD.setParsers === 'function') {
-            window.ArxaMD.setParsers(CM)
-            window.ArxaMD.setTheme(TH[isDarkMode() ? 'dark' : 'light'])
-          }
         }).catch(() => { /* palette is progressive enhancement */ })
         return () => { dead = true; if (unwatchPal) unwatchPal() }
       }, [])
@@ -1763,11 +1742,13 @@ window.__ModuleLoader__.load({
         let surface = null
         if (showDiff && editableLane) {
           surface = h(DiffView, { relPath: state.relPath, original: mainText, text: canEdit ? docText() : state.text })
-        } else if (lane === 'markdown' && !showSource) {
-          surface = h('div', { className: 'aXa_av_scroll' + (pal ? ' aXa_av_palMd' : '') },
-            h('div', { className: 'aXa_av_md', dangerouslySetInnerHTML: { __html: previewHtml || (window.ArxaMD ? window.ArxaMD.render(state.text) : '<em>' + t('loading') + '</em>') } }))
         } else if (editableLane) {
-          surface = h(CodeView, { relPath: state.relPath, absPath: state.absPath, session: state.wt ?? null, text: state.text, editable: canEdit, docRef, onDirty })
+          // Markdown is not a separate surface any more. Rendered preview and
+          // source are two editor inputs on ONE file inside VS Code's editor
+          // part, so the toggle is a prop, not a different React subtree — and
+          // the preview is VS Code's own, not the vendored markdown-it bundle.
+          surface = h(CodeView, { relPath: state.relPath, absPath: state.absPath, session: state.wt ?? null, text: state.text, editable: canEdit, docRef, onDirty,
+            preview: lane === 'markdown' && !showSource })
         } else if (lane === 'image') {
           surface = h('div', { className: 'aXa_av_scroll' }, h('div', { className: 'aXa_av_media' }, h('img', { src: state.url, alt: state.relPath })))
         } else if (lane === 'audio') {

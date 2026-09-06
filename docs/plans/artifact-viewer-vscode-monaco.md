@@ -746,13 +746,30 @@ Two harness fixes came out of it, both worth keeping:
 
 | vendored bundle | size | replaced by | site in `lib/client.js` |
 |---|---|---|---|
-| `markdown.js` | 146 KB | markdown preview webview | `:1404` |
+| ~~`markdown.js`~~ | ~~146 KB~~ | **DONE** — VS Code's preview webview | deleted |
 | `codemirror.js` | 886 KB | monaco's diff editor (`createDiffEditor`) | `:838` `:854` `:1621` |
 | `prettier.js` | 2.1 MB | LSP formatting (`textDocument/formatting`) | `:1652` |
 | `pdf.js` + worker | 1.7 MB | **nothing — stays** | `:878` |
 
 `codemirror.js` carries `ArxaTheme`, which also themes the markdown preview, so
 it can only go once the preview is a webview.
+
+#### 7.2-a markdown.js is gone — **DONE**
+
+The rendered preview is VS Code's own webview. The source/preview toggle stopped
+being a swap of React subtrees and became a **prop on the one `CodeView`**:
+both are editor inputs on the same file inside the part, so switching is
+`markdown.showPreview` / `openEditor` on the same uri.
+
+Deleted with it: `previewHtml`, `mdReady`, the two `ArxaMD` effects, the
+`setParsers`/`setTheme` wiring in the palette effect, `MD_ENTRY` and the
+`markdown-it` + `dompurify` dependencies of `lib/vendor-build`. The `parsers:`
+export inside `codemirror.js` existed only to feed that highlighter and now has
+no reader; it goes when that bundle does.
+
+What replaced it is better, not equal: VS Code's own preview stylesheet, math,
+task-list checkboxes, and fenced code highlighted by the same TextMate grammars
+the editor uses.
 
 #### 7.3 What "remove the previous stuff" cannot cover
 
