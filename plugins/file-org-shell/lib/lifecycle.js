@@ -1266,7 +1266,20 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
             }
             projectSlug = hit.slug
           } else if (!template.fixedWorkspaces.includes(ws)) {
-            throw new Error('unknown-workspace: ' + ws)
+            // G2 (grilled 2026-09-06): a bare dock's first-level subfolder is a
+            // workspace row too ('notes/ideas'), so it must be able to host a
+            // session. The allowance is a DISK check here rather than a wider
+            // template vocabulary — these folders are the user's, not the
+            // scaffold's. routeDock still owns the repo decision, so account/**
+            // stays refused and an unknown dock still routes nowhere.
+            const bare = /^([A-Za-z0-9][A-Za-z0-9._-]*)\/([A-Za-z0-9][A-Za-z0-9._-]*)$/.exec(ws)
+            const dock = bare === null ? undefined : template.docks.find((d) => d.slug === bare[1])
+            const isBareDock = dock !== undefined && dock.slug !== 'projects' && (dock.containers ?? []).length === 0
+            let isDir = false
+            if (isBareDock) {
+              try { isDir = fs.statSync(path.join(resolved, bare[1], bare[2])).isDirectory() } catch { isDir = false }
+            }
+            if (!isDir) throw new Error('unknown-workspace: ' + ws)
           }
           // D98/D99: the workspace row decides WHICH repo owns this session.
           // A project workspace attaches branch + worktree to the project
@@ -2119,6 +2132,18 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
    * listing is presentation, not lifecycle (same contract as listOrgs).
    * Sessions are omitted entirely when the org has no repo yet.
    */
+  /** First-level subdirectory names of a bare dock, sorted, dotfiles
+   * skipped. A dock that was never scaffolded reads as []. */
+  function bareDockFolders(dir) {
+    try {
+      return fs.readdirSync(dir, { withFileTypes: true })
+        .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+        .map((e) => e.name)
+        .sort()
+    } catch {
+      return []
+    }
+  }
   function orgTree(orgPath) {
     const resolved = path.resolve(orgPath)
     // Scan the ORG FOLDER itself (2026-08-30): scanning the lifecycle root
@@ -2132,14 +2157,23 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     // projects + their fixed containers. The client flattens this into
     // container rows (orgs, docks, projects) and leaf workspace rows.
     const template = getTemplate(TEMPLATE_VERSION)
-    const docks = template.docks.map((d) => ({
-      slug: d.slug,
-      exists: fs.existsSync(path.join(resolved, d.slug)),
+    const docks = template.docks.map((d) => {
       // A dock with no fixed containers (notes) is itself a workspace;
       // the projects dock holds projects instead.
-      workspace: d.slug !== 'projects' && (d.containers ?? []).length === 0,
-      containers: d.containers, // null = projects dock (dynamic children)
-    }))
+      const workspace = d.slug !== 'projects' && (d.containers ?? []).length === 0
+      return {
+        slug: d.slug,
+        exists: fs.existsSync(path.join(resolved, d.slug)),
+        workspace,
+        containers: d.containers, // null = projects dock (dynamic children)
+        // G2 (grilled 2026-09-06): a bare dock's first-level subfolders are
+        // real workspace rows — a note folder hosts its own sessions, the
+        // way a project container does. Disk truth, never template
+        // vocabulary: the user makes these folders, so nothing fixed can
+        // enumerate them.
+        ...(workspace ? { folders: bareDockFolders(path.join(resolved, d.slug)) } : {}),
+      }
+    })
     const orgProjects = [...projects.values()]
       .filter((p) => p.orgId === org.id)
       .map(({ id, name, slug, path: projectPath }) => ({

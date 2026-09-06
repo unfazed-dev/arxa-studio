@@ -158,7 +158,13 @@ out = out.replace(MENU_ANCHOR, 'false && (0, react_jsx_runtime.jsx)(_deepseek_ai
 //     can open the stock leaf group (setGroupExpanded) from outside React.
 const VIEW_ACTIONS = 'const groupExpansion = useStore((s) => s.groupExpansion);'
 if (!out.includes(VIEW_ACTIONS) || out.indexOf(VIEW_ACTIONS) !== out.lastIndexOf(VIEW_ACTIONS)) throw new Error('view actions anchor missing/dup — stock shape moved?')
-out = out.replace(VIEW_ACTIONS, VIEW_ACTIONS + '\n' + T(3) + 'arxaViewActions = actions;')
+//     G2 (2026-09-06): the same site mirrors `groupExpansion` into the
+//     region's `arxaGroupExpanded` so leafHidden can tell whether a LEAF
+//     ancestor (Notes, holding its subfolder rows) is open — leaf rows
+//     expand through the stock chevron, which writes only to the dsh view
+//     store. WorkspaceBrowser is SessionTree's parent, so the mirror is set
+//     before the group map reads ARXA_WS_HIDDEN.
+out = out.replace(VIEW_ACTIONS, VIEW_ACTIONS + '\n' + T(3) + 'arxaViewActions = actions;' + '\n' + T(3) + 'arxaGroupExpanded = groupExpansion;')
 
 // 6f. (Q6) every session row carries its id in the DOM so revealSession can
 //     scrollIntoView the resumed/opened row once the tree has mounted it.

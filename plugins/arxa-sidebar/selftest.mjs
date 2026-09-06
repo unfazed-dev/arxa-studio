@@ -51,12 +51,36 @@ check('headers: workspace part names its generator',
 check('headers: shell part names its generator',
   client.includes('scripts/gen-sidebar.mjs'))
 check('headers: client.js names dsh version', client.includes('0.1.2-rc.1'))
-// 2026-09-03: Material file/folder glyphs in the org tree — the generated
-// client carries the vendored-subset loader and both row injections.
+// 2026-09-03: Material file glyphs in the org tree — the generated client
+// carries the vendored-subset loader and the file-row injection.
+// G1 (grilled 2026-09-06): FOLDERS are dsh glyphs EVERYWHERE, so a folder
+// never looks different depending on which row system drew it; the Material
+// colour pack is files-only, where the per-extension colour is the point.
 check('icons: tree loader present', client.includes('function arxaIcons(') && client.includes('/__arxa/artifacts/vendor/icons.js'))
 check('icons: file rows render material glyphs', client.includes('matIcons.file(name)'))
-check('icons: dir rows render material folder glyphs (open/closed)', client.includes('matIcons.folder(sub'))
+check('G1 icons: no material folder glyph survives anywhere', !client.includes('matIcons.folder'))
 check('icons: stock dsh glyphs kept as fallback', client.includes('IconBrowseOutline16'))
+
+// G2 (grilled 2026-09-06): the Notes hierarchy, and the duplicate rows the
+// static hide-table could never cover (every project, every Notes folder).
+check('G2 notes: a bare dock pushes one row per first-level subfolder',
+  client.includes('for (const c of d.folders || []) push(d.slug + "/" + c, c, leafIds(d.slug + "/" + c));'))
+check('G2 rows: hideDirs is DERIVED from the tree, the static table is gone',
+  client.includes('const arxaRowChildren = (workspaceId) =>') && !client.includes('ARXA_ROW_HIDDEN'))
+check('G2 rows: project rows still hide nothing (D94 stands)',
+  client.includes('hideDirs: d.kind === "project" ? null : arxaRowChildren(d.key)'))
+check('G2 leaf: a LEAF ancestor opens from the mirrored dsh view store',
+  client.includes('arxaGroupExpanded = groupExpansion;')
+  && client.includes('if (!ARXA_IS_CONTAINER_GROUP(key) && arxaGroupExpanded[key] === true) continue;'))
+
+// G3 (grilled 2026-09-06): the folder glyph of the row a session binds to
+// lights (stock dsh rule, kept whole by the transform) and the session's own
+// row carries an accent dot.
+check('G3 glyph: the stock folderActive rule survives the transform',
+  client.includes('const active = group.expanded && group.containsCurrent;')
+  && client.includes('active && Rows_module_css_default.folderActive'))
+check('G3 dot: the current session row is marked without a pseudo-element',
+  client.includes('div.aXa_wsr_sessionRow.aXa_wsr_selected{background-color:'))
 
 // ---- 3. rows-world content ----------------------------------------------------
 check('rows: org store present', client.includes('function createOrgStore()'))

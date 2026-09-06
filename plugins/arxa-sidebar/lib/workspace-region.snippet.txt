@@ -410,7 +410,14 @@
 						}
 					} else if (d.workspace) {
 						// Bare dock (notes): the leaf IS the dock row — no pseudo.
+						// G2 (grilled 2026-09-06): its first-level subfolders are rows of
+						// the same kind — each hosts its own sessions at "notes/<sub>",
+						// the way a project container does. The host lists them from disk
+						// (orgTree `folders`); deeper folders stay file-lister rows.
+						// Label is the REAL folder name (D79 GitHub parity) — no
+						// dictionary, no TitleCasing, no leaked locale key.
 						push(d.slug, wsLabel(d.slug), leafIds(d.slug));
+						for (const c of d.folders || []) push(d.slug + "/" + c, c, leafIds(d.slug + "/" + c));
 					} else {
 						push(d.slug, orgT("tree.dock." + d.slug));
 						for (const c of d.containers || []) push(d.slug + "/" + c, wsLabel(d.slug + "/" + c), leafIds(d.slug + "/" + c));
@@ -996,6 +1003,14 @@
 				+ ".aXa_agentNote{padding:3px 6px;font-size:11px;color:var(--dsw-alias-label-caption);white-space:normal}"
 				+ ".aXa_agentDetails{margin-top:2px;background:none;border:0;border-top:1px solid var(--dsw-alias-border-l2);padding:5px 6px 2px;font:inherit;font-size:11px;color:var(--dsw-alias-label-tertiary);cursor:pointer;text-align:left}"
 				+ ".aXa_agentDetails:hover{color:var(--dsw-alias-label-primary)}"
+				// G3 (grilled 2026-09-06): the row the current session lives on gets
+				// an accent dot beside the stock selected background — the folder
+				// glyph above it already lights (dsh folderActive), so the pair reads
+				// as "this branch, this row". Painted as a background gradient, NOT a
+				// pseudo-element: ::before and ::after on .sessionRow are taken by the
+				// drag markers. The extra `div` step outranks the stock rule without
+				// depending on which style tag lands last.
+				+ "div.aXa_wsr_sessionRow.aXa_wsr_selected{background-color:var(--dsw-alias-interactive-bg-hover);background-image:radial-gradient(circle at 3px 50%,var(--dsw-alias-state-business-primary) 0 2.5px,transparent 2.6px);background-repeat:no-repeat}"
 				+ ".uV2eYG_root:not(.uV2eYG_hero) [data-arxa-preset-corner]{display:none}"
 				+ ".uV2eYG_hero [data-composer-card] :is(.uV2eYG_input,.uV2eYG_mirror,.uV2eYG_backdrop){box-sizing:border-box;padding-right:var(--arxa-preset-inset,120px)}";
 			document.head.appendChild(tag);
@@ -1012,14 +1027,48 @@
 		 * the tree opens exactly where the user opens it. Container pseudo
 		 * groups walk the same prefixes (the org pseudo has ws "" and never
 		 * hides). */
+		/** The dsh view store's group expansion, mirrored at render time by
+		 * gen splice 6e (WorkspaceBrowser, the parent of SessionTree — set
+		 * before the group map reads ARXA_WS_HIDDEN). Leaf rows open through
+		 * the stock chevron, which writes there and nowhere else. */
+		let arxaGroupExpanded = {};
 		const leafHidden = (workspaceId) => {
 			const { orgId, ws } = wsParts(workspaceId);
 			if (ws === "") return false;
 			const x = orgStore.get().expanded ?? {};
 			if (!x[orgId]) return true;
 			const parts = ws.split("/");
-			for (let i = 1; i < parts.length; i++) if (!x[orgId + "|" + parts.slice(0, i).join("/")]) return true;
+			for (let i = 1; i < parts.length; i++) {
+				const key = orgId + "|" + parts.slice(0, i).join("/");
+				if (x[key]) continue;
+				// G2: a LEAF ancestor (Notes, holding its subfolder rows) is opened
+				// by the stock row's own chevron, and that truth lives in the dsh
+				// view store — arxa's map never sees the click. CONTAINER ancestors
+				// stay on arxa's map alone: a stale dsh expansion must never reopen
+				// an org the user collapsed.
+				if (!ARXA_IS_CONTAINER_GROUP(key) && arxaGroupExpanded[key] === true) continue;
+				return true;
+			}
 			return false;
+		};
+		/** Names that ALREADY exist as tree rows one level under this row,
+		 * derived from the same workspacesView that builds the tree — so a
+		 * file lister can never repeat a row. Replaces D94's static table,
+		 * which knew only the fixed template vocabulary and therefore listed
+		 * every project (and every Notes folder) twice. Project rows are the
+		 * deliberate exception and pass null: D94 settled that stage
+		 * containers, targets and .github/ are real sidebar content. */
+		const arxaRowChildren = (workspaceId) => {
+			const { orgId, ws } = wsParts(workspaceId);
+			const prefix = ws === "" ? "" : ws + "/";
+			const out = {};
+			for (const it of orgStore.get().workspacesView.items || []) {
+				const p = wsParts(it.workspaceId);
+				if (p.orgId !== orgId || p.ws === "" || !p.ws.startsWith(prefix)) continue;
+				const rest = p.ws.slice(prefix.length);
+				if (rest !== "" && rest.indexOf("/") < 0) out[rest] = 1;
+			}
+			return out;
 		};
 		/** Stock-tree render hooks (gen splices call these by name). */
 		// Leaf indent by depth, in px (a unitless paddingLeft is silently
@@ -1052,7 +1101,7 @@
 			if (ARXA_IS_CONTAINER_GROUP(group.workspaceId)) return null;
 			const { ws } = wsParts(group.workspaceId);
 			if (ws === "") return null;
-			return (0, react_jsx_runtime.jsx)(ArxaDirRows, { dir: ws, depth: ws.split("/").length, mode: "full" }, "arxa-files");
+			return (0, react_jsx_runtime.jsx)(ArxaDirRows, { dir: ws, depth: ws.split("/").length, mode: "full", hideDirs: arxaRowChildren(group.workspaceId) }, "arxa-files");
 		};
 		/** D83: the Trash surface rides the GROUPED org tree's tail (gen
 		 * splice 6z) — directly under the last org row, ALWAYS, instead of
@@ -1360,7 +1409,7 @@
 					})
 				]
 				}, d.key),
-				open ? (0, react_jsx_runtime.jsx)(ArxaDirRows, { dir: d.kind === "org" ? "" : d.kind === "dock" ? d.slug : "projects/" + d.slug, depth: d.depth + 1, mode: "files-only", hideDirs: d.kind === "org" ? ARXA_ROW_HIDDEN.org : d.kind === "dock" ? (ARXA_ROW_HIDDEN.docks[d.slug] || {}) : null }, "arxa-dir:" + d.key) : null
+				open ? (0, react_jsx_runtime.jsx)(ArxaDirRows, { dir: d.kind === "org" ? "" : d.kind === "dock" ? d.slug : "projects/" + d.slug, depth: d.depth + 1, mode: "files-only", hideDirs: d.kind === "project" ? null : arxaRowChildren(d.key) }, "arxa-dir:" + d.key) : null
 			] }, d.key);
 		}
 		/** 2026-09-05 grill — the Archives section: every org's archived
@@ -1576,21 +1625,13 @@
 		 * artifact-viewer vendor route on this same origin; one promise per
 		 * page load dedupes every ArxaDirRows mount. Failure degrades to the
 		 * stock dsh glyphs — the tree never blocks on decoration. */
-		/** D94 (2026-09-01): directories that already exist as TREE ROWS at
-		 * their parent level, so ArxaDirRows does not list them twice. The
-		 * fixed vocabulary (D42 five docks + dock containers) is stable
-		 * template data — keying by slug is exact. Project rows hide
-		 * NOTHING: stage containers, targets and free-form folders are real
-		 * sidebar content. */
-		const ARXA_ROW_HIDDEN = {
-			org: { projects: 1, notes: 1, meetings: 1, account: 1, communications: 1 },
-			docks: {
-				meetings: { scheduler: 1, notes: 1 },
-				account: { receipts: 1, invoices: 1, subscriptions: 1, profile: 1 },
-				communications: { emails: 1, messages: 1, comments: 1 },
-				notes: {},
-			},
-		};
+		/** D94 (2026-09-01), rebuilt 2026-09-06 (G2): directories that already
+		 * exist as TREE ROWS at their parent level, so ArxaDirRows does not
+		 * list them twice — see arxaRowChildren. The old static table keyed
+		 * the FIXED vocabulary only (D42 five docks + dock containers), so
+		 * every dynamic child — each project under the Projects dock, each
+		 * Notes folder — rendered once as a tree row and again as a lister
+		 * row. Deriving from workspacesView cannot go stale that way. */
 		let __arxaIconsPromise = null;
 		function arxaIcons() {
 			if (typeof window !== "undefined" && window.ArxaIcons) return Promise.resolve(window.ArxaIcons);
@@ -1684,7 +1725,11 @@
 					style: { ...childStyle(d), fontWeight: 500, cursor: "pointer", borderRadius: 6 },
 					children: [
 						(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.chevron), children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTriangleRightFill14, { className: clsx(Rows_module_css_default.arrow, openDirs[sub] && Rows_module_css_default.arrowOpen) }) }),
-						(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder), children: matIcons ? (0, react_jsx_runtime.jsx)("span", { style: { width: 16, height: 16, display: "inline-flex" }, dangerouslySetInnerHTML: { __html: matIcons.folder(sub, !!openDirs[sub]) } }) : openDirs[sub] ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {}) }),
+						// G1 (grilled 2026-09-06): FOLDERS are dsh glyphs everywhere — the
+						// tree rows above already use them, and a lister directory is the
+						// same thing one level down. The Material colour pack stays on FILE
+						// rows, where the per-extension colour is the whole point.
+						(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder), children: openDirs[sub] ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {}) }),
 						(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: sub }) })
 					]
 				}),

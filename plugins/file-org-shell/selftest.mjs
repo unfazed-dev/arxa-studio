@@ -286,6 +286,16 @@ try {
     ok(tree.docks.find((d) => d.slug === 'projects').containers === null, 'the projects dock holds dynamic projects')
     ok(Array.isArray(tree.projects) && tree.projects.every((p) => p.path.startsWith(orgA.path) && p.containers.length === 10), 'projects scoped to the org with their 10 fixed containers')
     ok(tree.sessionsByWorkspace !== null, 'workspace counts readable for a repo-backed org')
+    // G2 (grilled 2026-09-06): a bare dock's own first-level subfolders are
+    // workspace rows in the sidebar, so the tree face has to report them.
+    // Disk truth, not template vocabulary — the user makes these folders.
+    fs.mkdirSync(path.join(orgA.path, 'notes', 'ideas'), { recursive: true })
+    fs.mkdirSync(path.join(orgA.path, 'notes', '.hidden'), { recursive: true })
+    const treeG2 = svcTree.orgTree(orgA.path)
+    ok(treeG2.docks.find((d) => d.slug === 'notes').folders.join(',') === 'ideas',
+      'G2: a bare dock reports its first-level folders, dotfiles skipped')
+    ok(treeG2.docks.find((d) => d.slug === 'meetings').folders === undefined,
+      'G2: container docks report no folders — their children are template vocabulary')
     assert.throws(() => svcTree.orgTree(path.join(root, 'not-an-org')), /unknown-org/)
     passed++
     console.log('  ✓ orgTree of a non-org fails loud')
@@ -320,6 +330,16 @@ try {
     ok(autoRow.id === `${orgB.slug}/notes/note-wt-${dstamp()}-002`, `auto-id: <org>/<workspace>/<prefix>-wt-<YYMMDD>-<NNN> from the workspace folder (${autoRow.id})`)
     ok(autoRow.name === `note-wt-${dstamp()}-002`, 'auto-name defaults to the LEAF of the id, not the whole id — the breadcrumb already carries the folders (Q9)')
     ok(autoRow.worktree.endsWith(autoRow.id) && autoRow.branch === `arxa/${autoRow.id}`, 'the minted id IS the worktree dir (under .arxa/worktrees) and the whole branch suffix after arxa/')
+    // G2 (grilled 2026-09-06): a Notes subfolder is a workspace row, so it
+    // hosts its own sessions — but ONLY when the folder really exists. The
+    // allowance is a disk check, so it can never widen into account/.
+    fs.mkdirSync(path.join(orgB.path, 'notes', 'ideas'), { recursive: true })
+    const subRow = await hNo.newSession(undefined, 'notes/ideas')
+    ok(subRow.workspace === 'notes/ideas' && subRow.id === `${orgB.slug}/notes/ideas/idea-wt-${dstamp()}-001`,
+      `G2: a Notes subfolder hosts sessions in its own id namespace (${subRow.id})`)
+    ok(fs.existsSync(subRow.worktree), 'G2: the subfolder session got a real branch + worktree (org repo, per routeDock)')
+    try { await hNo.newSession('bad', 'notes/not-on-disk') } catch (e) { ok(/unknown-workspace/.test(String(e.message)), 'G2: a Notes subfolder that is not on disk still fails loud') }
+    try { await hNo.newSession('bad', 'account/receipts') } catch (e) { ok(/account/.test(String(e.message)), 'G2: the allowance never reaches account/ — routing still refuses it (D37)') }
     try { await hNo.newSession('bad', null) } catch (e) { ok(/workspace-required/.test(String(e.message)), 'org-level sessions are impossible — workspace is required (v2)') }
     try { await hNo.newSession('bad', 'nope/deep') } catch (e) { ok(/unknown-workspace/.test(String(e.message)), 'unknown workspace fails loud') }
     svcNoDsh.closeOrg()
