@@ -33,6 +33,12 @@ import '@codingame/monaco-vscode-javascript-default-extension'
 import '@codingame/monaco-vscode-json-default-extension'
 import '@codingame/monaco-vscode-html-default-extension'
 import '@codingame/monaco-vscode-css-default-extension'
+// scss and less are SEPARATE extensions from css. Measured in the running
+// editor: without these a .scss or .less file opens as `plaintext`, which means
+// no grammar AND no language client — documentSelector matches on the language
+// id, so the css server would have started and then been sent nothing.
+import '@codingame/monaco-vscode-scss-default-extension'
+import '@codingame/monaco-vscode-less-default-extension'
 import '@codingame/monaco-vscode-markdown-language-features-default-extension'
 import '@codingame/monaco-vscode-markdown-math-default-extension'
 import '@codingame/monaco-vscode-media-preview-default-extension'

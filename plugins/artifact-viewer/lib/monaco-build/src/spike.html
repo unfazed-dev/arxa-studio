@@ -119,5 +119,18 @@
   out.contained = !!lb && lb.left >= box.left - 1 && lb.top >= box.top - 1 &&
     lb.right <= box.right + 1 && lb.width > 0
   out.styled = !!lines && getComputedStyle(document.querySelector('.monaco-editor')).position !== 'static'
+  // 2c: the monaco language id of every extension the LSP rows claim. A
+  // documentSelector matches on the language id, and a mismatch is SILENT —
+  // the client starts, the server runs, no document is ever synced and no
+  // underline ever appears. `plaintext` here means a dead row.
+  out.step = 'language-ids'
+  out.ids = {}
+  for (const ext of ['ts', 'tsx', 'mts', 'cts', 'js', 'jsx', 'mjs', 'cjs', 'html', 'css', 'scss', 'less', 'json', 'jsonc']) {
+    try {
+      const mdl = m.monaco.editor.createModel('', undefined, m.monaco.Uri.parse('file:///spike/probe.' + ext))
+      out.ids[ext] = mdl.getLanguageId()
+      mdl.dispose()
+    } catch (e) { out.ids[ext] = 'ERR:' + String(e && e.message || e) }
+  }
   out.step = 'done'
 </script>

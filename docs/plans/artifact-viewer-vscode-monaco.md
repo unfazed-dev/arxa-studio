@@ -507,6 +507,15 @@ dead row:
    client that then ignored every `.js`, `.scss` and `.jsonc` document it was
    started for.
 
+5. **`.scss` and `.less` opened as `plaintext`.** Caught only by asking the
+   RUNNING editor for `getLanguageId()` of every extension the rows claim, and
+   reading the answers off the capture — `scss` and `less` are separate default
+   extensions from `css`, and the build had only `css`. Two dead rows: the css
+   server would have started and then been sent nothing, because a
+   documentSelector matches on the language id. `check.mjs` now asserts all
+   fourteen ids, so a future row that claims an extension the build cannot
+   colour goes red instead of silent.
+
 **`projectRootFor` gained a fallback.** html, css and json normally have no
 manifest above them, and a loose `.ts` analyses fine on its own — denying those
 would have made "no diagnostics" the normal case for three of the five languages.

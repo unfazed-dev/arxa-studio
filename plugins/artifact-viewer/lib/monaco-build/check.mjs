@@ -76,6 +76,22 @@ server.listen(0, '127.0.0.1', () => {
       "window.__spike.lang === 'rust'",
       'window.__spike.tokens > 20',
       "window.__spike.lang2 === 'dart'",          // a second extension's grammar
+      // 2c: every extension an LSP row claims must resolve to a real language
+      // id. `plaintext` would be a row that starts a server and syncs nothing.
+      "window.__spike.ids.ts === 'typescript'",
+      "window.__spike.ids.tsx === 'typescriptreact'",
+      "window.__spike.ids.mts === 'typescript'",
+      "window.__spike.ids.cts === 'typescript'",
+      "window.__spike.ids.js === 'javascript'",
+      "window.__spike.ids.jsx === 'javascriptreact'",
+      "window.__spike.ids.mjs === 'javascript'",
+      "window.__spike.ids.cjs === 'javascript'",
+      "window.__spike.ids.html === 'html'",
+      "window.__spike.ids.css === 'css'",
+      "window.__spike.ids.scss === 'scss'",
+      "window.__spike.ids.less === 'less'",
+      "window.__spike.ids.json === 'json'",
+      "window.__spike.ids.jsonc === 'jsonc'",
       "window.__spike.reopenLang === 'rust'",
       'window.__spike.reopenFresh === true',      // reopen shows the NEW bytes
       'window.__spike.reopenNoStale === true',    // and not the old ones
