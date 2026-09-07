@@ -424,11 +424,11 @@ async function patchProjectManifest(projPath, patch) {
   // silently fail to publish, because a failed publish is swallowed by design.
   const projPath = ws.scaffoldProject(repoPath, 'kitchen').path
   gw.initProjectRepo(projPath)
-  const pmade = await act('workspace.new-session', { workspace: 'projects/kitchen/02-design' })
+  const pmade = await act('workspace.new-session', { workspace: 'projects/kitchen/02-design/application' })
   const psid = pmade.result?.id
   const prow = gw.parkedSessions(repoPath).find((x) => x.id === psid)
   check('Q14: a project session is visible from the ORG path, with the fields the ledger publishes',
-    !!prow && prow.repoPath === projPath && prow.workspace === 'projects/kitchen/02-design' && typeof prow.branch === 'string',
+    !!prow && prow.repoPath === projPath && prow.workspace === 'projects/kitchen/02-design/application' && typeof prow.branch === 'string',
     JSON.stringify({ found: !!prow, repoPath: prow?.repoPath, expected: projPath, workspace: prow?.workspace }))
 
   gw.recordStage(prow.repoPath, psid, { stage: 'committed', actor: 'Evan', sha: 'facefeed99' })

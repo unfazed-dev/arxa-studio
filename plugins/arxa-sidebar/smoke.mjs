@@ -284,14 +284,16 @@ const rcTree2 = s.orgs.find((o) => o.open).tree
 check('rows-c: project served with its 10 fixed containers',
   rcTree2.projects.length === 1 && rcTree2.projects[0].containers.length === 10,
   JSON.stringify(rcTree2.projects))
-r = await act('workspace.new-session', { orgId: rc.id, workspace: 'projects/rocket/02-design' })
+r = await act('workspace.new-session', { orgId: rc.id, workspace: 'projects/rocket/02-design/application' })
 // A project session's identity mirrors disk exactly — `projects/` kept, the
 // numeric container kept — and its CHECKOUT sits under the ORG's single
 // worktrees root even though its branch and registry live in the project repo.
-check('rows-c: project-container session ok (full path identity)',
+// Track binding (2026-09-08): the session hangs off the stage's application
+// track, and the auto-name takes the LAST segment (Q6 — unchanged mint rule).
+check('rows-c: project-track session ok (full path identity)',
   r.ok === true && r.result?.project === 'rocket'
-  && r.result?.workspace === 'projects/rocket/02-design'
-  && /^[^/]+\/projects\/rocket\/02-design\/02-design-wt-\d{6}-\d{3}$/.test(r.result?.id ?? '')
+  && r.result?.workspace === 'projects/rocket/02-design/application'
+  && /^[^/]+\/projects\/rocket\/02-design\/application\/application-wt-\d{6}-\d{3}$/.test(r.result?.id ?? '')
   && r.result?.name === r.result?.id.split('/').pop()
   && r.result?.branch === 'arxa/' + r.result?.id
   && r.result?.worktree.endsWith('/.arxa/worktrees/' + r.result?.id), JSON.stringify(r))
@@ -302,6 +304,13 @@ check('rows-c: both sessions registered under their workspaces with real timesta
   JSON.stringify(rcSessions))
 r = await act('workspace.new-session', { orgId: rc.id, workspace: 'notes/nope' })
 check('rows-c: unknown workspace is loud', r.ok === false && String(r.error).startsWith('unknown-workspace'), JSON.stringify(r))
+// Track binding (2026-09-08): a bare stage is refused through the ACTION too —
+// the HTTP surface has no auth, so this is where the rule actually holds.
+r = await act('workspace.new-session', { orgId: rc.id, workspace: 'projects/rocket/02-design' })
+check('rows-c: a bare stage container is refused and names the two paths that work',
+  r.ok === false && String(r.error).startsWith('workspace-needs-track')
+  && String(r.error).includes('02-design/application') && String(r.error).includes('02-design/website'),
+  JSON.stringify(r))
 
 // D80: full-move rename through the action — folder + manifest + rekey;
 // session workspaces rekey to the new slug.
@@ -311,7 +320,7 @@ s = await state()
 const renamedTree = s.orgs.find((o) => o.open).tree
 check('rows-c: renamed project serves under the new slug with its containers',
   renamedTree.projects.some((p) => p.slug === 'Rocket-Pool' && p.containers.length === 10), JSON.stringify(renamedTree.projects))
-r = await act('workspace.new-session', { orgId: rc.id, workspace: 'projects/Rocket-Pool/01-intake' })
+r = await act('workspace.new-session', { orgId: rc.id, workspace: 'projects/Rocket-Pool/01-intake/website' })
 check('rows-c: session under the renamed slug parses (D79 keys)', r.ok === true && r.result?.project === 'Rocket-Pool', JSON.stringify(r))
 // D80: project.trash parks the renamed project in the org trash (local-only).
 r = await act('project.trash', { orgId: rc.id, projectSlug: 'Rocket-Pool' })

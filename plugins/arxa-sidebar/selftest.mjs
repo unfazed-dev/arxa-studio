@@ -870,5 +870,47 @@ check('client: agent verb + reason strings localized in en/pl/fr',
     !host.includes('catch { /* factory unavailable/refused — degrade to a bare session */ }'))
 }
 
+// ============================================================
+// S-track — sessions bind to a track (grilled 2026-09-08,
+// docs/plans/sessions-bound-to-tracks.md). The nine numbered stages host a
+// session only under application/website; `notes` binds to itself; docks are
+// untouched. The sidebar copy is COSMETIC (the action has no auth) — these
+// checks exist so it never drifts from the server rule it mirrors.
+{
+  const gen = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
+  check('S-track: the stage row gains website + application children, notes does not',
+    /if \(c !== "notes"\) for \(const tr of \["website", "application"\]\) push\(cw \+ "\/" \+ tr/.test(gen))
+  check('S-track: the CTA and its tooltip both consult the predicate',
+    gen.includes('if (!sessionCreatable(sel.rowId)) return false;')
+    && gen.includes('if (!sessionCreatable(sel.rowId)) return orgT("newSession.needsTrack");'))
+  check('S-track: every locale answers newSession.needsTrack',
+    (gen.match(/"newSession\.needsTrack":/g) || []).length
+      === (gen.match(/"newSession\.selectFirst":/g) || []).length)
+
+  // Run the real predicate, not a regex about it: pull it out of the generated
+  // bundle and drive the whole grammar through it.
+  const src = /const sessionCreatable = \((?:.|\n)*?\n\t\t\};/.exec(gen)
+  check('S-track: sessionCreatable is present in the shipped bundle', src !== null)
+  if (src) {
+    // eslint-disable-next-line no-new-func
+    const fn = new Function(src[0] + ' return sessionCreatable;')()
+    const yes = ['notes', 'notes/ideas', 'meetings/scheduler', 'projects/p/notes',
+      'projects/p/02-design/application', 'projects/p/02-design/website']
+    const no = ['projects', 'projects/p', 'projects/p/02-design',
+      'projects/p/02-design/application/ios', 'projects/p/notes/application',
+      'projects/p/02-design/backend']
+    check('S-track: creatable paths — docks, project notes, both tracks', yes.every(fn),
+      JSON.stringify(yes.filter((x) => !fn(x))))
+    check('S-track: refused paths — bare stage, target, notes track, invented track',
+      no.every((x) => !fn(x)), JSON.stringify(no.filter(fn)))
+  }
+
+  // Drift guard: the two names are hardcoded client-side; the template owns them.
+  const tpl = readFileSync(new URL('../workspace/lib/template.js', import.meta.url), 'utf8')
+  const tracks = /const PROJECT_TRACKS_V4 = Object\.freeze\(\[([^\]]*)\]\)/.exec(tpl)
+  check('S-track: the client track list still matches PROJECT_TRACKS_V4',
+    tracks !== null && tracks[1].replace(/['\s]/g, '') === 'website,application')
+}
+
 console.log(failures === 0 ? '\narxa-sidebar selftest: ALL GREEN' : `\narxa-sidebar selftest: ${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)

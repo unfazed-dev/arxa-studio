@@ -3403,6 +3403,20 @@ window.__ModuleLoader__.load({
 		 * section (seen live 2026-08-30: blank sidebar). OrgBrowser refreshes
 		 * the capture every render; identity-stable fallback until then. */
 		let orgT = (k) => k;
+		/** Mirror of the server rule (lifecycle.js newSession, grilled
+		 * 2026-09-08, docs/plans/sessions-bound-to-tracks.md): inside a project
+		 * the nine numbered stages take a session only under a track —
+		 * application or website — and `notes` binds to itself. Docks are
+		 * untouched. This is COSMETICS: /__arxa/sidebar/action has no auth, so
+		 * the server check is what actually holds the rule. It exists so the CTA
+		 * never sits enabled over a path the server would refuse (a dead button
+		 * is worse than none — sidebar-workspace-row-new-session.md, D4). */
+		const sessionCreatable = (rowId) => {
+			const p = String(rowId || "").split("/").filter(Boolean);
+			if (p[0] !== "projects") return true;
+			if (p.length === 3) return p[2] === "notes";
+			return p.length === 4 && p[2] !== "notes" && (p[3] === "website" || p[3] === "application");
+		};
 		window.__ARXA_SIDEBAR__ = {
 			get orgOpen() {
 				return orgStore.get().orgs.some((o) => o.open);
@@ -3427,6 +3441,7 @@ window.__ModuleLoader__.load({
 				const s = orgStore.get();
 				const sel = s.selectedRowId;
 				if (!sel) return false;
+				if (!sessionCreatable(sel.rowId)) return false;
 				const o = (s.orgs || []).find((y) => y.id === sel.orgId);
 				return !(o && o.open && o.snapshotPending === true);
 			},
@@ -3439,6 +3454,7 @@ window.__ModuleLoader__.load({
 				const s = orgStore.get();
 				const sel = s.selectedRowId;
 				if (!sel) return orgT("newSession.selectFirst");
+				if (!sessionCreatable(sel.rowId)) return orgT("newSession.needsTrack");
 				const o = (s.orgs || []).find((y) => y.id === sel.orgId);
 				return o && o.open && o.snapshotPending === true ? orgT("newSession.snapshotPending") : void 0;
 			},
@@ -3512,7 +3528,20 @@ window.__ModuleLoader__.load({
 						push("projects", orgT("tree.dock.projects"));
 						for (const p of tree.projects || []) {
 							push("projects/" + p.slug, p.name);
-							for (const c of p.containers || []) push("projects/" + p.slug + "/" + c, wsLabel("projects/" + p.slug + "/" + c), leafIds("projects/" + p.slug + "/" + c));
+							// TRACK BINDING (grilled 2026-09-08, sessions-bound-to-tracks.md):
+							// the nine numbered stages host sessions only under a track, so
+							// each stage row gains "website" and "application" children and
+							// loses its own "+". `notes` is the exception — not a pipeline
+							// stage, it binds to itself and gets no track rows (one door per
+							// container). The two names mirror PROJECT_TRACKS_V4 in
+							// plugins/workspace/lib/template.js; selftest S-track pins them.
+							// Label is the REAL folder name, never a tree.ws.* locale key
+							// (D79 GitHub parity) — wsLabel has no entry this deep.
+							for (const c of p.containers || []) {
+								const cw = "projects/" + p.slug + "/" + c;
+								push(cw, wsLabel(cw), leafIds(cw));
+								if (c !== "notes") for (const tr of ["website", "application"]) push(cw + "/" + tr, tr, leafIds(cw + "/" + tr));
+							}
 						}
 					} else if (d.workspace) {
 						// Bare dock (notes): the leaf IS the dock row — no pseudo.
@@ -5795,6 +5824,7 @@ window.__ModuleLoader__.load({
 			"github.signin.failed": "GitHub sign-in did not complete — try again.",
 			"github.signin.required": "Link your GitHub account first.",
 			"newSession.selectFirst": "Select a workspace to start a session",
+			"newSession.needsTrack": "Pick the application or website inside this stage — sessions belong to one of them",
 			"files.openHint": "Open this organisation to browse its files",
 			"newSession.snapshotPending": "Preparing git snapshot — sessions unlock when it lands",
 			"welcome.title": "Welcome to arxa studio",
@@ -6000,6 +6030,7 @@ window.__ModuleLoader__.load({
 			"github.signin.failed": "Logowanie do GitHub nie powiodło się — spróbuj ponownie.",
 			"github.signin.required": "Najpierw połącz swoje konto GitHub.",
 			"newSession.selectFirst": "Wybierz obszar roboczy, aby rozpocząć sesję",
+			"newSession.needsTrack": "Wybierz aplikację lub witrynę w tym etapie — sesje należą do jednej z nich",
 			"files.openHint": "Otwórz tę organizację, aby przeglądać jej pliki",
 			"newSession.snapshotPending": "Przygotowywanie migawki git — sesje odblokują się, gdy będzie gotowa",
 			"welcome.title": "Witamy w arxa studio",
@@ -6205,6 +6236,7 @@ window.__ModuleLoader__.load({
 			"github.signin.failed": "La connexion à GitHub n’a pas abouti — réessayez.",
 			"github.signin.required": "Liez d’abord votre compte GitHub.",
 			"newSession.selectFirst": "Sélectionnez un espace de travail pour démarrer une session",
+			"newSession.needsTrack": "Choisissez l’application ou le site web dans cette étape — une session appartient à l’un des deux",
 			"files.openHint": "Ouvrez cette organisation pour parcourir ses fichiers",
 			"newSession.snapshotPending": "Préparation de l’instantané git — les sessions se débloqueront quand il sera prêt",
 			"welcome.title": "Bienvenue dans arxa studio",

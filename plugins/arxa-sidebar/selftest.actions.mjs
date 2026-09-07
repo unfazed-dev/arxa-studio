@@ -81,7 +81,8 @@ async function makeSession(org, workspace = 'notes') {
 }
 
 /** Scaffold a project WITH its own repo (D98/D99) — the same fixture shape
-  * smoke.mjs uses for 'projects/<slug>/<container>' sessions. */
+  * smoke.mjs uses for 'projects/<slug>/<container>/<track>' sessions
+  * (track binding, 2026-09-08). */
 async function makeProject(org, slug) {
   const proj = ws.scaffoldProject(org.path, slug)
   if (!proj?.path) throw new Error('scaffoldProject failed for ' + slug)
@@ -151,7 +152,7 @@ async function patchProjectManifest(projPath, patch) {
   check('D111 (project-routed): org-repo session unaffected by the project repo being red',
     orgSession.ok === true && orgSession.result.notice === null, JSON.stringify(orgSession))
 
-  const projSession = await act('workspace.new-session', { orgId: org.id, workspace: 'projects/rocket/02-design' })
+  const projSession = await act('workspace.new-session', { orgId: org.id, workspace: 'projects/rocket/02-design/application' })
   check('D111 (project-routed): project-repo session gated on the PROJECT manifest, not the org\'s',
     projSession.ok === false && projSession.error === 'main-red', JSON.stringify(projSession))
 }
@@ -163,7 +164,7 @@ async function patchProjectManifest(projPath, patch) {
   await patchManifest(org.path, { repoOwner: 'acme', repoName: 'org-repo', localOnly: false })
   await makeProject(org, 'rocket')
   fakeGh.prChecks = async () => ({ state: 'red', asleep: false, runs: [] }) // org would be red if (wrongly) consulted
-  const r = await act('workspace.new-session', { orgId: org.id, workspace: 'projects/rocket/02-design' })
+  const r = await act('workspace.new-session', { orgId: org.id, workspace: 'projects/rocket/02-design/application' })
   check('D111 (project-routed): unlinked project proceeds with notice null (does not fall back to org)',
     r.ok === true && r.result.notice === null, JSON.stringify(r))
 }

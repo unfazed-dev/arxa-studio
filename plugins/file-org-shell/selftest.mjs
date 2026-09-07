@@ -543,9 +543,9 @@ try {
     ok(path.basename(polo.path) === 'POLO', 'D79: uppercase name keeps its case on disk')
     const pm79 = JSON.parse(fs.readFileSync(path.join(polo.path, 'project.json'), 'utf8'))
     ok(pm79.name === 'POLO', 'D79: manifest display name preserves case (slug IS the folder)')
-    const sess79 = await svcNoGh.current.newSession(null, 'projects/POLO/00-moodboard')
+    const sess79 = await svcNoGh.current.newSession(null, 'projects/POLO/00-moodboard/application')
     ok(
-      sess79.workspace === 'projects/POLO/00-moodboard' && sess79.project === 'POLO',
+      sess79.workspace === 'projects/POLO/00-moodboard/application' && sess79.project === 'POLO',
       'D79: uppercase slugs parse as workspace keys (session scope accepts them)',
     )
 

@@ -63,8 +63,10 @@ try {
 
   // ---- (f) newSession for a project workspace -----------------------------
 
-  const ps = await h.newSession('design-001', 'projects/alpha/02-design')
-  ok(ps.workspace === 'projects/alpha/02-design' && ps.project === 'alpha', 'project session keeps its workspace + project scope')
+  // Track binding (grilled 2026-09-08): a numbered stage is not a session
+  // home — the session lives under its application/website track.
+  const ps = await h.newSession('design-001', 'projects/alpha/02-design/application')
+  ok(ps.workspace === 'projects/alpha/02-design/application' && ps.project === 'alpha', 'project session keeps its workspace + project scope')
   ok(
     commonDir(ps.worktree) === fs.realpathSync(path.join(proj.path, '.git')),
     'B2 FIXED: a project session worktree belongs to the PROJECT repo',
@@ -111,10 +113,34 @@ try {
     'an unknown dock refuses loudly — never a silent org fallback (that IS B2)',
   )
   await throwsAsync(
-    () => h.newSession('nope', 'projects/ghost/02-design'),
+    () => h.newSession('nope', 'projects/ghost/02-design/application'),
     (e) => assert.match(String(e.message), /unknown-workspace|unknown-dock/),
     'a project that does not exist refuses',
   )
+
+  // ---- track binding, the closed grammar (2026-09-08) ----------------------
+  await throwsAsync(
+    () => h.newSession('nope', 'projects/alpha/02-design'),
+    (e) => assert.match(String(e.message), /workspace-needs-track/),
+    'a bare stage container refuses, and says which two paths work',
+  )
+  await throwsAsync(
+    () => h.newSession('nope', 'projects/alpha/02-design/application/ios'),
+    (e) => assert.match(String(e.message), /unknown-workspace/),
+    'a target below a track refuses — binding is track-level',
+  )
+  await throwsAsync(
+    () => h.newSession('nope', 'projects/alpha/notes/application'),
+    (e) => assert.match(String(e.message), /unknown-workspace/),
+    'notes takes no track rows — one session door per container',
+  )
+  await throwsAsync(
+    () => h.newSession('nope', 'projects/alpha/02-design/backend'),
+    (e) => assert.match(String(e.message), /unknown-workspace/),
+    'an invented track refuses',
+  )
+  const wsTrack = await h.newSession(undefined, 'projects/alpha/02-design/website')
+  ok(wsTrack.workspace === 'projects/alpha/02-design/website', 'the website track is a session home too')
 
   // ---- no HEAD: routing refuses instead of letting worktree add fail raw ---
 

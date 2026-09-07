@@ -1261,11 +1261,39 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           let projectSlug = null
           // D79: slugs preserve case — "projects/POLO/00-moodboard" is a
           // legal workspace key and must parse.
-          const projectScope = /^projects\/([A-Za-z0-9][A-Za-z0-9._-]*)\/([A-Za-z0-9][A-Za-z0-9._-]*)$/.exec(ws)
+          //
+          // TRACK BINDING (grilled 2026-09-08, sessions-bound-to-tracks.md):
+          // inside a project a session is bound to what it works ON, not just
+          // to the phase of work. The nine numbered stages therefore take a
+          // session only under a TRACK — `<stage>/application` or
+          // `<stage>/website` — and the bare stage container is refused. Both
+          // track folders are scaffolded under every container of every
+          // project in every template version (projectDirsV2/V3/V4), so this
+          // costs no migration and no disk probe. `notes` is the exception
+          // (Q2/Q7): not a pipeline stage, so it binds to itself and its own
+          // two track folders are NOT session points — one door per container.
+          // Depth is invisible to git routing (resolveSessionRepo reads only
+          // `projects` and the slug), so nothing below changes.
+          const projectScope =
+            /^projects\/([A-Za-z0-9][A-Za-z0-9._-]*)\/([A-Za-z0-9][A-Za-z0-9._-]*)(?:\/([A-Za-z0-9][A-Za-z0-9._-]*))?$/.exec(ws)
           if (projectScope) {
+            const [, slug, container, track] = projectScope
             const hit = [...scanWorkspace(resolved).projects.values()]
-              .find((p) => p.orgId === opened.manifest.id && p.slug === projectScope[1])
-            if (!hit || !template.projectContainers.includes(projectScope[2])) {
+              .find((p) => p.orgId === opened.manifest.id && p.slug === slug)
+            if (!hit || !template.projectContainers.includes(container)) {
+              throw new Error('unknown-workspace: ' + ws)
+            }
+            // v4 names them `projectTracks`; v2/v3 carry the same two strings
+            // under `projectTargets`, so this reads correctly on every version.
+            const tracks = template.projectTracks ?? template.projectTargets ?? []
+            if (container === 'notes') {
+              if (track !== undefined) throw new Error('unknown-workspace: ' + ws)
+            } else if (track === undefined) {
+              throw new Error(
+                'workspace-needs-track: "' + ws + '" is a stage, not a session home — ' +
+                  'create the session in ' + ws + '/application or ' + ws + '/website',
+              )
+            } else if (!tracks.includes(track)) {
               throw new Error('unknown-workspace: ' + ws)
             }
             projectSlug = hit.slug
