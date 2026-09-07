@@ -3,8 +3,7 @@
 # Runs INSIDE the Arch container (scripts/linux/Dockerfile.arch) with both repos
 # bind-mounted, and prints one PASS/FAIL table.
 #
-#   docker run --rm -v <parent>:/work -v arxa-linux-node-modules:/work/arxa-studio/node_modules \
-#     arxa-arch:arm64 bash /work/arxa-studio/scripts/linux/bringup.sh
+#   scripts/linux/run-container.sh [--fresh] [all|engine|sidecars|shell|window]
 #
 # Layers, cheapest first — a later layer only runs when the ones it needs passed:
 #   1  toolchain + deps        node, npm ci, bwrap, secret-tool, zenity
@@ -15,20 +14,26 @@
 #                              failure is reported, not chased — Hyprland is the real target
 set -uo pipefail
 
-STUDIO=${STUDIO:-/work/arxa-studio}
+SRC=${SRC:-/src}
+WORK=${WORK:-/work}
+STUDIO="$WORK/arxa-studio"
 ONLY=${1:-all}
-cd "$STUDIO" || { echo "no studio at $STUDIO"; exit 1; }
 
-# Refuse to touch the HOST's node_modules. When the container-owned volume is
-# missing or unwritable, /work/arxa-studio/node_modules resolves to the
-# bind-mounted macOS tree, and `npm ci` there replaces every darwin binary with
-# a Linux one — the host build then fails in ways that look unrelated. Run
-# through scripts/linux/run-container.sh, which creates and chowns the volume.
-if ls node_modules/@esbuild 2>/dev/null | grep -q darwin; then
-  echo "REFUSING: node_modules holds darwin packages — this is the host tree, not the container volume." >&2
-  echo "          Run scripts/linux/run-container.sh instead of a bare docker run." >&2
-  exit 2
-fi
+# The host repos are READ-ONLY at /src; everything happens on the container's
+# own copy under /work. Two things this buys: `npm ci` can never replace the
+# host's darwin node_modules with Linux binaries (it did, once), and the install
+# runs on a plain volume filesystem instead of a volume nested inside a
+# virtiofs bind mount, which failed halfway through with ENOTDIR.
+echo "=== 0 sync $SRC → $WORK ==="
+mkdir -p "$WORK"
+for repo in arxa-studio arxa; do
+  [ -d "$SRC/$repo" ] || continue
+  rsync -a --delete \
+    --exclude 'node_modules/' --exclude '.git/' --exclude 'target/' \
+    --exclude '.compile-cache/' --exclude 'designs/' --exclude 'archives/' \
+    "$SRC/$repo/" "$WORK/$repo/"
+done
+cd "$STUDIO" || { echo "no studio at $STUDIO"; exit 1; }
 
 pass=0; fail=0; skip=0
 declare -a ROWS
@@ -116,8 +121,8 @@ fi
 # ---- 4. the shell -----------------------------------------------------------
 if want all || want shell; then
   step "8 cargo build (Tauri shell against webkit2gtk)"
-  if (cd /work/arxa/desktop/src-tauri && cargo build --release > /tmp/cargo.log 2>&1); then
-    row PASS "cargo build" "$(ls -la /work/arxa/desktop/src-tauri/target/release/arxa-desktop 2>/dev/null | awk '{print $5" bytes"}')"
+  if (cd "$WORK/arxa/desktop/src-tauri" && cargo build --release > /tmp/cargo.log 2>&1); then
+    row PASS "cargo build" "$(ls -la "$WORK/arxa/desktop/src-tauri/target/release/arxa-desktop" 2>/dev/null | awk '{print $5" bytes"}')"
   else
     row FAIL "cargo build" "$(grep -E '^error' /tmp/cargo.log | head -3 | tr '\n' ' ')"
   fi
@@ -126,7 +131,7 @@ fi
 # ---- 5. window (best effort) ------------------------------------------------
 if want all || want window; then
   step "9 window smoke under Xvfb (best effort)"
-  BIN=/work/arxa/desktop/src-tauri/target/release/arxa-desktop
+  BIN="$WORK/arxa/desktop/src-tauri/target/release/arxa-desktop"
   if [ ! -x "$BIN" ]; then
     row SKIP "window" "no built shell to run"
   else

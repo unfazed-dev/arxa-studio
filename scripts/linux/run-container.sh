@@ -5,22 +5,22 @@
 #   scripts/linux/run-container.sh engine         # one layer
 #   scripts/linux/run-container.sh -- bash        # a shell in the container
 #
-# The one thing this script exists to get right: node_modules must be a
-# CONTAINER-OWNED volume, not the host's tree. A docker-created volume mounts
-# root-owned, the container user cannot write it, and the write then lands on
-# the bind-mounted host tree instead — which replaces the macOS install with
-# Linux binaries and breaks the host build. So the volume is created and chowned
-# here before anything runs, and bringup.sh refuses a tree that looks like the
-# host's.
+# The host repos are mounted READ-ONLY at /src and the container works on its own
+# copy in a volume (rsync'd by bringup.sh). Two failures forced that shape:
+#   * a writable bind mount let `npm ci` replace the macOS node_modules with
+#     Linux binaries, breaking the host build;
+#   * npm ci onto a docker volume mounted INSIDE the bind mount failed
+#     intermittently with ENOTDIR halfway through the install.
+# A read-only source mount makes the first impossible and the second moot.
 set -euo pipefail
 
 IMAGE=${IMAGE:-arxa-arch:arm64}
-VOLUME=${VOLUME:-arxa-linux-node-modules}
+VOLUME=${VOLUME:-arxa-linux-work}
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 STUDIO=$(cd "$HERE/../.." && pwd)
 PARENT=$(dirname "$STUDIO")
 
-# `--fresh` throws the node_modules volume away first: an interrupted npm ci
+# `--fresh` throws the work volume away first: an interrupted npm ci
 # leaves a half-written tree that then fails with ENOTDIR on the next attempt.
 if [ "${1:-}" = "--fresh" ]; then
   shift
@@ -35,10 +35,9 @@ args=(
   # bwrap needs unprivileged user namespaces; docker's default seccomp profile
   # blocks the syscalls. This is the container being permissive, not the app.
   --security-opt seccomp=unconfined
-  -v "$PARENT":/work
-  -v "$VOLUME":/work/arxa-studio/node_modules
+  -v "$PARENT":/src:ro
+  -v "$VOLUME":/work
   -v arxa-linux-cargo:/home/builder/.cargo
-  -v arxa-linux-target:/work/arxa/desktop/src-tauri/target
   # Warm package caches. Cold ones are not just slow: dsh's profile bootstrap
   # installs its own dependencies and starts loading plugins, so a store that
   # has to download ~190 packages first loses the race and the engine dies on
@@ -57,7 +56,7 @@ ensure_volumes() {
 
 if [ "${1:-}" = "--" ]; then
   shift
-  ensure_volumes arxa-linux-cargo arxa-linux-target arxa-linux-pnpm-store arxa-linux-npm-cache
+  ensure_volumes arxa-linux-cargo arxa-linux-pnpm-store arxa-linux-npm-cache
   # -t only when this really is a terminal; a piped invocation must not fail.
   [ -t 0 ] && args+=(-it)
   exec docker run "${args[@]}" "$IMAGE" "$@"
@@ -67,4 +66,4 @@ fi
 # the same way so a release build is not denied halfway through.
 ensure_volumes arxa-linux-cargo arxa-linux-target arxa-linux-pnpm-store arxa-linux-npm-cache
 
-exec docker run "${args[@]}" "$IMAGE" bash /work/arxa-studio/scripts/linux/bringup.sh "${1:-all}"
+exec docker run "${args[@]}" "$IMAGE" bash /src/arxa-studio/scripts/linux/bringup.sh "${1:-all}"

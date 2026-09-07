@@ -29,7 +29,7 @@ RUN pacman -Syu --noconfirm --needed \
       bubblewrap libsecret gnome-keyring dbus polkit \
       xdg-desktop-portal xdg-desktop-portal-gtk \
       xorg-server-xvfb ttf-dejavu zenity \
-      unzip zip which jq procps-ng python \
+      unzip zip which jq procps-ng python rsync \
   && pacman -Scc --noconfirm
 
 # Dart SDK: `dart` is an official Arch package on x86_64 only, so the aarch64
