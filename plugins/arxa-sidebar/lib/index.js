@@ -336,8 +336,37 @@ export function apply(ctx, opts = {}) {
                   //    passes through. Resolve failure degrades exactly as
                   //    before — no preset recorded, host default composition.
                   const resolved = await presets.resolve(undefined)
-                  if (resolved && typeof resolved.id === 'string' && resolved.id !== '') presetId = resolved.id
-                  setup = async (agentCtx) => { await presets.mount(agentCtx, resolved.id) }
+                  if (resolved && typeof resolved.id === 'string' && resolved.id !== '') {
+                    presetId = resolved.id
+                    // 3b. A PRESET IS A COMPOSITION CHOICE, NOT A PREREQUISITE
+                    //     FOR HAVING AN AGENT (2026-09-08). mount() throws when
+                    //     a preset's composition is unusable (bad YAML, ghost
+                    //     directory, rowless list) -- and it throws from INSIDE
+                    //     setup, where dsh-agent-loop's setupAndPublish disposes
+                    //     the half-built agent and rethrows. The session is then
+                    //     left with no agent loop at all, which is precisely the
+                    //     unrecoverable state: resolve() finds no live agent,
+                    //     and persistence.prepare() then refuses BECAUSE the
+                    //     session is live ("cannot prepare session while it is
+                    //     live"). Losing the whole conversation because a
+                    //     DECORATION failed is the wrong trade, so degrade to
+                    //     the host default composition -- the same outcome a
+                    //     resolve() failure already produces via the catch
+                    //     below. Note ensureStanding() DROPS a settled failure
+                    //     so a later session retries the preset: that is how one
+                    //     session can die on a mount the very next one survives.
+                    //     Mount by presetId (a checked non-empty string), never
+                    //     resolved.id, so the closure cannot reintroduce the
+                    //     unguarded read this guard exists to prevent.
+                    setup = async (agentCtx) => {
+                      try {
+                        await presets.mount(agentCtx, presetId)
+                      } catch (e) {
+                        console.log('[arxa-sidebar] preset mount failed for ' + presetId +
+                          ' - keeping the agent on the host default composition: ' + String(e?.message ?? e))
+                      }
+                    }
+                  }
                 }
               } catch { /* no preset roster — the host default composition stands */ }
               const handle = await agents.create({

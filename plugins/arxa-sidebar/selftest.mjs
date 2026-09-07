@@ -322,7 +322,11 @@ check('S1/Q2: the mint reads the CROSS-REGISTRY aggregate — the id becomes the
   check('S1/item1: the resolved preset id rides on meta so it lands in the session HEADER and the stock AgentPresetLabel lights up',
     hostSrc.includes('meta: { cwd, ...(presetId === undefined ? {} : { agentPreset: presetId }) }')
       && hostSrc.includes('const resolved = await presets.resolve(undefined)')
-      && hostSrc.includes('setup = async (agentCtx) => { await presets.mount(agentCtx, resolved.id) }'))
+      // The mount moved into a try/catch on 2026-09-08 (a throwing mount used
+      // to cost the session its whole agent loop) and now mounts by the
+      // guard-checked `presetId`. Still one setup, still mounting the resolved
+      // preset -- what this check has always been about.
+      && /setup = async \(agentCtx\) => \{\s*try \{\s*await presets\.mount\(agentCtx, presetId\)/.test(hostSrc))
   // Measured 2026-09-03: the AgentHandle carries NO `.session` (live=false in
   // the debug line), and rename() identity-checks against the store — so BOTH
   // paths must take the session from the store, never from the handle.
@@ -841,6 +845,24 @@ check('client: agent verb + reason strings localized in en/pl/fr',
 // good. The catch must be loud and must rethrow, never degrade.
 {
   const host = hostSrc()
+  // 2026-09-08 (Omarchy): mount() throws for an unusable preset composition,
+  // and it throws from inside `setup` -- where dsh-agent-loop disposes the
+  // half-built agent and rethrows, leaving a session with NO agent loop. That
+  // state is unrecoverable (agentFor finds none; prepare() then refuses
+  // BECAUSE the session is live). A preset is a decoration; it must never cost
+  // the session its conversation. ensureStanding() drops a settled failure, so
+  // the next session can survive a mount that killed the previous one.
+  check('spawn: a preset mount failure degrades to the host default, never kills the agent',
+    /setup = async \(agentCtx\) => \{\s*try \{\s*await presets\.mount\(agentCtx, presetId\)\s*\} catch/.test(host)
+    && host.includes("preset mount failed for ")
+    && !host.includes('presets.mount(agentCtx, resolved.id)'))
+
+  // The mount id must come from the CHECKED string, not the raw resolve()
+  // result: the guard on the line above exists precisely to prove it is a
+  // non-empty string before anything reads it.
+  check('spawn: the preset closure is built inside the resolved-id guard',
+    /if \(resolved && typeof resolved\.id === 'string' && resolved\.id !== ''\) \{\s*presetId = resolved\.id/.test(host))
+
   check('spawn: an agents.create failure is reported, not swallowed',
     host.includes("console.error('[arxa-sidebar] agents.create failed for ")
     && host.includes("throw new Error('agent-factory-failed: ' + detail)"))
