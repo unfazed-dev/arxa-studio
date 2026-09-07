@@ -3062,7 +3062,7 @@ window.__ModuleLoader__.load({
 			if (bootDone) return;
 			bootDone = true;
 			const nav = performance.getEntriesByType ? performance.getEntriesByType("navigation")[0] : null;
-			if (nav) bootMarks.unshift("resp=" + Math.round(nav.responseStart), "dcl=" + Math.round(nav.domContentLoadedEventEnd), "load=" + Math.round(nav.loadEventEnd));
+			if (nav) bootMarks.unshift("nav=" + nav.type + "/redir" + nav.redirectCount + " fetch=" + Math.round(nav.fetchStart) + " resp=" + Math.round(nav.responseStart), "dcl=" + Math.round(nav.domContentLoadedEventEnd), "load=" + Math.round(nav.loadEventEnd));
 			try {
 				fetch("/__arxa/artifacts/trace", { method: "POST", keepalive: true, headers: { "content-type": "application/json" },
 					body: JSON.stringify({ relPath: "boot@" + new Date(performance.timeOrigin).toISOString(), outcome, totalMs: Math.round(performance.now()), bundleWarm: true, marks: bootMarks.join(" ") }) }).catch(() => {});
@@ -3070,6 +3070,18 @@ window.__ModuleLoader__.load({
 		};
 		bootMark("client-eval");
 		window.setTimeout(() => bootEnd("timeout"), 30000);
+		// When does the client's session catalog first hold anything? The
+		// service binds later in apply, so wait for it (trace only).
+		{
+			const arm = () => {
+				const s = arxaClientSessions;
+				if (!s || !s.list || typeof s.list.subscribe !== "function") { if (!bootDone) window.setTimeout(arm, 50); return; }
+				const has = () => { const snap = s.list.getSnapshot(); return snap && Array.isArray(snap.ids) && snap.ids.length > 0; };
+				if (has()) { bootMark("catalog-first"); return; }
+				const un = s.list.subscribe(() => { if (has()) { bootMark("catalog-first"); un(); } });
+			};
+			window.setTimeout(arm, 0);
+		}
 		let stateFetched = false;
 		const ORG_FETCH = async (selectedProject) => {
 			const q = selectedProject ? "?project=" + encodeURIComponent(selectedProject) : "";
@@ -3194,8 +3206,16 @@ window.__ModuleLoader__.load({
 			// welcome hero instead of an empty thread. Otherwise reveal the row
 			// in the tree (Q6) before opening.
 			bootMark("open-req");
-			orgStore.mutate("session.open", { orgId: open.id, sessionId: cand.id, dropIfEmpty: true }).then((r) => {
+			// ORG_POST + a parallel refresh, not mutate (2026-09-07): mutate resolves
+			// only after the refresh that follows the action, and on boot that
+			// refresh cost ~0.5s the conversation open was waiting on for nothing
+			// — a row that has conversed already carries its dshSessionId. Only a
+			// row born without one (spawned by this very resume) waits for the
+			// refresh, which is what delivers the new id.
+			ORG_POST("session.open", { orgId: open.id, sessionId: cand.id, dropIfEmpty: true }).then((res) => {
 				bootMark("open-res");
+				const r = res ? res.result : void 0;
+				const refreshed = refresh();
 				if (r && r.dropped === true) {
 					currentSessionId = null;
 					bootDecided = false;
@@ -3206,8 +3226,9 @@ window.__ModuleLoader__.load({
 					return;
 				}
 				try { orgStore.revealSession(cand.id) } catch { /* reveal is presentation — never blocks the open */ }
-				return arxaOpenConversation(cand.id);
-			}).catch(() => {});
+				if (cand.dshSessionId) return arxaOpenConversation(cand.id);
+				return refreshed.then(() => arxaOpenConversation(cand.id));
+			}).catch(() => { refresh(); });
 			};
 			const emit = () => {
 				subs.forEach((l) => l());
@@ -3540,7 +3561,7 @@ window.__ModuleLoader__.load({
 		 * beat to reach the client's session catalog — retry until it is
 		 * listed (open before then is a silent no-op, and the content area
 		 * would stay on the empty state). */
-		const arxaOpenConversation = (sessionId, tries = 0) => {
+		const arxaOpenConversation = (sessionId, waited = false) => {
 			if (!arxaClientSessions || typeof arxaClientSessions.open !== "function") return;
 			let dshId = null;
 			for (const o of orgStore.get().orgs || []) {
@@ -3548,14 +3569,27 @@ window.__ModuleLoader__.load({
 				if (row) { dshId = row.dshSessionId ?? null; break; }
 			}
 			if (!dshId) return;
-			const snap = arxaClientSessions.list && typeof arxaClientSessions.list.getSnapshot === "function" ? arxaClientSessions.list.getSnapshot() : null;
-			if (snap && Array.isArray(snap.ids) && !snap.ids.includes(dshId) && tries < 12) {
-				if (tries === 0) bootMark("catalog-wait");
-				window.setTimeout(() => arxaOpenConversation(sessionId, tries + 1), 400);
+			const list = arxaClientSessions.list;
+			const listed = () => { const snap = list && typeof list.getSnapshot === "function" ? list.getSnapshot() : null; return !(snap && Array.isArray(snap.ids) && !snap.ids.includes(dshId)); };
+			if (!listed()) {
+				// Subscribe, don't poll (2026-09-07): the 400ms poll paid up to
+				// 400ms after the catalog already held the id. The store notifies
+				// on every list change; the 10s cap only guards a catalog that
+				// never lists it (open then is the same silent no-op as before).
+				bootMark("catalog-wait");
+				if (list && typeof list.subscribe === "function") {
+					let done = false;
+					const finish = () => { if (done) return; done = true; unsub(); window.clearTimeout(cap); arxaOpenConversation(sessionId, true); };
+					const unsub = list.subscribe(() => { if (listed()) finish(); });
+					const cap = window.setTimeout(finish, 10000);
+					if (listed()) finish();
+					return;
+				}
+				window.setTimeout(() => arxaOpenConversation(sessionId, true), 400);
 				return;
 			}
 			try {
-				bootMark("open-call" + (tries ? "(tries=" + tries + ")" : ""));
+				bootMark("open-call" + (waited ? "(waited)" : ""));
 				arxaClientSessions.open(dshId);
 				window.requestAnimationFrame(() => window.requestAnimationFrame(() => { bootMark("painted"); bootEnd("painted"); }));
 			} catch (err) {

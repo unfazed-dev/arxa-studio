@@ -56,6 +56,7 @@ export function publishDesktopSession ({ connection, port, env = process.env, pi
 export default {
   inject: ['connection', 'webServer'],
   apply(ctx) {
+    console.log('[arxa-boot] desktop-session apply')
     const publish = () => publishDesktopSession({ connection: ctx.connection, port: ctx.webServer.port })
     // Same readiness seam as dsh-web-app's `dsh web:` announce: the port is
     // only meaningful once the loader has settled and the server is bound.

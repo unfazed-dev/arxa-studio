@@ -60,6 +60,9 @@ export function hashDir (root) {
 export function copyTree (src, dst) {
   rmSync(dst, { recursive: true, force: true })
   cpSync(src, dst, { recursive: true, filter: (s) => !SKIP(basename(s)) })
+  // The launcher skips its profile seed while <profile>/node_modules/.arxa-seeded
+  // names the payload; a rewritten payload must reseed, so drop the marker.
+  try { rmSync(join(homedir(), '.arxa', 'dsh', 'profiles', 'arxa', 'node_modules', '.arxa-seeded'), { force: true }) } catch { /* absent */ }
 }
 
 /** Platform coherence invariant: synced plugin bytes are only meaningful

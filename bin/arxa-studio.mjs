@@ -424,12 +424,25 @@ if (packed) {
   // relative-import libs are extra here. A plugin added to the profile is
   // therefore shipped by the sidecar automatically — the drift that killed the
   // 2026-09-03 build cannot recur by omission.
-  const cp0 = Date.now()
-  for (const [name, dir] of [...PROFILE_PLUGINS, ...fiveLibs]) {
-    rmSync(join(nm, name), { recursive: true, force: true })
-    cpSync(dir, join(nm, name), { recursive: true })
+  // Seed marker (2026-09-07): the copy cost 254ms on every launch. The
+  // payload is immutable per engine dir (its path carries the tarball hash),
+  // so a marker naming THIS launcher's dir proves the profile already holds
+  // these exact plugins. bin/arxa-engine-sync.mjs deletes the marker when it
+  // rewrites the payload, so a dev sync still reseeds on the next launch.
+  const seedMarker = join(nm, '.arxa-seeded')
+  let seeded = false
+  try { seeded = readFileSync(seedMarker, 'utf8') === here } catch { seeded = false }
+  if (seeded) {
+    engineLog('profile plugins already seeded from ' + here)
+  } else {
+    const cp0 = Date.now()
+    for (const [name, dir] of [...PROFILE_PLUGINS, ...fiveLibs]) {
+      rmSync(join(nm, name), { recursive: true, force: true })
+      cpSync(dir, join(nm, name), { recursive: true })
+    }
+    try { writeFileSync(seedMarker, here) } catch { /* next launch copies again */ }
+    engineLog('profile plugins copied in ' + (Date.now() - cp0) + 'ms')
   }
-  engineLog('profile plugins copied in ' + (Date.now() - cp0) + 'ms')
 } else {
   const r = spawnSync('pnpm', ['install', '--force', '--dir', profileDir], { stdio: 'inherit' })
   if (r.error || r.status !== 0) {
