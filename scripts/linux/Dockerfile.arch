@@ -29,7 +29,7 @@ RUN pacman -Syu --noconfirm --needed \
       bubblewrap libsecret gnome-keyring dbus polkit \
       xdg-desktop-portal xdg-desktop-portal-gtk \
       xorg-server-xvfb ttf-dejavu zenity \
-      unzip zip which jq procps-ng python rsync \
+      unzip zip which jq procps-ng python rsync strace \
   && pacman -Scc --noconfirm
 
 # Dart SDK: `dart` is an official Arch package on x86_64 only, so the aarch64
@@ -72,6 +72,12 @@ USER builder
 WORKDIR /work/arxa-studio
 
 # The repos are bind-mounted from the host and owned by a different uid.
+# Pre-create the dirs the cache volumes mount under. Docker creates a missing
+# mount-point parent as ROOT, and then the app cannot create its own data dir
+# beside it — Tauri died with "Failed to setup app: Permission denied" on
+# mkdir ~/.local/share/solutions.arxadigital.arxa (traced 2026-09-07).
+RUN mkdir -p /home/builder/.local/share /home/builder/.cache /home/builder/.config
+
 RUN git config --global --add safe.directory '*' \
  && git config --global user.email "bringup@arxa.local" \
  && git config --global user.name "arxa bringup" \

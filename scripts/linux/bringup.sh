@@ -31,6 +31,7 @@ for repo in arxa-studio arxa; do
   rsync -a --delete \
     --exclude 'node_modules/' --exclude '.git/' --exclude 'target/' \
     --exclude '.compile-cache/' --exclude '.dart_tool/' \
+    --exclude 'src-tauri/binaries/' \
     --exclude 'designs/' --exclude 'archives/' \
     "$SRC/$repo/" "$WORK/$repo/"
 done
@@ -121,6 +122,16 @@ fi
 
 # ---- 4. the shell -----------------------------------------------------------
 if want all || want shell; then
+  TRIPLE="$(uname -m | sed 's/aarch64/aarch64/; s/x86_64/x86_64/')-unknown-linux-gnu"
+  BINDIR="$WORK/arxa/desktop/src-tauri/binaries"
+  for pair in "arxa-studio-$TRIPLE:scripts/pack-sidecar.mjs" "arxa-$TRIPLE:scripts/pack-cli.mjs"; do
+    f="${pair%%:*}"; builder="${pair##*:}"
+    if [ ! -x "$BINDIR/$f" ]; then
+      echo "--- $f missing, building it first ($builder) ---"
+      (cd "$STUDIO" && node "$builder" > "/tmp/$(basename "$builder").log" 2>&1) || row FAIL "prebuild $f" "$(tail -2 "/tmp/$(basename "$builder").log" | tr '\n' ' ')"
+    fi
+  done
+
   step "8 cargo build (Tauri shell against webkit2gtk)"
   if (cd "$WORK/arxa/desktop/src-tauri" && cargo build --release > /tmp/cargo.log 2>&1); then
     row PASS "cargo build" "$(ls -la "$WORK/arxa/desktop/src-tauri/target/release/arxa-desktop" 2>/dev/null | awk '{print $5" bytes"}')"
@@ -136,7 +147,10 @@ if want all || want window; then
   if [ ! -x "$BIN" ]; then
     row SKIP "window" "no built shell to run"
   else
-    if xvfb-run -a --server-args="-screen 0 1280x800x24" \
+    # A session bus is required, not optional: the shell talks to the a11y bus
+    # and the XDG portal at startup, and without one it dies before its own
+    # first log line. Hyprland always has one; a bare container does not.
+    if xvfb-run -a --server-args="-screen 0 1280x800x24" dbus-run-session -- \
         env WEBKIT_DISABLE_DMABUF_RENDERER=1 WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1 \
         timeout 60 "$BIN" > /tmp/window.log 2>&1; then
       row PASS "window" "shell ran under Xvfb"
