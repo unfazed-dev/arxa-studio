@@ -162,6 +162,18 @@ engine there.
 never runs from the AppImage mount" in `arxa/desktop/README.md` — running it
 from `/tmp/.mount_*` gives SIGBUS the moment the shell exits.
 
+**No title bar on tiling desktops.** Moving to the Wayland backend made GTK
+draw its own title bar (client-side decorations), which is dead weight on a
+tiling compositor: on Omarchy/Hyprland its minimise and maximise buttons do
+nothing and only close works, so it costs vertical space and gives nothing
+back. The shell now calls `set_decorations(false)` when it detects a tiling
+session — a compositor IPC socket (`HYPRLAND_INSTANCE_SIGNATURE`, `SWAYSOCK`,
+`NIRI_SOCKET`) or an `XDG_CURRENT_DESKTOP` entry in `TILING_DESKTOPS`
+(hyprland, sway, river, niri, wayfire, i3, qtile, bspwm, awesome). Floating
+desktops — GNOME, KDE, XFCE, Cinnamon — keep their decorations, because there
+those buttons are the only way to manage a window. `ARXA_DECORATIONS=1` forces
+the title bar back on, `ARXA_DECORATIONS=0` forces it off anywhere.
+
 **Everything was drawn twice as large on Omarchy — fixed.** Root cause, proven
 by a controlled A/B on the real machine (2026-09-08): Omarchy's
 `~/.config/hypr/monitors.lua` sets `GDK_SCALE=2` for the whole session, and the

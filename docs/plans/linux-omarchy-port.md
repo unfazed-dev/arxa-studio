@@ -500,6 +500,11 @@ bwrap probe is skipped. Nothing arch-specific broke.
   `coredumpctl` records **no new SIGBUS** — the same sequence produced one
   every time before (00:59 and again at 01:49). `NRestarts=0`.
   Pairing survives the menu removal: Settings → "Pair a device".
+- **Title bar (2026-09-08, `arxa` 444b7538):** the Wayland switch brought GTK
+  client-side decorations with it. Gone on tiling sessions, kept on floating
+  ones (GNOME/KDE), `ARXA_DECORATIONS` overrides both ways. Omarchy's own
+  `omarchy` skill is about `~/.config` customisation and says nothing about app
+  chrome, so the rule is ours: detect the compositor, not the distro.
 - The resume failure is unreproducible headlessly and was most likely
   downstream of the crash loop: the SIGBUS killed the launcher while its node
   children kept serving, which is exactly how a session ends up live-but-
