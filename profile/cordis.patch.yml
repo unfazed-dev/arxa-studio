@@ -426,3 +426,17 @@
 - insert:
   - id: arxa-desktop-session
     name: __ARXA_STUDIO_PLUGINS__/desktop-session/lib/index.js
+
+# Session list at boot (2026-09-07 boot trace). dsh's list summarizes every
+# cold session; for logs under coldBlankProbeMaxBytes (default 1024) it
+# decompresses and replays the log to learn whether the session is blank.
+# 33 of 56 saved sessions here are sub-1KB leftovers from worktree smoke
+# runs, so every list cost ~500ms idle and 1.2s on the boot path — the
+# critical path from splash to the first painted session. 0 skips the probe:
+# a small session lists as visible instead of hidden, which the arxa
+# sidebar never renders anyway (it opens dsh sessions by id). Config
+# replaces wholesale; nativeOpen is optional in the schema (verified), so
+# this row is complete as written.
+- id: session-controller
+  config:
+    coldBlankProbeMaxBytes: 0

@@ -3063,6 +3063,8 @@ window.__ModuleLoader__.load({
 			bootDone = true;
 			const nav = performance.getEntriesByType ? performance.getEntriesByType("navigation")[0] : null;
 			if (nav) bootMarks.unshift("nav=" + nav.type + "/redir" + nav.redirectCount + " fetch=" + Math.round(nav.fetchStart) + " resp=" + Math.round(nav.responseStart), "dcl=" + Math.round(nav.domContentLoadedEventEnd), "load=" + Math.round(nav.loadEventEnd));
+			// Slowest three sub-resources: names the 800ms dcl→client-eval gap (2026-09-07).
+			try { bootMarks.push("slow=" + performance.getEntriesByType("resource").sort((a, b) => b.duration - a.duration).slice(0, 3).map((r) => r.name.split("/").slice(-1)[0].slice(0, 28) + ":" + Math.round(r.startTime) + "+" + Math.round(r.duration) + (r.transferSize === 0 ? "c" : "")).join(",")); } catch { /* trace only */ }
 			try {
 				fetch("/__arxa/artifacts/trace", { method: "POST", keepalive: true, headers: { "content-type": "application/json" },
 					body: JSON.stringify({ relPath: "boot@" + new Date(performance.timeOrigin).toISOString(), outcome, totalMs: Math.round(performance.now()), bundleWarm: true, marks: bootMarks.join(" ") }) }).catch(() => {});
