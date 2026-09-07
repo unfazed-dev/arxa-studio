@@ -34,9 +34,13 @@ const arxaMcpToolNames = (schemas) => schemas
 export class ClaudeCodeAdapter extends LlmAdapter {
   /** `spawn`/`mkdir` exist only so the selftest can exercise spawnClaudeCodeProcess without
    * touching the real filesystem or starting a process; production leaves them undefined. */
-  constructor ({ query, probe, ctx, binary, env, version, spawn, mkdir, publish }) {
+  constructor ({ query, probe, ctx, binary, env, version, spawn, mkdir, publish, skillPacks }) {
     super()
     Object.assign(this, { query, probe, ctx, binary, env, version, spawn, mkdir })
+    // Resolved once at apply() (index.mjs) and handed in: a per-turn readdir of the pack roots
+    // would put disk I/O on the stream path for a set that changes when the user installs a pack,
+    // i.e. never during a turn. Empty = the option is not sent at all.
+    this.skillPacks = skillPacks ?? []
     // Where statuses go. Production hands in the providerStatus SERVICE's publish (index.mjs) so
     // the ring's store is the one the RPC serves, whichever copy of provider-status this file
     // resolved by relative path; the module import stays as the selftest default only.
@@ -93,6 +97,10 @@ export class ClaudeCodeAdapter extends LlmAdapter {
       pathToClaudeCodeExecutable: this.binary,
       env: this.env,
       settingSources: [],
+      // Not a hole in `settingSources: []` — these are the packs ARXA resolved
+      // (lib/skill-packs.js), each with skipMcpDiscovery so a pack cannot open
+      // MCP connections around arxa's sandbox and approval bridge.
+      ...(this.skillPacks.length > 0 ? { plugins: this.skillPacks } : {}),
       permissionMode: 'default',
       spawnClaudeCodeProcess: makeSpawner({
         // An arrow, not a bare `this.ctx.sandbox.confine` reference: confine is an instance

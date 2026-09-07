@@ -6,6 +6,7 @@ import { createRequire } from 'node:module'
 import { query, startup } from '@anthropic-ai/claude-agent-sdk'
 import z from '@deepseek-ai/schemastery'
 import { ClaudeCodeAdapter } from './lib/adapter.js'
+import { resolveSkillPacks } from './lib/skill-packs.js'
 import { Probe, resolveClaudeBinary } from './lib/probe.js'
 import { scrubEnv } from './lib/env.js'
 import { makeSpawner } from './lib/spawn.js'
@@ -31,6 +32,10 @@ export function readAppVersion (root = join(pluginDir, '..', '..')) {
   return 'unknown'
 }
 const version = readAppVersion()
+// The studio root — plugins/claude-code/ two levels up. Same shape in the repo and in the
+// packed payload (~/.arxa/engine/<hash>/arxa-studio), which is why bundled skill packs can be
+// found the same way in both.
+const studioRoot = join(pluginDir, '..', '..')
 // Resolved via the package's main entry, not './package.json': the SDK's `exports` map does
 // not expose its own package.json, so requiring that subpath throws at plugin load.
 const sdkRoot = dirname(require.resolve('@anthropic-ai/claude-agent-sdk'))
@@ -86,7 +91,11 @@ export function apply (ctx, config = {}) {
   // before any turn can run.
   let statusService
   const publish = (session, status) => { if (statusService !== undefined) statusService.publish(session, status) }
-  const adapter = new ClaudeCodeAdapter({ query, probe, ctx, binary, env, version, publish })
+  // Phase 2: arxa's own Claude Code plugins (skills/commands/agents) for every turn. Resolved
+  // once — a pack installed while the engine runs is picked up at the next boot, the same as a
+  // plugin the user drops into the profile.
+  const skillPacks = resolveSkillPacks({ env: process.env, appRoot: studioRoot, log: (m) => console.log('[claude-code] ' + m) })
+  const adapter = new ClaudeCodeAdapter({ query, probe, ctx, binary, env, version, publish, skillPacks })
   ctx.llm.registerAdapter([PROVIDER_ID], adapter)
   // The row on Settings → Models. `settingsPath: []` = the whole section is the profile, like
   // dsh-llm-deepseek's own entry (dsh-llm-deepseek/lib/index.js:2037).

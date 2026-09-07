@@ -36,14 +36,19 @@ uncached so the tree cannot stale; the gitignore gitlink guard is correct;
 `updatedAt` is set on every annotation. `next.tree` is outside the signature but
 is dead payload — only `o.tree` is read (`client.js:3014`, `3315`).
 
-### Latent, not yet a bug
+### Latent, not yet a bug — CLOSED 2026-09-07 (no tie left)
 
 `conversation.input.dock` is `kind:'list'`, `scope:'session'`. The renderer sorts
 with `a.order - b.order` (`dsh-client-ui-renderer/lib/client.js:844`) and JS sort
-is stable, so the arxa card's `order:20` tie with dsh's own `queueDockEntry`
-(`dsh-client-ui-conversation/lib/client.js:6927`) resolves by registration order —
-correct today by accident. Reordering rows in `profile/cordis.patch.yml` would
-silently move the card. Fix: give the card `order: 30`.
+is stable, so an `order` TIE would resolve by registration order — correct only
+by accident, and re-orderable by an edit to `profile/cordis.patch.yml`.
+
+Checked against the pinned dsh: its two dock rows are `todo` `order:0`
+(`dsh-client-ui-conversation/lib/client.js:15915`) and `queue` `order:20`
+(:13901). The arxa card carries `order: 15`
+(`plugins/arxa-git-card/lib/client.js:797`), which sits strictly between them —
+no tie, so the position is deterministic and nothing needs changing. Re-check
+this if a dsh wave ever ships a dock row at 15.
 
 ---
 

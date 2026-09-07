@@ -225,4 +225,20 @@ no code execution. And a third: arxa's own context via
 - Plan: `docs/plans/claude-subscription-engine-implementation.md` (Tasks 1–14).
 - Shipped (Tasks 1–14): the claude-code engine — `plugins/claude-code/lib/{models,env,probe,spawn,pending,mirror-tools,mirror-gate,bridge,handoff,mcp-bridge,approval,adapter,rate-limit,auth-flow}.js`, `index.mjs` (adapter registration, sign-in flow, pi-ai OAuth hide) and `agent.mjs` (mirror tools, gated on the selected model). 57 offline test suites green. `scripts/claude-code-smoke.mjs` (Task 12) is the hand-run live smoke that exercises all of the above against a real signed-in binary; it never runs in CI.
 - Shipped (Tasks 13–14): the D10 `provider/status` channel and composer pill — `plugins/provider-status/` (schema, `providerStatus` projection, composer slot), fed by the claude-code adapter's rate-limit and model-fallback notes.
-- Still open: Windows ACL rung unmeasured; Linux token-dependent runs (resume, Bash escape) pending a `claude setup-token`; Claude Code `plugins:` loading of arxa skill packs (phase 2). `scripts/claude-code-smoke.mjs`'s live run itself is also outstanding — it needs a signed-in account and spends real subscription quota, so it is the operator's call, not something CI or an implementer runs automatically.
+- Still open: Windows ACL rung unmeasured; Linux token-dependent runs (resume, Bash escape) pending a `claude setup-token`; the skill-pack PACKAGING half of phase 2 (which packs ship in the bundle — see below). `scripts/claude-code-smoke.mjs`'s live run itself is also outstanding — it needs a signed-in account and spends real subscription quota, so it is the operator's call, not something CI or an implementer runs automatically.
+- **Phase 2 mechanism — DONE 2026-09-07.** `plugins/claude-code/lib/skill-packs.js` resolves
+  local Claude Code plugin dirs and `adapter.base()` passes them as the SDK's `plugins:`
+  option (SdkPluginConfig, sdk.d.ts:4818) on every `query()`. Roots in precedence order:
+  `ARXA_SKILL_PACKS` (colon-separated pack dirs), `$ARXA_HOME/skill-packs/<pack>` (what a
+  user installs — no database, no account, per the distribution boundary), then
+  `<studio root>/skill-packs/<pack>` (bundled). A pack is any dir with
+  `.claude-plugin/plugin.json` carrying a `name`; duplicates by name resolve to the earliest
+  root, and a broken pack is logged and skipped, never thrown, so it cannot cost a turn.
+  Every pack loads with `skipMcpDiscovery: true` — a pack's own `.mcp.json` would otherwise
+  open MCP connections around arxa's sandbox and the approval bridge (D5/mcp-bridge own that).
+  `settingSources: []` is untouched: nothing is discovered from `~/.claude` or the project tree.
+  Gate: `plugins/claude-code/selftest.skill-packs.mjs` (5 cases); CI 80 suites ALL GREEN.
+- **Still open (a decision, not code):** WHICH packs ship. Nothing lands in
+  `<studio root>/skill-packs/` today, and the arxa repo's `skills/*` are bare SKILL.md trees,
+  not plugin dirs — turning them into a shipped pack means a `.claude-plugin/plugin.json` in
+  the arxa repo and a pack-sidecar payload entry. Grill material.
