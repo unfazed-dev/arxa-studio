@@ -110,6 +110,37 @@ async function importGitWorkspace() {
 
 export function apply(ctx, opts = {}) {
   console.log('[arxa-boot] sidebar apply')
+  // Single-flight the persisted session listing (2026-09-07 boot trace: two
+  // "list" requests in flight at once at page+918ms, each 811ms; dsh's
+  // listing is ~5 serial awaits per session log, no cache). Callers with no
+  // abort signal share the in-flight promise; signalled calls pass through
+  // untouched so one caller's abort can never reject another. Logs every
+  // call so the next boot names the callers and their cost.
+  // ponytail: dedupe only, no memo — staleness stays dsh's problem, not ours.
+  const armListSingleFlight = (tries = 0) => {
+    const q = typeof ctx.get === 'function' ? ctx.get('sessionQuery') : null
+    if (!q || typeof q.listSessions !== 'function') {
+      if (tries < 20) setTimeout(() => armListSingleFlight(tries + 1), 250).unref?.()
+      else console.log('[arxa-boot] listSessions single-flight: sessionQuery never reachable')
+      return
+    }
+    const orig = q.listSessions.bind(q)
+    let inflight = null
+    let n = 0
+    q.listSessions = (signal) => {
+      if (signal !== undefined) return orig(signal)
+      if (inflight) { console.log('[arxa-boot] listSessions #' + n + ' joined'); return inflight }
+      const id = ++n
+      const t0 = Date.now()
+      inflight = orig(undefined).finally(() => {
+        inflight = null
+        console.log('[arxa-boot] listSessions #' + id + ' ' + (Date.now() - t0) + 'ms')
+      })
+      return inflight
+    }
+    console.log('[arxa-boot] listSessions single-flight armed')
+  }
+  armListSingleFlight()
   // Boot diagnostic (2026-09-07): the client's session catalog landed 2.1-2.7s
   // after navigation on every measured boot, and every open waits on it. Time
   // the host's own list call once, 4s after apply, to tell a slow answer from
