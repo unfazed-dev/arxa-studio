@@ -55,3 +55,34 @@ jobs:
             echo "::error::studio CLI smoke run failed or hung"
             exit 1
           fi
+
+  linux:
+    # The Linux lane (docs/plans/linux-omarchy-port.md D11). Same self-hosted mac,
+    # but the work happens inside the Arch image the dev loop uses, so a
+    # macOS-only call — an osascript, a ~/Library path, a launchctl — goes red
+    # here the day it lands instead of on the Omarchy box weeks later.
+    #
+    # Engine only: no cargo, no window. The Rust shell changes rarely and takes
+    # ~20 minutes to build; the plugin tree changes constantly and takes three.
+    runs-on: [self-hosted, macOS, ARM64, arxa]
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Docker available
+        # Docker Desktop is not a service on this runner; skip loudly rather
+        # than fail the build when it is not up.
+        id: docker
+        run: |
+          if docker info >/dev/null 2>&1; then echo "up=yes" >> "$GITHUB_OUTPUT"
+          else echo "up=no" >> "$GITHUB_OUTPUT"; echo "::warning::Docker is not running — the Linux lane did not execute"; fi
+
+      - name: Build the Arch image
+        if: steps.docker.outputs.up == 'yes'
+        run: docker build -f scripts/linux/Dockerfile.arch -t arxa-arch:arm64 scripts/linux
+
+      - name: Engine layer on Arch
+        if: steps.docker.outputs.up == 'yes'
+        # --fresh so a stale work volume cannot make a red run look green.
+        run: ./scripts/linux/run-container.sh --fresh engine
