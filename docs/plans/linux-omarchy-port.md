@@ -202,25 +202,93 @@ everything in an Arch container on this machine.
 
 macOS after every change: 83 suites ALL GREEN, boot smoke OK.
 
-### Open, measured, not fixed: the payload ships devDependencies
+### Fixed 2026-09-07: the payload no longer ships devDependencies
 
-Extracting both darwin payloads (2026-09-07) puts the shipped tree at 753 MB,
-up from 609 MB. Two causes, only one of them wanted:
+Extracting both darwin payloads (2026-09-07) put the shipped tree at 753 MB, up
+from 609 MB. Two causes, only one of them wanted:
 
 - `plugins/artifact-viewer/lib/monaco-build/dist` — **+32 MB, wanted.** That
   bundle is gitignored and built by `npm run build` in `monaco-build`, so it is
   host state — but `scripts/pack-sidecar.mjs` refuses to pack without
   `dist/arxa-monaco.js`, so a payload can never ship without it. What the two
   payloads show is a fuller bundle than the earlier one, not a fixed break.
-- `node_modules` — **+112 MB of devDependencies** (`@wdio/*`, `webdriverio`,
-  `webdriver`, `rxjs`, `cheerio`, `@esbuild/*`). `scripts/pack-sidecar.mjs` tars
-  the whole `node_modules`, so every test tool rides along into every install
-  and every update.
+- `node_modules` — **every devDependency.** `pack-sidecar.mjs` tarred the whole
+  tree, so every test tool rode along into every install and every update.
 
-Not a Linux regression — the packer has always done this — and not fixed here
-because "which tree do we pack" is a packaging decision. The cheap version is a
-prod-only file list from `npm ls --omit=dev --parseable`, and the packed boot
-smoke (step 7b) is now the gate that would catch getting it wrong.
+Measured, then removed: **290 top-most dev-only dirs, 87.3 MB uncompressed**
+(esbuild 10.2, `@esbuild/darwin-arm64` 10.1, `@zip.js/zip.js` 7.3, rxjs 4.3,
+webdriver 3.8, webdriverio 3.8, cheerio 2.5 …). The darwin sidecar went
+**263.9 MB → 241.0 MB** — the payload is gzipped, so the binary shrinks by less
+than the raw total.
+
+The mechanism is three lines of tar; the care is all in the two questions
+around it.
+
+**"What is dev-only?"** — `devOnlyDirs()` in `scripts/pack-manifest.mjs` diffs
+`npm ls --parseable --all` against the same with `--omit=dev` and keeps the
+top-most dirs (excluding a dir takes its children). The hazard is not a
+non-zero exit (npm ls reports extraneous deps that way, routinely) but
+**truncated stdout**: a short keep set makes the complement swallow production
+trees. So every direct `dependencies` key plus `@deepseek-ai/dsh` must appear
+in the keep set or it throws rather than computing an exclude list.
+
+**"Does anything actually load it?"** — this is the one that could ship a
+broken app. cordis resolves plugins BY NAME from the profile at boot, so a
+dropped-but-referenced package is not a build error; it is a stock row that
+dies on `ERR_MODULE_NOT_FOUND` after the user installs. `devOnlyImports()`
+scans bare specifiers in `bin/ plugins/ pi/ profile/` **and `- id:` rows in the
+profile YAML** — the YAML half matters, and a first cut that scanned every
+lowercase word in the YAML produced two false positives (the words "process"
+and "events" are both npm packages in the dev-only tree). Live answer today: 0
+references. It runs in `pack-sidecar` (fatal), in `--check`, and as CI suite
+`scripts/pack-list-check.mjs` — where it goes red the day a plugin imports
+something only `@wdio/cli` installs.
+
+**The tar flags are never trusted.** macOS is bsdtar, the container is GNU tar,
+and both failure directions are silent: a no-op exclude (nothing saved, and we
+would report a saving that did not happen) and an over-broad one (a payload
+missing a prod tree). So the packer lists the tarball it just wrote and asserts
+zero members under any dropped dir plus the presence of
+`arxa-studio/node_modules/@deepseek-ai/dsh/lib/bin.js`. Live: 30 466 members,
+0 leaked.
+
+Then the live half: packed boot smoke on the trimmed binary, macOS 11s.
+
+### Fixed 2026-09-07: the new gates are wired to CI, by repo
+
+Both gates added on 2026-09-06 (packed boot smoke, `cargo test engine_unit`)
+ran only on a manual `run-container.sh all`. They now have homes, chosen by
+where the artifact lives rather than by which repo the harness sits in:
+
+- **`cargo build` + `cargo test engine_unit`** → arxa `desktop-gate.yml`, new
+  job `linux-engine-unit`. The Rust is in arxa, so an `engine_unit.rs` change
+  is an arxa commit; that repo already holds `ARXA_STUDIO_CHECKOUT_TOKEN`, so
+  it can check both repos out as siblings the way `run-container.sh` expects.
+  It runs the `shell` layer only, on its own work volume (`VOLUME=
+  arxa-ci-work-arm64`) so a CI rsync can never land inside a local bring-up.
+- **Packed boot smoke** → arxa `desktop-release.yml`, straight after
+  `pack-sidecar`. The binary is already built there, so the gate costs ~15 s
+  and covers exactly the artifact that ships. On port **7931**, not the 7919
+  default: the self-hosted runner is also the operator's dev machine.
+- arxa-studio's own `ci.yml` stays **engine-only**. Nothing there needs the
+  sibling repo or a token.
+
+Say it plainly: this makes the packed smoke a **release** gate, not a branch
+gate. A push that breaks the packed artifact still goes red at tag time or on a
+manual `all` pass, not on the PR.
+
+Two things the wiring exposed:
+
+- **`desktop-release.yml` would have failed on the next tag.** It runs
+  `npm install` then `pack-sidecar.mjs`, and nothing built the monaco bundle —
+  which `pack-sidecar` has refused to pack without since the guard landed. A
+  build step in `monaco-build` now precedes the sidecar build.
+- **The `shell` layer could not run without a monaco `dist/`.** It pre-builds
+  any missing sidecar by calling `pack-sidecar`, which refuses. But cargo only
+  needs FILES at the `externalBin` paths — it never runs them — so when the
+  dist is absent, `bringup.sh` now calls arxa's own
+  `desktop/scripts/dev-stub-sidecars.sh` instead. Step 7b skips anything under
+  1 MB so a stub can never be mistaken for a packed artifact.
 
 Two container-only obstacles were traced and fixed in the harness, not the app:
 the shell needs a **session bus** (it talks to the a11y bus and the XDG portal
@@ -243,4 +311,8 @@ bwrap probe is skipped. Nothing arch-specific broke.
 - The real machine: Hyprland, GPU compositing, HiDPI, the tray, a genuine
   `systemd --user` engine unit (the container has no systemd, so the fallback
   path is what ran), and a packaged install from the PKGBUILD.
+- The two new arxa-repo CI steps (monaco build + packed smoke in
+  `desktop-release.yml`, `linux-engine-unit` in `desktop-gate.yml`) are wired but
+  have not yet run on the runner — the first release tag and the first
+  `desktop/**` PR are their first live pass.
 - `arxa/desktop` has no `.desktop`-file or icon story beyond the PKGBUILD entry.

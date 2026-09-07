@@ -18,8 +18,9 @@
 // ever loads a file through a COMPUTED name, this cannot see it; add it to
 // BIN_FILES by hand and the check stays quiet (an unreachable entry is a
 // warning, never a failure).
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { join, relative, sep } from 'node:path'
 
 /**
  * The Rust target triple Tauri expects in an `externalBin` filename, for the
@@ -94,4 +95,107 @@ export function checkPackList (studioRoot, files = BIN_FILES, entry = BIN_ENTRY)
     missing: reachable.filter((f) => !files.includes(f)),
     unused: files.filter((f) => !reachable.includes(f)),
   }
+}
+
+// ---------------------------------------------------------------------------
+// devDependency trim (2026-09-07)
+//
+// The payload tars all of node_modules, so every devDependency shipped: 290
+// top-level dirs, 87 MB uncompressed (esbuild, @esbuild/darwin-arm64,
+// webdriverio, webdriver, rxjs, cheerio, the @wdio stack). None of it can run
+// in a packed app — there is no test runner in there — but it all extracts to
+// <ARXA_HOME>/engine/<sha> on every user's disk.
+//
+// The dangerous half of this is not the exclusion, it is the QUESTION it
+// answers: "does anything the engine loads at runtime live in a dev-only
+// tree?" cordis resolves plugins BY NAME from the profile at boot, so a
+// missing package is not a build error — it is a stock row that dies on
+// ERR_MODULE_NOT_FOUND after the app is installed. devOnlyImports() below is
+// the static half of that answer (JS specifiers AND profile YAML names); the
+// packed boot smoke is the live half.
+
+/** Direct dependencies that MUST survive the trim, whatever npm reports. */
+const KEEP_ANCHOR = '@deepseek-ai/dsh'
+
+const nmRelative = (studioRoot, stdout) => new Set(
+  stdout.split('\n')
+    .filter(Boolean)
+    .map((p) => relative(studioRoot, p))
+    .filter((p) => p.startsWith('node_modules' + sep) || p === 'node_modules'),
+)
+
+/** Default runner: `npm ls`, tolerating a non-zero exit (extraneous deps). */
+const npmLs = (studioRoot, args) => {
+  const r = spawnSync('npm', ['ls', '--parseable', '--all', ...args], {
+    cwd: studioRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+  })
+  // A non-zero exit is normal (npm ls reports extraneous/peer noise as failure)
+  // — TRUNCATED stdout is the hazard: a short keep set makes the complement
+  // swallow production packages. The caller asserts the anchors.
+  return r.stdout ?? ''
+}
+
+/**
+ * Top-most node_modules dirs (repo-relative, POSIX-ish) that ONLY
+ * devDependencies reach — i.e. safe to leave out of the sidecar payload.
+ * "Top-most" because excluding a directory takes its children with it.
+ *
+ * @throws if the keep set looks truncated (see npmLs).
+ */
+export function devOnlyDirs (studioRoot, run = npmLs) {
+  const keep = nmRelative(studioRoot, run(studioRoot, ['--omit=dev']))
+  const all = nmRelative(studioRoot, run(studioRoot, []))
+  const pkg = JSON.parse(readFileSync(join(studioRoot, 'package.json'), 'utf8'))
+  const direct = Object.keys(pkg.dependencies ?? {})
+  // Truncation guard: every DIRECT production dependency must be in the keep
+  // set. If npm's output was cut short, this trips instead of the payload
+  // silently losing a prod tree.
+  const lost = [...direct, KEEP_ANCHOR].filter((n) => !keep.has(join('node_modules', n)))
+  if (lost.length > 0) {
+    throw new Error(`devOnlyDirs: production packages missing from \`npm ls --omit=dev\` (${lost.join(', ')}) — refusing to compute an exclude list from truncated output`)
+  }
+  const drop = [...all].filter((p) => !keep.has(p))
+  // Keep only the top-most: a/b is implied by a.
+  return drop.filter((p) => !drop.some((q) => q !== p && p.startsWith(q + sep))).sort()
+}
+
+const RUNTIME_DIRS = ['bin', 'plugins', 'pi', 'profile']
+const SPEC_RE = /(?:from\s+|import\s*\(\s*|require\s*\(\s*)["']([^"'./][^"']*)["']/g
+// A profile row names a plugin by bare package name in an `- id:` position;
+// cordis resolves that name from the materialized node_modules at boot. Only
+// that position is scanned — a looser scan matches English prose (the words
+// "process" and "events" are both npm packages in the dev-only tree).
+const YAML_ID_RE = /^\s*-?\s*id:\s*['"]?(@?[\w.-]+(?:\/[\w.-]+)?)['"]?\s*$/gm
+
+const pkgOf = (spec) => (spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0])
+
+/**
+ * Runtime references to a package in `dropped` — the trim's fatal case.
+ * Scans JS-ish sources for bare specifiers and profile YAML for bare names.
+ * @returns {{ pkg: string, file: string }[]}
+ */
+export function devOnlyImports (studioRoot, dropped) {
+  const names = new Set([...dropped].map((p) => p.split(sep).slice(1).join('/')))
+  const hits = []
+  const walk = (dir) => {
+    let entries
+    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const e of entries) {
+      if (e.name === 'node_modules' || e.name === '.git' || e.name === 'dist') continue
+      const file = join(dir, e.name)
+      if (e.isDirectory()) { walk(file); continue }
+      const yaml = /\.ya?ml$/.test(e.name)
+      if (!yaml && !/\.(mjs|cjs|js|ts)$/.test(e.name)) continue
+      const src = readFileSync(file, 'utf8')
+      const found = yaml
+        ? [...src.matchAll(YAML_ID_RE)].map((m) => m[1])
+        : [...src.matchAll(SPEC_RE)].map((m) => pkgOf(m[1]))
+      for (const name of found) {
+        if (name.startsWith('node:')) continue
+        if (names.has(name)) hits.push({ pkg: name, file: relative(studioRoot, file) })
+      }
+    }
+  }
+  for (const d of RUNTIME_DIRS) walk(join(studioRoot, d))
+  return hits
 }

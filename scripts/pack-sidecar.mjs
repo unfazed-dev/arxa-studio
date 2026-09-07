@@ -28,7 +28,7 @@ import { createHash } from 'node:crypto'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
-import { BIN_FILES, checkPackList, hostTriple } from './pack-manifest.mjs'
+import { BIN_FILES, checkPackList, devOnlyDirs, devOnlyImports, hostTriple } from './pack-manifest.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const studioRoot = resolve(here, '..')            // .../arxa-studio
@@ -94,8 +94,24 @@ if (!existsSync(join(studioRoot, monacoDist))) {
   process.exit(1)
 }
 
+// The payload used to tar ALL of node_modules, so every devDependency shipped
+// to every user: 290 top-level dirs, 87 MB uncompressed. None of it can run in
+// a packed app. The exclusion is only safe because of the line under it —
+// cordis resolves plugins BY NAME at boot, so a package that is dropped but
+// still referenced is not a build error, it is a stock row that dies on
+// ERR_MODULE_NOT_FOUND on the user's machine. Static half of the proof here,
+// live half in the packed boot smoke (ARXA_SMOKE_LAUNCHER).
+const devDirs = devOnlyDirs(studioRoot)
+const devRefs = devOnlyImports(studioRoot, devDirs)
+if (devRefs.length > 0) {
+  console.error('pack-sidecar: runtime code references packages that only devDependencies install:')
+  for (const { pkg, file } of devRefs) console.error(`             ${pkg} ← ${file}`)
+  console.error('             move the package into "dependencies" (or drop the reference) — the packed app would die on ERR_MODULE_NOT_FOUND')
+  process.exit(1)
+}
+
 if (checkOnly) {
-  console.log(`pack-sidecar: --check OK — target ${triple}, pack list (${drift.reachable.join(', ')}), inputs and monaco bundle all present`)
+  console.log(`pack-sidecar: --check OK — target ${triple}, pack list (${drift.reachable.join(', ')}), inputs and monaco bundle present, ${devDirs.length} dev-only trees excluded and unreferenced`)
   process.exit(0)
 }
 
@@ -121,6 +137,14 @@ try {
   cpSync(nodeBin, join(stage, 'node', 'bin', 'node'))
   chmodSync(join(stage, 'node', 'bin', 'node'), 0o755)
 
+  // One pattern per dropped dir, plus its children: bsdtar (macOS) and GNU tar
+  // (the Arch container) agree on both forms, and neither is trusted — the
+  // tarball is listed and asserted below.
+  const excludeFile = join(work, 'exclude.txt')
+  writeFileSync(excludeFile, devDirs.flatMap((d) => {
+    const p = `${studioName}/${d}`
+    return [p, `${p}/*`]
+  }).join('\n') + '\n')
   const tarball = join(work, 'payload.tar.gz')
   console.log('pack-sidecar: creating payload.tar.gz (node_modules + plugins + node runtime)…')
   const tar = spawnSync(tarBin, [
@@ -129,6 +153,7 @@ try {
     // produce dist/. Without this the payload grows by that entire tree.
     // Excludes must precede the file list for bsdtar.
     '--exclude', '*/lib/monaco-build/node_modules',
+    '--exclude-from', excludeFile,
     '-czf', tarball,
     '-C', stage, '.',
     '-C', parentDir,
@@ -140,6 +165,22 @@ try {
     ...arxaHarnessRels,
   ], { stdio: 'inherit', env: { ...process.env, COPYFILE_DISABLE: '1' } })
   if (tar.status !== 0) throw new Error('tar failed')
+
+  // Assert on the archive, never on the flags: a no-op exclude (nothing saved,
+  // and we would report a saving that did not happen) and an over-broad one
+  // (a payload missing a prod tree) are both silent.
+  const listed = spawnSync(tarBin, ['-tzf', tarball], { encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 })
+  if (listed.status !== 0) throw new Error('tar -tzf failed on the payload we just wrote')
+  const members = listed.stdout.split('\n').filter(Boolean)
+  const dropped = new Set(devDirs.map((d) => `${studioName}/${d}`))
+  const leaked = members.filter((m) => {
+    for (let i = m.indexOf('/'); i > 0; i = m.indexOf('/', i + 1)) if (dropped.has(m.slice(0, i))) return true
+    return false
+  })
+  if (leaked.length > 0) throw new Error(`payload still contains ${leaked.length} dev-only members (e.g. ${leaked[0]}) — the tar exclude did not apply`)
+  const anchor = `${studioName}/node_modules/@deepseek-ai/dsh/lib/bin.js`
+  if (!members.includes(anchor)) throw new Error(`payload is missing ${anchor} — the exclude list was too broad`)
+  console.log(`pack-sidecar: payload verified — ${members.length} members, ${devDirs.length} dev-only trees excluded, engine entry present`)
 
   const sha = createHash('sha256').update(readFileSync(tarball)).digest('hex').slice(0, 12)
   const launcherRel = `${studioName}/bin/arxa-studio.mjs`

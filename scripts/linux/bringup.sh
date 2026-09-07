@@ -127,6 +127,8 @@ if want all || want sidecars; then
   PACKED="$WORK/arxa/desktop/src-tauri/binaries/arxa-studio-$(uname -m)-unknown-linux-gnu"
   if [ ! -x "$PACKED" ]; then
     row SKIP "packed boot" "no $PACKED (pack-sidecar failed)"
+  elif [ "$(stat -c %s "$PACKED" 2>/dev/null || echo 0)" -lt 1048576 ]; then
+    row SKIP "packed boot" "$PACKED is a stub, not a packed sidecar"
   elif ARXA_SMOKE_LAUNCHER="$PACKED" npm run smoke > /tmp/packed-smoke.log 2>&1; then
     row PASS "packed boot" "$(grep -o 'OK — .*' /tmp/packed-smoke.log | head -1)"
   else
@@ -138,13 +140,23 @@ fi
 if want all || want shell; then
   TRIPLE="$(uname -m | sed 's/aarch64/aarch64/; s/x86_64/x86_64/')-unknown-linux-gnu"
   BINDIR="$WORK/arxa/desktop/src-tauri/binaries"
-  for pair in "arxa-studio-$TRIPLE:scripts/pack-sidecar.mjs" "arxa-$TRIPLE:scripts/pack-cli.mjs"; do
-    f="${pair%%:*}"; builder="${pair##*:}"
-    if [ ! -x "$BINDIR/$f" ]; then
-      echo "--- $f missing, building it first ($builder) ---"
-      (cd "$STUDIO" && node "$builder" > "/tmp/$(basename "$builder").log" 2>&1) || row FAIL "prebuild $f" "$(tail -2 "/tmp/$(basename "$builder").log" | tr '\n' ' ')"
-    fi
-  done
+  mkdir -p "$BINDIR"
+  # cargo only needs FILES at the externalBin paths — it never runs them. A CI
+  # checkout has no monaco dist (gitignored; 1.3 GB of build deps to produce it)
+  # and pack-sidecar rightly refuses without it, so stub instead of packing.
+  # The REAL artifact is gated by step 7b, which runs when it exists.
+  if [ ! -f "$STUDIO/plugins/artifact-viewer/lib/monaco-build/dist/arxa-monaco.js" ]; then
+    echo "--- no monaco dist: stubbing sidecars so cargo can link ---"
+    bash "$WORK/arxa/desktop/scripts/dev-stub-sidecars.sh" || row FAIL "stub sidecars" "dev-stub-sidecars.sh failed"
+  else
+    for pair in "arxa-studio-$TRIPLE:scripts/pack-sidecar.mjs" "arxa-$TRIPLE:scripts/pack-cli.mjs"; do
+      f="${pair%%:*}"; builder="${pair##*:}"
+      if [ ! -x "$BINDIR/$f" ]; then
+        echo "--- $f missing, building it first ($builder) ---"
+        (cd "$STUDIO" && node "$builder" > "/tmp/$(basename "$builder").log" 2>&1) || row FAIL "prebuild $f" "$(tail -2 "/tmp/$(basename "$builder").log" | tr '\n' ' ')"
+      fi
+    done
+  fi
 
   step "8 cargo build (Tauri shell against webkit2gtk)"
   if (cd "$WORK/arxa/desktop/src-tauri" && cargo build --release > /tmp/cargo.log 2>&1); then

@@ -77,10 +77,23 @@ into its own volume. That is deliberate: a writable bind mount let a container
 npm install onto a volume nested inside the bind mount failed intermittently
 with `ENOTDIR`.
 
-CI (`.github/workflows/ci.yml`) runs only the **engine** layer of that harness.
-The packed-sidecar smoke and the `cargo test` of the systemd unit renderer run
-on a manual `scripts/linux/run-container.sh all` pass — nothing gates them
-automatically yet.
+Three workflows split the gates by where the artifact lives:
+
+| Gate | Runs in | On |
+|---|---|---|
+| engine layer on Arch (`npm ci`, suites, boot smoke, keyring) | arxa-studio `ci.yml` | every push / PR |
+| `cargo build` + `cargo test engine_unit` (the systemd unit renderer) | arxa `desktop-gate.yml`, job `linux-engine-unit` | PRs touching `desktop/**` |
+| packed-sidecar boot smoke — the binary that actually ships | arxa `desktop-release.yml` | release tags |
+
+The Rust gates live in the arxa repo because the Rust does; that repo already
+holds the `ARXA_STUDIO_CHECKOUT_TOKEN` needed to put both repos side by side
+the way `run-container.sh` expects. Sidecars are **stubbed** in that job
+(`desktop/scripts/dev-stub-sidecars.sh`): cargo needs files at the `externalBin`
+paths, not working engines, and a CI checkout has no monaco `dist/`.
+
+Being plain about the last row: the packed smoke gates a **release**, not a
+branch. A push that breaks the packed artifact goes red at tag time or on a
+manual `scripts/linux/run-container.sh all`, not on the PR.
 
 Two container-only limits, neither a code fault: unprivileged user namespaces
 are unavailable, so the `bwrap` probe is skipped, and there is no Secret Service
