@@ -238,3 +238,40 @@ engine per port. Rollback copy: `~/.arxa/Arxa Studio.app.pre-persist`.
 While probing the boot HTML from the sandbox, a connection error echoed the
 current engine launch token into the session transcript. The engine was
 restarted twice since (token rotates per engine boot), so that token is dead.
+
+## Round 9 — launchd agent closes the crash gap (2026-09-07, arxa `see git log`)
+
+`desktop/src-tauri/src/engine_agent.rs` + `lib.rs`:
+- The shell writes `~/Library/LaunchAgents/solutions.arxadigital.arxa.engine.plist`:
+  `ProgramArguments` = bundled `arxa-studio --no-open`, `RunAtLoad`,
+  `KeepAlive.PathState[<sidecar>] = true` (restart on every exit for as long
+  as the app binary exists — deleting the app ends the loop), `ThrottleInterval 5`,
+  `ProcessType Interactive`, stdio → `~/.arxa/dsh/engine-stdio.log`,
+  `EnvironmentVariables` = the shell's own PATH plus any ARXA_* overrides.
+- Launch: port owner nobody here started → never managed (rider 1 intact).
+  Otherwise: stop a detached engine from round 8 (owner pid), then
+  `ensure()`: plist changed or agent not loaded → bootout, wait for the port,
+  bootstrap; plist current but sidecar stamp changed (app update) →
+  `launchctl kickstart -k`. Owner record becomes `{pid:0, stamp}`.
+- Engine → Restart Engine = `kickstart -k` when launchd owns the engine.
+- Watchdog: launchd restarts a crashed engine in ~1s, inside one 2s poll, so
+  the port never reads down and the page would reconnect its socket while
+  still running client bundles the new engine does not serve. The watchdog
+  now also tracks the session file's mtime (rewritten once per engine boot;
+  baselined on the first up tick) and sends the window through the waiting
+  page when it changes.
+- No launchctl → the round-8 detached spawn + adopt path.
+
+Measured (02:38–02:40, `open -a` / action → painted trace):
+| step | result |
+|---|---|
+| launch after install (stamp changed) | kickstart, 1 engine boot, painted 7.4 s (first launch of a fresh bundle, Gatekeeper) |
+| `kill -9` the engine group | launchd back in 1.0 s, page reloaded and painted 6.2 s |
+| Engine → Restart Engine | new pid, old dead, painted 5.4 s |
+| quit, relaunch | engine kept, 0 boots, painted **2.2 s** |
+
+Rollbacks: `~/.arxa/Arxa Studio.app.pre-agent` (round 8 build),
+`~/.arxa/Arxa Studio.app.pre-agent2`. To stop supervising by hand:
+`launchctl bootout gui/$(id -u)/solutions.arxadigital.arxa.engine` and delete
+the plist; the shell reinstalls it on next launch. The old dev-machine agent
+`solutions.arxadigital.arxa.studio.plist.disabled` is unrelated and stays disabled.
