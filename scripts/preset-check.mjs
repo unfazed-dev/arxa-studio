@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import yaml from 'js-yaml'
-import { materialisePreset } from '../bin/materialise-preset.mjs'
+import { materialisePreset, rewritePluginRoots } from '../bin/materialise-preset.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = dirname(here)
@@ -169,6 +169,31 @@ try {
     existsSync(join(writtenDir, 'agent.cordis.yml')))
   check('materialisePreset writes preset.yml',
     existsSync(join(writtenDir, 'preset.yml')))
+
+  // Measured on Omarchy 2026-09-08: the checked-in composition names three
+  // plugins by the BUILD machine's absolute path, so on every other install
+  // all three rows failed to resolve, the `arxa` preset refused to mount, and
+  // every session silently fell back to the host default composition. The
+  // materialiser repoints such rows at THIS install; the whole point is that
+  // what lands in DSH_HOME resolves on the machine it landed on.
+  const writtenComposition = readFileSync(join(writtenDir, 'agent.cordis.yml'), 'utf8')
+  const unresolvable = [...writtenComposition.matchAll(/^\s*(?:-\s+)?name:\s*(\/\S+)$/gm)]
+    .map((m) => m[1])
+    .filter((f) => !existsSync(f))
+  check('every absolute plugin path in the materialised preset resolves on THIS machine',
+    unresolvable.length === 0, unresolvable.join(', '))
+
+  // The rebase must be real, not a no-op that happens to pass on the machine
+  // that wrote the paths.
+  const rebased = rewritePluginRoots(
+    '  name: /some/other/checkout/plugins/memory/index.mjs\n', root)
+  check('rewritePluginRoots repoints a foreign checkout at this install',
+    rebased.trim() === 'name: ' + join(root, 'plugins', 'memory', 'index.mjs'), rebased.trim())
+
+  // A path we cannot place must be left exactly as written, never guessed at.
+  const untouched = '  name: /nowhere/plugins/does-not-exist/index.mjs\n'
+  check('rewritePluginRoots leaves an unplaceable path alone',
+    rewritePluginRoots(untouched, root) === untouched)
 } finally {
   rmSync(tmpDshHome, { recursive: true, force: true })
 }
