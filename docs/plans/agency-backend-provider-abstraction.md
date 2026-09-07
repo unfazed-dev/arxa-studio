@@ -2,6 +2,18 @@
 
 Status: PLAN ONLY — no code or schema changes. Consult-mode advisor skipped (no API key configured); design grounded in primary sources below.
 
+**Amended 2026-09-07 — two corrections, still no code.** (a) The plan offered
+`supabase` and `custom` and nothing else, so a user with no database and no
+adapter module got *nothing* — which the repo's own ownership boundary forbids
+(`CLAUDE.md`: "every feature that can use a database must have a **local-only
+fallback with equivalent capability and security** for users without one").
+`local` is now the DEFAULT provider, specified in §0, §1 and §5. (b) The
+Supabase table advertised `entitlementIssuer` and `billingWebhooks` as
+workspace-provider capabilities while §0 says the license plane is not
+pluggable; they are removed from the contract (§1) and kept only as a
+description of the official project's own shape (§3). Everything marked `local`
+here is a **design decision, not shipped code** — none of it exists yet.
+
 Sources read: `docs/plans/arxa-studio-grill-decisions.md` (D-series locked decisions), `docs/plans/entitlement-backend-runbook.md`, `arxa/deploy/supabase/schema.sql` + `seed.sql`.
 
 ## 0. The one non-negotiable split
@@ -11,7 +23,7 @@ Two planes. They never merge:
 | Plane | What it holds | Backend |
 |---|---|---|
 | **Product-license plane** | arxa entitlements, machines, subscriptions, Stripe billing, activate flow | **ALWAYS the official Totem backend.** Not pluggable, not configurable off. |
-| **Workspace-data plane** | orgs, org_members, tickets, chat, feedback, audit_log, analytics, storage blobs | **Pluggable.** Supabase is the first-class default and the conformance reference. |
+| **Workspace-data plane** | orgs, org_members, tickets, chat, feedback, audit_log, analytics, storage blobs | **Pluggable, three providers:** `local` (DEFAULT — no account, no network, no database), `supabase` (first-class, and the conformance reference), `custom` (a BYO adapter module). |
 
 A BYO provider replaces only the workspace-data plane. Paying for arxa (studio or agency tier) still means checkout → official `activate` Edge Function → Ed25519-signed token → offline verification in `arxa/lib/entitlement.dart`. A BYO backend cannot mint product tiers. This preserves every payment-gate decision in the grill doc unchanged.
 
@@ -38,7 +50,7 @@ Minimal contract the agency app codes against. All IDs are opaque strings; all m
 **`audit`** — append-only
 - `append(orgId, event)` only. No update/delete in the interface at all — immutability enforced by interface shape, verified by the conformance kit.
 
-**Server-side authorization (cross-cutting, REQUIRED)** — every capability above must be enforced *by the provider's server*, not by the adapter. The adapter is untrusted client code. Concretely: user A of org X must be unable to read/write org Y's rows even with a hand-crafted request. Supabase does this with RLS; a BYO Postgres+PostgREST or custom API must do the equivalent. This is a conformance-kit gate, not a suggestion.
+**Server-side authorization (cross-cutting, REQUIRED)** — every capability above must be enforced *by the provider's server*, not by the adapter. The adapter is untrusted client code. Concretely: user A of org X must be unable to read/write org Y's rows even with a hand-crafted request. Supabase does this with RLS; a BYO Postgres+PostgREST or custom API must do the equivalent. This is a conformance-kit gate, not a suggestion. It binds every provider that talks to a network; the `local` provider is exempt by construction (see §1 local table and §4 section 3), and the kit reports that exemption rather than a pass.
 
 ### OPTIONAL capabilities (with mandated degradation)
 
@@ -47,8 +59,40 @@ Minimal contract the agency app codes against. All IDs are opaque strings; all m
 | `realtime` | `subscribe(orgId, collection, cb)` | App polls `records.list` on a visible-tab interval; UI drops the "live" badge. No feature is removed. |
 | `storage` | `upload/download/delete/signedUrl(orgId, path)` | Attachments disabled in tickets/chat; text-only flows keep working. |
 | `analytics` | `track(event)` (fire-and-forget) | No-op sink. Nothing user-visible. |
-| `billingWebhooks` | inbound webhook spec for *agency-to-their-client* billing only | Feature hidden. **Product billing is never here** — see §0. |
-| `entitlementIssuer` | see §2 trust model | Workspace-scoped gated features fall back to "everyone in org may use"; product gates unaffected. |
+
+**Not capabilities, deliberately.** An earlier draft listed `billingWebhooks`
+and `entitlementIssuer` here. Both contradict §0 — the license plane is "not
+pluggable, not configurable off" — and listing them in the workspace contract
+invites an adapter author to implement something no workspace provider may
+serve. Product billing and product-tier issuance are the official backend's,
+always. The *optional* BYO issuer for workspace-scoped claims is a separate
+server endpoint spec (§2), not a `WorkspaceProvider` capability, and it can
+never sign a product-tier claim.
+
+### The `local` provider (the default, and the fallback the boundary requires)
+
+Not a degraded mode: the same contract, same conformance kit, same UX. It is
+what a free user with no account runs, and it is the shape
+`plugins/account-mirror/lib/providers.js` already established (local default,
+remote as a typed stub that performs no HTTP).
+
+| Capability | Local implementation |
+|---|---|
+| `auth` | One local user, the machine's operator. `currentSession()` always returns it; `signIn`/`signOut` are no-ops that still fire `onAuthStateChange`. No password, no token. |
+| `orgs` | Orgs and members are records like any other. Roles are stored and enforced by the same rules; with one user the enforcement is trivially satisfied but the vocabulary stays identical, so a later export/import into Supabase needs no translation. |
+| `records` | JSON documents under `<ARXA_HOME>/workspace/<orgId>/<collection>/<id>.json`. Atomic per file (temp + rename), the account-mirror convention. |
+| `audit` | Append-only JSONL per org. Immutability is a file mode plus the absence of any update/delete method — the same interface shape the contract relies on everywhere else. |
+| `realtime` | In-process emitter. Strictly better than the polling degradation, because there is no network in between. |
+| `storage` | Blobs under `<ARXA_HOME>/workspace/<orgId>/storage/`. `signedUrl` returns a `file:` URL. |
+| `analytics` | No-op sink. |
+
+**"Equivalent security" for a single-user local store means what it can mean:**
+the OS's own file permissions (0700 on the workspace root) and the fact that
+nothing leaves the machine. §1's server-side-authorization requirement is a
+requirement about *remote* providers, where a hostile client is the threat;
+locally the client and the server are the same process and the same user. The
+conformance kit must state this exemption explicitly rather than let a local
+provider silently "pass" the cross-org isolation section — see §4.
 
 `provider.capabilities()` returns the supported set at startup; the app feature-flags from that one call.
 
@@ -80,8 +124,18 @@ The only server component a BYO provider must add is the **activate-equivalent i
 | `realtime` | Supabase Realtime channels per `org_id` |
 | `storage` | Supabase Storage, bucket per env, path prefix `org/<org_id>/…` |
 | `analytics` | `analytics_events` insert |
-| `entitlementIssuer` | `activate` Edge Function + `ENTITLEMENT_ISSUER_JWK` secret + `machines`/`entitlements`/`subscriptions` tables — **note: in production this whole row belongs to the license plane and lives on the official project, not the customer's workspace project** |
-| `billingWebhooks` | `stripe-webhook` Edge Function (`STRIPE_WEBHOOK_SECRET`) — license plane, official project only |
+
+**Two rows that are NOT adapter capabilities** (they were, in an earlier draft;
+§1 removed them). Kept here only to describe the official project's own shape,
+because the Supabase adapter and the official license backend happen to be the
+same technology:
+
+- `activate` Edge Function + `ENTITLEMENT_ISSUER_JWK` secret +
+  `machines`/`entitlements`/`subscriptions` tables — the license plane, on the
+  official project, never on a customer's workspace project.
+- `stripe-webhook` Edge Function (`STRIPE_WEBHOOK_SECRET`) — same.
+
+A workspace provider neither implements nor advertises either one.
 
 **Supabase-specific things the contract deliberately hides:**
 - `user_id uuid references auth.users` — the contract's opaque `userId` string breaks this coupling; BYO providers use their own identity PKs.
@@ -95,7 +149,7 @@ Ship as `arxa studio provider verify --config <file>` — a runnable suite again
 
 1. **Auth**: sign-in/out round-trip; expired-session behavior; `onAuthStateChange` fires.
 2. **Org CRUD + role matrix**: each of the four roles attempts each org/membership operation; results must match the contract's permission table exactly (e.g. only `owner|admin` add members; `billing` reads billing collections only; last-owner removal rejected).
-3. **Cross-org isolation (the gate that matters)**: two real users, two orgs; user A replays raw API calls against org B's data — every one must fail server-side. Includes list-endpoint leakage (no org-B rows in org-A lists) and IDOR by guessed IDs.
+3. **Cross-org isolation (the gate that matters)**: two real users, two orgs; user A replays raw API calls against org B's data — every one must fail server-side. Includes list-endpoint leakage (no org-B rows in org-A lists) and IDOR by guessed IDs. **The `local` provider is exempt from this section, and the kit must say so in its report rather than print a green** — the threat model is a hostile client talking to a shared server, and locally the client, the server and the user are one process. A local run prints `n/a (single-user local store)` for section 3; anything that talks to a network prints green or red.
 4. **Records**: put/get/list/delete round-trip per collection; cursor pagination; concurrent-write conflict surfaces as `conflict`, not silent loss.
 5. **Audit immutability**: append works; update/delete attempts (raw API) fail.
 6. **Optional-capability honesty**: `capabilities()` matches reality — every advertised capability passes its round-trip; every absent one degrades per §1 table.
@@ -112,7 +166,8 @@ Precedence: env > project config > user config > default.
 // .arxa/studio.json (project) or ~/.arxa/studio.json (user)
 {
   "workspaceBackend": {
-    "provider": "supabase",            // default; or "custom"
+    "provider": "local",               // DEFAULT; or "supabase", or "custom"
+    "local":    { "root": "~/.arxa/workspace" },   // optional; this is the default
     "supabase": { "url": "…", "anonKey": "…" },
     "custom":   { "adapter": "./adapters/my-backend.mjs" }  // module implementing WorkspaceProvider
   },
@@ -133,8 +188,11 @@ Env overrides: `ARXA_WORKSPACE_PROVIDER`, `ARXA_SUPABASE_URL`, `ARXA_SUPABASE_AN
 - `arxa studio workspace import --config <target> bundle/` → creates org on target, replays records preserving IDs where the target allows (else writes an ID-map file), re-uploads blobs, **re-invites members** (they re-auth on the new provider), imports `audit_log` as read-only historical records with an `imported_from` marker.
 - Explicitly **not** migrated: entitlements, machines, subscriptions (license plane — nothing to migrate, it never moved), provider auth credentials, realtime subscriptions.
 - Round-trip of the bundle is conformance-kit section 8, so every certified provider is also a certified migration source/target.
+- `local` is a first-class source AND target: "try it offline, move to Supabase later" and "leave Supabase, keep working offline" are the same command with a different `--config`. Nothing about the bundle format is provider-specific.
 
 ## 7. Open questions (for the user)
+
+All five remain open and all five block the code phase; the 2026-09-07 amendment changed none of them.
 
 1. **Adapter distribution**: are custom adapters local JS modules only (simple, but unsigned code loaded into the app), or do we require a reviewed registry / signature before loading?
 2. **Contract packaging**: publish `WorkspaceProvider` types + conformance kit as a public npm package (invites third-party adapters) or keep in-repo for a first-party-only v1?
