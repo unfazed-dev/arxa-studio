@@ -26,15 +26,18 @@ checked (noted as ✔ verified / ✘ still open).
 - `session-naming-agent-controls-and-cicd-card.md` — "NOT executed: any GitHub call" against a real repo; header pixels unobserved (headless binding).
 
 ### Code work still open
-- `plugins/claude-code/selftest.account.mjs` is RED (pre-existing; cause not captured).
-- `claude-signin-and-effort-selector.md` — F15 `claude auth status` probe swap deliberately deferred. (SDK vendoring blocker ✔ closed: `@anthropic-ai/claude-agent-sdk` 0.3.259 is in the payload.)
-- `claude-subscription-engine.md` — phase 2 "Claude Code `plugins:` loading of arxa skill packs" not started.
-- `composer-resume-breadcrumb-sidebar-sync.md` — proposed `pack-sidecar --check` for pack-list drift, not built.
 - `mobile-flutter-migration-spec.md` — 11 unchecked build items (pairing screen, QR, iroh client, loopback proxy, reconnect, revocation, push relay, app identity…).
-- `file-organisation-implementation.md` — Phase 6 has no completion marker (trash ✔ exists and was exercised today; cairn rail ✔ exists; `account/` mirror unverified).
 - `agency-backend-provider-abstraction.md` — "PLAN ONLY — no code or schema changes".
-- `git-card-sessions-worktree-rewire.md` — "Latent, not yet a bug" section.
-- `artifact-viewer-docked-column.md` — T4 anchor "PENDING".
+- `artifact-viewer-docked-column.md` — T4 anchor "PENDING" (sidebar Files rows over the T3 tree route). **Held:** it lands on exactly the sidebar surface the coming grill covers.
+- `claude-signin-and-effort-selector.md` — F15 `claude auth status` probe swap deliberately deferred. (SDK vendoring blocker ✔ closed: `@anthropic-ai/claude-agent-sdk` 0.3.259 is in the payload.)
+- `claude-subscription-engine.md` — packaging half of phase 2: WHICH skill packs ship in the bundle (the loading mechanism is done, below). Grill material.
+
+### Closed 2026-09-07 (this session)
+- `plugins/claude-code/selftest.account.mjs` RED ✔ — it hung, it did not fail: the login harness's fake child only exited on a stdin write or a kill, so `signout` after a login awaited a `close` that never came. Harness fixed, and the product gap it exposed closed with it — `run()` is now bounded (a wedged `claude auth logout` is killed and surfaces a timeout instead of spinning the card forever). 10 ok.
+- `composer-resume-breadcrumb-sidebar-sync.md` pack-list drift ✔ — `scripts/pack-manifest.mjs` (BIN_FILES + a scan of what the launcher actually loads), `pack-sidecar --check`, CI suite `scripts/pack-list-check.mjs`. Catches the 2026-09-02 regression (`missing: ['materialise-preset.mjs']` against the old list). Built static, not as the proposed boot-the-binary check.
+- `claude-subscription-engine.md` phase 2 mechanism ✔ — `plugins/claude-code/lib/skill-packs.js` + the SDK `plugins:` option on every turn, `skipMcpDiscovery: true`, roots `ARXA_SKILL_PACKS` → `$ARXA_HOME/skill-packs` → bundled. 5-case selftest.
+- `git-card-sessions-worktree-rewire.md` "Latent, not yet a bug" ✔ — no tie exists: dsh's dock rows are `todo` 0 and `queue` 20, the arxa card is 15. Nothing to change.
+- `file-organisation-implementation.md` Phase 6 `account/` mirror ✔ — built and wired as an OPTIONAL rail in `file-org-shell/lib/lifecycle.js` (default absent, attaches only when a provider is configured); both states covered in `plugins/file-org-shell/selftest.mjs`. The plugin is a pure library, so its absence from `profile/cordis.patch.yml` is correct, not a gap.
 
 ### Blocked upstream (dsh / Flutter)
 - No resume verb until dsh has a contentless wake; no `job.*` RPC (dsh-side API).
@@ -59,12 +62,11 @@ checked (noted as ✔ verified / ✘ still open).
 - `inline-generative-ui-in-dsh.md` — "decisions proposed (not yet ratified)".
 - `flows-answers-ssot-and-canvas-undo.md` OPEN-1; `scaffold-shell-spine-verification.md` "composer is broken on both scaffold screens… pending lead's call"; `q13-parallel-run-design-shell.md`; `intake-build-project-aware.md`; `widget-panel-vocabulary-reconciliation.md` "execution pending go-ahead"; `screen-vocabulary-identifier-rename.md` (migrate v1 or pin it).
 - `arxa-memory-and-payment.md` / `consolidate-one-app-plus-daemon.md` — price point O2 still open.
-- **Direction question:** the `designs/arxa-studio(-v2)` web design-tool cluster (inspector-hover-uniform-widgets, provenance-routed-text-editing, studio-v2-boot-sequence-wiring, screen-vocabulary rename) is untouched since 2026-08-26/27 while desktop (Tauri) and kit/showcase_app (Flutter+Cairn) are the active tracks. Paused or abandoned? Answers whether ~20 unchecked items there are real.
+- **Direction question — ANSWERED 2026-09-07 (abandoned).** arxa studio is now a dsh fork, so the studio no longer designs itself through the design tool. `designs/arxa-studio-v2` is archived to `archives/arxa-studio-v2/` (arxa `cbf4e82b`); `GateContext.studioDesignDir` now points at the in-tree v1 tree, which arxa's own gates, probes and flow-services parity suite still run against. The ~20 unchecked items in inspector-hover-uniform-widgets, provenance-routed-text-editing, studio-v2-boot-sequence-wiring, inspector-everything-as-widgets, inspector-hover-hit-testing-and-identity and screen-vocabulary-identifier-rename are therefore NOT real work — superseded, pending the docs pass after the grill.
 
 ### Code work still open
 - `b2-sync-first-phase1.md` — cairn-infra mirror/sync, every TDD step unchecked.
 - `arxa-kit-cairn.md` — Phases 0–6 backend port; Phase 6 deferred; open risks.
-- `inspector-everything-as-widgets.md` / `inspector-hover-hit-testing-and-identity.md` — all steps unchecked (design-tool track, see direction question).
 - `arxa-engine-llm-fabric.md` — "decided 2026-07-29, not yet built".
 - `arxa-harness-and-distribution.md` — dictionary + gates (W4) not built; section H deferred.
 - `arxa-dart-only-tooling.md` — `generate_view` flow not started.
