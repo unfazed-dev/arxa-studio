@@ -117,13 +117,21 @@ export function apply(ctx, opts = {}) {
   // untouched so one caller's abort can never reject another. Logs every
   // call so the next boot names the callers and their cost.
   // ponytail: dedupe only, no memo — staleness stays dsh's problem, not ours.
-  const armListSingleFlight = (tries = 0) => {
+  const armListSingleFlight = async (tries = 0) => {
     const q = typeof ctx.get === 'function' ? ctx.get('sessionQuery') : null
     if (!q || typeof q.listSessions !== 'function') {
       if (tries < 20) setTimeout(() => armListSingleFlight(tries + 1), 250).unref?.()
       else console.log('[arxa-boot] listSessions single-flight: sessionQuery never reachable')
       return
     }
+    // Header index over dsh's persistence (see session-header-index.js): the
+    // frame decode per saved session is the bulk of every list call.
+    let index = null
+    try {
+      const { armHeaderIndex } = await import(new URL('./session-header-index.js', import.meta.url).href)
+      const persistence = typeof ctx.get === 'function' ? ctx.get('sessionPersistence') : null
+      index = armHeaderIndex(persistence, { log: (m) => console.log('[arxa-boot] ' + m) })
+    } catch (e) { console.log('[arxa-boot] header index not armed: ' + (e?.message ?? e)) }
     const orig = q.listSessions.bind(q)
     let inflight = null
     let n = 0
@@ -134,13 +142,14 @@ export function apply(ctx, opts = {}) {
       const t0 = Date.now()
       inflight = orig(undefined).finally(() => {
         inflight = null
-        console.log('[arxa-boot] listSessions #' + id + ' ' + (Date.now() - t0) + 'ms')
+        const st = index ? index.stats() : null
+        console.log('[arxa-boot] listSessions #' + id + ' ' + (Date.now() - t0) + 'ms' + (st ? ' index hits=' + st.hits + ' misses=' + st.misses : ''))
       })
       return inflight
     }
     console.log('[arxa-boot] listSessions single-flight armed')
   }
-  armListSingleFlight()
+  armListSingleFlight().catch((e) => console.log('[arxa-boot] listSessions single-flight failed: ' + (e?.message ?? e)))
   // Boot diagnostic (2026-09-07): the client's session catalog landed 2.1-2.7s
   // after navigation on every measured boot, and every open waits on it. Time
   // the host's own list call once, 4s after apply, to tell a slow answer from
