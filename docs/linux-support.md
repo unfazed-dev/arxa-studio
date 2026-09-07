@@ -163,7 +163,10 @@ Each lane has its own work and cargo volumes (different glibc, never shared).
 scripts/linux/run-container.sh            # everything on Arch (arm64, native)
 DISTRO=ubuntu scripts/linux/run-container.sh          # everything on Ubuntu, incl. the AppImage
 DISTRO=ubuntu scripts/linux/run-container.sh appimage # just the AppImage layer
-ARCH=amd64 scripts/linux/run-container.sh engine   # x86_64 under qemu (slow)
+ARCH=amd64 scripts/linux/run-container.sh engine   # x86_64 under qemu (slow; engine layer only —
+                                                    # rustc and the packed bun engine crash under qemu,
+                                                    # so x86_64 shells/AppImages come from the release-linux job,
+                                                    # or enable Rosetta in Docker Desktop)
 scripts/linux/run-container.sh engine     # one layer
 scripts/linux/run-container.sh --fresh    # discard the work volume first
 scripts/linux/run-container.sh -- bash    # a shell in the container
