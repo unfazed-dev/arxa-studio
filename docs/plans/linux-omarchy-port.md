@@ -488,6 +488,24 @@ bwrap probe is skipped. Nothing arch-specific broke.
   `cannot prepare session while it is live` on resume, to be re-tested once
   the fixed AppImage is installed (the old shell rewrites the unit back to its
   own mount path on every launch, so the box cannot be healed by hand).
+- **Verified on the machine (2026-09-08, x86_64 AppImage built from `arxa`
+  69e95dbd, installed over SSH):** the shell logs `GDK_BACKEND=wayland,x11`
+  and `engine copied out of the AppImage mount to
+  ~/.local/share/arxa-studio/libexec/arxa-studio`; the unit it writes now has
+  that stable path in both `ExecStart` and `ConditionPathExists` plus
+  `KillMode=mixed`; the window reports `xwayland=False`, carries a normal
+  title bar instead of the GTK menu strip, and renders at the correct size
+  under the session's own `GDK_SCALE=2`. Quitting the shell unmounts the
+  AppImage, the engine keeps serving :7891 from the stable copy, and
+  `coredumpctl` records **no new SIGBUS** — the same sequence produced one
+  every time before (00:59 and again at 01:49). `NRestarts=0`.
+  Pairing survives the menu removal: Settings → "Pair a device".
+- The resume failure is unreproducible headlessly and was most likely
+  downstream of the crash loop: the SIGBUS killed the launcher while its node
+  children kept serving, which is exactly how a session ends up live-but-
+  agentless (`agentFor` → `resume` → `prepare` throws "while it is live";
+  `ctx.sessions` is per-process, so it needs one engine in that state, not
+  two). Engine is clean now — needs a UI retry to confirm.
 - The Ubuntu lane surfaced one red that Arch never showed, and it was a real
   product bug: the frame's generated `check.sh` began with `set -uo pipefail`
   and both the generated `ci.yml` and the selftest run it with `sh`. On
