@@ -5,7 +5,7 @@
 // with its own helpers and removes the session dirs whose header cwd sits
 // under the purged path. Nothing else is touched; a header that cannot be
 // read is kept (doubt keeps the row).
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
@@ -90,6 +90,16 @@ export async function sweepDeadTmpSessions(persistence, { tmpRoots, log = () => 
 export function purgedOrgsLedgerPath() {
   return join(homedir(), '.arxa', 'purged-orgs.json')
 }
+/** True when `p` is a directory tree holding no regular files at all. */
+function isEmptyTree(p) {
+  try {
+    if (!statSync(p).isDirectory()) return false
+    for (const e of readdirSync(p, { withFileTypes: true })) {
+      if (!e.isDirectory() || !isEmptyTree(join(p, e.name))) return false
+    }
+    return true
+  } catch { return false }
+}
 function readLedger(file) {
   try { const v = JSON.parse(readFileSync(file, 'utf8')); return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : [] } catch { return [] }
 }
@@ -108,18 +118,50 @@ export function rememberPurgedOrg(orgPath, { file = purgedOrgsLedgerPath() } = {
  * exists again (org re-created there) leaves the ledger untouched by us.
  * @returns {Promise<{ swept: Record<string, number>, forgotten: string[] }>}
  */
-export async function sweepPurgedOrgs(persistence, { file = purgedOrgsLedgerPath(), log = () => {} } = {}) {
+export async function sweepPurgedOrgs(persistence, { file = purgedOrgsLedgerPath(), registry = null, log = () => {} } = {}) {
   const list = readLedger(file)
   const swept = {}
   const forgotten = []
   const keep = []
   for (const p of list) {
-    if (existsSync(p)) { forgotten.push(p); continue }
+    if (existsSync(p)) {
+      // dsh's session controller mkdir -p's a session cwd on open, so a page
+      // still pointing at a purged org rebuilds an EMPTY folder skeleton at
+      // every boot. A skeleton with no files is still the purged org: remove
+      // it and keep sweeping. Anything with a file in it is a real re-create.
+      if (!isEmptyTree(p)) { forgotten.push(p); continue }
+      await rm(p, { recursive: true, force: true })
+    }
     keep.push(p)
     const r = await sweepSessionsUnder(persistence, p)
-    if (r.removed.length > 0) swept[p] = r.removed.length
+    const w = await sweepWorkspacesUnder(registry, p)
+    if (r.removed.length + w.removed.length > 0) swept[p] = r.removed.length + w.removed.length
   }
   if (forgotten.length > 0) writeLedger(file, keep)
   if (Object.keys(swept).length > 0 || forgotten.length > 0) log('purged-org sweep: ' + JSON.stringify({ swept, forgotten }))
   return { swept, forgotten }
+}
+
+/**
+ * Delete dsh workspace records whose path sits under `orgPath`, through the
+ * registry service itself (never the store file). Without this the page's
+ * current workspace keeps pointing at the purged org and dsh's session
+ * controller mkdir -p's the dead cwd back at every boot.
+ * @param registry dsh workspaceRegistry ({ list(), delete(id) }) or null
+ * @returns {Promise<{ removed: string[], skipped?: string }>}
+ */
+export async function sweepWorkspacesUnder(registry, orgPath) {
+  if (!registry || typeof registry.list !== 'function' || typeof registry.delete !== 'function') return { removed: [], skipped: 'registry-unavailable' }
+  const base = resolve(orgPath)
+  const inside = (p) => typeof p === 'string' && (resolve(p) === base || resolve(p).startsWith(base + sep))
+  const removed = []
+  let rows
+  try { rows = await registry.list() } catch { return { removed, skipped: 'list-failed' } }
+  for (const w of Array.isArray(rows) ? rows : []) {
+    const p = w?.path ?? w?.record?.path
+    const id = w?.id
+    if (!inside(p) || typeof id !== 'string') continue
+    try { if (await registry.delete(id)) removed.push(id) } catch { /* a record that will not go stays reported by the next sweep */ }
+  }
+  return { removed }
 }

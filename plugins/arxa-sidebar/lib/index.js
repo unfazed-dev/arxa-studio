@@ -137,7 +137,7 @@ export function apply(ctx, opts = {}) {
       try {
         const { sweepPurgedOrgs } = await import(new URL('./session-sweep.js', import.meta.url).href)
         const persistence = typeof ctx.get === 'function' ? ctx.get('sessionPersistence') : null
-        await sweepPurgedOrgs(persistence, { log: (m) => console.log('[arxa-boot] ' + m) })
+        await sweepPurgedOrgs(persistence, { registry: ctx.get('workspaceRegistry'), log: (m) => console.log('[arxa-boot] ' + m) })
       } catch (e) { console.log('[arxa-boot] purged-org sweep failed: ' + (e?.message ?? e)) }
     })()
     const orig = q.listSessions.bind(q)
@@ -1495,8 +1495,9 @@ export function apply(ctx, opts = {}) {
               // would otherwise linger as orphans (2026-09-07 audit).
               if (out?.orgPath) {
                 try {
-                  const { sweepSessionsUnder } = await import(new URL('./session-sweep.js', import.meta.url).href)
+                  const { sweepSessionsUnder, sweepWorkspacesUnder } = await import(new URL('./session-sweep.js', import.meta.url).href)
                   out.sessions = await sweepSessionsUnder(ctx.get('sessionPersistence'), out.orgPath, { log: (m) => console.log('[arxa-sidebar] ' + m) })
+                  out.workspaces = await sweepWorkspacesUnder(ctx.get('workspaceRegistry'), out.orgPath)
                   // Remember the path: a client that still points at one of
                   // its sessions re-creates a log with the dead cwd at the
                   // next boot, and the boot sweep (armListSingleFlight)

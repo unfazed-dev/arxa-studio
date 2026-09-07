@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from "node:module"
 const require = createRequire(import.meta.url)
-import { sweepSessionsUnder, sweepDeadTmpSessions, rememberPurgedOrg, sweepPurgedOrgs } from './lib/session-sweep.js'
+import { sweepSessionsUnder, sweepDeadTmpSessions, rememberPurgedOrg, sweepPurgedOrgs, sweepWorkspacesUnder } from './lib/session-sweep.js'
 
 const dir = mkdtempSync(join(tmpdir(), 'arxa-sweep-'))
 const root = join(dir, 'sessions')
@@ -49,7 +49,7 @@ try {
   // Purged-org ledger: a dead path is swept at every boot; a path that exists
   // again is dropped from the ledger.
   const ledger = join(dir, 'purged-orgs.json')
-  const gone = join(dir, 'GONE-ORG'); const back = join(dir, 'BACK-ORG'); mkdirSync(back)
+  const gone = join(dir, 'GONE-ORG'); const back = join(dir, 'BACK-ORG'); mkdirSync(back); writeFileSync(join(back, 'org.json'), '{}') // a real re-create has files
   rememberPurgedOrg(gone, { file: ledger }); rememberPurgedOrg(back, { file: ledger }); rememberPurgedOrg(gone, { file: ledger })
   assert.deepEqual(JSON.parse(readFileSync(ledger, 'utf8')), [gone, back], 'ledger dedupes')
   const g1 = mk('p-gone', 'g1', { id: 'g1', cwd: join(gone, '.arxa', 'worktrees', 'x') })
@@ -58,5 +58,21 @@ try {
   assert.deepEqual(r3, { swept: { [gone]: 1 }, forgotten: [back] })
   assert.ok(!existsSync(g1) && existsSync(b1), 'dead-path session swept, re-created path kept')
   assert.deepEqual(JSON.parse(readFileSync(ledger, 'utf8')), [gone], 'existing path left the ledger')
+  // An empty skeleton at a purged path (dsh mkdir -p of a dead cwd) is still
+  // dead: removed, swept, and kept in the ledger.
+  mkdirSync(join(gone, '.arxa', 'worktrees', 'x'), { recursive: true })
+  const g2 = mk('p-gone', 'g2', { id: 'g2', cwd: join(gone, '.arxa', 'worktrees', 'x') })
+  const r4 = await sweepPurgedOrgs(fake, { file: ledger })
+  assert.deepEqual(r4, { swept: { [gone]: 1 }, forgotten: [] })
+  assert.ok(!existsSync(gone) && !existsSync(g2), 'skeleton and its session removed')
+  assert.deepEqual(JSON.parse(readFileSync(ledger, 'utf8')), [gone], 'skeleton path stays ledgered')
+
+  // Workspace records under the org go through the registry's own delete.
+  const rows = [{ id: 'w1', path: '/vol/RESTO/.arxa/worktrees/a' }, { id: 'w2', path: '/vol/RESTOX' }, { id: 'w3', path: '/vol/RESTO' }]
+  const deleted = []
+  const reg = { async list() { return rows }, async delete(id) { deleted.push(id); return true } }
+  assert.deepEqual(await sweepWorkspacesUnder(reg, '/vol/RESTO'), { removed: ['w1', 'w3'] })
+  assert.deepEqual(deleted, ['w1', 'w3'], 'prefix trap kept, exact + nested removed')
+  assert.deepEqual(await sweepWorkspacesUnder(null, '/vol/RESTO'), { removed: [], skipped: 'registry-unavailable' })
   console.log('arxa-sidebar selftest.session-sweep: ALL GREEN')
 } finally { rmSync(dir, { recursive: true, force: true }) }
