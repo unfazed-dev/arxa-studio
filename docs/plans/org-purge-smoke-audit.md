@@ -61,3 +61,16 @@ End state verified: all five repos 404; no `actions.runner.unfazed-dev-{RESTO,TO
 
 studio and arxa repos pushed to GitHub after this round; engine payload
 synced and restarted (Engine → Restart Engine).
+
+## Follow-up (same day): "fix all the things you found"
+
+| item | fix | commit |
+|---|---|---|
+| purge left a project's repo alive when `project.json` had no `repoUrl` | `orgTrashEntryRepos` falls back to the folder's own `git remote origin` (GitHub URL parsed; localOnly still skipped); regression test strips Inner's manifest and expects `octocat/Inner` deleted | `6e34aec` |
+| create modal offered a vanished sticky root (`/tmp/arxa-smoke/root`) | `create.defaults` ignores a root that no longer exists; `create-root.json` on this machine reset to `/Volumes/business_ssd` | `6e34aec` |
+| `create.defaults` and the new sweep answered `no-workspace` with zero orgs | both lifted above the lifecycle gate (persistence-only verbs) | `44e00f6` |
+| dsh session logs under dead test roots (`/tmp/...`) | `sessions.sweep-dead-tmp` action: removes sessions whose cwd is under the OS temp dir and gone; a missing cwd anywhere else is only reported (`stranded`) — an unmounted drive looks exactly like a deletion. Ran once: 6 removed, 0 stranded | `6e34aec` |
+| **page resurrects a purged org**: dsh's session controller `mkdir -p`s a session cwd on open, and dsh's workspace store still held 24 records under the purged orgs, so the page rebuilt `/Volumes/business_ssd/RESTO/.arxa/worktrees/...` (empty) and a new session at every boot | purge now also deletes workspace records under the org through `workspaceRegistry.delete`, and a purged-org ledger (`~/.arxa/purged-orgs.json`) re-sweeps sessions + workspace records at every boot while the path stays gone, removing an all-empty skeleton as still-dead. Verified: after one boot 15 rows swept, no folder, no session, store 27 → 3 records (all live) | `44e00f6`, `6be2e9a` |
+| dead org recents (`/tmp/arxa-s2/ws/LensCo`, `/Volumes/business_ssd` pre-D69 migration leftover) | dropped from `organisation.json` (recents are advisory) | — |
+
+Left alone on purpose: the `names` ledger keeps purged names — its claim check already skips paths that no longer exist, so a purged name is reusable; `listOrgs` skipping a dead recents row stays silent because an org on an unmounted drive must not be forgotten.
