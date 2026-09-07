@@ -61,10 +61,24 @@ resolves its own path as its engine and spawns itself. Everything lives in
 because `current_exe()` reads `/proc/self/exe`. `scripts/linux/run-container.sh
 package` asserts that layout from the package's own file list.
 
-**AppImage is configured but unbuilt.** `appimage` is in `bundle.targets`, and
-nothing here has ever run `tauri build --bundles appimage` — Tauri's AppImage
-bundler downloads `linuxdeploy` at build time, so it needs network and has not
-been exercised. Treat it as untested.
+**AppImage does not currently work — tested 2026-09-07, blocked twice.**
+
+1. `linuxdeploy-plugin-gtk.sh` copies `/usr/lib/gdk-pixbuf-2.0/2.10.0`
+   unconditionally; Arch's `gdk-pixbuf2 2.44.6-2` has no such directory, the
+   plugin exits 1 and no AppImage is produced. Arch-specific, so Omarchy too.
+2. Worse and distro-independent: linuxdeploy rewrites the RUNPATH of every ELF
+   in the AppDir, including the 266 MB bun-compiled engine sidecar. That grows
+   the file by 64 KB, moves every offset the sidecar uses to find its embedded
+   payload, and the result **segfaults on launch** (exit 139) where the original
+   prints its URL and serves.
+
+`bundle.targets` still lists `appimage`; do not ship it. The PKGBUILD is the
+working route. `.deb` should be fine — Tauri's deb bundler copies files and
+never runs linuxdeploy — but it has not been tested either.
+
+Consequence worth knowing: Tauri's Linux updater only understands AppImage, so
+as things stand a Linux install has no auto-update. See
+`docs/plans/linux-omarchy-port.md` for the three ways out.
 
 ## What differs from macOS
 
@@ -75,7 +89,7 @@ been exercised. Treat it as untested.
 | Engine supervision | launchd agent (`solutions.arxadigital.arxa.engine`) | `systemd --user` unit `arxa-engine.service` |
 | Self-hosted runner service | the runner tarball's `svc.sh` (LaunchAgent) | our own `systemd --user` unit — `svc.sh install` needs sudo on Linux |
 | Runner labels | `macOS,ARM64,arxa` | `Linux,X64,arxa` (from the real platform) |
-| Packaging | `app` + `dmg` | `appimage` (updater-compatible) + `packaging/PKGBUILD` in the arxa repo |
+| Packaging | `app` + `dmg` | `packaging/PKGBUILD` (proven). `appimage` is configured but BROKEN — see below |
 
 Both keyring paths keep the loud in-memory fallback: no Secret Service running
 means the GitHub token lives for the session only, and the log says so.

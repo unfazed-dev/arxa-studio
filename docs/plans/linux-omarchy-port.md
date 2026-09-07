@@ -334,6 +334,61 @@ Still untested: **AppImage**. It is in `bundle.targets` and nothing has ever run
 `tauri build --bundles appimage`; Tauri's bundler downloads `linuxdeploy` at
 build time, so it needs network and has never been exercised.
 
+### Tried 2026-09-07: the AppImage does not work, for two proven reasons
+
+`npx @tauri-apps/cli@^2 build --bundles appimage` in the arm64 Arch container.
+arm64 is NOT the problem — `AppRun-aarch64` and `linuxdeploy-aarch64.AppImage`
+both exist and downloaded fine, and the AppDir was assembled with every webkit
+library and both sidecars in place. Two things stop it, and the second is the
+one that matters.
+
+**1. Tauri's GTK plugin is broken on current Arch.** `linuxdeploy-plugin-gtk.sh`
+unconditionally copies `/usr/lib/gdk-pixbuf-2.0/2.10.0`. Arch's
+`gdk-pixbuf2 2.44.6-2` has no `/usr/lib/gdk-pixbuf-2.0` directory at all, so the
+`cp` fails, the plugin exits 1, linuxdeploy fails, and no AppImage is produced:
+
+```
+[gtk/stderr] cp: cannot stat '/usr/lib/gdk-pixbuf-2.0/2.10.0': No such file or directory
+ERROR: Failed to run plugin: gtk (exit code: 1)
+failed to bundle project: `failed to run …/linuxdeploy-aarch64.AppImage`
+```
+
+Distro-specific, and Omarchy is Arch, so the real box hits it too.
+
+**2. linuxdeploy patchelfs the engine sidecar, and that kills it.** This one is
+fatal regardless of distro. linuxdeploy rewrites the RUNPATH of every ELF it
+finds in the AppDir, including our 266 MB bun-compiled self-extracting sidecar:
+
+| | original | after linuxdeploy |
+|---|---|---|
+| size | 266 455 336 | 266 520 872 (+64 KB exactly) |
+| RUNPATH | none | `$ORIGIN/../lib` |
+| first differing byte | — | 43 (the ELF header) |
+| `--no-open` | prints its URL, serves | **exit 139 (SIGSEGV), silently** |
+
+The sidecar finds its embedded tar payload by file offset. patchelf grows the
+headers, every offset moves, and the binary segfaults before printing anything.
+`options=('!strip')` in the PKGBUILD protects the pacman path from the same
+class of damage; nothing protects the AppImage path, because the damage is not
+strip.
+
+**So the AppImage lane needs a decision, not a fix** (D10 is worth revisiting):
+
+- Drop AppImage, ship the PKGBUILD (proven) and optionally `.deb` (Tauri's deb
+  bundler copies files; it does not run linuxdeploy, so it is not exposed to
+  either problem). Cost: Tauri's Linux updater only understands AppImage, so
+  Linux loses auto-update and updates become "pacman -U the new package".
+- Keep AppImage and stop shipping the engine as an `externalBin` on Linux —
+  fetch or extract it at first run instead. Large change to the packed-sidecar
+  design, and the packed smoke would need a new shape.
+- Keep AppImage and stop using a self-extracting binary on Linux (plain payload
+  dir + the pinned node). Also large, and it gives up the one-file property the
+  packer exists for.
+
+Not attempted: hand-assembling an AppImage around linuxdeploy, or `mkdir`-ing
+the missing gdk-pixbuf path to get past problem 1. Both produce a green that
+does not mean anything while problem 2 stands.
+
 ### x86_64 pass (D3) — done, emulated
 
 `ARCH=amd64 scripts/linux/run-container.sh --fresh engine` on `archlinux:base-devel`
@@ -349,7 +404,9 @@ bwrap probe is skipped. Nothing arch-specific broke.
 - The real machine: Hyprland, GPU compositing, HiDPI, the tray, and a genuine
   `systemd --user` engine unit (the container has no systemd, so the fallback
   path is what ran). The PKGBUILD install itself is now proven in the container.
-- The AppImage target has never been built (needs network for `linuxdeploy`).
+- **AppImage: a D10 decision, not a task.** Built and tested 2026-09-07; it is
+  blocked by linuxdeploy patchelfing the engine sidecar into a segfault (and, on
+  Arch, by the gtk plugin). Three ways out are listed above; none is a small fix.
 - The two new arxa-repo CI steps (monaco build + packed smoke in
   `desktop-release.yml`, `linux-engine-unit` in `desktop-gate.yml`) are wired but
   have not yet run on the runner — the first release tag and the first
