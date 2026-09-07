@@ -147,3 +147,42 @@ everything in an Arch container on this machine.
 - **The Windows question stays open.** Doing this properly opens the platform seams
   (keyring backend, picker, supervision) that a Windows port would need next; this plan
   does not build them.
+
+
+---
+
+## 5. Execution log — 2026-09-07
+
+### What the port found (product bugs, not container quirks)
+
+| # | Bug | Where | Why it mattered |
+|---|---|---|---|
+| B1 | **Unbounded keychain probe hung the engine at boot.** `security add-generic-password` blocks forever when the HOME it is given has no login keychain; the probe is a `spawnSync` on the boot path. Caught with a 70-second-old `security` child and nothing on the port. | `plugins/github-link/lib/keyring.js` | macOS too — any user whose login keychain is locked or absent gets an app that never starts. Now bounded (`PROBE_TIMEOUT_MS = 2000`) and falls back to memory. |
+| B2 | **A developer's absolute `/Volumes/...` path in the shipped profile.** The arxa-gate row named the harness by hand. | `profile/cordis.patch.yml` | The engine dies with `ERR_MODULE_NOT_FOUND` on every machine that is not this one — including a packed build on another Mac. Now `__ARXA_REPO__`, resolved by the launcher, and pack-sidecar ships the harness files. |
+| B3 | **`svc.sh install` needs sudo on Linux** and the teardown removed a LaunchAgent plist unconditionally; runner labels were hardcoded `macOS,ARM64`. | `plugins/github-link/lib/runner.js` | A Linux runner advertised itself as a Mac and its service install prompted for root out of a GUI app. Now a `systemd --user` unit and real labels. |
+| B4 | **A test that only passed because APFS is case-insensitive.** `softDelete(orgA.path, 'projects/doomed')` while D79 slugging produces `Doomed`. | `plugins/file-org-shell/selftest.mjs` | Green on macOS, red on ext4. The fixture now takes the path from `newProject`. |
+| B5 | **The locale package gate hashed filenames in ICU collation order** (`localeCompare`), so the same package hashed differently per node build; and the pin itself had been taken against a damaged tree missing a file. | `plugins/locale/selftest.mjs` | Byte-stable order now, pinned to the complete 16-file published tree — verified identical on macOS and Arch. |
+| B6 | **Nothing pinned pnpm**, and dsh resolves its stock rows against the layout pnpm produces. pnpm 10 vs 11 hoists differently and the engine died on `ERR_MODULE_NOT_FOUND` for `@deepseek-ai/dsh-commands`. | `package.json` | `packageManager: pnpm@11.21.0`, and the container matches. |
+| B7 | **npm 12 blocks install scripts by default**, so `node-pty`, `koffi`, `esbuild`, `protobufjs` and dsh's spawn helper silently never built. | `package.json` `allowScripts` | A fresh clone on any npm-12 machine (Omarchy gets node from mise, so npm 12 is likely) had no working pty. The five are approved by name; `edgedriver`/`geckodriver` deliberately are not. |
+| B8 | **The boot smoke could not tell a dead launcher from a slow one** — every failure read "never printed its token URL". | `scripts/engine-boot-smoke.mjs` | It now reports the exit code and the child's last words. |
+
+### Harness lessons (container, not product)
+
+- Arch's official image is amd64-only → `menci/archlinuxarm:base-devel` on arm64.
+- pacman 7 fences downloads with Landlock, which a container build cannot apply — `DisableSandbox` in `pacman.conf`, or every install reads as "failed to synchronize databases".
+- **The host tree must be read-only.** A writable bind mount let a container `npm ci` (which starts by deleting `node_modules`) wipe and then replace the macOS install with Linux binaries — twice, the second time while the first was still being diagnosed. The harness now mounts the repos at `/src:ro` and rsyncs into a container volume.
+- bun installs through npm need `--allow-scripts=bun` (its postinstall IS the binary download).
+
+### Where it stands
+
+| Layer | arm64 Arch container |
+|---|---|
+| toolchain, `/usr/bin/{secret-tool,zenity,bwrap,tar}` | PASS |
+| `npm ci` (890 packages, native modules built) | PASS |
+| plugin suites (`scripts/ci.mjs`) | PASS |
+| **engine boot smoke — 200 HTML from the real engine** | **PASS (3s)** |
+| `secret-tool` round-trip against gnome-keyring | PASS |
+| bwrap sandbox | SKIP — no unprivileged userns in the container |
+| sidecars, `cargo build`, Xvfb window | in progress |
+
+macOS after every change: 83 suites ALL GREEN, boot smoke OK.

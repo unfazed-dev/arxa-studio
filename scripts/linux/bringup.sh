@@ -30,7 +30,8 @@ for repo in arxa-studio arxa; do
   [ -d "$SRC/$repo" ] || continue
   rsync -a --delete \
     --exclude 'node_modules/' --exclude '.git/' --exclude 'target/' \
-    --exclude '.compile-cache/' --exclude 'designs/' --exclude 'archives/' \
+    --exclude '.compile-cache/' --exclude '.dart_tool/' \
+    --exclude 'designs/' --exclude 'archives/' \
     "$SRC/$repo/" "$WORK/$repo/"
 done
 cd "$STUDIO" || { echo "no studio at $STUDIO"; exit 1; }

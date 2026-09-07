@@ -47,9 +47,12 @@ if (checkOnly) {
   process.exit(0)
 }
 
-// `dart compile exe` needs the package's deps resolved; a fresh checkout (or a
-// container that has never run pub) has no .dart_tool.
-if (!existsSync(join(cliPkg, '.dart_tool', 'package_config.json'))) {
+// `dart compile exe` needs the package's deps resolved, and .dart_tool is NOT
+// portable: package_config.json holds absolute paths into the pub cache of the
+// machine that wrote it. A tree copied to another machine (or a container)
+// therefore resolves `package:path` to nothing and AOT dies with
+// "Method not found: 'join'". Always resolve; it is a no-op when current.
+{
   console.log('pack-cli: dart pub get …')
   const pub = spawnSync('dart', ['pub', 'get'], { cwd: cliPkg, stdio: 'inherit' })
   if (pub.status !== 0) { console.error('pack-cli: dart pub get failed'); process.exit(1) }
