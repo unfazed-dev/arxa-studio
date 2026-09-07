@@ -171,3 +171,70 @@ Open levers, by size:
    records `js=<n>/<KB>/last@` to size it.
 3. Prune 30 orphan sessions (user's call) — list is cached now, so minor.
 4. dsh core bundling — upstream.
+
+## Round 8 — the two remaining levers (2026-09-07)
+
+### Lever 1: engine outlives the shell — DONE (arxa `fda4b2b3`)
+
+Problem: every app launch paid ~1.2–1.3 s of dsh core boot (module-graph file
+I/O, upstream), because the shell killed the engine on exit and respawned it.
+
+Fix (`desktop/src-tauri/src/lib.rs`):
+- The engine launcher is spawned with `std::process::Command`, `process_group(0)`,
+  stdio to `<dsh home>/engine-stdio.log`, and a reaper thread. It is no longer a
+  `tauri-plugin-shell` sidecar child, so neither the plugin's exit hook nor the
+  shell's death touches it. `RunEvent::Exit` no longer calls `kill_spawned`.
+- Owner record `<dsh home>/desktop-engine.json` = `{ pid, stamp }`, stamp = mtime
+  of the bundled `arxa-studio` sidecar binary.
+- Launch: reachable + owner pid alive + `ps` says it is an arxa-studio launcher +
+  stamp matches → adopt (page-only boot). Stamp differs (app update) → kill the
+  group, wait for the port, spawn fresh. No owner record → external engine,
+  never managed (launchd rider unchanged).
+- New menu **Engine → Restart Engine**: kills the owned engine tree, waits for
+  the port, spawns, sets `EngineSpawnedAt` so `open_studio` waits for the fresh
+  token; the watchdog parks the window on the waiting page meanwhile. This is
+  now the dev path after `bin/arxa-engine-sync.mjs` (a payload sync does not
+  change the stamp).
+- Token reuse across shell runs works because the signing secret is durable
+  (`plugins/desktop-session/lib/index.js`): the previous engine's token is still
+  the current engine's token.
+
+Measured (02:21, `open -a` → painted trace):
+| run | what | open→painted | page start→painted |
+|---|---|---|---|
+| 1 | cold, fresh engine | 8.45 s (includes `open` latency + engine boot) | 1.17 s |
+| quit | app gone, launcher pid alive, port held | — | — |
+| 2 | relaunch, adopted, 0 new engine boots | **2.17 s** | 1.17 s |
+| menu | Restart Engine → new pid, old dead | 5.2 s to repaint | 1.01 s |
+
+Keychain probe (`plugins/github-link`, `d1575c0`) confirmed absent from the new
+engine's boot log.
+
+Known limits: no crash supervision after the shell quits (relaunch respawns);
+an uninstalled app leaves the engine running until reboot/`kill`; one global
+engine per port. Rollback copy: `~/.arxa/Arxa Studio.app.pre-persist`.
+
+### Lever 2: client bundle diet — NOT WORTH BUILDING (measured)
+
+- Clean boot loads **4 scripts / 1.2 MB** (`js=` mark, 02:21): vite shell
+  vendor 723 K + index 413 K, artifact-viewer icons 85 K, plus the dsh
+  application combo(s) (size not exposed by Resource Timing). The earlier
+  11.5 MB figure was a same-page re-run 9 minutes in, counting Monaco and
+  everything else loaded since.
+- dsh's `client-modules` composes EVERY plugin client half into one
+  application combo (`partitionComboRecords` splits only by URL length),
+  served `cache-control: immutable`; `immediately` is parsed but the only
+  consumers are dsh's own shell. Factories register on script execution,
+  `apply` runs on activation by `dsh-cordis-client-runner` — unused code is
+  pre-parsed lazily by WebKit anyway.
+- Studio-owned client bytes: 865 KB raw (552 KB without comments/indent) of
+  ~5.8 MB total client JS; sidebar 356 KB is needed for first paint. Deferring
+  the rest saves ≤ 500 KB of mostly-lazy-parsed code — tens of ms at best
+  against the ~780 ms dcl→client-eval window, which is dsh's shell boot.
+- Kept: the trace now names the four heaviest scripts (`1b1c9e0`) so a
+  regression shows up by name.
+
+### Incident note
+While probing the boot HTML from the sandbox, a connection error echoed the
+current engine launch token into the session transcript. The engine was
+restarted twice since (token rotates per engine boot), so that token is dead.
