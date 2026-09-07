@@ -3052,10 +3052,32 @@ window.__ModuleLoader__.load({
 		// hooks at /__arxa/sidebar/*, relabels the locale dicts, and adds the one
 		// genuinely new surface: the trash list (Q6). Everything else is stock
 		// behaviour over org data.
+		// Boot trace (2026-09-07): marks from navigation start to the resumed
+		// conversation's first paint, posted once to the host trace route so
+		// the engine log holds the whole open-to-session waterfall.
+		const bootMarks = [];
+		let bootDone = false;
+		const bootMark = (name) => { if (!bootDone) bootMarks.push(name + "=" + Math.round(performance.now())); };
+		const bootEnd = (outcome) => {
+			if (bootDone) return;
+			bootDone = true;
+			const nav = performance.getEntriesByType ? performance.getEntriesByType("navigation")[0] : null;
+			if (nav) bootMarks.unshift("resp=" + Math.round(nav.responseStart), "dcl=" + Math.round(nav.domContentLoadedEventEnd), "load=" + Math.round(nav.loadEventEnd));
+			try {
+				fetch("/__arxa/artifacts/trace", { method: "POST", keepalive: true, headers: { "content-type": "application/json" },
+					body: JSON.stringify({ relPath: "boot@" + new Date(performance.timeOrigin).toISOString(), outcome, totalMs: Math.round(performance.now()), bundleWarm: true, marks: bootMarks.join(" ") }) }).catch(() => {});
+			} catch { /* trace only */ }
+		};
+		bootMark("client-eval");
+		window.setTimeout(() => bootEnd("timeout"), 30000);
+		let stateFetched = false;
 		const ORG_FETCH = async (selectedProject) => {
 			const q = selectedProject ? "?project=" + encodeURIComponent(selectedProject) : "";
+			if (!stateFetched) bootMark("state-req");
 			const r = await fetch("/__arxa/sidebar/state" + q);
-			return r.json();
+			const j = await r.json();
+			if (!stateFetched) { stateFetched = true; bootMark("state-res"); }
+			return j;
 		};
 		// card.* / insight.* / version.* moved to the arxa-git-card host
 		// (docs/plans/git-card-stock-dock-rebuild.md A2); routed by prefix
@@ -3171,7 +3193,9 @@ window.__ModuleLoader__.load({
 			// comes back { dropped: true } — the row is gone; land on the
 			// welcome hero instead of an empty thread. Otherwise reveal the row
 			// in the tree (Q6) before opening.
+			bootMark("open-req");
 			orgStore.mutate("session.open", { orgId: open.id, sessionId: cand.id, dropIfEmpty: true }).then((r) => {
+				bootMark("open-res");
 				if (r && r.dropped === true) {
 					currentSessionId = null;
 					bootDecided = false;
@@ -3526,11 +3550,14 @@ window.__ModuleLoader__.load({
 			if (!dshId) return;
 			const snap = arxaClientSessions.list && typeof arxaClientSessions.list.getSnapshot === "function" ? arxaClientSessions.list.getSnapshot() : null;
 			if (snap && Array.isArray(snap.ids) && !snap.ids.includes(dshId) && tries < 12) {
+				if (tries === 0) bootMark("catalog-wait");
 				window.setTimeout(() => arxaOpenConversation(sessionId, tries + 1), 400);
 				return;
 			}
 			try {
+				bootMark("open-call" + (tries ? "(tries=" + tries + ")" : ""));
 				arxaClientSessions.open(dshId);
+				window.requestAnimationFrame(() => window.requestAnimationFrame(() => { bootMark("painted"); bootEnd("painted"); }));
 			} catch (err) {
 				window.__arxaOpenError = String(err && err.message || err);
 			}

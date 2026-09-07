@@ -109,6 +109,7 @@ async function importGitWorkspace() {
 }
 
 export function apply(ctx, opts = {}) {
+  console.log('[arxa-boot] sidebar apply')
   /** Singleton — holds the single open-org handle across requests. */
   let lifecycle = null
   let shell = null
@@ -678,6 +679,8 @@ export function apply(ctx, opts = {}) {
   // first action, so it is deliberately NOT part of this gate — waiting for
   // it here would wait forever. CORS `*` on this one boolean so the shell's
   // own page (a different origin) can read the status.
+  let readyLogged = null
+  let stateLogged = false
   ctx.webServer.register({
     name: 'arxa-ready',
     path: '/__arxa/ready',
@@ -686,6 +689,7 @@ export function apply(ctx, opts = {}) {
       let ready = false
       try {
         const l = await getLifecycle()
+        if (readyLogged !== (l !== null)) { readyLogged = l !== null; console.log('[arxa-boot] ready=' + (l !== null)) }
         let root = null
         try { root = shell?.loadWorkspaceRoot?.() ?? null } catch { root = null }
         ready = l !== null || !root
@@ -705,7 +709,10 @@ export function apply(ctx, opts = {}) {
     kind: 'exact',
     handler: async (req, res) => {
       try {
-        json(res, await snapshot(params(req).get('project')))
+        const st0 = Date.now()
+        const snap = await snapshot(params(req).get('project'))
+        if (!stateLogged) { stateLogged = true; console.log('[arxa-boot] state first served in ' + (Date.now() - st0) + 'ms') }
+        json(res, snap)
       } catch (e) {
         json(res, { ...emptySnap(SEAM_LIFECYCLE_STUBBED), error: String(e?.message ?? e) })
       }
@@ -1357,7 +1364,9 @@ export function apply(ctx, opts = {}) {
               return cur.trashProject(arg.projectSlug)
             },
             'session.open': async () => {
+              const so0 = Date.now()
               const cur = await ensureOpen(arg?.orgId)
+              console.log('[arxa-boot] session.open ensureOpen=' + (Date.now() - so0) + 'ms')
               return cur.resumeSession(arg?.sessionId, { dropIfEmpty: arg?.dropIfEmpty === true })
             },
             'session.archive': async () => {

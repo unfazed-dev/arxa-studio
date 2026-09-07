@@ -424,10 +424,12 @@ if (packed) {
   // relative-import libs are extra here. A plugin added to the profile is
   // therefore shipped by the sidecar automatically — the drift that killed the
   // 2026-09-03 build cannot recur by omission.
+  const cp0 = Date.now()
   for (const [name, dir] of [...PROFILE_PLUGINS, ...fiveLibs]) {
     rmSync(join(nm, name), { recursive: true, force: true })
     cpSync(dir, join(nm, name), { recursive: true })
   }
+  engineLog('profile plugins copied in ' + (Date.now() - cp0) + 'ms')
 } else {
   const r = spawnSync('pnpm', ['install', '--force', '--dir', profileDir], { stdio: 'inherit' })
   if (r.error || r.status !== 0) {
@@ -561,8 +563,27 @@ try {
   engineLog('arxa: workspace store preflight skipped — ' + (err?.message ?? err))
 }
 
+engineLog('spawning dsh')
+// Packed: the child's stdout/stderr flow through this process so every line
+// lands in engine.log with an ISO timestamp (2026-09-07). Handing the child
+// the raw fd left everything after this point unclockable — the plugin
+// apply, the listen, the resume — which is exactly the part worth timing.
 const child = spawn(process.execPath, [...loaderArgs, dshBin, '--profile', 'arxa', ...passthrough, ...trustArgs], {
-  stdio: packed ? ['ignore', engineLogFd, engineLogFd] : 'inherit',
+  stdio: packed ? ['ignore', 'pipe', 'pipe'] : 'inherit',
   env: { ...childEnv, DSH_HOME: dshHome, PI_CODING_AGENT_DIR: piHome },
 })
+if (packed) {
+  const relay = (stream) => {
+    let rest = ''
+    stream.setEncoding('utf8')
+    stream.on('data', (chunk) => {
+      rest += chunk
+      let i
+      while ((i = rest.indexOf('\n')) !== -1) { engineLog(rest.slice(0, i)); rest = rest.slice(i + 1) }
+    })
+    stream.on('end', () => { if (rest !== '') engineLog(rest) })
+  }
+  relay(child.stdout)
+  relay(child.stderr)
+}
 child.on('exit', (code, signal) => process.exit(signal ? 1 : code ?? 1))

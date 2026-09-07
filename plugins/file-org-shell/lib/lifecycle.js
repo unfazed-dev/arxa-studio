@@ -1375,6 +1375,11 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           return out
         },
         async resumeSession(id, opts = {}) {
+          // Boot trace (2026-09-07): one line per resume naming what each
+          // step cost. Read next to the client's `trace boot` line.
+          const rt0 = Date.now()
+          const laps = []
+          const lap = (n) => laps.push(n + '=' + (Date.now() - rt0))
           // Q7: pinned identity vs the folder on disk. Refuse rather than
           // resume onto a path that no longer describes reality — the branch,
           // the worktree and the dsh key all carry the old name.
@@ -1394,6 +1399,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           // reviveSession's own preamble routes the git work; this lookup
           // only needs the dsh annotation, so read the aggregate.
           const row = allSessions(resolved, env).find((s) => s.id === id)
+          lap('head+rows')
           // Q3 (grilled 2026-09-02): a BOOT resume of a session whose
           // conversation never received a user message is not a resume —
           // the row is dropped (dsh archive, worktree, branch, registry
@@ -1403,6 +1409,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           // never conversed in — nothing to judge, they resume as before.
           if (opts?.dropIfEmpty === true && row?.dshSessionId) {
             const probe = await dshBridge.hasUserMessage(row.dshSessionId)
+            lap('probe')
             if (probe.ok && probe.value === false) {
               await dshBridge.archive([row.dshSessionId])
               const dropped = dropSession(resolved, id, env)
@@ -1412,6 +1419,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
             }
           }
           const out = reviveSession(resolved, id, env)
+          lap('revive')
           // Re-attach the dsh conversation (focus/open by dshSessionId) when
           // the row carries one. Rows born while dsh was unavailable (or
           // pre-Phase-D) have none — SPAWN the engine conversation now
@@ -1425,11 +1433,14 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
             // route through session.open). Sessions born before the spawn
             // pin existed kept dsh's auto title — seen live on note-002.
             await dshBridge.retitle(row.dshSessionId, typeof out?.name === 'string' ? out.name : row.name)
+            lap('attach+retitle')
           } else if (out?.worktree) {
             const spawned = await dshBridge.spawn({ cwd: out.worktree, name: out.name })
             if (spawned.ok) await annotateSession(resolved, id, { dshSessionId: spawned.id, dshStatus: null }, env)
           }
           dshLive = await dshBridge.list()
+          lap('list')
+          console.log('[arxa-boot] resume ' + id + ' ' + laps.join(' '))
           syncWipWatchPaths() // session set changed — re-watch
           return out
         },
