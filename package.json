@@ -40,5 +40,12 @@
     "hoisting it flat. devDependencies, not dependencies: only the dev-time",
     "check script imports it — bin/arxa-studio.mjs and bin/materialise-preset.mjs",
     "do not use js-yaml at runtime."
-  ]
+  ],
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "@deepseek-ai/dsh-subprocess-local@0.1.2-rc.1": true,
+    "koffi@3.2.1": true,
+    "node-pty@1.2.0-beta.15": true,
+    "protobufjs@7.6.5": true
+  }
 }

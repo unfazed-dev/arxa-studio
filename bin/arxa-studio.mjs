@@ -206,6 +206,9 @@ writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
   dependencies: Object.fromEntries(PROFILE_PLUGINS.map(([name, dir]) => [name, `file:${dir}`])),
   dsh: { profile: { bundles } },
 }, null, 2) + '\n')
+// The sibling arxa repo: harness rows (the arxa gate) live there, and in a
+// packed payload the same relative shape is preserved by pack-sidecar.
+const arxaRepoDir = resolve(here, '..', '..', 'arxa')
 // Path-loaded rows (sandbox, approvals, conversation, claude-code, github-link, desktop-session)
 // name their entry as `__ARXA_STUDIO_PLUGINS__/<plugin>/...` and are resolved HERE to the
 // plugins/ dir beside this launcher: the repo checkout in checkout mode, the payload in packed
@@ -214,7 +217,7 @@ writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
 // from the repo while provider-status ran from the profile's node_modules copy, so the usage
 // reader landed in a module instance the poller never read (2026-09-05).
 const pluginsRoot = resolve(here, '..', 'plugins')
-writeFileSync(join(profileDir, 'cordis.patch.yml'), readFileSync(template, 'utf8').replaceAll('__ARXA_STUDIO_PLUGINS__', pluginsRoot))
+writeFileSync(join(profileDir, 'cordis.patch.yml'), readFileSync(template, 'utf8').replaceAll('__ARXA_REPO__', arxaRepoDir).replaceAll('__ARXA_STUDIO_PLUGINS__', pluginsRoot))
 engineLog('profile materialized: ' + profileDir)
 
 // The arxa agent preset (AGENT-PLANE, docs/plans/arxa-harness-and-distribution.md)
@@ -316,9 +319,8 @@ if (materialiseOnly) {
 // gate resolves its guard through realpath, so symlinking is safe.
 const piExtensions = join(piHome, 'extensions')
 mkdirSync(piExtensions, { recursive: true })
-const arxaDir = resolve(here, '..', '..', 'arxa')
 for (const [link, target] of [
-  [join(piExtensions, 'arxa-gate.ts'), join(arxaDir, 'harness', 'pi', 'arxa-gate.ts')],
+  [join(piExtensions, 'arxa-gate.ts'), join(arxaRepoDir, 'harness', 'pi', 'arxa-gate.ts')],
   [join(piExtensions, 'arxa-memory.ts'), join(here, '..', 'pi', 'arxa-memory.ts')],
 ]) {
   try { rmSync(link, { force: true }) } catch { /* first run */ }
@@ -445,7 +447,14 @@ if (packed) {
   }
 } else {
   const r = spawnSync('pnpm', ['install', '--force', '--dir', profileDir], { stdio: 'inherit' })
-  if (r.error || r.status !== 0) {
+  if (r.error?.code === 'ENOENT') {
+    // Without pnpm NOTHING in the profile resolves, and the failure surfaces
+    // several seconds later as ERR_MODULE_NOT_FOUND for whichever profile
+    // plugin dsh loads first — which reads like a broken checkout. Name it here.
+    console.error('arxa: pnpm is not on PATH. Checkout mode installs the profile\'s '
+      + 'file: plugins with it, so the engine cannot start without it. '
+      + 'Install it (npm i -g pnpm) and relaunch.')
+  } else if (r.error || r.status !== 0) {
     console.error('arxa: could not pnpm-install the profile — the design '
       + 'panel will not mount. Run: dsh plugin --profile arxa add '
       + `file:${designPanelDir}`)

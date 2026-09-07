@@ -118,7 +118,13 @@ process.on('exit', () => { try { rmSync(scratch, { recursive: true, force: true 
 console.log(`booting engine on :${PORT} (scratch home ${scratch}) …`)
 let problem = 'the launcher never printed its token URL'
 while (Date.now() < deadline && !up) {
-  if (child.exitCode !== null) break // died under us — report below
+  if (child.exitCode !== null) {
+    // Died under us. Say so, with its own last words: "never printed its token
+    // URL" reads like a hang and sent one debugging session down the wrong path.
+    problem = `the launcher exited ${child.exitCode}${child.signalCode ? ' on ' + child.signalCode : ''} before serving — last output: ` +
+      log.trim().split('\n').slice(-3).join(' / ')
+    break
+  }
   const printed = tokenUrlFromLog()
   const published = sessionFromFile()
   if (printed && !published) problem = 'token URL printed but desktop-session.json not published (arxa-desktop-session row broken?)'

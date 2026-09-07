@@ -35,6 +35,10 @@ const studioRoot = resolve(here, '..')            // .../arxa-studio
 const parentDir = dirname(studioRoot)             // .../totem_labs
 const studioName = basename(studioRoot)           // arxa-studio
 const arxaGateRel = join('arxa', 'harness', 'pi', 'arxa-gate.ts')
+// The profile's arxa-gate row (__ARXA_REPO__/harness/…) resolves inside the
+// payload, so these ship with it — without them a packed app on any machine but
+// the build host dies on ERR_MODULE_NOT_FOUND before serving anything.
+const arxaHarnessRels = [join('arxa', 'harness', 'dsh-external-gate'), join('arxa', 'harness', 'verdict.sh')]
 
 const triple = hostTriple()
 const outIdx = process.argv.indexOf('--out')
@@ -69,9 +73,11 @@ for (const rel of [...BIN_FILES.map((f) => `bin/${f}`), 'profile/cordis.patch.ym
     process.exit(1)
   }
 }
-if (!existsSync(join(parentDir, arxaGateRel))) {
-  console.error(`pack-sidecar: missing sibling ${arxaGateRel}`)
-  process.exit(1)
+for (const rel of [arxaGateRel, ...arxaHarnessRels]) {
+  if (!existsSync(join(parentDir, rel))) {
+    console.error(`pack-sidecar: missing sibling ${rel}`)
+    process.exit(1)
+  }
 }
 // --check: every cheap validation above, no build. What CI and a pre-release
 // pass want — the pack list, the inputs, the monaco bundle — in milliseconds
@@ -131,6 +137,7 @@ try {
     join(studioName, 'profile'),
     join(studioName, 'pi'),
     arxaGateRel,
+    ...arxaHarnessRels,
   ], { stdio: 'inherit', env: { ...process.env, COPYFILE_DISABLE: '1' } })
   if (tar.status !== 0) throw new Error('tar failed')
 

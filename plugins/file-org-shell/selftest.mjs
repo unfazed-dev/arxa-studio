@@ -233,8 +233,12 @@ try {
   const svcTrash = createOrgLifecycle({ workspaceRoot: root, env })
   await svcTrash.openOrg(orgA.path)
   const hT = svcTrash.current
-  await hT.newProject('Doomed')
-  const doomedPath = path.join(orgA.path, 'projects', 'doomed')
+  // D79 preserves case, so the folder is `Doomed`, not `doomed`. Taking the
+  // path from newProject rather than spelling it out: the lowercase guess only
+  // ever worked because APFS is case-insensitive — on ext4 it was "nothing to
+  // trash" (found on Arch, 2026-09-07).
+  const doomed = await hT.newProject('Doomed')
+  const doomedPath = doomed.path
   softDelete(orgA.path, doomedPath, { env }) // org-local trash (D69)
   ok(hT.trashCount() === 1, 'softDelete parks the project in the trash')
   const res = hT.restoreTrash()

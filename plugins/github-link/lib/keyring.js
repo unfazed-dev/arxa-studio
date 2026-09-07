@@ -23,6 +23,14 @@ import { execFile, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import { promisify } from 'node:util'
 
+/** The probe is SYNCHRONOUS and sits on the engine's boot path, so it must be
+ *  bounded: `security add-generic-password` blocks forever when the HOME it is
+ *  given has no login keychain (a scratch home, a service account, a locked
+ *  session). Unbounded, that hung the whole engine before it served anything —
+ *  observed 2026-09-07 with a 70s-old `security` child and no studio on the
+ *  port. A store that cannot answer in two seconds is a store we do not use. */
+export const PROBE_TIMEOUT_MS = 2000
+
 export const KEYCHAIN_SERVICE = 'arxa-studio'
 export const SECURITY_PATH = '/usr/bin/security'
 /** libsecret's CLI. Same role on Linux that `security` plays on macOS. */
@@ -194,12 +202,14 @@ function secretServiceUsable(toolPath) {
   const probeAccount = '__keyring_probe__'
   const attrs = ['service', KEYCHAIN_SERVICE, 'account', probeAccount]
   const set = spawnSync(toolPath, ['store', '--label=' + KEYCHAIN_SERVICE + ' probe', ...attrs],
-    { input: 'probe', stdio: ['pipe', 'ignore', 'ignore'] })
+    { input: 'probe', stdio: ['pipe', 'ignore', 'ignore'], timeout: PROBE_TIMEOUT_MS, killSignal: 'SIGKILL' })
   if (set.error || set.status !== 0) {
-    console.warn('[github-link] WARNING: secret-tool is installed but no Secret Service accepted a probe write (no gnome-keyring/kwallet running, or the keyring is locked) — using the in-memory fallback for this process.')
+    console.warn(set.error?.code === 'ETIMEDOUT'
+      ? `[github-link] WARNING: secret-tool did not answer within ${PROBE_TIMEOUT_MS}ms (a locked keyring waiting on a prompt?) — using the in-memory fallback for this process.`
+      : '[github-link] WARNING: secret-tool is installed but no Secret Service accepted a probe write (no gnome-keyring/kwallet running, or the keyring is locked) — using the in-memory fallback for this process.')
     return false
   }
-  spawnSync(toolPath, ['clear', ...attrs], { stdio: 'ignore' })
+  spawnSync(toolPath, ['clear', ...attrs], { stdio: 'ignore', timeout: PROBE_TIMEOUT_MS, killSignal: 'SIGKILL' })
   return true
 }
 
@@ -207,13 +217,16 @@ function keychainUsable(securityPath) {
   const probeAccount = '__keyring_probe__'
   const setProbe = spawnSync(securityPath,
     ['add-generic-password', '-s', KEYCHAIN_SERVICE, '-a', probeAccount, '-w', 'probe', '-U'],
-    { stdio: 'ignore' })
+    { stdio: 'ignore', timeout: PROBE_TIMEOUT_MS, killSignal: 'SIGKILL' })
   if (setProbe.error || setProbe.status !== 0) {
-    console.warn('[github-link] WARNING: /usr/bin/security exists but the keychain refused a probe write — using the in-memory fallback for this process.')
+    const timedOut = setProbe.error?.code === 'ETIMEDOUT'
+    console.warn(timedOut
+      ? `[github-link] WARNING: /usr/bin/security did not answer within ${PROBE_TIMEOUT_MS}ms (no login keychain for this HOME, or securityd is waiting on something) — using the in-memory fallback for this process.`
+      : '[github-link] WARNING: /usr/bin/security exists but the keychain refused a probe write — using the in-memory fallback for this process.')
     return false
   }
   spawnSync(securityPath,
     ['delete-generic-password', '-s', KEYCHAIN_SERVICE, '-a', probeAccount],
-    { stdio: 'ignore' })
+    { stdio: 'ignore', timeout: PROBE_TIMEOUT_MS, killSignal: 'SIGKILL' })
   return true
 }

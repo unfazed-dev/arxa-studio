@@ -47,13 +47,16 @@
     surfaceContext: false
     trustedHosts: !!js ctx.webStartup.trustedHosts
 
-# 4. The arxa gate on every mutating tool call (harness/README.md template;
-#    absolute path because arxa declares no npm dependency on the plugin).
+# 4. The arxa gate on every mutating tool call (harness/README.md template).
+#    __ARXA_REPO__ is rewritten by bin/arxa-studio.mjs to the sibling arxa repo
+#    (checkout) or the payload's copy (packed) — it used to be one developer's
+#    /Volumes path, which meant the engine died with ERR_MODULE_NOT_FOUND on
+#    every other machine (found on Arch, 2026-09-07).
 - insert:
   - id: arxa-gate
-    name: /Volumes/business_ssd/arxa_digital_solutions/arxa/harness/dsh-external-gate/index.mjs
+    name: __ARXA_REPO__/harness/dsh-external-gate/index.mjs
     config:
-      command: /Volumes/business_ssd/arxa_digital_solutions/arxa/harness/verdict.sh
+      command: __ARXA_REPO__/harness/verdict.sh
       # dsh-native tool names (dsh-tool-fs registers write/edit, not Write/Edit).
       # The 2026-08-21 booted check proved Claude-cased names match nothing here.
       tools: [write, edit, str_replace_editor, bash]

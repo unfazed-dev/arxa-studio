@@ -440,7 +440,7 @@ try {
     const fakeRun = async (file, args, opts = {}) => {
       ran.push([file, ...args].join(' '))
       if (file === './config.sh') {
-        assert.ok(args.includes('macOS,ARM64,arxa'), 'canon labels on config.sh')
+        assert.ok(args.includes('macOS,ARM64,arxa'), 'canon labels on config.sh (platform pinned above — Linux labels have their own suite)')
         assert.ok(args.join(' ').includes('https://github.com/octocat/framed'), 'repo URL on config.sh')
         // the REAL config.sh writes the .runner marker — mirror it
         fs.writeFileSync(path.join(opts.cwd, '.runner'), '{}\n')
@@ -452,7 +452,7 @@ try {
     fs.writeFileSync(path.join(cacheDir, 'config.sh'), '#!/bin/sh\n')
     fs.writeFileSync(path.join(cacheDir, 'svc.sh'), '#!/bin/sh\n')
     fs.writeFileSync(path.join(cacheDir, 'VERSION'), 'v9.9.9\n')
-    const opts = { owner: 'octocat', name: 'framed', home, run: fakeRun, fetch: mockFetch, registrationToken: async () => 'rt', latestRunnerTarball: async () => ({ url: 'u', version: 'v9.9.9' }) }
+    const opts = { owner: 'octocat', name: 'framed', home, platform: 'darwin', arch: 'arm64', run: fakeRun, fetch: mockFetch, registrationToken: async () => 'rt', latestRunnerTarball: async () => ({ url: 'u', version: 'v9.9.9' }) }
     const r1 = await ensureRunner(opts)
     ok(r1.ok === true && !r1.existing, 'frame: ensureRunner registers a runner (config.sh + svc.sh run)')
     ok(ran.some((c) => c.startsWith('./config.sh')), 'frame: config.sh ran unattended')
@@ -460,11 +460,11 @@ try {
     const r2 = await ensureRunner(opts)
     ok(r2.ok === true && r2.existing === true, 'frame: ensureRunner is idempotent')
     const { removeRunner } = await import('./lib/runner.js')
-    const d1 = await removeRunner({ owner: 'octocat', name: 'framed', home, run: fakeRun })
+    const d1 = await removeRunner({ owner: 'octocat', name: 'framed', home, run: fakeRun, platform: 'darwin' })
     ok(d1.ok === true && d1.existing === true, 'purge: removeRunner tears the instance down')
     ok(ran.some((c) => c === './svc.sh uninstall'), 'purge: svc.sh uninstall ran')
     ok(!runnerExists('octocat', 'framed', home), 'purge: instance dir removed')
-    const d2 = await removeRunner({ owner: 'octocat', name: 'framed', home, run: fakeRun })
+    const d2 = await removeRunner({ owner: 'octocat', name: 'framed', home, run: fakeRun, platform: 'darwin' })
     ok(d2.ok === true && d2.existing === false, 'purge: removeRunner is idempotent')
   } finally {
     fs.rmSync(home, { recursive: true, force: true })
