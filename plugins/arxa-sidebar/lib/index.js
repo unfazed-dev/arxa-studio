@@ -362,7 +362,25 @@ export function apply(ctx, opts = {}) {
                 }
               } catch { /* residency is best-effort — never blocks the spawn */ }
               return { id }
-            } catch { /* factory unavailable/refused — degrade to a bare session */ }
+            } catch (e) {
+              // 4. NEVER DEGRADE TO A BARE SESSION (2026-09-08). This used to
+              //    swallow the error and fall through to `sessions.create()`
+              //    below. That yields a live session with NO agent loop, and
+              //    dsh can never recover one: agentFor() finds no live agent,
+              //    then persistence.prepare() refuses precisely BECAUSE the
+              //    session is live ("cannot prepare session while it is
+              //    live"). The row looks healthy in the sidebar and dies on
+              //    the first prompt, for good — so the symptom surfaces far
+              //    from this catch, and the catch itself was silent.
+              //    Rethrow instead: dsh-bridge logs "dsh spawn degraded" and
+              //    the caller annotates the row `dshStatus: dsh-unavailable`,
+              //    which is the documented degrade path and is retryable.
+              //    The bare `sessions.create()` below now only serves an
+              //    engine with no agent factory at all.
+              const detail = String(e?.message ?? e)
+              console.error('[arxa-sidebar] agents.create failed for ' + (wanted ?? '<new>') + ': ' + detail)
+              throw new Error('agent-factory-failed: ' + detail)
+            }
           }
           let id
           try {

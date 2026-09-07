@@ -822,5 +822,20 @@ check('client: the dropdown taps through to the side panel, carrying its rows',
 check('client: agent verb + reason strings localized in en/pl/fr',
   ['agents.pause', 'agents.cancel', 'agents.why.no-terminate-verb', 'agents.why.no-job-api'].every((k) => (client.split('"' + k + '":').length - 1) === 3))
 
+// 2026-09-08 (Omarchy): a swallowed `ctx.agents.create` failure used to fall
+// through to a bare `sessions.create()`, which yields a session with NO agent
+// loop. dsh can never recover one — agentFor() finds no live agent and then
+// persistence.prepare() refuses because the session IS live — so the row died
+// on its first prompt with "cannot prepare session while it is live", for
+// good. The catch must be loud and must rethrow, never degrade.
+{
+  const host = hostSrc()
+  check('spawn: an agents.create failure is reported, not swallowed',
+    host.includes("console.error('[arxa-sidebar] agents.create failed for ")
+    && host.includes("throw new Error('agent-factory-failed: ' + detail)"))
+  check('spawn: no silent degrade-to-bare-session catch survives',
+    !host.includes('catch { /* factory unavailable/refused — degrade to a bare session */ }'))
+}
+
 console.log(failures === 0 ? '\narxa-sidebar selftest: ALL GREEN' : `\narxa-sidebar selftest: ${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)
