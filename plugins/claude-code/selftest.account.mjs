@@ -95,6 +95,9 @@ function loginHarness ({ accounts, url = 'https://claude.com/cai/oauth/authorize
     child.stdin = { write: (s) => { child.written += s; setTimeout(() => { if (err) child.stderr.emit('data', err); child.emit('exit', exit) }, 0) } }
     child.kill = () => { child.killed = true; setTimeout(() => child.emit('exit', 143), 0) }
     children.push(child)
+    // Only a login child waits for a pasted code; every other argv (auth logout)
+    // is a one-shot that exits on its own.
+    if (args[1] !== 'login') { setTimeout(() => { if (err) child.stderr.emit('data', err); child.emit('exit', exit) }, 0); return child }
     setTimeout(() => { child.stdout.emit('data', 'Opening browser to sign in…\n'); child.stdout.emit('data', `If the browser didn't open, visit: ${url}\nPaste code here if prompted > `) }, 0)
     return child
   }
@@ -138,8 +141,25 @@ function loginHarness ({ accounts, url = 'https://claude.com/cai/oauth/authorize
   const r = await h.handle('cancel'); assert.deepEqual(r.value, { cancelled: true }); assert.equal(h.children[0].killed, true)
   assert.deepEqual((await h.handle('cancel')).value, { cancelled: false })
   await h.handle('login'); assert.equal(h.spawned.length, 2, 'after a cancel, Sign in starts a new child')
-  await h.handle('signout'); assert.equal(h.children[1].killed, true, 'sign out kills a pending login too')
+  const so = await h.handle('signout')
+  assert.equal(so.ok, true); assert.equal(h.children[1].killed, true, 'sign out kills a pending login too')
+  assert.deepEqual(h.spawned.at(-1).args, SIGNOUT_ARGS, 'and then runs auth logout')
   ok('cancel kills the child; sign out cancels a pending login')
+
+  // A CLI that never exits must not wedge the RPC: run() kills it and answers.
+  const stuck = loginHarness({ accounts: [OUT] })
+  stuck.handle('login')
+  const reap = []
+  const wedged = createAccountRpc({
+    probe: { current: async () => OUT }, credentials: { deleteRecord: async () => {} },
+    spawn: () => { const c = new EventEmitter(); c.stderr = new EventEmitter(); c.kill = () => reap.push('killed'); return c },
+    binary: () => '/bin/claude', env: {},
+    setTimeout: (fn) => { const t = setTimeout(fn, 0); return t }, clearTimeout,
+  })
+  const timedOut = await wedged('signout')
+  assert.equal(timedOut.ok, false); assert.match(timedOut.error.message, /timed out/)
+  assert.deepEqual(reap, ['killed'], 'the wedged child is killed, not leaked')
+  ok('a CLI that never exits is reaped and surfaces a timeout instead of hanging')
 }
 
 console.log(`selftest.account: ${n} ok`)

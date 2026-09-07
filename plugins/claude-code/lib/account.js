@@ -124,13 +124,21 @@ export function createAccountRpc ({ probe, credentials, spawn, binary, env, setT
     return { cancelled: p !== undefined }
   }
 
+  // One-shot CLI run, bounded: `claude auth logout` normally exits in under a
+  // second, but a wedged binary (a keychain prompt nobody answers, a hung
+  // sandbox) used to leave the RPC awaiting forever with the card spinning.
+  // Same ceiling as the code exchange.
   function run (args) {
     return new Promise((resolve) => {
       let err = ''
+      let done = false
+      let timer
+      const finish = (r) => { if (done) return; done = true; ct(timer); resolve(r) }
       const child = spawn({ command: binary(), args, env })
+      timer = st(() => { try { child.kill() } catch {} ; finish({ code: -1, err: `timed out after ${CODE_WAIT_MS}ms` }) }, CODE_WAIT_MS)
       child.stderr?.on('data', (d) => { err += d })
-      child.on('error', (e) => resolve({ code: -1, err: String(e?.message ?? e) }))
-      child.on('exit', (code) => resolve({ code, err }))
+      child.on('error', (e) => finish({ code: -1, err: String(e?.message ?? e) }))
+      child.on('exit', (code) => finish({ code, err }))
     })
   }
 
