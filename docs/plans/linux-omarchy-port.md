@@ -472,6 +472,14 @@ bwrap probe is skipped. Nothing arch-specific broke.
   `release-linux` on the next tag.
 - **Distribution (2026-09-08):** `curl | sh` installer, see
   `linux-install-script.md`. The real-machine run now goes through it.
+- **First real Omarchy run (2026-09-08):** it launches and renders. Three
+  defects found, two fixed in the shell (`arxa` a04ba70c): the Linux in-window
+  GTK menu bar is gone, and the engine is copied out of the ephemeral AppImage
+  mount to `~/.local/share/arxa-studio/libexec/` so it cannot take SIGBUS when
+  the mount disappears. Open: HiDPI/Wayland scaling (everything drawn too
+  large, GTK chrome included — suspect the AppRun hook forcing
+  `GDK_BACKEND=x11`), and a `cannot prepare session while it is live` on
+  resume. Both need evidence from the box; see `docs/linux-support.md`.
 - The Ubuntu lane surfaced one red that Arch never showed, and it was a real
   product bug: the frame's generated `check.sh` began with `set -uo pipefail`
   and both the generated `ci.yml` and the selftest run it with `sh`. On

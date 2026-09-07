@@ -148,6 +148,35 @@ from the package's own file list; the `appimage` layer asserts the AppDir's.
 updater stays AppImage-only (D10); note Tauri's CLI does sign `.deb`/`.rpm`
 too (`tauri-cli/src/bundle.rs`, `sign_updaters`) if that ever changes.
 
+## Known issues on the real machine (2026-09-08, Omarchy/Hyprland)
+
+**No in-window menu bar.** Tauri's `set_menu` is a system menu bar on macOS but
+a GTK menu bar *inside the window* on Linux, where it ate a strip off the top
+of the studio UI. The shell no longer installs it on Linux
+(`install_pairing_menu` is macOS-only). Pairing stays reachable from the launch
+page's button; the engine restart on Linux is
+`systemctl --user restart arxa-engine.service`, which is what actually owns the
+engine there.
+
+**The engine is copied out of the AppImage mount.** See "Linux: the engine
+never runs from the AppImage mount" in `arxa/desktop/README.md` — running it
+from `/tmp/.mount_*` gives SIGBUS the moment the shell exits.
+
+**Everything is drawn too large on a HiDPI Wayland session.** Under
+investigation. The GTK menu bar was scaled up as much as the web content, so
+this is GDK/compositor scaling, not the studio UI's CSS. Prime suspect: the
+`linuxdeploy-plugin-gtk` AppRun hook inside the AppImage does an
+unconditional `export GDK_BACKEND=x11`, which a user's own environment cannot
+override, so the app is always an XWayland client and Hyprland upscales it by
+the output scale. Reproduce and test with:
+
+```sh
+cd /tmp && ~/.local/share/arxa-studio/arxa-studio.AppImage --appimage-extract >/dev/null
+sed -i 's/^export GDK_BACKEND=x11/export GDK_BACKEND="${GDK_BACKEND:-x11}"/' \
+  squashfs-root/apprun-hooks/linuxdeploy-plugin-gtk.sh
+GDK_BACKEND=wayland ./squashfs-root/AppRun
+```
+
 ## What differs from macOS
 
 | Surface | macOS | Linux |
