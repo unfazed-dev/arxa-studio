@@ -476,10 +476,18 @@ bwrap probe is skipped. Nothing arch-specific broke.
   defects found, two fixed in the shell (`arxa` a04ba70c): the Linux in-window
   GTK menu bar is gone, and the engine is copied out of the ephemeral AppImage
   mount to `~/.local/share/arxa-studio/libexec/` so it cannot take SIGBUS when
-  the mount disappears. Open: HiDPI/Wayland scaling (everything drawn too
-  large, GTK chrome included — suspect the AppRun hook forcing
-  `GDK_BACKEND=x11`), and a `cannot prepare session while it is live` on
-  resume. Both need evidence from the box; see `docs/linux-support.md`.
+  the mount disappears. Two more found and fixed by SSH-ing into the box
+  (`arxa` 69e95dbd): the 2x scaling is Omarchy's session `GDK_SCALE=2` meeting
+  the AppRun hook's forced `GDK_BACKEND=x11`, so the shell now prefers the
+  session's Wayland backend; and the engine unit shipped `KillMode=process`,
+  which orphaned the dsh server on the port so every `Restart=always` attempt
+  then exited 1 against its own orphan. Confirmed on the machine: the unit's
+  `ExecStart` really was `/tmp/.mount_arxa-sahPnGI/...`, a second SIGBUS
+  reproduced at 01:49, and systemd-coredump strips the mount prefix — which is
+  why the crash was reported against `/usr/libexec/...`. Still open: a
+  `cannot prepare session while it is live` on resume, to be re-tested once
+  the fixed AppImage is installed (the old shell rewrites the unit back to its
+  own mount path on every launch, so the box cannot be healed by hand).
 - The Ubuntu lane surfaced one red that Arch never showed, and it was a real
   product bug: the frame's generated `check.sh` began with `set -uo pipefail`
   and both the generated `ci.yml` and the selftest run it with `sh`. On

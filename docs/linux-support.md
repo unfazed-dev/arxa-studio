@@ -162,20 +162,27 @@ engine there.
 never runs from the AppImage mount" in `arxa/desktop/README.md` — running it
 from `/tmp/.mount_*` gives SIGBUS the moment the shell exits.
 
-**Everything is drawn too large on a HiDPI Wayland session.** Under
-investigation. The GTK menu bar was scaled up as much as the web content, so
-this is GDK/compositor scaling, not the studio UI's CSS. Prime suspect: the
-`linuxdeploy-plugin-gtk` AppRun hook inside the AppImage does an
-unconditional `export GDK_BACKEND=x11`, which a user's own environment cannot
-override, so the app is always an XWayland client and Hyprland upscales it by
-the output scale. Reproduce and test with:
+**Everything was drawn twice as large on Omarchy — fixed.** Root cause, proven
+by a controlled A/B on the real machine (2026-09-08): Omarchy's
+`~/.config/hypr/monitors.lua` sets `GDK_SCALE=2` for the whole session, and the
+session also asks for `GDK_BACKEND=wayland,x11,*`. The AppImage's
+`linuxdeploy-plugin-gtk` AppRun hook then ran `export GDK_BACKEND=x11`
+*unconditionally*, clobbering that choice and dropping the app onto XWayland.
+On Wayland the compositor divides an integer `GDK_SCALE` back out through the
+surface's buffer scale; under XWayland with `xwayland:force_zero_scaling`
+nothing does — so GTK chrome and webview alike were drawn at 2x.
 
-```sh
-cd /tmp && ~/.local/share/arxa-studio/arxa-studio.AppImage --appimage-extract >/dev/null
-sed -i 's/^export GDK_BACKEND=x11/export GDK_BACKEND="${GDK_BACKEND:-x11}"/' \
-  squashfs-root/apprun-hooks/linuxdeploy-plugin-gtk.sh
-GDK_BACKEND=wayland ./squashfs-root/AppRun
-```
+The shell now sets `GDK_BACKEND=wayland,x11` itself before GTK initialises
+whenever `WAYLAND_DISPLAY` is present (`gdk_backend_for` in
+`desktop/src-tauri/src/lib.rs`), which beats the hook because the hook runs
+before our process starts. `x11` stays in the list as GDK's own fallback, and
+`ARXA_GDK_BACKEND=x11` forces the old behaviour if a machine needs it.
+
+Evidence: same window, same 781x850 slot on a 1920x1080 screen at Hyprland
+scale 1.2 — with `GDK_BACKEND=x11 GDK_SCALE=2` the menu bar and body text
+render at 2x and overflow; with `GDK_BACKEND=wayland` the window reports
+`xwayland=False`, the UI is correctly sized, and WebKit does not crash (the
+concern behind the hook's original x11 default).
 
 ## What differs from macOS
 
