@@ -120,9 +120,13 @@ export function apply(ctx, opts = {}) {
       // controller and cordis throws on an un-injected property.
       const sc = typeof ctx.get === 'function' ? ctx.get('sessionController') : null
       if (!sc || typeof sc.list !== 'function') { console.log('[arxa-boot] session list: controller not reachable'); return }
+      const q = typeof ctx.get === 'function' ? ctx.get('sessionQuery') : null
+      const q0 = Date.now()
+      const recs = q && typeof q.listSessions === 'function' ? await q.listSessions() : null
+      const qMs = Date.now() - q0
       const t0 = Date.now()
       const out = await sc.list({})
-      console.log('[arxa-boot] session list ' + (out?.items?.length ?? '?') + ' items in ' + (Date.now() - t0) + 'ms')
+      console.log('[arxa-boot] session list ' + (out?.items?.length ?? '?') + ' items in ' + (Date.now() - t0) + 'ms (query ' + (recs ? recs.length : '?') + ' records in ' + qMs + 'ms)')
     } catch (e) { console.log('[arxa-boot] session list failed: ' + (e?.message ?? e)) }
   }, 4000).unref?.()
   /** Singleton — holds the single open-org handle across requests. */
