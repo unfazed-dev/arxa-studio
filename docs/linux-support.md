@@ -35,8 +35,9 @@ ARXA_SMOKE_LAUNCHER=../arxa/desktop/src-tauri/binaries/arxa-studio-$(uname -m)-u
 
 ## Installing it
 
-Two proven routes: the **AppImage** (any distro with glibc ≥ 2.35 — Ubuntu
-22.04+, Debian 12+, Fedora 36+, Arch/Omarchy) and the **Arch package**.
+Three proven routes: the **AppImage** (any distro with glibc ≥ 2.35 — Ubuntu
+22.04+, Debian 12+, Fedora 36+, Arch/Omarchy), the **.deb** (Debian/Ubuntu),
+and the **Arch package**.
 
 **AppImage.** Build it on the Ubuntu 22.04 image, never on Arch (see below):
 
@@ -52,6 +53,15 @@ Needs `fuse2` on the host (Arch/Omarchy: `pacman -S fuse2`), or run it with
 packed input and boots through the same smoke gate as the checkout engine; the
 image itself under Xvfb spawns that engine and extracts it to
 `$ARXA_HOME/engine/<sha>`.
+
+**.deb.** Same Ubuntu lane, same layout: `DISTRO=ubuntu
+scripts/linux/run-container.sh deb` → `…/bundle/deb/Arxa Studio_0.1.1_<arch>.deb`,
+then `sudo dpkg -i` it. **Proven 2026-09-07 (arm64):** the package lists the
+engine at `usr/libexec/arxa-studio/arxa-studio` and nothing at
+`usr/bin/arxa-studio`; the engine inside is byte-identical to the packed input
+and boots through the smoke gate; and a root `dpkg -i` in a throwaway
+container installs it cleanly, after which `/usr/bin/arxa-desktop` under Xvfb
+spawns the engine and extracts it to `$ARXA_HOME/engine/<sha>`.
 
 **Arch package.** It packages an already-built tree, so build first on the
 machine and arch you are packaging for — the engine sidecar embeds the build
@@ -109,10 +119,9 @@ from the package's own file list; the `appimage` layer asserts the AppDir's.
    built on `scripts/linux/Dockerfile.ubuntu` (22.04, glibc 2.35).** The Arch
    image reports the `appimage` layer as SKIP by design.
 
-`.deb` shares the same `files` map and the same layout, but has not been
-tested. The updater stays AppImage-only (D10); note Tauri's CLI does sign
-`.deb`/`.rpm` too (`tauri-cli/src/bundle.rs`, `sign_updaters`) if that ever
-changes.
+`.deb` shares the same `files` map and the same layout (proven above). The
+updater stays AppImage-only (D10); note Tauri's CLI does sign `.deb`/`.rpm`
+too (`tauri-cli/src/bundle.rs`, `sign_updaters`) if that ever changes.
 
 ## What differs from macOS
 
@@ -146,7 +155,7 @@ Xvfb window run, and then the packaging layer the image is for:
 | image | `DISTRO` | lane | packaging layer |
 |---|---|---|---|
 | `Dockerfile.arch` (Arch Linux ARM; the official `archlinux:*` images are amd64-only) | `arch` (default) | dev loop, what Omarchy runs | `package`: makepkg + layout assertion |
-| `Dockerfile.ubuntu` (Ubuntu 22.04, glibc 2.35) | `ubuntu` | release artifacts | `appimage`: tauri build, AppDir assertions, engine boot from the extracted image, the image under Xvfb |
+| `Dockerfile.ubuntu` (Ubuntu 22.04, glibc 2.35) | `ubuntu` | release artifacts | `appimage`: tauri build, AppDir assertions, engine boot from the extracted image, the image under Xvfb; `deb`: tauri build, file-list + byte assertions, engine boot from the extracted package |
 
 Each lane has its own work and cargo volumes (different glibc, never shared).
 
@@ -173,6 +182,7 @@ Three workflows split the gates by where the artifact lives:
 | engine layer on Arch (`npm ci`, suites, boot smoke, keyring) | arxa-studio `ci.yml` | every push / PR |
 | `cargo build` + `cargo test engine_unit` (the systemd unit renderer) | arxa `desktop-gate.yml`, job `linux-engine-unit` | PRs touching `desktop/**` |
 | packed-sidecar boot smoke — the binary that actually ships | arxa `desktop-release.yml` | release tags |
+| Linux release: AppImage + `.sig` + `.deb` on `ubuntu-22.04` (x86_64), AppDir layout asserted, engine booted from the extracted image, uploaded to the Release the macOS job created, `desktop/{channel}/linux/x86_64/latest.json` pushed | arxa `desktop-release.yml`, job `release-linux` | release tags, after `release` |
 
 The Rust gates live in the arxa repo because the Rust does; that repo already
 holds the `ARXA_STUDIO_CHECKOUT_TOKEN` needed to put both repos side by side

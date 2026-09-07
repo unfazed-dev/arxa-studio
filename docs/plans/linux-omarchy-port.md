@@ -434,6 +434,18 @@ Not in scope today: an x86_64 AppImage (same lane, `ARCH=amd64 DISTRO=ubuntu`,
 emulated), a Linux job in `desktop-release.yml` (it only has the macOS runner),
 and the `.deb` test.
 
+### Plan 2026-09-07 (later): close the AppImage follow-ups
+
+Items: the x86_64 AppImage, the `.deb`, and a Linux job in `desktop-release.yml`.
+A real Omarchy box stays with the user; `fuse2` is the AppImage runtime's
+requirement, documented, not ours to remove.
+
+| item | how | proof |
+|---|---|---|
+| `.deb` | new `deb` harness layer (Ubuntu lane): `tauri build --bundles deb`, assert the file list has the engine at `usr/libexec` and nothing at `usr/bin/arxa-studio`, `dpkg-deb -x` and `cmp` the engine, boot it through the smoke gate | rows `deb build`, `deb engine`; plus a one-off root `dpkg -i` in a throwaway container with the installed shell under Xvfb |
+| x86_64 AppImage | `ARCH=amd64 DISTRO=ubuntu scripts/linux/run-container.sh` (qemu-emulated on Apple Silicon, slow) | the same `appimage` + `deb` rows on amd64 |
+| release job | `release-linux` in `desktop-release.yml`: GitHub-hosted `ubuntu-22.04`, x86_64, `needs: release` (that job creates the GitHub Release; this one `gh release upload`s the AppImage + `.sig` + `.deb` and pushes `desktop/{channel}/linux/x86_64/latest.json`). Asserts the AppDir layout and boots the engine from the extracted image before staging. arm64 Linux stays a local build until the repo has an arm runner | YAML parses; first live pass is the next tag |
+
 ### x86_64 pass (D3) — done, emulated
 
 `ARCH=amd64 scripts/linux/run-container.sh --fresh engine` on `archlinux:base-devel`

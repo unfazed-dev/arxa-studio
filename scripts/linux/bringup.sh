@@ -3,7 +3,7 @@
 # Runs INSIDE the Arch container (scripts/linux/Dockerfile.arch) with both repos
 # bind-mounted, and prints one PASS/FAIL table.
 #
-#   scripts/linux/run-container.sh [--fresh] [all|engine|sidecars|shell|window|package|appimage]
+#   scripts/linux/run-container.sh [--fresh] [all|engine|sidecars|shell|window|package|appimage|deb]
 #
 # Layers, cheapest first — a later layer only runs when the ones it needs passed:
 #   1  toolchain + deps        node, npm ci, bwrap, secret-tool, zenity
@@ -17,6 +17,7 @@
 #   7  appimage                tauri build --bundles appimage, asserting the engine is NOT
 #                              in usr/bin, is byte-identical at usr/libexec, and boots from
 #                              the extracted image (Ubuntu image — DISTRO=ubuntu)
+#   8  deb                     tauri build --bundles deb, same layout + engine assertions (Ubuntu)
 set -uo pipefail
 
 SRC=${SRC:-/src}
@@ -304,6 +305,54 @@ if want all || want appimage; then
         row PASS "appimage window" "shell launched the bundled engine (extracted under $HOME_PROBE/engine; exit $code under Xvfb)"
       else
         row FAIL "appimage window" "engine never extracted into $HOME_PROBE (exit $code): $(grep -oE '\[arxa-desktop\][^"]*' /tmp/appimage-window.log | head -1 | cut -c1-90)"
+      fi
+    fi
+  fi
+fi
+
+# ---- 8. the .deb ------------------------------------------------------------
+# Same Ubuntu lane. Tauri's deb bundler copies files and never runs
+# linuxdeploy, so this cannot hit the patchelf bug — what it CAN get wrong is
+# the layout (tauri.linux.conf.json maps the engine into /usr/libexec via
+# deb.files; if that map were dropped the engine would be missing, not
+# corrupt). Installing needs root, which this layer is not: assert the file
+# list, extract, compare bytes, and boot the engine from the extracted root.
+if want all || want deb; then
+  step "12 deb (tauri build --bundles deb)"
+  TRIPLE="$(uname -m)-unknown-linux-gnu"
+  PACKED="$WORK/arxa/desktop/src-tauri/binaries/arxa-studio-$TRIPLE"
+  DEBDIR="$WORK/arxa/desktop/src-tauri/target/release/bundle/deb"
+  if ! command -v dpkg-deb >/dev/null 2>&1; then
+    row SKIP "deb" "no dpkg-deb on this image — the deb is the Ubuntu lane"
+  elif [ ! -x "$PACKED" ] || [ "$(stat -c %s "$PACKED" 2>/dev/null || echo 0)" -lt 1048576 ]; then
+    row SKIP "deb" "no packed engine at $PACKED (run the sidecars layer first)"
+  elif ! (cd "$WORK/arxa/desktop" && rm -rf "$DEBDIR" && \
+        npx --yes @tauri-apps/cli@^2 build --bundles deb \
+          --config '{"bundle":{"createUpdaterArtifacts":false}}' > /tmp/deb.log 2>&1); then
+    row FAIL "deb build" "$(grep -iE 'error|failed' /tmp/deb.log | tail -3 | tr '\n' ' ' | cut -c1-160)"
+  else
+    DEB="$(ls "$DEBDIR"/*.deb 2>/dev/null | head -1)"
+    listing="$(dpkg-deb -c "$DEB" 2>/dev/null)"
+    ok_layout=1
+    # dpkg-deb -c prints members with or without a leading ./ depending on
+    # how the data.tar was written; match either.
+    for want_path in usr/libexec/arxa-studio/arxa-studio usr/bin/arxa-desktop usr/bin/arxa; do
+      echo "$listing" | grep -qE " (\./)?$want_path\$" || { ok_layout=0; missing="$want_path"; }
+    done
+    echo "$listing" | grep -qE " (\./)?usr/bin/arxa-studio\$" && { ok_layout=0; missing="usr/bin/arxa-studio present (engine still an externalBin?)"; }
+    DEBROOT=/tmp/deb-root; rm -rf "$DEBROOT"; mkdir -p "$DEBROOT"
+    if [ -z "$DEB" ]; then
+      row FAIL "deb" "no .deb produced under $DEBDIR"
+    elif [ "$ok_layout" != 1 ]; then
+      row FAIL "deb layout" "$missing"
+    elif ! dpkg-deb -x "$DEB" "$DEBROOT" || ! cmp -s "$PACKED" "$DEBROOT/usr/libexec/arxa-studio/arxa-studio"; then
+      row FAIL "deb layout" "engine in the package is not byte-identical to the packed input"
+    else
+      row PASS "deb build" "$(basename "$DEB") ($(du -h "$DEB" | cut -f1)); engine at usr/libexec byte-identical, absent from usr/bin"
+      if ARXA_SMOKE_LAUNCHER="$DEBROOT/usr/libexec/arxa-studio/arxa-studio" npm run smoke > /tmp/deb-smoke.log 2>&1; then
+        row PASS "deb engine" "$(grep -o 'OK — .*' /tmp/deb-smoke.log | head -1)"
+      else
+        row FAIL "deb engine" "$(tail -3 /tmp/deb-smoke.log | tr '\n' ' ' | cut -c1-160)"
       fi
     fi
   fi
