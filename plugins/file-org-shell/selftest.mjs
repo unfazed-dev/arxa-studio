@@ -774,6 +774,23 @@ try {
       const trashed = await svcT.trashOrg(orgT.path)
       ok(svcT.listOrgTrash().some((e) => e.entryId === trashed.entryId && e.name === 'Trash-Me'), 'D81: trashed org listed in the org-trash index')
 
+      // 2026-09-07: a localOnly org goes to the trash as-is — no publish, no
+      // 15s grace. (Regression: trashOrg read the folder instead of org.json.)
+      const orgL = svcT.createOrg('Keep Local')
+      const mpL = path.join(orgL.path, 'org.json')
+      const mL = JSON.parse(fs.readFileSync(mpL, 'utf8'))
+      for (const k of ['repoUrl', 'repoOwner', 'repoName', 'githubStatus']) delete mL[k]
+      mL.localOnly = true
+      fs.writeFileSync(mpL, JSON.stringify(mL, null, 2) + '\n')
+      const nCreated = createdRepos.length
+      const tL0 = Date.now()
+      const trashedL = await svcT.trashOrg(orgL.path)
+      ok(createdRepos.length === nCreated, 'trash: a localOnly org is never published on its way to the trash')
+      ok(Date.now() - tL0 < 3000, 'trash: no 15s publish grace for a localOnly org (' + (Date.now() - tL0) + 'ms)')
+      ok(fs.existsSync(trashedL.entryPath), 'trash: localOnly org landed in the trash')
+      const resL = await svcT.purgeOrgTrash(trashedL.entryId)
+      ok(resL.deletedRepos.length === 0 && !fs.existsSync(trashedL.entryPath), 'purge: localOnly org purges with no GitHub calls')
+
       // purge refusal when GitHub deletes are refused (403 posture)
       refuseDeletes = true
       await assert.rejects(() => svcT.purgeOrgTrash(trashed.entryId), /purge incomplete/)

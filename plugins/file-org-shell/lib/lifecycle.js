@@ -2067,7 +2067,11 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       // Cold mid-publish org (created seconds ago, already switched away):
       // complete the freeze best-effort so this window can't orphan either.
       let pending = null
-      try { pending = readManifest(resolved) } catch { /* treated as bare */ }
+      // The MANIFEST, not the folder: readManifest(resolved) threw EISDIR on
+      // every non-current org, so trash treated each as bare, published it to
+      // GitHub (repo + runner) and then waited out the 15s bound (2026-09-07
+      // smoke: a localOnly org gained a repo on the way into the trash).
+      try { pending = readManifest(orgManifestPath(resolved)) } catch { /* treated as bare */ }
       if (!pending?.repoUrl && !pending?.localOnly && hasHead(resolved, env)) {
         try { await bounded(publishOrgAndProjects(resolved, path.basename(resolved)), 15000) } catch { /* throw-proof */ }
       }
