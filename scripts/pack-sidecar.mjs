@@ -19,7 +19,8 @@
 // spawns the extracted node on the extracted launcher. One file on disk, no
 // pnpm / nvm / checkout dependency at runtime.
 //
-// Usage:  node scripts/pack-sidecar.mjs [--out <path>]
+// Usage:  node scripts/pack-sidecar.mjs [--out <path>] [--check]
+//         --check validates inputs and the bin/ pack list, then exits (no build).
 // Default out: ../arxa/desktop/src-tauri/binaries/arxa-studio-<target-triple>
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
@@ -27,6 +28,7 @@ import { createHash } from 'node:crypto'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
+import { BIN_FILES, checkPackList } from './pack-manifest.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const studioRoot = resolve(here, '..')            // .../arxa-studio
@@ -47,14 +49,18 @@ if (!/node$/.test(nodeBin)) {
   console.error(`pack-sidecar: run me with node, not ${nodeBin} — the exec path is pinned into the payload`)
   process.exit(1)
 }
-// Every bin/ module the launcher imports at runtime. Explicit (not a glob) on
-// purpose: bin/ also holds dev-only scripts (arxa-explore, isolation-check,
-// arxa-engine-sync, .arxa-cell-launcher) that must NOT ship in the sidecar.
-// One list drives both the existence check and the stage copy so they cannot
-// drift — a89b02e added materialise-preset.mjs to the launcher's imports and
-// the old two hard-coded copies missed it (packed sidecar died on
-// ERR_MODULE_NOT_FOUND before binding its port, 2026-09-02).
-const BIN_FILES = ['arxa-studio.mjs', 'loopback-localhost-patch.mjs', 'materialise-preset.mjs']
+// The pack list lives in scripts/pack-manifest.mjs, next to the scan that
+// proves it still matches what bin/arxa-studio.mjs actually loads. Drift here
+// is invisible in the repo (a checkout has all of bin/) and fatal in the
+// bundle, so the check runs BEFORE the two-minute bun build — and again in CI
+// via scripts/pack-list-check.mjs.
+const drift = checkPackList(studioRoot)
+if (drift.missing.length > 0) {
+  console.error(`pack-sidecar: bin/ files the launcher loads but the pack list misses: ${drift.missing.join(', ')}`)
+  console.error('             add them to BIN_FILES in scripts/pack-manifest.mjs — a packed sidecar without them dies on ERR_MODULE_NOT_FOUND before binding its port')
+  process.exit(1)
+}
+for (const f of drift.unused) console.warn(`pack-sidecar: warning — ${f} is packed but nothing under bin/ loads it`)
 for (const rel of [...BIN_FILES.map((f) => `bin/${f}`), 'profile/cordis.patch.yml', 'node_modules/@deepseek-ai/dsh/lib/bin.js']) {
   if (!existsSync(join(studioRoot, rel))) {
     console.error(`pack-sidecar: missing ${rel} — run npm install first`)
@@ -65,6 +71,10 @@ if (!existsSync(join(parentDir, arxaGateRel))) {
   console.error(`pack-sidecar: missing sibling ${arxaGateRel}`)
   process.exit(1)
 }
+// --check: every cheap validation above, no build. What CI and a pre-release
+// pass want — the pack list, the inputs, the monaco bundle — in milliseconds
+// instead of the two-minute compile.
+const checkOnly = process.argv.includes('--check')
 // The artifact viewer's Monaco/VS Code bundle is a build product of a SEPARATE
 // npm root and is gitignored, so a checkout has plugins/ but no dist/ — and the
 // viewer would ship with every monaco chunk 404ing. Refuse rather than pack a
@@ -74,6 +84,11 @@ const monacoDist = 'plugins/artifact-viewer/lib/monaco-build/dist/arxa-monaco.js
 if (!existsSync(join(studioRoot, monacoDist))) {
   console.error(`pack-sidecar: missing ${monacoDist} — run \`npm ci && npm run build\` in plugins/artifact-viewer/lib/monaco-build first`)
   process.exit(1)
+}
+
+if (checkOnly) {
+  console.log(`pack-sidecar: --check OK — pack list (${drift.reachable.join(', ')}), inputs and monaco bundle all present`)
+  process.exit(0)
 }
 
 const work = mkdtempSync(join(tmpdir(), 'arxa-sidecar-'))

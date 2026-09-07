@@ -58,6 +58,11 @@ suites.push([root, 'scripts', 'session-event-vocabulary-check.mjs'])
 // pinned release, the import surface still exporting what the plugins
 // destructure, and pi-ai owned by upstream’s range again.
 suites.push([root, 'scripts', 'dsh-contract-check.mjs'])
+// The packed sidecar ships an EXPLICIT bin/ list. A checkout boots fine with a
+// stale list (all of bin/ is there); the bundle dies on ERR_MODULE_NOT_FOUND
+// before binding its port, two minutes of build and an install later. This
+// scans what the launcher actually loads and compares (2026-09-02 regression).
+suites.push([root, 'scripts', 'pack-list-check.mjs'])
 
 // bin/ is outside the plugins/*/selftest.mjs sweep, so this is wired by hand.
 // arxa-engine-sync decides what reaches a user's desktop payload, and both of its
