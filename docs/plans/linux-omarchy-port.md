@@ -59,7 +59,7 @@ everything in an Arch container on this machine.
 | D7 | Folder picker | **XDG portal via `gdbus`** (`org.freedesktop.portal.FileChooser`), **zenity/kdialog fallback** |
 | D8 | Supervision | **`systemd --user` units, no sudo** — one for the engine (mirrors the LaunchAgent), one per runner instead of `sudo ./svc.sh install`; `loginctl enable-linger` for reboot survival |
 | D9 | Sidecars | **Port `pack-sidecar.mjs` first** — produce a real Linux sidecar, no dev shims |
-| D10 | Release format | **Both** — AppImage (updater-compatible, keeps the minisign key and `{{target}}/{{arch}}` endpoint) **and** a PKGBUILD (native `pacman -U` on Arch/Omarchy) |
+| D10 | Release format | **Both** — AppImage (updater-compatible, keeps the minisign key and `{{target}}/{{arch}}` endpoint; built on the Ubuntu 22.04 image, engine at `/usr/libexec` — see the 2026-09-07 plan section) **and** a PKGBUILD (native `pacman -U` on Arch/Omarchy) |
 | D11 | CI | **Arch container job on the existing self-hosted runner** — same image as the dev loop |
 | D12 | Commitment | **Second supported platform** — parity for the flows that matter, published artifacts, docs |
 
@@ -389,6 +389,51 @@ Not attempted: hand-assembling an AppImage around linuxdeploy, or `mkdir`-ing
 the missing gdk-pixbuf path to get past problem 1. Both produce a green that
 does not mean anything while problem 2 stands.
 
+### Plan 2026-09-07: make the AppImage work (decided: keep AppImage, D10 stands)
+
+Research (four slices, sources in `docs/linux-support.md`) settled both
+blockers at source:
+
+- **linuxdeploy** runs `patchelf --set-rpath` on every dynamically-linked ELF it
+  finds in `usr/bin` (top level) and `usr/lib` (recursively), whether or not it
+  deployed the file itself (`AppDir::listExecutables` / `listSharedLibraries`,
+  `appdir.cpp`). There is no exclude flag; `NO_STRIP` and `--exclude-library`
+  do not cover it. Tauri copies every `externalBin` into `usr/bin` before the
+  call (`appimage.rs` → `debian::generate_data`). Anything else under `/usr/`
+  is left alone, and `bundle.linux.appimage.files` can put a file there.
+- **The bun engine cannot survive patchelf.** Forensics on the damaged copy:
+  patchelf could not grow `.dynamic` in place, so it prepended a 64 KB PT_LOAD
+  at offset 0 and shifted every later segment's file offset by 0x10000. Bun
+  1.4.2 (what the container packs with; bun ≥ 1.3.12 maps its payload through
+  a PT_LOAD converted from PT_GNU_STACK) then reads the wrong bytes and dies.
+  Reproduced with a bare `patchelf --set-rpath` on a clean copy; `strip` alone
+  is fine; `--remove-rpath` afterwards does not recover it. oven-sh/bun#4103
+  is the same class and was closed without a fix. The Dart `arxa` CLI takes the
+  same patch and still runs.
+- **The gdk-pixbuf failure is Arch-only** (loaders are built into the library,
+  so the dir pkg-config names does not exist). Tauri's own guidance is to build
+  AppImages on Ubuntu 22.04 / Debian 12 anyway: the build host's glibc is the
+  floor for every user (`v2.tauri.app/distribute/appimage`, "Limitations").
+- Correction to an earlier note: Tauri's CLI signs `.deb`/`.rpm` for the
+  updater as well as the AppImage (`tauri-cli/src/bundle.rs`, `sign_updaters`),
+  and the updater installs them via `pkexec dpkg -i`. D10 keeps the updater on
+  AppImage only for now; `.deb` remains untested.
+
+Decisions taken (user: "proceed" on the recommended set):
+
+| | decision |
+|---|---|
+| Build host | a second image, `scripts/linux/Dockerfile.ubuntu` (Ubuntu 22.04), beside the Arch one. Arch stays the dev loop and the PKGBUILD lane; Ubuntu is the AppImage/deb lane. `DISTRO=ubuntu scripts/linux/run-container.sh …` |
+| Engine location on Linux | `/usr/libexec/arxa-studio/arxa-studio` in AppImage, deb and PKGBUILD alike — outside linuxdeploy's scan, one layout, one code path |
+| How it gets there | `tauri.linux.conf.json` drops the engine from `externalBin` (JSON merge patch replaces arrays) and maps it via `appimage.files` + `deb.files` from `binaries/libexec/arxa-studio`, a plain-named copy `pack-sidecar.mjs` now writes on Linux beside the triple-suffixed one |
+| Shell | `sidecar_path()` tries `<exe dir>/arxa-studio` first (macOS, dev), then `<exe dir>/../libexec/arxa-studio/arxa-studio` (all three Linux layouts) |
+| Proof | new `appimage` harness layer: `tauri build --bundles appimage` with `createUpdaterArtifacts` off (no key involved), assert the AppDir has **no** `usr/bin/arxa-studio` and that `usr/libexec/arxa-studio/arxa-studio` is byte-identical to the packed input, extract the AppImage without FUSE and run the packed boot smoke against the extracted engine, then launch the AppImage under Xvfb with a throwaway `ARXA_HOME` and check the engine extracted itself there |
+| Updater | AppImage only, as D10 says |
+
+Not in scope today: an x86_64 AppImage (same lane, `ARCH=amd64 DISTRO=ubuntu`,
+emulated), a Linux job in `desktop-release.yml` (it only has the macOS runner),
+and the `.deb` test.
+
 ### x86_64 pass (D3) — done, emulated
 
 `ARCH=amd64 scripts/linux/run-container.sh --fresh engine` on `archlinux:base-devel`
@@ -404,9 +449,23 @@ bwrap probe is skipped. Nothing arch-specific broke.
 - The real machine: Hyprland, GPU compositing, HiDPI, the tray, and a genuine
   `systemd --user` engine unit (the container has no systemd, so the fallback
   path is what ran). The PKGBUILD install itself is now proven in the container.
-- **AppImage: a D10 decision, not a task.** Built and tested 2026-09-07; it is
-  blocked by linuxdeploy patchelfing the engine sidecar into a segfault (and, on
-  Arch, by the gtk plugin). Three ways out are listed above; none is a small fix.
+- **AppImage: works (2026-09-07, arm64, Ubuntu lane).** 320 MB image; engine
+  at `usr/libexec` byte-identical, absent from `usr/bin`; boots from the
+  extracted image; the image under Xvfb spawns and extracts its engine. Still
+  open: an x86_64 AppImage (`ARCH=amd64 DISTRO=ubuntu`, emulated), a Linux job
+  in `desktop-release.yml`, the `.deb`, and a real-machine run.
+- The Ubuntu lane surfaced one red that Arch never showed, and it was a real
+  product bug: the frame's generated `check.sh` began with `set -uo pipefail`
+  and both the generated `ci.yml` and the selftest run it with `sh`. On
+  Debian/Ubuntu (and GitHub's runners) `sh` is dash, which has no `pipefail`
+  and exits 2 with "Illegal option" — every user's day-zero CI would have been
+  red. Arch's `sh` is bash, so the Arch lane could never see it. Fixed in
+  `plugins/git-workspace/lib/frame.js`: `set -u` plus pipefail only where the
+  shell has it. Verified under dash in the Ubuntu container. The other red,
+  `selftest.integrate.mjs`, was the test itself assuming git ≥ 2.38 for its
+  negative control (`merge-tree --write-tree` leaking objects); the product
+  already takes the legacy probe on older git, so the control is now skipped
+  there and the 0-objects assertion still runs. Ubuntu lane: 83 suites green.
 - The two new arxa-repo CI steps (monaco build + packed smoke in
   `desktop-release.yml`, `linux-engine-unit` in `desktop-gate.yml`) are wired but
   have not yet run on the runner — the first release tag and the first

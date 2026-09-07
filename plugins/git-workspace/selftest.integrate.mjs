@@ -82,8 +82,14 @@ g(B.worktree, ['add', '-A']); g(B.worktree, ['commit', '-m', 'feat: allergens'])
 console.log('\n— mergePreview: correct, and costs the repo nothing —')
 
 // NEGATIVE CONTROL: the same call WITHOUT the redirect must leak, or this
-// test proves nothing about the redirect that follows it.
-{
+// test proves nothing about the redirect that follows it. Only meaningful on
+// git ≥ 2.38: older git has no `--write-tree` (Ubuntu 22.04 ships 2.34), the
+// call fails without writing, and mergePreview takes its legacy probe, which
+// writes nothing by construction — the "0 objects" assertion below still runs.
+const gitV = /(\d+)\.(\d+)/.exec(runGit(['--version'], { cwd: repoPath, allowFail: true }) ?? '')
+const hasWriteTree = gitV !== null && (Number(gitV[1]) > 2 || (Number(gitV[1]) === 2 && Number(gitV[2]) >= 38))
+if (!hasWriteTree) console.log(`  (git ${gitV?.[0] ?? '?'} < 2.38: no --write-tree, negative control skipped — the legacy probe is what runs)`)
+if (hasWriteTree) {
   const before = looseObjects(repoPath)
   runGitProbe(['merge-tree', '--write-tree', '--name-only', 'main', B.branch], { cwd: repoPath })
   const leaked = looseObjects(repoPath) - before

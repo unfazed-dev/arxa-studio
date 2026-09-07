@@ -250,6 +250,20 @@ child.on("exit", (code, signal) => process.exit(signal ? 1 : code ?? 1));
   cpSync(compiled, outFile)
   chmodSync(outFile, 0o755)
 
+  // Linux ships the engine OUTSIDE usr/bin and usr/lib — tauri.linux.conf.json
+  // maps it to /usr/libexec/arxa-studio/ — because linuxdeploy patchelfs every
+  // ELF it finds in those two trees and this binary does not survive that
+  // (docs/plans/linux-omarchy-port.md, "make the AppImage work"). Tauri's
+  // `files` map cannot spell the target triple, so write a plain-named copy too.
+  if (process.platform === 'linux') {
+    const plain = join(dirname(outFile), 'libexec', 'arxa-studio')
+    mkdirSync(dirname(plain), { recursive: true })
+    rmSync(plain, { force: true })
+    cpSync(outFile, plain)
+    chmodSync(plain, 0o755)
+    console.log(`pack-sidecar: OK → ${plain} (Linux bundle copy for tauri.linux.conf.json)`)
+  }
+
   const mb = (statSync(outFile).size / 1024 / 1024).toFixed(1)
   console.log(`pack-sidecar: OK → ${outFile} (${mb} MB, payload sha12 ${sha})`)
 } finally {

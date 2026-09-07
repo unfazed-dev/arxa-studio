@@ -35,9 +35,27 @@ ARXA_SMOKE_LAUNCHER=../arxa/desktop/src-tauri/binaries/arxa-studio-$(uname -m)-u
 
 ## Installing it
 
-The Arch package is the proven route. It packages an already-built tree, so
-build first on the machine and arch you are packaging for — the engine sidecar
-embeds the build host's node:
+Two proven routes: the **AppImage** (any distro with glibc ≥ 2.35 — Ubuntu
+22.04+, Debian 12+, Fedora 36+, Arch/Omarchy) and the **Arch package**.
+
+**AppImage.** Build it on the Ubuntu 22.04 image, never on Arch (see below):
+
+```sh
+docker build -f scripts/linux/Dockerfile.ubuntu -t arxa-ubuntu:arm64 scripts/linux
+DISTRO=ubuntu scripts/linux/run-container.sh        # → …/bundle/appimage/Arxa Studio_0.1.1_aarch64.AppImage
+chmod +x "Arxa Studio_0.1.1_aarch64.AppImage" && ./"Arxa Studio_0.1.1_aarch64.AppImage"
+```
+
+Needs `fuse2` on the host (Arch/Omarchy: `pacman -S fuse2`), or run it with
+`--appimage-extract-and-run`. **Proven in the arm64 Ubuntu container,
+2026-09-07:** 320 MB image; the engine inside it is byte-identical to the
+packed input and boots through the same smoke gate as the checkout engine; the
+image itself under Xvfb spawns that engine and extracts it to
+`$ARXA_HOME/engine/<sha>`.
+
+**Arch package.** It packages an already-built tree, so build first on the
+machine and arch you are packaging for — the engine sidecar embeds the build
+host's node:
 
 ```sh
 cd arxa-studio && npm ci
@@ -53,32 +71,48 @@ the installed `/usr/bin/arxa-studio` under Xvfb spawns its engine, extracts the
 payload to `~/.arxa/engine/<sha>`, publishes `desktop-session.json`, and loads
 the studio UI in WebKit (the artifact viewer's 10 MB monaco bundle included).
 
-**The layout is load-bearing.** `src/lib.rs::sidecar_path()` is
-`dirname(current_exe()) / "arxa-studio"` — beside the executable, plain name,
-no triple. So the shell binary must NOT be `/usr/bin/arxa-studio`, or it
-resolves its own path as its engine and spawns itself. Everything lives in
-`/usr/lib/arxa-studio/`; `/usr/bin/arxa-studio` is a symlink, which is safe
-because `current_exe()` reads `/proc/self/exe`. `scripts/linux/run-container.sh
-package` asserts that layout from the package's own file list.
+**The layout is load-bearing.** On Linux the engine lives at
+`/usr/libexec/arxa-studio/arxa-studio` in all three formats (AppImage, deb,
+PKGBUILD); `src/lib.rs::sidecar_path()` looks there first
+(`dirname(current_exe())/../libexec/arxa-studio/`), then beside the executable
+under the plain name (macOS, `tauri dev`). Why libexec: linuxdeploy patchelfs
+every ELF under `usr/bin` and `usr/lib` while building the AppImage and the
+self-extracting engine does not survive that (below). The shell binary must
+also NOT be `/usr/bin/arxa-studio`, or it resolves its own path as its engine
+and spawns itself: the shell and the CLI live in `/usr/lib/arxa-studio/`,
+`/usr/bin/arxa-studio` is a symlink (safe: `current_exe()` reads
+`/proc/self/exe`). `scripts/linux/run-container.sh package` asserts that layout
+from the package's own file list; the `appimage` layer asserts the AppDir's.
 
-**AppImage does not currently work — tested 2026-09-07, blocked twice.**
+**AppImage: what broke on the first attempt, and the two rules that fix it.**
 
-1. `linuxdeploy-plugin-gtk.sh` copies `/usr/lib/gdk-pixbuf-2.0/2.10.0`
-   unconditionally; Arch's `gdk-pixbuf2 2.44.6-2` has no such directory, the
-   plugin exits 1 and no AppImage is produced. Arch-specific, so Omarchy too.
-2. Worse and distro-independent: linuxdeploy rewrites the RUNPATH of every ELF
-   in the AppDir, including the 266 MB bun-compiled engine sidecar. That grows
-   the file by 64 KB, moves every offset the sidecar uses to find its embedded
-   payload, and the result **segfaults on launch** (exit 139) where the original
-   prints its URL and serves.
+1. linuxdeploy runs `patchelf --set-rpath` on every dynamically-linked ELF in
+   `usr/bin` and (recursively) `usr/lib`, whether or not it deployed the file
+   (`linuxdeploy/src/core/appdir.cpp`, `listExecutables` / `listSharedLibraries`;
+   no exclude flag, `NO_STRIP` does not cover it). Tauri copies every
+   `externalBin` into `usr/bin` first. The bun-compiled engine does not survive
+   the rewrite: patchelf prepends a 64 KB PT_LOAD to hold the grown `.dynamic`
+   and shifts every later file offset by 0x10000; bun (1.4.2 here, ≥ 1.3.12 maps
+   its payload via a PT_LOAD converted from PT_GNU_STACK) then reads the wrong
+   bytes and segfaults. Reproduced with a bare `patchelf --set-rpath` on a
+   clean copy; `strip` is harmless; `--remove-rpath` does not recover it;
+   oven-sh/bun#4103 is the same class, closed unfixed. The Dart CLI takes the
+   same patch and runs. **Rule: the engine ships via
+   `src-tauri/tauri.linux.conf.json` (`appimage.files` + `deb.files`) at
+   `/usr/libexec/arxa-studio/`, and is NOT an `externalBin` on Linux.**
+   `scripts/pack-sidecar.mjs` writes the plain-named copy that map needs.
+2. `linuxdeploy-plugin-gtk.sh` copies the gdk-pixbuf loaders dir pkg-config
+   names; Arch builds the loaders into the library and has no such dir, so the
+   plugin exits 1. Tauri's guidance is to build AppImages on the oldest base you
+   support anyway, because the build host's glibc is the floor for every user
+   (`v2.tauri.app/distribute/appimage`, "Limitations"). **Rule: AppImages are
+   built on `scripts/linux/Dockerfile.ubuntu` (22.04, glibc 2.35).** The Arch
+   image reports the `appimage` layer as SKIP by design.
 
-`bundle.targets` still lists `appimage`; do not ship it. The PKGBUILD is the
-working route. `.deb` should be fine — Tauri's deb bundler copies files and
-never runs linuxdeploy — but it has not been tested either.
-
-Consequence worth knowing: Tauri's Linux updater only understands AppImage, so
-as things stand a Linux install has no auto-update. See
-`docs/plans/linux-omarchy-port.md` for the three ways out.
+`.deb` shares the same `files` map and the same layout, but has not been
+tested. The updater stays AppImage-only (D10); note Tauri's CLI does sign
+`.deb`/`.rpm` too (`tauri-cli/src/bundle.rs`, `sign_updaters`) if that ever
+changes.
 
 ## What differs from macOS
 
@@ -101,17 +135,25 @@ an in-process D-Bus client — a dependency for one dialog.
 
 ## The container harness
 
-`scripts/linux/run-container.sh` builds and runs `scripts/linux/Dockerfile.arch`
-(Arch Linux ARM on arm64; the official `archlinux:*` images are amd64-only) and
-executes `scripts/linux/bringup.sh`, which prints a PASS/FAIL table for the
-toolchain, `npm ci`, the plugin suites, the boot smoke, a real `secret-tool`
-round-trip, both sidecar builds, the **same boot smoke driven through the packed
-sidecar**, `cargo build`, `cargo test` of the systemd unit renderer (that module
-is `#[cfg(target_os = "linux")]`, so macOS can never run its tests), and a
-best-effort Xvfb window run.
+`scripts/linux/run-container.sh` runs `scripts/linux/bringup.sh` inside one of
+two images and prints a PASS/FAIL table for the toolchain, `npm ci`, the plugin
+suites, the boot smoke, a real `secret-tool` round-trip, both sidecar builds,
+the **same boot smoke driven through the packed sidecar**, `cargo build`,
+`cargo test` of the systemd unit renderer (that module is
+`#[cfg(target_os = "linux")]`, so macOS can never run its tests), a best-effort
+Xvfb window run, and then the packaging layer the image is for:
+
+| image | `DISTRO` | lane | packaging layer |
+|---|---|---|---|
+| `Dockerfile.arch` (Arch Linux ARM; the official `archlinux:*` images are amd64-only) | `arch` (default) | dev loop, what Omarchy runs | `package`: makepkg + layout assertion |
+| `Dockerfile.ubuntu` (Ubuntu 22.04, glibc 2.35) | `ubuntu` | release artifacts | `appimage`: tauri build, AppDir assertions, engine boot from the extracted image, the image under Xvfb |
+
+Each lane has its own work and cargo volumes (different glibc, never shared).
 
 ```sh
-scripts/linux/run-container.sh            # everything (arm64, native)
+scripts/linux/run-container.sh            # everything on Arch (arm64, native)
+DISTRO=ubuntu scripts/linux/run-container.sh          # everything on Ubuntu, incl. the AppImage
+DISTRO=ubuntu scripts/linux/run-container.sh appimage # just the AppImage layer
 ARCH=amd64 scripts/linux/run-container.sh engine   # x86_64 under qemu (slow)
 scripts/linux/run-container.sh engine     # one layer
 scripts/linux/run-container.sh --fresh    # discard the work volume first

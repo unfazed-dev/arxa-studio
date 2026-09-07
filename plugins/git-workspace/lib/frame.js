@@ -108,7 +108,12 @@ function checkShHead() {
     '# arxa frame — day-zero check. Green by absence: a fresh tree passes;',
     '# red only when something real is wrong. Local green = CI green (the',
     '# ci.yml runs this exact script). SSOT: plugins/git-workspace/lib/frame.js',
-    'set -uo pipefail',
+    // POSIX sh: ci.yml (and the selftest) run this with `sh`, which is dash on
+    // Debian/Ubuntu — dash has no pipefail and `set -o pipefail` there is a
+    // hard "Illegal option" exit 2, i.e. red on day zero (found by the Ubuntu
+    // lane, 2026-09-07). Keep pipefail where the shell has it, skip it where not.
+    'set -u',
+    '(set -o pipefail) 2>/dev/null && set -o pipefail',
     'cd "$(dirname "$0")"',
     'fail() { echo "FAIL: $1" >&2; exit 1; }',
   ].join('\n')
