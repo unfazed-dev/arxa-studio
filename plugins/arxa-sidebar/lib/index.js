@@ -110,6 +110,21 @@ async function importGitWorkspace() {
 
 export function apply(ctx, opts = {}) {
   console.log('[arxa-boot] sidebar apply')
+  // Boot diagnostic (2026-09-07): the client's session catalog landed 2.1-2.7s
+  // after navigation on every measured boot, and every open waits on it. Time
+  // the host's own list call once, 4s after apply, to tell a slow answer from
+  // a late request. Remove with the boot trace.
+  setTimeout(async () => {
+    try {
+      // ctx.get, never a property read: this plugin does not inject the
+      // controller and cordis throws on an un-injected property.
+      const sc = typeof ctx.get === 'function' ? ctx.get('sessionController') : null
+      if (!sc || typeof sc.list !== 'function') { console.log('[arxa-boot] session list: controller not reachable'); return }
+      const t0 = Date.now()
+      const out = await sc.list({})
+      console.log('[arxa-boot] session list ' + (out?.items?.length ?? '?') + ' items in ' + (Date.now() - t0) + 'ms')
+    } catch (e) { console.log('[arxa-boot] session list failed: ' + (e?.message ?? e)) }
+  }, 4000).unref?.()
   /** Singleton — holds the single open-org handle across requests. */
   let lifecycle = null
   let shell = null

@@ -3234,7 +3234,17 @@ window.__ModuleLoader__.load({
 				subs.forEach((l) => l());
 				window.dispatchEvent(new Event("arxa-sidebar-state"));
 			};
-			const refresh = async () => {
+			// Single-flight (2026-09-07): the boot trace showed two state fetches in
+			// flight at once (the first subscriber's and a resubscription's), each a
+			// ~250ms host snapshot the resume then queued behind. A refresh that
+			// starts while one is in flight shares its result.
+			let refreshInflight = null;
+			const refresh = () => {
+				if (refreshInflight) return refreshInflight;
+				refreshInflight = refreshOnce().finally(() => { refreshInflight = null; });
+				return refreshInflight;
+			};
+			const refreshOnce = async () => {
 				try {
 					const next = await ORG_FETCH();
 					// D88: orgTrash rides the change signature — a purge changes ONLY
