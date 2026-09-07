@@ -59,3 +59,18 @@ Date: 2026-09-07. Owner: artifact-viewer / sidebar / git-workspace / desktop she
 
 ## Diagnostics to remove once green
 - artifact-viewer `loop-lag` sampler and `sync-spawn` wrapper (index.js).
+
+## Measured after step A (2026-09-07, boot at 10:00)
+
+- The 8 fetch + 2 push storm is gone. Remaining sync git in the first 35 s: 6 local calls,
+  four under 90 ms, plus two `fetchRepo` of ~340 ms from `reconcileLocalMain`
+  (git-workspace `prflow.js`) called by `card.status` in arxa-git-card on every status poll.
+  Fixed in `1eac7b8`: `reconcileLocalMain` is now async over `fetchRepoAsync`; both
+  callers (`mergeSessionPr`, `card.status`) already ran in async scope.
+- Loop lag after boot: worst 815 ms at +5.7 s (was multi-second). First click 375 ms
+  warm, later clicks 95–130 ms.
+- Desktop shell: `arxa` commit `d5337c42` (splash waits for `/__arxa/ready`). The local
+  release build must pack the sidecars from the installed app: `src-tauri/binaries/` held a
+  Sep 5 12:04 studio sidecar whose payload hash differs from the running engine
+  (`dc67c634ff0c`), so a naive rebuild would have booted an older payload without today's
+  plugin fixes. Sidecars are gitignored; the CI release pipeline injects them.
