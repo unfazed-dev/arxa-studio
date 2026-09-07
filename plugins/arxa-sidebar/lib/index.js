@@ -762,6 +762,42 @@ export function apply(ctx, opts = {}) {
     },
   })
 
+  // Boot prewarm (2026-09-07 trace): the client's first two round trips —
+  // sidebar state (150ms host) then session.open (215ms of it opening the
+  // org) — ran serially on the paint path, ~1.1s after this plugin applied
+  // with the host idle in between. Build the first snapshot now and open the
+  // org the boot will resume into, by the client's own candidate rule (no
+  // org open at boot → most recently updated open-state row across orgs).
+  // The cached snapshot is taken BEFORE the open so the client sees the same
+  // no-org-open view it does today and picks the same candidate; it serves
+  // exactly one boot request, project-less, younger than 15s, and any action
+  // in between discards it. No candidate → nothing opens (design intent:
+  // an org opens because a session resumes, never on its own).
+  let prewarm = null
+  ;(async () => {
+    try {
+      const l = await getLifecycle()
+      if (!l) return
+      const p0 = Date.now()
+      const snap = await snapshot(undefined)
+      prewarm = { snap, at: Date.now() }
+      const ts = (x) => Date.parse(x.updatedAt || x.createdAt || '') || 0
+      let cand = null
+      let org = null
+      for (const o of snap.orgs || []) {
+        const rows = (o.sessions || []).filter((x) => x.state === 'open')
+        const r = rows.length ? rows[rows.length - 1] : null
+        if (r && (!cand || ts(r) > ts(cand))) { cand = r; org = o }
+      }
+      let opened = 'none'
+      if (org && !l.current) {
+        const hit = l.listOrgs().find((o) => o.id === org.id)
+        if (hit) { await l.openOrg(hit.path); opened = hit.slug || hit.id }
+      }
+      console.log('[arxa-boot] prewarm snapshot+open in ' + (Date.now() - p0) + 'ms (org ' + opened + ')')
+    } catch (e) { console.log('[arxa-boot] prewarm failed: ' + (e?.message ?? e)) }
+  })()
+
   ctx.webServer.register({
     name: 'arxa-sidebar-state',
     path: '/__arxa/sidebar/state',
@@ -769,7 +805,15 @@ export function apply(ctx, opts = {}) {
     handler: async (req, res) => {
       try {
         const st0 = Date.now()
-        const snap = await snapshot(params(req).get('project'))
+        const project = params(req).get('project')
+        let snap
+        if (prewarm && !project && Date.now() - prewarm.at < 15000) {
+          snap = prewarm.snap
+          prewarm = null
+          console.log('[arxa-boot] state served from prewarm')
+        } else {
+          snap = await snapshot(project)
+        }
         if (!stateLogged) { stateLogged = true; console.log('[arxa-boot] state first served in ' + (Date.now() - st0) + 'ms') }
         json(res, snap)
       } catch (e) {
@@ -896,6 +940,7 @@ export function apply(ctx, opts = {}) {
       req.on('data', (c) => { raw += c })
       req.on('end', async () => {
         try {
+          prewarm = null // any mutation outdates the boot snapshot
           const { action, arg } = JSON.parse(raw || '{}')
           /** D36 first run: pick the folder organisations live under. Handled
             * before the lifecycle guard because its whole job is to make one

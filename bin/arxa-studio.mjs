@@ -583,7 +583,11 @@ engineLog('spawning dsh')
 // apply, the listen, the resume — which is exactly the part worth timing.
 const child = spawn(process.execPath, [...loaderArgs, dshBin, '--profile', 'arxa', ...passthrough, ...trustArgs], {
   stdio: packed ? ['ignore', 'pipe', 'pipe'] : 'inherit',
-  env: { ...childEnv, DSH_HOME: dshHome, PI_CODING_AGENT_DIR: piHome },
+  // V8 compile cache for the engine's module graph (Node >= 22.1, the packed
+  // runtime is 26.x). Measured 2026-09-07: dsh core alone is 1744 modules,
+  // 9.5MB of bytecode; spawn -> first plugin apply was 1.2-1.35s without it.
+  // Keyed by engine payload dir so a new payload never reads stale cache.
+  env: { ...childEnv, DSH_HOME: dshHome, PI_CODING_AGENT_DIR: piHome, NODE_COMPILE_CACHE: join(here, '..', '.compile-cache') },
 })
 if (packed) {
   const relay = (stream) => {
