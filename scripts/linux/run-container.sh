@@ -14,8 +14,14 @@
 # A read-only source mount makes the first impossible and the second moot.
 set -euo pipefail
 
-IMAGE=${IMAGE:-arxa-arch:arm64}
-VOLUME=${VOLUME:-arxa-linux-work}
+# ARCH selects both the image and the volume set, so the emulated x86_64 pass
+# never shares a work tree (or a cargo target) with the native arm64 one.
+ARCH=${ARCH:-arm64}
+IMAGE=${IMAGE:-arxa-arch:$ARCH}
+VOLUME=${VOLUME:-arxa-linux-work-$ARCH}
+CARGO_VOL=arxa-linux-cargo-$ARCH
+PNPM_VOL=arxa-linux-pnpm-store-$ARCH
+NPM_VOL=arxa-linux-npm-cache-$ARCH
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 STUDIO=$(cd "$HERE/../.." && pwd)
 PARENT=$(dirname "$STUDIO")
@@ -37,13 +43,13 @@ args=(
   --security-opt seccomp=unconfined
   -v "$PARENT":/src:ro
   -v "$VOLUME":/work
-  -v arxa-linux-cargo:/home/builder/.cargo
+  -v "$CARGO_VOL":/home/builder/.cargo
   # Warm package caches. Cold ones are not just slow: dsh's profile bootstrap
   # installs its own dependencies and starts loading plugins, so a store that
   # has to download ~190 packages first loses the race and the engine dies on
   # ERR_MODULE_NOT_FOUND for a stock row.
-  -v arxa-linux-pnpm-store:/home/builder/.local/share/pnpm
-  -v arxa-linux-npm-cache:/home/builder/.npm
+  -v "$PNPM_VOL":/home/builder/.local/share/pnpm
+  -v "$NPM_VOL":/home/builder/.npm
   -w /work/arxa-studio
 )
 
@@ -56,7 +62,7 @@ ensure_volumes() {
 
 if [ "${1:-}" = "--" ]; then
   shift
-  ensure_volumes arxa-linux-cargo arxa-linux-pnpm-store arxa-linux-npm-cache
+  ensure_volumes "$CARGO_VOL" "$PNPM_VOL" "$NPM_VOL"
   # -t only when this really is a terminal; a piped invocation must not fail.
   [ -t 0 ] && args+=(-it)
   exec docker run "${args[@]}" "$IMAGE" "$@"

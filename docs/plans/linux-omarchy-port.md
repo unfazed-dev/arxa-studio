@@ -175,14 +175,34 @@ everything in an Arch container on this machine.
 
 ### Where it stands
 
-| Layer | arm64 Arch container |
+`scripts/linux/run-container.sh all`, arm64 Arch — **13 PASS, 0 FAIL, 1 SKIP**:
+
+| Layer | Result |
 |---|---|
 | toolchain, `/usr/bin/{secret-tool,zenity,bwrap,tar}` | PASS |
 | `npm ci` (890 packages, native modules built) | PASS |
-| plugin suites (`scripts/ci.mjs`) | PASS |
-| **engine boot smoke — 200 HTML from the real engine** | **PASS (3s)** |
-| `secret-tool` round-trip against gnome-keyring | PASS |
-| bwrap sandbox | SKIP — no unprivileged userns in the container |
-| sidecars, `cargo build`, Xvfb window | in progress |
+| plugin suites (`scripts/ci.mjs`) | PASS — 83 green |
+| **engine boot smoke — 200 HTML from the real engine** | **PASS (2s)** |
+| `secret-tool` round-trip against gnome-keyring | PASS — real libsecret |
+| `pack-cli` → `arxa-aarch64-unknown-linux-gnu` | PASS — 12.8 MB |
+| `pack-sidecar` → `arxa-studio-aarch64-unknown-linux-gnu` | PASS — 276 MB |
+| `cargo build` of the Tauri shell against webkit2gtk 2.52 | PASS — 42 MB |
+| **shell under Xvfb: full launch flow** | **PASS** — probe → systemd attempt → detached fallback → `engine sidecar spawned (pid 121)` → keyring `secret-tool store` |
+| bwrap sandbox | SKIP — no unprivileged user namespaces in the container |
 
 macOS after every change: 83 suites ALL GREEN, boot smoke OK.
+
+Two container-only obstacles were traced and fixed in the harness, not the app:
+the shell needs a **session bus** (it talks to the a11y bus and the XDG portal
+before its own first log line), and Docker created `~/.local/share` as root to
+host a cache volume, so Tauri could not create its app data dir — traced with
+`strace` to `mkdirat(".../solutions.arxadigital.arxa") = EACCES`.
+
+### Still to do
+
+- The emulated **x86_64 pass** (D3) — the arm64 run is Arch Linux ARM, and the
+  real Omarchy box is x86_64.
+- The real machine: Hyprland, GPU compositing, HiDPI, the tray, a genuine
+  `systemd --user` engine unit (the container has no systemd, so the fallback
+  path is what ran), and a packaged install from the PKGBUILD.
+- `arxa/desktop` has no `.desktop`-file or icon story beyond the PKGBUILD entry.
