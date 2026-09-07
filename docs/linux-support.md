@@ -35,7 +35,32 @@ ARXA_SMOKE_LAUNCHER=../arxa/desktop/src-tauri/binaries/arxa-studio-$(uname -m)-u
 
 ## Installing it
 
-Three proven routes: the **AppImage** (any distro with glibc ≥ 2.35 — Ubuntu
+**Users: one command.** The installer lives at the root of the public
+`unfazed-dev/arxa-releases` repo (source of truth: `arxa/desktop/scripts/install.sh`,
+copied there by the `release-linux` job). It installs the host packages the
+AppImage cannot bundle (`fuse2`, `zenity`, `gnome-keyring`, `libsecret`,
+`bubblewrap`; root only for that step), reads the same
+`desktop/<channel>/linux/<arch>/latest.json` the in-app updater reads, downloads
+the AppImage, verifies its published `.sha256`, and installs it per user:
+`~/.local/share/arxa-studio/arxa-studio.AppImage`, `~/.local/bin/arxa-studio`,
+a `.desktop` entry and icon. Rerun to upgrade; `sh install.sh --uninstall` to
+remove (`~/.arxa` is kept).
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/unfazed-dev/arxa-releases/main/install.sh | sh
+# no stable Linux release yet → the preview feed:
+curl -fsSL https://raw.githubusercontent.com/unfazed-dev/arxa-releases/main/install.sh | ARXA_CHANNEL=beta sh
+# a local or ad-hoc image, e.g. one from the container harness:
+ARXA_STUDIO_APPIMAGE=./Arxa-Studio-0.1.1-aarch64-unknown-linux-gnu.AppImage sh install.sh
+```
+
+Proven 2026-09-08 as root in a fresh `ubuntu:22.04` container (apt path, local
+image, launcher entry, `--appimage-version`, uninstall). Plan and decisions:
+`docs/plans/linux-install-script.md`. The preview release
+`linux-preview-0.1.1` carries the container-built x86_64 and aarch64 images,
+unsigned for the updater; the next `studio-*` tag replaces the x86_64 one.
+
+**Building it yourself.** Three proven routes: the **AppImage** (any distro with glibc ≥ 2.35 — Ubuntu
 22.04+, Debian 12+, Fedora 36+, Arch/Omarchy), the **.deb** (Debian/Ubuntu),
 and the **Arch package**.
 

@@ -470,6 +470,8 @@ bwrap probe is skipped. Nothing arch-specific broke.
   the amd64 `.deb`, same assertions, engine boots from both. Still open: a
   real-machine run (Omarchy/Hyprland), and the first live pass of
   `release-linux` on the next tag.
+- **Distribution (2026-09-08):** `curl | sh` installer, see
+  `linux-install-script.md`. The real-machine run now goes through it.
 - The Ubuntu lane surfaced one red that Arch never showed, and it was a real
   product bug: the frame's generated `check.sh` began with `set -uo pipefail`
   and both the generated `ci.yml` and the selftest run it with `sh`. On
