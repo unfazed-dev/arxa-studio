@@ -175,6 +175,11 @@ everything in an Arch container on this machine.
 - pacman 7 fences downloads with Landlock, which a container build cannot apply — `DisableSandbox` in `pacman.conf`, or every install reads as "failed to synchronize databases".
 - **The host tree must be read-only.** A writable bind mount let a container `npm ci` (which starts by deleting `node_modules`) wipe and then replace the macOS install with Linux binaries — twice, the second time while the first was still being diagnosed. The harness now mounts the repos at `/src:ro` and rsyncs into a container volume.
 - bun installs through npm need `--allow-scripts=bun` (its postinstall IS the binary download).
+- **Never run the harness script straight off the host mount.** bash reads a
+  script incrementally by byte offset, so editing `bringup.sh` while a pass was
+  running dropped the container into the middle of a line ("syntax error near
+  unexpected token" at step 9) and cost the whole result table.
+  `run-container.sh` now copies it to `/tmp` and runs the copy.
 
 ### Where it stands
 
