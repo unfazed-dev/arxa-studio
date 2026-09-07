@@ -6,7 +6,7 @@
     "test": "node scripts/ci.mjs",
     "smoke": "node scripts/engine-boot-smoke.mjs"
   },
-  "description": "arxa — Totem Labs' agentic studio harness. A package that DEPENDS on dsh components (depend-don't-fork, arxa-harness-and-distribution.md amendment); never a fork, never a rebase.",
+  "description": "arxa \u2014 Totem Labs' agentic studio harness. A package that DEPENDS on dsh components (depend-don't-fork, arxa-harness-and-distribution.md amendment); never a fork, never a rebase.",
   "type": "module",
   "bin": {
     "arxa-studio": "bin/arxa-studio.mjs"
@@ -27,18 +27,18 @@
     "js-yaml": "^4.3.1"
   },
   "//": [
-    "Versions are EXACT — a caret on a prerelease moves under you (H1 finding 2).",
-    "private:true until the outward name check (trademark/domain/npm) — decision 10.",
+    "Versions are EXACT \u2014 a caret on a prerelease moves under you (H1 finding 2).",
+    "private:true until the outward name check (trademark/domain/npm) \u2014 decision 10.",
     "arxa update = bump these pins, run the suite. That is the whole upstream story.",
     "the pi-ai override was dropped at the 0.1.2-rc.1 bump: upstream dsh-llm-pi-ai",
     "now declares ^0.84.2 itself (the issue we filed landed), so the engine's own",
-    "range owns pi-ai again — glm-5.3 catalog entries ride it unchanged.",
+    "range owns pi-ai again \u2014 glm-5.3 catalog entries ride it unchanged.",
     "js-yaml (devDependencies) was previously an UNDECLARED transitive dependency",
     "(hoisted only via @deepseek-ai/dsh-agent-presets) that scripts/preset-check.mjs",
     "relies on directly; now declared explicitly, pinned to the major already",
     "hoisted in node_modules (4.3.1) so a future install cannot silently stop",
     "hoisting it flat. devDependencies, not dependencies: only the dev-time",
-    "check script imports it — bin/arxa-studio.mjs and bin/materialise-preset.mjs",
+    "check script imports it \u2014 bin/arxa-studio.mjs and bin/materialise-preset.mjs",
     "do not use js-yaml at runtime."
   ],
   "allowScripts": {
@@ -47,5 +47,6 @@
     "koffi@3.2.1": true,
     "node-pty@1.2.0-beta.15": true,
     "protobufjs@7.6.5": true
-  }
+  },
+  "packageManager": "pnpm@11.21.0"
 }

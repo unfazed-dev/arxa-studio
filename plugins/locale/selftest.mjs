@@ -108,7 +108,10 @@ const hashPkg = (specifier, expected) => {
   const pkgDir = dirname(createRequire(import.meta.url).resolve(specifier + '/package.json'))
   const files = []
   const walk = (d) => {
-    for (const e of readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    // Plain code-unit order, NOT localeCompare: this hash is a cross-platform
+    // gate, and ICU collation differs between node builds — the same package
+    // hashed to two values on macOS and Arch (2026-09-07).
+    for (const e of readdirSync(d, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
       const f = join(d, e.name)
       e.isDirectory() ? walk(f) : files.push(f)
     }
@@ -122,12 +125,14 @@ const hashPkg = (specifier, expected) => {
     hash.update('\0')
   }
   const got = hash.digest('hex')
-  return { ok: got === expected }
+  return { ok: got === expected, got }
 }
+// [re-pinned 2026-09-07 when the walk order became byte-stable; dsh 0.1.2-rc.1]
+const PINNED_LOCALE_SHA = '5055f54a37163cbc67c9ed0d36da44008c133704fc8787c764ca6e1287a2abb3'
 {
-  // [re-pinned 2026-09-05, dsh 0.1.2-rc.1 deliberate bump] package-tree sha256
-  const s = hashPkg('@deepseek-ai/dsh-client-locale', '97b19b1c42f2ad4eb42263ded5b08acb1900a1274b1c8594b252e1ea4ca17196')
-  check('reference: dsh locale package byte-identical', s.ok, 'expected 97b19b1c…')
+  // package-tree sha256, code-unit filename order
+  const s = hashPkg('@deepseek-ai/dsh-client-locale', PINNED_LOCALE_SHA)
+  check('reference: dsh locale package byte-identical', s.ok, `expected ${PINNED_LOCALE_SHA.slice(0, 8)}…, got ${s.got.slice(0, 8)}…`)
 }
 
 // ---- 6. registration wired -------------------------------------------------------

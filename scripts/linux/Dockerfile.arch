@@ -60,7 +60,9 @@ ARG BUN_VERSION=1.4.2
 RUN npm install -g --allow-scripts=bun "bun@${BUN_VERSION}" && bun --version
 
 # Checkout mode installs the profile's file: plugins with pnpm (bin/arxa-studio.mjs).
-ARG PNPM_VERSION=10.20.0
+# Must match packageManager in arxa-studio/package.json — the profile layout
+# pnpm produces is what dsh resolves its stock rows against.
+ARG PNPM_VERSION=11.21.0
 RUN npm install -g "pnpm@${PNPM_VERSION}" && pnpm --version
 
 # A non-root user: bwrap refuses to nest under some root configurations, npm
