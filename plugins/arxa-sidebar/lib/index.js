@@ -132,6 +132,14 @@ export function apply(ctx, opts = {}) {
       const persistence = typeof ctx.get === 'function' ? ctx.get('sessionPersistence') : null
       index = armHeaderIndex(persistence, { log: (m) => console.log('[arxa-boot] ' + m) })
     } catch (e) { console.log('[arxa-boot] header index not armed: ' + (e?.message ?? e)) }
+    // Purged-org residue (see orgtrash.purge): detached, never on the boot path.
+    ;(async () => {
+      try {
+        const { sweepPurgedOrgs } = await import(new URL('./session-sweep.js', import.meta.url).href)
+        const persistence = typeof ctx.get === 'function' ? ctx.get('sessionPersistence') : null
+        await sweepPurgedOrgs(persistence, { log: (m) => console.log('[arxa-boot] ' + m) })
+      } catch (e) { console.log('[arxa-boot] purged-org sweep failed: ' + (e?.message ?? e)) }
+    })()
     const orig = q.listSessions.bind(q)
     let inflight = null
     let n = 0
@@ -1289,11 +1297,10 @@ export function apply(ctx, opts = {}) {
             return json(res, { ok: true, action, result: agentOut })
           }
 
-          const l = await getLifecycle()
-          if (!l) return json(res, { ok: false, seam: SEAM_LIFECYCLE_STUBBED, error: 'no-workspace', action })
-          const { orgByRef, handle, ensureOpen } = orgHelpers(l)
-
-          const table = {
+          // Persistence-only verbs, valid with ZERO orgs (first run, or right
+          // after the last org was purged): answering them with no-workspace
+          // sent the create modal to its ~/Arxa fallback (2026-09-07 audit).
+          const preTable = {
             /** D92: the create modal's defaults — the sticky last-used parent
               * root (create-root.json, written on every successful
               * org.create-at) plus the host homedir, so the client can
@@ -1314,6 +1321,25 @@ export function apply(ctx, opts = {}) {
               if (root && !fs.existsSync(root)) root = null
               return { root, home: os.homedir() }
             },
+            /** Dead-root session prune (2026-09-07 audit): sessions whose cwd
+              * was under the OS temp dir and is gone are test residue — remove
+              * their dsh logs. Anything else with a missing cwd is only
+              * REPORTED (an unmounted drive looks exactly like a deleted one). */
+            'sessions.sweep-dead-tmp': async () => {
+              const { sweepDeadTmpSessions } = await import(new URL('./session-sweep.js', import.meta.url).href)
+              return sweepDeadTmpSessions(ctx.get('sessionPersistence'), { log: (m) => console.log('[arxa-sidebar] ' + m) })
+            },
+          }
+          if (preTable[action]) {
+            const out = await preTable[action]()
+            return json(res, { ok: true, action, result: out })
+          }
+
+          const l = await getLifecycle()
+          if (!l) return json(res, { ok: false, seam: SEAM_LIFECYCLE_STUBBED, error: 'no-workspace', action })
+          const { orgByRef, handle, ensureOpen } = orgHelpers(l)
+
+          const table = {
             /** Create + open: a freshly scaffolded org is the place you are about to work. */
             'org.create': async () => {
               // D69 gate half: no org is created without a linked GitHub
@@ -1471,17 +1497,15 @@ export function apply(ctx, opts = {}) {
                 try {
                   const { sweepSessionsUnder } = await import(new URL('./session-sweep.js', import.meta.url).href)
                   out.sessions = await sweepSessionsUnder(ctx.get('sessionPersistence'), out.orgPath, { log: (m) => console.log('[arxa-sidebar] ' + m) })
+                  // Remember the path: a client that still points at one of
+                  // its sessions re-creates a log with the dead cwd at the
+                  // next boot, and the boot sweep (armListSingleFlight)
+                  // removes it again for as long as the path stays gone.
+                  const { rememberPurgedOrg } = await import(new URL('./session-sweep.js', import.meta.url).href)
+                  rememberPurgedOrg(out.orgPath)
                 } catch (e) { out.sessions = { removed: [], kept: 0, skipped: String(e?.message ?? e) } }
               }
               return out
-            },
-            /** Dead-root session prune (2026-09-07 audit): sessions whose cwd
-              * was under the OS temp dir and is gone are test residue — remove
-              * their dsh logs. Anything else with a missing cwd is only
-              * REPORTED (an unmounted drive looks exactly like a deleted one). */
-            'sessions.sweep-dead-tmp': async () => {
-              const { sweepDeadTmpSessions } = await import(new URL('./session-sweep.js', import.meta.url).href)
-              return sweepDeadTmpSessions(ctx.get('sessionPersistence'), { log: (m) => console.log('[arxa-sidebar] ' + m) })
             },
             'projecttrash.purge': async () => {
               if (typeof arg?.entryId !== 'string' || arg.entryId.trim() === '') throw new Error('entry-id-required')

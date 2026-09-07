@@ -5,9 +5,9 @@
 // with its own helpers and removes the session dirs whose header cwd sits
 // under the purged path. Nothing else is touched; a header that cannot be
 // read is kept (doubt keeps the row).
-import { existsSync, realpathSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 
 /**
@@ -84,4 +84,42 @@ export async function sweepDeadTmpSessions(persistence, { tmpRoots, log = () => 
   }
   log('dead-tmp session sweep: removed ' + removed.length + ', kept ' + kept + ', stranded ' + stranded.length)
   return { removed, kept, stranded: [...new Set(stranded)] }
+}
+
+/** Ledger of purged org paths: `~/.arxa/purged-orgs.json`, a string array. */
+export function purgedOrgsLedgerPath() {
+  return join(homedir(), '.arxa', 'purged-orgs.json')
+}
+function readLedger(file) {
+  try { const v = JSON.parse(readFileSync(file, 'utf8')); return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : [] } catch { return [] }
+}
+function writeLedger(file, list) {
+  mkdirSync(join(file, '..'), { recursive: true })
+  writeFileSync(file, JSON.stringify(list, null, 2) + '\n')
+}
+export function rememberPurgedOrg(orgPath, { file = purgedOrgsLedgerPath() } = {}) {
+  const list = readLedger(file)
+  const p = resolve(orgPath)
+  if (!list.includes(p)) writeLedger(file, [...list, p])
+}
+
+/**
+ * Sweep sessions under every ledgered path that is still gone; a path that
+ * exists again (org re-created there) leaves the ledger untouched by us.
+ * @returns {Promise<{ swept: Record<string, number>, forgotten: string[] }>}
+ */
+export async function sweepPurgedOrgs(persistence, { file = purgedOrgsLedgerPath(), log = () => {} } = {}) {
+  const list = readLedger(file)
+  const swept = {}
+  const forgotten = []
+  const keep = []
+  for (const p of list) {
+    if (existsSync(p)) { forgotten.push(p); continue }
+    keep.push(p)
+    const r = await sweepSessionsUnder(persistence, p)
+    if (r.removed.length > 0) swept[p] = r.removed.length
+  }
+  if (forgotten.length > 0) writeLedger(file, keep)
+  if (Object.keys(swept).length > 0 || forgotten.length > 0) log('purged-org sweep: ' + JSON.stringify({ swept, forgotten }))
+  return { swept, forgotten }
 }
