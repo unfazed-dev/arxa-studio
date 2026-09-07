@@ -278,9 +278,20 @@ const world = (paths, links = {}) => ({
   new ArxaSandboxProvider(ctx, { runnerCommand: [], runnerFailureSignatures: [], probeTimeoutMs: 5000 })
   const policy = { mode: 'workspace-write', workspaceRoot: process.cwd(), extraWritableRoots: [join(homedir(), '.claude', 'projects')] }
   // Through ctx.sandbox — NOT the raw instance. This is the production path.
-  const out = ctx.sandbox.confine(['/bin/echo', 'hi'], policy)
-  assert.ok(Array.isArray(out.argv) && out.argv.length > 0)
-  ok('confine() works through the cordis service proxy, not only on a raw instance')
+  // A host with no usable backend (no bwrap, no Landlock — an emulated CI
+  // container, 2026-09-07) refuses to confine at all, by design; that refusal
+  // is a different test, so report it and skip rather than fail here.
+  let out
+  try {
+    out = ctx.sandbox.confine(['/bin/echo', 'hi'], policy)
+  } catch (err) {
+    if (err?.code !== 'SANDBOX_UNAVAILABLE') throw err
+    console.log('  SKIP live: no sandbox backend usable on this host — the proxy path cannot be exercised here')
+  }
+  if (out) {
+    assert.ok(Array.isArray(out.argv) && out.argv.length > 0)
+    ok('confine() works through the cordis service proxy, not only on a raw instance')
+  }
   // The memo must still memoize: resolution shells out, so a second call must not re-resolve.
   const a = ctx.sandbox.toolchainRoots()
   const b = ctx.sandbox.toolchainRoots()
