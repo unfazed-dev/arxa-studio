@@ -355,19 +355,26 @@
 		 * section (seen live 2026-08-30: blank sidebar). OrgBrowser refreshes
 		 * the capture every render; identity-stable fallback until then. */
 		let orgT = (k) => k;
-		/** Mirror of the server rule (lifecycle.js newSession, grilled
-		 * 2026-09-08, docs/plans/sessions-bound-to-tracks.md): inside a project
-		 * the nine numbered stages take a session only under a track —
-		 * application or website — and `notes` binds to itself. Docks are
-		 * untouched. This is COSMETICS: /__arxa/sidebar/action has no auth, so
-		 * the server check is what actually holds the rule. It exists so the CTA
-		 * never sits enabled over a path the server would refuse (a dead button
-		 * is worse than none — sidebar-workspace-row-new-session.md, D4). */
-		const sessionCreatable = (rowId) => {
+		/** Mirror of the PROJECT half of the server rule (lifecycle.js
+		 * newSession, grilled 2026-09-08, docs/plans/sessions-bound-to-tracks.md):
+		 * inside a project the nine numbered stages take a session only under a
+		 * track — application or website — and `notes` binds to itself.
+		 *
+		 * Deliberately answers only about `projects/…`. A dock path returns
+		 * false (= "not this rule's business"), NOT "the server will accept it":
+		 * the server also refuses a dock that is off-disk or outside
+		 * fixedWorkspaces, and the row model has neither of those facts. Naming
+		 * this `sessionCreatable` would overclaim exactly there.
+		 *
+		 * COSMETICS: /__arxa/sidebar/action has no auth, so the server check is
+		 * what holds the rule. This exists so the CTA never sits enabled over a
+		 * stage the server would refuse (a dead button is worse than none —
+		 * sidebar-workspace-row-new-session.md, D4). */
+		const projectRowRefused = (rowId) => {
 			const p = String(rowId || "").split("/").filter(Boolean);
-			if (p[0] !== "projects") return true;
-			if (p.length === 3) return p[2] === "notes";
-			return p.length === 4 && p[2] !== "notes" && (p[3] === "website" || p[3] === "application");
+			if (p[0] !== "projects") return false;
+			if (p.length === 3) return p[2] !== "notes";
+			return !(p.length === 4 && p[2] !== "notes" && (p[3] === "website" || p[3] === "application"));
 		};
 		window.__ARXA_SIDEBAR__ = {
 			get orgOpen() {
@@ -393,7 +400,7 @@
 				const s = orgStore.get();
 				const sel = s.selectedRowId;
 				if (!sel) return false;
-				if (!sessionCreatable(sel.rowId)) return false;
+				if (projectRowRefused(sel.rowId)) return false;
 				const o = (s.orgs || []).find((y) => y.id === sel.orgId);
 				return !(o && o.open && o.snapshotPending === true);
 			},
@@ -406,7 +413,7 @@
 				const s = orgStore.get();
 				const sel = s.selectedRowId;
 				if (!sel) return orgT("newSession.selectFirst");
-				if (!sessionCreatable(sel.rowId)) return orgT("newSession.needsTrack");
+				if (projectRowRefused(sel.rowId)) return orgT("newSession.needsTrack");
 				const o = (s.orgs || []).find((y) => y.id === sel.orgId);
 				return o && o.open && o.snapshotPending === true ? orgT("newSession.snapshotPending") : void 0;
 			},
