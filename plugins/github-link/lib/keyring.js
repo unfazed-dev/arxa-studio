@@ -96,10 +96,18 @@ export function createKeyring({ bridge, securityPath = SECURITY_PATH, run } = {}
     return makeBridgeBackend(bridge)
   }
   const runner = run ?? promisify(execFile)
-  if (fs.existsSync(securityPath) && keychainUsable(securityPath)) {
-    return makeSecurityBackend(securityPath, runner)
+  if (!fs.existsSync(securityPath)) return makeMemoryBackend()
+  // Probe on first use, not at plugin apply: the two synchronous `security`
+  // round-trips cost 38ms on the engine's boot path (CPU profile, 2026-09-07)
+  // for a keyring most boots never touch.
+  let real = null
+  const backend = () => (real ??= keychainUsable(securityPath) ? makeSecurityBackend(securityPath, runner) : makeMemoryBackend())
+  return {
+    get backend() { return backend().backend },
+    setSecret: (account, secret) => backend().setSecret(account, secret),
+    getSecret: (account) => backend().getSecret(account),
+    deleteSecret: (account) => backend().deleteSecret(account),
   }
-  return makeMemoryBackend()
 }
 
 /**
