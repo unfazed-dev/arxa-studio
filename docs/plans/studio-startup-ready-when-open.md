@@ -107,3 +107,31 @@ sessions (54 logs / 26 scopes, many from dropped worktrees), or `coldBlankProbeM
 88-191ms, state snapshot 259ms; (3) dsh core boot 1.3s before the first studio plugin applies;
 (4) relaunch race: quitting and reopening within ~2s lets the old engine answer the new shell's
 probes — cold starts are unaffected.
+
+## Cairn question and shell round 3 (2026-09-07)
+
+**Cairn is not a startup lever.** Grill D32/D46/D61/D62 place cairn as the
+mobile DB rail (approvals, session state, the phone's tree projection);
+`plugins/cairn-rail` is a pure local JSONL library that the sidebar never
+attaches (no `rails` passed at `plugins/arxa-sidebar/lib/index.js:450`).
+The Tauri shell already runs a `cairn-server` sidecar for the B2 approvals
+mirror (`desktop/src-tauri/src/cairn_server.rs`); on the dev machine it
+reuses the external one, so its boot cost is two loopback probes. A
+sidebar/session-list projection cache belongs in the engine as a plain
+file, not behind a CRDT.
+
+**Two shell defects found in the boot trace and fixed (desktop repo):**
+
+- `open_studio` re-navigated to the clean root after the 303 exchange even
+  though the window was already there — a full second page load every
+  boot; only that second load ever painted, ~1.1 s after `dsh web:`.
+  Now: settle and return (`lib.rs`, "settled on clean root").
+- The splash's `/__arxa/ready` probe threw "Load failed" (the engine's 404
+  before the sidebar registers the route carries no CORS header) and the
+  catch branch treated that as ready, so the shell invoked on "port open"
+  alone. Now: catch = not ready, keep polling; `READY_CAP` 150 → 50
+  (10 s bound).
+
+Expected next trace: `ready(status200)=`, `settled on clean root` in
+`/tmp/arxa-open-studio.trace`, no `navigate#2`, page `boot@` within
+~200 ms of the ready flip.
