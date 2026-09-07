@@ -74,3 +74,36 @@ Date: 2026-09-07. Owner: artifact-viewer / sidebar / git-workspace / desktop she
   Sep 5 12:04 studio sidecar whose payload hash differs from the running engine
   (`dc67c634ff0c`), so a naive rebuild would have booted an older payload without today's
   plugin fixes. Sidecars are gitignored; the CI release pipeline injects them.
+
+## Boot trace rounds (2026-09-07, after step B)
+
+Instrumentation (`7c2c023`): the launcher relays child stdout/stderr into engine.log with ISO
+timestamps (the timestamp cliff is gone), host marks `[arxa-boot] …`, the page posts one
+`trace boot@<nav start>` line to `/__arxa/artifacts/trace`, the shell posts `trace shell`
+(desktop `7a49b2d9`+). Artifact: https://claude.ai/code/artifact/3e67cbd6-b245-4472-bd0a-85003ff84f78
+
+Measured (launcher boot = 0):
+- 10:34 boot: copy 254ms · dsh core → listen 1.39s · ready seen +2.15s · nav +3.07s · painted +5.94s.
+  Page: state 200ms, session.open round trip 946ms (host 375ms + a second state fetch the client
+  waited on), catalog wait 1.34s (400ms poll), paint 230ms.
+- 10:43/10:49 boots (after `c91cfae`, `34d6fff`): copy 6ms when seeded · dsh core 1.28-1.31s ·
+  listen → nav 1.04s every time · page 2.6-3.0s, catalog-first at 2.5-2.7s after nav is the whole
+  critical path; open-call fires the same ms.
+- Host `sessionController.list()` = **911ms for 54 items** when idle (`936a300` splits query vs
+  summarize). dsh's own restore (`dsh.sessions.current`) waits on the same list.
+- Shell: /tmp/arxa-open-studio.trace shows navigate#1 with the PREVIOUS engine's token, "token
+  rotated at poll[0]", navigate#2 — a double page load on every boot. The `/__arxa/ready` route was
+  never hit by the shell on those boots (works when probed directly: 200 in 29ms); the shell trace
+  will say why.
+
+Fixes shipped: async remote git (`7e8e44d`), git card fetch async (`1eac7b8`), ready route
+(`6196a1a`), seed marker (`c91cfae`), open on host answer + catalog subscribe (`c91cfae`),
+single-flight state refresh (`34d6fff`), splash polls 200ms (desktop `7a49b2d9`), fresh-token
+guard + shell trace (desktop, this round).
+
+Open: (1) session list 0.9s — see query-vs-summarize split next boot; candidates: fewer persisted
+sessions (54 logs / 26 scopes, many from dropped worktrees), or `coldBlankProbeMaxBytes: 0`;
+(2) sync host work queued ahead of the list on boot: `ensureOpen` 225-587ms, `hasHead`+`allSessions`
+88-191ms, state snapshot 259ms; (3) dsh core boot 1.3s before the first studio plugin applies;
+(4) relaunch race: quitting and reopening within ~2s lets the old engine answer the new shell's
+probes — cold starts are unaffected.
