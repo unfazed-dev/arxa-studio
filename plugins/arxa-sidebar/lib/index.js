@@ -346,6 +346,11 @@ export function apply(ctx, opts = {}) {
                 ...(setup === undefined ? {} : { setup })
               })
               const id = (handle && handle.session && handle.session.id) || (handle && handle.id) || wanted
+              try {
+                let a = 'n/a'
+                try { if (ctx.agents && typeof ctx.agents.get === 'function') a = !!ctx.agents.get(id) } catch { a = 'err' }
+                console.log('[arxa-sidebar] spawned ' + id + ' liveAgent=' + a)
+              } catch { /* tracing only */ }
               // The AgentHandle does NOT carry `.session` (measured: live=false
               // — that is also why the id resolver above falls through to
               // handle.id). rename() identity-checks against the store, so the
@@ -421,8 +426,24 @@ export function apply(ctx, opts = {}) {
           return Promise.all(rows)
         },
       }
+      // One line naming the two facts that decide whether a session can be
+      // prompted: is it live in this process, and does it still have an agent.
+      // A live session with NO agent is the unrecoverable pair — dsh's
+      // agentFor() finds no agent, then persistence.prepare() refuses BECAUSE
+      // the session is live — and it presents as a row with no composer.
+      // Cheap, and it is the only place that pair is observable.
+      const agentState = (id) => {
+        let live = 'n/a'
+        let agent = 'n/a'
+        try { if (typeof sessions.get === 'function') live = !!sessions.get(id) } catch { live = 'err' }
+        try { if (ctx.agents && typeof ctx.agents.get === 'function') agent = !!ctx.agents.get(id) } catch { agent = 'err' }
+        return 'liveSession=' + live + ' liveAgent=' + agent
+      }
       if (typeof sessions.get === 'function') {
-        faces.attach = async (id) => ({ ok: !!sessions.get(id) })
+        faces.attach = async (id) => {
+          console.log('[arxa-sidebar] attach ' + id + ' ' + agentState(id))
+          return { ok: !!sessions.get(id) }
+        }
         // Q1 follow-up (2026-09-03): re-pin on resume/rename. Sessions born
         // before the spawn pin existed (or renamed since) otherwise keep dsh's
         // auto-generated title in the header. A session not live in-process

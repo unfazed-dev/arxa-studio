@@ -1129,9 +1129,20 @@
 		 * derived from the same workspacesView that builds the tree — so a
 		 * file lister can never repeat a row. Replaces D94's static table,
 		 * which knew only the fixed template vocabulary and therefore listed
-		 * every project (and every Notes folder) twice. Project rows are the
-		 * deliberate exception and pass null: D94 settled that stage
-		 * containers, targets and .github/ are real sidebar content. */
+		 * every project (and every Notes folder) twice.
+		 *
+		 * Project rows were the exception and passed null, because D94 settled
+		 * that stage containers, targets and .github/ are real sidebar content.
+		 * That held while a project's stage containers were NOT tree rows.
+		 * They are: orgItems does
+		 * `for (const c of p.containers || []) push("projects/" + p.slug + "/" + c, ...)`,
+		 * so every one of them is in workspacesView — and the exception made
+		 * the lister repeat the lot under the project row (2026-09-08, seen on
+		 * PROTONFEW/projects/poutre: all ten subfolders rendered twice).
+		 * Projects now hide what is already a row, like every other kind.
+		 * D94's intent survives untouched: a directory that is NOT a tree row
+		 * — .github/, a target, any plain folder — is absent from this map and
+		 * still lists. */
 		const arxaRowChildren = (workspaceId) => {
 			const { orgId, ws } = wsParts(workspaceId);
 			const prefix = ws === "" ? "" : ws + "/";
@@ -1497,7 +1508,7 @@
 					})
 				]
 				}, d.key),
-				open ? (0, react_jsx_runtime.jsx)(ArxaDirRows, { dir: d.kind === "org" ? "" : d.kind === "dock" ? d.slug : "projects/" + d.slug, depth: d.depth + 1, mode: "files-only", hideDirs: d.kind === "project" ? null : arxaRowChildren(d.key) }, "arxa-dir:" + d.key) : null
+				open ? (0, react_jsx_runtime.jsx)(ArxaDirRows, { dir: d.kind === "org" ? "" : d.kind === "dock" ? d.slug : "projects/" + d.slug, depth: d.depth + 1, mode: "files-only", hideDirs: arxaRowChildren(d.key) }, "arxa-dir:" + d.key) : null
 			] }, d.key);
 		}
 		/** 2026-09-05 grill — the Archives section: every org's archived

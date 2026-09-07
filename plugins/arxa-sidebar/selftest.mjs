@@ -67,8 +67,19 @@ check('G2 notes: a bare dock pushes one row per first-level subfolder',
   client.includes('for (const c of d.folders || []) push(d.slug + "/" + c, c, leafIds(d.slug + "/" + c));'))
 check('G2 rows: hideDirs is DERIVED from the tree, the static table is gone',
   client.includes('const arxaRowChildren = (workspaceId) =>') && !client.includes('ARXA_ROW_HIDDEN'))
-check('G2 rows: project rows still hide nothing (D94 stands)',
-  client.includes('hideDirs: d.kind === "project" ? null : arxaRowChildren(d.key)'))
+// D94 superseded (2026-09-08). Its exception — project rows hide nothing —
+// was written while a project's stage containers were not tree rows. orgItems
+// now pushes every one of them (`for (const c of p.containers || [])`), so the
+// exception made the file lister repeat all ten subfolders under the project
+// on a real org (PROTONFEW/projects/poutre). Projects hide what is already a
+// row, like every other kind; a directory that is NOT a row (.github/, a
+// target, a plain folder) is not in the map and still lists, which is what
+// D94 actually cared about.
+check('G2 rows: every kind hides what is already a tree row (D94 exception gone)',
+  client.includes('hideDirs: arxaRowChildren(d.key)')
+  && !client.includes('hideDirs: d.kind === "project" ? null'))
+check('G2 rows: a project pushes its stage containers as rows, which is why it must hide them',
+  client.includes('for (const c of p.containers || []) push("projects/" + p.slug + "/" + c'))
 check('G2 leaf: a LEAF ancestor opens from the mirrored dsh view store',
   client.includes('arxaGroupExpanded = groupExpansion;')
   && client.includes('if (!ARXA_IS_CONTAINER_GROUP(key) && arxaGroupExpanded[key] === true) continue;'))
