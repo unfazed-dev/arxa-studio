@@ -99,3 +99,36 @@ export async function ensureRunner(opts) {
 export function runnerExists(owner, name, home = process.env.HOME) {
   return fs.existsSync(path.join(runnersBase(home), owner + '__' + name, '.runner'))
 }
+
+/**
+ * Tear a runner instance down: stop + uninstall its LaunchAgent (svc.sh,
+ * best-effort; falls back to bootout by the label config.sh/svc.sh derive),
+ * then remove ~/.arxa/runners/<owner>__<name>. GitHub-side deregistration is
+ * skipped on purpose — callers run this after the repo itself is deleted, and
+ * a deleted repo takes its runner registrations with it. Idempotent.
+ * @returns {Promise<{ ok: true, existing: boolean, dir: string, serviceRemoved: boolean } | { ok: false, reason: string }>}
+ */
+export async function removeRunner({ owner, name, home = process.env.HOME, run = sh } = {}) {
+  if (!owner || !name) return { ok: false, reason: 'owner-and-name-required' }
+  const dir = path.join(runnersBase(home), owner + '__' + name)
+  if (!fs.existsSync(dir)) return { ok: true, existing: false, dir, serviceRemoved: false }
+  let serviceRemoved = false
+  try {
+    await run('./svc.sh', ['stop'], { cwd: dir })
+    await run('./svc.sh', ['uninstall'], { cwd: dir })
+    serviceRemoved = true
+  } catch { /* fall through to the label-based teardown */ }
+  const label = 'actions.runner.' + owner + '-' + name + '.arxa-' + owner + '-' + name
+  const plist = path.join(home, 'Library', 'LaunchAgents', label + '.plist')
+  if (!serviceRemoved || fs.existsSync(plist)) {
+    try { await run('launchctl', ['bootout', 'gui/' + process.getuid() + '/' + label]) } catch { /* not loaded */ }
+    try { fs.rmSync(plist, { force: true }) } catch { /* best-effort */ }
+    serviceRemoved = !fs.existsSync(plist)
+  }
+  try {
+    fs.rmSync(dir, { recursive: true, force: true })
+  } catch (err) {
+    return { ok: false, reason: 'runner-remove-failed: ' + String(err?.message ?? err) }
+  }
+  return { ok: true, existing: true, dir, serviceRemoved }
+}

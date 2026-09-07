@@ -11,13 +11,13 @@
 
 import { getClientId, defaultApiBase, defaultTokenBase, linkViaBrowser, linkViaDevice, createPrivateRepoApi, renameRepoApi, repoNameAvailableApi, deleteRepoApi, deleteBranchApi, refreshAccessToken, SCOPES, SHIPPED_CLIENT_ID, defaultOpen } from './auth.js'
 import { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prCommentApi, prUpdateApi, prStateApi,prChecksApi, workflowRunsApi, rerunRunApi, cancelRunApi, prConversationApi, setThreadResolvedApi, prThreadReplyApi, runJobsApi } from './frame.js'
-import { ensureRunner } from './runner.js'
+import { ensureRunner, removeRunner } from './runner.js'
 import { createKeyring } from './keyring.js'
 import { readState, writeState, clearState } from './state.js'
 
 export { SCOPES, createPkcePair, pkceChallenge, getClientId, loadClientId, linkViaBrowser, linkViaDevice, createPrivateRepoApi, renameRepoApi, repoNameAvailableApi } from './auth.js'
 export { settingsApi, protectionApi, registrationTokenApi, latestRunnerTarballApi, prCreateApi, prListForHeadApi, prSquashMergeApi, prMergeApi, prCommentApi, prUpdateApi, prStateApi,prChecksApi, workflowRunsApi, rerunRunApi, cancelRunApi, prConversationApi, setThreadResolvedApi, prThreadReplyApi, runJobsApi } from './frame.js'
-export { ensureRunner, runnerExists } from './runner.js'
+export { ensureRunner, runnerExists, removeRunner } from './runner.js'
 export { createKeyring, KEYCHAIN_SERVICE, SECURITY_PATH } from './keyring.js'
 export { readState, writeState, clearState, statePath, arxaHome } from './state.js'
 
@@ -445,6 +445,7 @@ export function createGithubLink({
     gitCredentials,
     wireFrame,
     ensureRunner: ensureRunnerFace,
+    removeRunner: (owner, name) => removeRunner({ owner, name }),
     prCreate,
     prListForHead,
     prSquashMerge,

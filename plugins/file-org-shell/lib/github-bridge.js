@@ -79,6 +79,17 @@ export function createGithubBridge(faces = {}) {
   /** Permanently delete a repo (D80 trash purge): { ok:true } |
     * { ok:false, reason, error }. The error text carries the 403
     * re-link guidance verbatim for the UI. */
+  /** Local runner teardown after a repo delete; missing face = nothing to do. */
+  async function removeRunner(owner, name) {
+    if (typeof f.removeRunner !== 'function') return { ok: true, existing: false, skipped: 'github-unavailable' }
+    try {
+      const r = await f.removeRunner(owner, name)
+      return r && typeof r === 'object' ? r : { ok: false, reason: 'runner-remove-failed' }
+    } catch (err) {
+      return { ok: false, reason: 'runner-remove-failed', error: String(err?.message ?? err) }
+    }
+  }
+
   async function deleteRepo(owner, name) {
     if (typeof f.deleteRepo !== 'function') return { ok: false, reason: 'github-unavailable' }
     try {
@@ -197,7 +208,7 @@ export function createGithubBridge(faces = {}) {
     }
   }
 
-  return { status, createPrivateRepo, renameRepo, repoNameTaken, deleteRepo, deleteBranch, wireFrame, ensureRunner, prCreate, prComment,prListForHead, prSquashMerge, prMerge, prState, prChecks, gitCredentials }
+  return { status, createPrivateRepo, renameRepo, repoNameTaken, deleteRepo, removeRunner, deleteBranch, wireFrame, ensureRunner, prCreate, prComment,prListForHead, prSquashMerge, prMerge, prState, prChecks, gitCredentials }
 }
 
 /**

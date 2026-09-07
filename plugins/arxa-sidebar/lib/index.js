@@ -774,13 +774,19 @@ export function apply(ctx, opts = {}) {
   // in between discards it. No candidate → nothing opens (design intent:
   // an org opens because a session resumes, never on its own).
   let prewarm = null
+  // Every action bumps this; the prewarm only lands when nothing mutated
+  // while its snapshot was in flight (selftest.actions caught the race:
+  // org.create nulled prewarm, then the late snapshot re-armed a stale one).
+  let mutations = 0
+  let inflight = 0 // actions still running: their snapshot would be half-baked
   ;(async () => {
     try {
       const l = await getLifecycle()
       if (!l) return
       const p0 = Date.now()
+      const m0 = mutations
       const snap = await snapshot(undefined)
-      prewarm = { snap, at: Date.now() }
+      if (mutations === m0 && inflight === 0) prewarm = { snap, at: Date.now() }
       const ts = (x) => Date.parse(x.updatedAt || x.createdAt || '') || 0
       let cand = null
       let org = null
@@ -807,7 +813,7 @@ export function apply(ctx, opts = {}) {
         const st0 = Date.now()
         const project = params(req).get('project')
         let snap
-        if (prewarm && !project && Date.now() - prewarm.at < 15000) {
+        if (prewarm && !project && inflight === 0 && Date.now() - prewarm.at < 15000) {
           snap = prewarm.snap
           prewarm = null
           console.log('[arxa-boot] state served from prewarm')
@@ -941,6 +947,8 @@ export function apply(ctx, opts = {}) {
       req.on('end', async () => {
         try {
           prewarm = null // any mutation outdates the boot snapshot
+          mutations++
+          inflight++
           const { action, arg } = JSON.parse(raw || '{}')
           /** D36 first run: pick the folder organisations live under. Handled
             * before the lifecycle guard because its whole job is to make one
@@ -1452,7 +1460,16 @@ export function apply(ctx, opts = {}) {
             'orgtrash.restore': () => l.restoreOrg(arg?.entryId),
             'orgtrash.purge': async () => {
               if (typeof arg?.entryId !== 'string' || arg.entryId.trim() === '') throw new Error('entry-id-required')
-              return l.purgeOrgTrash(arg.entryId)
+              const out = await l.purgeOrgTrash(arg.entryId)
+              // The org is gone from disk and GitHub; its dsh session logs
+              // would otherwise linger as orphans (2026-09-07 audit).
+              if (out?.orgPath) {
+                try {
+                  const { sweepSessionsUnder } = await import(new URL('./session-sweep.js', import.meta.url).href)
+                  out.sessions = await sweepSessionsUnder(ctx.get('sessionPersistence'), out.orgPath, { log: (m) => console.log('[arxa-sidebar] ' + m) })
+                } catch (e) { out.sessions = { removed: [], kept: 0, skipped: String(e?.message ?? e) } }
+              }
+              return out
             },
             'projecttrash.purge': async () => {
               if (typeof arg?.entryId !== 'string' || arg.entryId.trim() === '') throw new Error('entry-id-required')
@@ -1528,6 +1545,9 @@ export function apply(ctx, opts = {}) {
           json(res, out !== undefined ? { ok: true, action, result: out } : { ok: true, action })
         } catch (e) {
           json(res, { ok: false, error: String(e?.message ?? e) })
+        } finally {
+          inflight = Math.max(0, inflight - 1)
+          mutations++
         }
       })
     },

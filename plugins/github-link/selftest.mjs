@@ -459,6 +459,13 @@ try {
     ok(runnerExists('octocat', 'framed', home), 'frame: runnerExists sees the instance')
     const r2 = await ensureRunner(opts)
     ok(r2.ok === true && r2.existing === true, 'frame: ensureRunner is idempotent')
+    const { removeRunner } = await import('./lib/runner.js')
+    const d1 = await removeRunner({ owner: 'octocat', name: 'framed', home, run: fakeRun })
+    ok(d1.ok === true && d1.existing === true, 'purge: removeRunner tears the instance down')
+    ok(ran.some((c) => c === './svc.sh uninstall'), 'purge: svc.sh uninstall ran')
+    ok(!runnerExists('octocat', 'framed', home), 'purge: instance dir removed')
+    const d2 = await removeRunner({ owner: 'octocat', name: 'framed', home, run: fakeRun })
+    ok(d2.ok === true && d2.existing === false, 'purge: removeRunner is idempotent')
   } finally {
     fs.rmSync(home, { recursive: true, force: true })
   }

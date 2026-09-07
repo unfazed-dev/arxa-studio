@@ -2135,9 +2135,17 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       err.failed = failed
       throw err
     }
+    // Repos are gone: their self-hosted runners have nothing left to serve.
+    // Best-effort, reported, never blocks the purge (2026-09-07 audit: the
+    // LaunchAgent + ~/.arxa/runners dir used to survive every org purge).
+    const runners = []
+    for (const r of repos) {
+      const rr = await githubBridge.removeRunner(r.owner, r.name)
+      if (rr.existing) runners.push({ repo: r.owner + '/' + r.name, ok: rr.ok === true, serviceRemoved: rr.serviceRemoved === true, error: rr.error ?? rr.reason })
+    }
     const purged = hardDelete(rec.scope, entryId, { confirm: hardDeleteToken(entryId) })
     writeOrgTrashIndex(readOrgTrashIndex().filter((e) => e.entryId !== entryId))
-    return { ...purged, deletedRepos: deleted }
+    return { ...purged, orgPath: path.join(rec.scope, rec.name), deletedRepos: deleted, runners }
   }
 
   /**
