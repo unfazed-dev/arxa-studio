@@ -139,12 +139,19 @@ try {
 
   // One pattern per dropped dir, plus its children: bsdtar (macOS) and GNU tar
   // (the Arch container) agree on both forms, and neither is trusted — the
-  // tarball is listed and asserted below.
-  const excludeFile = join(work, 'exclude.txt')
-  writeFileSync(excludeFile, devDirs.flatMap((d) => {
-    const p = `${studioName}/${d}`
-    return [p, `${p}/*`]
-  }).join('\n') + '\n')
+  // tarball is listed and asserted below. An EMPTY list means no flag at all:
+  // packing a tree installed with `npm ci --omit=dev` is legitimate, and a
+  // file holding one blank line is a pattern of unknown meaning to both tars.
+  const excludeArgs = []
+  if (devDirs.length > 0) {
+    const excludeFile = join(work, 'exclude.txt')
+    writeFileSync(excludeFile, devDirs.flatMap((d) => {
+      const p = `${studioName}/${d}`
+      return [p, `${p}/*`]
+    }).join('\n') + '\n')
+    excludeArgs.push('--exclude-from', excludeFile)
+  }
+
   const tarball = join(work, 'payload.tar.gz')
   console.log('pack-sidecar: creating payload.tar.gz (node_modules + plugins + node runtime)…')
   const tar = spawnSync(tarBin, [
@@ -153,7 +160,7 @@ try {
     // produce dist/. Without this the payload grows by that entire tree.
     // Excludes must precede the file list for bsdtar.
     '--exclude', '*/lib/monaco-build/node_modules',
-    '--exclude-from', excludeFile,
+    ...excludeArgs,
     '-czf', tarball,
     '-C', stage, '.',
     '-C', parentDir,
