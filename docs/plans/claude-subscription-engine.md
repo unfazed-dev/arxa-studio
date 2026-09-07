@@ -238,6 +238,18 @@ no code execution. And a third: arxa's own context via
   open MCP connections around arxa's sandbox and the approval bridge (D5/mcp-bridge own that).
   `settingSources: []` is untouched: nothing is discovered from `~/.claude` or the project tree.
   Gate: `plugins/claude-code/selftest.skill-packs.mjs` (5 cases); CI 80 suites ALL GREEN.
+  Sandbox check (the pack must be READABLE inside D5 confinement): every backend grants
+  read of the whole filesystem and restricts writes only — macOS Seatbelt
+  `(allow default)` + `(deny file-write*)`, Linux bwrap `--ro-bind / /`, Landlock
+  `readOnly: ['/']`, Windows ACL write-SIDs only (`@deepseek-ai/dsh-sandbox-local/lib/index.js`
+  seatbeltProfileArgs / bwrapProfileArgs / landlockProfileArgs). So a pack under
+  `$ARXA_HOME/skill-packs` or the app bundle loads with no extra grant. A pack whose HOOKS
+  want to WRITE outside the workspace is a different story — writes stay denied, and
+  `skipMcpDiscovery` does not cover hooks at all. Engine boot re-verified after the
+  `index.mjs` apply-path edit: `npm run smoke` OK (studio UI 200 on :7919).
+- **Also grill material:** `plugins:` loads hooks, commands and agents, not just skills — a
+  pack is executable surface inside a turn, so "which packs ship" is a trust question as much
+  as a packaging one.
 - **Still open (a decision, not code):** WHICH packs ship. Nothing lands in
   `<studio root>/skill-packs/` today, and the arxa repo's `skills/*` are bare SKILL.md trees,
   not plugin dirs — turning them into a shipped pack means a `.claude-plugin/plugin.json` in
