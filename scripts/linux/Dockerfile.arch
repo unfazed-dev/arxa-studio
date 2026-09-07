@@ -76,7 +76,8 @@ WORKDIR /work/arxa-studio
 # mount-point parent as ROOT, and then the app cannot create its own data dir
 # beside it — Tauri died with "Failed to setup app: Permission denied" on
 # mkdir ~/.local/share/solutions.arxadigital.arxa (traced 2026-09-07).
-RUN mkdir -p /home/builder/.local/share /home/builder/.cache /home/builder/.config
+RUN mkdir -p /home/builder/.local/share /home/builder/.cache /home/builder/.config \
+      /home/builder/.npm /home/builder/.cargo
 
 RUN git config --global --add safe.directory '*' \
  && git config --global user.email "bringup@arxa.local" \

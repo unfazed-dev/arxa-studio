@@ -55,7 +55,8 @@ toolchain, `npm ci`, the plugin suites, the boot smoke, a real `secret-tool`
 round-trip, both sidecar builds, `cargo build`, and a best-effort Xvfb window run.
 
 ```sh
-scripts/linux/run-container.sh            # everything
+scripts/linux/run-container.sh            # everything (arm64, native)
+ARCH=amd64 scripts/linux/run-container.sh engine   # x86_64 under qemu (slow)
 scripts/linux/run-container.sh engine     # one layer
 scripts/linux/run-container.sh --fresh    # discard the work volume first
 scripts/linux/run-container.sh -- bash    # a shell in the container

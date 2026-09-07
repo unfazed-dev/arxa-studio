@@ -198,10 +198,18 @@ before its own first log line), and Docker created `~/.local/share` as root to
 host a cache volume, so Tauri could not create its app data dir — traced with
 `strace` to `mkdirat(".../solutions.arxadigital.arxa") = EACCES`.
 
-### Still to do
+### x86_64 pass (D3) — done, emulated
 
-- The emulated **x86_64 pass** (D3) — the arm64 run is Arch Linux ARM, and the
-  real Omarchy box is x86_64.
+`ARCH=amd64 scripts/linux/run-container.sh --fresh engine` on `archlinux:base-devel`
+under qemu: toolchain, `/usr/bin/{secret-tool,zenity,bwrap,tar}`, `npm ci`, the
+**engine boot smoke (200 HTML, 20s under emulation)** and a real libsecret
+round-trip all PASS. One RED, `plugins/sandbox/selftest.mjs`, is the container
+limit already recorded: with no unprivileged user namespaces there is no usable
+bwrap/Landlock backend, and the sandbox **refuses to run the command unconfined**
+(`SandboxUnavailableError`) — the designed behaviour, and the same reason the
+bwrap probe is skipped. Nothing arch-specific broke.
+
+### Still to do
 - The real machine: Hyprland, GPU compositing, HiDPI, the tray, a genuine
   `systemd --user` engine unit (the container has no systemd, so the fallback
   path is what ran), and a packaged install from the PKGBUILD.
