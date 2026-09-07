@@ -1308,6 +1308,10 @@ export function apply(ctx, opts = {}) {
                 root = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.arxa', 'create-root.json'), 'utf8')).root ?? null
               } catch { /* first run — the ~/Arxa default stands */ }
               if (typeof root !== 'string' || root.trim() === '') root = null
+              // A root that no longer exists (a /tmp smoke root after reboot,
+              // an unmounted drive) must not be offered: the modal would
+              // scaffold the next org into a folder nobody chose (2026-09-07).
+              if (root && !fs.existsSync(root)) root = null
               return { root, home: os.homedir() }
             },
             /** Create + open: a freshly scaffolded org is the place you are about to work. */
@@ -1470,6 +1474,14 @@ export function apply(ctx, opts = {}) {
                 } catch (e) { out.sessions = { removed: [], kept: 0, skipped: String(e?.message ?? e) } }
               }
               return out
+            },
+            /** Dead-root session prune (2026-09-07 audit): sessions whose cwd
+              * was under the OS temp dir and is gone are test residue — remove
+              * their dsh logs. Anything else with a missing cwd is only
+              * REPORTED (an unmounted drive looks exactly like a deleted one). */
+            'sessions.sweep-dead-tmp': async () => {
+              const { sweepDeadTmpSessions } = await import(new URL('./session-sweep.js', import.meta.url).href)
+              return sweepDeadTmpSessions(ctx.get('sessionPersistence'), { log: (m) => console.log('[arxa-sidebar] ' + m) })
             },
             'projecttrash.purge': async () => {
               if (typeof arg?.entryId !== 'string' || arg.entryId.trim() === '') throw new Error('entry-id-required')

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from "node:module"
 const require = createRequire(import.meta.url)
-import { sweepSessionsUnder } from './lib/session-sweep.js'
+import { sweepSessionsUnder, sweepDeadTmpSessions } from './lib/session-sweep.js'
 
 const dir = mkdtempSync(join(tmpdir(), 'arxa-sweep-'))
 const root = join(dir, 'sessions')
@@ -34,5 +34,16 @@ try {
   assert.ok(existsSync(c) && existsSync(d) && existsSync(e), 'outside / prefix-trap / unreadable kept')
   assert.ok(!existsSync(join(root, 'p-resto')), 'emptied project dir removed')
   assert.deepEqual(await sweepSessionsUnder(null, '/vol/RESTO'), { removed: [], kept: 0, skipped: 'persistence-unavailable' })
+
+  // Dead-tmp sweep: a missing cwd under a temp root is removed; a missing cwd
+  // elsewhere is reported as stranded and kept; an existing tmp cwd is kept.
+  const tmpRoot = join(dir, 'fake-tmp'); mkdirSync(join(tmpRoot, 'alive'), { recursive: true })
+  const t1 = mk('p-tmp', 't1', { id: 't1', cwd: join(tmpRoot, 'gone', 'ws') })
+  const t2 = mk('p-tmp', 't2', { id: 't2', cwd: join(tmpRoot, 'alive') })
+  const t3 = mk('p-vol', 't3', { id: 't3', cwd: '/Volumes/unmounted-drive/org' })
+  const r2 = await sweepDeadTmpSessions(fake, { tmpRoots: [tmpRoot] })
+  assert.deepEqual(r2.removed, ['t1'])
+  assert.ok(r2.stranded.includes('/Volumes/unmounted-drive/org') && !r2.stranded.some((c) => c.startsWith(tmpRoot)), 'missing cwd outside tmp is reported, never removed')
+  assert.ok(!existsSync(t1) && existsSync(t2) && existsSync(t3), 'only the dead tmp session is removed')
   console.log('arxa-sidebar selftest.session-sweep: ALL GREEN')
 } finally { rmSync(dir, { recursive: true, force: true }) }

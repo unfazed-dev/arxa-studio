@@ -2038,12 +2038,24 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
     if (!slug) return repos
     const orgDir = path.join(entryPath, slug)
     const read = (p) => { try { return readManifest(p) } catch { return null } }
+    // A manifest without repo fields (never annotated, or torn) used to leave
+    // that repo alive on GitHub after the purge (2026-09-07 audit). The git
+    // remote of the folder's OWN repo is the fallback source of truth.
+    const fromRemote = (dir) => {
+      if (!fs.existsSync(path.join(dir, '.git'))) return null
+      const url = runGit(['config', '--get', 'remote.origin.url'], { cwd: dir, env, allowFail: true })
+      const m = /github\.com[/:]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(String(url ?? '').trim())
+      return m ? { owner: m[1], name: m[2] } : null
+    }
     const om = read(path.join(orgDir, 'org.json'))
-    if (om && om.repoUrl && om.repoOwner) repos.push({ owner: om.repoOwner, name: om.repoName || slug, kind: 'org' })
+    const orgRepo = om && om.repoUrl && om.repoOwner ? { owner: om.repoOwner, name: om.repoName || slug } : (om?.localOnly ? null : fromRemote(orgDir))
+    if (orgRepo) repos.push({ ...orgRepo, kind: 'org' })
     const projectsDir = path.join(orgDir, 'projects')
     for (const d of fs.existsSync(projectsDir) ? fs.readdirSync(projectsDir) : []) {
-      const pm = read(path.join(projectsDir, d, 'project.json'))
-      if (pm && pm.repoUrl && pm.repoOwner) repos.push({ owner: pm.repoOwner, name: pm.repoName || d, kind: 'project', project: d })
+      const pDir = path.join(projectsDir, d)
+      const pm = read(path.join(pDir, 'project.json'))
+      const pr = pm && pm.repoUrl && pm.repoOwner ? { owner: pm.repoOwner, name: pm.repoName || d } : (pm?.localOnly ? null : fromRemote(pDir))
+      if (pr && !repos.some((r) => r.owner === pr.owner && r.name === pr.name)) repos.push({ ...pr, kind: 'project', project: d })
     }
     return repos
   }

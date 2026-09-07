@@ -770,6 +770,17 @@ try {
       await svcT.openOrg(orgT.path)
       await svcT.current.newProject('Inner')
       svcT.closeOrg()
+      // 2026-09-07: a project whose manifest lost its repo fields must still
+      // have its repo found (git remote fallback) and deleted by the purge.
+      {
+        const innerDir = fs.readdirSync(path.join(orgT.path, 'projects')).map((d) => path.join(orgT.path, 'projects', d)).find((d) => fs.existsSync(path.join(d, 'project.json')))
+        const mp = path.join(innerDir, 'project.json')
+        const m = JSON.parse(fs.readFileSync(mp, 'utf8'))
+        for (const k of ['repoUrl', 'repoOwner', 'repoName']) delete m[k]
+        fs.writeFileSync(mp, JSON.stringify(m, null, 2) + '\n')
+        ok(fs.existsSync(path.join(innerDir, '.git')), 'fixture: the project is its own git repo with a remote')
+        runGit(['remote', 'set-url', 'origin', 'https://github.com/octocat/Inner.git'], { cwd: innerDir, env })
+      }
       // trash the ORG itself through the real API (writes the index)
       const trashed = await svcT.trashOrg(orgT.path)
       ok(svcT.listOrgTrash().some((e) => e.entryId === trashed.entryId && e.name === 'Trash-Me'), 'D81: trashed org listed in the org-trash index')
