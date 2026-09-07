@@ -528,3 +528,74 @@ bwrap probe is skipped. Nothing arch-specific broke.
   have not yet run on the runner — the first release tag and the first
   `desktop/**` PR are their first live pass.
 - `arxa/desktop` has no `.desktop`-file or icon story beyond the PKGBUILD entry.
+
+## 2026-09-08 — the missing composer, and the deploy trap that hid it
+
+### The trap: hot patches went to a copy the engine never loads
+
+dsh resolves `id: arxa-sidebar` (profile/cordis.patch.yml) **by package name**,
+against `~/.arxa/dsh/profiles/arxa/node_modules/arxa-sidebar/`. That is a real
+directory, copied at install time — *not* a symlink to the engine payload at
+`~/.arxa/engine/<hash>/arxa-studio/plugins/arxa-sidebar/`.
+
+Every hot patch in this session went to the payload copy, so none of it ever
+ran. The symptom was a contradiction that took several rounds to see: a probe
+on line 315 never printed while `console.log` on line 112 of *the same file*
+printed fine, and a session row came back carrying the `dshSessionId` only that
+unprinted code path can mint. What settled it was a marker on line 1 of the
+module: it never appeared, so the engine was executing a different file.
+
+**Rule: to hot-patch a plugin on an install, write to
+`~/.arxa/dsh/profiles/<profile>/node_modules/<pkg>/`.** Verify with a
+line-1 marker before trusting any measurement, and note that
+`console.log`/`console.error` both reach `engine.log` (the launcher relays the
+dsh child's stdout *and* stderr) — absence of a log line is real evidence, but
+only once you have proved which file is running.
+
+### Root cause: a preset failure took the whole agent with it
+
+`plugins/arxa-sidebar/lib/index.js` mounted the recorded agent preset inside the
+`setup` callback handed to `agents.create()`. `presets.mount()` throws when a
+composition is unusable, and that throw escapes from inside setup — where
+dsh-agent-loop's `setupAndPublish` disposes the half-built agent and rethrows.
+The session then exists with **no agent loop**, which is unrecoverable in
+process: `resolve()` finds no live agent, and `persistence.prepare()` then
+refuses *because the session is live* (`cannot prepare session "..." while it
+is live`, dsh-session-persistence/lib/index.js:954). `SessionStore` has no
+close/release, so only an engine restart clears it.
+
+Both reported symptoms are that one state. The client hides the composer
+whenever nothing is bound (`unbound` → `data-arxa-empty`), and a session whose
+`open()` fails never becomes current — so "a row with no composer" and the
+`gateway/internal` resume error are the same fault seen from two sides.
+
+`ensureStanding()` drops a settled failure so the *next* session retries the
+preset, which is why one session could die on a mount the next one survived.
+
+Fix (db30680): mount best-effort inside setup — a preset is a composition
+choice, not a prerequisite for having an agent — and build the closure inside
+the resolved-id guard so it mounts by the checked `presetId`.
+
+### Why the preset was failing at all
+
+`profile/agent-presets/arxa/agent.cordis.yml` names three plugins by the BUILD
+machine's absolute path (rows `arxa-memory`, `arxa-pi-delegate`,
+`arxa-claude-code-tools`), and `materialisePreset` copied it verbatim. On every
+install but the one that wrote those paths, all three rows failed to resolve,
+the `arxa` preset refused to mount, and every session silently ran the host
+default composition — without arxa's memory, pi-delegate or claude-code tools.
+
+Fix (668594f): `materialisePreset` repoints such rows at the install that
+materialises them, rewriting only when the rebased file exists so a bare name,
+a relative path, or an unplaceable path is never replaced with a guess.
+`scripts/preset-check.mjs` covers it.
+
+### Duplicated project subfolders
+
+`ArxaDirRows` filters directories only by `hideDirs`, and project rows passed
+`hideDirs: null` (decision D94). D94 was safe when projects had no container
+rows; `orgItems` now pushes every stage container as a tree row, so the file
+lister repeated all ten of POUTRE's folders. Projects now hide what is already
+a row, like every other kind (dc12da2). Fixed in
+`lib/workspace-region.snippet.txt` — `client.js` is generated; the drift gate
+catches editing it directly.
