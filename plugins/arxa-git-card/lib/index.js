@@ -533,7 +533,7 @@ export function apply(ctx) {
               // `readySession` needs: it computes merge-base against local main.
               if (health === 'ok' && sessionRow) {
                 const { reconcileLocalMain } = await importPrflow()
-                try { reconcileLocalMain(sessionRow.repoPath ?? cur.path) } catch { /* offline is not an error — the counts below just stay as they were */ }
+                try { await reconcileLocalMain(sessionRow.repoPath ?? cur.path) } catch { /* offline is not an error — the counts below just stay as they were */ }
               }
               let aheadBehind = null
               if (health === 'ok' && gw.runGit(['rev-parse', '-q', '--verify', 'origin/main'], { cwd: cur.path, allowFail: true }) !== null) {

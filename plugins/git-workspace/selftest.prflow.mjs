@@ -302,7 +302,7 @@ try {
     const r = readySession(solo, 'solo1', { subject: 'chore: local only' })
     ok(r.reason === 'no-origin' && r.pushed === false && r.collapsed === true,
       'no-origin: the collapse still happens, the push reports no-origin')
-    ok(reconcileLocalMain(solo).reason === 'no-origin', 'no-origin: reconcile degrades quietly')
+    ok((await reconcileLocalMain(solo)).reason === 'no-origin', 'no-origin: reconcile degrades quietly')
   }
 
   // --- 6. PRESSURE: 10 sessions through the whole flow -------------------------

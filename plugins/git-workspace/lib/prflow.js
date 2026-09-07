@@ -34,7 +34,7 @@
 import { runGit } from './run.js'
 import { stageBoundarySquash, isDirty } from './commits.js'
 import { listSessions, runGate, SESSION_BRANCH_PREFIX, SESSION_BASE_PREFIX } from './sessions.js'
-import { getOrigin, fetchRepo, ffMergeMain, mainSyncState } from './repos.js'
+import { getOrigin, fetchRepoAsync, ffMergeMain, mainSyncState } from './repos.js'
 import { SUBJECT_RE } from './frame.js'
 import { sessionTrailers } from './ledger.js'
 import { integrateMain, isIntegrating } from './integrate.js'
@@ -288,7 +288,7 @@ export async function mergeSessionPr(repoPath, id, {
     const reason = result?.reason ?? 'not-merged'
     return { merged: false, mergeSha: result?.sha ?? null, localMainSha: null, reason, message: result?.message ?? '', reconcile: { reason } }
   }
-  const reconcile = reconcileLocalMain(repoPath, { env, origin })
+  const reconcile = await reconcileLocalMain(repoPath, { env, origin })
   return { merged: true, mergeSha: result.sha ?? null, localMainSha: reconcile.localMainSha, reconcile }
 }
 
@@ -302,13 +302,15 @@ export async function mergeSessionPr(repoPath, id, {
  *
  * @returns {{ fetched: boolean, advanced: boolean, localMainSha: string|null, sync: object, reason?: string }}
  */
-export function reconcileLocalMain(repoPath, { env = process.env, origin, timeout } = {}) {
+export async function reconcileLocalMain(repoPath, { env = process.env, origin, timeout } = {}) {
   const url = origin !== undefined ? origin : getOrigin(repoPath, env)
   const localSha = () => runGit(['rev-parse', 'main'], { cwd: repoPath, env, allowFail: true })
   if (url === null || url === undefined) {
     return { fetched: false, advanced: false, localMainSha: localSha(), sync: mainSyncState(repoPath, env), reason: 'no-origin' }
   }
-  const fetched = fetchRepo(repoPath, url, env, { timeout })
+  // Async: `card.status` runs this on every status poll, and a sync fetch to
+  // GitHub froze the host for ~0.35s each time (measured 2026-09-07).
+  const fetched = await fetchRepoAsync(repoPath, url, env, { timeout })
   const advanced = ffMergeMain(repoPath, env)
   const sync = mainSyncState(repoPath, env)
   return {
