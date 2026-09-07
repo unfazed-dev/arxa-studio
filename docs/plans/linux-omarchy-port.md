@@ -443,7 +443,7 @@ requirement, documented, not ours to remove.
 | item | how | proof |
 |---|---|---|
 | `.deb` | new `deb` harness layer (Ubuntu lane): `tauri build --bundles deb`, assert the file list has the engine at `usr/libexec` and nothing at `usr/bin/arxa-studio`, `dpkg-deb -x` and `cmp` the engine, boot it through the smoke gate | rows `deb build`, `deb engine`; plus a one-off root `dpkg -i` in a throwaway container with the installed shell under Xvfb |
-| x86_64 AppImage | `ARCH=amd64 DISTRO=ubuntu scripts/linux/run-container.sh` (qemu-emulated on Apple Silicon, slow) | **Blocked on this Mac, 2026-09-07:** the amd64 image builds and the engine layer passes (boot in 18 s), but `rustc -vV` segfaults under qemu (signal 11, reproduced standalone), the packed bun engine aborts (signal 6), and `sandbox/selftest.mjs` is red — so no shell, no AppImage, no deb. Docker Desktop has `UseVirtualizationFrameworkRosetta: false`; Rosetta usually runs rustc where qemu cannot, but that is a Docker Desktop setting on the operator's machine. Until then the x86_64 artifacts come from the `release-linux` job, which is a real x86_64 host |
+| x86_64 AppImage | `ARCH=amd64 DISTRO=ubuntu scripts/linux/run-container.sh` (qemu-emulated on Apple Silicon, slow) | **Blocked on this Mac, 2026-09-07:** the amd64 image builds and the engine layer passes (boot in 18 s), but `rustc -vV` segfaults under qemu (signal 11, reproduced standalone), the packed bun engine aborts (signal 6), and `sandbox/selftest.mjs` is red — so no shell, no AppImage, no deb. Docker Desktop has `UseVirtualizationFrameworkRosetta: false`; Rosetta usually runs rustc where qemu cannot, but that is a Docker Desktop setting on the operator's machine. Until then the x86_64 artifacts come from the `release-linux` job, which is a real x86_64 host. **With Rosetta on (same day):** rustc, cargo, the packed bun engine and the `.deb` all pass on amd64 (deb 253 MB, engine boots in 9 s); the AppImage build then failed at linuxdeploy's plugin discovery because Rosetta refuses to exec the appimage plugin — its ELF header padding carries the AppImage magic. Fixed in the harness by zeroing those bytes in the cache copy and retrying; see `docs/linux-support.md`. `sandbox/selftest.mjs` was also red there (no bwrap, no Landlock in that VM): it now skips the live proxy-confine check on such hosts |
 | release job | `release-linux` in `desktop-release.yml`: GitHub-hosted `ubuntu-22.04`, x86_64, `needs: release` (that job creates the GitHub Release; this one `gh release upload`s the AppImage + `.sig` + `.deb` and pushes `desktop/{channel}/linux/x86_64/latest.json`). Asserts the AppDir layout and boots the engine from the extracted image before staging. arm64 Linux stays a local build until the repo has an arm runner | YAML parses; first live pass is the next tag |
 
 ### x86_64 pass (D3) — done, emulated
@@ -465,9 +465,11 @@ bwrap probe is skipped. Nothing arch-specific broke.
   at `usr/libexec` byte-identical, absent from `usr/bin`; boots from the
   extracted image; the image under Xvfb spawns and extracts its engine. The
   `.deb` is proven the same way plus a root `dpkg -i`; `desktop-release.yml`
-  has a `release-linux` job (ubuntu-22.04, x86_64). Still open: an x86_64
-  build on this Mac (qemu cannot run rustc; Rosetta is off in Docker Desktop —
-  the GitHub job is the x86_64 lane until that changes) and a real-machine run.
+  has a `release-linux` job (ubuntu-22.04, x86_64). **x86_64 proven too
+  (2026-09-08, Rosetta on):** `Arxa Studio_0.1.1_amd64.AppImage` (323 MB) and
+  the amd64 `.deb`, same assertions, engine boots from both. Still open: a
+  real-machine run (Omarchy/Hyprland), and the first live pass of
+  `release-linux` on the next tag.
 - The Ubuntu lane surfaced one red that Arch never showed, and it was a real
   product bug: the frame's generated `check.sh` began with `set -uo pipefail`
   and both the generated `ci.yml` and the selftest run it with `sh`. On

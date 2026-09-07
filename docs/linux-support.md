@@ -159,14 +159,26 @@ Xvfb window run, and then the packaging layer the image is for:
 
 Each lane has its own work and cargo volumes (different glibc, never shared).
 
+**x86_64 under Rosetta, one quirk (2026-09-07):** Rosetta refuses to exec an
+ELF whose header padding carries the AppImage magic (`AI\2` at offset 8 —
+`ENOEXEC`, the shell then says `ELFAI: not found`). linuxdeploy's *appimage
+plugin* is such a file, so the AppImage build died at plugin discovery with
+`subprocess failed (exit code 2)`. The `appimage` layer detects a plugin that
+does not exec, zeroes those three bytes in Tauri's cache copy (the runtime
+never reads them) and retries; it runs the produced image through a
+magic-zeroed *copy* the same way. The shipped file is untouched, and a real
+x86_64 host never needs any of this. The Docker VM is 8 GB; linuxdeploy plus
+`mksquashfs` over a 320 MB payload under Rosetta is memory-hungry, so close
+what you can on a 16 GB Mac before running that lane.
+
 ```sh
 scripts/linux/run-container.sh            # everything on Arch (arm64, native)
 DISTRO=ubuntu scripts/linux/run-container.sh          # everything on Ubuntu, incl. the AppImage
 DISTRO=ubuntu scripts/linux/run-container.sh appimage # just the AppImage layer
-ARCH=amd64 scripts/linux/run-container.sh engine   # x86_64 under qemu (slow; engine layer only —
-                                                    # rustc and the packed bun engine crash under qemu,
-                                                    # so x86_64 shells/AppImages come from the release-linux job,
-                                                    # or enable Rosetta in Docker Desktop)
+ARCH=amd64 DISTRO=ubuntu scripts/linux/run-container.sh   # x86_64, emulated — needs Rosetta ON in
+                                                    # Docker Desktop (Settings → General → Apple
+                                                    # Virtualization framework + "Use Rosetta");
+                                                    # under plain qemu rustc and the bun engine crash
 scripts/linux/run-container.sh engine     # one layer
 scripts/linux/run-container.sh --fresh    # discard the work volume first
 scripts/linux/run-container.sh -- bash    # a shell in the container

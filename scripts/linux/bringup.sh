@@ -264,17 +264,45 @@ if want all || want appimage; then
   TRIPLE="$(uname -m)-unknown-linux-gnu"
   PACKED="$WORK/arxa/desktop/src-tauri/binaries/arxa-studio-$TRIPLE"
   BUNDLE="$WORK/arxa/desktop/src-tauri/target/release/bundle/appimage"
+  # Rosetta (Docker Desktop on Apple Silicon, the emulated x86_64 lane) refuses
+  # to exec an ELF whose e_ident padding carries the AppImage "AI\2" magic —
+  # ENOEXEC, so the shell falls back to "ELFAI: not found" (2026-09-07). The
+  # runtime does not need those 3 bytes; zeroing them only stops `file` calling
+  # it an AppImage. Applied to linuxdeploy's appimage PLUGIN in Tauri's cache
+  # (so the build can run) and to a COPY of the produced image (so the smoke
+  # can run). The shipped image is left untouched; a real x86_64 host never
+  # hits this.
+  unmagic() { printf '\0\0\0' | dd of="$1" bs=1 seek=8 conv=notrunc 2>/dev/null; }
+  execs() { "$1" --appimage-version >/dev/null 2>&1; }
+  build_appimage() {
+    (cd "$WORK/arxa/desktop" && rm -rf "$BUNDLE" && APPIMAGE_EXTRACT_AND_RUN=1 \
+      npx --yes @tauri-apps/cli@^2 build --bundles appimage \
+        --config '{"bundle":{"createUpdaterArtifacts":false}}' > /tmp/appimage.log 2>&1)
+  }
+  built=0
   if [ -f /etc/arch-release ]; then
     row SKIP "appimage" "Arch lane — build AppImages with DISTRO=ubuntu (gdk-pixbuf plugin, glibc floor)"
   elif [ ! -x "$PACKED" ] || [ "$(stat -c %s "$PACKED" 2>/dev/null || echo 0)" -lt 1048576 ]; then
     row SKIP "appimage" "no packed engine at $PACKED (run the sidecars layer first)"
-  elif ! (cd "$WORK/arxa/desktop" && rm -rf "$BUNDLE" && APPIMAGE_EXTRACT_AND_RUN=1 \
-        npx --yes @tauri-apps/cli@^2 build --bundles appimage \
-          --config '{"bundle":{"createUpdaterArtifacts":false}}' > /tmp/appimage.log 2>&1); then
-    row FAIL "appimage build" "$(grep -iE 'error|failed' /tmp/appimage.log | tail -3 | tr '\n' ' ' | cut -c1-160)"
+  elif build_appimage; then
+    built=1
   else
+    PLUGIN="$(ls "$HOME"/.cache/tauri/linuxdeploy-plugin-appimage*.AppImage 2>/dev/null | head -1)"
+    if [ -n "$PLUGIN" ] && ! execs "$PLUGIN"; then
+      echo "--- $PLUGIN does not exec here (Rosetta rejects the AppImage magic): zeroing it and retrying ---"
+      unmagic "$PLUGIN"
+      build_appimage && built=1 && ROSETTA_NOTE=", plugin un-magicked for Rosetta"
+    fi
+    [ "$built" = 1 ] || row FAIL "appimage build" "$(grep -iE 'error|failed' /tmp/appimage.log | tail -3 | tr '\n' ' ' | cut -c1-160)"
+  fi
+  if [ "$built" = 1 ]; then
     APPDIR="$BUNDLE/Arxa Studio.AppDir"
     IMG="$(ls "$BUNDLE"/*.AppImage 2>/dev/null | head -1)"
+    # The image we RUN: the original where it execs, else a magic-zeroed copy.
+    RUNIMG="$IMG"
+    if [ -n "$IMG" ] && ! execs "$IMG"; then
+      RUNIMG=/tmp/run.AppImage; cp "$IMG" "$RUNIMG"; unmagic "$RUNIMG"
+    fi
     if [ -e "$APPDIR/usr/bin/arxa-studio" ]; then
       row FAIL "appimage layout" "usr/bin/arxa-studio exists — linuxdeploy patched the engine (tauri.linux.conf.json not applied?)"
     elif ! cmp -s "$PACKED" "$APPDIR/usr/libexec/arxa-studio/arxa-studio"; then
@@ -282,12 +310,12 @@ if want all || want appimage; then
     elif [ -z "$IMG" ]; then
       row FAIL "appimage" "no .AppImage produced under $BUNDLE"
     else
-      row PASS "appimage build" "$(basename "$IMG") ($(du -h "$IMG" | cut -f1)); engine at usr/libexec byte-identical, absent from usr/bin"
+      row PASS "appimage build" "$(basename "$IMG") ($(du -h "$IMG" | cut -f1)); engine at usr/libexec byte-identical, absent from usr/bin${ROSETTA_NOTE:-}"
       # No FUSE in a container: extract the image (the runtime does that
       # without FUSE) and put the engine INSIDE it through the same boot gate
       # as steps 4 and 7b.
       EXTRACT=/tmp/appimage-extract; rm -rf "$EXTRACT"; mkdir -p "$EXTRACT"
-      if (cd "$EXTRACT" && "$IMG" --appimage-extract > /dev/null 2>&1) \
+      if (cd "$EXTRACT" && "$RUNIMG" --appimage-extract > /dev/null 2>&1) \
          && ARXA_SMOKE_LAUNCHER="$EXTRACT/squashfs-root/usr/libexec/arxa-studio/arxa-studio" npm run smoke > /tmp/appimage-smoke.log 2>&1; then
         row PASS "appimage engine" "$(grep -o 'OK — .*' /tmp/appimage-smoke.log | head -1)"
       else
@@ -299,7 +327,7 @@ if want all || want appimage; then
       xvfb-run -a --server-args="-screen 0 1280x800x24" dbus-run-session -- \
         env APPIMAGE_EXTRACT_AND_RUN=1 ARXA_HOME="$HOME_PROBE" \
             WEBKIT_DISABLE_DMABUF_RENDERER=1 WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1 \
-        timeout 60 "$IMG" > /tmp/appimage-window.log 2>&1
+        timeout 60 "$RUNIMG" > /tmp/appimage-window.log 2>&1
       code=$?
       if ls -d "$HOME_PROBE"/engine/*/ > /dev/null 2>&1; then
         row PASS "appimage window" "shell launched the bundled engine (extracted under $HOME_PROBE/engine; exit $code under Xvfb)"
