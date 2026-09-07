@@ -33,6 +33,39 @@ ARXA_SMOKE_LAUNCHER=../arxa/desktop/src-tauri/binaries/arxa-studio-$(uname -m)-u
   npm run smoke
 ```
 
+## Installing it
+
+The Arch package is the proven route. It packages an already-built tree, so
+build first on the machine and arch you are packaging for — the engine sidecar
+embeds the build host's node:
+
+```sh
+cd arxa-studio && npm ci
+(cd plugins/artifact-viewer/lib/monaco-build && npm ci && npm run build)
+node scripts/pack-cli.mjs && node scripts/pack-sidecar.mjs
+cd ../arxa/desktop/src-tauri && cargo build --release
+cd ../packaging && makepkg -si
+```
+
+**Proven in the arm64 Arch container, 2026-09-07:** `makepkg` produces
+`arxa-studio-0.1.1-1-aarch64.pkg.tar.xz` (212 MB), `pacman -U` installs it, and
+the installed `/usr/bin/arxa-studio` under Xvfb spawns its engine, extracts the
+payload to `~/.arxa/engine/<sha>`, publishes `desktop-session.json`, and loads
+the studio UI in WebKit (the artifact viewer's 10 MB monaco bundle included).
+
+**The layout is load-bearing.** `src/lib.rs::sidecar_path()` is
+`dirname(current_exe()) / "arxa-studio"` — beside the executable, plain name,
+no triple. So the shell binary must NOT be `/usr/bin/arxa-studio`, or it
+resolves its own path as its engine and spawns itself. Everything lives in
+`/usr/lib/arxa-studio/`; `/usr/bin/arxa-studio` is a symlink, which is safe
+because `current_exe()` reads `/proc/self/exe`. `scripts/linux/run-container.sh
+package` asserts that layout from the package's own file list.
+
+**AppImage is configured but unbuilt.** `appimage` is in `bundle.targets`, and
+nothing here has ever run `tauri build --bundles appimage` — Tauri's AppImage
+bundler downloads `linuxdeploy` at build time, so it needs network and has not
+been exercised. Treat it as untested.
+
 ## What differs from macOS
 
 | Surface | macOS | Linux |

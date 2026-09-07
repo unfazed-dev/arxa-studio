@@ -3,7 +3,7 @@
 # Runs INSIDE the Arch container (scripts/linux/Dockerfile.arch) with both repos
 # bind-mounted, and prints one PASS/FAIL table.
 #
-#   scripts/linux/run-container.sh [--fresh] [all|engine|sidecars|shell|window]
+#   scripts/linux/run-container.sh [--fresh] [all|engine|sidecars|shell|window|package]
 #
 # Layers, cheapest first — a later layer only runs when the ones it needs passed:
 #   1  toolchain + deps        node, npm ci, bwrap, secret-tool, zenity
@@ -13,6 +13,7 @@
 #   4  shell                   cargo build + the engine_unit (systemd) tests
 #   5  window (best effort)    the built shell under Xvfb; a container compositing
 #                              failure is reported, not chased — Hyprland is the real target
+#   6  package                 makepkg on the PKGBUILD, asserting the installed layout
 set -uo pipefail
 
 SRC=${SRC:-/src}
@@ -207,6 +208,39 @@ if want all || want window; then
         row SKIP "window" "container compositing (exit $code): $(tail -1 /tmp/window.log | cut -c1-70)"
       fi
     fi
+  fi
+fi
+
+
+# ---- 6. the Arch package (D10: PKGBUILD) ------------------------------------
+# makepkg only — installing needs root, which this layer deliberately is not.
+# What it catches is the class of bug it DID catch (2026-09-07): the package
+# built and installed fine while putting the shell at /usr/bin/arxa-studio and
+# the sidecars in /usr/lib/arxa-studio, so the shell's own
+# dirname(current_exe())/arxa-studio resolved to ITSELF. The layout is visible
+# in the package's file list, so assert on that.
+if want all || want package; then
+  step "10 arch package (makepkg)"
+  PKGDIR="$WORK/arxa/desktop/packaging"
+  if [ ! -x "$WORK/arxa/desktop/src-tauri/target/release/arxa-desktop" ]; then
+    row SKIP "makepkg" "no built shell to package (run the shell layer first)"
+  elif (cd "$PKGDIR" && mkdir -p /work/pkgout && PKGDEST=/work/pkgout makepkg -f --nodeps --noconfirm > /tmp/makepkg.log 2>&1); then
+    PKGFILE="$(ls -t /work/pkgout/*.pkg.tar.* 2>/dev/null | head -1)"
+    listing="$(bsdtar -tvf "$PKGFILE" 2>/dev/null)"
+    # The shell and BOTH sidecars must sit in one dir, sidecars under their
+    # plain names, and /usr/bin must be a symlink into it — never the shell.
+    ok_layout=1
+    for want_path in usr/lib/arxa-studio/arxa-desktop usr/lib/arxa-studio/arxa-studio usr/lib/arxa-studio/arxa; do
+      echo "$listing" | grep -q " $want_path\$" || { ok_layout=0; missing="$want_path"; }
+    done
+    echo "$listing" | grep -q "usr/bin/arxa-studio -> /usr/lib/arxa-studio/arxa-desktop" || { ok_layout=0; missing="usr/bin/arxa-studio symlink"; }
+    if [ "$ok_layout" = 1 ]; then
+      row PASS "makepkg" "$(basename "$PKGFILE") ($(du -h "$PKGFILE" | cut -f1)), sidecars beside the shell"
+    else
+      row FAIL "makepkg" "package layout wrong: $missing — the shell would resolve its own path as its engine"
+    fi
+  else
+    row FAIL "makepkg" "$(tail -3 /tmp/makepkg.log | tr '\n' ' ')"
   fi
 fi
 

@@ -296,6 +296,44 @@ before its own first log line), and Docker created `~/.local/share` as root to
 host a cache volume, so Tauri could not create its app data dir — traced with
 `strace` to `mkdirat(".../solutions.arxadigital.arxa") = EACCES`.
 
+### Fixed 2026-09-07: the PKGBUILD installed an app that would spawn itself
+
+Nobody had ever run `makepkg`. Doing so found a real break, not a rough edge.
+
+`src/lib.rs::sidecar_path()` is `dirname(current_exe()) / "arxa-studio"` —
+beside the executable, under the plain name Tauri gives an `externalBin`. The
+PKGBUILD installed the **shell** as `/usr/bin/arxa-studio` and the sidecars as
+`/usr/lib/arxa-studio/arxa-studio-<triple>`. So the installed app computed its
+engine path as `/usr/bin/arxa-studio` — itself. Two bugs in one destination:
+wrong directory, and the target triple kept in a filename Tauri strips.
+
+Now: shell at `/usr/lib/arxa-studio/arxa-desktop`, both sidecars beside it
+under their plain names, `/usr/bin/arxa-studio` a symlink into that dir (safe:
+`current_exe()` reads `/proc/self/exe`, so it resolves to the real file).
+
+Proven end to end in the container rather than argued:
+
+| Step | Result |
+|---|---|
+| `makepkg -f --nodeps` | `arxa-studio-0.1.1-1-aarch64.pkg.tar.xz`, 212 MB |
+| `pacman -U` | installs; `/usr/bin/arxa-studio → /usr/lib/arxa-studio/arxa-desktop` |
+| run the INSTALLED binary under Xvfb, as a normal user | `spawning engine sidecar` → `engine sidecar spawned (pid 119)` |
+| the payload | extracted to `~/.arxa/engine/15725d73bc0f` — the same sha the container's own pack-sidecar wrote |
+| the engine | published `desktop-session.json`, `[arxa-boot] state first served in 1ms` |
+| the UI | artifact-viewer trace: monaco 10.2 MB loaded, DCL 95 ms, load 1083 ms — the studio rendered in WebKit |
+
+`systemctl --user daemon-reload` failed (no systemd in a container) and the
+shell took its detached fallback, exactly as designed.
+
+New harness layer `scripts/linux/run-container.sh package`: runs `makepkg` and
+asserts the layout from the package's own file list — the shell and both
+sidecars in one dir, sidecars under plain names, `/usr/bin` a symlink and never
+the shell. That assertion is what would have caught this on day one.
+
+Still untested: **AppImage**. It is in `bundle.targets` and nothing has ever run
+`tauri build --bundles appimage`; Tauri's bundler downloads `linuxdeploy` at
+build time, so it needs network and has never been exercised.
+
 ### x86_64 pass (D3) — done, emulated
 
 `ARCH=amd64 scripts/linux/run-container.sh --fresh engine` on `archlinux:base-devel`
@@ -308,9 +346,10 @@ bwrap/Landlock backend, and the sandbox **refuses to run the command unconfined*
 bwrap probe is skipped. Nothing arch-specific broke.
 
 ### Still to do
-- The real machine: Hyprland, GPU compositing, HiDPI, the tray, a genuine
+- The real machine: Hyprland, GPU compositing, HiDPI, the tray, and a genuine
   `systemd --user` engine unit (the container has no systemd, so the fallback
-  path is what ran), and a packaged install from the PKGBUILD.
+  path is what ran). The PKGBUILD install itself is now proven in the container.
+- The AppImage target has never been built (needs network for `linuxdeploy`).
 - The two new arxa-repo CI steps (monaco build + packed smoke in
   `desktop-release.yml`, `linux-engine-unit` in `desktop-gate.yml`) are wired but
   have not yet run on the runner — the first release tag and the first
