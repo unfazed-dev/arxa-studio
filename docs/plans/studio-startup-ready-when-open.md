@@ -135,3 +135,39 @@ file, not behind a CRDT.
 Expected next trace: `ready(status200)=`, `settled on clean root` in
 `/tmp/arxa-open-studio.trace`, no `navigate#2`, page `boot@` within
 ~200 ms of the ready flip.
+
+## Rounds 4–7 (2026-09-07 01:12 → 01:46): from 4.6s to 2.7s launch→painted
+
+Measured per cold boot (engine.log + page trace), what moved:
+
+| fix | commit | effect |
+|---|---|---|
+| shell: no re-navigation after the 303 exchange; ready probe throw = not ready | desktop `e90ff601` | one page load instead of two; invoke on `ready(status200)` |
+| dsh `coldBlankProbeMaxBytes: 0` (profile patch) | `d0f0e83` | catalog wait 1.2s → 385ms |
+| header index (first-line cache) | `63786d1` | **no effect** — decode was not the cost |
+| list cache keyed on the set of present logs, one parallel scan | `263b91d` | list 800–1400ms → 4ms; catalog lands before open-res |
+| prewarm: first snapshot + pre-open the boot org at apply | `747c9f0` | state 150→0ms host, ensureOpen 215→0ms; painted 1.37s → 1.02s after page start |
+| NODE_COMPILE_CACHE on the engine spawn | `747c9f0` | **no effect** (spawn→first apply 1.18–1.27s either way) |
+| keychain probe lazy | `d1575c0` | −38ms boot (two sync `security` spawns) |
+
+Page path now (01:46 boot): dcl 66 · client-eval 821 · state 899→917 ·
+open 918→1012 · catalog 952 · painted 1036. Everything after the client
+script runs is ~215ms; **80% of the page is JavaScript parse/eval before
+the sidebar snippet runs** (≈2MB dsh clients + 0.9MB arxa clients, no
+bytecode cache on a fresh WKWebView).
+
+Engine boot (CPU profile of an isolated engine, ARXA_HOME relocated):
+991ms to the webserver apply = native `read`/`readFileUtf8` 381ms +
+`compileSourceTextModule` 99ms + dlopen 39ms (sharp, koffi — dsh's) +
+spawnSync 38ms (keychain probe, now lazy). It is module-graph I/O in dsh
+core (1744+ files); the loader hook (`loopback-localhost-patch.mjs`)
+measured neutral (dump-config 483 vs 482–506ms). Not ours to bundle.
+
+Open levers, by size:
+1. Engine persistence across app restarts (launchd agent; rider 1 already
+   prefers an external engine) — relaunch would be page-only (~1s). Product
+   decision.
+2. Client bundle diet / lazy client halves — 0.8s of parse. Trace now
+   records `js=<n>/<KB>/last@` to size it.
+3. Prune 30 orphan sessions (user's call) — list is cached now, so minor.
+4. dsh core bundling — upstream.
