@@ -77,6 +77,11 @@ function engineLog(line) {
 }
 if (packed) {
   try {
+    // FIRST BOOT: nothing has created <dshHome> yet at this point (the preset
+    // and settings writers below do), so openSync threw ENOENT into the catch
+    // and the whole first run went unlogged — exactly the run whose log you
+    // need. Create the dir first.
+    mkdirSync(dshHome, { recursive: true })
     const logFile = join(dshHome, 'engine.log')
     try { if (existsSync(logFile) && statSync(logFile).size > 10 * 1024 * 1024) rmSync(logFile, { force: true }) } catch {}
     engineLogFd = openSync(logFile, 'a')

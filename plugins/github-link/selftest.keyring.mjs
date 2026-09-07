@@ -120,6 +120,54 @@ const quiet = async (fn) => {
   ok('the Tauri bridge rung wins on every platform')
 }
 
+// ---- A store that is unusable at boot must not be unusable forever.
+// A login keychain still locked when the engine starts (or a Secret Service
+// that comes up after it) used to pin the token to the memory fallback for the
+// whole session, because the probe ran once and the answer was cached.
+{
+  let usable = false
+  const calls = []
+  const k = createKeyring({
+    platform: 'darwin',
+    securityPath: '/usr/bin/env',
+    probeStore: () => usable,
+    reprobeMs: 0,
+    run: async (cmd, args) => { calls.push(args[0]); return { stdout: 'ghp_mac\n' } },
+  })
+  await quiet(async () => {
+    assert.equal(k.backend, 'memory')
+    await k.setSecret('octocat', 'session-only')
+    assert.equal(await k.getSecret('octocat'), 'session-only')
+    usable = true
+    assert.equal(k.backend, 'security')
+    await k.setSecret('octocat', 'ghp_secret')
+  })
+  assert.deepEqual(calls, ['add-generic-password'])
+  ok('an unusable store is re-probed, and the upgrade reaches the real store')
+}
+
+// ---- …but a store that HANGS is not re-probed, ever.
+// Retrying a two-second hang every minute would stall the status poll the
+// sidebar runs — the exact stall the bounded probe was added to end.
+{
+  let probes = 0
+  const k = createKeyring({
+    platform: 'darwin',
+    securityPath: '/usr/bin/env',
+    probeStore: () => { probes++; return false },
+    reprobeMs: 0,
+    hangMs: 0,           // every probe counts as a hang
+    run: async () => ({ stdout: '' }),
+  })
+  await quiet(async () => {
+    assert.equal(k.backend, 'memory')
+    assert.equal(k.backend, 'memory')
+    await k.getSecret('octocat')
+  })
+  assert.equal(probes, 1)
+  ok('a hanging store is probed once and never again')
+}
+
 assert.equal(SECRET_TOOL_PATH, '/usr/bin/secret-tool')
 assert.equal(SECURITY_PATH, '/usr/bin/security')
 ok('store paths pinned')

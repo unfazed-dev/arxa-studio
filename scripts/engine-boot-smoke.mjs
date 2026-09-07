@@ -25,7 +25,16 @@ const PORT = Number(process.env.ARXA_SMOKE_PORT || 7919)
 const BOOT_BUDGET_MS = Number(process.env.ARXA_SMOKE_BUDGET_MS || 120_000)
 
 const scratch = mkdtempSync(join(tmpdir(), 'arxa-boot-smoke-'))
-const child = spawn(process.execPath, [join(root, 'bin', 'arxa-studio.mjs'), '--no-open'], {
+// ARXA_SMOKE_LAUNCHER points the same gate at the PACKED sidecar
+// (binaries/arxa-studio-<triple>) instead of the checkout launcher: extraction,
+// the pinned node, the payload's plugin tree and the profile rows are then
+// subject to the identical "binds a port and answers 200 HTML" proof. Default
+// stays the checkout launcher.
+const launcher = process.env.ARXA_SMOKE_LAUNCHER?.trim()
+const [launchCmd, launchArgs] = launcher
+  ? [launcher, ['--no-open']]
+  : [process.execPath, [join(root, 'bin', 'arxa-studio.mjs'), '--no-open']]
+const child = spawn(launchCmd, launchArgs, {
   env: {
     ...process.env,
     // arxa owns its home outright (HOME DISCIPLINE, bin/arxa-studio.mjs):
@@ -68,7 +77,13 @@ const killTree = () => {
 // token URL's own authority — switching to arxa.studio.localhost mid-flow
 // reads as a different site and 401s.
 const tokenUrlFromLog = () => {
-  const m = log.match(/dsh web: (https?:\/\/\S+\?token=\S+)/)
+  // Packed mode NEVER inherits the engine's stdio (bin/arxa-studio.mjs: under
+  // the desktop shell there is no terminal), so the "dsh web:" line lands in
+  // <ARXA_HOME>/dsh/engine.log instead of our pipe. Read both; checkout mode
+  // has no engine.log and the file read is a no-op.
+  let text = log
+  try { text += readFileSync(join(scratch, 'dsh', 'engine.log'), 'utf8') } catch {}
+  const m = text.match(/dsh web: (https?:\/\/\S+\?token=\S+)/)
   return m ? m[1] : null
 }
 // The desktop shell's login path (arxa-desktop-session profile row,
@@ -115,7 +130,7 @@ const deadline = Date.now() + BOOT_BUDGET_MS
 let up = null
 process.on('exit', () => { try { rmSync(scratch, { recursive: true, force: true }) } catch {} })
 
-console.log(`booting engine on :${PORT} (scratch home ${scratch}) …`)
+console.log(`booting engine on :${PORT} (scratch home ${scratch}) via ${launcher ? 'packed sidecar ' + launcher : 'the checkout launcher'} …`)
 let problem = 'the launcher never printed its token URL'
 while (Date.now() < deadline && !up) {
   if (child.exitCode !== null) {

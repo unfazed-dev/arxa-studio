@@ -23,8 +23,14 @@ creates an unlocked default keyring. What it does not ship, and arxa needs:
 
 ```sh
 npm ci                      # needs the allowScripts entries in package.json
+(cd plugins/artifact-viewer/lib/monaco-build && npm ci && npm run build)
+                            # gitignored bundle; pack-sidecar REFUSES without it
 npm run smoke               # boots the real engine, expects 200 HTML
 node scripts/ci.mjs         # the plugin suites
+
+# the same gate against the artifact that actually ships:
+ARXA_SMOKE_LAUNCHER=../arxa/desktop/src-tauri/binaries/arxa-studio-$(uname -m)-unknown-linux-gnu \
+  npm run smoke
 ```
 
 ## What differs from macOS
@@ -52,7 +58,10 @@ an in-process D-Bus client — a dependency for one dialog.
 (Arch Linux ARM on arm64; the official `archlinux:*` images are amd64-only) and
 executes `scripts/linux/bringup.sh`, which prints a PASS/FAIL table for the
 toolchain, `npm ci`, the plugin suites, the boot smoke, a real `secret-tool`
-round-trip, both sidecar builds, `cargo build`, and a best-effort Xvfb window run.
+round-trip, both sidecar builds, the **same boot smoke driven through the packed
+sidecar**, `cargo build`, `cargo test` of the systemd unit renderer (that module
+is `#[cfg(target_os = "linux")]`, so macOS can never run its tests), and a
+best-effort Xvfb window run.
 
 ```sh
 scripts/linux/run-container.sh            # everything (arm64, native)
@@ -67,6 +76,11 @@ into its own volume. That is deliberate: a writable bind mount let a container
 `npm ci` replace the host's darwin `node_modules` with Linux binaries, and an
 npm install onto a volume nested inside the bind mount failed intermittently
 with `ENOTDIR`.
+
+CI (`.github/workflows/ci.yml`) runs only the **engine** layer of that harness.
+The packed-sidecar smoke and the `cargo test` of the systemd unit renderer run
+on a manual `scripts/linux/run-container.sh all` pass — nothing gates them
+automatically yet.
 
 Two container-only limits, neither a code fault: unprivileged user namespaces
 are unavailable, so the `bwrap` probe is skipped, and there is no Secret Service

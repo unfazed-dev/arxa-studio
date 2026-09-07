@@ -8,8 +8,9 @@
 # Layers, cheapest first — a later layer only runs when the ones it needs passed:
 #   1  toolchain + deps        node, npm ci, bwrap, secret-tool, zenity
 #   2  engine                  the 80+ suite CI, then the boot smoke (binds a port, serves HTML)
-#   3  sidecars                pack-cli (dart compile exe) and pack-sidecar (bun) for THIS triple
-#   4  shell                   cargo build of the Tauri app against webkit2gtk
+#   3  sidecars                pack-cli (dart compile exe), pack-sidecar (bun), then the
+#                             SAME boot smoke driven through the packed binary
+#   4  shell                   cargo build + the engine_unit (systemd) tests
 #   5  window (best effort)    the built shell under Xvfb; a container compositing
 #                              failure is reported, not chased — Hyprland is the real target
 set -uo pipefail
@@ -118,6 +119,19 @@ if want all || want sidecars; then
   else
     row FAIL "pack-sidecar" "$(tail -3 /tmp/pack-sidecar.log | tr '\n' ' ')"
   fi
+
+  # The artifact that actually ships is the packed one, so put it through the
+  # SAME gate as the checkout engine: extract, boot, bind, answer 200 HTML.
+  # Step 4 proves the checkout tree; this proves the payload's own copy of it.
+  step "7b packed sidecar boot smoke"
+  PACKED="$WORK/arxa/desktop/src-tauri/binaries/arxa-studio-$(uname -m)-unknown-linux-gnu"
+  if [ ! -x "$PACKED" ]; then
+    row SKIP "packed boot" "no $PACKED (pack-sidecar failed)"
+  elif ARXA_SMOKE_LAUNCHER="$PACKED" npm run smoke > /tmp/packed-smoke.log 2>&1; then
+    row PASS "packed boot" "$(grep -o 'OK — .*' /tmp/packed-smoke.log | head -1)"
+  else
+    row FAIL "packed boot" "$(tail -3 /tmp/packed-smoke.log | tr '\n' ' ')"
+  fi
 fi
 
 # ---- 4. the shell -----------------------------------------------------------
@@ -137,6 +151,25 @@ if want all || want shell; then
     row PASS "cargo build" "$(ls -la "$WORK/arxa/desktop/src-tauri/target/release/arxa-desktop" 2>/dev/null | awk '{print $5" bytes"}')"
   else
     row FAIL "cargo build" "$(grep -E '^error' /tmp/cargo.log | head -3 | tr '\n' ' ')"
+  fi
+
+  # engine_unit.rs is #[cfg(target_os = "linux")], so macOS can NEVER run its
+  # tests and `cargo build` does not run tests at all — this is the only place
+  # the systemd unit renderer is actually exercised. Single-threaded: the
+  # XDG_CONFIG_HOME test mutates process env.
+  step "8b cargo test (systemd unit renderer)"
+  if (cd "$WORK/arxa/desktop/src-tauri" && cargo test --release engine_unit -- --test-threads=1 > /tmp/cargo-test.log 2>&1); then
+    # Assert the COUNT, not just "ok": a filter that stops matching (module
+    # renamed, moved behind another cfg) would otherwise report PASS on
+    # "0 passed" — the same silent-zero shape as the allowScripts bug.
+    n_tests="$(grep -o 'test result: ok. [0-9]* passed' /tmp/cargo-test.log | grep -o '[0-9]*' | head -1)"
+    if [ "${n_tests:-0}" -ge 3 ]; then
+      row PASS "cargo test" "$n_tests engine_unit tests passed"
+    else
+      row FAIL "cargo test" "expected 3+ engine_unit tests, ran ${n_tests:-0} — did the module move?"
+    fi
+  else
+    row FAIL "cargo test" "$(grep -E '^(error|test .* FAILED|failures:)' /tmp/cargo-test.log | head -3 | tr '\n' ' ')"
   fi
 fi
 

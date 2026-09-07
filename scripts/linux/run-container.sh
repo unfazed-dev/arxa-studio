@@ -72,4 +72,9 @@ fi
 # the same way so a release build is not denied halfway through.
 ensure_volumes arxa-linux-cargo arxa-linux-target arxa-linux-pnpm-store arxa-linux-npm-cache
 
-exec docker run "${args[@]}" "$IMAGE" bash /src/arxa-studio/scripts/linux/bringup.sh "${1:-all}"
+# Run a COPY of the script, never /src directly: bash reads a script
+# incrementally by byte offset, so editing it on the host mid-run makes the
+# container land in the middle of a line ("syntax error near unexpected
+# token" at step 9, 2026-09-07) and the whole result table is lost.
+exec docker run "${args[@]}" "$IMAGE" bash -c \
+  'cp /src/arxa-studio/scripts/linux/bringup.sh /tmp/bringup.sh && exec bash /tmp/bringup.sh "$1"' _ "${1:-all}"

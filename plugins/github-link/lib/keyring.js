@@ -30,6 +30,8 @@ import { promisify } from 'node:util'
  *  observed 2026-09-07 with a 70s-old `security` child and no studio on the
  *  port. A store that cannot answer in two seconds is a store we do not use. */
 export const PROBE_TIMEOUT_MS = 2000
+// How long an unusable store is trusted to stay unusable before we look again.
+export const REPROBE_MS = 60_000
 
 export const KEYCHAIN_SERVICE = 'arxa-studio'
 export const SECURITY_PATH = '/usr/bin/security'
@@ -158,10 +160,12 @@ function captureWithStdin(cmd, args, stdin) {
  *   secretToolPath  — override the libsecret binary path (same)
  *   run             — injectable (cmd, args) => Promise<{stdout}> for `security`
  *   runSecret       — injectable (cmd, args, stdin) => Promise<string> for secret-tool
+ *   reprobeMs       — how long a FAILED usability probe is cached (default 60s)
+ *   hangMs          — a probe at least this slow counts as a HANG and is never retried
  *   probeStore      — injectable () => boolean usability probe (tests; default
  *                     is the real throwaway write against the platform store)
  */
-export function createKeyring({ bridge, platform = process.platform, securityPath = SECURITY_PATH, secretToolPath = SECRET_TOOL_PATH, run, runSecret, probeStore } = {}) {
+export function createKeyring({ bridge, platform = process.platform, securityPath = SECURITY_PATH, secretToolPath = SECRET_TOOL_PATH, run, runSecret, probeStore, reprobeMs = REPROBE_MS, hangMs = PROBE_TIMEOUT_MS } = {}) {
   if (bridge && typeof bridge.setSecret === 'function' && typeof bridge.getSecret === 'function' && typeof bridge.deleteSecret === 'function') {
     return makeBridgeBackend(bridge)
   }
@@ -177,11 +181,37 @@ export function createKeyring({ bridge, platform = process.platform, securityPat
   // 38ms on the engine's boot path (CPU profile, 2026-09-07) for a keyring most
   // boots never touch.
   let real = null
-  const build = () => {
-    if (linux) return (probeStore ?? (() => secretServiceUsable(secretToolPath)))() ? makeSecretToolBackend(secretToolPath, capture) : makeMemoryBackend()
-    return (probeStore ?? (() => keychainUsable(securityPath)))() ? makeSecurityBackend(securityPath, runner) : makeMemoryBackend()
+  let probedAt = 0
+  // One memory instance, reused across re-probes, so a secret written while
+  // the store was unusable stays readable for the session.
+  let mem = null
+  const memory = () => (mem ??= makeMemoryBackend())
+  // A probe that burns its whole timeout means the store HANGS rather than
+  // refuses (B1: `security` blocked for 70s against a keychain-less HOME).
+  // Retrying THAT every reprobeMs would stall a status poll for two seconds a
+  // minute, so a hang is cached for the process; only fast refusals are retried.
+  let hung = false
+  const probe = (fn) => {
+    const t0 = Date.now()
+    const usable = fn()
+    if (!usable && Date.now() - t0 >= hangMs) hung = true
+    return usable
   }
-  const backend = () => (real ??= build())
+  const build = () => {
+    if (linux) return probe(probeStore ?? (() => secretServiceUsable(secretToolPath))) ? makeSecretToolBackend(secretToolPath, capture) : memory()
+    return probe(probeStore ?? (() => keychainUsable(securityPath))) ? makeSecurityBackend(securityPath, runner) : memory()
+  }
+  // A WORKING store is cached for the process lifetime; a FAILED probe only
+  // for reprobeMs. Otherwise a keychain still locked at login, or a Secret
+  // Service that starts after the engine, would pin the token to memory for
+  // the entire session — invisible until the user restarts arxa. ponytail:
+  // secrets written to memory before an upgrade are not migrated into the
+  // store; they stay session-only, which is what the fallback already promises.
+  const backend = () => {
+    if (real !== null && (hung || real.backend !== 'memory' || Date.now() - probedAt < reprobeMs)) return real
+    probedAt = Date.now()
+    return (real = build())
+  }
   return {
     get backend() { return backend().backend },
     setSecret: (account, secret) => backend().setSecret(account, secret),

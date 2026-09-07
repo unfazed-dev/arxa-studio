@@ -164,7 +164,10 @@ everything in an Arch container on this machine.
 | B5 | **The locale package gate hashed filenames in ICU collation order** (`localeCompare`), so the same package hashed differently per node build; and the pin itself had been taken against a damaged tree missing a file. | `plugins/locale/selftest.mjs` | Byte-stable order now, pinned to the complete 16-file published tree — verified identical on macOS and Arch. |
 | B6 | **Nothing pinned pnpm**, and dsh resolves its stock rows against the layout pnpm produces. pnpm 10 vs 11 hoists differently and the engine died on `ERR_MODULE_NOT_FOUND` for `@deepseek-ai/dsh-commands`. | `package.json` | `packageManager: pnpm@11.21.0`, and the container matches. |
 | B7 | **npm 12 blocks install scripts by default**, so `node-pty`, `koffi`, `esbuild`, `protobufjs` and dsh's spawn helper silently never built. | `package.json` `allowScripts` | A fresh clone on any npm-12 machine (Omarchy gets node from mise, so npm 12 is likely) had no working pty. The five are approved by name; `edgedriver`/`geckodriver` deliberately are not. |
-| B8 | **The boot smoke could not tell a dead launcher from a slow one** — every failure read "never printed its token URL". | `scripts/engine-boot-smoke.mjs` | It now reports the exit code and the child's last words. |
+| B8 | **The boot smoke could not tell a dead launcher from a slow one** — every failure read "never printed its token URL". | `scripts/engine-boot-smoke.mjs` | It now reports the exit code and the child's last words, and `ARXA_SMOKE_LAUNCHER` points the same gate at the packed sidecar. |
+| B9 | **The packed sidecar's first boot was never logged.** Packed mode opens `<DSH_HOME>/engine.log` before anything creates `<DSH_HOME>`, so `openSync` threw ENOENT into a silent catch. | `bin/arxa-studio.mjs` | Every installed app's FIRST run — the one users report — produced no log at all, on both platforms. Found by pointing the boot smoke at the packed binary. Now `mkdirSync` first. |
+| B10 | **`allowScripts` pins by exact version**, so the next dsh wave bump leaves keys matching nothing and `node-pty`/`koffi` silently stop being built while `npm ci` exits 0. | `scripts/dsh-contract-check.mjs` | Not yet bitten; the gate now asserts every `allowScripts` key names the version actually installed. |
+| B11 | **One 2-second probe decided the keyring backend for the whole session.** A login keychain still locked at boot, or a Secret Service that starts after the engine, pinned the GitHub token to memory until the app was restarted. | `plugins/github-link/lib/keyring.js` | A working store is still cached for the process; a FAILED probe now expires after 60s and is retried. |
 
 ### Harness lessons (container, not product)
 
@@ -175,7 +178,7 @@ everything in an Arch container on this machine.
 
 ### Where it stands
 
-`scripts/linux/run-container.sh all`, arm64 Arch — **13 PASS, 0 FAIL, 1 SKIP**:
+`scripts/linux/run-container.sh all`, arm64 Arch — **15 PASS, 0 FAIL, 1 SKIP**:
 
 | Layer | Result |
 |---|---|
@@ -186,11 +189,33 @@ everything in an Arch container on this machine.
 | `secret-tool` round-trip against gnome-keyring | PASS — real libsecret |
 | `pack-cli` → `arxa-aarch64-unknown-linux-gnu` | PASS — 12.8 MB |
 | `pack-sidecar` → `arxa-studio-aarch64-unknown-linux-gnu` | PASS — 276 MB |
+| **packed sidecar boot smoke — the shipped binary, same 200 HTML gate** | **PASS (4s)** |
 | `cargo build` of the Tauri shell against webkit2gtk 2.52 | PASS — 42 MB |
+| `cargo test engine_unit` — the systemd unit renderer | PASS — 3 tests (macOS can never run these) |
 | **shell under Xvfb: full launch flow** | **PASS** — probe → systemd attempt → detached fallback → `engine sidecar spawned (pid 121)` → keyring `secret-tool store` |
 | bwrap sandbox | SKIP — no unprivileged user namespaces in the container |
 
 macOS after every change: 83 suites ALL GREEN, boot smoke OK.
+
+### Open, measured, not fixed: the payload ships devDependencies
+
+Extracting both darwin payloads (2026-09-07) puts the shipped tree at 753 MB,
+up from 609 MB. Two causes, only one of them wanted:
+
+- `plugins/artifact-viewer/lib/monaco-build/dist` — **+32 MB, wanted.** That
+  bundle is gitignored and built by `npm run build` in `monaco-build`, so it is
+  host state — but `scripts/pack-sidecar.mjs` refuses to pack without
+  `dist/arxa-monaco.js`, so a payload can never ship without it. What the two
+  payloads show is a fuller bundle than the earlier one, not a fixed break.
+- `node_modules` — **+112 MB of devDependencies** (`@wdio/*`, `webdriverio`,
+  `webdriver`, `rxjs`, `cheerio`, `@esbuild/*`). `scripts/pack-sidecar.mjs` tars
+  the whole `node_modules`, so every test tool rides along into every install
+  and every update.
+
+Not a Linux regression — the packer has always done this — and not fixed here
+because "which tree do we pack" is a packaging decision. The cheap version is a
+prod-only file list from `npm ls --omit=dev --parseable`, and the packed boot
+smoke (step 7b) is now the gate that would catch getting it wrong.
 
 Two container-only obstacles were traced and fixed in the harness, not the app:
 the shell needs a **session bus** (it talks to the a11y bus and the XDG portal

@@ -66,6 +66,31 @@ for (const entry of Object.values(lock.packages)) {
 ok(`every @deepseek-ai/dsh* package in the lockfile is on the ${wave} wave`, stragglers.length === 0,
   stragglers.join(', ') || 'lockstep')
 
+// ---- 2b. allowScripts still matches what is installed -------------------------
+// npm 12 only runs a dependency's install scripts when package.json's
+// allowScripts names it AT ITS EXACT VERSION. A wave bump (or any dep bump)
+// leaves the old "name@version" key behind, matching nothing — npm then exits 0
+// with node-pty and koffi UNBUILT, and the failure surfaces much later as a
+// terminal that will not open. Pin the keys to the installed tree here.
+{
+  const stale = []
+  for (const key of Object.keys(pkg.allowScripts ?? {})) {
+    const at = key.lastIndexOf('@')
+    const name = key.slice(0, at)
+    const pinned = key.slice(at + 1)
+    let installed
+    try {
+      installed = JSON.parse(readFileSync(join(root, 'node_modules', name, 'package.json'), 'utf8')).version
+    } catch {
+      stale.push(`${key} (not installed)`)
+      continue
+    }
+    if (installed !== pinned) stale.push(`${key} → installed ${installed}`)
+  }
+  ok('every allowScripts key names the installed version', stale.length === 0,
+    stale.join(', ') || `${Object.keys(pkg.allowScripts ?? {}).length} entries, all current`)
+}
+
 // ---- 3. the import surface ----------------------------------------------------
 // [module, {exportName: typeof}] — the names the host half (plugins/*)
 // actually destructures. BROWSER-RUNTIME ids (dsh-client-ui-primitives,
