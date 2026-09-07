@@ -128,7 +128,7 @@ const hashPkg = (specifier, expected) => {
   return { ok: got === expected, got }
 }
 // [re-pinned 2026-09-07 when the walk order became byte-stable; dsh 0.1.2-rc.1]
-const PINNED_LOCALE_SHA = '5055f54a37163cbc67c9ed0d36da44008c133704fc8787c764ca6e1287a2abb3'
+const PINNED_LOCALE_SHA = '89a696152ec6ab9679757f490ad63a46e484e75821e9f5f632870dcfa8172bff'
 {
   // package-tree sha256, code-unit filename order
   const s = hashPkg('@deepseek-ai/dsh-client-locale', PINNED_LOCALE_SHA)
