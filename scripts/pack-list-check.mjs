@@ -12,7 +12,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { BIN_FILES, binDeps, checkPackList } from './pack-manifest.mjs'
+import { BIN_FILES, binDeps, checkPackList, hostTriple } from './pack-manifest.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 let n = 0
@@ -65,5 +65,15 @@ assert.ok(live.reachable.includes('arxa-studio.mjs'), 'the launcher itself is re
 for (const f of live.unused) console.log(`  warn ${f} is packed but nothing under bin/ loads it (computed load? stale entry?)`)
 ok(`live pack list matches the launcher's loads (${live.reachable.length} files: ${live.reachable.join(', ')})`)
 
+
+// ---- 3. the target triple both packers stamp into the sidecar filename.
+assert.equal(hostTriple('darwin', 'arm64'), 'aarch64-apple-darwin')
+assert.equal(hostTriple('darwin', 'x64'), 'x86_64-apple-darwin')
+assert.equal(hostTriple('linux', 'arm64'), 'aarch64-unknown-linux-gnu')
+assert.equal(hostTriple('linux', 'x64'), 'x86_64-unknown-linux-gnu')
+assert.throws(() => hostTriple('win32', 'x64'), /unsupported platform/)
+assert.throws(() => hostTriple('linux', 'ppc64'), /unsupported cpu/)
+assert.match(hostTriple(), /^(aarch64|x86_64)-(apple-darwin|unknown-linux-gnu)$/, 'this host resolves to a real triple')
+ok('hostTriple covers both supported platforms and refuses the rest')
 
 console.log(`pack-list-check: ${n} ok`)

@@ -28,7 +28,7 @@ import { createHash } from 'node:crypto'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
-import { BIN_FILES, checkPackList } from './pack-manifest.mjs'
+import { BIN_FILES, checkPackList, hostTriple } from './pack-manifest.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const studioRoot = resolve(here, '..')            // .../arxa-studio
@@ -36,7 +36,7 @@ const parentDir = dirname(studioRoot)             // .../totem_labs
 const studioName = basename(studioRoot)           // arxa-studio
 const arxaGateRel = join('arxa', 'harness', 'pi', 'arxa-gate.ts')
 
-const triple = `${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}-apple-darwin`
+const triple = hostTriple()
 const outIdx = process.argv.indexOf('--out')
 const outFile = outIdx >= 0
   ? resolve(process.argv[outIdx + 1])
@@ -44,6 +44,8 @@ const outFile = outIdx >= 0
 
 // Sanity: this script must run under real node — its execPath is what we pin
 // into the payload as the engine's runtime.
+const tarBin = ['/usr/bin/tar', '/bin/tar'].find((c) => existsSync(c)) ?? 'tar'
+
 const nodeBin = process.execPath
 if (!/node$/.test(nodeBin)) {
   console.error(`pack-sidecar: run me with node, not ${nodeBin} — the exec path is pinned into the payload`)
@@ -87,7 +89,7 @@ if (!existsSync(join(studioRoot, monacoDist))) {
 }
 
 if (checkOnly) {
-  console.log(`pack-sidecar: --check OK — pack list (${drift.reachable.join(', ')}), inputs and monaco bundle all present`)
+  console.log(`pack-sidecar: --check OK — target ${triple}, pack list (${drift.reachable.join(', ')}), inputs and monaco bundle all present`)
   process.exit(0)
 }
 
@@ -115,7 +117,7 @@ try {
 
   const tarball = join(work, 'payload.tar.gz')
   console.log('pack-sidecar: creating payload.tar.gz (node_modules + plugins + node runtime)…')
-  const tar = spawnSync('/usr/bin/tar', [
+  const tar = spawnSync(tarBin, [
     // plugins/ is tarred whole, and monaco-build carries 1.3 GB of build-time
     // node_modules (vite, rolldown, the @codingame stack) that exists only to
     // produce dist/. Without this the payload grows by that entire tree.
@@ -160,7 +162,8 @@ if (!existsSync(okMarker)) {
   mkdirSync(tmp, { recursive: true });
   const tarball = join(tmp, "payload.tar.gz");
   await Bun.write(tarball, Bun.file(payload));
-  const r = spawnSync("/usr/bin/tar", ["-xzf", tarball, "-C", tmp], { stdio: "inherit" });
+  const tarBin = ["/usr/bin/tar", "/bin/tar"].find((c) => existsSync(c)) ?? "tar";
+  const r = spawnSync(tarBin, ["-xzf", tarball, "-C", tmp], { stdio: "inherit" });
   if (r.status !== 0) { console.error("arxa-studio sidecar: payload extraction failed"); process.exit(1); }
   rmSync(tarball, { force: true });
   writeFileSync(join(tmp, ".extracted"), SHA + "\\n");

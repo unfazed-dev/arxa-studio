@@ -22,6 +22,24 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
+ * The Rust target triple Tauri expects in an `externalBin` filename, for the
+ * host we are packing on: Tauri resolves `binaries/arxa-studio` to
+ * `binaries/arxa-studio-<triple>`, so a wrong triple is a build that cannot
+ * find its sidecar.
+ *
+ * Linux is glibc-only on purpose — the payload embeds the BUILD HOST's node, so
+ * a musl host would produce a binary that only runs on musl. If that day comes,
+ * pack on the target libc rather than renaming the triple.
+ */
+export function hostTriple (platform = process.platform, arch = process.arch) {
+  const cpu = arch === 'arm64' ? 'aarch64' : arch === 'x64' ? 'x86_64' : undefined
+  if (cpu === undefined) throw new Error(`pack: unsupported cpu ${arch}`)
+  if (platform === 'darwin') return `${cpu}-apple-darwin`
+  if (platform === 'linux') return `${cpu}-unknown-linux-gnu`
+  throw new Error(`pack: unsupported platform ${platform}`)
+}
+
+/**
  * Every bin/ module the launcher loads at runtime. Explicit (not a glob) on
  * purpose: bin/ also holds dev-only scripts (arxa-explore, isolation-check,
  * arxa-engine-sync) that must NOT ship in the sidecar.

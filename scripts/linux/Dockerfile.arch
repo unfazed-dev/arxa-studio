@@ -1,0 +1,75 @@
+# Arch test image for the Linux port (docs/plans/linux-omarchy-port.md).
+#
+# Base: Arch Linux ARM on arm64 — the official archlinux:* images are amd64-only,
+# so a native (unemulated) container on Apple Silicon has to come from ALARM.
+# The x86_64 pass at the end of the port uses `archlinux:base-devel` under
+# emulation instead; ARG BASE exists for exactly that.
+#
+# Package set mirrors what Omarchy ships (basecamp/omarchy install/omarchy-base.packages:
+# gnome-keyring, libsecret, xdg-desktop-portal-gtk, polkit-gnome, rust) plus the
+# build inputs Omarchy does NOT ship and a Linux build needs: nodejs/npm (Omarchy
+# gets node from mise), webkit2gtk-4.1 and friends for Tauri, xvfb for the
+# headless window smoke.
+ARG BASE=menci/archlinuxarm:base-devel
+FROM ${BASE}
+
+# pacman 7 drops privileges to the `alpm` user and fences downloads with
+# Landlock; neither is permitted inside a container build, and the failure reads
+# as "failed to synchronize all databases", which looks like a mirror problem and
+# is not. Turning the download sandbox off is safe here: the build itself is the
+# isolation boundary. (The `DownloadUser` line is deleted for pacman 6, where
+# `DisableSandbox` is not a recognised directive.)
+RUN sed -i '/^ *DownloadUser/d' /etc/pacman.conf \
+ && printf '\nDisableSandbox\n' >> /etc/pacman.conf
+
+# One transaction: a partial `pacman -Sy` is the classic Arch container footgun.
+RUN pacman -Syu --noconfirm --needed \
+      nodejs npm git rust \
+      webkit2gtk-4.1 gtk3 libsoup3 librsvg openssl pkgconf cmake \
+      bubblewrap libsecret gnome-keyring dbus polkit \
+      xdg-desktop-portal xdg-desktop-portal-gtk \
+      xorg-server-xvfb ttf-dejavu zenity \
+      unzip zip which jq procps-ng \
+  && pacman -Scc --noconfirm
+
+# Dart SDK: `dart` is an official Arch package on x86_64 only, so the aarch64
+# image takes the upstream tarball. Pinned to a release, not `latest`, so a
+# rebuild is the same SDK.
+# Must satisfy arxa/arxa/pubspec.yaml `sdk: ^3.12.0` (host SDK is 3.13.2).
+ARG DART_VERSION=3.13.2
+RUN set -eu; \
+    case "$(uname -m)" in \
+      aarch64) DART_ARCH=arm64 ;; \
+      x86_64)  DART_ARCH=x64 ;; \
+      *) echo "unsupported arch $(uname -m)" >&2; exit 1 ;; \
+    esac; \
+    url="https://storage.googleapis.com/dart-archive/channels/stable/release/${DART_VERSION}/sdk/dartsdk-linux-${DART_ARCH}-release.zip"; \
+    curl -fsSL "$url" -o /tmp/dart.zip; \
+    unzip -q /tmp/dart.zip -d /opt; \
+    rm /tmp/dart.zip; \
+    /opt/dart-sdk/bin/dart --version
+ENV PATH="/opt/dart-sdk/bin:${PATH}"
+ENV PUB_CACHE=/home/builder/.pub-cache
+
+# bun compiles the packed sidecar entry (scripts/pack-sidecar.mjs). The npm
+# package pulls the right prebuilt binary per platform; the AUR bun-bin is not
+# reachable from a plain container build.
+# --allow-scripts is required: npm 11 blocks postinstall by default and bun's
+# postinstall is what fetches the actual binary.
+ARG BUN_VERSION=1.4.2
+RUN npm install -g --allow-scripts=bun "bun@${BUN_VERSION}" && bun --version
+
+# A non-root user: bwrap refuses to nest under some root configurations, npm
+# scripts run happier, and it matches how the app really runs.
+RUN useradd -m -u 1000 builder && chown -R builder:builder /home/builder
+USER builder
+WORKDIR /work/arxa-studio
+
+# The repos are bind-mounted from the host and owned by a different uid.
+RUN git config --global --add safe.directory '*'
+
+ENV CARGO_HOME=/home/builder/.cargo \
+    RUSTUP_HOME=/home/builder/.rustup \
+    npm_config_cache=/home/builder/.npm
+
+CMD ["/bin/bash"]

@@ -849,25 +849,12 @@ export function apply(ctx, opts = {}) {
       req.on('data', (c) => { raw += c })
       req.on('end', async () => {
         try {
-          if (process.platform !== 'darwin') {
-            return json(res, { ok: false, error: 'folder picker unsupported on ' + process.platform })
-          }
           const { title } = JSON.parse(raw || '{}')
-          const prompt = String(title ?? 'Choose a folder').replace(/["\\]/g, '')
           const { spawn } = await import('node:child_process')
-          const child = spawn('/usr/bin/osascript', ['-e',
-            'POSIX path of (choose folder with prompt "' + prompt + '")'])
-          let out = ''
-          let err = ''
-          child.stdout.on('data', (c) => { out += c })
-          child.stderr.on('data', (c) => { err += c })
-          const code = await new Promise((r) => child.on('exit', r))
-          if (code === 0) {
-            const p = out.trim().replace(/\/+$/, '') || '/'
-            return json(res, { ok: true, path: p })
-          }
-          const canceled = code === 128 || /User canceled/.test(err)
-          return json(res, { ok: false, canceled, error: canceled ? 'canceled' : err.trim() || ('osascript exited ' + code) })
+          const { existsSync } = await import('node:fs')
+          const { pickFolder } = await import(new URL('./folder-picker.js', import.meta.url).href)
+          // osascript on macOS, zenity/kdialog on Linux — same answer shape.
+          return json(res, await pickFolder({ title, spawn, exists: existsSync }))
         } catch (e) {
           json(res, { ok: false, error: String(e?.message ?? e) })
         }

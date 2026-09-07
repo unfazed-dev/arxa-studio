@@ -16,6 +16,7 @@
  * runner is asleep (wake it; never fix code, the canon says).
  */
 import fs from 'node:fs'
+import { installUserService, removeUserService, runnerLabels, unitName } from './service-unit.js'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 
@@ -63,6 +64,9 @@ export async function ensureRunner(opts) {
   const home = opts.home ?? process.env.HOME
   const run = opts.run ?? sh
   const fetchImpl = opts.fetch ?? globalThis.fetch
+  // Injectable so the selftest can drive both platforms on one machine.
+  const platform = opts.platform ?? process.platform
+  const arch = opts.arch ?? process.arch
   if (!owner || !name) return { ok: false, reason: 'owner-and-name-required' }
   const base = runnersBase(home)
   const dir = path.join(base, owner + '__' + name)
@@ -80,14 +84,24 @@ export async function ensureRunner(opts) {
       '--url', 'https://github.com/' + owner + '/' + name,
       '--token', token,
       '--name', 'arxa-' + owner + '-' + name,
-      '--labels', 'macOS,ARM64,arxa',
+      // Labels are what `runs-on:` matches; the old hardcoded macOS,ARM64 set
+      // made a Linux runner advertise itself as a Mac.
+      '--labels', runnerLabels(platform, arch),
       '--unattended',
     ], { cwd: dir })
-    // Service install is best-effort: a runner without the LaunchAgent
-    // still works while arxa studio runs; svc.sh merely survives reboots.
+    // Service install is best-effort: a runner without a service still works
+    // while arxa studio runs; the service merely survives reboots.
+    //
+    // macOS: svc.sh writes a per-user LaunchAgent, no sudo. Linux: the same
+    // script writes a SYSTEM unit through sudo, so we install a
+    // `systemd --user` unit ourselves instead (see lib/service-unit.js).
     try {
-      await run('./svc.sh', ['install'], { cwd: dir })
-      await run('./svc.sh', ['start'], { cwd: dir })
+      if (platform === 'linux') {
+        await installUserService({ dir, owner, name, home, run: (cmd, args) => run(cmd, args, { cwd: dir }) })
+      } else {
+        await run('./svc.sh', ['install'], { cwd: dir })
+        await run('./svc.sh', ['start'], { cwd: dir })
+      }
     } catch { /* best-effort — the runner is registered and listening */ }
     return { ok: true, dir }
   } catch (err) {
@@ -108,22 +122,28 @@ export function runnerExists(owner, name, home = process.env.HOME) {
  * a deleted repo takes its runner registrations with it. Idempotent.
  * @returns {Promise<{ ok: true, existing: boolean, dir: string, serviceRemoved: boolean } | { ok: false, reason: string }>}
  */
-export async function removeRunner({ owner, name, home = process.env.HOME, run = sh } = {}) {
+export async function removeRunner({ owner, name, home = process.env.HOME, run = sh, platform = process.platform } = {}) {
   if (!owner || !name) return { ok: false, reason: 'owner-and-name-required' }
   const dir = path.join(runnersBase(home), owner + '__' + name)
   if (!fs.existsSync(dir)) return { ok: true, existing: false, dir, serviceRemoved: false }
   let serviceRemoved = false
-  try {
-    await run('./svc.sh', ['stop'], { cwd: dir })
-    await run('./svc.sh', ['uninstall'], { cwd: dir })
-    serviceRemoved = true
-  } catch { /* fall through to the label-based teardown */ }
-  const label = 'actions.runner.' + owner + '-' + name + '.arxa-' + owner + '-' + name
-  const plist = path.join(home, 'Library', 'LaunchAgents', label + '.plist')
-  if (!serviceRemoved || fs.existsSync(plist)) {
-    try { await run('launchctl', ['bootout', 'gui/' + process.getuid() + '/' + label]) } catch { /* not loaded */ }
-    try { fs.rmSync(plist, { force: true }) } catch { /* best-effort */ }
-    serviceRemoved = !fs.existsSync(plist)
+  if (platform === 'linux') {
+    // Our own user unit, so nothing to ask svc.sh (which would sudo).
+    const out = await removeUserService({ owner, name, home, run: (cmd, args) => run(cmd, args, { cwd: dir }) })
+    serviceRemoved = out.removed
+  } else {
+    try {
+      await run('./svc.sh', ['stop'], { cwd: dir })
+      await run('./svc.sh', ['uninstall'], { cwd: dir })
+      serviceRemoved = true
+    } catch { /* fall through to the label-based teardown */ }
+    const label = 'actions.runner.' + owner + '-' + name + '.arxa-' + owner + '-' + name
+    const plist = path.join(home, 'Library', 'LaunchAgents', label + '.plist')
+    if (!serviceRemoved || fs.existsSync(plist)) {
+      try { await run('launchctl', ['bootout', 'gui/' + process.getuid() + '/' + label]) } catch { /* not loaded */ }
+      try { fs.rmSync(plist, { force: true }) } catch { /* best-effort */ }
+      serviceRemoved = !fs.existsSync(plist)
+    }
   }
   try {
     fs.rmSync(dir, { recursive: true, force: true })
