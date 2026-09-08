@@ -216,6 +216,68 @@ ok('wipCommit still throws on a genuine add failure (not the tolerated embedded-
   }
 })
 
+// --- tolerance must survive a non-English git locale ------------------------
+// The two tolerance checks above match git's compiled-in English strings.
+// git actually translates those strings under a non-English locale (verified
+// empirically: LC_ALL=fr_FR.UTF-8 turns "does not have a commit checked out"
+// into "n'a pas de commit extrait", and "nothing added to commit but
+// untracked files present" into "aucune modification ajoutée à la validation
+// mais des fichiers non suivis sont présents" — see the round-2 write-up in
+// engine-wipcommit-report.md). run.js's childEnv() now pins LC_ALL=C on every
+// git child process regardless of what the caller's env requests, so a
+// caller passing a French env must still see the English tolerance path.
+// This repo has fr_FR.UTF-8 installed, so these exercise the real pin
+// end-to-end rather than just asserting a key is present on the call.
+//
+// A real user's machine is far more likely to set only LANG (e.g.
+// LANG=fr_FR.UTF-8) than to set LC_ALL directly — LC_ALL is the rarer,
+// more deliberate override. Verified empirically that LC_ALL wins over LANG
+// on this git/gettext build: LANG=fr_FR.UTF-8 alone (no LC_ALL) produces the
+// French messages above; adding LC_ALL=C on top of that same LANG reverts
+// both to English. The first test below passes only LANG, matching the
+// realistic case; the second passes LC_ALL directly to also cover that path.
+
+ok('wipCommit is still a no-op under a non-English git locale (LANG only, no LC_ALL — the realistic case)', () => {
+  const proj = freshRepo('project-embedded-repo-only-locale')
+  fs.writeFileSync(path.join(proj, 'root.txt'), 'hello\n')
+  runGit(['add', '-A'], { cwd: proj })
+  runGit(['commit', '-m', 'seed'], { cwd: proj })
+
+  const sub = path.join(proj, 'sub')
+  fs.mkdirSync(sub)
+  runGit(['init', '-b', 'main'], { cwd: sub })
+  fs.writeFileSync(path.join(sub, 'file.txt'), 'content\n')
+
+  const frenchEnv = { ...process.env, LANG: 'fr_FR.UTF-8' }
+  delete frenchEnv.LC_ALL
+  const before = runGit(['rev-parse', 'HEAD'], { cwd: proj })
+  const result = wipCommit(proj, { message: 'auto-save', env: frenchEnv })
+  assert.equal(result.committed, false)
+  assert.equal(result.sha, null)
+  assert.equal(runGit(['rev-parse', 'HEAD'], { cwd: proj }), before, 'HEAD must not move')
+})
+
+ok('wipCommit still commits the rest of the tree under a non-English git locale (LC_ALL set directly, embedded repo + unrelated change)', () => {
+  const proj = freshRepo('project-embedded-repo-locale')
+  fs.writeFileSync(path.join(proj, 'root.txt'), 'hello\n')
+  runGit(['add', '-A'], { cwd: proj })
+  runGit(['commit', '-m', 'seed'], { cwd: proj })
+
+  const sub = path.join(proj, 'sub')
+  fs.mkdirSync(sub)
+  runGit(['init', '-b', 'main'], { cwd: sub })
+  fs.writeFileSync(path.join(sub, 'file.txt'), 'content\n')
+  fs.writeFileSync(path.join(proj, 'root2.txt'), 'unrelated change\n')
+
+  const frenchEnv = { ...process.env, LC_ALL: 'fr_FR.UTF-8' }
+  const result = wipCommit(proj, { message: 'auto-save', env: frenchEnv })
+  assert.equal(result.committed, true, 'wipCommit must succeed despite the embedded repo, even under a French locale')
+  assert.ok(result.sha)
+
+  const tracked = runGit(['ls-files'], { cwd: proj }).split('\n')
+  assert.ok(tracked.includes('root2.txt'), 'the unrelated file must still be committed')
+})
+
 // --- reviewedTip: "did the session's real work land?" ------------------------
 {
   const dir = fsx.mkdtempSync(pathx.join(osx.tmpdir(), 'arxa-reviewed-'))
