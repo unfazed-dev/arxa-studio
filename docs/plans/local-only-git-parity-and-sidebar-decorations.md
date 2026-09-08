@@ -262,6 +262,46 @@ defined` — `plugins/arxa-sidebar/lib/index.js` has no module-level `path` impo
 unit and string assertion passed while that was true; only driving the real route
 found it.
 
+
+### Live GitHub run, 2026-09-08 (org TERRA wired to `unfazed-dev/TERRA`)
+
+**Which smokes prove which code.** This bit me and is worth writing down: the
+live smokes split into two families, and only one of them tests the working
+tree.
+
+| smoke | wiring | what it actually tested |
+|---|---|---|
+| `card-cicd-smoke.mjs` | in-process imports | **current code** — 31 PASS, ALL GREEN |
+| `cicd-smoke.mjs` | in-process imports | current code |
+| `org-link-smoke.mjs` | HTTP to `ARXA_BASE` (127.0.0.1:7891) | whatever build that engine is running |
+| `org-purge-smoke.mjs` | HTTP to `ARXA_BASE` | same |
+
+The engine listening on 7891 during this run was an **older build** — probed
+directly, it answered `unknown-action` for both `card.finish` and `org.sweep`.
+So `org-purge-smoke`'s green and `org-link-smoke`'s red both describe code that
+predates this session. A BASE-driven smoke is only as current as the engine
+someone last launched, and nothing in the output says which.
+
+**`org-link-smoke.mjs` S5 has been dead for a long time.** Its `post()` helper
+sent *every* action to `/__arxa/sidebar/action`, but `card.*` / `insight.*` /
+`version.*` live on `/__arxa/git-card/action` (the split `card-local-smoke.mjs:77`
+makes). So the section named "the composer git card loop end-to-end" failed at
+its first card call with `unknown-action` and never reached the loop it tests.
+Routing fixed here.
+
+Fixing it exposed the next layer rather than a green: `card.commit` now returns
+`nothing-to-propose`. That is a **second, separate staleness** in the same
+section — it writes its probe file into the ORG worktree
+(`orgRow.path/notes/card-smoke.md`) and then expects the SESSION branch to have
+something to squash. Not chased in this pass, and not a product bug: it
+reproduces against the old engine too. S5 needs its own repair, against a
+freshly launched engine.
+
+**Still owed:** `cicd-smoke.mjs --yes`, and the lens pass. The installed
+`/Applications/Arxa Studio.app` is also the pre-change build, so the lens pass
+needs a rebuild first — the same rebuild that would make the BASE-driven smokes
+meaningful.
+
 ---
 
 ## 1. What local-only already does (verified, not assumed)

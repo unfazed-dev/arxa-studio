@@ -10,8 +10,13 @@
 const BASE = process.env.ARXA_BASE || 'http://127.0.0.1:7891'
 const NAME = 'D90SMOKE' + Date.now().toString(36).toUpperCase().slice(-6)
 
+/* card.* / insight.* / version.* live on the CARD's own route, not the
+ * sidebar's — the same split card-local-smoke.mjs:77 makes. This helper posted
+ * everything to the sidebar route, so every card assertion in S5 below has been
+ * answering `unknown-action` since the card got its own wire, and the smoke
+ * failed at its first card call instead of testing the loop it names. */
 const post = (action, arg) =>
-  fetch(BASE + '/__arxa/sidebar/action', {
+  fetch(BASE + (/^(card|insight|version)\./.test(action) ? '/__arxa/git-card/action' : '/__arxa/sidebar/action'), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ action, arg }),
