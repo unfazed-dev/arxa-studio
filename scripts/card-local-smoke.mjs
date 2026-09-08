@@ -32,6 +32,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
+import { endOfLife, sweepFlow } from './lib/card-flow.mjs'
 
 const sandbox = mkdtempSync(path.join(tmpdir(), 'arxa-card-local-'))
 process.env.ARXA_HOME = path.join(sandbox, 'home')
@@ -266,89 +267,22 @@ check('...and is NOT local-only, so the card shows its PR and CI section',
 writeFileSync(projManifestPath, JSON.stringify(projManifest, null, 2))
 
 // ============================================================
-section('7. End of life — Finish one session, Sweep the rest (D113)')
-// ============================================================
-/* Until 2026-09-08 finishSession and sweepMerged were fully implemented and
- * called by nothing but their own unit selftest: a session could be started,
- * committed and landed, but never CLOSED — its worktree and branch stayed
- * forever. These drive the routes the card and the row menus actually use, so
- * "implemented" and "reachable" stop being the same claim. */
-
-// sid landed its work in section 3, so its branch is merged and its worktree
-// is clean — the one shape finishSession accepts.
-r = await act('card.status', { sessionId: sid })
-check('card.status carries the finish gate for a session seat',
-  r.result?.finish !== null && r.result?.finish !== undefined, JSON.stringify(r.result?.finish ?? null))
-check('a merged, clean session reports finishable',
-  r.result?.finish?.can === true, JSON.stringify(r.result?.finish))
-
-// The refusal the operator must SEE rather than meet as a dead button.
-const finSess = gw.parkedSessions(org.path).find((x) => x.id === sid)
-writeFileSync(path.join(finSess.worktree, 'scratch.txt'), 'uncommitted\n')
-r = await act('card.status', { sessionId: sid })
-check('a dirty worktree turns the gate off and NAMES why',
-  r.result?.finish?.can === false && r.result?.finish?.reason === 'worktree-dirty',
-  JSON.stringify(r.result?.finish))
-r = await act('card.finish', { sessionId: sid })
-check('...and card.finish refuses it rather than half-acting',
-  r.ok === false || r.result?.finished === false, JSON.stringify(r).slice(0, 200))
-check('the refused session still has its worktree',
-  existsSync(finSess.worktree), finSess.worktree)
-
-// Clean it the way the app does — through the card, not by hand.
-rmSync(path.join(finSess.worktree, 'scratch.txt'))
-r = await act('card.finish', { sessionId: sid })
-check('card.finish removes the worktree and the branch',
-  r.ok === true && r.result?.finished === true, JSON.stringify(r).slice(0, 300))
-check('the worktree is really gone from disk', !existsSync(finSess.worktree), finSess.worktree)
-check('the branch is really gone from git',
-  git(['branch', '--list', finSess.branch], proj.path) === '',
-  git(['branch', '--list', finSess.branch], proj.path))
-check('the work it landed is still on main (finish is cleanup, never a revert)',
-  git(['show', '--name-only', '--format=', 'main'], proj.path).length >= 0
-  && git(['ls-tree', '--name-only', 'main'], proj.path).includes('hero.md'),
-  git(['ls-tree', '--name-only', 'main'], proj.path))
-
-// --- Sweep, on the project repo the row menu would target -------------------
-const sweepPreview = await act('org.sweep', { orgId: org.id, projectSlug: 'storefront', dryRun: true })
-check('org.sweep previews without touching anything',
-  sweepPreview.ok === true && Array.isArray(sweepPreview.result?.finished),
-  JSON.stringify(sweepPreview).slice(0, 300))
-const wouldGo = (sweepPreview.result?.finished ?? []).map((x) => x.id)
-const wouldStay = sweepPreview.result?.skipped ?? []
-check('the preview marks every row it lists as a dry run',
-  (sweepPreview.result?.finished ?? []).every((x) => x.dryRun === true),
-  JSON.stringify(sweepPreview.result?.finished))
-check('an already-finished session is not reported as unmerged forever',
-  !wouldGo.includes(sid) && (wouldStay.find((x) => x.id === sid)?.reason ?? 'absent') !== 'not-merged',
-  JSON.stringify(wouldStay))
-
-// The ceiling: act on a subset of the preview and nothing outside it moves.
-const stillThere = gw.parkedSessions(org.path).filter((x) => wouldGo.includes(x.id))
-// The ceiling assertion is worthless with one candidate: `others` would be
-// empty and `.every()` on an empty array is true, so it would pass without ever
-// proving anything. Require two.
-check('the sweep ceiling has something to prove — two or more candidates',
-  stillThere.length >= 2, JSON.stringify({ candidates: stillThere.map((x) => x.id) }))
-if (stillThere.length >= 2) {
-  const target = stillThere[0]
-  const others = stillThere.slice(1)
-  r = await act('org.sweep', { orgId: org.id, projectSlug: 'storefront', dryRun: false, only: [target.id] })
-  check('org.sweep acts on the ids it was given',
-    r.ok === true && (r.result?.finished ?? []).some((x) => x.id === target.id && x.finished === true),
-    JSON.stringify(r).slice(0, 300))
-  check('...and on nothing else, even when the others were equally sweepable',
-    others.every((o) => existsSync(o.worktree)),
-    JSON.stringify(others.map((o) => ({ id: o.id, gone: !existsSync(o.worktree) }))))
+/* Sections 7-8 are the SHARED table (Decision 5) — the same assertions the
+ * GitHub-linked smoke runs, imported rather than copied. Everything in it is
+ * plain local git through the card's own route, so it holds identically in
+ * both modes; the divergence it prevents is a flow that gets tested in one
+ * configuration and quietly not the other. Names come from ctx because the
+ * linked run uses arxa's real publish and real slugs. */
+const flowCtx = {
+  act, check, section, git, gw,
+  orgId: org.id, orgPath: org.path,
+  projectSlug: 'storefront', projectPath: proj.path,
+  workspace: wsPath, file: 'hero.md',
+  // A dock workspace on the ORG repo — the sweep scope check needs one.
+  orgWorkspace: 'notes',
 }
-
-// An org-row sweep must NOT reach into the project — the copy promises one repo.
-const orgSweep = await act('org.sweep', { orgId: org.id, dryRun: true })
-check('an org-row sweep sees only the ORG repo, never the projects beneath it',
-  orgSweep.ok === true
-  && (orgSweep.result?.finished ?? []).concat(orgSweep.result?.skipped ?? [])
-    .every((x) => !String(x.id).includes('storefront')),
-  JSON.stringify(orgSweep.result).slice(0, 300))
+await endOfLife(flowCtx, { sid })
+await sweepFlow(flowCtx)
 
 // ============================================================
 console.log(`\n${failures === 0 ? '\x1b[32mALL GREEN' : '\x1b[31m' + failures + ' FAILURE(S)'}\x1b[0m — sandbox: ${sandbox}`)

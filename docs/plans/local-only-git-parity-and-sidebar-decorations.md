@@ -221,6 +221,47 @@ app. The gating is proven by `selftest.finish.mjs` (8 cases) and by string
 assertions on the generated card; the button appearing, darkening with its reason
 and asking before acting all still need a lens pass.
 
+
+### Decision 5 — the shared table (half landed 2026-09-08)
+
+`scripts/lib/card-flow.mjs` holds the flow both modes must prove identically:
+`landOneSession`, `endOfLife`, `sweepFlow`. Everything in it is plain local git
+driven through the card's own route, so it holds for a local-only org and a
+linked one alike. Names (project slug, file, workspaces) come from `ctx` because
+the linked run uses arxa's real publish and real slugs — a table that hardcoded
+`storefront` and `hero.md` would fail there on names it never created.
+
+`card-local-smoke.mjs` now calls it and is green (offline, in CI).
+
+**`card-cicd-smoke.mjs` is NOT wired to it yet, deliberately.** That script needs
+a real token and creates a real repo, so it only runs behind `--yes` — which
+means a refactor of it cannot be verified here, and an unverified refactor of the
+script meant to unify the two is the worst possible commit. Landed the verifiable
+half; the linked half is the next step.
+
+**When wiring the linked half, it should gain an offline mode rather than stay
+`--yes`-only.** It already stubs faces (`ensureRunner: () => ({ ok: false, reason:
+'skipped-by-smoke' })`), and `card-local-smoke.mjs:55-65` has a complete fake
+`gh`. If that fake is reusable, the linked script can run the **shared** table
+with no token and keep only the push/PR/checks/merge tail behind the live guard —
+which is what Decision 5 was for: the same assertions proving the same flow
+twice, both runnable in CI.
+
+**Two vacuous assertions caught while writing this**, both the same trap —
+`.every()` on an empty array is `true`, and an empty array is also what a broken
+route returns:
+- the sweep ceiling passed with one candidate (nothing to *not* touch) → now
+  requires two;
+- the org-scope check passed with zero rows → the table now creates an org-level
+  session first, because every other session in the smoke lives in the project
+  repo, so the org sweep was legitimately empty and proved nothing.
+
+**A real bug the smoke caught on its first run:** `org.sweep` threw `path is not
+defined` — `plugins/arxa-sidebar/lib/index.js` has no module-level `path` import
+(it imports `node:path` locally inside the few functions that need it). Every
+unit and string assertion passed while that was true; only driving the real route
+found it.
+
 ---
 
 ## 1. What local-only already does (verified, not assumed)
