@@ -3,8 +3,8 @@
 // generic day-zero frame (F8, docs/plans/freestyle-section.md).
 import fs from 'node:fs'; import path from 'node:path'; import { randomUUID } from 'node:crypto'
 import { registryPath, manifestPath } from './paths.js'
-import { initPlainRepo } from '../../git-workspace/lib/repos.js'
-import { writeFrameFiles } from '../../git-workspace/lib/frame.js'
+import { initPlainRepo, pushRepo, setOrigin } from '../../git-workspace/lib/repos.js'
+import { protectionPayload, settingsPayload, writeFrameFiles } from '../../git-workspace/lib/frame.js'
 import { wipCommit } from '../../git-workspace/lib/commits.js'
 
 const EMPTY = () => ({ roots: [], ui: { activeTab: 'org' } })
@@ -123,6 +123,59 @@ export function renameRoot(id, name, opts = {}) {
   const env = resolveEnv(opts)
   const clean = String(name || '').trim(); if (!clean) throw new Error('name-required')
   return mutate(env, (reg) => { const r = reg.roots.find((x) => x.id === id); if (!r) throw new Error('unknown-root'); r.name = clean; writeManifest(r, { name: clean }); return r })
+}
+
+/** Put a local-only Freestyle root on GitHub as a private repository. */
+export async function publishRoot(root, opts = {}) {
+  const env = resolveEnv(opts)
+  const github = opts.github
+  if (!github || typeof github.status !== 'function') return { ok: false, reason: 'github-unavailable' }
+
+  const status = await github.status()
+  if (!status?.ok) return { ok: false, reason: status?.reason || 'github-unavailable' }
+  if (!status.linked) return { ok: false, reason: 'github-unlinked' }
+
+  const made = await github.createPrivateRepo(root.name)
+  if (!made?.ok) return { ok: false, reason: made?.reason || 'github-unavailable' }
+  const repo = made.repo
+  if (!repo?.repoOwner || !repo?.repoName || !repo?.repoUrl) {
+    return { ok: false, reason: 'github-unavailable' }
+  }
+
+  try {
+    // Keep origin free of credentials. A token is scoped to this one push,
+    // matching file-org-shell's publish path; local test remotes pass through.
+    setOrigin(root.path, repo.repoUrl, env)
+    writeFrameFiles(root.path, 'freestyle', { includeCiYml: true })
+    wipCommit(root.path, { message: 'publish freestyle root', env })
+
+    const credentials = await github.gitCredentials()
+    if (!credentials?.ok) return { ok: false, reason: credentials?.reason || 'github-unavailable' }
+    const pushUrl = repo.repoUrl.startsWith('https://github.com/')
+      ? 'https://' + encodeURIComponent(credentials.login) + ':' + encodeURIComponent(credentials.token)
+        + '@' + repo.repoUrl.slice('https://'.length)
+      : repo.repoUrl
+    pushRepo(root.path, pushUrl, env)
+
+    writeManifest(root, {
+      localOnly: false,
+      repoOwner: repo.repoOwner,
+      repoName: repo.repoName,
+      repoUrl: repo.repoUrl,
+    })
+  } catch (err) {
+    return { ok: false, reason: String(err?.message ?? err) }
+  }
+
+  // Repository settings/protection are repairable remote decoration. A
+  // failure here never reverses a completed publish or harms the local root.
+  try {
+    await github.wireFrame(repo.repoOwner, repo.repoName, {
+      settings: settingsPayload(),
+      protection: protectionPayload(),
+    })
+  } catch { /* best effort */ }
+  return { ok: true, repoUrl: repo.repoUrl }
 }
 
 export function setActiveTab(tab, opts = {}) {

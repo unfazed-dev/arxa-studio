@@ -5,7 +5,7 @@
 //
 //   GET  /__arxa/freestyle/state   -> { roots, trash, ui }
 //   POST /__arxa/freestyle/action  body { action, arg } -> { ok, ... } | { ok:false, error }
-import { readRegistry, rootById, addRoot, newRoot, openRoot, closeRoot, forgetRoot, renameRoot, setActiveTab } from './roots.js'
+import { readRegistry, rootById, addRoot, newRoot, openRoot, closeRoot, forgetRoot, renameRoot, publishRoot, setActiveTab } from './roots.js'
 import { createFile, createDir, renameEntry, moveEntry, duplicateEntry, trashEntry, listTrash, restoreEntry, purgeEntry, revealEntry } from './files.js'
 import { createFreestyleSessions } from './sessions.js'
 import { isRepo, hasHead } from '../../git-workspace/lib/repos.js'
@@ -22,6 +22,16 @@ export const inject = ['webServer']
 // this file risking that failure class.
 const noDshBridge = { spawn: async () => ({ ok: false, reason: 'dsh-unavailable' }) }
 
+async function githubBridgeFor(faces, env) {
+  const shell = await import('arxa-file-org-shell').catch(() => import('../../file-org-shell/lib/index.js'))
+  let source = faces
+  if (!source) {
+    const link = await import('arxa-github-link').catch(() => import('../../github-link/lib/index.js'))
+    source = link.createGithubLink({ env })
+  }
+  return shell.createGithubBridge(source)
+}
+
 function json(res, body) {
   res.writeHead(200, {
     'content-type': 'application/json',
@@ -34,6 +44,8 @@ export function apply(ctx, opts = {}) {
   const env = opts.env || process.env
   const dshBridge = opts.dshBridge || noDshBridge
   const S = createFreestyleSessions({ env, dshBridge })
+  let githubPromise = null
+  const github = () => { githubPromise ??= githubBridgeFor(opts.github, env); return githubPromise }
 
   const rootOr = (id) => { const r = rootById(id, { env }); if (!r) throw new Error('unknown-root: ' + id); return r }
 
@@ -57,6 +69,10 @@ export function apply(ctx, opts = {}) {
     'root.close': ({ rootId }) => ({ root: closeRoot(rootId, { env }) }),
     'root.forget': ({ rootId }) => ({ root: forgetRoot(rootId, { env }) }),
     'root.rename': ({ rootId, name }) => ({ root: renameRoot(rootId, name, { env }) }),
+    'root.publish': async ({ rootId, visibility }) => {
+      if (visibility !== 'private') throw new Error('private-visibility-required')
+      return publishRoot(rootOr(rootId), { github: await github(), env })
+    },
     'file.create': ({ rootId, relPath }) => createFile(rootOr(rootId), relPath, { env }),
     'dir.create': ({ rootId, relPath }) => createDir(rootOr(rootId), relPath, { env }),
     'entry.rename': ({ rootId, relPath, name }) => renameEntry(rootOr(rootId), relPath, name, { env }),
