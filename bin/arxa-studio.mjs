@@ -143,6 +143,10 @@ const sidebarDir = resolve(here, '..', 'plugins', 'arxa-sidebar')
 // host half serves /__arxa/git-card/action over the sidebar's org shell;
 // browser half is the conversation.input.dock card in stock QueueDock grammar.
 const gitCardDir = resolve(here, '..', 'plugins', 'arxa-git-card')
+// Freestyle (docs/plans/freestyle-section.md): host half serves
+// /__arxa/freestyle/state and /__arxa/freestyle/action for user-picked
+// folders backed by their own plain git repos.
+const freestyleDir = resolve(here, '..', 'plugins', 'arxa-freestyle')
 const jobsDir = resolve(here, '..', 'plugins', 'arxa-jobs')
 // Approvals loop (grill D60–D68): approvals doors new pendings through the
 // push-doorbell library by bare-name-then-relative import probe (the sidebar
@@ -195,6 +199,7 @@ const PROFILE_PLUGINS = [
   ['arxa-pairing', pairingDir],
   ['arxa-sidebar', sidebarDir],
   ['arxa-git-card', gitCardDir],
+  ['arxa-freestyle', freestyleDir],
   ['arxa-jobs', jobsDir],
   ['arxa-file-org-shell', fileOrgShellDir],
   ['arxa-github-link', githubLinkDir],
@@ -387,7 +392,7 @@ engineLog('dsh bin resolved: ' + dshBin)
 // The design panel, brand and gen-ui plugins resolve by package name (their
 // browser halves are discovered through package.json dsh.client, which a
 // file-path entry never reaches).
-const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa-mcp-apps', 'arxa-waiting-page', 'arxa-theme-accent', 'arxa-pairing', 'arxa-sidebar', 'arxa-git-card', 'arxa-artifact-viewer', 'arxa-frame', 'arxa-locale', 'arxa-prism', 'arxa-provider-status']
+const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa-mcp-apps', 'arxa-waiting-page', 'arxa-theme-accent', 'arxa-pairing', 'arxa-sidebar', 'arxa-git-card', 'arxa-artifact-viewer', 'arxa-frame', 'arxa-locale', 'arxa-prism', 'arxa-provider-status', 'arxa-freestyle']
 // ALWAYS install, never skip on presence: these are file: dependencies, and
 // pnpm copies them into .pnpm at add-time. A plain `pnpm install` sees the
 // lockfile entry unchanged and keeps the OLD copy — measured 2026-08-25: the
@@ -472,6 +477,15 @@ if (packed) {
   // (measured live 2026-08-29: shell-unavailable / no-workspace, silent).
   rmSync(join(nm, 'arxa-file-org-shell'), { recursive: true, force: true })
   cpSync(fileOrgShellDir, join(nm, 'arxa-file-org-shell'), { recursive: true })
+  // arxa-freestyle needs the same real-directory treatment, for the same
+  // reason: its ../../git-workspace/lib/... relative imports (roots.js,
+  // files.js, sessions.js, lib/index.js) resolve against the parent
+  // node_modules, where the fiveLibs copy of git-workspace sits — not
+  // against the .pnpm virtual store the symlink targets, which has no
+  // git-workspace alongside it (measured live 2026-09-08:
+  // ERR_MODULE_NOT_FOUND for git-workspace/lib/repos.js).
+  rmSync(join(nm, 'arxa-freestyle'), { recursive: true, force: true })
+  cpSync(freestyleDir, join(nm, 'arxa-freestyle'), { recursive: true })
   for (const [name, dir] of fiveLibs) {
     rmSync(join(nm, name), { recursive: true, force: true })
     cpSync(dir, join(nm, name), { recursive: true })

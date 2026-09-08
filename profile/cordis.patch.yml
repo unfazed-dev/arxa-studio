@@ -234,6 +234,14 @@
   - id: arxa-sidebar
     name: arxa-sidebar
 
+# Freestyle (docs/plans/freestyle-section.md): a second workspace kind —
+# arbitrary user-picked folders, each backed by its own plain git repo —
+# alongside the org/project tree the sidebar already manages. Host half
+# serves GET /__arxa/freestyle/state and POST /__arxa/freestyle/action.
+- insert:
+  - id: arxa-freestyle
+    name: arxa-freestyle
+
 # 11d. The Git card (docs/plans/git-card-stock-dock-rebuild.md, 2026-09-02):
 #      its own plugin. Host half = the card.* / insight.* / version.mint
 #      engine actions moved out of arxa-sidebar (POST /__arxa/git-card/action)
