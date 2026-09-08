@@ -135,14 +135,25 @@ export async function publishRoot(root, opts = {}) {
   if (!status?.ok) return { ok: false, reason: status?.reason || 'github-unavailable' }
   if (!status.linked) return { ok: false, reason: 'github-unlinked' }
 
-  const made = await github.createPrivateRepo(root.name)
-  if (!made?.ok) return { ok: false, reason: made?.reason || 'github-unavailable' }
-  const repo = made.repo
+  const manifest = readManifest(root)
+  if (manifest?.localOnly === false && manifest.repoUrl) return { ok: true, repoUrl: manifest.repoUrl }
+  let repo = manifest?.pendingPublish
+  if (!repo) {
+    const made = await github.createPrivateRepo(root.name)
+    if (!made?.ok) return { ok: false, reason: made?.reason || 'github-unavailable' }
+    repo = made.repo
+  }
   if (!repo?.repoOwner || !repo?.repoName || !repo?.repoUrl) {
     return { ok: false, reason: 'github-unavailable' }
   }
 
   try {
+    // Creating a remote is irreversible. Keep its non-secret identity so
+    // a credential/network failure can resume without a name-taken error.
+    // The root remains local-only until its first push succeeds.
+    writeManifest(root, { pendingPublish: {
+      repoOwner: repo.repoOwner, repoName: repo.repoName, repoUrl: repo.repoUrl,
+    } })
     // Keep origin free of credentials. A token is scoped to this one push,
     // matching file-org-shell's publish path; local test remotes pass through.
     setOrigin(root.path, repo.repoUrl, env)
@@ -162,6 +173,7 @@ export async function publishRoot(root, opts = {}) {
       repoOwner: repo.repoOwner,
       repoName: repo.repoName,
       repoUrl: repo.repoUrl,
+      pendingPublish: null,
     })
   } catch (err) {
     return { ok: false, reason: String(err?.message ?? err) }

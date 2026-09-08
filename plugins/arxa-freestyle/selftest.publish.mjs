@@ -96,6 +96,30 @@ try {
   ok(!fs.existsSync(path.join(localOnlyFolder, '.github')), 'unlinked refusal leaves GitHub frame files absent')
   ok(readManifest(localOnlyRoot).localOnly === true, 'unlinked refusal preserves the local-only manifest')
 
+  // A remote can be created before credentials/push fail. Retrying must
+  // finish that publication without attempting to create the same name.
+  let creates = 0
+  let credentialsAvailable = false
+  const retryRemote = path.join(sandbox, 'retry.git')
+  const retryGithub = {
+    status: async () => ({ ok: true, linked: true, login: 'octocat' }),
+    createPrivateRepo: async () => {
+      if (++creates > 1) return { ok: false, reason: 'name-taken' }
+      runGit(['init', '--bare', retryRemote], { cwd: sandbox, env })
+      return { ok: true, repo: { repoOwner: 'octocat', repoName: 'local-only', repoUrl: retryRemote } }
+    },
+    gitCredentials: async () => credentialsAvailable
+      ? { ok: true, login: 'octocat', token: 'stub-token' }
+      : { ok: false, reason: 'token-unavailable' },
+    wireFrame: async () => ({ ok: true }),
+  }
+  const failed = await roots.publishRoot(localOnlyRoot, { github: retryGithub, env })
+  ok(!failed.ok && readManifest(localOnlyRoot).localOnly, 'failed push setup leaves root local-only')
+  credentialsAvailable = true
+  const retried = await roots.publishRoot(localOnlyRoot, { github: retryGithub, env })
+  ok(retried.ok && creates === 1, 'retry finishes the existing private repository')
+  ok(runGit(['rev-parse', 'main'], { cwd: retryRemote, env }) === runGit(['rev-parse', 'HEAD'], { cwd: localOnlyFolder, env }), 'retry pushes the local HEAD')
+
   // The host action wraps the raw github-link face in the established
   // throw-proof bridge before handing it to publishRoot.
   const routes = {}
