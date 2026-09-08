@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { addRoot } from './lib/roots.js'
-import { createFile, createDir, renameEntry, moveEntry, duplicateEntry, trashEntry, listTrash, restoreEntry, purgeEntry, listDir } from './lib/files.js'
+import { createFile, createDir, renameEntry, moveEntry, duplicateEntry, trashEntry, listTrash, restoreEntry, purgeEntry, revealEntry, listDir } from './lib/files.js'
 const git = (cwd, ...a) => execFileSync('git', a, { cwd, encoding: 'utf8' }).trim()
 let n = 0; const ok = (c, m) => { assert.ok(c, m); n++; console.log('  ok', n, '-', m) }
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-fs-')); const env = { ...process.env, ARXA_HOME: path.join(tmp, 'home') }
@@ -25,8 +25,18 @@ ok(d1.rel === 'archive/b copy.md' && d2.rel === 'archive/b copy 2.md' && clean()
 const e = trashEntry(root, 'archive/b copy.md', { env })
 ok(!fs.existsSync(path.join(folder, 'archive/b copy.md')) && fs.existsSync(path.join(folder, '.arxa/trash', e.id, 'b copy.md')) && listTrash(root).length === 1 && clean(), 'trash moves into .arxa/trash and commits the removal')
 restoreEntry(root, e.id, { env }); ok(fs.existsSync(path.join(folder, 'archive/b copy.md')) && listTrash(root).length === 0, 'restore puts it back')
+createFile(root, 'archive/c.md', { env }); const e3 = trashEntry(root, 'archive/c.md', { env })
+createFile(root, 'archive/c.md', { env }); restoreEntry(root, e3.id, { env })
+ok(fs.existsSync(path.join(folder, 'archive/c (restored).md')), 'restore collides -> lands at "<name> (restored)<ext>"')
 const e2 = trashEntry(root, 'archive', { env }); ok(listTrash(root)[0].kind === 'dir', 'folders trash too')
-purgeEntry(root, e2.id, { env }); ok(listTrash(root).length === 0 && !fs.existsSync(path.join(folder, '.arxa/trash', e2.id)), 'purge is final')
-const ls = listDir(root, '', { env }); ok(ls.dirs.includes('docs') && !ls.dirs.includes('.arxa') && !ls.dirs.includes('.git'), 'listDir hides studio state')
+purgeEntry(root, e2.id); ok(listTrash(root).length === 0 && !fs.existsSync(path.join(folder, '.arxa/trash', e2.id)), 'purge is final')
+const ls = listDir(root, ''); ok(ls.dirs.includes('docs') && !ls.dirs.includes('.arxa') && !ls.dirs.includes('.git'), 'listDir hides studio state')
+createDir(root, 'empty', { env }); const lsEmpty = listDir(root, 'empty')
+ok(lsEmpty.dirs.length === 0 && lsEmpty.files.length === 0, 'freshly created folder lists as empty (.gitkeep hidden)')
+ok(revealEntry(root, 'does-not-exist.md').ok === false, 'revealEntry returns { ok: false } for a missing path')
+createFile(root, 'top.md', { env }) // committed in the root repo before `nested` exists, so its own add -A never has to look at an uncommitted embedded repo
+fs.mkdirSync(path.join(folder, 'nested')); git(path.join(folder, 'nested'), 'init', '-b', 'main')
+moveEntry(root, 'top.md', 'nested', { env })
+ok(fs.existsSync(path.join(folder, 'nested/top.md')) && clean() && git(path.join(folder, 'nested'), 'status', '--porcelain') === '', 'cross-repo move commits both the source and destination repos')
 for (const bad of ['.git/HEAD', '.arxa/freestyle.json', '../x']) assert.throws(() => createFile(root, bad, { env })); ok(true, 'verbs refuse reserved and escaping paths')
 console.log('GREEN arxa-freestyle files (' + n + ')')

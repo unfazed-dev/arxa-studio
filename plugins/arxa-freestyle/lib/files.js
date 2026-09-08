@@ -10,6 +10,15 @@ import { wipCommit } from '../../git-workspace/lib/commits.js'
 
 function repoOf(root, rel, env) { return resolveFreestyleRepo(root.path, path.posix.dirname(rel) === '.' ? '' : path.posix.dirname(rel), { env, requireHead: false }).repoPath }
 function commit(root, rel, verb, env) { wipCommit(repoOf(root, rel, env), { message: `chore: ${verb} ${rel}`, env }) }
+// rename/move can cross a nested-repo boundary (source and destination under
+// different repos within the same Freestyle root) — commit BOTH repos with
+// the same message, not just the destination, so the source repo never
+// carries an uncommitted deletion.
+function commitBoth(root, fromRel, toRel, verb, env) {
+  const message = `chore: ${verb} ${fromRel} -> ${toRel}`
+  const toRepo = repoOf(root, toRel, env); wipCommit(toRepo, { message, env })
+  const fromRepo = repoOf(root, fromRel, env); if (fromRepo !== toRepo) wipCommit(fromRepo, { message, env })
+}
 function mustNotExist(abs) { if (fs.existsSync(abs)) throw new Error('exists: ' + abs) }
 
 export function createFile(root, relPath, { env = process.env } = {}) {
@@ -23,13 +32,13 @@ export function createDir(root, relPath, { env = process.env } = {}) {
 export function renameEntry(root, relPath, newName, { env = process.env } = {}) {
   if (typeof newName !== 'string' || newName.includes('/') || newName.includes('\\') || newName === '' || newName === '.' || newName === '..') throw new Error('bad-name')
   const from = resolveInside(root.path, relPath); const to = resolveInside(root.path, path.posix.join(path.posix.dirname(from.rel), newName)); mustNotExist(to.abs)
-  fs.renameSync(from.abs, to.abs); commit(root, to.rel, 'rename ' + from.rel + ' ->', env); return { rel: to.rel }
+  fs.renameSync(from.abs, to.abs); commitBoth(root, from.rel, to.rel, 'rename', env); return { rel: to.rel }
 }
 export function moveEntry(root, relPath, toDir, { env = process.env } = {}) {
   const from = resolveInside(root.path, relPath); const dir = resolveInside(root.path, toDir || '')
   if (dir.rel === from.rel || dir.rel.startsWith(from.rel + '/')) throw new Error('cannot move a folder into itself')
   const to = resolveInside(root.path, path.posix.join(dir.rel, path.posix.basename(from.rel))); mustNotExist(to.abs)
-  fs.renameSync(from.abs, to.abs); commit(root, to.rel, 'move ' + from.rel + ' ->', env); return { rel: to.rel }
+  fs.renameSync(from.abs, to.abs); commitBoth(root, from.rel, to.rel, 'move', env); return { rel: to.rel }
 }
 export function duplicateEntry(root, relPath, { env = process.env } = {}) {
   const from = resolveInside(root.path, relPath); const ext = path.posix.extname(from.rel); const stem = from.rel.slice(0, from.rel.length - ext.length)
@@ -57,11 +66,26 @@ export function restoreEntry(root, entryId, { env = process.env } = {}) {
 export function purgeEntry(root, entryId) { const d = path.join(trashDir(root.path), entryId); if (!fs.existsSync(path.join(d, 'entry.json'))) throw new Error('unknown-entry'); fs.rmSync(d, { recursive: true, force: true }); return { ok: true } }
 export function revealEntry(root, relPath) {
   const { abs } = resolveInside(root.path, relPath)
-  const [cmd, args] = process.platform === 'darwin' ? ['open', ['-R', abs]] : ['xdg-open', [fs.statSync(abs).isDirectory() ? abs : path.dirname(abs)]]
-  try { spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref(); return { ok: true } } catch (e) { return { ok: false, reason: String(e.message) } }
+  try {
+    // statSync runs unconditionally (both branches, not just xdg-open's) so
+    // a reveal on a deleted path fails fast here with { ok: false } on every
+    // platform — the darwin branch (`open -R`) never consulted it before and
+    // would happily spawn on a path that no longer exists.
+    const isDir = fs.statSync(abs).isDirectory()
+    const [cmd, args] = process.platform === 'darwin' ? ['open', ['-R', abs]] : ['xdg-open', [isDir ? abs : path.dirname(abs)]]
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore' })
+    // async spawn failure (e.g. no xdg-open on a bare box) has no listener by
+    // default and would crash the host; swallow it — the sync return already
+    // said ok: true, and an async failure can't retroactively change that.
+    child.on('error', () => {}); child.unref()
+    return { ok: true }
+  } catch (e) { return { ok: false, reason: String(e.message) } }
 }
 export function listDir(root, relDir = '') {
   const { abs } = resolveInside(root.path, relDir || ''); const dirs = [], files = []
-  for (const d of fs.readdirSync(abs, { withFileTypes: true })) { if (RESERVED.includes(d.name)) continue; (d.isDirectory() ? dirs : files).push(d.name) }
+  for (const d of fs.readdirSync(abs, { withFileTypes: true })) {
+    if (RESERVED.includes(d.name) || d.name === '.gitkeep') continue // .gitkeep is createDir's commit placeholder, not a real file
+    ;(d.isDirectory() ? dirs : files).push(d.name)
+  }
   dirs.sort(); files.sort(); return { dirs, files }
 }
