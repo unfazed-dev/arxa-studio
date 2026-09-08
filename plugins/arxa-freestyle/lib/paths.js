@@ -42,8 +42,8 @@ export function resolveInside(rootPath, relPath) {
   const abs = path.resolve(rootResolved, relPath)
   const rel = path.relative(rootResolved, abs)
   if (rel === '' ? false : (rel.startsWith('..') || path.isAbsolute(rel))) throw new Error('outside-root: ' + relPath)
-  const first = rel.split(path.sep)[0]
-  if (RESERVED.includes(first)) throw new Error('reserved: ' + first + '/ is studio state')
+  const reserved = rel.split(path.sep).find((part) => RESERVED.includes(part))
+  if (reserved) throw new Error('reserved: ' + reserved + '/ is studio state')
   // symlink escape: realpath the root and the deepest existing ancestor of
   // `abs`, then check containment — catches a symlink anywhere under the
   // root (e.g. `docs` itself) that points outside it, even though the
@@ -55,8 +55,9 @@ export function resolveInside(rootPath, relPath) {
   // A symlink INSIDE the root under a non-reserved name (e.g. root/alias ->
   // root/.git) passes the lexical RESERVED check above (first segment is
   // 'alias') and the containment check above (still inside rootReal) — so
-  // re-run RESERVED against the realpath'd first segment too.
-  const firstReal = path.relative(rootReal, probeReal).split(path.sep)[0]
-  if (RESERVED.includes(firstReal)) throw new Error('reserved: ' + firstReal + '/ is studio state')
+  // re-run RESERVED against every realpath segment too (nested repos have
+  // their own .git and .arxa directories).
+  const reservedReal = path.relative(rootReal, probeReal).split(path.sep).find((part) => RESERVED.includes(part))
+  if (reservedReal) throw new Error('reserved: ' + reservedReal + '/ is studio state')
   return { abs, rel: rel.split(path.sep).join('/') }
 }

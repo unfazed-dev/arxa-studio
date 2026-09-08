@@ -4,7 +4,7 @@
 // docks — nested repos commit in the right place, not at the Freestyle root.
 import fs from 'node:fs'; import path from 'node:path'; import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { resolveInside, trashDir, RESERVED } from './paths.js'
+import { resolveInside, RESERVED } from './paths.js'
 import { resolveFreestyleRepo } from '../../git-workspace/lib/routing.js'
 import { wipCommit } from '../../git-workspace/lib/commits.js'
 
@@ -20,6 +20,39 @@ function commitBoth(root, fromRel, toRel, verb, env) {
   const fromRepo = repoOf(root, fromRel, env); if (fromRepo !== toRepo) wipCommit(fromRepo, { message, env })
 }
 function mustNotExist(abs) { if (fs.existsSync(abs)) throw new Error('exists: ' + abs) }
+
+// Internal storage cannot follow user-created symlinks outside its root.
+export function ensureTrashDir(root, { create = true } = {}) {
+  let dir = fs.realpathSync(root.path)
+  for (const part of ['.arxa', 'trash']) {
+    dir = path.join(dir, part)
+    try {
+      if (!fs.lstatSync(dir).isDirectory()) throw new Error('unsafe-trash')
+    } catch (err) {
+      if (err.code !== 'ENOENT' || !create) throw err
+      fs.mkdirSync(dir)
+    }
+  }
+  return dir
+}
+
+const entryName = (value) => typeof value === 'string' && value !== '' && value !== '.' && value !== '..' && !/[\\/\0]/.test(value)
+
+/** Resolve a listed entry before any restore/purge, never an arbitrary path. */
+export function readTrashEntry(root, entryId) {
+  try {
+    if (!entryName(entryId)) throw new Error('bad-id')
+    const dir = path.join(ensureTrashDir(root, { create: false }), entryId)
+    if (!fs.lstatSync(dir).isDirectory()) throw new Error('bad-directory')
+    const marker = path.join(dir, 'entry.json')
+    if (!fs.lstatSync(marker).isFile()) throw new Error('bad-marker')
+    const entry = JSON.parse(fs.readFileSync(marker, 'utf8'))
+    if (entry.id !== entryId || typeof entry.trashedAt !== 'string' || !['file', 'dir', 'session'].includes(entry.kind)) throw new Error('bad-entry')
+    if (entry.kind !== 'session' && (!entryName(entry.name) || typeof entry.relPath !== 'string')) throw new Error('bad-payload')
+    if (entry.payloadName !== undefined && (!entryName(entry.payloadName) || entry.payloadName === 'entry.json')) throw new Error('bad-payload')
+    return { dir, entry }
+  } catch { throw new Error('unknown-entry') }
+}
 
 export function createFile(root, relPath, { env = process.env } = {}) {
   const { abs, rel } = resolveInside(root.path, relPath); mustNotExist(abs)
@@ -47,23 +80,27 @@ export function duplicateEntry(root, relPath, { env = process.env } = {}) {
 }
 export function trashEntry(root, relPath, { env = process.env } = {}) {
   const from = resolveInside(root.path, relPath); if (!fs.existsSync(from.abs)) throw new Error('missing: ' + relPath)
-  const id = randomUUID(); const dir = path.join(trashDir(root.path), id); fs.mkdirSync(dir, { recursive: true })
-  const entry = { id, relPath: from.rel, name: path.posix.basename(from.rel), kind: fs.statSync(from.abs).isDirectory() ? 'dir' : 'file', trashedAt: new Date().toISOString() }
-  fs.renameSync(from.abs, path.join(dir, entry.name)); fs.writeFileSync(path.join(dir, 'entry.json'), JSON.stringify(entry, null, 2))
+  const id = randomUUID(); const dir = path.join(ensureTrashDir(root), id); fs.mkdirSync(dir)
+  const entry = { id, relPath: from.rel, name: path.posix.basename(from.rel), payloadName: 'payload', kind: fs.statSync(from.abs).isDirectory() ? 'dir' : 'file', trashedAt: new Date().toISOString() }
+  fs.renameSync(from.abs, path.join(dir, entry.payloadName)); fs.writeFileSync(path.join(dir, 'entry.json'), JSON.stringify(entry, null, 2))
   commit(root, from.rel, 'trash', env); return entry
 }
 export function listTrash(root) {
-  const d = trashDir(root.path); if (!fs.existsSync(d)) return []
-  return fs.readdirSync(d).flatMap((id) => { try { return [JSON.parse(fs.readFileSync(path.join(d, id, 'entry.json'), 'utf8'))] } catch { return [] } }).sort((a, b) => b.trashedAt.localeCompare(a.trashedAt))
+  let ids
+  try { ids = fs.readdirSync(ensureTrashDir(root, { create: false })) } catch { return [] }
+  return ids.flatMap((id) => { try { return [readTrashEntry(root, id).entry] } catch { return [] } }).sort((a, b) => b.trashedAt.localeCompare(a.trashedAt))
 }
 export function restoreEntry(root, entryId, { env = process.env } = {}) {
-  const e = listTrash(root).find((x) => x.id === entryId); if (!e) throw new Error('unknown-entry')
+  const { dir, entry: e } = readTrashEntry(root, entryId)
+  if (e.kind === 'session') throw new Error('session-entry')
+  const payload = path.join(dir, e.payloadName || e.name)
   let target = resolveInside(root.path, e.relPath)
-  if (fs.existsSync(target.abs)) { const ext = path.posix.extname(e.relPath); target = resolveInside(root.path, e.relPath.slice(0, e.relPath.length - ext.length) + ' (restored)' + ext) }
-  fs.mkdirSync(path.dirname(target.abs), { recursive: true }); fs.renameSync(path.join(trashDir(root.path), entryId, e.name), target.abs)
-  fs.rmSync(path.join(trashDir(root.path), entryId), { recursive: true, force: true }); commit(root, target.rel, 'restore', env); return { rel: target.rel }
+  let copy = 1
+  while (fs.existsSync(target.abs)) { const ext = path.posix.extname(e.relPath); target = resolveInside(root.path, e.relPath.slice(0, e.relPath.length - ext.length) + (copy === 1 ? ' (restored)' : ` (restored ${copy})`) + ext); copy++ }
+  fs.mkdirSync(path.dirname(target.abs), { recursive: true }); fs.renameSync(payload, target.abs)
+  fs.rmSync(dir, { recursive: true, force: true }); commit(root, target.rel, 'restore', env); return { rel: target.rel }
 }
-export function purgeEntry(root, entryId) { const d = path.join(trashDir(root.path), entryId); if (!fs.existsSync(path.join(d, 'entry.json'))) throw new Error('unknown-entry'); fs.rmSync(d, { recursive: true, force: true }); return { ok: true } }
+export function purgeEntry(root, entryId) { const { dir } = readTrashEntry(root, entryId); fs.rmSync(dir, { recursive: true, force: true }); return { ok: true } }
 export function revealEntry(root, relPath) {
   const { abs } = resolveInside(root.path, relPath)
   try {
