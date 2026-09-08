@@ -1002,7 +1002,7 @@ check('client: agent verb + reason strings localized in en/pl/fr',
   const host = readFileSync(new URL('./lib/index.js', import.meta.url), 'utf8')
   check('D113: the host has a sweep route scoped to ONE repo, never a cascade',
     host.includes("'org.sweep': async () => {")
-    && host.includes("const repoPath = slug ? path.join(cur.path, 'projects', slug) : cur.path"))
+    && host.includes("const repoPath = slug ? nodePath.join(cur.path, 'projects', slug) : cur.path"))
   // The whole point of the `only` list: between the preview and the confirm the
   // WIP watcher can auto-commit a refused worktree clean and silently promote a
   // session the operator was never shown. Preview must be a CEILING.

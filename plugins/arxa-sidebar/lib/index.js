@@ -1543,9 +1543,10 @@ export function apply(ctx, opts = {}) {
               * visible instead of being summarised into a count. */
             'org.sweep': async () => {
               const gw = await importGitWorkspace()
+              const nodePath = await import('node:path')
               const cur = arg?.orgId ? await ensureOpen(arg.orgId) : handle()
               const slug = typeof arg?.projectSlug === 'string' && arg.projectSlug.trim() !== '' ? arg.projectSlug.trim() : null
-              const repoPath = slug ? path.join(cur.path, 'projects', slug) : cur.path
+              const repoPath = slug ? nodePath.join(cur.path, 'projects', slug) : cur.path
               const only = Array.isArray(arg?.only) ? arg.only.filter((x) => typeof x === 'string') : null
               return gw.sweepMerged(repoPath, { env: process.env, dryRun: arg?.dryRun !== false, only })
             },
