@@ -69,6 +69,16 @@ async function importManifestSeat() {
   return manifestSeatCache
 }
 
+let freestyleApiCache = null
+async function importFreestyleApi() {
+  if (freestyleApiCache) return freestyleApiCache
+  let api
+  try { api = await import('arxa-freestyle') }
+  catch { api = await import(new URL('../../arxa-freestyle/lib/index.js', import.meta.url).href) }
+  freestyleApiCache = { listRoots: api.listRoots, createFreestyleSessions: api.createFreestyleSessions }
+  return freestyleApiCache
+}
+
 /* ---------------------------------------------------------------------------
  * The review surface (docs/plans/github-conversations-in-the-insight-panel.md)
  * ------------------------------------------------------------------------- */
@@ -229,9 +239,62 @@ export function apply(ctx) {
           const sb = await sidebarHost()
           if (!sb) return json(res, { ok: false, error: 'sidebar-not-ready', action })
           const oc = await sb.orgContext()
-          if (!oc) return json(res, { ok: false, seam: sb.seam, error: 'no-workspace', action })
-          const { handle, ensureOpen } = oc
+          const handle = () => {
+            if (!oc) throw new Error('no-workspace')
+            return oc.handle()
+          }
+          const ensureOpen = async (ref) => {
+            if (!oc) throw new Error('no-workspace')
+            return oc.ensureOpen(ref)
+          }
           const { getGithub, mainChecksFor, importGitWorkspace } = sb
+
+          // A card is seated by its dsh conversation, not by the currently
+          // open organisation. Resolve that session across both existing
+          // registries: the org aggregate and every remembered Freestyle root.
+          // This stays request-local so each action sees fresh registry state.
+          let sessionRowsPromise = null
+          let resolvedSession = null
+          const sessionRows = async (gw) => {
+            if (sessionRowsPromise) return sessionRowsPromise
+            sessionRowsPromise = (async () => {
+              const rows = []
+              if (oc) {
+                try { rows.push(...gw.parkedSessions(handle().path)) } catch { /* no open org rows */ }
+              }
+              try {
+                const { listRoots, createFreestyleSessions } = await importFreestyleApi()
+                const roots = listRoots({ env: process.env })
+                const sessions = createFreestyleSessions({ env: process.env, dshBridge: {} })
+                for (const root of roots) {
+                  const listed = sessions.list(root)
+                  for (const row of [...listed.active, ...listed.parked, ...listed.archived]) {
+                    rows.push({ ...row, origin: 'freestyle', rootId: root.id })
+                  }
+                }
+              } catch { /* Freestyle plugin absent/unreadable — org behavior stands */ }
+              return rows
+            })()
+            return sessionRowsPromise
+          }
+          const sessionFor = async (gw, id) => {
+            if (resolvedSession && (resolvedSession.id === id || resolvedSession.dshSessionId === id)) return resolvedSession
+            const rows = await sessionRows(gw)
+            const byConversation = rows.find((s) => s.dshSessionId === id)
+            if (byConversation) return byConversation
+            const byRegistry = rows.filter((s) => s.id === id)
+            if (byRegistry.length > 1) throw new Error('ambiguous-session: ' + id)
+            return byRegistry[0] ?? null
+          }
+
+          // An aggregated org/project row and every Freestyle row carries
+          // its owning repo. Session actions must use that path directly;
+          // falling back to the current org (or another root) can mutate a
+          // different repository when the seat registry is damaged.
+          const sessionRepoPath = (s, sid) => {
+            if (typeof s?.repoPath !== 'string' || s.repoPath === '') throw new Error('session-repo-not-found: ' + sid)
+            return s.repoPath
+          }
 
           // The shell seats the card with the dsh conversation id
           // (`arxa-<id>`, stored on the registry row as dshSessionId), while
@@ -242,9 +305,11 @@ export function apply(ctx) {
           // registry id passes through untouched.
           if (typeof arg?.sessionId === 'string' && arg.sessionId !== '') {
             const gw = await importGitWorkspace()
-            const rows = gw.parkedSessions(handle().path)
-            const hit = rows.find((s) => s.id === arg.sessionId) || rows.find((s) => s.dshSessionId === arg.sessionId) || null
-            if (hit && hit.id !== arg.sessionId) arg = { ...arg, sessionId: hit.id }
+            const hit = await sessionFor(gw, arg.sessionId)
+            if (hit) {
+              resolvedSession = hit
+              if (hit.id !== arg.sessionId) arg = { ...arg, sessionId: hit.id }
+            }
           }
 
           /**
@@ -264,7 +329,9 @@ export function apply(ctx) {
            * `org-not-published` the PR handlers use, so the card's error
            * vocabulary stays one word wide. */
           const orgRepoFor = async (cur) => {
-              const manifest = await repoFor(s)
+            const { seatManifest } = await importManifestSeat()
+            const manifest = seatManifest(cur.path).manifest ?? {}
+            if (!manifest.repoOwner || !manifest.repoName) throw new Error('org-not-published')
             return { owner: manifest.repoOwner, name: manifest.repoName }
           }
 
@@ -291,7 +358,7 @@ export function apply(ctx) {
               // cancelling against the org for a project seat would act on a
               // different repository's runs entirely.
               const gw = await importGitWorkspace()
-              const s = gw.parkedSessions(handle().path).find((x) => x.id === sid)
+              const s = await sessionFor(gw, sid)
               if (!s) throw new Error('session-not-found: ' + sid)
               const m = await repoFor(s)
               if (runId === undefined || runId === null || runId === '') throw new Error('runId-required')
@@ -304,11 +371,12 @@ export function apply(ctx) {
 
           const pushSessionBranch = async (gw, cur, sid, { loud = false } = {}) => {
             const fail = (reason) => { if (loud) throw new Error(reason); return { ok: false, reason } }
-            const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+            const s = await sessionFor(gw, sid)
             if (!s) return fail('session-not-found: ' + sid)
             const g = await getGithub().catch(() => null)
             if (!g) return fail('github-unavailable')
-            const repoPath = s.repoPath ?? cur.path
+            let repoPath
+            try { repoPath = sessionRepoPath(s, sid) } catch (err) { return fail(err.message) }
             const origin = gw.getOrigin(repoPath)
             if (!origin) return fail('no-origin — connect this org to GitHub first')
             const urlFor = (creds) => origin.replace('https://', 'https://' + encodeURIComponent(creds.login) + ':' + creds.token + '@')
@@ -367,11 +435,12 @@ export function apply(ctx) {
             const manifest = await repoFor(s)
             if (!gw.SUBJECT_RE.test(title)) throw new Error('title-not-conventional: the PR title becomes the squash-merge subject (Q7/Q8)')
             const attribution = '— written by ' + String(model ?? 'the session model') + ' in arxa studio'
-            const actor = await authorLogin(s.repoPath ?? cur.path)
+            const repoPath = sessionRepoPath(s, sid)
+            const actor = await authorLogin(repoPath)
             const collaborator = gw.agentCollaborator(model, effort)
             // The ledger is fenced into the body at creation so every later
             // stage can rewrite that block in place instead of appending.
-            const ledgerTable = gw.renderLedger(gw.readLedger(s.repoPath ?? cur.path, sid), { sessionId: sid, container: s.workspace, next: 'review' })
+            const ledgerTable = gw.renderLedger(gw.readLedger(repoPath, sid), { sessionId: sid, container: s.workspace, next: 'review' })
             const body = gw.withLedger(
               [String(problem ?? ''), String(fix ?? ''), attribution].filter((x) => x !== '').join('\n\n'),
               ledgerTable,
@@ -380,7 +449,7 @@ export function apply(ctx) {
             const existing = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
             if (Array.isArray(existing) && existing.length > 0) return { ok: true, existing: true, pr: { number: existing[0].number, url: existing[0].html_url } }
             const pr = await g.prCreate(manifest.repoOwner, manifest.repoName, { title, body, head: s.branch, base: 'main' })
-            await noteStage(s.repoPath ?? cur.path, sid, { stage: 'review', author: actor, collaborator, detail: 'PR #' + pr.number + ' opened' }, { next: 'a human reviewer' })
+            await noteStage(repoPath, sid, { stage: 'review', author: actor, collaborator, detail: 'PR #' + pr.number + ' opened' }, { next: 'a human reviewer' })
             return { ok: true, pr: { number: pr.number, url: pr.html_url } }
           }
 
@@ -403,9 +472,10 @@ export function apply(ctx) {
           const autoOpenPr = async (gw, cur, sid) => {
             const g = await getGithub().catch(() => null)
             if (!g) return { ok: false, reason: 'unlinked' }
-            const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+            const s = await sessionFor(gw, sid)
             if (!s) return { ok: false, reason: 'session-not-found' }
-            const repoPath = s.repoPath ?? cur.path
+            let repoPath
+            try { repoPath = sessionRepoPath(s, sid) } catch { return { ok: false, reason: 'session-repo-not-found' } }
             let subject = ''
             try {
               subject = String(gw.runGit(['log', '-1', '--pretty=%s', s.branch], { cwd: repoPath, allowFail: true }) ?? '').trim()
@@ -430,18 +500,17 @@ export function apply(ctx) {
            */
           const repoFor = async (s) => {
             const { seatManifest } = await importManifestSeat()
-            const isProject = s?.origin === 'project' && typeof s?.repoPath === 'string'
-            // No org fallback for a project seat (team-lead ruling,
+            // No org fallback for a project or Freestyle seat (team-lead ruling,
             // freestyle-section Task 7): today's code never fell back to
             // org.json for a project seat's own manifest, and a broken
             // project.json must keep throwing project-not-published, not
             // silently resolve to the OPEN ORG's repo.
-            const seat = isProject ? seatManifest(s.repoPath) : seatManifest(handle().path)
+            const seat = seatManifest(sessionRepoPath(s, s?.id ?? '<unknown>'))
             const m = seat.manifest ?? {}
             if (!m.repoOwner || !m.repoName) {
               throw new Error(seat.kind === 'freestyle'
                 ? 'freestyle-not-published: this folder has no GitHub repo yet'
-                : isProject
+                : seat.kind === 'project'
                   ? 'project-not-published: this project has no GitHub repo yet'
                   : 'org-not-published')
             }
@@ -480,8 +549,8 @@ export function apply(ctx) {
               try {
                 const g = await getGithub().catch(() => null)
                 if (!g) return false
-                const cur = handle()
-                const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+                const cur = oc ? handle() : null
+                const s = await sessionFor(gw, sid)
                 if (!s) return false
                 // Follows the SESSION's repo: a project session's PR lives in
                 // the project, so its ledger must be published there too.
@@ -514,9 +583,10 @@ export function apply(ctx) {
             // evidence only — the session model writes the subject.
             'card.status': async () => {
               const gw = await importGitWorkspace()
-              const cur = handle()
+              const cur = oc ? handle() : null
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
-              let repoPath = cur.path
+              let repoPath = cur?.path
+              let primaryRepoPath = cur?.path
               let branch = 'main'
               let sessionRow = null
               if (sid) {
@@ -530,11 +600,13 @@ export function apply(ctx) {
                 // the bare `id` answered session-not-found for every live seat
                 // and the client silently fell back to the org seat ("main")
                 // (2026-09-02).
-                sessionRow = gw.parkedSessions(cur.path).find((s) => s.id === sid || s.dshSessionId === sid) ?? null
+                sessionRow = await sessionFor(gw, sid)
                 if (!sessionRow) throw new Error('session-not-found: ' + sid)
+                primaryRepoPath = sessionRepoPath(sessionRow, sid)
                 repoPath = sessionRow.worktree
                 branch = sessionRow.branch
               }
+              if (!repoPath) throw new Error('no-workspace')
               // B1: a session worktree can be deleted out from under the
               // registry. `status --porcelain` then returns null, and the old
               // `?? ''` turned that into "no output" — which the counters below
@@ -561,10 +633,10 @@ export function apply(ctx) {
               // `readySession` needs: it computes merge-base against local main.
               if (health === 'ok' && sessionRow) {
                 const { reconcileLocalMain } = await importPrflow()
-                try { await reconcileLocalMain(sessionRow.repoPath ?? cur.path) } catch { /* offline is not an error — the counts below just stay as they were */ }
+                try { await reconcileLocalMain(sessionRepoPath(sessionRow, sid)) } catch { /* offline is not an error — the counts below just stay as they were */ }
               }
               let aheadBehind = null
-              if (health === 'ok' && gw.runGit(['rev-parse', '-q', '--verify', 'origin/main'], { cwd: cur.path, allowFail: true }) !== null) {
+              if (health === 'ok' && primaryRepoPath && gw.runGit(['rev-parse', '-q', '--verify', 'origin/main'], { cwd: primaryRepoPath, allowFail: true }) !== null) {
                 const c = gw.runGit(['rev-list', '--left-right', '--count', 'origin/main...HEAD'], { cwd: repoPath, allowFail: true })
                 if (c) { const [behind, ahead] = c.split(/\s+/).map(Number); aheadBehind = { ahead, behind } }
               }
@@ -575,7 +647,7 @@ export function apply(ctx) {
               // check" and "there is no conflict" are different claims.
               let integrate = null
               if (health === 'ok' && sessionRow) {
-                const repo = sessionRow.repoPath ?? cur.path
+                const repo = sessionRepoPath(sessionRow, sid)
                 const preview = gw.mergePreview(repo, sessionRow.branch)
                 integrate = {
                   behind: preview.behind,
@@ -586,7 +658,7 @@ export function apply(ctx) {
                 }
               }
               const { seatManifest: resolveSeatManifest } = await importManifestSeat()
-              const openSeat = resolveSeatManifest(cur.path)
+              const openSeat = cur ? resolveSeatManifest(cur.path) : { manifest: null, kind: null }
               const manifest = openSeat.manifest ?? {}
               /* D98/D99: an org and a project each own a repo, and a project
                * seat's link state lives in its OWN project.json — the same
@@ -612,13 +684,13 @@ export function apply(ctx) {
                * project seat on a missing/malformed project.json, and that
                * must not change — a broken project manifest keeps reading
                * unlinked, not silently inheriting the org's link state. */
-              const seatIsProject = sessionRow?.origin === 'project' && typeof sessionRow.repoPath === 'string'
-              const seatRepoPath = seatIsProject ? sessionRow.repoPath : cur.path
-              const seat = seatIsProject ? resolveSeatManifest(seatRepoPath) : openSeat
+              const seatRepoPath = sessionRow ? sessionRepoPath(sessionRow, sid) : cur?.path
+              if (!seatRepoPath) throw new Error('no-workspace')
+              const seat = sessionRow ? resolveSeatManifest(seatRepoPath) : openSeat
               const seatManifest = seat.manifest ?? {}
-              const seatKind = seat.kind ?? (seatIsProject ? 'project' : 'org')
+              const seatKind = seat.kind ?? (sessionRow?.origin === 'project' ? 'project' : sessionRow?.origin === 'freestyle' ? 'freestyle' : 'org')
               const seatLinked = Boolean(seatManifest.repoUrl)
-              const seatLocalOnly = seatManifest.localOnly === true || (!seatLinked && manifest.localOnly === true)
+              const seatLocalOnly = seatManifest.localOnly === true || (seatKind === 'project' && !seatLinked && manifest.localOnly === true)
               const g = await getGithub().catch(() => null)
               // Checks belong to the seat's OWN repo: for a project session
               // the org's main-branch checks describe a different repository.
@@ -631,7 +703,7 @@ export function apply(ctx) {
               // is standing when a push dies.
               const ghState = await (g ? g.status().catch(() => null) : null)
               return {
-                seat: { kind: sid ? 'session' : 'org', sessionId: sid, branch },
+                seat: { kind: sid ? 'session' : 'org', sessionId: sessionRow?.id ?? sid, branch },
                 github: { relinkRequired: ghState?.relinkRequired === true },
                 // `health` is what the card must read before any count. When it
                 // is not 'ok' the counts were never measured, so they are null
@@ -666,11 +738,12 @@ export function apply(ctx) {
             /** Q6: EVIDENCE ONLY — the session model drafts the subject. */
             'card.commit.draft': async () => {
               const gw = await importGitWorkspace()
-              const cur = handle()
+              const cur = oc ? handle() : null
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
-              const repoPath = sid
-                ? (gw.parkedSessions(cur.path).find((s) => s.id === sid || s.dshSessionId === sid) ?? {}).worktree ?? cur.path
-                : cur.path
+              const session = sid ? await sessionFor(gw, sid) : null
+              if (sid && !session) throw new Error('session-not-found: ' + sid)
+              const repoPath = session?.worktree ?? cur?.path
+              if (!repoPath) throw new Error('no-workspace')
               return {
                 uncommittedStat: gw.runGit(['diff', '--stat'], { cwd: repoPath, allowFail: true }) ?? '',
                 wipSubjects: gw.wipRun(repoPath).map((c) => c.subject),
@@ -680,7 +753,7 @@ export function apply(ctx) {
             },
             'card.commit': async () => {
               const gw = await importGitWorkspace()
-              const cur = handle()
+              const cur = oc ? handle() : null
               const subject = String(arg?.subject ?? '').split('\n')[0].trim()
               if (!gw.SUBJECT_RE.test(subject)) throw new Error('subject-not-conventional: use <type>(<scope>): <what is now true> — got: ' + subject)
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
@@ -693,8 +766,9 @@ export function apply(ctx) {
                 // days). Best-effort: no link / no origin → null → the
                 // boundary pushes bare `origin` non-interactively and reports
                 // push-failed in the RESULT, never fatal to the commit.
-                const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
-                const repoPath = s?.repoPath ?? cur.path
+                const s = await sessionFor(gw, sid)
+                if (!s) throw new Error('session-not-found: ' + sid)
+                const repoPath = sessionRepoPath(s, sid)
                 const pushUrl = await (async () => {
                   const origin = gw.getOrigin(repoPath)
                   if (!origin || !origin.startsWith('https://')) return null
@@ -747,7 +821,7 @@ export function apply(ctx) {
                   }
                 }
                 // Unlinked / no credentials: local-only boundary (merge to main here).
-                const out = gw.sessionStageBoundary(cur.path, sid, { message: subject, pushUrl })
+                const out = gw.sessionStageBoundary(repoPath, sid, { message: subject, pushUrl })
                 // Q6/Q7 (2026-09-03): a GREEN boundary publishes the session
                 // branch, which is what makes frame-check run against it on
                 // GitHub (ci.yml v4 watches arxa/**). A red boundary
@@ -778,6 +852,7 @@ export function apply(ctx) {
               // resetting to the recorded SHA restores the exact prior state —
               // the WIP run included. Nothing is lost, which is the same
               // promise parkSession makes on the session path (D40).
+              if (!cur) throw new Error('no-workspace')
               const preSha = gw.runGit(['rev-parse', 'HEAD'], { cwd: cur.path, allowFail: true })
               const sq = gw.stageBoundarySquash(cur.path, { message: subject, trailer: 'Arxa-Stage: org' })
               const gate = gw.runGate(cur.path)
@@ -791,7 +866,7 @@ export function apply(ctx) {
              * relaxation, Q2): main pushes ride boundaries/heal. */
             'card.push': async () => {
               const gw = await importGitWorkspace()
-              const cur = handle()
+              const cur = oc ? handle() : null
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               if (!sid) throw new Error('card.push serves session seats — the org primary rides its boundaries')
               return pushSessionBranch(gw, cur, sid, { loud: true })
@@ -800,17 +875,11 @@ export function apply(ctx) {
               const gw = await importGitWorkspace()
               const g = await getGithub().catch(() => null)
               if (!g) throw new Error('github-unavailable')
-              const cur = handle()
+              const cur = oc ? handle() : null
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               if (!sid) throw new Error('card.pr.create serves session seats')
-              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              const s = await sessionFor(gw, sid)
               if (!s) throw new Error('session-not-found: ' + sid)
-              // D98: a project session's branch and remote belong to the
-              // PROJECT repo, but the PR below is built from the ORG manifest.
-              // Before routing this seat was unreachable for project sessions
-              // (the org registry had no such id, so it threw). Keep it loud
-              // rather than silently filing an org-scoped PR for project work —
-              // choosing the right manifest is Phase 2 (D102/D107).
               return openPr(gw, g, cur, s, sid, {
                 title: String(arg?.title ?? '').trim(),
                 problem: arg?.problem, fix: arg?.fix, model: arg?.model, effort: arg?.effort,
@@ -820,14 +889,13 @@ export function apply(ctx) {
               const gw = await importGitWorkspace()
               const g = await getGithub().catch(() => null)
               if (!g) throw new Error('github-unavailable')
-              const cur = handle()
+              const cur = oc ? handle() : null
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               if (!sid) throw new Error('card.pr.status serves session seats')
-              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              const s = await sessionFor(gw, sid)
               if (!s) throw new Error('session-not-found: ' + sid)
-              // D98: same as card.pr.create — the org manifest is the wrong
-              // source for a project session's PR. Loud, not silently wrong.
               const manifest = await repoFor(s)
+              const repoPath = sessionRepoPath(s, sid)
               // 'all', not the default 'open' (2026-09-06, found by the live
               // card smoke). The approve row has THREE states — an open PR
               // shows Merge, a MERGED one shows Mint, neither shows Create
@@ -859,9 +927,9 @@ export function apply(ctx) {
               // forty identical "pending" rows and post forty comments.
               if (checks?.state === 'green' || checks?.state === 'red') {
                 const gwl = await importGitWorkspace()
-                const seen = gwl.readLedger(s.repoPath ?? cur.path, sid).filter((e) => e.stage === 'checks')
+                const seen = gwl.readLedger(repoPath, sid).filter((e) => e.stage === 'checks')
                 if (seen[seen.length - 1]?.result !== checks.state) {
-                  await noteStage(s.repoPath ?? cur.path, sid, {
+                  await noteStage(repoPath, sid, {
                     stage: 'checks', author: 'github-actions[bot]', result: checks.state, sha: pr.head?.sha ?? null,
                   }, { next: checks.state === 'green' ? 'merge when reviewed' : 'fix the failing check' })
                 }
@@ -888,12 +956,11 @@ export function apply(ctx) {
               * they started. */
             'card.integrate': async () => {
               const gw = await importGitWorkspace()
-              const cur = handle()
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               if (!sid) throw new Error('card.integrate serves session seats')
-              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              const s = await sessionFor(gw, sid)
               if (!s) throw new Error('session-not-found: ' + sid)
-              const repoPath = s.repoPath ?? cur.path
+              const repoPath = sessionRepoPath(s, sid)
               return gw.integrateMain(s, {
                 author: await authorLogin(repoPath),
                 collaborator: gw.agentCollaborator(arg?.model, arg?.effort),
@@ -906,13 +973,12 @@ export function apply(ctx) {
               * resurface later as a baffling gate failure. */
             'card.integrate.finish': async () => {
               const gw = await importGitWorkspace()
-              const cur = handle()
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               if (!sid) throw new Error('card.integrate.finish serves session seats')
-              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              const s = await sessionFor(gw, sid)
               if (!s) throw new Error('session-not-found: ' + sid)
               return gw.finishIntegrate(s, {
-                author: await authorLogin(s.repoPath ?? cur.path),
+                author: await authorLogin(sessionRepoPath(s, sid)),
                 collaborator: gw.agentCollaborator(arg?.model, arg?.effort),
               })
             },
@@ -924,12 +990,12 @@ export function apply(ctx) {
               const gw = await importGitWorkspace()
               const g = await getGithub().catch(() => null)
               if (!g) throw new Error('github-unavailable')
-              const cur = handle()
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               if (!sid) throw new Error('card.pr.comment serves session seats')
-              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              const s = await sessionFor(gw, sid)
               if (!s) throw new Error('session-not-found: ' + sid)
               const manifest = await repoFor(s)
+              const repoPath = sessionRepoPath(s, sid)
               const stage = String(arg?.stage ?? '').trim()
               if (stage === '') throw new Error('stage-required')
               let number = Number.isInteger(arg?.number) ? arg.number : null
@@ -948,7 +1014,7 @@ export function apply(ctx) {
               // that its automatic twin carried.
               const body = gw.stageComment({
                 stage,
-                author: arg?.author ?? await authorLogin(s.repoPath ?? cur.path),
+                author: arg?.author ?? await authorLogin(repoPath),
                 collaborator: gw.agentCollaborator(arg?.model, arg?.effort),
                 result: arg?.result ?? null,
                 sha: arg?.sha ?? null,
@@ -965,10 +1031,9 @@ export function apply(ctx) {
               const gw = await importGitWorkspace()
               const g = await getGithub().catch(() => null)
               if (!g) throw new Error('github-unavailable')
-              const cur = handle()
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               if (!sid) throw new Error('card.pr.merge serves session seats')
-              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              const s = await sessionFor(gw, sid)
               if (!s) throw new Error('session-not-found: ' + sid)
               const manifest = await repoFor(s)
               const prs = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
@@ -979,7 +1044,7 @@ export function apply(ctx) {
               // prflow.js has no other caller yet (D116) — imported directly
               // rather than through the index barrel, which does not re-export it.
               const { mergeSessionPr } = await importPrflow()
-              const repoPath = s.repoPath ?? cur.path
+              const repoPath = sessionRepoPath(s, sid)
               // Token-bearing URL for the post-merge fetch (D107 step 6): a bare
               // https origin would fall back to a TTY password prompt.
               const origin = await (async () => {
@@ -999,7 +1064,7 @@ export function apply(ctx) {
               })
               if (result.merged) {
                 await noteStage(repoPath, sid, {
-                  stage: 'merged', author: await authorLogin(s.repoPath ?? cur.path), sha: result.mergeSha,
+                  stage: 'merged', author: await authorLogin(repoPath), sha: result.mergeSha,
                   detail: 'PR #' + pr.number + ' merged with --no-ff onto the reviewed sha',
                 }, { next: 'archive the session' })
               }
@@ -1016,10 +1081,9 @@ export function apply(ctx) {
               * sessions.js:423), captured in one clean stage commit. */
             'version.mint': async () => {
               const gw = await importGitWorkspace()
-              const cur = handle()
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               if (!sid) throw new Error('version.mint serves session seats')
-              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              const s = await sessionFor(gw, sid)
               if (!s) throw new Error('session-not-found: ' + sid)
               const name = typeof arg?.name === 'string' && arg.name.trim() !== '' ? arg.name.trim() : undefined
               const state = typeof arg?.state === 'string' && arg.state.trim() !== '' ? arg.state.trim() : undefined
@@ -1072,13 +1136,12 @@ export function apply(ctx) {
               * must never break the whole card. */
             'insight.streak': async () => {
               const gw = await importGitWorkspace()
-              const cur = handle()
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               if (!sid) throw new Error('insight.streak serves session seats')
-              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              const s = await sessionFor(gw, sid)
               if (!s) throw new Error('session-not-found: ' + sid)
               if (typeof gw.commitDays !== 'function') return { days: [], current: 0, longest: 0, reason: 'unavailable' }
-              const repoPath = s.repoPath ?? cur.path
+              const repoPath = sessionRepoPath(s, sid)
               return gw.commitDays(repoPath, { since: '90 days', env: process.env })
             },
             /** D4: the review surface ABSORBED the retired `insight.ci` view.
@@ -1091,10 +1154,9 @@ export function apply(ctx) {
             'insight.review': async () => {
               const gw = await importGitWorkspace()
               const g = await getGithub().catch(() => null)
-              const cur = handle()
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               if (!sid) throw new Error('insight.review serves session seats')
-              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              const s = await sessionFor(gw, sid)
               if (!s) throw new Error('session-not-found: ' + sid)
               if (!g || typeof g.prConversation !== 'function') return { ...EMPTY_REVIEW, reason: 'unavailable' }
               const manifest = await repoFor(s).catch(() => null)
@@ -1116,10 +1178,9 @@ export function apply(ctx) {
               const g = await getGithub().catch(() => null)
               if (!g) return { ok: false, reason: 'unlinked' }
               const gw = await importGitWorkspace()
-              const cur = handle()
               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
               if (!sid) return { ok: false, reason: 'session-required' }
-              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid)
+              const s = await sessionFor(gw, sid)
               if (!s) return { ok: false, reason: 'session-not-found' }
               const text = typeof arg?.text === 'string' ? arg.text.trim() : ''
               if (text === '') return { ok: false, reason: 'message-required' }

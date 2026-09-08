@@ -63,7 +63,10 @@ export function createFreestyleSessions({ env = process.env, dshBridge }) {
     const prefix = sessionKey(root) + '/'
     let rows
     try { rows = GW.listSessions(repoPath, env) } catch { return [] }
-    return rows.filter((s) => s.id.startsWith(prefix))
+    return rows.filter((s) => {
+      if (typeof s.freestyleRootId === 'string' && s.freestyleRootId !== '') return s.freestyleRootId === root.id
+      return s.id.startsWith(prefix) // legacy rows predate explicit ownership
+    })
   }
 
   function repoOfSession(root, id) {
@@ -88,8 +91,9 @@ export function createFreestyleSessions({ env = process.env, dshBridge }) {
       })
       const cwd = path.join(session.worktree, route.cwdRel)
       fs.mkdirSync(cwd, { recursive: true })
-      const spawned = await dshBridge.spawn({ cwd, name: session.name, id: session.id })
+      const spawned = await dshBridge.spawn({ cwd, name: session.name, id: session.id, rootId: root.id })
       const annotated = GW.annotateSession(route.repoPath, session.id, {
+        freestyleRootId: root.id,
         dshSessionId: spawned.ok ? spawned.id : null,
         dshStatus: spawned.ok ? 'live' : (spawned.reason || 'spawn-failed'),
       }, env)

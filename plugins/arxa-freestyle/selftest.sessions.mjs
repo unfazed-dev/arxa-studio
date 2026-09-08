@@ -16,7 +16,8 @@ const S = createFreestyleSessions({ env, dshBridge })
 
 const s1 = await S.newSession(root, '', 'scratch')
 ok(s1.worktree === path.join(root.path, '.arxa', 'worktrees', s1.id) && s1.cwd === s1.worktree, 'root session: worktree under the root, cwd = worktree')
-ok(spawned[0].cwd === s1.cwd && spawned[0].id === s1.id, 'dsh spawned in the worktree')
+ok(spawned[0].cwd === s1.cwd && spawned[0].id === s1.id && spawned[0].rootId === root.id, 'dsh spawned in the worktree with the stable root namespace')
+ok(s1.freestyleRootId === root.id, 'new session records explicit Freestyle root ownership')
 createDir(root, 'docs/deep', { env })
 const s2 = await S.newSession(root, 'docs/deep', 'write')
 ok(s2.cwd === path.join(s2.worktree, 'docs', 'deep') && fs.existsSync(s2.cwd), 'folder session: cwd is the folder inside the worktree')
@@ -43,6 +44,12 @@ const foreignId = GW.mintSessionPath({
 })
 GW.openSession(foreignRepo, { id: foreignId, orgPath: foreignRepo, name: 'planted', workspace: '', env })
 ok(!S.list(root).active.some((s) => s.id === foreignId), "a foreign nested-repo session does not leak into this root's list")
+const collidingPrefixId = GW.mintSessionPath({
+  org: 'r', workspace: '', name: 'planted-same-prefix', sessions: GW.listSessions(foreignRepo, env), ghosts: [],
+})
+GW.openSession(foreignRepo, { id: collidingPrefixId, orgPath: foreignRepo, name: 'planted-same-prefix', workspace: '', env })
+GW.annotateSession(foreignRepo, collidingPrefixId, { freestyleRootId: 'different-root-uuid' }, env)
+ok(!S.list(root).active.some((s) => s.id === collidingPrefixId), 'explicit root ownership beats a colliding legacy basename prefix')
 
 // FIX2: sweep must aggregate over the same repo set list/archive/finish use
 // — a session merged inside a nested repo, not just the root's own repo.
