@@ -52,5 +52,11 @@ export function resolveInside(rootPath, relPath) {
   let probe = abs; while (!fs.existsSync(probe)) probe = path.dirname(probe)
   const probeReal = fs.realpathSync(probe)
   if (probeReal !== rootReal && !probeReal.startsWith(rootReal + path.sep)) throw new Error('outside-root: symlink escape')
+  // A symlink INSIDE the root under a non-reserved name (e.g. root/alias ->
+  // root/.git) passes the lexical RESERVED check above (first segment is
+  // 'alias') and the containment check above (still inside rootReal) — so
+  // re-run RESERVED against the realpath'd first segment too.
+  const firstReal = path.relative(rootReal, probeReal).split(path.sep)[0]
+  if (RESERVED.includes(firstReal)) throw new Error('reserved: ' + firstReal + '/ is studio state')
   return { abs, rel: rel.split(path.sep).join('/') }
 }

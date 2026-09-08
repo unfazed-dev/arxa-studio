@@ -9,19 +9,39 @@ import { wipCommit } from '../../git-workspace/lib/commits.js'
 
 const EMPTY = () => ({ roots: [], ui: { activeTab: 'org' } })
 
+/**
+ * Every exported function below takes options `{ env }`, never `env`
+ * positionally. This guard makes the other shape loud instead of silent: a
+ * raw env object (e.g. `{ ...process.env, ARXA_HOME: tmp }`) passed where
+ * `opts` goes has no `env` key, so a naive `{ env = process.env } = opts`
+ * destructure falls through to the REAL process.env with no error — writing
+ * to the user's actual `~/.arxa/freestyle.json` from what looked like a
+ * scoped test/call. PATH/HOME/ARXA_HOME are presence-checked because any
+ * real env object carries at least one; a genuine `{ env }` bag never does.
+ */
+function resolveEnv(opts) {
+  const o = opts || {}
+  if (typeof o === 'object' && !('env' in o) && ('PATH' in o || 'HOME' in o || 'ARXA_HOME' in o)) {
+    throw new Error('roots.js takes { env }')
+  }
+  return o.env || process.env
+}
+
 /** { roots, ui } from disk, or the empty shape when unreadable/absent. */
-export function readRegistry(env = process.env) {
+export function readRegistry(opts = {}) {
+  const env = resolveEnv(opts)
   try { const j = JSON.parse(fs.readFileSync(registryPath(env), 'utf8')); return { roots: j.roots || [], ui: { activeTab: 'org', ...(j.ui || {}) } } } catch { return EMPTY() }
 }
 
 /** Atomic write (tmp + rename) so a crash mid-write never corrupts the registry. */
-export function writeRegistry(reg, env = process.env) {
+export function writeRegistry(reg, opts = {}) {
+  const env = resolveEnv(opts)
   const p = registryPath(env); fs.mkdirSync(path.dirname(p), { recursive: true })
   const tmp = p + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(reg, null, 2) + '\n'); fs.renameSync(tmp, p)
 }
 
-export function listRoots(env = process.env) { return readRegistry(env).roots }
-export function rootById(id, env = process.env) { return listRoots(env).find((r) => r.id === id) || null }
+export function listRoots(opts = {}) { return readRegistry(opts).roots }
+export function rootById(id, opts = {}) { return listRoots(opts).find((r) => r.id === id) || null }
 
 /** <root>/.arxa/freestyle.json, or null when absent/unreadable. */
 export function readManifest(root) { try { return JSON.parse(fs.readFileSync(manifestPath(root.path), 'utf8')) } catch { return null } }
@@ -34,7 +54,7 @@ export function writeManifest(root, patch) {
 }
 
 /** Read-modify-write helper: reads the registry, lets `fn` mutate it in place, writes it back. */
-function mutate(env, fn) { const reg = readRegistry(env); const out = fn(reg); writeRegistry(reg, env); return out }
+function mutate(env, fn) { const reg = readRegistry({ env }); const out = fn(reg); writeRegistry(reg, { env }); return out }
 
 /**
  * F1+F4+F8: register a folder as a Freestyle root, adopt or init its repo,
@@ -42,7 +62,9 @@ function mutate(env, fn) { const reg = readRegistry(env); const out = fn(reg); w
  * the same folder twice returns the existing row.
  * @returns {object} the root row
  */
-export function addRoot(absPath, { env = process.env, name } = {}) {
+export function addRoot(absPath, opts = {}) {
+  const env = resolveEnv(opts)
+  const name = opts.name
   // path.resolve, NOT fs.realpathSync: a stored row.path must stay the path
   // the caller (and, later, the UI) actually gave — realpath-ing it would
   // silently rewrite it to the OS's canonical form (e.g. macOS's tmp dirs:
@@ -72,33 +94,39 @@ export function addRoot(absPath, { env = process.env, name } = {}) {
 }
 
 /** mkdir then addRoot; refuses an existing target so callers never adopt by accident. */
-export function newRoot(parentAbs, name, { env = process.env } = {}) {
+export function newRoot(parentAbs, name, opts = {}) {
+  const env = resolveEnv(opts)
   const target = path.join(parentAbs, name)
   if (fs.existsSync(target)) throw new Error('exists: ' + target)
   fs.mkdirSync(target, { recursive: true })
   return addRoot(target, { env, name })
 }
 
-export function openRoot(id, env = process.env) {
+export function openRoot(id, opts = {}) {
+  const env = resolveEnv(opts)
   return mutate(env, (reg) => { const r = reg.roots.find((x) => x.id === id); if (!r) throw new Error('unknown-root'); r.open = true; r.lastOpenedAt = new Date().toISOString(); return r })
 }
 
-export function closeRoot(id, env = process.env) {
+export function closeRoot(id, opts = {}) {
+  const env = resolveEnv(opts)
   return mutate(env, (reg) => { const r = reg.roots.find((x) => x.id === id); if (!r) throw new Error('unknown-root'); r.open = false; return r })
 }
 
 /** Registry only — never deletes anything on disk. */
-export function forgetRoot(id, env = process.env) {
+export function forgetRoot(id, opts = {}) {
+  const env = resolveEnv(opts)
   return mutate(env, (reg) => { const i = reg.roots.findIndex((x) => x.id === id); if (i < 0) throw new Error('unknown-root'); const [r] = reg.roots.splice(i, 1); return r })
 }
 
 /** Display-only: the folder on disk never moves. */
-export function renameRoot(id, name, env = process.env) {
+export function renameRoot(id, name, opts = {}) {
+  const env = resolveEnv(opts)
   const clean = String(name || '').trim(); if (!clean) throw new Error('name-required')
   return mutate(env, (reg) => { const r = reg.roots.find((x) => x.id === id); if (!r) throw new Error('unknown-root'); r.name = clean; writeManifest(r, { name: clean }); return r })
 }
 
-export function setActiveTab(tab, env = process.env) {
+export function setActiveTab(tab, opts = {}) {
+  const env = resolveEnv(opts)
   if (tab !== 'org' && tab !== 'freestyle') throw new Error('bad-tab')
   return mutate(env, (reg) => { reg.ui.activeTab = tab; return reg.ui })
 }
