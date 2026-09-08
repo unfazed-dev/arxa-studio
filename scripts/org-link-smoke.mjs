@@ -282,6 +282,11 @@ if (!pst.ok || !pst.result || !pst.result.pr || !pst.result.checks) fail('S5: ca
 // Q8: squash-merge on GitHub once the frame checks are green (a plan/
 // scope gap leaves checks 'none' — merge directly, protection is
 // plan-limited there anyway).
+// Hoisted: the merge below has to know how the checks ended, and `none` (the
+// plan grants no checks at all) must reach it too — that case skips the whole
+// wait block, so a variable declared inside it is invisible exactly when the
+// merge needs it most.
+let finalChecks = pst.result.checks
 if (pst.result.checks.state !== 'none') {
   // The states are none | pending | green | red (github-link/lib/frame.js:303).
   //
@@ -299,6 +304,7 @@ if (pst.result.checks.state !== 'none') {
     const again = await post('card.pr.status', { sessionId: sid })
     if (again.ok && again.result && again.result.checks) last = again.result.checks
   }
+  finalChecks = last
   const runsSeen = (last.runs || []).map((r) => (r.name ?? '?') + '=' + (r.conclusion ?? r.status ?? 'running')).join(', ')
   if (last.state === 'red') {
     fail('S5: frame checks went RED — runs: ' + (runsSeen || 'none reported'))
@@ -340,7 +346,7 @@ if (pst.result.checks.state !== 'none') {
   // while passing. TERRA, a real linked org, has squashMergeAllowed:false — the
   // product needs nothing else.
   const { execFileSync } = await import('node:child_process')
-  if (last.state === 'green') {
+  if (finalChecks.state === 'green') {
     // The real path: arxa's own action, which re-checks green itself.
     const mg = await post('card.pr.merge', { sessionId: sid })
     if (!mg.ok || !mg.result || mg.result.ok !== true) fail('S5: card.pr.merge failed: ' + JSON.stringify(mg).slice(0, 300))
@@ -368,7 +374,7 @@ if (pst.result.checks.state !== 'none') {
 const rmB = await post('org.disconnect', { orgId: org.id, removeRepos: true })
 if (!rmB.ok || !rmB.result || rmB.result.ok !== true) fail('S5: post-card disconnect failed: ' + JSON.stringify(rmB).slice(0, 300))
 if ((await ghRepo(NAME)) !== null) fail('S5: org repo still on GitHub after the card loop')
-console.log('5e. Part B card loop: status/subject-law/commit/push/PR+dedupe/squash-merge OK')
+console.log('5e. Part B card loop: status/subject-law/commit/push/PR+dedupe/merge OK')
 
 // 6. purge the local-only org — no GitHub requirement, local folder gone.
 const trashed = await post('org.trash', { orgId: org.id })

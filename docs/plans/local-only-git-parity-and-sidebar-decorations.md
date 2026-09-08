@@ -833,3 +833,49 @@ in the *test*, not the product, and each was hidden by the one before it:
 routing → wrong probe repo → wrong merge shape → wrong merge method. A suite
 that cannot reach its own assertions reports green for the same reason a suite
 with no assertions does.
+
+### S5 passes end to end, for the first time since it was written
+
+```
+5e. Part B card loop: status/subject-law/commit/push/PR+dedupe/merge OK
+6.  purge local-only: no GitHub needed, folder gone OK
+
+NOT MEASURED (skipped, not passed):
+  - S5 merge through card.pr.merge (it requires green): runner asleep
+    (frame-check=queued, frame-check=queued)
+
+ORG-LINK SMOKE: GREEN WITH 1 SKIPPED
+```
+
+Offline `scripts/ci.mjs`: **84 GREEN**. Account: 81 repos, TERRA present, nothing
+smoke-shaped. App: `WAW, TERRA` only.
+
+## 7. Where this leaves the plan
+
+**Done and verified live:** Decisions 1 (the mark, its reason, and now a visible
+refusal), 2, 4 (Finish + Sweep, through their routes), 5 (the shared table).
+§5's Organisations/Tree anomaly is **closed** — it was the polluted registry.
+
+**Built but not yet seen on screen:** the **Finish button** and the **Sweep
+modal**. Both are asserted through their routes and in the selftests, but neither
+has been photographed. They cannot be reached from the WAW session, which has no
+conversation for a card to bind to, so this needs a session that *has* one — a
+real setup cost, not another lens run.
+
+**Not started — and this is the headline the plan is named for:**
+
+- **Decision 3** — the Checks row (`gate.output` on red, a "Run checks" button).
+- **Decision 6** — decorations measured session-vs-main, `diff --name-status
+  main...HEAD` unioned with `status --porcelain`.
+- **Decision 7** — the selected session decorates the tree, and a decorated row
+  opens *that session's* copy.
+
+6 and 7 are the VS Code parity the operator asked for by name. Scoping done:
+`ARXA_LEAF_FILES` (snippet:1254) renders the file rows and `openFile`
+(snippet:1922) is the click target; there is **no** decoration machinery and
+**no** file-status route yet, so both are greenfield — a new sidebar action
+returning an org-relative path→status map, a badge on the leaf rows, and a
+`sessionId` on the open call.
+
+Everything done today was verification and test repair. That work found five real
+defects, but none of it is Decisions 3, 6 or 7.
