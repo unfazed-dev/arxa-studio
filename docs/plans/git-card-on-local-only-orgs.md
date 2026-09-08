@@ -127,3 +127,63 @@ cleared:
 Verified to FAIL on the pre-fix code (section 6, both assertions) and pass
 after — the D91 inheritance assertion passes either way by design, since that
 behaviour was accidentally correct before and must stay correct.
+
+## Live verification through the lens (2026-09-08)
+
+The offline smoke proves the code; it cannot prove the running app serves it.
+`arxa/tool/lens_studio_smoke.dart` walks the REAL desktop app with the app's
+own launch token — sidebar → org → project tree → track → session → git card —
+capturing evidence at each step. Run against the real **WAW** org (localOnly,
+project `Tree`, also local-only):
+
+```
+PASS  the shell surface renders (not the parked browser card)
+PASS  the WAW organisation row is present and clickable
+PASS  every stage container renders a website + application track row
+PASS  all nine stages carry a track row
+PASS  a session row is rendered under the application track
+PASS  the session opens from the sidebar
+PASS  the git card renders in the composer dock
+PASS  the expanded card names the local-only state
+      card: "main · clean  local-only  nothing to commit"
+PASS  no GitHub-only affordance is offered on a local-only seat
+PASS  no console errors / no uncaught page errors
+```
+
+So **the git card does work on a local-only org**: it renders, reports
+`local-only`, measures the branch as clean, and offers no GitHub control it
+cannot honour. The reported symptom is not reproducible on this build against
+this org — which is why the fix above is filed as a real but *adjacent* defect
+(it needs a PUBLISHED project inside a local-only org to bite, and `Tree` is
+not published).
+
+Two things worth recording about getting the lens onto this surface:
+
+- The waiting-page referee parks any plain-browser tab while the desktop is
+  alive, so a naive capture returns "Arxa Studio is running as the desktop
+  app." `ARXA_LENS_UA` with an `ArxaShell` UA is the documented way through,
+  and it is *passive* — a shell-UA client only sends `shell-beat`; it never
+  claims a slot, so it cannot displace the live window. The door NOT to use is
+  `/?arxa-browser=<token>`, which claims PRIMARY.
+- A live app never settles (spinners, a pulsing logo — 131 SMIL animations),
+  so `captureGolden` refused to write. `tool/lens_shot.dart` gained
+  `--allow-unstable`, the same opt-out `gate_lens.dart` already takes for its
+  evidence shot. Off by default: a golden must still converge.
+
+### Open finding: the + on a bare stage row is a silent no-op
+
+The lens caught one genuine defect the offline suites cannot see. Every stage
+row (`02-design`, …) carries a hover `+` button, `aria-label="New session in
+02-design"`. It is **enabled**, and pressing it does nothing at all — measured:
+session count 1 → 1, no toast, no console error, no explanation.
+
+The cause is a half-applied gate. The server refuses a bare stage
+(`workspace-needs-track`, 98f2e93) and the DOCK's New Session CTA correctly
+disables itself with the `newSession.needsTrack` tooltip (`projectRowRefused`,
+`workspace-region.snippet.txt:403/416`). The per-row `+` never got the same
+gate — and it lives in the BUNDLED Rows region of `client.js`, outside the
+generated snippet, which is why the earlier fix did not reach it.
+
+Not fixed here: editing a bundled artifact is a different kind of change from
+the one this pass was scoped to, and it wants the reason surfaced to the user
+(disabled + the needsTrack tooltip), not merely the button removed.
