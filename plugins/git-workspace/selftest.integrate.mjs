@@ -203,7 +203,12 @@ console.log('\n— no origin: local-only orgs keep working (CLAUDE.md contract) 
   g(solo, ['add', '-A']); g(solo, ['commit', '-m', 'chore: base'])
   const S = openSession(solo, { id: 'solo1', name: 'solo1', workspace: 'notes' })
   const r = integrateMain(S, { author: 'local-user' })
-  ok(r.reason === 'no-origin' || r.reason === 'current', `no throw without a remote (reason=${r.reason})`)
+  // Was `'no-origin' || 'current'` — loose enough that it never noticed the
+  // repo reporting a FAILURE for a question it had answered with certainty.
+  // With no remote and nothing behind, the honest answer is `current`, and
+  // `fetched:false` carries the "we did not sync" half.
+  ok(r.reason === 'current', `a local-only repo with nothing behind is CURRENT (reason=${r.reason})`)
+  ok(r.fetched === false, 'and it reports that it never fetched')
   const p = mergePreview(solo, S.branch)
   ok(p.conflicts === false || p.conflicts === null, 'and the preview answers rather than blowing up')
 }

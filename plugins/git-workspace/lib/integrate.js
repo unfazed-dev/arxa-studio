@@ -187,7 +187,14 @@ export function integrateMain(session, { author, collaborator, env = process.env
   const behind = Number(runGit(['rev-list', '--count', `HEAD..${base}`], { cwd: worktree, env, allowFail: true }) ?? '') || 0
   const onto = runGit(['rev-parse', '--short', base], { cwd: worktree, env, allowFail: true })
   if (behind === 0) {
-    return { integrated: false, conflicted: false, reason: url ? 'current' : 'no-origin', behind: 0, onto, fetched, sync, files: [] }
+    /* `behind` is measured LOCALLY (git rev-list --count HEAD..main), so
+     * "there is nothing to integrate" is knowable with no remote at all —
+     * a local-only repo is genuinely CURRENT, not broken. Reporting
+     * 'no-origin' here made every local-only session look like a failure on
+     * an answer we were certain of. `fetched` already says whether we
+     * synced first, so the caller can still tell a fresh 'current' from a
+     * stale one without overloading `reason`. */
+    return { integrated: false, conflicted: false, reason: 'current', behind: 0, onto, fetched, sync, files: [] }
   }
 
   const wip = isDirty(worktree, env) ? wipCommit(worktree, { message: 'pre-integrate snapshot', env }) : { committed: false, sha: null }
