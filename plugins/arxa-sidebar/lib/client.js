@@ -819,6 +819,8 @@ window.__ModuleLoader__.load({
 				blank: s.blank,
 				running: s.running,
 				runningSubagentCount: descendants.get(s.id)?.runningCount ?? 0,
+				dshSessionId: s.dshSessionId ?? null,
+				dshStatus: s.dshStatus ?? null,
 				completed: s.completed === true,
 				hasActiveSchedule: hasActiveSchedule(s),
 				updatedAt: s.updatedAt,
@@ -3663,6 +3665,9 @@ window.__ModuleLoader__.load({
 			}
 			try {
 				bootMark("open-call" + (waited ? "(waited)" : ""));
+				// Clear the miss on the way through, or a row that later opened fine
+				// leaves a stale id behind and the lens reads a false positive.
+				window.__arxaNoConversation = null;
 				arxaClientSessions.open(dshId);
 				window.requestAnimationFrame(() => window.requestAnimationFrame(() => { bootMark("painted"); bootEnd("painted"); }));
 			} catch (err) {
@@ -4332,7 +4337,11 @@ window.__ModuleLoader__.load({
 			// the row is indistinguishable from one that opened fine. `dshStatus`
 			// rides the tooltip untranslated — engine vocabulary, same rule as the
 			// sync badge detail.
-			if (row && row.dshSessionId == null) return (0, react_jsx_runtime.jsx)("span", {
+			// STRICT null on purpose: both writers coerce with `?? null`, so an
+			// explicit null means "served, and absent" while `undefined` means the
+			// field never reached this row. Loose `== null` would conflate them and
+			// mark every row while swallowing the current-session dot below.
+			if (row && row.dshSessionId === null) return (0, react_jsx_runtime.jsx)("span", {
 				className: clsx(Rows_module_css_default.dot, "aXa_arxaNoConvoDot"),
 				role: "img",
 				"aria-label": orgT("rows.noConversation"),

@@ -142,6 +142,16 @@ out = out.replace(GROUP_ITEM_END, [
 //     Session CTA targets the selected workspace row; region helper
 //     parses the composite id). The org-row open/switch rider is GONE —
 //     org rows are containers now (click = collapse, grilled decision).
+// D112: sessionNode rebuilds the row as a FRESH object literal, so anything
+// the arxa summary adds is stripped before SessionNodeItem ever sees it. Carry
+// the conversation link through, or ARXA_SESSION_DOT reads `undefined` for
+// every row — which (with a loose null check) would mark them all AND swallow
+// the you-are-here dot. Caught pre-ship 2026-09-08; the dot's own selftest is
+// string-based and cannot see a field that fails to flow.
+const SESSION_NODE_FIELDS = 'runningSubagentCount: descendants.get(s.id)?.runningCount ?? 0,'
+if (out.indexOf(SESSION_NODE_FIELDS) === -1 || out.indexOf(SESSION_NODE_FIELDS) !== out.lastIndexOf(SESSION_NODE_FIELDS)) throw new Error('gen-workspace: sessionNode field anchor missing or duplicated')
+out = out.replace(SESSION_NODE_FIELDS, SESSION_NODE_FIELDS + '\n' + T(4) + 'dshSessionId: s.dshSessionId ?? null,\n' + T(4) + 'dshStatus: s.dshStatus ?? null,')
+
 const ROW_TOGGLE = 'onClick: onToggle,'
 if (!out.includes(ROW_TOGGLE) || out.indexOf(ROW_TOGGLE) !== out.lastIndexOf(ROW_TOGGLE)) throw new Error('row toggle anchor missing/dup — stock shape moved?')
 out = out.replace(ROW_TOGGLE, 'onClick: () => { onToggle(); ARXA_SELECT_WS(row.workspaceId); },')

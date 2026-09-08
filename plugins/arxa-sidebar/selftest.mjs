@@ -974,7 +974,19 @@ check('client: agent verb + reason strings localized in en/pl/fr',
   // only the SELECTED row, and after boot most dsh-less rows are not selected.
   check('D112: the dot is handed the row and marks EVERY dsh-less one',
     gen.includes('ARXA_SESSION_DOT(selected, row)')
-    && /const ARXA_SESSION_DOT = \(selected, row\) => \{[\s\S]{0,900}?if \(row && row\.dshSessionId == null\) return/.test(gen))
+    && /const ARXA_SESSION_DOT = \(selected, row\) => \{[\s\S]{0,1600}?if \(row && row\.dshSessionId === null\) return/.test(gen))
+  // THE assertion that caught a pre-ship regression (2026-09-08): sessionNode
+  // rebuilds the row as a fresh object literal, so without this transform both
+  // fields are stripped and `row.dshSessionId` is `undefined` at render — which
+  // under a loose `== null` marked EVERY row and swallowed the you-are-here dot.
+  // Every other D112 check passed while that was true.
+  check('D112: the link survives sessionNode, which rebuilds the row from scratch',
+    /runningSubagentCount: descendants\.get\(s\.id\)\?\.runningCount \?\? 0,\n\t+dshSessionId: s\.dshSessionId \?\? null,\n\t+dshStatus: s\.dshStatus \?\? null,/.test(gen))
+  check('D112: the guard is STRICT null — served-and-absent, not never-arrived',
+    gen.includes('if (row && row.dshSessionId === null) return')
+    && !gen.includes('if (row && row.dshSessionId == null) return'))
+  check('D112: a later successful open clears the miss (no stale lens evidence)',
+    /window\.__arxaNoConversation = null;\n\t+arxaClientSessions\.open\(dshId\);/.test(gen))
   check('D112: the mark is accessible and names the engine reason',
     gen.includes('"aria-label": orgT("rows.noConversation")')
     && gen.includes('row.dshStatus ? " (" + row.dshStatus + ")" : ""')

@@ -121,6 +121,15 @@ set out to prevent, just quieter."
 change the row states its conversation is missing; the stale pane beside it
 remains a known gap. Do not record Decision 1 as closing the misread.
 
+The mark's render path is proven only by string assertions on the generated
+client — **no one has seen the dot appear on a real dsh-less row.** It needs a
+lens pass against WAW before it counts as verified. That gap is not theoretical:
+`sessionNode` (`client.js:814`) rebuilds every row as a fresh object literal, so
+the first cut of this fix silently stripped both new fields, and every string
+assertion still passed. `gen-workspace.mjs` now carries them through and the
+guard is strict `=== null` (an explicit null means "served and absent";
+`undefined` means the field never arrived and falls through to the normal dot).
+
 **Verification must assert the negative.** A test that checks bind-by-arxa-id and
 bind-by-`dshSessionId` passes today and would have passed before the bug. The
 discriminating assertion is: with a row whose `dshSessionId` is null and a
