@@ -292,7 +292,11 @@ export function initOrgRepo(orgPath, env = process.env, { deferSnapshot = false,
  */
 export function initPlainRepo(dir, env = process.env) {
   if (isRepo(dir, env)) {
-    try { excludeArxaDir(path.join(dir, '.git')) } catch { /* exclusion is best-effort */ }
+    // Linked worktrees store .git as a file; info/exclude lives in the
+    // shared git directory. Fail before adoption if runtime data cannot
+    // be excluded, rather than letting the next WIP commit capture it.
+    const commonDir = runGit(['rev-parse', '--git-common-dir'], { cwd: dir, env })
+    excludeArxaDir(path.resolve(dir, commonDir))
     return { created: false }
   }
   initRepo(dir, env)

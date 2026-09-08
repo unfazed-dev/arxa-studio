@@ -13,6 +13,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { initPlainRepo, isRepo, hasHead } from './lib/repos.js'
+import { runGit } from './lib/run.js'
 import { freestyleCheckSh, writeFrameFiles, frameStatus, readStamp } from './lib/frame.js'
 
 const git = (cwd, ...a) => execFileSync('git', a, { cwd, encoding: 'utf8' }).trim()
@@ -33,6 +34,18 @@ ok(git(a, 'status', '--porcelain') === '', 'existing files are committed by the 
 // 2. existing repo is adopted untouched
 const before = git(a, 'rev-parse', 'HEAD')
 ok(initPlainRepo(a).created === false && git(a, 'rev-parse', 'HEAD') === before, 'second call is a no-op')
+
+// A user-supplied linked worktree has a .git FILE and shares info/exclude.
+// Remove the initializer's exclusion to reproduce adoption of an external repo.
+fs.writeFileSync(path.join(a, '.git', 'info', 'exclude'), '# user rule\n*.local\n')
+const linked = path.join(tmp, 'linked')
+runGit(['worktree', 'add', '-b', 'linked', linked], { cwd: a })
+fs.mkdirSync(path.join(linked, '.arxa'))
+fs.writeFileSync(path.join(linked, '.arxa', 'private.json'), 'runtime metadata')
+ok(initPlainRepo(linked).created === false, 'linked worktree is adopted without reinitializing')
+ok(git(linked, 'status', '--porcelain') === '', 'linked worktree runtime metadata is excluded')
+ok(fs.readFileSync(path.join(a, '.git', 'info', 'exclude'), 'utf8').includes('*.local'), 'existing user exclusion is preserved')
+ok(git(linked, 'rev-parse', 'HEAD') === before, 'adopting a linked worktree preserves HEAD')
 
 // 3. check.sh detects the stack at the root
 const sh = freestyleCheckSh()
