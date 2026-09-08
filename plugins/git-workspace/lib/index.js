@@ -129,3 +129,4 @@ export function mintAtStageBoundary(repoPath, { message, name, state, env = proc
 }
 
 export { mergePreview, integrateMain, finishIntegrate, isIntegrating, conflictMarkerFiles, unmergedPaths } from './integrate.js'
+export { decorate, foldDirs } from './decorations.js'

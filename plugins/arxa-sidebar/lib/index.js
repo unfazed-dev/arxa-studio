@@ -1541,6 +1541,34 @@ export function apply(ctx, opts = {}) {
               * the WIP-watcher race). The result is returned whole so the
               * skipped reasons — parked, not-merged, worktree-dirty — stay
               * visible instead of being summarised into a count. */
+            /** D117 — the decoration map for ONE session, org-relative.
+             *
+             * The tree speaks org-relative paths ('projects/Tree/notes/a.md');
+             * git speaks worktree-relative ones ('notes/a.md'). Only this route
+             * knows which seat the session sits in, so the prefixing happens
+             * here rather than in git-workspace, which would have to guess.
+             *
+             * Two git calls total, whatever the tree's size — the client asks
+             * once per session and reads the map for every row. */
+            'session.decorations': async () => {
+              const gw = await importGitWorkspace()
+              const cur = arg?.orgId ? await ensureOpen(arg.orgId) : handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (!sid) return { ok: false, reason: 'session-required', files: {}, dirs: {} }
+              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid || x.dshSessionId === sid) ?? null
+              // A dsh-less session is legitimate (D112) and decorates like any
+              // other — the match above takes the arxa id first for exactly that
+              // reason. What it cannot do is decorate without a worktree.
+              if (!s || !s.worktree) return { ok: false, reason: 'session-not-found', files: {}, dirs: {} }
+              const d = gw.decorate(s.worktree, { env: process.env })
+              if (!d.ok) return { ok: false, reason: d.reason, files: {}, dirs: {} }
+              // A project seat's files live under projects/<slug>/ in the tree;
+              // an org seat's are already org-relative.
+              const prefix = typeof s.project === 'string' && s.project !== '' ? 'projects/' + s.project + '/' : ''
+              const files = {}
+              for (const [rel, letter] of Object.entries(d.files)) files[prefix + rel] = letter
+              return { ok: true, sessionId: s.id, files, dirs: gw.foldDirs(files), reason: null }
+            },
             'org.sweep': async () => {
               const gw = await importGitWorkspace()
               const nodePath = await import('node:path')
