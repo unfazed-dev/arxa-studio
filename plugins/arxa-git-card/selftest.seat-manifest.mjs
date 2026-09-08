@@ -6,19 +6,29 @@
  *  A. Pure unit checks on plugins/git-workspace/lib/manifest-seat.js: the
  *     four candidate files in isolation, freestyle.json's precedence over a
  *     stray project.json in the same directory (a project inside a
- *     Freestyle root is still a Freestyle seat), and the fallbackOrgPath
- *     step.
- *  B. A live card.status check, using the SAME fake-webServer + fake-github
+ *     Freestyle root is still a Freestyle seat), the fallbackOrgPath step,
+ *     and (task-7-review fix 2) malformed JSON treated exactly like a
+ *     missing file, both alone and as a fall-through case.
+ *  B. Live card.status checks, using the SAME fake-webServer + fake-github
  *     harness as selftest.actions.mjs (real Phase A lifecycle, sandboxed
- *     ARXA_HOME + workspace): an org whose own directory carries
- *     `.arxa/freestyle.json` instead of `org.json` — the shape a Freestyle
- *     root takes once opened as the current handle — reports
- *     linked:false, localOnly:true, kind:'freestyle' from card.status, with
- *     the same seat.branch shape as any other org ('main', no session).
+ *     ARXA_HOME + workspace):
+ *     B1. an org whose own directory carries `.arxa/freestyle.json` instead
+ *         of `org.json` — the shape a Freestyle root takes once opened as
+ *         the current handle — reports linked:false, localOnly:true,
+ *         kind:'freestyle' from card.status, with the same seat.branch
+ *         shape as any other org ('main', no session).
+ *     B2. (task-7-review fix 1) the regression Ruling 2 exists to prevent:
+ *         a project seat whose OWN project.json is missing or malformed,
+ *         inside a LINKED org, must report linked:false — never inherit
+ *         the org's link state. Confirmed to genuinely catch a regression:
+ *         reverting the call site back to `resolveSeatManifest(seatRepoPath,
+ *         cur.path)` (passing the org back in as fallbackOrgPath for a
+ *         project seat) turns both these checks RED — see task-7-report.md
+ *         for that verbatim output.
  *
  * Run: node plugins/arxa-git-card/selftest.seat-manifest.mjs
  */
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -94,6 +104,24 @@ const dir = (name) => { const p = path.join(tmp, name); mkdirSync(p, { recursive
     withoutFallback.manifest === null && withoutFallback.kind === null, JSON.stringify(withoutFallback))
 }
 
+{
+  // task-7-review FIX 2: malformed JSON must be treated exactly like a
+  // missing file — read()'s catch doesn't distinguish, but the resolver's
+  // contract deserves both spelled out explicitly.
+  const malformedOnlyDir = dir('malformed-only')
+  writeFileSync(path.join(malformedOnlyDir, 'org.json'), '{ not valid json')
+  const r1 = seatManifest(malformedOnlyDir)
+  check('unit: a malformed org.json alone resolves null, same as a missing one',
+    r1.manifest === null && r1.kind === null && r1.file === null, JSON.stringify(r1))
+
+  const malformedThenValidDir = dir('malformed-project-valid-org')
+  writeFileSync(path.join(malformedThenValidDir, 'project.json'), '{ not valid json')
+  writeFileSync(path.join(malformedThenValidDir, 'org.json'), JSON.stringify({ tag: 'org-after-malformed-project' }))
+  const r2 = seatManifest(malformedThenValidDir)
+  check('unit: a malformed project.json is skipped, falling through to org.json — not a hard stop',
+    r2.kind === 'org' && r2.manifest.tag === 'org-after-malformed-project', JSON.stringify(r2))
+}
+
 rmSync(tmp, { recursive: true, force: true })
 
 // ============================================================
@@ -154,6 +182,46 @@ rmSync(tmp, { recursive: true, force: true })
   check('card.status: seat.branch keeps its ordinary no-session shape (unchanged by this task)',
     status.ok === true && status.result.seat && status.result.seat.kind === 'org' && status.result.seat.branch === 'main' && status.result.seat.sessionId === null,
     JSON.stringify(status.result?.seat))
+
+  // ============================================================
+  // B2 (task-7-review FIX 1): a project seat with a missing/malformed
+  // project.json must NOT inherit the currently-open org's linked state.
+  // Reusing this same sandbox/harness — a second org, opened over the
+  // first, gives us a LINKED org to test against.
+  // ============================================================
+  const gw = await import(path.join(here, '..', 'git-workspace', 'lib', 'index.js'))
+  const ws = await import(path.join(here, '..', 'workspace', 'lib', 'index.js'))
+
+  const fbCreate = await act('org.create', { name: 'Fallback Co', link: false })
+  if (!fbCreate.ok) throw new Error('org.create (Fallback Co) failed: ' + fbCreate.error)
+  const fbState = await call('/__arxa/sidebar/state')
+  const fbOrg = fbState.orgs.find((o) => o.open)
+  const fbOrgManifestFile = path.join(fbOrg.path, 'org.json')
+  const fbOrgManifest = JSON.parse(fs.readFileSync(fbOrgManifestFile, 'utf8'))
+  fs.writeFileSync(fbOrgManifestFile, JSON.stringify({ ...fbOrgManifest, repoUrl: 'https://github.com/acme/fallback-co', repoOwner: 'acme', repoName: 'fallback-co', localOnly: false }))
+  const linkedCheck = await act('card.status', {})
+  check('card.status: Fallback Co reads linked before the project-seat checks below (sanity)',
+    linkedCheck.ok === true && linkedCheck.result.linked === true, JSON.stringify(linkedCheck.result))
+
+  const proj = ws.scaffoldProject(fbOrg.path, 'gear')
+  gw.initProjectRepo(proj.path)
+  const pmade = await act('workspace.new-session', { workspace: 'projects/gear/02-design/application' })
+  if (!pmade.ok) throw new Error('workspace.new-session (project) failed: ' + pmade.error)
+  const prow = gw.parkedSessions(fbOrg.path).find((x) => x.id === pmade.result.id)
+  if (!prow) throw new Error('project session row not found in parkedSessions')
+  const projManifestFile = path.join(prow.repoPath, 'project.json')
+
+  fs.rmSync(projManifestFile)
+  let fbStatus = await act('card.status', { sessionId: prow.id })
+  check('card.status: a project seat with NO project.json does not inherit the linked org (missing manifest)',
+    fbStatus.ok === true && fbStatus.result.linked === false,
+    JSON.stringify(fbStatus.result).slice(0, 300))
+
+  fs.writeFileSync(projManifestFile, '{ not valid json')
+  fbStatus = await act('card.status', { sessionId: prow.id })
+  check('card.status: a project seat with a MALFORMED project.json does not inherit the linked org',
+    fbStatus.ok === true && fbStatus.result.linked === false,
+    JSON.stringify(fbStatus.result).slice(0, 300))
 
   rmSync(sandbox, { recursive: true, force: true })
 }
