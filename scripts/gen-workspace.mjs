@@ -201,7 +201,7 @@ const SESSION_ROW_END = [
 if (!out.includes(SESSION_ROW_END) || out.indexOf(SESSION_ROW_END) !== out.lastIndexOf(SESSION_ROW_END)) throw new Error('session row end anchor missing/dup — stock shape moved?')
 out = out.replace(SESSION_ROW_END, [
   T(6) + '}),',
-  T(6) + 'ARXA_SESSION_DOT(selected)',
+  T(6) + 'ARXA_SESSION_DOT(selected, row)',
   T(5) + ']',
   T(4) + '}),',
   T(4) + 'content: (0, react_jsx_runtime.jsx)(SessionHoverContent, {',

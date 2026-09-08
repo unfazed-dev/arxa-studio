@@ -1423,7 +1423,7 @@ window.__ModuleLoader__.load({
 								})
 							})
 						}),
-						ARXA_SESSION_DOT(selected)
+						ARXA_SESSION_DOT(selected, row)
 					]
 				}),
 				content: (0, react_jsx_runtime.jsx)(SessionHoverContent, {
@@ -3595,6 +3595,12 @@ window.__ModuleLoader__.load({
 					running: x.running ?? false,
 					completed: x.state === "parked",
 					updatedAt: x.updatedAt ?? x.createdAt ?? Date.now(),
+					// Conversation link, carried onto the summary so ARXA_SESSION_DOT can
+					// mark a row with no conversation from the row it is already handed.
+					// Reading orgStore inside that render would have described only the
+					// SELECTED row, and after boot most dsh-less rows are not selected.
+					dshSessionId: x.dshSessionId ?? null,
+					dshStatus: x.dshStatus ?? null,
 					...(x.pendingInteraction == null ? {} : { pendingInteraction: x.pendingInteraction })
 				};
 				ids.push(x.id);
@@ -3615,11 +3621,27 @@ window.__ModuleLoader__.load({
 		const arxaOpenConversation = (sessionId, waited = false) => {
 			if (!arxaClientSessions || typeof arxaClientSessions.open !== "function") return;
 			let dshId = null;
+			let dshWhy = null;
 			for (const o of orgStore.get().orgs || []) {
 				const row = (o.sessions || []).find((x) => x.id === sessionId);
-				if (row) { dshId = row.dshSessionId ?? null; break; }
+				if (row) { dshId = row.dshSessionId ?? null; dshWhy = row.dshStatus ?? null; break; }
 			}
-			if (!dshId) return;
+			if (!dshId) {
+				// A session with no conversation is LEGITIMATE — its worktree, branch
+				// and files are all real; dsh was simply down when it was created and
+				// `dshStatus` records that. What is not legitimate is returning in
+				// silence, which is what this did until 2026-09-08: the row highlighted
+				// (mutate sets currentSessionId optimistically), nothing opened, and the
+				// pane kept a FOREIGN conversation — whose git card then read as this
+				// row's, which is exactly how a correct `main · clean` was reported as a
+				// broken session. Same defect class as ARXA_WS_NEW_REFUSED: a silent
+				// no-op is the dead button D4 set out to prevent, just quieter.
+				// The VISIBLE naming is ARXA_SESSION_DOT, which renders straight off the
+				// row data — these two lines are the diagnostic trail (lens + console).
+				window.__arxaNoConversation = { sessionId, reason: dshWhy || "unknown" };
+				console.warn("[arxa-sidebar] no conversation for " + sessionId + " (" + (dshWhy || "unknown") + ") — nothing was opened");
+				return;
+			}
 			const list = arxaClientSessions.list;
 			const listed = () => { const snap = list && typeof list.getSnapshot === "function" ? list.getSnapshot() : null; return !(snap && Array.isArray(snap.ids) && !snap.ids.includes(dshId)); };
 			if (!listed()) {
@@ -4171,6 +4193,11 @@ window.__ModuleLoader__.load({
 				// gradient, which sits UNDER the row's content: it could only ever
 				// live in the padding and would have collided with the timestamp.
 				+ ".aXa_arxaCurrentDot{width:6px;height:6px;flex:none;margin-left:6px;border-radius:50%;background:var(--dsw-alias-state-business-primary)}"
+				// Same 6px slot as the current dot, deliberately NOT the accent: a
+				// hollow ring in the caption grey reads as "something is absent here",
+				// where a filled accent dot reads as "you are here". The two never
+				// collide — a row with no conversation cannot be the one you are in.
+				+ ".aXa_arxaNoConvoDot{width:6px;height:6px;flex:none;margin-left:6px;border-radius:50%;background:none;border:1px solid var(--dsw-alias-label-caption);opacity:.7}"
 				+ ".uV2eYG_root:not(.uV2eYG_hero) [data-arxa-preset-corner]{display:none}"
 				+ ".uV2eYG_hero [data-composer-card] :is(.uV2eYG_input,.uV2eYG_mirror,.uV2eYG_backdrop){box-sizing:border-box;padding-right:var(--arxa-preset-inset,120px)}";
 			document.head.appendChild(tag);
@@ -4298,12 +4325,26 @@ window.__ModuleLoader__.load({
 		 * hover, its ellipsis menu. Not a StateDot — that primitive's states
 		 * are done/error/ongoing (the RUN state, already on the left slot),
 		 * and this says something else entirely. */
-		const ARXA_SESSION_DOT = (selected) => selected !== true ? null : (0, react_jsx_runtime.jsx)("span", {
+		const ARXA_SESSION_DOT = (selected, row) => {
+			// A session with no conversation gets the OTHER mark, on every such row
+			// and not only the selected one. Selecting it opens nothing
+			// (arxaOpenConversation bails on the null dshSessionId), so without this
+			// the row is indistinguishable from one that opened fine. `dshStatus`
+			// rides the tooltip untranslated — engine vocabulary, same rule as the
+			// sync badge detail.
+			if (row && row.dshSessionId == null) return (0, react_jsx_runtime.jsx)("span", {
+				className: clsx(Rows_module_css_default.dot, "aXa_arxaNoConvoDot"),
+				role: "img",
+				"aria-label": orgT("rows.noConversation"),
+				title: orgT("rows.noConversation") + (row.dshStatus ? " (" + row.dshStatus + ")" : ""),
+			}, "arxa-no-convo");
+			return selected !== true ? null : (0, react_jsx_runtime.jsx)("span", {
 			className: clsx(Rows_module_css_default.dot, "aXa_arxaCurrentDot"),
 			role: "img",
 			"aria-label": orgT("rows.current"),
 			title: orgT("rows.current"),
 		}, "arxa-current");
+		};
 		const ARXA_SELECT_WS = (workspaceId) => {
 			const { orgId, ws } = wsParts(workspaceId);
 			if (ws !== "") orgStore.selectRow({ orgId, rowId: ws });
@@ -5848,6 +5889,7 @@ window.__ModuleLoader__.load({
 			"disconnect.doneRemoved": "Disconnected — removed from GitHub: {repos}",
 			"rows.ghSynced": "Synced with GitHub",
 			"rows.current": "You are here",
+			"rows.noConversation": "No conversation — the session's files are here, but nothing opened",
 			"org.create.ghToggle": "Publish to GitHub",
 			"org.create.ghOnHint": "A private GitHub repository is created and kept in sync.",
 			"org.create.ghOffHint": "This organisation stays on this device only. Connect it later from its menu.",
@@ -6056,6 +6098,7 @@ window.__ModuleLoader__.load({
 			"disconnect.doneRemoved": "Odłączono — usunięto z GitHub: {repos}",
 			"rows.ghSynced": "Zsynchronizowano z GitHub",
 			"rows.current": "Tu jesteś",
+			"rows.noConversation": "Brak rozmowy — pliki sesji są tutaj, ale nic się nie otworzyło",
 			"org.create.ghToggle": "Opublikuj na GitHub",
 			"org.create.ghOnHint": "Zostaje utworzone prywatne repozytorium GitHub i jest na bieżąco synchronizowane.",
 			"org.create.ghOffHint": "Ta organizacja pozostaje tylko na tym urządzeniu. Połącz ją później z jej menu.",
@@ -6264,6 +6307,7 @@ window.__ModuleLoader__.load({
 			"disconnect.doneRemoved": "Déconnecté — supprimés de GitHub : {repos}",
 			"rows.ghSynced": "Synchronisé avec GitHub",
 			"rows.current": "Vous êtes ici",
+			"rows.noConversation": "Aucune conversation — les fichiers de la session sont là, mais rien ne s'est ouvert",
 			"org.create.ghToggle": "Publier sur GitHub",
 			"org.create.ghOnHint": "Un dépôt GitHub privé est créé et synchronisé en continu.",
 			"org.create.ghOffHint": "Cette organisation reste uniquement sur cet appareil. Connectez-la plus tard depuis son menu.",

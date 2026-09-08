@@ -95,11 +95,11 @@ check('G3 glyph: the stock folderActive rule survives the transform',
 // first attempt was a background gradient: it paints UNDER the row's content,
 // so it could only live in the padding and would have hit the timestamp.
 check('G3 dot: the current session row is marked in the stock dot slot',
-  client.includes('const ARXA_SESSION_DOT = (selected) =>')
+  client.includes('const ARXA_SESSION_DOT = (selected, row) =>')
   && client.includes('clsx(Rows_module_css_default.dot, "aXa_arxaCurrentDot")')
   && client.includes('.aXa_arxaCurrentDot{width:6px;height:6px;flex:none;margin-left:6px'))
 check('G3 dot: it is the LAST child of the session row (pinned right)',
-  client.includes('ARXA_SESSION_DOT(selected)\n' + '\t'.repeat(5) + ']'))
+  client.includes('ARXA_SESSION_DOT(selected, row)\n' + '\t'.repeat(5) + ']'))
 check('G3 dot: no gradient left painting under the row content',
   !client.includes('div.aXa_wsr_sessionRow.aXa_wsr_selected'))
 check('G3 dot: its label is translated in all 3 dictionaries',
@@ -943,6 +943,45 @@ check('client: agent verb + reason strings localized in en/pl/fr',
   check('S-rescue: every locale answers the two gate strings',
     (gen.match(/"welcome\.trashed":/g) || []).length === (gen.match(/"welcome\.businessSoon":/g) || []).length
     && (gen.match(/"welcome\.restore":/g) || []).length === (gen.match(/"welcome\.businessSoon":/g) || []).length)
+}
+
+// ---- D112: a session with no conversation is NAMED, never silent ----
+// The bug this gates (2026-09-08): selecting a row whose `dshSessionId` is null
+// highlighted it, opened nothing, and said nothing — the pane kept a FOREIGN
+// conversation and its (correct) org-seated git card was read as this row's.
+// These assert the NEGATIVE. A test that only checks "the row is selectable"
+// passed before the fix and would pass after it, so it gates nothing.
+{
+  const gen = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
+  const host = readFileSync(new URL('./lib/index.js', import.meta.url), 'utf8')
+  // The exact early return that swallowed it. Reachability of the null row is
+  // already green elsewhere: file-org-shell/selftest.mjs asserts that the
+  // default (no-faces) bridge leaves dshSessionId null + dshStatus
+  // 'dsh-unavailable', which is precisely the row this path receives.
+  check('D112: the silent bail is gone from arxaOpenConversation',
+    !/if \(!dshId\) return;/.test(gen))
+  check('D112: a missing conversation leaves a diagnostic trail',
+    gen.includes('window.__arxaNoConversation = { sessionId, reason: dshWhy || "unknown" };')
+    && gen.includes('[arxa-sidebar] no conversation for '))
+  // Serving the reason, not just the absence — without dshStatus the row can
+  // only say "missing", never "dsh was down".
+  check('D112: the rows face serves dshStatus alongside dshSessionId',
+    host.includes('dshStatus: s.dshStatus ?? null,'))
+  check('D112: the summary carries the link so the row render needs no store read',
+    gen.includes('dshSessionId: x.dshSessionId ?? null,')
+    && gen.includes('dshStatus: x.dshStatus ?? null,'))
+  // Handed the row, not reading orgStore: a store read would have described
+  // only the SELECTED row, and after boot most dsh-less rows are not selected.
+  check('D112: the dot is handed the row and marks EVERY dsh-less one',
+    gen.includes('ARXA_SESSION_DOT(selected, row)')
+    && /const ARXA_SESSION_DOT = \(selected, row\) => \{[\s\S]{0,900}?if \(row && row\.dshSessionId == null\) return/.test(gen))
+  check('D112: the mark is accessible and names the engine reason',
+    gen.includes('"aria-label": orgT("rows.noConversation")')
+    && gen.includes('row.dshStatus ? " (" + row.dshStatus + ")" : ""')
+    && gen.includes('.aXa_arxaNoConvoDot{'))
+  check('D112: every locale answers the new string',
+    (gen.match(/"rows\.noConversation":/g) || []).length
+      === (gen.match(/"rows\.current":/g) || []).length)
 }
 
 console.log(failures === 0 ? '\narxa-sidebar selftest: ALL GREEN' : `\narxa-sidebar selftest: ${failures} FAILURE(S)`)

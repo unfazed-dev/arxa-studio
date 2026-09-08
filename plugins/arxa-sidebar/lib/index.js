@@ -651,6 +651,12 @@ export function apply(ctx, opts = {}) {
         createdAt: s.createdAt ?? null,
         updatedAt: s.updatedAt ?? null,
         dshSessionId: s.dshSessionId ?? null,
+        // Why the conversation is missing, not merely that it is (2026-09-08).
+        // `dsh-unavailable` is a truthful refusal recorded at creation
+        // (dsh-bridge.js:29 when no dsh faces are injected) — the client could
+        // see the null but had no way to name the cause, so the row said
+        // nothing at all.
+        dshStatus: s.dshStatus ?? null,
         // The crumb last segment (Q2: … / session / worktree) reads this — it was
         // never served, so the segment silently never rendered (2026-09-02).
         worktree: s.worktree ?? null,
