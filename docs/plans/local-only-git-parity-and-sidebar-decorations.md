@@ -143,6 +143,57 @@ before the host call and never reverts it on the `.catch()` path — a failed
 `session.open` leaves the row highlighted.
 
 
+
+### Decisions 2 + 4 — landed 2026-09-08 (Finish half; Sweep still open)
+
+**Commit now says what it does.** `git.commit` was the bare word "Commit" in all
+three dictionaries while `sessionStageBoundary` squashed the WIP run, ran
+`check.sh` and merged into main behind it. Relabelled "Commit & land on main".
+
+**Finish is reachable.** New `card.finish` route + a button on the Commit row —
+same journey's end: Commit lands the work, Finish clears what is left. It calls
+`finishSession`, which already refuses unless the branch is merged AND the
+worktree is clean.
+
+- The enabled state is **`finishSession`'s own `dryRun`**, not a second opinion
+  computed beside it. A separately derived gate can drift from what the action
+  does; this one cannot, and `dryRun`'s `reason` gives the disabled button honest
+  copy (`not merged into main yet` / `uncommitted changes in the worktree`)
+  instead of going mute. Costs ~2 extra spawns on the 30 s status poll.
+- **D40 holds twice.** A parked session gets no Finish button at all
+  (`status.finish` is null, so it is absent rather than dark) *and* the route
+  refuses `parked-never-deleted`, so a stale card cannot post past the missing
+  button.
+- Confirm key is `finishSession`, not `finish` — `git.confirm.finish.*` was
+  already "Finish integrating". The visible labels stay distinct.
+
+**Two backend bugs found in code that had never had a caller.**
+
+1. `finishSession` looked up its session with a bare `listSessions(repoPath)`
+   while `sessionStageBoundary:574` routes through `sessionRepoFor` — so under
+   D98/D99 a project session finished from the org path threw `unknown-session`.
+   Same preamble added. Two functions in one module sharing a `(repoPath, id)`
+   signature while disagreeing on whether they route is a trap for the next
+   caller.
+2. `sweepMerged` had **no parked guard**. Decision 4 says parked sessions are
+   never swept, and that held only by accident: a red gate parks *and* leaves the
+   branch unmerged, so the merged filter happened to cover it. A session parked
+   after a green land would have had its branch deleted. Explicit guard added,
+   plus the test case the guard exists for (parked **and** merged) — the existing
+   test used a session that was both parked and unmerged, which is exactly why
+   the gap went unnoticed.
+
+**Sweep is not landed and is not going on this card.** Sweep is org-scoped; the
+card is seat-scoped, so a batch cleanup belongs on the sidebar's org and project
+row menus (D80 gives both a menu). Under D98/D99 each row owns exactly one repo,
+which is precisely `sweepMerged(repoPath)`'s existing signature — no cross-repo
+iteration needed. That is the next piece of Decision 4.
+
+**Unverified the same way Decision 1 is:** no one has clicked Finish in a running
+app. The gating is proven by `selftest.finish.mjs` (8 cases) and by string
+assertions on the generated card; the button appearing, darkening with its reason
+and asking before acting all still need a lens pass.
+
 ---
 
 ## 1. What local-only already does (verified, not assumed)
