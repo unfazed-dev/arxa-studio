@@ -449,9 +449,22 @@ try {
 } catch (err) {
   check('the smoke ran to completion', false, String(err?.stack ?? err).slice(0, 900))
 } finally {
+  /* --project mode does NOT use `repoName`. It drives arxa's REAL publish,
+   * which names each repo after its slug (Arxa-Smoke-Org, Arxa-Smoke-Project),
+   * so deleting only the throwaway left BOTH real-named repos on the account
+   * after every project run — found 2026-09-08, twelve minutes after a green
+   * one. `created` was already true for them (set at :204/:206), so the flag
+   * said "clean me up" while the cleanup could not name them.
+   *
+   * Names are derived from the same constants publish uses, never from what is
+   * on the account, so this can only ever reach repos this run made. */
   if (created && !keep) {
-    sh('gh', ['repo', 'delete', `${owner}/${repoName}`, '--yes'], { allowFail: true })
-    console.log(`\ncleaned up ${owner}/${repoName}`)
+    const slug = (n) => n.trim().replace(/\s+/g, '-')
+    const mine = projectMode ? [slug(ORG_NAME), slug(PROJECT_NAME)] : [repoName]
+    for (const r of mine) {
+      sh('gh', ['repo', 'delete', `${owner}/${r}`, '--yes'], { allowFail: true })
+      console.log(`\ncleaned up ${owner}/${r}`)
+    }
   }
 }
 

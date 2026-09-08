@@ -318,6 +318,21 @@ Kept **synchronous** deliberately: all 51 call sites are bare `fail('…')` with
 past the failure it just reported. `execFileSync` keeps it a hard stop. Verified
 on the next failing run — it cleaned up after itself.
 
+**`card-cicd-smoke.mjs --project` leaked two repos on every run, including
+green ones.** Its cleanup deleted `repoName` (`arxa-cicd-card-<ts>`), but
+`--project` mode never uses that name — it drives arxa's REAL publish, which
+names each repo after its slug (`Arxa-Smoke-Org`, `Arxa-Smoke-Project`). So the
+`created` flag said "clean me up" while the cleanup could not name what was
+made. Fixed: the finally block now deletes whichever pair the mode created,
+derived from the same `ORG_NAME`/`PROJECT_NAME` constants publish uses, so it
+can only ever reach repos that run made. Verified — a re-run reported cleaning
+up both.
+
+Worth noting how this was nearly missed: the leftover check filtered on
+`/^(arxa-cicd|SMOKE|D90SMOKE|Born-Smoke)/i` and reported "none" while both repos
+sat there, because neither matches. A litter check is only as good as its
+pattern; sort by `updatedAt` instead of guessing names.
+
 **Still owed:** repairing `org-link-smoke` S5 (second staleness: it writes its
 probe into the ORG worktree and expects the SESSION branch to have something to
 squash), and the lens pass. The installed `/Applications/Arxa Studio.app` is the
