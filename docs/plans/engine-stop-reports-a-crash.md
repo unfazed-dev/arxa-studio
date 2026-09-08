@@ -31,23 +31,29 @@ systemd main  →  libexec/arxa-studio --no-open   (bun-compiled sidecar, script
 `KillMode=mixed` sends SIGTERM to the **main pid only**; anything still alive
 when it exits is SIGKILLed.
 
-## Root cause — the same line in two layers
+## Root cause — one fault, one amplifier
 
-Both the wrapper and the launcher ended with:
+Both the wrapper and the launcher ended with the same line:
 
 ```js
 child.on('exit', (code, signal) => process.exit(signal ? 1 : code ?? 1))
 ```
 
-- **Wrapper** (`scripts/pack-sidecar.mjs`): it forwards SIGTERM to the launcher
-  correctly, the launcher then dies *from that signal*, and this line turns
-  "child died from the signal I just sent it" into **exit 1**. That is the
-  `status=1/FAILURE` systemd reports.
-- **Launcher** (`bin/arxa-studio.mjs`): no signal handling at all, so the dsh
-  engine below it never learned the app was stopping. It survived its parent and
-  systemd **SIGKILLed** it — every stop, with registries and worktrees in flight.
+but they are **not** two independent causes. The chain is:
 
-So the two journal lines have two different causes, and both are this one shape.
+1. **The fault — `bin/arxa-studio.mjs` had no signal handling at all.** The
+   wrapper forwards SIGTERM to it correctly; with no handler it dies *by the
+   signal*, and the dsh engine below it never learns the app is stopping. That
+   orphaned engine is what systemd then **SIGKILLs**.
+2. **The amplifier — the wrapper mistranslates that death.** Seeing its child
+   killed by a signal, `signal ? 1` reports **exit 1**, which is the
+   `status=1/FAILURE` systemd records.
+
+Proved by the box: patching **only** the launcher, leaving the shipped wrapper
+untouched, made the stop clean. The launcher now exits 0 instead of dying by
+signal, so the old wrapper's `code ?? 1` sees 0 and reports success. The
+wrapper's line was never reached on a signal path once the launcher stopped
+producing one.
 
 ## Fix
 
@@ -60,8 +66,24 @@ A stop we asked for is a success, and it has to reach the bottom of the ladder:
    `TimeoutStopSec=20`).
 
 Fixing the launcher alone is enough to clear the exit code on an already-installed
-build: the launcher now exits 0 rather than dying by signal, so the old wrapper's
-`code ?? 1` sees 0 and exits 0 too. The wrapper fix makes it correct by itself.
+build, and that is what was verified on the box. **The wrapper change is
+unverified** — the box still runs the old wrapper — but it is the right change
+anyway: without it, a launcher that dies by signal for a real reason would still
+be reported as exit 1. It ships with the next build.
+
+**Deploy caveat.** The box's fix is a hot patch of
+`~/.arxa/engine/<hash>/arxa-studio/bin/arxa-studio.mjs`. A re-extraction reverts
+exactly that file — it happened during this session — so the next AppImage
+install brings the failing stop back until a Linux build carries both commits.
+
+## Incident during the investigation
+
+Testing the sidecar by hand (`… --no-open &`, then `kill -TERM`) left an orphan
+engine holding port 7891 — because the unpatched wrapper did not shut its child
+down, which is this very bug. The service then crash-looped on `EADDRINUSE` for
+about two minutes until the orphan was terminated by pid. Worth recording twice
+over: it is the cleanest demonstration of the fault, and a warning that manual
+sidecar runs need their child reaped.
 
 ## Evidence
 
