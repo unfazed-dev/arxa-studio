@@ -30,6 +30,19 @@ the same call that wrote it. Measured live: `state` keys came back as
 `seam,root,orgs,rows,tree,trashCount,archives,sessionTrash,selectedProject`
 (exactly `emptySnap`) and `orgtrash.restore` → `{"ok":false,"error":"no-workspace"}`.
 
+**It needs a restart, which is why it looked intermittent.** `getLifecycle()`
+memoises (`if (lifecycle) return lifecycle`), so the process that trashed the
+org keeps working: the cached lifecycle answers everything, trash included.
+The seam only goes stub in a process that has to BUILD one with empty recents
+— the next engine start, or an app relaunch. Measured both ways on the box
+2026-09-08: `orgtrash.purge` succeeded at zero orgs through a warm cache, and
+the same engine after a restart served `emptySnap` with no trash at all.
+
+Consequence for the tests below: the in-process smoke exercises the verbs at
+zero orgs but generally runs through the WARM cache, so it does not by itself
+prove the stubbed branch. That branch is covered by the `S-rescue` source
+checks and by the live box evidence (restart, zero recents, trash served).
+
 On top of that, `WelcomeGate` is a full-screen overlay at `orgs.length === 0`
 — so even a served trash row would have been behind it.
 
