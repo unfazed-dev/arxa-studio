@@ -19,7 +19,7 @@
 
 import fs from 'node:fs'
 import { runGit } from './run.js'
-import { listSessions, archiveSession, annotateSession, SESSION_BASE_PREFIX, SESSION_BRANCH_PREFIX } from './sessions.js'
+import { listSessions, archiveSession, annotateSession, sessionRepoFor, SESSION_BASE_PREFIX, SESSION_BRANCH_PREFIX } from './sessions.js'
 
 /** Finish refused: the session branch is not (yet) merged into main. */
 export class FinishRefusedError extends Error {
@@ -79,6 +79,13 @@ function isWorktreeClean(worktreePath, env) {
  *   branchDeleted?: boolean, baseRefDeleted?: boolean }}
  */
 export function finishSession(repoPath, id, { env = process.env, dryRun = false } = {}) {
+  // D98: act on the OWNING repo's registry — the same preamble
+  // sessionStageBoundary uses. Without it a project session finished from the
+  // org path threw unknown-session, and two functions in this module sharing a
+  // (repoPath, id) signature while disagreeing on whether they route is a trap
+  // for the next caller. This module had no caller but its own selftest until
+  // 2026-09-08, so nothing had exercised it.
+  repoPath = sessionRepoFor(repoPath, id, env)
   const session = getSessionOrThrow(repoPath, id, env)
   const branch = session.branch
   const merged = isMergedIntoMain(repoPath, branch, env)
@@ -156,6 +163,15 @@ export function sweepMerged(repoPath, { env = process.env, dryRun = true } = {})
   const skipped = []
   for (const session of listSessions(repoPath, env)) {
     if (!session.branch.startsWith(SESSION_BRANCH_PREFIX)) continue
+    // D40: parked is never deleted. Until 2026-09-08 this held only by
+    // accident — a red gate parks AND leaves the branch unmerged, so the
+    // merged filter below happened to cover it. Anything that parks a session
+    // whose branch IS merged (a manual park after a green land) would have
+    // swept it. Explicit guard, not an emergent one.
+    if (session.state === 'parked') {
+      skipped.push({ id: session.id, branch: session.branch, reason: 'parked' })
+      continue
+    }
     // Already finished: branch (and its worktree) are gone, so it's not a
     // sweep candidate at all — distinct from "not merged yet", otherwise
     // every already-finished session pollutes `skipped` as 'not-merged'

@@ -26,7 +26,7 @@ const en = {
   'git.health.missing': 'worktree missing',
   'git.health.detached': 'worktree detached',
   'git.refresh': 'Refresh',
-  'git.commit': 'Commit',
+  'git.commit': 'Commit & land on main',
   'git.commitHint': 'nothing to commit',
   'git.commitSubject': 'Commit subject — <type>(<scope>): <what is now true>',
   'git.save': 'Commit',
@@ -86,6 +86,14 @@ const en = {
   'git.confirm.mint.title': 'Mint a version?',
   'git.confirm.mint.body': 'Stamps a version on this merged seat. A version is a public record — the next one goes forward, never over this one.',
   'git.confirm.mint.ok': 'Mint a version',
+  'git.finish': 'Finish session',
+  'git.finish.not-merged': 'not merged into main yet',
+  'git.finish.worktree-dirty': 'uncommitted changes in the worktree',
+  'git.finish.done': 'Session finished — worktree and branch removed',
+  'git.finishFailed': 'Could not finish: {reason}',
+  'git.confirm.finishSession.title': 'Finish this session?',
+  'git.confirm.finishSession.body': 'Removes the worktree and deletes the branch. The work is already on main and the session’s record is kept — but the branch itself is gone.',
+  'git.confirm.finishSession.ok': 'Finish session',
   // G6: the expired grant used to be a sentence nobody could act on.
   'git.relinkNeeded': 'GitHub sign-in expired',
   'git.relink.title': 'Re-link GitHub',
@@ -114,7 +122,7 @@ const pl = {
   'git.health.missing': 'brak drzewa roboczego',
   'git.health.detached': 'drzewo robocze odłączone',
   'git.refresh': 'Odśwież',
-  'git.commit': 'Zatwierdź',
+  'git.commit': 'Zatwierdź i scal do main',
   'git.commitHint': 'nic do zatwierdzenia',
   'git.commitSubject': 'Temat commita — <typ>(<zakres>): <co jest teraz prawdą>',
   'git.save': 'Zatwierdź',
@@ -173,6 +181,14 @@ const pl = {
   'git.confirm.mint.title': 'Wybić wersję?',
   'git.confirm.mint.body': 'Stempluje wersję na scalonym miejscu. Wersja to zapis publiczny — następna idzie do przodu, nigdy po tej.',
   'git.confirm.mint.ok': 'Wybij wersję',
+  'git.finish': 'Zakończ sesję',
+  'git.finish.not-merged': 'jeszcze nie scalona do main',
+  'git.finish.worktree-dirty': 'niezatwierdzone zmiany w drzewie roboczym',
+  'git.finish.done': 'Sesja zakończona — drzewo robocze i gałąź usunięte',
+  'git.finishFailed': 'Nie udało się zakończyć: {reason}',
+  'git.confirm.finishSession.title': 'Zakończyć tę sesję?',
+  'git.confirm.finishSession.body': 'Usuwa drzewo robocze i kasuje gałąź. Praca jest już na main, a zapis sesji zostaje — ale sama gałąź znika.',
+  'git.confirm.finishSession.ok': 'Zakończ sesję',
   'git.relinkNeeded': 'Sesja GitHub wygasła',
   'git.relink.title': 'Połącz ponownie GitHub',
   'git.relink.desc': 'Wpisz ten jednorazowy kod na github.com/login/device — przeglądarka powinna już tam być.',
@@ -200,7 +216,7 @@ const fr = {
   'git.health.missing': 'arbre de travail manquant',
   'git.health.detached': 'arbre de travail détaché',
   'git.refresh': 'Actualiser',
-  'git.commit': 'Valider',
+  'git.commit': 'Valider et fusionner dans main',
   'git.commitHint': 'rien à valider',
   'git.commitSubject': 'Sujet du commit — <type>(<portée>): <ce qui est vrai maintenant>',
   'git.save': 'Valider',
@@ -259,6 +275,14 @@ const fr = {
   'git.confirm.mint.title': 'Frapper une version ?',
   'git.confirm.mint.body': 'Appose une version sur ce siège fusionné. Une version est un enregistrement public — la suivante avance, elle ne recouvre jamais celle-ci.',
   'git.confirm.mint.ok': 'Frapper une version',
+  'git.finish': 'Terminer la session',
+  'git.finish.not-merged': 'pas encore fusionnée dans main',
+  'git.finish.worktree-dirty': 'modifications non validées dans l’arbre de travail',
+  'git.finish.done': 'Session terminée — arbre de travail et branche supprimés',
+  'git.finishFailed': 'Échec de la fin de session : {reason}',
+  'git.confirm.finishSession.title': 'Terminer cette session ?',
+  'git.confirm.finishSession.body': 'Supprime l’arbre de travail et la branche. Le travail est déjà sur main et le relevé de la session est conservé — mais la branche elle-même disparaît.',
+  'git.confirm.finishSession.ok': 'Terminer la session',
   'git.relinkNeeded': 'Session GitHub expirée',
   'git.relink.title': 'Reconnecter GitHub',
   'git.relink.desc': 'Saisissez ce code à usage unique sur github.com/login/device — votre navigateur devrait déjà y être.',
@@ -537,6 +561,21 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
     go,
   })
   const confirmGo = () => { const c = confirm; setConfirm(null); if (c) c.go() }
+  /** D113: end of life. finishSession refuses unless the branch is merged AND
+   * the worktree is clean, and card.status already asked it (dryRun) for the
+   * enabled state — so this just runs the same function for real. Behind the
+   * same G4 confirm as the other moves that are hard to walk back: the worktree
+   * and the branch are both gone afterwards. */
+  const finishSession = async () => {
+    await run('finish', async () => {
+      try {
+        await post('card.finish', seatArg())
+        if (!alive.current) return
+        notify('info', t('git.finish.done'))
+        load()
+      } catch (e) { notify('error', t('git.finishFailed', { reason: reasonOf(e) })) }
+    })
+  }
   /** G6: the device flow, the sidebar's relink verbatim — card.github.link
    * LONG-POLLS until GitHub confirms, while card.github.device is polled
    * meanwhile for the one-time code to show. Both ride the card's own route:
@@ -662,6 +701,17 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
         : [
           canCommit ? action('draft', t('git.askDraft'), Icon('IconSparkle16', 'IconEnhanceOutline16', 14), { onClick: askDraft }) : null,
           action('commit', t('git.commit'), Icon('IconListPenOutline16', 'IconCheckOutline16', 14), { disabled: !canCommit, onClick: () => setEditing({ kind: 'commit', text: '' }) }),
+          // D113: Finish sits with Commit because it is the same journey's end
+          // — Commit lands the work on main, Finish clears what is left behind.
+          // `status.finish` is null on an org seat and on a PARKED session (D40:
+          // parked is never deleted), so the button is absent, not merely dark.
+          // When present but refused it stays visible and DISABLED, and the
+          // preview line says which refusal — a mute dark button teaches nothing.
+          status.finish
+            ? action('finish', t('git.finish') + (status.finish.can ? '' : ' — ' + (t('git.finish.' + status.finish.reason) || status.finish.reason)),
+              Icon('IconArchiveOutline20', 'IconCloseOutline16', 14),
+              { disabled: !status.finish.can, onClick: ask('finishSession', finishSession) })
+            : null,
         ])))
   // 3. Approve — session seats of a linked org only
   if (status.seat && status.seat.kind === 'session' && status.linked && !status.localOnly) {

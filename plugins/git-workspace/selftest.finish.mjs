@@ -24,7 +24,7 @@ import path from 'node:path'
 import { runGit } from './lib/run.js'
 import { initProjectRepo } from './lib/repos.js'
 import {
-  openSession, sessionStageBoundary, archiveSession, listSessions,
+  openSession, sessionStageBoundary, archiveSession, annotateSession, listSessions,
   SESSION_BASE_PREFIX, GATE_CHECK_SCRIPT,
 } from './lib/sessions.js'
 import { behindMain, branchTip, isMergedIntoMain, finishSession, sweepMerged, FinishRefusedError } from './lib/finish.js'
@@ -204,9 +204,29 @@ ok('sweepMerged dryRun lists candidates without touching anything', () => {
   assert.ok(aRow, 'already-finished session vanished from skipped entirely')
   assert.equal(aRow.reason, 'already-finished', 'already-finished session misreported as not-merged')
   const bRow = again.skipped.find((r) => r.id === 'sweep-b')
-  assert.equal(bRow.reason, 'not-merged')
+  // 'parked', not 'not-merged': the parked guard runs first now. sweep-b is
+  // both, and D40 (parked is never deleted) is the stronger reason to say.
+  assert.equal(bRow.reason, 'parked')
 
   archiveSession(proj, 'sweep-b')
+})
+
+// The case the guard actually exists for. sweep-b above is parked AND unmerged,
+// so the merged filter alone would have covered it — which is exactly why the
+// guard's absence went unnoticed. A session that is parked while its branch IS
+// merged (park after a green land) was swept by the old code, deleting the
+// branch D40 promises to keep.
+ok('sweepMerged never sweeps a parked session, even one whose branch is merged', () => {
+  const p = openSession(proj, { id: 'sweep-parked-merged' })
+  fs.writeFileSync(path.join(p.worktree, 'spm.txt'), 'x\n')
+  assert.equal(sessionStageBoundary(proj, 'sweep-parked-merged').merged, true, 'setup: branch must be merged')
+  annotateSession(proj, 'sweep-parked-merged', { state: 'parked' })
+
+  const out = sweepMerged(proj, { dryRun: false })
+  assert.ok(!out.finished.some((r) => r.id === 'sweep-parked-merged'), 'a parked session was swept')
+  const row = out.skipped.find((r) => r.id === 'sweep-parked-merged')
+  assert.equal(row && row.reason, 'parked')
+  assert.ok(runGit(['branch', '--list', p.branch], { cwd: proj }) !== '', 'a parked session lost its branch')
 })
 
 // ---- 6. pressure: 30 sessions, 15 merged, sweep < 5s -----------------------

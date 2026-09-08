@@ -102,6 +102,40 @@ check('G5 icons: one glyph per meaning — refresh and check stop standing in fo
 check('G5 icons: the two names that never existed are gone',
   !clientSrc.includes('IconGitBranchOutline14') && !clientSrc.includes('IconUploadOutline16'))
 
+// ---- D113: Finish is REACHABLE, and its refusals are legible ----
+// finishSession + sweepMerged were fully implemented and called by nothing but
+// their own selftest. What is new here is the route, so these assert the
+// GATING, not the function: a test that only proves "Finish appears on a merged
+// clean session" never shows that either refusal reaches the operator.
+check('D113: the card has a finish route at all',
+  hostSrc().includes("'card.finish': async () => {"))
+check('D113: the enabled state comes from finishSession\'s OWN dryRun, not a second opinion',
+  hostSrc().includes("gw.finishSession(cur.path, sessionRow.id, { env: process.env, dryRun: true })")
+  && hostSrc().includes("finish = { can: dry.wouldFinish === true, reason: dry.reason ?? null }"))
+// D40: parked is never deleted — absent, not merely disabled, and the route
+// refuses too so a stale card cannot post its way past the missing button.
+check('D113: a parked session is never offered Finish, and the route refuses it',
+  hostSrc().includes("if (sessionRow && sessionRow.state !== 'parked' && health === 'ok')")
+  && hostSrc().includes("if (s.state === 'parked') throw new Error('parked-never-deleted: ' + sid)"))
+check('D113: both refusals are named on the button, never a mute dark one',
+  clientSrc.includes("t('git.finish.' + status.finish.reason)")
+  && ["'git.finish.not-merged'", "'git.finish.worktree-dirty'"].every((k) => clientSrc.includes(k)))
+check('D113: Finish asks before acting, like the other unwalkable moves',
+  clientSrc.includes("onClick: ask('finishSession', finishSession)")
+  && clientSrc.includes("'git.confirm.finishSession.ok'"))
+check('D113: an org seat has no Finish (status.finish is null there)',
+  clientSrc.includes('status.finish\n') || clientSrc.includes('status.finish ?'))
+check('D113: every locale answers the finish strings',
+  (clientSrc.match(/'git\.confirm\.finishSession\.ok':/g) || []).length
+    === (clientSrc.match(/'git\.confirm\.mint\.ok':/g) || []).length
+  && (clientSrc.match(/'git\.finish':/g) || []).length
+    === (clientSrc.match(/'git\.confirm\.mint\.ok':/g) || []).length)
+// Decision 2: Commit has always squashed the WIP run, run the gate and merged
+// into main (sessionStageBoundary). The button said "Commit" and nothing else.
+check('D113: Commit says that it lands on main',
+  clientSrc.includes("'git.commit': 'Commit & land on main'")
+  && !/'git\.commit': 'Commit',/.test(clientSrc))
+
 // G4. The four moves that are hard to walk back pause on the stock Modal.
 check('G4: merge, integrate, finish and mint ask before acting',
   ["onClick: ask('merge', mergePr)", "onClick: ask('mint', mint)", "onClick: ask('integrate',", "onClick: ask('finish',"]

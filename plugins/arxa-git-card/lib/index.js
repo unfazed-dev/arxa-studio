@@ -603,7 +603,22 @@ export function apply(ctx) {
               // has to reach here — the sidebar's org modal is not where anyone
               // is standing when a push dies.
               const ghState = await (g ? g.status().catch(() => null) : null)
+              // D113: whether Finish would be accepted, answered by
+              // finishSession's OWN dryRun rather than a second opinion. A
+              // separately computed gate can drift from what the action does;
+              // this cannot, and its `reason` ('not-merged' | 'worktree-dirty')
+              // is what the dark button says instead of going mute.
+              // D40: a parked session is never deleted, so Finish is not
+              // offered on one at all — not merely disabled.
+              let finish = null
+              if (sessionRow && sessionRow.state !== 'parked' && health === 'ok') {
+                try {
+                  const dry = gw.finishSession(cur.path, sessionRow.id, { env: process.env, dryRun: true })
+                  finish = { can: dry.wouldFinish === true, reason: dry.reason ?? null }
+                } catch (err) { finish = { can: false, reason: String(err?.message ?? err) } }
+              }
               return {
+                finish,
                 seat: { kind: sid ? 'session' : 'org', sessionId: sid, branch },
                 github: { relinkRequired: ghState?.relinkRequired === true },
                 // `health` is what the card must read before any count. When it
@@ -873,6 +888,22 @@ export function apply(ctx) {
               * while a tracked file still carries a marker — git alone commits
               * a staged `<<<<<<<` without complaint, and the breakage would
               * resurface later as a baffling gate failure. */
+            /** D113: end of life for a session — remove the worktree, delete
+              * the branch, keep the record. finishSession refuses unless the
+              * branch is merged into main AND the worktree is clean, so this
+              * route adds no gate of its own: it calls the same function the
+              * card's dark/enabled state was computed from. D40 keeps parked
+              * sessions out (the card never offers the button there). */
+            'card.finish': async () => {
+              const gw = await importGitWorkspace()
+              const cur = handle()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (!sid) throw new Error('card.finish serves session seats')
+              const s = gw.parkedSessions(cur.path).find((x) => x.id === sid || x.dshSessionId === sid)
+              if (!s) throw new Error('session-not-found: ' + sid)
+              if (s.state === 'parked') throw new Error('parked-never-deleted: ' + sid)
+              return gw.finishSession(cur.path, s.id, { env: process.env })
+            },
             'card.integrate.finish': async () => {
               const gw = await importGitWorkspace()
               const cur = handle()
