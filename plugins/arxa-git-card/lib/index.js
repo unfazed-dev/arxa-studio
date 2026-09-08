@@ -264,7 +264,13 @@ export function apply(ctx) {
             const g = await getGithub().catch(() => null)
             if (!g) throw new Error('github-unavailable')
             const runId = arg?.runId
-            if (runId === undefined || runId === null || runId === '') throw new Error('runId-required')
+            /* Publishedness is checked BEFORE the runId. A local-only org has
+             * no runs to name, so demanding a runId first answered
+             * 'runId-required' — true, and useless: it blames the caller for
+             * omitting something that cannot exist. Resolving the repo first
+             * reports 'project-not-published' / 'org-not-published', the same
+             * strings repoFor already uses, so the surface says the one thing
+             * a user can act on. */
             const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
             if (sid) {
               // A run belongs to the repo the SESSION lives in. Re-running or
@@ -274,9 +280,11 @@ export function apply(ctx) {
               const s = gw.parkedSessions(handle().path).find((x) => x.id === sid)
               if (!s) throw new Error('session-not-found: ' + sid)
               const m = await repoFor(s)
+              if (runId === undefined || runId === null || runId === '') throw new Error('runId-required')
               return { g, owner: m.repoOwner, name: m.repoName, runId }
             }
             const { owner, name } = await orgRepoFor(handle())
+            if (runId === undefined || runId === null || runId === '') throw new Error('runId-required')
             return { g, owner, name, runId }
           }
 
@@ -574,15 +582,20 @@ export function apply(ctx) {
                * field set. Inherit only when the project is genuinely
                * unlinked — a published project is not local-only whatever its
                * org says. */
+              const seatIsProject = sessionRow?.origin === 'project' && typeof sessionRow.repoPath === 'string'
+              const seatRepoPath = seatIsProject ? sessionRow.repoPath : cur.path
+              const seatKind = seatIsProject ? 'project' : 'org'
               let seatManifest = manifest
-              if (sessionRow?.origin === 'project' && typeof sessionRow.repoPath === 'string') {
+              if (seatIsProject) {
                 seatManifest = {}
                 try { seatManifest = JSON.parse((await import('node:fs')).readFileSync(sessionRow.repoPath + '/project.json', 'utf8')) } catch { /* unreadable — unlinked, and it inherits below */ }
               }
               const seatLinked = Boolean(seatManifest.repoUrl)
               const seatLocalOnly = seatManifest.localOnly === true || (!seatLinked && manifest.localOnly === true)
               const g = await getGithub().catch(() => null)
-              const mainChecks = await mainChecksFor(cur.path, manifest, g, gw).catch(() => null)
+              // Checks belong to the seat's OWN repo: for a project session
+              // the org's main-branch checks describe a different repository.
+              const mainChecks = await mainChecksFor(seatRepoPath, seatManifest, g, gw).catch(() => null)
               // F8 (2026-09-04): when GitHub revokes the grant, every push and
               // PR on this card fails with a bare 401 and nothing says why or
               // what to do. github-link records relinkRequired; the card is the
@@ -612,7 +625,10 @@ export function apply(ctx) {
                 // back `modified` and is deliberately left alone — without this
                 // nobody could ever say so, and that repo would keep an old gate
                 // forever while looking fine.
-                frame: { wired: manifest.frameWired === true ? 'ok' : (manifest.frameWired ?? null), protection: manifest.frameProtection ?? null, runner: manifest.frameRunner ?? null, files: (() => { try { return gw.frameStatus(cur.path, 'org', { includeCiYml: true }) } catch { return null } })() },
+                // Same seat rule as linked/localOnly: a project session's
+                // frame is the PROJECT's (frameStatus has taken a 'project'
+                // kind all along — only this call never passed it).
+                frame: { wired: seatManifest.frameWired === true ? 'ok' : (seatManifest.frameWired ?? null), protection: seatManifest.frameProtection ?? null, runner: seatManifest.frameRunner ?? null, files: (() => { try { return gw.frameStatus(seatRepoPath, seatKind, { includeCiYml: true }) } catch { return null } })() },
                 main: { checks: mainChecks?.state ?? null },
               }
             },

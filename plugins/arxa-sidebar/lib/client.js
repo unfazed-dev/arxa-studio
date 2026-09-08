@@ -1146,6 +1146,8 @@ window.__ModuleLoader__.load({
 							type: "button",
 							className: Rows_module_css_default.iconButton,
 							"aria-label": t("actions.newSession.aria", { name: label }),
+							disabled: ARXA_WS_NEW_REFUSED(row.workspaceId) !== null,
+							title: ARXA_WS_NEW_REFUSED(row.workspaceId) ?? void 0,
 							onClick: (e) => {
 								e.stopPropagation();
 								onCreate();
@@ -4305,6 +4307,20 @@ window.__ModuleLoader__.load({
 		const ARXA_SELECT_WS = (workspaceId) => {
 			const { orgId, ws } = wsParts(workspaceId);
 			if (ws !== "") orgStore.selectRow({ orgId, rowId: ws });
+		};
+		/** The PER-ROW + affordance, gated by the same rule as the dock CTA.
+		 * `projectRowRefused` was wired into ctaReady when tracks landed, but
+		 * every tree row carries its own + button inside the stock bundle and
+		 * that one kept calling onCreate() for a workspace the server refuses.
+		 * Measured through the lens 2026-09-08 on a bare stage row: the click
+		 * created nothing, raised nothing and said nothing — session count
+		 * 1 -> 1, no toast, no console error. A silent no-op is the dead
+		 * button D4 set out to prevent, just quieter.
+		 * Returns the REASON to show, or null when the row can host a
+		 * session, so the stock scope needs no locale of its own. */
+		const ARXA_WS_NEW_REFUSED = (workspaceId) => {
+			const { ws } = wsParts(workspaceId);
+			return projectRowRefused(ws) ? orgT("newSession.needsTrack") : null;
 		};
 		/** Container-row emission map (v2 collapse fix, 2026-08-30): every
 		 * container row is keyed at its OWN pseudo workspace (orgItems pushes

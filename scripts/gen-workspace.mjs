@@ -146,6 +146,21 @@ const ROW_TOGGLE = 'onClick: onToggle,'
 if (!out.includes(ROW_TOGGLE) || out.indexOf(ROW_TOGGLE) !== out.lastIndexOf(ROW_TOGGLE)) throw new Error('row toggle anchor missing/dup — stock shape moved?')
 out = out.replace(ROW_TOGGLE, 'onClick: () => { onToggle(); ARXA_SELECT_WS(row.workspaceId); },')
 
+// 6c-bis. the per-row + affordance obeys the track rule (98f2e93). The dock
+//     CTA has been gated by projectRowRefused since tracks landed, but each
+//     tree row carries its OWN + inside the stock bundle, and that one still
+//     called onCreate() for a bare stage the server refuses with
+//     workspace-needs-track. Measured through the lens 2026-09-08: pressing
+//     it created nothing and said nothing. The region hook returns the reason
+//     string (or null), so this scope needs no locale of its own.
+//     One line, so it cannot drift on whitespace; `disabled` is what stops
+//     the click, and the title carries the reason on hover.
+const ROW_CREATE = '"aria-label": t("actions.newSession.aria", { name: label }),'
+if (!out.includes(ROW_CREATE) || out.indexOf(ROW_CREATE) !== out.lastIndexOf(ROW_CREATE)) throw new Error('row + anchor missing/dup — stock shape moved?')
+out = out.replace(ROW_CREATE, ROW_CREATE +
+  '\n' + T(7) + 'disabled: ARXA_WS_NEW_REFUSED(row.workspaceId) !== null,' +
+  '\n' + T(7) + 'title: ARXA_WS_NEW_REFUSED(row.workspaceId) ?? void 0,')
+
 // 6d. hide the stock workspace-row ellipsis menu on leaf rows: fixed
 //     folders are neither renamable nor deletable; org actions live on
 //     the org container row's own menu (region OrgContainerRow).
