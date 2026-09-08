@@ -756,3 +756,43 @@ parked, pushed.
 
 Three defects stacked in one section, each hidden by the one before it. The
 routing bug hid the wrong probe path, which hid the wrong shape assertion.
+
+### A wait that could not tell slow from broken
+
+With the probe and the shape fixed, S5 reached the merge-on-green tail and
+failed there — reporting only *"frame checks did not go green before merge"*.
+That sentence fits a slow run and a failing one equally well and names neither,
+because the loop tested **only** for green: a red run span the full deadline and
+came out sounding like a timeout. It also could never converge on a skipped or
+cancelled run, since `every(success)` is false for those, so the state is
+`pending` forever and only the clock ends it.
+
+Rewritten to stop at any terminal state and say what it saw. The first run with
+the new message answered immediately:
+
+```
+S5: frame checks ended pending after 240s (runner asleep)
+    — runs: frame-check=running, frame-check=running
+```
+
+`asleep` is literally *a check run is still **queued*** (`frame.js:301`). GitHub
+had not started the work after four minutes, so there was nothing about this
+repository, this card or this code to measure — waiting longer tests the runner
+queue, not arxa. The three cases are now distinct:
+
+| state | meaning | verdict |
+|---|---|---|
+| `red` | a check reported failure | **fail** |
+| `pending`, nothing queued | runs moving, never settled in 240s | **fail** — a real stall |
+| `pending` + `asleep` | GitHub has not started them | **skip**, loudly |
+
+The block already merged directly when the plan grants no checks at all; a
+runner that has not woken is the same situation by another road. Failing the
+suite for it trains everyone to ignore a red S5.
+
+**A skip must never wear the word GREEN.** The final line now reads
+`GREEN WITH n SKIPPED` and lists what went unmeasured. That last line is the only
+line most runs are read by, and "ALL GREEN" printed over an unmeasured step is
+how a suite starts lying — the same vacuous-pass shape as `.every()` over an
+empty array, printed instead of computed. Both shapes have now been found in this
+one file today.

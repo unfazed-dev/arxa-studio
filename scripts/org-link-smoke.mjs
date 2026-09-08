@@ -10,6 +10,14 @@
 import { execFileSync } from 'node:child_process'
 
 const BASE = process.env.ARXA_BASE || 'http://127.0.0.1:7891'
+
+/** Steps the run could not measure, printed loudly at the end.
+ *
+ * A skip that prints nothing is a pass, and this smoke already learned that
+ * lesson twice today (a vacuous `.every()` on an empty array, and a cleanup that
+ * reported success while leaking). Anything pushed here has to survive to the
+ * final line. */
+const skipped = []
 const NAME = 'D90SMOKE' + Date.now().toString(36).toUpperCase().slice(-6)
 
 /* card.* / insight.* / version.* live on the CARD's own route, not the
@@ -275,14 +283,42 @@ if (!pst.ok || !pst.result || !pst.result.pr || !pst.result.checks) fail('S5: ca
 // scope gap leaves checks 'none' — merge directly, protection is
 // plan-limited there anyway).
 if (pst.result.checks.state !== 'none') {
-  const deadline = Date.now() + 150000
-  let green = pst.result.checks.state === 'green'
-  while (!green && Date.now() < deadline) {
+  // The states are none | pending | green | red (github-link/lib/frame.js:303).
+  //
+  // This loop used to test ONLY for green, so it span the full deadline on a RED
+  // run and then reported "did not go green" — a sentence that fits a slow run
+  // and a failing one equally well, and names neither. It also cannot converge
+  // when a run is skipped or cancelled: `every(success)` is false for those, so
+  // the state is 'pending' forever and only the deadline ends it.
+  //
+  // So: stop at any TERMINAL state, and say what was actually seen.
+  const deadline = Date.now() + 240000
+  let last = pst.result.checks
+  while (last.state === 'pending' && Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 5000))
     const again = await post('card.pr.status', { sessionId: sid })
-    green = again.ok && again.result && again.result.checks && again.result.checks.state === 'green'
+    if (again.ok && again.result && again.result.checks) last = again.result.checks
   }
-  if (!green) fail('S5: frame checks did not go green before merge')
+  const runsSeen = (last.runs || []).map((r) => (r.name ?? '?') + '=' + (r.conclusion ?? r.status ?? 'running')).join(', ')
+  if (last.state === 'red') {
+    fail('S5: frame checks went RED — runs: ' + (runsSeen || 'none reported'))
+  }
+  if (last.state === 'pending' && !last.asleep) {
+    // Pending, nothing queued, four minutes gone: the runs are moving and simply
+    // never settled. That is a real stall worth failing on.
+    fail('S5: frame checks never settled in 240s — runs: ' + (runsSeen || 'none reported'))
+  }
+  if (last.state !== 'green') {
+    // `asleep` is literally "a check run is still QUEUED" (frame.js:301). GitHub
+    // has not started it yet, so there is nothing about this repository, this
+    // card or this code to measure — waiting longer tests the runner queue, not
+    // arxa. The block above already merges directly when the plan gives us no
+    // checks at all; a runner that has not woken is the same situation arriving
+    // by a different road, and failing the suite for it would train everyone to
+    // ignore a red S5.
+    skipped.push('S5 merge-on-green tail: runner asleep (' + (runsSeen || 'queued') + ')')
+    console.log('   SKIP the merge tail — GitHub had not started the checks after 240s')
+  }
 }
 {
   const { execFileSync } = await import('node:child_process')
@@ -319,4 +355,14 @@ if (!purged.ok) fail('local-only purge failed: ' + JSON.stringify(purged).slice(
 if ((await ghRepo(NAME)) !== null) fail('repo reappeared after purge?!')
 console.log('6. purge local-only: no GitHub needed, folder gone OK')
 
-console.log('ORG-LINK SMOKE: ALL GREEN (' + NAME + ')')
+if (skipped.length) {
+  // Never let a skip wear the word GREEN. The final line is the only line most
+  // runs are read by, and "ALL GREEN" over an unmeasured step is how a suite
+  // starts lying — the same vacuous-pass shape as an `.every()` over an empty
+  // array, just printed instead of computed.
+  console.log('\nNOT MEASURED (skipped, not passed):')
+  for (const x of skipped) console.log('  - ' + x)
+  console.log('\nORG-LINK SMOKE: GREEN WITH ' + skipped.length + ' SKIPPED (' + NAME + ')')
+} else {
+  console.log('ORG-LINK SMOKE: ALL GREEN (' + NAME + ')')
+}
