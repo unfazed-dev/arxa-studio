@@ -153,7 +153,15 @@ export function finishSession(repoPath, id, { env = process.env, dryRun = false 
  *
  * @returns {{ finished: object[], skipped: object[] }}
  */
-export function sweepMerged(repoPath, { env = process.env, dryRun = true } = {}) {
+export function sweepMerged(repoPath, { env = process.env, dryRun = true, only = null } = {}) {
+  // `only` (2026-09-08): act on nothing outside this id list. The sweep UI shows
+  // a dryRun preview and then acts on confirm, and between those two moments the
+  // WIP watcher (lifecycle.js:986, ~1.5s debounce) can auto-commit a dirty
+  // worktree clean — turning a session the preview REFUSED into one the real
+  // sweep would happily delete. Re-previewing at confirm time does not fix that;
+  // it just moves the race. Passing the previewed ids makes the preview a
+  // CEILING: the act can be a subset of what was shown, never a superset.
+  const allow = Array.isArray(only) ? new Set(only) : null
   const mergedOut = runGit(['branch', '--merged', 'main', '--format=%(refname:short)'], { cwd: repoPath, env })
   const merged = new Set(mergedOut.split('\n').map((s) => s.trim()).filter(Boolean))
   const allOut = runGit(['branch', '--format=%(refname:short)'], { cwd: repoPath, env })
@@ -163,6 +171,7 @@ export function sweepMerged(repoPath, { env = process.env, dryRun = true } = {})
   const skipped = []
   for (const session of listSessions(repoPath, env)) {
     if (!session.branch.startsWith(SESSION_BRANCH_PREFIX)) continue
+    if (allow && !allow.has(session.id)) continue
     // D40: parked is never deleted. Until 2026-09-08 this held only by
     // accident — a red gate parks AND leaves the branch unmerged, so the
     // merged filter below happened to cover it. Anything that parks a session
@@ -185,7 +194,16 @@ export function sweepMerged(repoPath, { env = process.env, dryRun = true } = {})
       continue
     }
     if (dryRun) {
-      finished.push({ id: session.id, branch: session.branch, dryRun: true, wouldFinish: true })
+      // Ask finishSession itself rather than declaring it finishable here: the
+      // merged check above is only HALF its contract — it also refuses a dirty
+      // worktree. Until 2026-09-08 the preview skipped that, so a sweep could
+      // promise a session and then refuse it, which is the one thing a preview
+      // for a destructive batch must never do.
+      let dry
+      try { dry = finishSession(repoPath, session.id, { env, dryRun: true }) }
+      catch (err) { skipped.push({ id: session.id, branch: session.branch, reason: err.reason || err.message }); continue }
+      if (dry.wouldFinish === true) finished.push(dry)
+      else skipped.push({ id: session.id, branch: session.branch, reason: dry.reason || 'refused' })
       continue
     }
     try {

@@ -4534,11 +4534,16 @@ window.__ModuleLoader__.load({
 				// under it, so on a project row the same item would silently do
 				// far more than its label promises.
 				{ id: "sync", label: orgT("menu.org.sync"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconRefreshOutline16, {}) },
+				// D113: unlike sync, sweep does NOT cascade — an org row sweeps the
+				// ORG repo only. Each row owns exactly one repo (D98/D99), so a
+				// project's sessions are swept from the project row. The copy says so.
+				{ id: "sweep", label: orgT("menu.org.sweep"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20, {}) },
 				d.connected === false ? { id: "connect", label: orgT("menu.org.connect"), icon: ghMark16 } : { id: "disconnect", label: orgT("menu.org.disconnect"), icon: ghMark16 },
 				{ type: "separator", id: "sep-org-trash" },
 				{ id: "trash", label: orgT("menu.org.trash"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}), danger: true }
 			] : [
 				{ id: "rename", label: orgT("menu.project.rename"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconEditOutline16, {}) },
+				{ id: "sweep", label: orgT("menu.project.sweep"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20, {}) },
 				d.connected === false ? { id: "connect", label: orgT("menu.project.connect"), icon: ghMark16 } : { id: "disconnect", label: orgT("menu.project.disconnect"), icon: ghMark16 },
 				{ id: "trash", label: orgT("menu.project.trash"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}), danger: true }
 			];
@@ -4555,6 +4560,9 @@ window.__ModuleLoader__.load({
 						.then((b) => { setSyncState(arxaSyncSummary(b.result)); return orgStore.refresh(); })
 						.catch((e) => setSyncState({ key: "rows.sync.failed", detail: String(e?.message ?? e), bad: true }));
 				}
+				else if (id === "sweep") window.dispatchEvent(new CustomEvent("arxa-sweep-merged", { detail: isOrg
+					? { orgId: d.orgId, name: d.label || d.orgId }
+					: { orgId: d.orgId, projectSlug: d.slug, name: d.label || d.slug } }));
 				else if (id === "connect" && isOrg) window.dispatchEvent(new CustomEvent("arxa-publish-org", { detail: { orgId: d.orgId, orgName: d.label || d.orgId } }));
 			else if (id === "connect") window.dispatchEvent(new CustomEvent("arxa-publish-org", { detail: { orgId: d.orgId, projectSlug: d.slug, orgName: d.label || d.orgId, projectName: d.label || d.slug } }));
 			else if (id === "disconnect" && isOrg) window.dispatchEvent(new CustomEvent("arxa-disconnect-github", { detail: { kind: "org", orgId: d.orgId, name: d.label || d.orgId, slug: d.slug || "" } }));
@@ -5647,6 +5655,77 @@ window.__ModuleLoader__.load({
 	 * GitHub is the DEFAULT; "remove too" arms only after the exact repo
 	 * slug is retyped (D88-style typed gate); busy locks the modal; a
 	 * scope-stale 403 offers the in-modal re-link + auto-retry (D85). */
+	/** D113 sweep: remove the worktrees and branches of sessions whose work is
+	 * already on main, for ONE repo — the row the menu was opened on. Three
+	 * phases: `loading` runs the dryRun, `confirm` shows exactly what would go
+	 * and what would not (with the engine's own refusal word), `done` reports.
+	 *
+	 * The confirm posts back the ids it SHOWED, as `only`. Between the preview
+	 * and the click the WIP watcher can auto-commit a refused worktree clean,
+	 * which would silently promote a session the operator was never offered —
+	 * sending the list makes the preview a ceiling instead of a suggestion. */
+	function OrgSweepModal({ t, target, onClose }) {
+		const [phase, setPhase] = (0, react.useState)("loading");
+		const [preview, setPreview] = (0, react.useState)(null);
+		const [result, setResult] = (0, react.useState)(null);
+		const [errMsg, setErrMsg] = (0, react.useState)(null);
+		const scope = target ? (target.projectSlug ? { orgId: target.orgId, projectSlug: target.projectSlug } : { orgId: target.orgId }) : null;
+		(0, react.useEffect)(() => {
+			setPhase("loading"); setPreview(null); setResult(null); setErrMsg(null);
+			if (!target) return;
+			ORG_POST("org.sweep", { ...scope, dryRun: true }).then((r) => {
+				setPreview((r && r.result) || { finished: [], skipped: [] });
+				setPhase("confirm");
+			}, (e) => { setErrMsg(e instanceof Error ? e.message : String(e)); setPhase("confirm"); });
+		}, [target]);
+		if (!target) return null;
+		const dismiss = () => { if (phase !== "busy") onClose(); };
+		const goers = (preview && preview.finished) || [];
+		const stayers = (preview && preview.skipped) || [];
+		const submit = () => {
+			if (phase !== "confirm" || goers.length === 0) return;
+			setPhase("busy"); setErrMsg(null);
+			ORG_POST("org.sweep", { ...scope, dryRun: false, only: goers.map((r) => r.id) }).then((r) => {
+				setResult((r && r.result) || { finished: [], skipped: [] });
+				setPhase("done");
+				orgStore.refresh();
+			}, (e) => { setErrMsg(e instanceof Error ? e.message : String(e)); setPhase("confirm"); });
+		};
+		const line = (label, rows) => rows.length === 0 ? null : (0, react_jsx_runtime.jsxs)("div", { style: { marginTop: 8 }, children: [
+			(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.55, marginBottom: 2 }, children: label }),
+			rows.map((r) => (0, react_jsx_runtime.jsxs)("div", { style: { fontSize: 12, fontFamily: "var(--dsw-font-mono, monospace)", opacity: 0.85 }, children: [
+				r.id, r.reason ? " — " + r.reason : ""
+			] }, r.id))
+		] });
+		const footer = (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+			(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "outline", disabled: phase === "busy", onClick: dismiss, children: phase === "done" ? t("purge.close") : t("publish.cancel") }),
+			phase !== "done" && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "primary", disabled: phase !== "confirm" || goers.length === 0, onClick: submit, children: phase === "busy" ? t("sweep.busy") : t("sweep.cta").replace("{n}", String(goers.length)) })
+		] });
+		return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Modal, {
+			open: true,
+			onClose: dismiss,
+			closeLabel: t("publish.cancel"),
+			title: t("sweep.title"),
+			footer,
+			children: (0, react_jsx_runtime.jsxs)("div", { children: [
+				(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, marginBottom: 4 }, children: target.name }),
+				(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75 }, children: t("sweep.scope") }),
+				phase === "loading" && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.6, marginTop: 8 }, children: t("sweep.loading") }),
+				phase === "done"
+					? (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, marginTop: 8 }, children: t("sweep.done").replace("{n}", String(((result && result.finished) || []).length)) }),
+						line(t("sweep.refused"), ((result && result.skipped) || []).filter((r) => goers.some((g) => g.id === r.id)))
+					] })
+					: phase !== "loading" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+						goers.length === 0
+							? (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.6, marginTop: 8 }, children: t("sweep.none") })
+							: line(t("sweep.willGo"), goers),
+						line(t("sweep.willStay"), stayers)
+					] }),
+				(0, react_jsx_runtime.jsx)(ErrorNote, { msg: errMsg })
+			] })
+		});
+	}
 	function OrgDisconnectModal({ t, target, onClose }) {
 		const [phase, setPhase] = (0, react.useState)("confirm");
 		const [errMsg, setErrMsg] = (0, react.useState)(null);
@@ -5763,6 +5842,7 @@ window.__ModuleLoader__.load({
 			const [purging, setPurging] = (0, react.useState)(null);
 			// D90: the disconnect conversation — { kind, orgId, projectSlug?, name, slug } | null.
 			const [disconnecting, setDisconnecting] = (0, react.useState)(null);
+			const [sweeping, setSweeping] = (0, react.useState)(null);
 			(0, react.useEffect)(() => {
 				const open = () => setCreating(true);
 				const onPublish = (e) => {
@@ -5799,6 +5879,11 @@ window.__ModuleLoader__.load({
 				};
 				window.addEventListener("arxa-purge-trash", onPurge);
 			window.addEventListener("arxa-disconnect-github", onDisconnect);
+				const onSweep = (e) => {
+					const d = (e && e.detail) || {};
+					if (d && d.orgId) setSweeping({ orgId: String(d.orgId), projectSlug: d.projectSlug ? String(d.projectSlug) : void 0, name: String(d.name || d.orgId) });
+				};
+				window.addEventListener("arxa-sweep-merged", onSweep);
 				return () => {
 					window.removeEventListener("arxa-create-org", open);
 					window.removeEventListener("arxa-publish-org", onPublish);
@@ -5807,6 +5892,7 @@ window.__ModuleLoader__.load({
 				window.removeEventListener("arxa-rename-project", onRenameProject);
 				window.removeEventListener("arxa-purge-trash", onPurge);
 				window.removeEventListener("arxa-disconnect-github", onDisconnect);
+				window.removeEventListener("arxa-sweep-merged", onSweep);
 				};
 			}, []);
 			orgT = props.t; // stock-scope render sites read the locale through this
@@ -5823,7 +5909,8 @@ window.__ModuleLoader__.load({
 					(0, react_jsx_runtime.jsx)(OrgProjectModal, { t: props.t, target: creatingProject, onClose: () => setCreatingProject(null) }),
 				(0, react_jsx_runtime.jsx)(OrgRenameModal, { t: props.t, target: renaming, onClose: () => setRenaming(null) }),
 				(0, react_jsx_runtime.jsx)(OrgPurgeModal, { t: props.t, target: purging, onClose: () => setPurging(null) }),
-			(0, react_jsx_runtime.jsx)(OrgDisconnectModal, { t: props.t, target: disconnecting, onClose: () => setDisconnecting(null) })
+			(0, react_jsx_runtime.jsx)(OrgDisconnectModal, { t: props.t, target: disconnecting, onClose: () => setDisconnecting(null) }),
+			(0, react_jsx_runtime.jsx)(OrgSweepModal, { t: props.t, target: sweeping, onClose: () => setSweeping(null) })
 				]
 			});
 		}
@@ -6000,6 +6087,18 @@ window.__ModuleLoader__.load({
 			"tree.pc.scaffold": "Scaffold",
 			"menu.org.open": "Open organisation",
 			"menu.org.sync": "Sync with GitHub",
+			"menu.org.sweep": "Sweep merged sessions (this org repo)",
+			"menu.project.sweep": "Sweep merged sessions (this project)",
+			"sweep.title": "Sweep merged sessions",
+			"sweep.scope": "One repository — the row you opened this from. Projects are swept from their own row.",
+			"sweep.loading": "Checking which sessions can go\u2026",
+			"sweep.willGo": "Worktree and branch removed",
+			"sweep.willStay": "Left alone",
+			"sweep.none": "Nothing to sweep — no session has landed on main yet.",
+			"sweep.cta": "Sweep {n}",
+			"sweep.busy": "Sweeping\u2026",
+			"sweep.done": "Swept {n}",
+			"sweep.refused": "Refused at the last moment",
 			"rows.sync.busy": "Syncing…",
 			"rows.sync.ok": "In sync",
 			"rows.sync.pushed": "Synced",
@@ -6209,6 +6308,18 @@ window.__ModuleLoader__.load({
 			"tree.pc.scaffold": "Scaffold",
 			"menu.org.open": "Otwórz organizację",
 			"menu.org.sync": "Synchronizuj z GitHub",
+			"menu.org.sweep": "Uprzątnij scalone sesje (to repo organizacji)",
+			"menu.project.sweep": "Uprzątnij scalone sesje (ten projekt)",
+			"sweep.title": "Uprzątnij scalone sesje",
+			"sweep.scope": "Jedno repozytorium — ten wiersz. Projekty sprzątasz z ich własnych wierszy.",
+			"sweep.loading": "Sprawdzanie, które sesje mogą zniknąć\u2026",
+			"sweep.willGo": "Drzewo robocze i gałąź usunięte",
+			"sweep.willStay": "Zostają",
+			"sweep.none": "Nie ma czego sprzątać — żadna sesja nie trafiła jeszcze na main.",
+			"sweep.cta": "Uprzątnij {n}",
+			"sweep.busy": "Sprzątanie\u2026",
+			"sweep.done": "Uprzątnięto {n}",
+			"sweep.refused": "Odmówiono w ostatniej chwili",
 			"rows.sync.busy": "Synchronizowanie…",
 			"rows.sync.ok": "Zsynchronizowano",
 			"rows.sync.pushed": "Zsynchronizowano",
@@ -6418,6 +6529,18 @@ window.__ModuleLoader__.load({
 			"tree.pc.scaffold": "Scaffold",
 			"menu.org.open": "Ouvrir l’organisation",
 			"menu.org.sync": "Synchroniser avec GitHub",
+			"menu.org.sweep": "Nettoyer les sessions fusionnées (ce dépôt d\u2019organisation)",
+			"menu.project.sweep": "Nettoyer les sessions fusionnées (ce projet)",
+			"sweep.title": "Nettoyer les sessions fusionnées",
+			"sweep.scope": "Un seul dépôt — la ligne d\u2019où vous venez. Les projets se nettoient depuis leur propre ligne.",
+			"sweep.loading": "Vérification des sessions pouvant partir\u2026",
+			"sweep.willGo": "Arbre de travail et branche supprimés",
+			"sweep.willStay": "Conservées",
+			"sweep.none": "Rien à nettoyer — aucune session n\u2019est encore arrivée sur main.",
+			"sweep.cta": "Nettoyer {n}",
+			"sweep.busy": "Nettoyage\u2026",
+			"sweep.done": "{n} nettoyée(s)",
+			"sweep.refused": "Refusées au dernier moment",
 			"rows.sync.busy": "Synchronisation…",
 			"rows.sync.ok": "Synchronisé",
 			"rows.sync.pushed": "Synchronisé",

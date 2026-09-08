@@ -1526,6 +1526,29 @@ export function apply(ctx, opts = {}) {
               // the open handle — the handle is presentation + publish.
               return l.syncOrgRepos(cur.path)
             },
+            /** D113 sweep: remove the worktrees and branches of sessions whose
+              * work is already on main. ONE repo — the row's own. Deliberately
+              * NOT org.sync's cascade: under D98/D99 each row owns exactly one
+              * repo (repoFor reads project.json for a project, org.json
+              * otherwise), so an org-row sweep touches the ORG repo only and a
+              * project's sessions are swept from the project row. A "Sweep" on
+              * an org row that silently reached into every project would be the
+              * same over-reach D97 avoided by keeping Sync org-only.
+              *
+              * Two calls, one flow: dryRun fills the confirm dialog, then the
+              * confirm posts back the ids it showed as `only` — the preview is
+              * a ceiling the act cannot exceed (see sweepMerged's own note on
+              * the WIP-watcher race). The result is returned whole so the
+              * skipped reasons — parked, not-merged, worktree-dirty — stay
+              * visible instead of being summarised into a count. */
+            'org.sweep': async () => {
+              const gw = await importGitWorkspace()
+              const cur = arg?.orgId ? await ensureOpen(arg.orgId) : handle()
+              const slug = typeof arg?.projectSlug === 'string' && arg.projectSlug.trim() !== '' ? arg.projectSlug.trim() : null
+              const repoPath = slug ? path.join(cur.path, 'projects', slug) : cur.path
+              const only = Array.isArray(arg?.only) ? arg.only.filter((x) => typeof x === 'string') : null
+              return gw.sweepMerged(repoPath, { env: process.env, dryRun: arg?.dryRun !== false, only })
+            },
             'org.rename': () => l.renameOrg(orgByRef(arg?.orgId).path, arg?.name),
             /** D74 manual publish (the org menu affordance): idempotent —
               * create the private repo when missing, push all branches,

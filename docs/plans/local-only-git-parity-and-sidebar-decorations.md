@@ -183,11 +183,38 @@ worktree is clean.
    test used a session that was both parked and unmerged, which is exactly why
    the gap went unnoticed.
 
-**Sweep is not landed and is not going on this card.** Sweep is org-scoped; the
-card is seat-scoped, so a batch cleanup belongs on the sidebar's org and project
-row menus (D80 gives both a menu). Under D98/D99 each row owns exactly one repo,
-which is precisely `sweepMerged(repoPath)`'s existing signature — no cross-repo
-iteration needed. That is the next piece of Decision 4.
+**Sweep landed on the sidebar, not the card** (2026-09-08). A batch cleanup on a
+seat-scoped card is the wrong surface, so it went to the org and project row
+menus (D80 gives both a menu) as `OrgSweepModal`, the seventh in that family.
+
+- **One repo per row, deliberately not a cascade.** An org-row Sweep touches the
+  ORG repo only; a project's sessions are swept from the project row. This is the
+  opposite of D97's Sync, which sweeps the org *and* every project beneath it —
+  and the menu copy says which, so "Sweep" on an org row is never read as "sweep
+  everything".
+- **The preview is a ceiling, not a suggestion.** Opening the dialog runs
+  `dryRun` and lists what would go; confirming posts those **ids back** as
+  `only`, and `sweepMerged` acts on nothing outside the list. This closes a race
+  nobody had noticed: between the preview and the click, the WIP watcher
+  (`lifecycle.js:986`, ~1.5 s) can auto-commit a *refused* worktree clean and
+  silently promote a session the operator was never shown. Re-previewing at
+  confirm time does not fix that — it just moves the race.
+- Uses `ORG_POST` + a manual refresh, not `orgStore.mutate`, for the same reason
+  D97's Sync does: `mutate` throws the result away, and the per-session refusal
+  reasons *are* the deliverable.
+
+**A third bug in `sweepMerged`, found by writing the dialog.** Its `dryRun`
+branch checked only "is the branch merged" and pushed `wouldFinish: true` — it
+never asked `finishSession`, so it skipped the *other* refusal (`worktree-dirty`).
+A preview for a destructive batch could therefore promise a session the act would
+then refuse. The dry branch now calls `finishSession(dryRun: true)`, so the
+preview and the act share one refusal path. Three cases added
+(`selftest.finish.mjs`, now 11): the dirty-worktree preview, the `only` ceiling,
+and a mid-batch refusal leaving earlier successes recorded.
+
+**Also added:** the sidebar had no icon gate. The card has had one since two
+invented glyph names shipped and rendered as something else in silence; D113 put
+a new name on the sidebar's menus, so the same gate now guards its 18 icons.
 
 **Unverified the same way Decision 1 is:** no one has clicked Finish in a running
 app. The gating is proven by `selftest.finish.mjs` (8 cases) and by string

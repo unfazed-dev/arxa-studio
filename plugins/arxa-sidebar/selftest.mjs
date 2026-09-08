@@ -996,5 +996,55 @@ check('client: agent verb + reason strings localized in en/pl/fr',
       === (gen.match(/"rows\.current":/g) || []).length)
 }
 
+// ---- D113: Sweep is reachable, per-row, and its preview is a ceiling ----
+{
+  const gen = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
+  const host = readFileSync(new URL('./lib/index.js', import.meta.url), 'utf8')
+  check('D113: the host has a sweep route scoped to ONE repo, never a cascade',
+    host.includes("'org.sweep': async () => {")
+    && host.includes("const repoPath = slug ? path.join(cur.path, 'projects', slug) : cur.path"))
+  // The whole point of the `only` list: between the preview and the confirm the
+  // WIP watcher can auto-commit a refused worktree clean and silently promote a
+  // session the operator was never shown. Preview must be a CEILING.
+  check('D113: the confirm posts back the ids the preview showed',
+    gen.includes('ORG_POST("org.sweep", { ...scope, dryRun: false, only: goers.map((r) => r.id) })')
+    && host.includes("const only = Array.isArray(arg?.only) ? arg.only.filter((x) => typeof x === 'string') : null"))
+  check('D113: opening the dialog previews first — it never acts on open',
+    gen.includes('ORG_POST("org.sweep", { ...scope, dryRun: true })'))
+  check('D113: the primary button is dark when there is nothing to sweep',
+    gen.includes("disabled: phase !== \"confirm\" || goers.length === 0"))
+  // Skipped reasons ARE the deliverable (same reason D97 uses ORG_POST for
+  // sync): orgStore.mutate throws the result away.
+  check('D113: sweep uses ORG_POST, not mutate, so refusal reasons survive',
+    !/mutate\("org\.sweep"/.test(gen)
+    && gen.includes('r.reason ? " — " + r.reason : ""'))
+  check('D113: both rows carry Sweep, and the copy says it is one repo',
+    gen.includes('id: "sweep", label: orgT("menu.org.sweep")')
+    && gen.includes('id: "sweep", label: orgT("menu.project.sweep")')
+    && gen.includes('"sweep.scope": "One repository'))
+  check('D113: every locale answers the sweep strings',
+    (gen.match(/"sweep\.cta":/g) || []).length === (gen.match(/"menu\.org\.sync":/g) || []).length
+    && (gen.match(/"menu\.project\.sweep":/g) || []).length === (gen.match(/"menu\.org\.sync":/g) || []).length)
+}
+
+// ---- G5-for-the-sidebar: an icon that does not exist renders as something
+// else and says nothing. The card has had this gate since the two names that
+// never existed shipped; the sidebar never did, and D113 added a new name to it.
+{
+  const gen = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
+  const assets = new URL('../../node_modules/@deepseek-ai/dsh-web-frontend/dist/assets/', import.meta.url)
+  let bundle
+  try { bundle = readdirSync(assets).find((f) => /^index-.*\.js$/.test(f)) } catch { bundle = undefined }
+  check('icons: the shipped primitives bundle is findable (the haystack)', bundle !== undefined)
+  if (bundle !== undefined) {
+    const shipped = new Set(readFileSync(new URL(bundle, assets), 'utf8').match(/Icon[A-Za-z0-9]+/g) || [])
+    const named = [...new Set((gen.match(/_deepseek_ai_dsh_client_ui_primitives\.(Icon[A-Za-z0-9]+)/g) || [])
+      .map((m) => m.split('.')[1]))]
+    const missing = named.filter((n) => !shipped.has(n))
+    check('icons: every glyph the sidebar names exists',
+      named.length >= 14 && missing.length === 0, 'named ' + named.length + ', missing: ' + missing.join(', '))
+  }
+}
+
 console.log(failures === 0 ? '\narxa-sidebar selftest: ALL GREEN' : `\narxa-sidebar selftest: ${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)

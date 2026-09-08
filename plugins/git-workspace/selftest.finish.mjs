@@ -229,6 +229,66 @@ ok('sweepMerged never sweeps a parked session, even one whose branch is merged',
   assert.ok(runGit(['branch', '--list', p.branch], { cwd: proj }) !== '', 'a parked session lost its branch')
 })
 
+// A preview for a destructive batch must never promise something the act will
+// refuse. The old dryRun branch checked only "is the branch merged" and skipped
+// finishSession's OTHER refusal (dirty worktree), so it did exactly that.
+ok('sweepMerged dryRun refuses a dirty worktree, exactly as the real sweep would', () => {
+  const d = openSession(proj, { id: 'sweep-dirty' })
+  fs.writeFileSync(path.join(d.worktree, 'sd.txt'), 'x\n')
+  assert.equal(sessionStageBoundary(proj, 'sweep-dirty').merged, true, 'setup: branch must be merged')
+  fs.writeFileSync(path.join(d.worktree, 'left-behind.txt'), 'uncommitted\n')
+
+  const preview = sweepMerged(proj, { dryRun: true })
+  assert.ok(!preview.finished.some((r) => r.id === 'sweep-dirty'), 'preview promised a session the act would refuse')
+  const row = preview.skipped.find((r) => r.id === 'sweep-dirty')
+  assert.equal(row && row.reason, 'worktree-dirty')
+
+  fs.rmSync(path.join(d.worktree, 'left-behind.txt'))
+  archiveSession(proj, 'sweep-dirty')
+})
+
+// The staleness window: the WIP watcher can auto-commit a refused session clean
+// between the preview and the confirm. `only` makes the preview a ceiling, so
+// the act can be a subset of what was shown but never a superset.
+ok('sweepMerged acts on nothing outside the previewed id list', () => {
+  const a = openSession(proj, { id: 'sweep-only-a' })
+  fs.writeFileSync(path.join(a.worktree, 'oa.txt'), 'a\n')
+  assert.equal(sessionStageBoundary(proj, 'sweep-only-a').merged, true)
+  const b = openSession(proj, { id: 'sweep-only-b' })
+  fs.writeFileSync(path.join(b.worktree, 'ob.txt'), 'b\n')
+  assert.equal(sessionStageBoundary(proj, 'sweep-only-b').merged, true)
+
+  // Both are sweepable; the operator was only ever shown A.
+  const preview = sweepMerged(proj, { dryRun: true })
+  assert.ok(preview.finished.some((r) => r.id === 'sweep-only-a'))
+  assert.ok(preview.finished.some((r) => r.id === 'sweep-only-b'), 'setup: B must also be sweepable')
+
+  const out = sweepMerged(proj, { dryRun: false, only: ['sweep-only-a'] })
+  assert.ok(out.finished.some((r) => r.id === 'sweep-only-a' && r.finished === true))
+  assert.ok(!out.finished.some((r) => r.id === 'sweep-only-b'), 'swept a session that was never shown')
+  assert.ok(!out.skipped.some((r) => r.id === 'sweep-only-b'), 'an unlisted session must be invisible, not reported')
+  assert.ok(runGit(['branch', '--list', b.branch], { cwd: proj }) !== '', 'an unlisted session lost its branch')
+  archiveSession(proj, 'sweep-only-b')
+})
+
+// A per-session refusal must not lose the successes before it. sweepMerged
+// catches inside the loop rather than propagating — this is what proves it.
+ok('a mid-batch refusal records, it does not abort the sweep', () => {
+  const good = openSession(proj, { id: 'sweep-mix-good' })
+  fs.writeFileSync(path.join(good.worktree, 'g.txt'), 'g\n')
+  assert.equal(sessionStageBoundary(proj, 'sweep-mix-good').merged, true)
+  const bad = openSession(proj, { id: 'sweep-mix-bad' })
+  fs.writeFileSync(path.join(bad.worktree, 'b.txt'), 'b\n')
+  assert.equal(sessionStageBoundary(proj, 'sweep-mix-bad').merged, true)
+  fs.writeFileSync(path.join(bad.worktree, 'dirty.txt'), 'x\n')
+
+  const out = sweepMerged(proj, { dryRun: false, only: ['sweep-mix-good', 'sweep-mix-bad'] })
+  assert.ok(out.finished.some((r) => r.id === 'sweep-mix-good' && r.finished === true), 'a refusal swallowed an earlier success')
+  assert.equal(out.skipped.find((r) => r.id === 'sweep-mix-bad')?.reason, 'worktree-dirty')
+  fs.rmSync(path.join(bad.worktree, 'dirty.txt'))
+  archiveSession(proj, 'sweep-mix-bad')
+})
+
 // ---- 6. pressure: 30 sessions, 15 merged, sweep < 5s -----------------------
 
 ok('pressure: 30 sessions, 15 merged, sweepMerged finishes exactly 15 in under 5s', () => {
