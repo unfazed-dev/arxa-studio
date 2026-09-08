@@ -18,12 +18,60 @@
 //   The WIP run drops out of branch history; it lingers only in the
 //   local reflog, which is never pushed.
 
-import { runGit, WIP_IDENTITY, STAGE_IDENTITY } from './run.js'
+import { runGit, runGitProbe, WIP_IDENTITY, STAGE_IDENTITY } from './run.js'
 
 export const STAGE_BASE_REF = 'refs/arxa/stage-base'
 export const WIP_PREFIX = 'wip:'
 
 const SEP = '\x1f' // unit separator for log parsing
+
+// A working tree can contain an embedded git repo (e.g. a folder the user,
+// or a tool, ran `git init` in) that has zero commits yet. Git can't record
+// a gitlink for a repo with no HEAD, so a plain `git add -A` aborts the
+// WHOLE add — observed on git 2.51 as exit 128 with:
+//   error: '<path>' does not have a commit checked out
+//   fatal: adding files failed
+// That one failure mode is tolerated below: the add is retried with
+// `--ignore-errors`, which degrades it to a per-path warning (exit 1,
+// same "does not have a commit checked out" line, no "fatal:" trailer —
+// also observed empirically) and stages everything else. Any OTHER add
+// failure (permissions, a corrupt index, a bad pathspec) produces
+// different stderr, does not match, and is left to throw.
+const EMBEDDED_REPO_NO_COMMITS_RE = /^error: '.+' does not have a commit checked out$/
+
+function isToleratedAddFailure(stderr) {
+  const lines = (stderr || '').split('\n').map((l) => l.trim()).filter(Boolean)
+  const significant = lines.filter((l) => l !== 'fatal: adding files failed')
+  return significant.length > 0 && significant.every((l) => EMBEDDED_REPO_NO_COMMITS_RE.test(l))
+}
+
+/**
+ * `git add -A`, tolerating only the embedded-repo-with-no-commits failure
+ * above so the rest of the tree still gets committed. Everything else
+ * throws, same as a plain `runGit(['add', '-A'])` would.
+ */
+function addAll(repoPath, env) {
+  const first = runGitProbe(['add', '-A'], { cwd: repoPath, env })
+  if (first.status === 0) return
+  if (!isToleratedAddFailure(first.stderr)) {
+    throw new Error(`git add failed in ${repoPath}: ${first.stderr.trim() || first.stdout.trim()}`)
+  }
+  const retry = runGitProbe(['add', '-A', '--ignore-errors'], { cwd: repoPath, env })
+  if (retry.status !== 0 && !isToleratedAddFailure(retry.stderr)) {
+    throw new Error(`git add --ignore-errors failed in ${repoPath}: ${retry.stderr.trim() || retry.stdout.trim()}`)
+  }
+}
+
+// Even after addAll() above leaves the intolerable-to-git path out, the
+// ONLY dirty content in the tree can turn out to be that exact path (e.g.
+// a folder containing nothing but a freshly-`git init`'d, commit-less
+// subrepo — the exact "user folder = an embedded repo" case, no unrelated
+// change alongside it). Nothing lands in the index, and `git commit` then
+// fails — observed on git 2.51 as exit 1, empty stderr, and this on
+// stdout: "nothing added to commit but untracked files present". Not a
+// real failure: same as the clean-tree no-op above. Any other commit
+// failure still throws.
+const NOTHING_TO_COMMIT_RE = /nothing to commit|nothing added to commit/
 
 function head(repoPath, env) {
   return runGit(['rev-parse', 'HEAD'], { cwd: repoPath, env })
@@ -63,9 +111,15 @@ export function isDirty(repoPath, env = process.env) {
  */
 export function wipCommit(repoPath, { message, env = process.env } = {}) {
   if (!isDirty(repoPath, env)) return { committed: false, sha: null }
-  runGit(['add', '-A'], { cwd: repoPath, env })
+  addAll(repoPath, env)
   const subject = `${WIP_PREFIX} ${message || `auto-save ${new Date().toISOString()}`}`
-  runGit(['commit', '-m', subject], { cwd: repoPath, env, identity: WIP_IDENTITY })
+  const result = runGitProbe(['commit', '-m', subject], { cwd: repoPath, env, identity: WIP_IDENTITY })
+  if (result.status !== 0) {
+    if (NOTHING_TO_COMMIT_RE.test(result.stdout) || NOTHING_TO_COMMIT_RE.test(result.stderr)) {
+      return { committed: false, sha: null }
+    }
+    throw new Error(`git commit failed in ${repoPath}: ${result.stderr.trim() || result.stdout.trim()}`)
+  }
   return { committed: true, sha: head(repoPath, env) }
 }
 

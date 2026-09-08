@@ -151,6 +151,71 @@ ok('commitDays on a repo with no commits returns zeros and never throws', () => 
   assert.equal(result.current, 0)
   assert.equal(result.longest, 0)
 })
+
+// --- wipCommit must survive an embedded repo with no commits ---------------
+// A user folder can contain a subfolder the user (or a tool) `git init`'d
+// with zero commits yet. Git can't record a gitlink for a repo with no
+// commits, so a plain `git add -A` aborts the WHOLE add — every other
+// change in the tree must still land in the WIP commit.
+
+ok('wipCommit commits the rest of the tree when it contains an embedded repo with no commits', () => {
+  const proj = freshRepo('project-embedded-repo')
+  fs.writeFileSync(path.join(proj, 'root.txt'), 'hello\n')
+  runGit(['add', '-A'], { cwd: proj })
+  runGit(['commit', '-m', 'seed'], { cwd: proj })
+
+  const sub = path.join(proj, 'sub')
+  fs.mkdirSync(sub)
+  runGit(['init', '-b', 'main'], { cwd: sub }) // embedded repo, zero commits
+  fs.writeFileSync(path.join(sub, 'file.txt'), 'content\n')
+  fs.writeFileSync(path.join(proj, 'root2.txt'), 'unrelated change\n')
+
+  const result = wipCommit(proj, { message: 'auto-save' })
+  assert.equal(result.committed, true, 'wipCommit must succeed despite the embedded repo')
+  assert.ok(result.sha)
+
+  const tracked = runGit(['ls-files'], { cwd: proj }).split('\n')
+  assert.ok(tracked.includes('root2.txt'), 'the unrelated file must still be committed')
+  assert.ok(!tracked.some((f) => f.startsWith('sub/')), 'the embedded repo must not be tracked as plain files')
+})
+
+ok('wipCommit is a no-op, not a throw, when the embedded repo is the ONLY dirty thing', () => {
+  const proj = freshRepo('project-embedded-repo-only')
+  fs.writeFileSync(path.join(proj, 'root.txt'), 'hello\n')
+  runGit(['add', '-A'], { cwd: proj })
+  runGit(['commit', '-m', 'seed'], { cwd: proj })
+
+  const sub = path.join(proj, 'sub')
+  fs.mkdirSync(sub)
+  runGit(['init', '-b', 'main'], { cwd: sub }) // embedded repo, zero commits
+  fs.writeFileSync(path.join(sub, 'file.txt'), 'content\n')
+  // No other change anywhere in the tree — addAll() stages nothing at all,
+  // so `git commit` fails with "nothing added to commit". That must come
+  // back as a no-op, the same shape a clean tree already returns, not a throw.
+
+  const before = runGit(['rev-parse', 'HEAD'], { cwd: proj })
+  const result = wipCommit(proj, { message: 'auto-save' })
+  assert.equal(result.committed, false)
+  assert.equal(result.sha, null)
+  assert.equal(runGit(['rev-parse', 'HEAD'], { cwd: proj }), before, 'HEAD must not move')
+})
+
+ok('wipCommit still throws on a genuine add failure (not the tolerated embedded-repo case)', () => {
+  const proj = freshRepo('project-genuine-add-failure')
+  fs.writeFileSync(path.join(proj, 'a.txt'), 'x\n')
+  runGit(['add', '-A'], { cwd: proj })
+  runGit(['commit', '-m', 'seed'], { cwd: proj })
+
+  fs.writeFileSync(path.join(proj, 'b.txt'), 'y\n')
+  const lock = path.join(proj, '.git', 'index.lock')
+  fs.writeFileSync(lock, '')
+  try {
+    assert.throws(() => wipCommit(proj, { message: 'should throw' }), /git add failed/)
+  } finally {
+    fs.rmSync(lock)
+  }
+})
+
 // --- reviewedTip: "did the session's real work land?" ------------------------
 {
   const dir = fsx.mkdtempSync(pathx.join(osx.tmpdir(), 'arxa-reviewed-'))
