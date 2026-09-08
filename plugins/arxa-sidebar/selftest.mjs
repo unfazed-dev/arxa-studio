@@ -107,7 +107,8 @@ check('G3 dot: its label is translated in all 3 dictionaries',
 
 // ---- 3. rows-world content ----------------------------------------------------
 check('rows: org store present', client.includes('function createOrgStore()'))
-check('rows: OrgBrowser is the slot component', client.includes('}, OrgBrowser));'))
+check('rows: tab wrapper owns the slot and retains OrgBrowser for the organisation tab',
+  client.includes('}, SidebarBrowser));') && client.includes('(0, react_jsx_runtime.jsx)(OrgBrowser, { ...props })'))
 check('rows: org data hooks pinned at the component boundary', client.includes('useWorkspaces: orgUseWorkspaces, useSessions: orgUseSessions') && client.includes('const orgUseWorkspaces = (sel) => useOrg'))
 check('rows: honest content search (empty fetch)', client.includes('searchSessions: async () => ({ items: [], hasMore: false })'))
 check('rows: trash surface wired (Q6)', client.includes('function TrashSection(') && client.includes('trash: () => orgStore.toggleTrash()'))
@@ -119,7 +120,8 @@ check('create-modal: sign-in CTA carries the GitHub brand mark', client.includes
 check('create-modal: D90 sign-in wall is GONE — submit always present, GitHub rides the switch', !client.includes('!showSignin && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {') && !client.includes('showSignin') && client.includes('const canSubmit = name.trim() !== "" && !busy && location.trim() !== "" && !blocked;'))
 check('create-modal: device-flow code surfaces in the sign-in step (github.device poll + big code)', client.includes('"github.device"') && client.includes('github.signin.codeHint') && client.includes('devCode.userCode'))
 check('create-modal: D90 device-flow copy/open-link moved to the relink paths (purge + disconnect modals)', client.includes('open-external') && client.includes('https://github.com/login/device') && client.includes('devCode.userCode'))
-check('rows: window.prompt is gone (Tauri WKWebView never implements it)', !client.includes('window.prompt('))
+check('rows: window.prompt remains isolated to Freestyle new-folder naming (organisation create stays WebView-safe)',
+  (client.match(/window\.prompt\(/g) || []).length === 1 && client.includes('window.prompt(t("freestyle.add.newPrompt"))'))
 check('rows: location field opens the OS folder locator (Tauri dialog when injected, host osascript locator otherwise)',
   client.includes('window.__TAURI__.dialog') && client.includes('directory: true') && client.includes('pick-folder'))
 check('host: macOS folder locator route exists', hostSrc().includes('choose folder') && hostSrc().includes('pick-folder'))
@@ -238,7 +240,7 @@ check('conformance: ErrorNote dedup — one shared error line across the org mod
 check('conformance: locale world is en/pl/fr — zhOver deleted, sparse plOver/frOver registered with per-key en fallback',
   client.includes('ctx.locale.register(NS, { zh, en: { ...en, ...enOver }, pl: plOver, fr: frOver })')
   && !client.includes('const zhOver = {') && client.includes('const plOver = {') && client.includes('const frOver = {'))
-check('welcome: TWO buttons - arxa studio (create) + arxa business (disabled, later)', client.includes('t("welcome.studio")') && client.includes('t("welcome.business")') && client.includes('"welcome.businessSoon"') && !client.includes('t("welcome.cta")'))
+check('welcome: organisation, Freestyle and future-business choices stay reachable', client.includes('t("welcome.studio")') && client.includes('t("welcome.freestyle")') && client.includes('t("welcome.business")') && client.includes('"welcome.businessSoon"') && !client.includes('t("welcome.cta")'))
 check('welcome: one-shot resume to newest session of the open org', client.includes('resumeTried') && client.includes('maybeResume(next.orgs)') && client.includes('orgStore.mutate("session.open"'))
 check('content area (2026-08-30): arxa is the sole driver — row open + resume focus the conversation via the client sessions service (dsh own open call)',
   client.includes('arxaOpenConversation(sessionId)') && client.includes('arxaOpenConversation(cand.id)') && client.includes('arxaClientSessions.open(dshId)') && client.includes('snap.ids.includes(dshId)'))

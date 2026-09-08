@@ -1,0 +1,131 @@
+		//#region arxa freestyle (F2) — __ARXA_FREESTYLE_REGION__
+		function createFreestyleStore() {
+			let state = { roots: [], trash: [], ui: { activeTab: "org" }, sel: null, tick: 0 };
+			const subs = new Set();
+			const emit = () => {
+				state = { ...state, tick: state.tick + 1 };
+				subs.forEach((f) => f());
+				if (typeof window !== "undefined") window.dispatchEvent(new Event("arxa-sidebar-state"));
+			};
+			async function refresh() {
+				try {
+					const r = await fetch("/__arxa/freestyle/state");
+					const j = await r.json();
+					state = { ...state, roots: j.roots || [], trash: j.trash || [], ui: j.ui || state.ui };
+					emit();
+				} catch { /* keep the last usable state */ }
+			}
+			async function mutate(action, arg) {
+				let result;
+				let failure;
+				try {
+					const r = await fetch("/__arxa/freestyle/action", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, arg }) });
+					result = await r.json().catch(() => ({ ok: false, error: "bad json" }));
+				} catch (e) {
+					failure = e;
+				}
+				await refresh();
+				if (failure) throw failure;
+				if (!result.ok) throw new Error(result.error || action + " failed");
+				return result;
+			}
+			return {
+				get: () => state,
+				subscribe: (f) => { subs.add(f); return () => subs.delete(f); },
+				refresh,
+				mutate,
+				select(rootId, relDir) { state = { ...state, sel: rootId ? { rootId, relDir: relDir || "" } : null }; emit(); },
+				selected: () => state.sel,
+				setTab: (tab) => mutate("ui.tab", { tab })
+			};
+		}
+		const freestyleStore = createFreestyleStore();
+		void freestyleStore.refresh();
+		function useFreestyle() {
+			const [, force] = (0, react.useReducer)((x) => x + 1, 0);
+			(0, react.useEffect)(() => freestyleStore.subscribe(force), []);
+			return freestyleStore.get();
+		}
+		function freestyleSelectedWorkspace(store = freestyleStore) {
+			if (store.get().ui.activeTab !== "freestyle") return null;
+			const selected = store.selected();
+			return selected ? { kind: "freestyle", ...selected } : null;
+		}
+		function showWelcomeGate(orgCount, activeTab) {
+			return orgCount === 0 && activeTab !== "freestyle";
+		}
+		function freestyleNotice(error) {
+			window.dispatchEvent(new CustomEvent("arxa-sidebar-notice", { detail: { code: String((error && error.message) || error || "unknown") } }));
+		}
+		function SidebarTabs({ wide, active, onChange }) {
+			const t = orgT;
+			const tab = (id, label, Icon) => (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Tooltip, {
+				label,
+				children: (0, react_jsx_runtime.jsxs)("button", {
+					type: "button",
+					role: "tab",
+					"aria-label": label,
+					"aria-selected": active === id,
+					className: "aXa_fs_tab" + (active === id ? " aXa_fs_tabOn" : ""),
+					onClick: () => onChange(id),
+					children: [(0, react_jsx_runtime.jsx)(Icon, { size: 16 }), wide ? (0, react_jsx_runtime.jsx)("span", { children: label }) : null]
+				})
+			});
+			return (0, react_jsx_runtime.jsxs)("div", { role: "tablist", className: "aXa_fs_tabs" + (wide ? "" : " aXa_fs_tabsRail"), children: [
+				tab("org", t("freestyle.tab.org"), _deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16),
+				tab("freestyle", t("freestyle.tab.freestyle"), _deepseek_ai_dsh_client_ui_primitives.IconBrowseOutline16)
+			] });
+		}
+		function FreestyleBrowser({ wide, expandSidebar }) {
+			const t = orgT;
+			const st = useFreestyle();
+			const [menuOpen, setMenuOpen] = (0, react.useState)(false);
+			(0, react.useEffect)(() => { void freestyleStore.refresh(); }, []);
+			const pickFolder = async (title) => {
+				const r = await fetch("/__arxa/sidebar/pick-folder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }) });
+				const j = await r.json().catch(() => ({ ok: false, error: "bad json" }));
+				if (j && j.ok && typeof j.path === "string" && j.path.trim() !== "") return j.path;
+				if (j && j.canceled) return null;
+				throw new Error((j && j.error) || t("freestyle.add.unavailable"));
+			};
+			const addOpen = async () => {
+				const path = await pickFolder(t("freestyle.add.open"));
+				if (path) await freestyleStore.mutate("root.add", { path });
+			};
+			const addNew = async () => {
+				const parent = await pickFolder(t("freestyle.add.new"));
+				if (!parent) return;
+				const name = window.prompt(t("freestyle.add.newPrompt"));
+				if (name) await freestyleStore.mutate("root.new", { parent, name });
+			};
+			if (!wide) return null;
+			return (0, react_jsx_runtime.jsxs)("div", { className: "aXa_fs_body", children: [
+				(0, react_jsx_runtime.jsxs)("div", { className: "aXa_fs_head", children: [
+					(0, react_jsx_runtime.jsx)("span", { children: t("freestyle.section") }),
+					(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {
+						open: menuOpen,
+						onClose: () => setMenuOpen(false),
+						items: [{ id: "open", label: t("freestyle.add.open") }, { id: "new", label: t("freestyle.add.new") }],
+						onSelect: (id) => {
+							setMenuOpen(false);
+							const action = id === "open" ? addOpen : id === "new" ? addNew : null;
+							if (action) action().catch(freestyleNotice);
+						},
+						portal: true,
+						anchor: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("freestyle.add"), onClick: () => setMenuOpen((v) => !v), children: "+" })
+					})
+				] }),
+				st.roots.length === 0 ? (0, react_jsx_runtime.jsx)("div", { className: "aXa_fs_empty", children: t("freestyle.empty") }) : (0, react_jsx_runtime.jsx)(FreestyleRoots, { roots: st.roots, trash: st.trash })
+			] });
+		}
+		function FreestyleRoots() { return null; }
+		function SidebarBrowser(props) {
+			orgT = props.t;
+			const fsState = useFreestyle();
+			const { wide, expandSidebar } = props;
+			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+				(0, react_jsx_runtime.jsx)(SidebarTabs, { wide, active: fsState.ui.activeTab, onChange: (tab) => { freestyleStore.setTab(tab).catch(freestyleNotice); } }),
+				fsState.ui.activeTab === "freestyle" ? (0, react_jsx_runtime.jsx)(FreestyleBrowser, { wide, expandSidebar }) : (0, react_jsx_runtime.jsx)(OrgBrowser, { ...props })
+			] });
+		}
+		//#endregion
