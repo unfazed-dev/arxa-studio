@@ -348,6 +348,38 @@ check('gh: org.create allowed once linked', r.ok === true, r.error)
 s = await state()
 check('gh: the admitted org exists and is open', s.orgs.some((o) => o.name === 'Admitted Co' && o.open), JSON.stringify(s.orgs.map((o) => o.name)))
 
+// ---------------------------------------------------------------------------
+// Zero-org rescue (2026-09-08, docs/plans/org-trash-unreachable.md).
+// trashOrg() drops the org from the recents; loadWorkspaceRoot() answers the
+// first valid recent; getLifecycle() returns null without one. So trashing the
+// LAST org took the whole lifecycle seam down WITH the trash entry it had just
+// written: no orgTrash in the state, orgtrash.restore answered no-workspace,
+// and the app showed a welcome gate over the only door back. Measured live on
+// Omarchy (org PROTONFEW parked intact while the UI showed nothing).
+// This drives the real thing: empty the orgs, then get one back.
+{
+  const before = await state()
+  for (const o of before.orgs) await act('org.trash', { orgId: o.id })
+  const empty = await state()
+  check('zero-org: every org is gone from the state', empty.orgs.length === 0, JSON.stringify(empty.orgs.map((o) => o.name)))
+  check('zero-org: the trash is STILL listed with no workspace root',
+    Array.isArray(empty.orgTrash) && empty.orgTrash.length === before.orgs.length,
+    JSON.stringify({ orgTrash: empty.orgTrash, trashed: before.orgs.length }))
+
+  const entry = (empty.orgTrash || [])[0]
+  const back = await act('orgtrash.restore', { entryId: entry?.entryId })
+  check('zero-org: restore works with no lifecycle at all', back.ok === true, JSON.stringify(back))
+  const after = await state()
+  // The trash row carries the FOLDER name (path.basename) while the org row
+  // carries its display name — "Admitted-Co" vs "Admitted Co" — so identity is
+  // checked against the restored path, not the label.
+  check('zero-org: the restored org is live again, and it is the one we restored',
+    after.orgs.length === 1 && String(back.result?.restoredPath || '').endsWith(entry?.name),
+    JSON.stringify({ want: entry?.name, restoredPath: back.result?.restoredPath, got: after.orgs.map((o) => o.name) }))
+  check('zero-org: the restored entry left the trash',
+    !(after.orgTrash || []).some((e) => e.entryId === entry?.entryId), JSON.stringify(after.orgTrash))
+}
+
 console.log(failures === 0 ? '\narxa-sidebar smoke: ALL GREEN' : `\narxa-sidebar smoke: ${failures} FAILURE(S)`)
 rmSync(sandbox, { recursive: true, force: true })
 process.exit(failures === 0 ? 0 : 1)

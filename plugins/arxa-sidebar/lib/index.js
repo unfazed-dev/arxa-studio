@@ -711,13 +711,46 @@ export function apply(ctx, opts = {}) {
     selectedProject: null,
   })
 
+  /**
+   * The org trash index is GLOBAL (<arxaHome>/org-trash.json) and every entry
+   * carries its own scope, so it can be read with NO workspace root and NO
+   * open org. It has to be, and this is why:
+   *
+   * trashOrg() ends with removeRecent(orgPath) (lifecycle.js). loadWorkspaceRoot()
+   * answers the first valid RECENT (workspace/lib/root.js). Trash your LAST org
+   * and the recents are empty, so that returns null, so getLifecycle() returns
+   * null a few lines below, so every face degrades to the stub: the state
+   * endpoint served emptySnap with no orgTrash key at all and orgtrash.restore
+   * answered `no-workspace`. The trash entry written one line earlier was
+   * unreachable — no row, no restore, no evidence the org had ever existed.
+   * Measured live on Omarchy 2026-09-08 (org PROTONFEW, parked intact at
+   * Documents/.arxa/trash/ while the app showed nothing).
+   *
+   * Same class as the `preTable` verbs below: valid with zero orgs.
+   */
+  const orgTrashRows = async () => {
+    try {
+      shell ??= await importShell().catch(() => null)
+      if (typeof shell?.arxaHome !== 'function') return []
+      const [{ default: fs }, { default: path }] = await Promise.all([import('node:fs'), import('node:path')])
+      const list = JSON.parse(fs.readFileSync(path.join(shell.arxaHome(), 'org-trash.json'), 'utf8'))
+      return list
+        .filter((e) => fs.existsSync(path.join(e.scope, '.arxa', 'trash', e.entryId)))
+        .map((e) => ({ entryId: e.entryId, name: e.name || e.entryId }))
+    } catch {
+      return [] // no index yet, or unreadable — an empty trash, never a throw
+    }
+  }
+
   /** D96: last detached sync kick (throttle window guard). */
   let lastSyncKick = 0
 
   /** Snapshot for the rows client: orgs with their session rows inline. */
   const snapshot = async (selectedProject) => {
     const l = await getLifecycle()
-    if (!l) return emptySnap(SEAM_LIFECYCLE_STUBBED)
+    // Zero orgs still shows the Trash: the row is the only way back to an org
+    // you just deleted, so it must not depend on having one.
+    if (!l) return { ...emptySnap(SEAM_LIFECYCLE_STUBBED), orgTrash: await orgTrashRows() }
     const cur = l.current
     // D96 refresh: every state poll may kick ONE detached sync per minute
     // for the OPEN org — the sidebar re-renders off the next poll after
@@ -1391,7 +1424,42 @@ export function apply(ctx, opts = {}) {
           }
 
           const l = await getLifecycle()
-          if (!l) return json(res, { ok: false, seam: SEAM_LIFECYCLE_STUBBED, error: 'no-workspace', action })
+          if (!l) {
+            /**
+             * Zero-org rescue (2026-09-08). Trashing your LAST org empties the
+             * recents, which takes getLifecycle() to null — so the ONE verb
+             * that undoes that must not need a lifecycle. Everything it touches
+             * is global or self-describing: the index at <arxaHome>/org-trash.json
+             * and the scope recorded in the entry itself. The restore re-adds
+             * the org as a recent, so the very next state poll builds a real
+             * lifecycle again and the app comes back on its own.
+             *
+             * Deliberately reached ONLY when there is no lifecycle: with one,
+             * the table below still routes to l.restoreOrg, which stays the
+             * single implementation for the normal case.
+             */
+            if (action === 'orgtrash.restore') {
+              shell ??= await importShell().catch(() => null)
+              if (typeof shell?.restoreFromTrash !== 'function') {
+                return json(res, { ok: false, seam: SEAM_LIFECYCLE_STUBBED, error: 'no-workspace', action })
+              }
+              try {
+                const [{ default: fs }, { default: path }] = await Promise.all([import('node:fs'), import('node:path')])
+                const file = path.join(shell.arxaHome(), 'org-trash.json')
+                const list = JSON.parse(fs.readFileSync(file, 'utf8'))
+                const rec = list.find((e) => e.entryId === arg?.entryId)
+                if (!rec) throw new Error('no-trash-entry: ' + String(arg?.entryId))
+                const out = shell.restoreFromTrash(rec.scope, rec.entryId)
+                fs.writeFileSync(file, JSON.stringify(list.filter((e) => e.entryId !== rec.entryId), null, 2) + '\n')
+                // Without this the org is back on disk and still invisible.
+                try { shell.touchRecent(out.restoredPath) } catch { /* recents are advisory */ }
+                return json(res, { ok: true, action, result: out })
+              } catch (e) {
+                return json(res, { ok: false, action, error: String(e?.message ?? e) })
+              }
+            }
+            return json(res, { ok: false, seam: SEAM_LIFECYCLE_STUBBED, error: 'no-workspace', action })
+          }
           const { orgByRef, handle, ensureOpen } = orgHelpers(l)
 
           const table = {

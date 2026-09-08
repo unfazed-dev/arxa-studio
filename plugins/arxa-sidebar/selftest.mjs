@@ -921,5 +921,29 @@ check('client: agent verb + reason strings localized in en/pl/fr',
     JSON.stringify({ template: tracks && tracks[1], client: shipped && shipped[1] }))
 }
 
+// ============================================================
+// S-rescue — the way back from a zero-org state (2026-09-08,
+// docs/plans/org-trash-unreachable.md). smoke.mjs drives the SERVER half end
+// to end; these pin the client half, which is the part that was invisible: the
+// welcome gate covers the whole app at zero orgs, Trash row included.
+{
+  const gen = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
+  const host = readFileSync(new URL('./lib/index.js', import.meta.url), 'utf8')
+  check('S-rescue: the zero-org snapshot still carries the org trash',
+    host.includes('...emptySnap(SEAM_LIFECYCLE_STUBBED), orgTrash: await orgTrashRows()'))
+  check('S-rescue: orgtrash.restore is answered with NO lifecycle',
+    /if \(!l\) \{[\s\S]{0,900}?if \(action === 'orgtrash\.restore'\)/.test(host)
+    && host.includes('shell.touchRecent(out.restoredPath)'))
+  check('S-rescue: the welcome gate reads the trash and offers restore',
+    gen.includes('const trashed = useOrg((s) => s.orgTrash) || [];')
+    && /trashed\.length > 0 \?/.test(gen)
+    && gen.includes('orgStore.mutate("orgtrash.restore", { entryId: e.entryId })'))
+  check('S-rescue: restoring from the gate cannot also create an org',
+    /onClick: \(ev\) => \{ ev\.stopPropagation\(\); orgStore\.mutate\("orgtrash\.restore"/.test(gen))
+  check('S-rescue: every locale answers the two gate strings',
+    (gen.match(/"welcome\.trashed":/g) || []).length === (gen.match(/"welcome\.businessSoon":/g) || []).length
+    && (gen.match(/"welcome\.restore":/g) || []).length === (gen.match(/"welcome\.businessSoon":/g) || []).length)
+}
+
 console.log(failures === 0 ? '\narxa-sidebar selftest: ALL GREEN' : `\narxa-sidebar selftest: ${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)

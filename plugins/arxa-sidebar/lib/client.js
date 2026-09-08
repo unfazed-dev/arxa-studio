@@ -5518,6 +5518,12 @@ window.__ModuleLoader__.load({
 		 * lens-screenshot-able like every other overlay. */
 		function WelcomeGate({ t }) {
 			const count = useOrg((s) => s.orgs.length);
+			// 2026-09-08: this gate covers the WHOLE app when the org count hits
+			// zero — including the Trash row. Trash your last org and the only
+			// door back was behind the overlay, so the app read as "your work is
+			// gone" while it sat parked and intact in <scope>/.arxa/trash.
+			// The way back therefore has to live on the gate itself.
+			const trashed = useOrg((s) => s.orgTrash) || [];
 			if (count > 0) return null;
 			return (0, react_jsx_runtime.jsx)("div", {
 				style: { position: "absolute", inset: 0, background: "var(--dsw-alias-bg-base)", display: "flex", alignItems: "center", justifyContent: "center" },
@@ -5542,7 +5548,30 @@ window.__ModuleLoader__.load({
 								style: { border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 8, padding: "8px 18px", fontSize: 13, cursor: "not-allowed", background: "transparent", color: "inherit", opacity: 0.5 },
 								children: t("welcome.business")
 							})
-						] })
+						] }),
+						// Restore re-adds the org to the recents, so the lifecycle
+						// rebuilds on the next poll and this gate lifts itself. The
+						// card behind is a create-org button, hence stopPropagation on
+						// both click and key: restoring must never create an org too.
+						trashed.length > 0 ? (0, react_jsx_runtime.jsxs)("div", {
+							onClick: (e) => e.stopPropagation(),
+							onKeyDown: (e) => e.stopPropagation(),
+							style: { marginTop: 18, paddingTop: 14, borderTop: "1px solid var(--dsw-alias-border-l2)" },
+							children: [
+								(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.65, marginBottom: 8 }, children: t("welcome.trashed") }),
+								...trashed.map((e) => (0, react_jsx_runtime.jsxs)("div", {
+									style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 6 },
+									children: [
+										(0, react_jsx_runtime.jsx)("span", { style: { fontSize: 13 }, children: e.name }),
+										(0, react_jsx_runtime.jsx)("button", {
+											onClick: (ev) => { ev.stopPropagation(); orgStore.mutate("orgtrash.restore", { entryId: e.entryId }).catch(() => {}); },
+											style: { border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 8, padding: "5px 12px", fontSize: 12, cursor: "pointer", background: "var(--dsw-alias-bg-layer-2)", color: "inherit" },
+											children: t("welcome.restore")
+										})
+									]
+								}, e.entryId))
+							]
+						}) : null
 					]
 				})
 			});
@@ -5839,6 +5868,8 @@ window.__ModuleLoader__.load({
 			"welcome.studio": "arxa studio",
 			"welcome.business": "arxa business",
 			"welcome.businessSoon": "arxa business (agency) — coming soon",
+			"welcome.trashed": "Recently deleted",
+			"welcome.restore": "Restore",
 			"tree.dock.projects": "Projects",
 			"agents.jobs.empty": "No background jobs",
 			"agents.jobs.emptyHint": "Background jobs appear here once one is started. Open the panel for details.",
@@ -6045,6 +6076,8 @@ window.__ModuleLoader__.load({
 			"welcome.studio": "arxa studio",
 			"welcome.business": "arxa business",
 			"welcome.businessSoon": "arxa business (agencja) — wkrótce",
+			"welcome.trashed": "Ostatnio usunięte",
+			"welcome.restore": "Przywróć",
 			"tree.dock.projects": "Projekty",
 			"agents.jobs.empty": "Brak zadań w tle",
 			"agents.jobs.emptyHint": "Zadania w tle pojawią się tutaj po uruchomieniu. Otwórz panel, aby zobaczyć szczegóły.",
@@ -6251,6 +6284,8 @@ window.__ModuleLoader__.load({
 			"welcome.studio": "arxa studio",
 			"welcome.business": "arxa business",
 			"welcome.businessSoon": "arxa business (agence) — bientôt disponible",
+			"welcome.trashed": "Supprimé récemment",
+			"welcome.restore": "Restaurer",
 			"tree.dock.projects": "Projets",
 			"agents.jobs.empty": "Aucune tâche en arrière-plan",
 			"agents.jobs.emptyHint": "Les tâches en arrière-plan apparaîtront ici une fois lancées. Ouvrez le panneau pour les détails.",
