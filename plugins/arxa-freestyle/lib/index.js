@@ -6,7 +6,7 @@
 //   GET  /__arxa/freestyle/state   -> { roots, trash, ui }
 //   POST /__arxa/freestyle/action  body { action, arg } -> { ok, ... } | { ok:false, error }
 import { readRegistry, listRoots, rootById, addRoot, newRoot, openRoot, closeRoot, forgetRoot, renameRoot, publishRoot, setActiveTab } from './roots.js'
-import { createFile, createDir, renameEntry, moveEntry, duplicateEntry, trashEntry, listTrash, restoreEntry, purgeEntry, revealEntry } from './files.js'
+import { createFile, createDir, renameEntry, moveEntry, duplicateEntry, trashEntry, listTrash, readTrashEntry, restoreEntry, purgeEntry, revealEntry } from './files.js'
 import { createFreestyleSessions } from './sessions.js'
 import { isRepo, hasHead } from '../../git-workspace/lib/repos.js'
 import { dshSessionKey } from '../../git-workspace/lib/sessions.js'
@@ -141,9 +141,13 @@ export function apply(ctx, opts = {}) {
       return productionBridge.spawn({ ...arg, id })
     },
   }
-  const S = createFreestyleSessions({ env, dshBridge })
   let githubPromise = null
   const github = () => { githubPromise ??= githubBridgeFor(opts.github, env); return githubPromise }
+  const S = createFreestyleSessions({
+    env,
+    dshBridge,
+    githubBridge: { deleteBranch: async (...args) => (await github()).deleteBranch(...args) },
+  })
 
   const isDshLive = (id) => {
     if (typeof id !== 'string' || id === '') return false
@@ -184,8 +188,18 @@ export function apply(ctx, opts = {}) {
     'entry.duplicate': ({ rootId, relPath }) => duplicateEntry(rootOr(rootId), relPath, { env }),
     'entry.trash': ({ rootId, relPath }) => ({ entry: trashEntry(rootOr(rootId), relPath, { env }) }),
     'entry.reveal': ({ rootId, relPath }) => revealEntry(rootOr(rootId), relPath),
-    'trash.restore': ({ rootId, entryId }) => restoreEntry(rootOr(rootId), entryId, { env }),
-    'trash.purge': ({ rootId, entryId }) => purgeEntry(rootOr(rootId), entryId),
+    'trash.restore': ({ rootId, entryId }) => {
+      const root = rootOr(rootId)
+      return readTrashEntry(root, entryId).entry.kind === 'session'
+        ? S.restoreTrash(root, entryId)
+        : restoreEntry(root, entryId, { env })
+    },
+    'trash.purge': async ({ rootId, entryId }) => {
+      const root = rootOr(rootId)
+      return readTrashEntry(root, entryId).entry.kind === 'session'
+        ? S.purgeTrash(root, entryId)
+        : purgeEntry(root, entryId)
+    },
     'session.new': async ({ rootId, relDir, name }) => {
       const session = await S.newSession(rootOr(rootId), relDir || '', name)
       return { ...session, dshLive: isDshLive(session.dshSessionId) }

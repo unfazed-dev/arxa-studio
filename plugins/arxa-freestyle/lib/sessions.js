@@ -5,7 +5,12 @@
 // in ../../git-workspace/lib for the functions this file calls.
 import fs from 'node:fs'
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { ensureTrashDir, listTrash, purgeEntry, readTrashEntry } from './files.js'
 import { resolveFreestyleRepo } from '../../git-workspace/lib/routing.js'
+import { getOrigin, isRepo } from '../../git-workspace/lib/repos.js'
+import { seatManifest } from '../../git-workspace/lib/manifest-seat.js'
+import { runGit } from '../../git-workspace/lib/run.js'
 import * as GW from '../../git-workspace/lib/sessions.js'
 import * as FIN from '../../git-workspace/lib/finish.js'
 
@@ -46,7 +51,7 @@ function sessionKey(root) {
   return GW.slugSegment(path.basename(root.path)) || `root-${String(root.id).slice(0, 8)}`
 }
 
-export function createFreestyleSessions({ env = process.env, dshBridge }) {
+export function createFreestyleSessions({ env = process.env, dshBridge, githubBridge }) {
   // `list`/`repoOfSession` are the only two functions that need to search
   // beyond the root's own repo — every other verb already knows its repo
   // (newSession via resolveFreestyleRepo, the rest via repoOfSession).
@@ -76,6 +81,53 @@ export function createFreestyleSessions({ env = process.env, dshBridge }) {
     throw new Error(`unknown-session: "${id}"`)
   }
 
+  function relativeRepo(root, repoPath) {
+    const rootPath = path.resolve(root.path)
+    const repo = path.resolve(repoPath)
+    const rel = path.relative(rootPath, repo)
+    if (rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) throw new Error('repo-outside-root')
+    return rel || '.'
+  }
+
+  function repoFromEntry(root, entry) {
+    if (typeof entry.repoPath !== 'string' || entry.repoPath === '' || path.isAbsolute(entry.repoPath)) throw new Error('unknown-entry')
+    const rootPath = fs.realpathSync(root.path)
+    const candidate = path.resolve(rootPath, entry.repoPath)
+    const rel = path.relative(rootPath, candidate)
+    if (rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) throw new Error('unknown-entry')
+    if (!fs.existsSync(candidate)) return candidate
+    const real = fs.realpathSync(candidate)
+    const realRel = path.relative(rootPath, real)
+    if (realRel === '..' || realRel.startsWith('..' + path.sep) || path.isAbsolute(realRel)) throw new Error('unknown-entry')
+    return real
+  }
+
+  function sessionEntry(root, entryId) {
+    const found = readTrashEntry(root, entryId)
+    const e = found.entry
+    let expectedBranch
+    try {
+      GW.assertSessionIdShape(e.sessionId)
+      expectedBranch = GW.SESSION_BRANCH_PREFIX + e.sessionId
+    } catch { throw new Error('unknown-entry') }
+    const expectedWorktree = path.resolve(root.path, GW.SESSIONS_DIR, ...e.sessionId.split('/'))
+    if (
+      e.kind !== 'session' || e.freestyleRootId !== root.id ||
+      typeof e.sessionId !== 'string' || !e.session || e.session.id !== e.sessionId ||
+      e.session.freestyleRootId !== root.id || e.session.state !== 'archived' ||
+      e.branch !== expectedBranch || e.session.branch !== expectedBranch ||
+      path.resolve(e.session.worktree || '') !== expectedWorktree
+    ) throw new Error('unknown-entry')
+    return { ...found, repoPath: repoFromEntry(root, e), expectedBranch, expectedWorktree }
+  }
+
+  function ghostsFor(root, repoPath) {
+    const rel = relativeRepo(root, repoPath)
+    return listTrash(root)
+      .filter((e) => e.kind === 'session' && e.freestyleRootId === root.id && e.repoPath === rel && e.session?.id === e.sessionId)
+      .map((e) => e.session)
+  }
+
   return {
     async newSession(root, relDir = '', name) {
       const route = resolveFreestyleRepo(root.path, relDir, { env })
@@ -84,7 +136,7 @@ export function createFreestyleSessions({ env = process.env, dshBridge }) {
         workspace: (relDir || '').replace(/\/+$/, ''),
         name,
         sessions: GW.listSessions(route.repoPath, env),
-        ghosts: [],
+        ghosts: ghostsFor(root, route.repoPath),
       })
       const session = GW.openSession(route.repoPath, {
         id, orgPath: root.path, name: name?.trim() || undefined, workspace: relDir || '', env,
@@ -119,7 +171,99 @@ export function createFreestyleSessions({ env = process.env, dshBridge }) {
 
     archive(root, id) { return GW.archiveSession(repoOfSession(root, id), id, env) },
     revive(root, id) { return GW.reviveSession(repoOfSession(root, id), id, env) },
-    trashArchived(root, id) { return GW.removeSessionRow(repoOfSession(root, id), id, env) },
+    trashArchived(root, id) {
+      const repoPath = repoOfSession(root, id)
+      const row = ownRows(root, repoPath).find((s) => s.id === id)
+      if (!row) throw new Error(`unknown-session: "${id}"`)
+      if (row.state !== 'archived') {
+        throw new Error(`not-archived: session "${id}" is ${row.state} — archive it first`)
+      }
+
+      // Marker first, registry removal second. If the process stops between
+      // these writes the session is duplicated in Archives and Trash, which
+      // remains visible and recoverable; the inverse ordering can orphan it.
+      const entryId = randomUUID()
+      const dir = path.join(ensureTrashDir(root), entryId)
+      fs.mkdirSync(dir)
+      const saved = { ...row, freestyleRootId: root.id }
+      const entry = {
+        id: entryId,
+        kind: 'session',
+        trashedAt: new Date().toISOString(),
+        freestyleRootId: root.id,
+        repoPath: relativeRepo(root, repoPath),
+        sessionId: saved.id,
+        name: typeof saved.name === 'string' && saved.name !== '' ? saved.name : saved.id,
+        branch: typeof saved.branch === 'string' ? saved.branch : null,
+        session: saved,
+      }
+      fs.writeFileSync(path.join(dir, 'entry.json'), JSON.stringify(entry, null, 2) + '\n')
+      GW.removeSessionRow(repoPath, id, env)
+      return { entryId, session: saved, branch: entry.branch }
+    },
+    restoreTrash(root, entryId) {
+      const { entry, repoPath, expectedBranch, expectedWorktree } = sessionEntry(root, entryId)
+      if (!isRepo(repoPath, env)) {
+        throw new Error(`repo-gone: ${entry.repoPath} no longer exists — restore the owning folder first`)
+      }
+      if (entry.branch && runGit(['rev-parse', '--verify', entry.branch], { cwd: repoPath, env, allowFail: true }) === null) {
+        throw new Error(`branch-gone: parked branch "${entry.branch}" no longer exists`)
+      }
+      const existing = GW.listSessions(repoPath, env).find((row) => row.id === entry.sessionId)
+      if (existing) {
+        const safelyDuplicated = existing.state === 'archived'
+          && existing.branch === expectedBranch
+          && path.resolve(existing.worktree || '') === expectedWorktree
+          && (!existing.freestyleRootId || existing.freestyleRootId === root.id)
+        if (!safelyDuplicated) throw new Error(`session-conflict: session "${entry.sessionId}" already exists outside Archives`)
+        purgeEntry(root, entryId)
+        return { sessionId: existing.id, state: existing.state, deleted: entryId }
+      }
+      const row = GW.restoreSessionRow(repoPath, entry.session, env)
+      purgeEntry(root, entryId)
+      return { sessionId: row.id, state: row.state ?? 'archived', deleted: entryId }
+    },
+    async purgeTrash(root, entryId) {
+      const { entry, repoPath, expectedBranch, expectedWorktree } = sessionEntry(root, entryId)
+      const out = { entryId, sessionId: entry.sessionId, remoteBranch: 'no-origin', refs: null, deleted: null }
+      if (!isRepo(repoPath, env)) {
+        out.refs = { id: entry.sessionId, branch: entry.branch, branchDropped: false, baseRefDropped: false, repoGone: true }
+      } else {
+        const registryRowExists = () => GW.listSessions(repoPath, env).some((row) => row.id === entry.sessionId)
+        if (registryRowExists()) {
+          throw new Error(`session-conflict: session "${entry.sessionId}" still has a registry row — restore the duplicate trash entry before purging`)
+        }
+        const { manifest } = seatManifest(repoPath)
+        if (entry.branch && getOrigin(repoPath, env) !== null && manifest?.repoOwner && manifest?.repoName) {
+          if (!githubBridge || typeof githubBridge.deleteBranch !== 'function') {
+            throw new Error('purge incomplete: remote branch deletion failed (github-unavailable) — the trash entry was kept')
+          }
+          const made = await githubBridge.deleteBranch(manifest.repoOwner, manifest.repoName, entry.branch)
+          if (!made?.ok) {
+            throw new Error('purge incomplete: remote branch deletion failed (' + (made?.error || made?.reason || 'unknown') + ') — the trash entry was kept')
+          }
+          out.remoteBranch = made.alreadyGone ? 'already-gone' : 'deleted'
+        }
+        // Remote deletion awaits I/O. Restore can race that await, so guard
+        // again before the first local destructive operation.
+        if (registryRowExists()) {
+          throw new Error(`session-conflict: session "${entry.sessionId}" was restored while purge was running — local session data was kept`)
+        }
+        out.refs = GW.dropSessionRefs(repoPath, {
+          id: entry.sessionId,
+          branch: entry.branch,
+          worktree: entry.session.worktree ?? null,
+        }, env)
+        const branchRemains = runGit(['show-ref', '--verify', '--hash', 'refs/heads/' + expectedBranch], { cwd: repoPath, env, allowFail: true }) !== null
+        const baseRefRemains = runGit(['show-ref', '--verify', '--hash', GW.SESSION_BASE_PREFIX + entry.sessionId], { cwd: repoPath, env, allowFail: true }) !== null
+        if (branchRemains || baseRefRemains || fs.existsSync(expectedWorktree)) {
+          throw new Error('purge incomplete: local session refs or worktree remain — the trash entry was kept')
+        }
+      }
+      purgeEntry(root, entryId)
+      out.deleted = entryId
+      return out
+    },
     finish(root, id, { dryRun = false } = {}) {
       return FIN.finishSession(repoOfSession(root, id), id, { env, dryRun })
     },

@@ -129,8 +129,10 @@ let entryId
 }
 
 // 5. session.new through the production dsh service bridge.
+let primarySession
 {
   const r = await act('session.new', { rootId, relDir: '', name: 'test session' })
+  primarySession = r
   check('session.new: ok with a live dsh conversation', r.ok === true && r.dshStatus === 'live' && r.dshLive === true && live.has(r.dshSessionId), JSON.stringify(r))
   check('session.new: uses the agent factory with the session cwd',
     created.length === 1 && created[0].sessionId === r.dshSessionId && created[0].meta?.cwd === r.cwd,
@@ -160,6 +162,46 @@ let entryId
       && live.get(sb.dshSessionId)?.meta?.cwd === sb.cwd
       && sa.cwd !== sb.cwd,
     JSON.stringify({ a: live.get(sa.dshSessionId)?.meta, b: live.get(sb.dshSessionId)?.meta }))
+}
+
+// 7. Shared trash verbs dispatch by marker kind: session entries restore to
+// Archives and purge refs, while ordinary file entries keep their own path.
+{
+  let r = await act('session.archive', { rootId, id: primarySession.id })
+  check('session.archive: ok', r.ok === true, JSON.stringify(r))
+  r = await act('archive.trash', { rootId, id: primarySession.id })
+  const sessionEntryId = r.entryId
+  check('archive.trash: creates a session trash entry', r.ok === true && !!sessionEntryId, JSON.stringify(r))
+  let s = await state()
+  check('state exposes the session marker and removes its Archives row',
+    s.trash.some((e) => e.id === sessionEntryId && e.kind === 'session')
+      && !s.roots.find((x) => x.id === rootId)?.sessions?.archived?.some((x) => x.id === primarySession.id),
+    JSON.stringify(s))
+
+  r = await act('trash.restore', { rootId, entryId: sessionEntryId })
+  s = await state()
+  check('trash.restore dispatches a session marker back to Archives',
+    r.ok === true && r.sessionId === primarySession.id
+      && s.roots.find((x) => x.id === rootId)?.sessions?.archived?.some((x) => x.id === primarySession.id)
+      && !s.trash.some((e) => e.id === sessionEntryId),
+    JSON.stringify({ r, s }))
+
+  r = await act('archive.trash', { rootId, id: primarySession.id })
+  const purgeSessionEntryId = r.entryId
+  r = await act('trash.purge', { rootId, entryId: purgeSessionEntryId })
+  s = await state()
+  check('trash.purge dispatches a session marker through ref cleanup',
+    r.ok === true && r.sessionId === primarySession.id && r.refs?.branchDropped === true
+      && !s.trash.some((e) => e.id === purgeSessionEntryId),
+    JSON.stringify({ r, s }))
+
+  await act('file.create', { rootId, relPath: 'purge-me.md' })
+  r = await act('entry.trash', { rootId, relPath: 'purge-me.md' })
+  const fileEntryId = r.entry.id
+  r = await act('trash.purge', { rootId, entryId: fileEntryId })
+  s = await state()
+  check('trash.purge retains the ordinary file-entry path',
+    r.ok === true && !s.trash.some((e) => e.id === fileEntryId), JSON.stringify({ r, s }))
 }
 
 console.log(failures === 0 ? '\narxa-freestyle selftest.actions: ALL GREEN' : `\narxa-freestyle selftest.actions: ${failures} FAILURE(S)`)
