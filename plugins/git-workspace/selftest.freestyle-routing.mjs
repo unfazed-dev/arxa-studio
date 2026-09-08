@@ -28,6 +28,21 @@ assert.throws(() => resolveFreestyleRepo(bare, ''), (e) => e.reason === 'no-head
 const notARepo = path.join(tmp, 'not-a-repo'); fs.mkdirSync(notARepo)
 assert.throws(() => resolveFreestyleRepo(notARepo, ''), (e) => e instanceof RoutingRefusedError && e.reason === 'no-head'); ok(true, 'a root that is not a repo at all refuses with no-head')
 
+// A symlink placed inside the root can point anywhere on disk — the lexical
+// path.relative check above never sees it. Physical (realpath) containment
+// must catch it even when the trailing path segment past the symlink does
+// not exist yet.
+const external = path.join(tmp, 'external-repo'); fs.mkdirSync(external); git(external, 'init', '-q', '-b', 'main')
+fs.symlinkSync(external, path.join(root, 'escape'))
+assert.throws(() => resolveFreestyleRepo(root, 'escape'), (e) => e instanceof RoutingRefusedError && e.reason === 'outside-root'); ok(true, 'a symlink inside the root pointing outside the root refuses with outside-root')
+assert.throws(() => resolveFreestyleRepo(root, 'escape/sub'), (e) => e instanceof RoutingRefusedError && e.reason === 'outside-root'); ok(true, 'a path through an escaping symlink refuses with outside-root even when the trailing segment does not exist')
+
+// The check is physical containment, not "no symlinks": one that stays
+// inside the same root must still resolve normally.
+fs.symlinkSync(path.join(root, 'docs', 'deep'), path.join(root, 'alias'))
+r = resolveFreestyleRepo(root, 'alias')
+ok(r.repoPath === root, 'a symlink that stays inside the root still resolves normally')
+
 const nested = path.join(root, 'lib', 'child'); fs.mkdirSync(nested, { recursive: true }); initPlainRepo(nested)
 r = resolveFreestyleRepo(root, 'lib/child/src')
 ok(r.repoPath === nested && r.cwdRel === 'src', 'a nested repo is the nearest enclosing repo')

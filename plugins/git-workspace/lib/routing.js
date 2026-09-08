@@ -155,6 +155,41 @@ export function resolveSessionRepo(orgPath, workspace, { env = process.env, requ
 }
 
 /**
+ * The deepest ancestor of `p` (inclusive) that exists on disk, realpathed.
+ * `p` itself may not exist yet (Freestyle targets can be minted before their
+ * folder is created) — walk up until something real is found, then resolve
+ * THAT, so any symlink anywhere in the existing prefix is followed.
+ */
+function realpathDeepestExisting(p) {
+  let dir = p
+  while (!fs.existsSync(dir)) {
+    const parent = path.dirname(dir)
+    if (parent === dir) break // hit the filesystem root without finding anything real
+    dir = parent
+  }
+  return fs.realpathSync(dir)
+}
+
+/**
+ * Physical containment, not just lexical: `p` (or its deepest existing
+ * ancestor) must realpath to somewhere inside `rootReal`. The lexical check
+ * in `resolveFreestyleRepo` (a `path.relative` against `path.resolve`d
+ * strings) does not see through symlinks — a folder placed inside the root
+ * that points elsewhere on disk would sail past it and bind a session to a
+ * repo the root never actually contains.
+ */
+function assertPhysicallyInside(rootReal, p, relDir, rootPath) {
+  const real = realpathDeepestExisting(p)
+  if (real !== rootReal && !real.startsWith(rootReal + path.sep)) {
+    throw new RoutingRefusedError(
+      'outside-root',
+      `outside-root: "${relDir}" escapes ${rootPath} through a symlink`,
+      { repoPath: rootReal },
+    )
+  }
+}
+
+/**
  * Resolve a Freestyle target folder to the nearest enclosing git repo (F5).
  * A Freestyle root has no dock table — any folder under it is fair game — so
  * this is a pure path walk from `<rootPath>/<relDir>` up to `rootPath`
@@ -173,11 +208,12 @@ export function resolveSessionRepo(orgPath, workspace, { env = process.env, requ
  *   relative to `repoPath` (POSIX separators, so it can sit in a branch/id).
  */
 export function resolveFreestyleRepo(rootPath, relDir = '', { env = process.env, requireHead = true } = {}) {
-  // path.resolve, not realpathSync: `isRepo` already realpaths BOTH sides
-  // internally (repos.js:47, for exactly the macOS /var → /private/var tmp-
-  // dir symlink case), so the walk stays correct without it — and callers
-  // that pass a symlinked root get repoPath back as the path THEY gave, not
-  // a resolved alias they never typed.
+  // path.resolve, not realpathSync, for the LEXICAL walk and the returned
+  // repoPath: callers get back the path they typed, not a resolved alias
+  // they never wrote (`isRepo` already realpaths both sides internally —
+  // repos.js:47 — for the macOS /var → /private/var tmpdir case, so this
+  // stays correct for THAT). Symlink escapes are a different threat and get
+  // their own physical check, below, via assertPhysicallyInside.
   const rootAbs = path.resolve(rootPath)
   const target = path.resolve(rootAbs, relDir || '')
   const rel = path.relative(rootAbs, target)
@@ -188,9 +224,16 @@ export function resolveFreestyleRepo(rootPath, relDir = '', { env = process.env,
       { repoPath: rootAbs },
     )
   }
+  const rootReal = fs.realpathSync(rootAbs)
+  assertPhysicallyInside(rootReal, target, relDir, rootPath)
+
   let dir = target
   while (true) {
     if (isRepo(dir, env)) {
+      // The repo the walk lands on must ALSO be physically inside the root:
+      // a symlinked intermediate directory could otherwise let `isRepo` find
+      // — and bind a session to — a repo the root never actually contains.
+      assertPhysicallyInside(rootReal, dir, relDir, rootPath)
       if (requireHead && !hasHead(dir, env)) {
         throw new RoutingRefusedError('no-head', `no-head: ${dir} is a repo with no commits yet`, { repoPath: dir })
       }
