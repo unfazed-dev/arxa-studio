@@ -224,7 +224,20 @@ export function resolveFreestyleRepo(rootPath, relDir = '', { env = process.env,
       { repoPath: rootAbs },
     )
   }
-  const rootReal = fs.realpathSync(rootAbs)
+  // A deleted or moved root is the same human situation as "never added
+  // through Freestyle" (the no-repo-at-all case below) — no-head, not a raw
+  // ENOENT. realpathSync throws for a missing path, so this has to be its
+  // own guard rather than falling through to the walk-up loop's own throw.
+  let rootReal
+  try {
+    rootReal = fs.realpathSync(rootAbs)
+  } catch {
+    throw new RoutingRefusedError(
+      'no-head',
+      `no-head: ${rootPath} does not exist — add it through Freestyle first`,
+      { repoPath: rootAbs },
+    )
+  }
   assertPhysicallyInside(rootReal, target, relDir, rootPath)
 
   let dir = target

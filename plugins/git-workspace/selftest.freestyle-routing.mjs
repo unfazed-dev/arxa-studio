@@ -28,6 +28,12 @@ assert.throws(() => resolveFreestyleRepo(bare, ''), (e) => e.reason === 'no-head
 const notARepo = path.join(tmp, 'not-a-repo'); fs.mkdirSync(notARepo)
 assert.throws(() => resolveFreestyleRepo(notARepo, ''), (e) => e instanceof RoutingRefusedError && e.reason === 'no-head'); ok(true, 'a root that is not a repo at all refuses with no-head')
 
+// A deleted or moved root must not leak a raw ENOENT from realpathSync —
+// every refusal path is a structured RoutingRefusedError with a .reason
+// callers can branch on.
+const missing = path.join(tmp, 'does-not-exist')
+assert.throws(() => resolveFreestyleRepo(missing, ''), (e) => e instanceof RoutingRefusedError && e.reason === 'no-head'); ok(true, 'a root that does not exist on disk refuses with no-head, not a raw ENOENT')
+
 // A symlink placed inside the root can point anywhere on disk — the lexical
 // path.relative check above never sees it. Physical (realpath) containment
 // must catch it even when the trailing path segment past the symlink does
