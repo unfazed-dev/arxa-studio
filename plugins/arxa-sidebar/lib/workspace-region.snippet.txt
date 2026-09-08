@@ -568,6 +568,82 @@
 		 * beat to reach the client's session catalog — retry until it is
 		 * listed (open before then is a silent no-op, and the content area
 		 * would stay on the empty state). */
+		/* D117 — the decoration map for the SELECTED session.
+		 *
+		 * One map, fetched once per session per refresh, read by every row. The
+		 * obvious alternative — ask git per row as it renders — is O(files)
+		 * subprocesses on every keystroke-driven repaint, and it gets slower
+		 * exactly as a project gets big enough to need decorations.
+		 *
+		 * Which session? The SELECTED one (D-7). A tree decorated by "whatever
+		 * session happens to be running" would answer a question nobody asked;
+		 * the operator wants to know what THIS session changed, and the row they
+		 * click should open that session's copy of the file. */
+		let arxaDeco = { sessionId: null, prefix: "", files: {}, dirs: {}, ok: false };
+		const ARXA_DECO_EVENT = "arxa-deco";
+		let arxaDecoInflight = null;
+		const arxaRefreshDeco = () => {
+			const st = orgStore.get();
+			const sid = st.currentSessionId ?? null;
+			const org = (st.orgs || []).find((o) => (o.sessions || []).some((x) => x.id === sid));
+			if (!sid || !org) {
+				// No session selected means no decorations — NOT "everything is
+				// clean". Clearing is the honest render; a stale map would keep
+				// marking files against a session the user has left.
+				if (arxaDeco.sessionId !== null) {
+					arxaDeco = { sessionId: null, prefix: "", files: {}, dirs: {}, ok: false };
+					try { window.dispatchEvent(new Event(ARXA_DECO_EVENT)); } catch { /* no bridge */ }
+				}
+				return;
+			}
+			// Single-flight, for the same reason the state refresh is: the poll and
+			// a selection change can land together, and two git pairs racing to
+			// write the same map is pure waste.
+			if (arxaDecoInflight) return arxaDecoInflight;
+			arxaDecoInflight = ORG_POST("session.decorations", { orgId: org.id, sessionId: sid })
+				.then((res) => {
+					const r = res && res.result ? res.result : null;
+					const next = r && r.ok ? { sessionId: sid, prefix: r.prefix || "", files: r.files || {}, dirs: r.dirs || {}, ok: true } : { sessionId: sid, prefix: "", files: {}, dirs: {}, ok: false };
+					const changed = JSON.stringify([arxaDeco.sessionId, arxaDeco.files]) !== JSON.stringify([next.sessionId, next.files]);
+					arxaDeco = next;
+					// Only wake the rows when the map actually moved. The state poll
+					// runs on a timer, and repainting every row on every tick is how
+					// a sidebar starts feeling heavy for no visible reason.
+					if (changed) { try { window.dispatchEvent(new Event(ARXA_DECO_EVENT)); } catch { /* no bridge */ } }
+				})
+				.catch(() => { /* decorations are presentation — never block the tree */ })
+				.finally(() => { arxaDecoInflight = null; });
+			return arxaDecoInflight;
+		};
+		try { window.addEventListener("arxa-sidebar-state", () => { arxaRefreshDeco(); }); } catch { /* no bridge */ }
+
+		/** The mark for one row, or null. `kind` picks which map: a folder is lit
+		 * when anything INSIDE it changed, which is what makes a decoration
+		 * survive collapsing the folder. */
+		const ARXA_DECO_FOR = (relPath, kind) => {
+			const m = kind === "dir" ? arxaDeco.dirs : arxaDeco.files;
+			return (m && m[relPath]) || null;
+		};
+		const ARXA_DECO_TITLE = { M: "rows.deco.modified", A: "rows.deco.added", D: "rows.deco.deleted", R: "rows.deco.renamed" };
+		const ARXA_DECO_BADGE = (relPath, kind) => {
+			const letter = ARXA_DECO_FOR(relPath, kind);
+			if (!letter) return null;
+			return (0, react_jsx_runtime.jsx)("span", {
+				className: "aXa_deco aXa_deco_" + letter,
+				title: orgT(ARXA_DECO_TITLE[letter] || "rows.deco.modified"),
+				"aria-label": orgT(ARXA_DECO_TITLE[letter] || "rows.deco.modified"),
+				children: letter,
+			}, "deco");
+		};
+		/** Subscribe a row-rendering component to the map. */
+		const ARXA_USE_DECO = () => {
+			const [, bump] = (0, react.useState)(0);
+			(0, react.useEffect)(() => {
+				const on = () => bump((n) => n + 1);
+				window.addEventListener(ARXA_DECO_EVENT, on);
+				return () => window.removeEventListener(ARXA_DECO_EVENT, on);
+			}, []);
+		};
 		const arxaOpenConversation = (sessionId, waited = false) => {
 			if (!arxaClientSessions || typeof arxaClientSessions.open !== "function") return;
 			let dshId = null;
@@ -1155,6 +1231,28 @@
 				// rather than a second element appearing beside it, so the row gains
 				// no new slot to collide with the timestamp.
 				+ ".aXa_arxaNoConvoTag{width:auto;height:auto;border-radius:3px;padding:0 4px;font-size:10px;line-height:14px;white-space:nowrap;opacity:.85}"
+				// D117 decorations. One letter in the row's tail, VS Code's grammar:
+				// the mark AND the name take the colour, so the row reads as changed
+				// at a glance without the letter having to be large. Colours come
+				// from the dsh status aliases, which already track the theme — a
+				// hardcoded green would invert into an unreadable one in light mode.
+				+ ".aXa_deco{flex:none;margin-left:auto;padding-left:6px;font-size:11px;font-weight:600;line-height:20px;font-variant-numeric:tabular-nums}"
+				+ ".aXa_decoText{font-weight:500}"
+				// The colour classes go on BOTH the badge and the name, so the tint
+				// always matches the letter. A single shared text colour looked fine
+				// on a modified file and lied on a deleted one.
+				//
+				// Every token here is one the design system actually ships. The first
+				// draft invented status-warning/success/danger/info, which do not
+				// exist: `var()` silently falls back, so the colours looked right in
+				// the theme they were authored in and drifted in the other. The
+				// conformance check names that family for exactly this reason.
+				// There is no green in the vocabulary, so ADDED and RENAMED share the
+				// brand accent and the letter tells them apart.
+				+ ".aXa_deco_M{color:var(--dsw-alias-state-warn-label)}"
+				+ ".aXa_deco_A{color:var(--dsw-alias-brand-primary)}"
+				+ ".aXa_deco_D{color:var(--dsw-alias-label-error)}"
+				+ ".aXa_deco_R{color:var(--dsw-alias-brand-primary)}"
 				+ ".uV2eYG_root:not(.uV2eYG_hero) [data-arxa-preset-corner]{display:none}"
 				+ ".uV2eYG_hero [data-composer-card] :is(.uV2eYG_input,.uV2eYG_mirror,.uV2eYG_backdrop){box-sizing:border-box;padding-right:var(--arxa-preset-inset,120px)}";
 			document.head.appendChild(tag);
@@ -1919,8 +2017,27 @@
 			// unbounded indent would walk the name column off a narrow sidebar.
 			// Depths 1-9 are untouched, so the measured alignment above stands.
 			const childStyle = (d) => ({ marginLeft: (Math.min(Math.max(0, d - 1), 8) * 14) + "px" });
+			// Without this the map updates and NOTHING repaints: the rows read
+			// `arxaDeco` at render time, so they need a reason to render again.
+			ARXA_USE_DECO();
+			// D-7: a decorated row opens THAT SESSION's copy. Without the id the
+			// viewer resolves the path against the org checkout, so clicking a file
+			// marked "modified" opens the version WITHOUT the modification — the
+			// decoration and the content would disagree on the same click.
 			const openFile = (relPath) => {
-				try { window.dispatchEvent(new CustomEvent("arxa-av-open", { detail: { relPath } })); } catch { /* no bridge — ignore */ }
+				const sessionId = arxaDeco.sessionId || null;
+				// The tree speaks ORG-relative ('projects/Tree/notes/a.md'); the
+				// viewer's worktree route resolves against the WORKTREE root, where
+				// the same file is 'notes/a.md'. Handing it the org-relative path
+				// would look for projects/Tree/ INSIDE the worktree and 404 — the
+				// decoration would promise a change and the click would open
+				// nothing. Only the session path needs the strip; without a session
+				// the org checkout is the right root and the path is already correct.
+				const inWorktree = sessionId && arxaDeco.prefix && relPath.startsWith(arxaDeco.prefix)
+					? relPath.slice(arxaDeco.prefix.length)
+					: relPath;
+				const detail = sessionId ? { relPath: inWorktree, sessionId } : { relPath };
+				try { window.dispatchEvent(new CustomEvent("arxa-av-open", { detail })); } catch { /* no bridge — ignore */ }
 			};
 			const statusRow = (d, text) => (0, react_jsx_runtime.jsx)("div", { style: { ...childStyle(d), fontSize: 12, opacity: 0.6, padding: "2px 8px" }, children: text });
 			const fileRow = (relPath, name, d) => (0, react_jsx_runtime.jsxs)("div", {
@@ -1937,7 +2054,8 @@
 					// focused row (2026-09-01). The old blank 24px stub pushed
 					// file names ~22px past their siblings (user report).
 					(0, react_jsx_runtime.jsx)("span", { style: { flex: "none", width: 16, flexBasis: 16, height: 20, display: "inline-flex", alignItems: "center", justifyContent: "center" }, children: matIcons ? (0, react_jsx_runtime.jsx)("span", { style: { width: 16, height: 16, display: "inline-flex" }, dangerouslySetInnerHTML: { __html: matIcons.file(name) } }) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconBrowseOutline16, {}) }),
-					(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, style: { opacity: 0.92 }, children: name }) })
+					(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.title, ARXA_DECO_FOR(relPath, "file") && "aXa_decoText", ARXA_DECO_FOR(relPath, "file") && ("aXa_deco_" + ARXA_DECO_FOR(relPath, "file"))), style: { opacity: 0.92 }, children: name }) }),
+					ARXA_DECO_BADGE(relPath, "file")
 				]
 			}, "f:" + relPath);
 			const dirRow = (sub, d) => (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
@@ -1954,7 +2072,8 @@
 						// same thing one level down. The Material colour pack stays on FILE
 						// rows, where the per-extension colour is the whole point.
 						(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder), children: openDirs[sub] ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {}) }),
-						(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: sub }) })
+						(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.title, ARXA_DECO_FOR(dir ? dir + "/" + sub : sub, "dir") && "aXa_decoText", ARXA_DECO_FOR(dir ? dir + "/" + sub : sub, "dir") && ("aXa_deco_" + ARXA_DECO_FOR(dir ? dir + "/" + sub : sub, "dir"))), children: sub }) }),
+						ARXA_DECO_BADGE(dir ? dir + "/" + sub : sub, "dir")
 					]
 				}),
 				openDirs[sub] ? (0, react_jsx_runtime.jsx)(ArxaDirRows, { dir: dir ? dir + "/" + sub : sub, depth: depth + 1, mode }, "arxa-dir:" + (dir ? dir + "/" + sub : sub)) : null
@@ -2951,6 +3070,10 @@
 			"rows.current": "You are here",
 			"rows.noConversation": "No conversation — the session's files are here, but nothing opened",
 			"rows.noConversationTag": "No conversation",
+			"rows.deco.modified": "Modified in this session",
+			"rows.deco.added": "Added in this session",
+			"rows.deco.deleted": "Deleted in this session",
+			"rows.deco.renamed": "Renamed in this session",
 			"org.create.ghToggle": "Publish to GitHub",
 			"org.create.ghOnHint": "A private GitHub repository is created and kept in sync.",
 			"org.create.ghOffHint": "This organisation stays on this device only. Connect it later from its menu.",
@@ -3173,6 +3296,10 @@
 			"rows.current": "Tu jesteś",
 			"rows.noConversation": "Brak rozmowy — pliki sesji są tutaj, ale nic się nie otworzyło",
 			"rows.noConversationTag": "Brak rozmowy",
+			"rows.deco.modified": "Zmieniony w tej sesji",
+			"rows.deco.added": "Dodany w tej sesji",
+			"rows.deco.deleted": "Usunięty w tej sesji",
+			"rows.deco.renamed": "Zmieniona nazwa w tej sesji",
 			"org.create.ghToggle": "Opublikuj na GitHub",
 			"org.create.ghOnHint": "Zostaje utworzone prywatne repozytorium GitHub i jest na bieżąco synchronizowane.",
 			"org.create.ghOffHint": "Ta organizacja pozostaje tylko na tym urządzeniu. Połącz ją później z jej menu.",
@@ -3395,6 +3522,10 @@
 			"rows.current": "Vous êtes ici",
 			"rows.noConversation": "Aucune conversation — les fichiers de la session sont là, mais rien ne s'est ouvert",
 			"rows.noConversationTag": "Aucune conversation",
+			"rows.deco.modified": "Modifié dans cette session",
+			"rows.deco.added": "Ajouté dans cette session",
+			"rows.deco.deleted": "Supprimé dans cette session",
+			"rows.deco.renamed": "Renommé dans cette session",
 			"org.create.ghToggle": "Publier sur GitHub",
 			"org.create.ghOnHint": "Un dépôt GitHub privé est créé et synchronisé en continu.",
 			"org.create.ghOffHint": "Cette organisation reste uniquement sur cet appareil. Connectez-la plus tard depuis son menu.",

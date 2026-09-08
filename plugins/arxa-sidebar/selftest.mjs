@@ -636,8 +636,17 @@ check('files: NO fixed depth ceiling — folders keep expanding however deep (a 
   !/&& depth < \d/.test(client) && client.includes('entry.status === "ready" ? entry.dirs.filter((sub) => !(hideDirs && hideDirs[sub])).map((sub) => dirRow(sub, depth)) : null'))
 check('files: the INDENT is what is bounded, not the tree — the step stops at 8 so a deep row keeps its name column',
   client.includes('marginLeft: (Math.min(Math.max(0, d - 1), 8) * 14) + "px"'))
-check('files: lazy tree route + one fresh-token 403 retry + arxa-av-open bridge unchanged',
-  client.includes('"/__arxa/artifacts/tree?dir="') && client.includes('scope: "tree-read"') && client.includes('window.dispatchEvent(new CustomEvent("arxa-av-open", { detail: { relPath } }))'))
+// The av-open payload GREW a sessionId (D-7). The bridge itself is unchanged —
+// artifact-viewer already read `detail.sessionId` and already fetched
+// /__arxa/artifacts/wt?session=… with it; the sidebar simply never sent one.
+// The path strip is asserted with it, because sending the id WITHOUT stripping
+// the org prefix resolves inside the worktree and 404s: the decoration would
+// promise a change and the click would open nothing.
+check('files: lazy tree route + one fresh-token 403 retry + arxa-av-open carries the session',
+  client.includes('"/__arxa/artifacts/tree?dir="') && client.includes('scope: "tree-read"')
+  && client.includes('window.dispatchEvent(new CustomEvent("arxa-av-open", { detail }))')
+  && client.includes('const detail = sessionId ? { relPath: inWorktree, sessionId } : { relPath };')
+  && client.includes('relPath.startsWith(arxaDeco.prefix)'))
 check('files: expanding an org row opens the org (tree-read rides the open handle) + human hint when it is not open',
   client.includes('if (isOrg && !open) orgStore.mutate("org.open", { orgId: d.orgId }).catch(() => {});') && client.includes('/no org open/i.test(entry.error || "")') && client.includes('"files.openHint": "Open this organisation to browse its files"') && client.includes('"files.openHint": "Otwórz tę organizację, aby przeglądać jej pliki"') && client.includes('"files.openHint": "Ouvrez cette organisation pour parcourir ses fichiers"'))
 check('trash: restore/delete icon buttons are gapped (flex span, 12px user-tuned)',
@@ -943,6 +952,45 @@ check('client: agent verb + reason strings localized in en/pl/fr',
   check('S-rescue: every locale answers the two gate strings',
     (gen.match(/"welcome\.trashed":/g) || []).length === (gen.match(/"welcome\.businessSoon":/g) || []).length
     && (gen.match(/"welcome\.restore":/g) || []).length === (gen.match(/"welcome\.businessSoon":/g) || []).length)
+}
+
+// ---- D117: VS Code-style decorations on the file tree ----
+{
+  // The decorations live in the WORKSPACE region (client.js), not the host —
+  // the route is the only half in index.js, asserted separately below.
+  const gen = client
+  check('D117: the map is fetched ONCE per session, not per row',
+    gen.includes('ORG_POST("session.decorations"') && (gen.match(/ORG_POST\("session\.decorations"/g) || []).length === 1)
+  check('D117: the fetch is single-flight, like the state refresh beside it',
+    gen.includes('if (arxaDecoInflight) return arxaDecoInflight;'))
+  check('D117: rows subscribe, or a new map would paint nothing',
+    gen.includes('ARXA_USE_DECO();') && gen.includes('window.addEventListener(ARXA_DECO_EVENT, on);'))
+  check('D117: leaving a session CLEARS the map rather than leaving it stale',
+    gen.includes('arxaDeco = { sessionId: null, prefix: "", files: {}, dirs: {}, ok: false };'))
+  check('D117: folders decorate from the folded map, files from the file map',
+    gen.includes('kind === "dir" ? arxaDeco.dirs : arxaDeco.files'))
+  check('D117: both row kinds carry a badge',
+    gen.includes('ARXA_DECO_BADGE(relPath, "file")') && gen.includes('ARXA_DECO_BADGE(dir ? dir + "/" + sub : sub, "dir")'))
+  check('D117: the mark is announced, not colour-only',
+    gen.includes('"aria-label": orgT(ARXA_DECO_TITLE[letter]'))
+  check('D117: every decoration string is translated in all three dictionaries',
+    (gen.match(/"rows\.deco\.modified":/g) || []).length === 3
+    && (gen.match(/"rows\.deco\.deleted":/g) || []).length === 3)
+  // The first draft used status-warning/success/danger/info, none of which the
+  // design system ships: `var()` falls back silently, so the colours looked
+  // right in the theme they were written in and drifted in the other.
+  check('D117: decoration colours use tokens that actually exist',
+    !/aXa_deco_[MADR]\{color:var\(--dsw-alias-status-/.test(gen)
+    && gen.includes('.aXa_deco_M{color:var(--dsw-alias-state-warn-label)}')
+    && gen.includes('.aXa_deco_D{color:var(--dsw-alias-label-error)}'))
+  // Host half: the route maps git's worktree-relative paths into the tree's
+  // org-relative space, and hands the prefix back so the client can undo it.
+  check('D117: the route exists and prefixes project seats',
+    hostSrc().includes("'session.decorations':")
+    && hostSrc().includes("'projects/' + s.project + '/'")
+    && hostSrc().includes('dirs: gw.foldDirs(files)'))
+  check('D117: a dsh-less session still decorates (D112 sessions are legitimate)',
+    hostSrc().includes('x.id === sid || x.dshSessionId === sid'))
 }
 
 // ---- D112: a session with no conversation is NAMED, never silent ----

@@ -1567,7 +1567,12 @@ export function apply(ctx, opts = {}) {
               const prefix = typeof s.project === 'string' && s.project !== '' ? 'projects/' + s.project + '/' : ''
               const files = {}
               for (const [rel, letter] of Object.entries(d.files)) files[prefix + rel] = letter
-              return { ok: true, sessionId: s.id, files, dirs: gw.foldDirs(files), reason: null }
+              // The prefix rides back because the CLIENT has to undo it: the tree
+              // speaks org-relative, but the viewer's worktree route resolves a
+              // path against the WORKTREE root, so opening the session's copy
+              // needs 'notes/a.md', not 'projects/Tree/notes/a.md'. Returning the
+              // string we added beats making the client re-derive it and drift.
+              return { ok: true, sessionId: s.id, prefix, files, dirs: gw.foldDirs(files), reason: null }
             },
             'org.sweep': async () => {
               const gw = await importGitWorkspace()
