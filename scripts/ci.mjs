@@ -39,6 +39,12 @@ suites.push([root, 'scripts', 'preset-check.mjs'])
 // failure). Offline and deterministic — the LIVE variant is cicd-smoke.mjs,
 // which needs a real engine and real GitHub and is hand-run only.
 suites.push([root, 'scripts', 'cicd-stress.mjs'])
+// The LOCAL-ONLY card run. Every other card smoke (cicd-smoke, card-cicd-smoke)
+// needs a real GitHub token and a real repo, so the configuration most users
+// run — an org that was never published — had no coverage through the card's
+// own route at all. Offline and sandboxed, so unlike its two siblings it can
+// live here rather than being hand-run.
+suites.push([root, 'scripts', 'card-local-smoke.mjs'])
 // arxa-jobs reads an UNDOCUMENTED shape out of the installed dsh (the job
 // registry's `.id` fence). Its selftest runs against a faithful fake, so this
 // gate is the half that notices when the real thing moves.

@@ -559,6 +559,28 @@ export function apply(ctx) {
               }
               let manifest = {}
               try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch { /* unreadable — plain status */ }
+              /* D98/D99: an org and a project each own a repo, and a project
+               * seat's link state lives in its OWN project.json — the same
+               * selection repoFor() makes for the actions. card.status read
+               * org.json unconditionally, so it described the WRONG repo for
+               * every project session: a published project inside a local-only
+               * org came back linked:false / localOnly:true, and the client
+               * hides the whole PR + CI section on `linked && !localOnly`.
+               * Status and the actions disagreed — repoFor would find the
+               * project's repo for a button the card never drew.
+               * D91: a project with no link of its own INHERITS the org's
+               * local-only flag; reading project.json alone would drop the
+               * badge for the ordinary local-only project, which has neither
+               * field set. Inherit only when the project is genuinely
+               * unlinked — a published project is not local-only whatever its
+               * org says. */
+              let seatManifest = manifest
+              if (sessionRow?.origin === 'project' && typeof sessionRow.repoPath === 'string') {
+                seatManifest = {}
+                try { seatManifest = JSON.parse((await import('node:fs')).readFileSync(sessionRow.repoPath + '/project.json', 'utf8')) } catch { /* unreadable — unlinked, and it inherits below */ }
+              }
+              const seatLinked = Boolean(seatManifest.repoUrl)
+              const seatLocalOnly = seatManifest.localOnly === true || (!seatLinked && manifest.localOnly === true)
               const g = await getGithub().catch(() => null)
               const mainChecks = await mainChecksFor(cur.path, manifest, g, gw).catch(() => null)
               // F8 (2026-09-04): when GitHub revokes the grant, every push and
@@ -583,8 +605,8 @@ export function apply(ctx) {
                 // and leaves stale numbers on screen.
                 wipRun: health === 'ok' ? gw.wipRun(repoPath).length : null,
                 chip: health === 'ok' ? gw.versionChip(repoPath) : null,
-                linked: Boolean(manifest.repoUrl),
-                localOnly: Boolean(manifest.localOnly),
+                linked: seatLinked,
+                localOnly: seatLocalOnly,
                 // `files` is the per-file state of the GENERATED frame. openOrg
                 // upgrades a stale file on its own, but one a human edited comes
                 // back `modified` and is deliberately left alone — without this
