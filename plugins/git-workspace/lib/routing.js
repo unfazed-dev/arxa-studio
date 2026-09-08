@@ -38,8 +38,10 @@ export const DOCK_ROUTES = Object.freeze([
   Object.freeze({ dock: 'account', kind: 'refuse', reason: 'account' }),
 ])
 
-/** Refusal reasons, in the order the resolver can raise them. */
-export const ROUTING_REASONS = Object.freeze(['account', 'unknown-dock', 'no-head'])
+/** Refusal reasons, in the order the resolver can raise them. `outside-root`
+ * and the freestyle-flavoured `no-head` are raised only by
+ * resolveFreestyleRepo (F5), below. */
+export const ROUTING_REASONS = Object.freeze(['account', 'unknown-dock', 'no-head', 'outside-root'])
 
 /**
  * The no-HEAD refusal reuses lifecycle.js's session wording byte-for-byte
@@ -150,6 +152,62 @@ export function resolveSessionRepo(orgPath, workspace, { env = process.env, requ
     throw new RoutingRefusedError('no-head', INITIAL_SNAPSHOT_PENDING, { workspace, repoPath })
   }
   return { repoPath, kind: 'project', slug: route.slug }
+}
+
+/**
+ * Resolve a Freestyle target folder to the nearest enclosing git repo (F5).
+ * A Freestyle root has no dock table — any folder under it is fair game — so
+ * this is a pure path walk from `<rootPath>/<relDir>` up to `rootPath`
+ * itself, stopping at the first directory that `isRepo`. No filesystem
+ * writes happen here; adding the root as a repo is `initPlainRepo`'s job
+ * (repos.js), run once when a folder is added through Freestyle.
+ *
+ * @param {string} rootPath   the Freestyle root's directory
+ * @param {string} [relDir]   the target folder, relative to rootPath ('' = the root itself)
+ * @param {object} [opts]
+ * @param {object} [opts.env]                env for git calls
+ * @param {boolean} [opts.requireHead=true]  refuse when the enclosing repo has no HEAD yet
+ *   — same "first snapshot not done" contract as resolveSessionRepo.
+ * @returns {{ repoPath: string, kind: 'freestyle', cwdRel: string }}
+ *   `repoPath` is a WORKING DIRECTORY. `cwdRel` is `relDir` re-expressed
+ *   relative to `repoPath` (POSIX separators, so it can sit in a branch/id).
+ */
+export function resolveFreestyleRepo(rootPath, relDir = '', { env = process.env, requireHead = true } = {}) {
+  // path.resolve, not realpathSync: `isRepo` already realpaths BOTH sides
+  // internally (repos.js:47, for exactly the macOS /var → /private/var tmp-
+  // dir symlink case), so the walk stays correct without it — and callers
+  // that pass a symlinked root get repoPath back as the path THEY gave, not
+  // a resolved alias they never typed.
+  const rootAbs = path.resolve(rootPath)
+  const target = path.resolve(rootAbs, relDir || '')
+  const rel = path.relative(rootAbs, target)
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new RoutingRefusedError(
+      'outside-root',
+      `outside-root: "${relDir}" is not inside ${rootPath}`,
+      { repoPath: rootAbs },
+    )
+  }
+  let dir = target
+  while (true) {
+    if (isRepo(dir, env)) {
+      if (requireHead && !hasHead(dir, env)) {
+        throw new RoutingRefusedError('no-head', `no-head: ${dir} is a repo with no commits yet`, { repoPath: dir })
+      }
+      return { repoPath: dir, kind: 'freestyle', cwdRel: path.relative(dir, target).split(path.sep).join('/') }
+    }
+    if (dir === rootAbs) break
+    dir = path.dirname(dir)
+  }
+  // No repo anywhere between the target and the root, inclusive: the root
+  // itself was never added through Freestyle (that step runs initPlainRepo).
+  // Same reason as the no-commits-yet case above — a caller branches on
+  // `reason`, not on which of the two produced it.
+  throw new RoutingRefusedError(
+    'no-head',
+    `no-head: ${rootPath} is not a git repo — add it through Freestyle first`,
+    { repoPath: rootAbs },
+  )
 }
 
 /**

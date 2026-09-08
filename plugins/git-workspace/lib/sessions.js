@@ -323,18 +323,24 @@ export function assertSessionIdShape(id) {
  * NNN counts per path per day, across words: two sessions born the same day
  * in `RESTO/notes` are -001 and -002 whatever they are called. A number freed
  * by a drop is skipped, never reused — the registry is the authority.
+ *
+ * A Freestyle root session (F5) has no workspace row to sit under — the
+ * caller passes `workspace: ''` EXPLICITLY, and the identity collapses to
+ * `<org>/<word>-wt-<YYMMDD>-<NNN>` (two segments, not three). Omitting
+ * `workspace` entirely still throws below: only the explicit empty string
+ * means "this is a root session", never a missing argument.
  */
 export function mintSessionPath({ org, workspace, name, sessions, ghosts, now = new Date() } = {}) {
   const orgSegment = String(org ?? '').trim()
   const ws = String(workspace ?? '').split('/').filter(Boolean).join('/')
   if (orgSegment === '') throw new TypeError('mintSessionPath: the org folder name is required')
-  if (ws === '') throw new TypeError('mintSessionPath: the workspace key is required')
+  if (ws === '' && workspace !== '') throw new TypeError('mintSessionPath: the workspace key is required')
   const word = slugSegment(name) || slugSegment(workspacePrefix(ws)) || 'session'
   const stamp =
     String(now.getFullYear() % 100).padStart(2, '0') +
     String(now.getMonth() + 1).padStart(2, '0') +
     String(now.getDate()).padStart(2, '0')
-  const dir = `${orgSegment}/${ws}`
+  const dir = ws === '' ? orgSegment : `${orgSegment}/${ws}`
   const base = `${dir}/${word}-wt-${stamp}`
   const counter = new RegExp('^' + reEscape(dir) + '/[A-Za-z0-9._-]+-wt-' + stamp + '-(\\d+)$')
   const taken = new Set()
@@ -429,8 +435,11 @@ export function openSession(repoPath, { id, orgPath = repoPath, name, project, w
   if (project !== undefined && project !== null && (typeof project !== 'string' || project === '')) {
     throw new TypeError(`session project must be a slug string, null, or undefined; got ${JSON.stringify(project)}`)
   }
-  if (workspace !== undefined && workspace !== null && (typeof workspace !== 'string' || workspace === '')) {
-    throw new TypeError(`session workspace must be a non-empty path string, null, or undefined; got ${JSON.stringify(workspace)}`)
+  // '' is allowed: it is the Freestyle root session's workspace (F5) — the
+  // session sits directly under the org/root, not under a dock row. Every
+  // other non-string is still refused.
+  if (workspace !== undefined && workspace !== null && typeof workspace !== 'string') {
+    throw new TypeError(`session workspace must be a path string, the empty string (root session), null, or undefined; got ${JSON.stringify(workspace)}`)
   }
   ensureGit(env)
   // Q8 (2026-09-03): the library never invents an identity. Minting needs the

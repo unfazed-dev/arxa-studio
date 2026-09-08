@@ -28,6 +28,7 @@ export {
   RoutingRefusedError,
   routeDock,
   resolveSessionRepo,
+  resolveFreestyleRepo,
   projectRepos,
 } from './routing.js'
 export { runGit, runGitAsync, STAGE_IDENTITY, WIP_IDENTITY } from './run.js'
