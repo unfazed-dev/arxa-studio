@@ -3,7 +3,7 @@
 // generic day-zero frame (F8, docs/plans/freestyle-section.md).
 import fs from 'node:fs'; import path from 'node:path'; import { randomUUID } from 'node:crypto'
 import { registryPath, manifestPath } from './paths.js'
-import { initPlainRepo, pushRepo, setOrigin } from '../../git-workspace/lib/repos.js'
+import { initPlainRepo, pushRepoAsync, setOrigin } from '../../git-workspace/lib/repos.js'
 import { protectionPayload, settingsPayload, writeFrameFiles } from '../../git-workspace/lib/frame.js'
 import { wipCommit } from '../../git-workspace/lib/commits.js'
 
@@ -155,7 +155,7 @@ export async function publishRoot(root, opts = {}) {
       ? 'https://' + encodeURIComponent(credentials.login) + ':' + encodeURIComponent(credentials.token)
         + '@' + repo.repoUrl.slice('https://'.length)
       : repo.repoUrl
-    pushRepo(root.path, pushUrl, env)
+    await pushRepoAsync(root.path, pushUrl, env)
 
     writeManifest(root, {
       localOnly: false,
