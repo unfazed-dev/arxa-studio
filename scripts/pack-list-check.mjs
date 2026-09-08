@@ -8,7 +8,7 @@
 //      but the pack list misses is RED here instead of a sidecar that dies on
 //      ERR_MODULE_NOT_FOUND after a two-minute build and an app install.
 import { strict as assert } from 'node:assert'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -131,6 +131,28 @@ ok('hostTriple covers both supported platforms and refuses the rest')
     `runtime code references dev-only packages: ${refs.map((r) => `${r.pkg} ← ${r.file}`).join(', ')}\n` +
     '  → move it into "dependencies", or the packed sidecar dies on ERR_MODULE_NOT_FOUND.')
   ok(`live: ${drop.length} dev-only trees are excluded from the payload and nothing loads them`)
+}
+
+// A requested stop must not be reported as a failure (2026-09-08,
+// docs/plans/engine-stop-reports-a-crash.md). Both layers below systemd — the
+// bun wrapper this script generates, and the launcher it runs — used to map
+// "child died from a signal" to exit 1. Since the shell restarts the engine
+// unit on every app open, that marked the unit `failed` on every launch and
+// read to the user as a crash. Pinned in BOTH files: the shape is easy to
+// reintroduce by simplifying the exit handler back to a one-liner.
+{
+  const wrapper = readFileSync(join(root, 'scripts', 'pack-sidecar.mjs'), 'utf8')
+  assert.ok(wrapper.includes('if (stopping) process.exit(0);'),
+    'pack-sidecar: the generated wrapper must report a forwarded stop as exit 0')
+  assert.ok(!/child\.on\("exit", \(code, signal\) => process\.exit\(signal \? 1 : code \?\? 1\)\);/.test(wrapper),
+    'pack-sidecar: the old signal->exit(1) one-liner is back; systemd will call every stop a failure')
+
+  const launcher = readFileSync(join(root, 'bin', 'arxa-studio.mjs'), 'utf8')
+  assert.ok(/for \(const sig of \['SIGTERM', 'SIGINT', 'SIGHUP'\]\)/.test(launcher),
+    'arxa-studio.mjs: the launcher must forward a stop to the engine (KillMode=mixed signals only the main pid)')
+  assert.ok(launcher.includes('if (stopping) process.exit(0)'),
+    'arxa-studio.mjs: a stop we asked for must exit 0')
+  ok('stop path: both layers forward the signal and report a requested stop as success')
 }
 
 console.log(`pack-list-check: ${n} ok`)

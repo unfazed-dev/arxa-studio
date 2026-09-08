@@ -231,8 +231,22 @@ const child = spawn(
   [join(engineDir, ${JSON.stringify(launcherRel)}), ...process.argv.slice(2)],
   { stdio: "inherit" },
 );
-for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => child.kill(sig));
-child.on("exit", (code, signal) => process.exit(signal ? 1 : code ?? 1));
+// This process is the systemd main process for arxa-engine.service, and the
+// shell restarts that unit on every app open. Forwarding the stop was already
+// right; reporting it was not. A child killed by the signal WE just forwarded
+// is a clean shutdown, but "signal ? 1" turned every ordinary stop into
+// \`Main process exited, status=1/FAILURE\` and left the unit in \`failed\` state
+// — 466 times against 23 clean stops on the Omarchy box (2026-09-08), read by
+// the user as a crash on every launch. Nothing had crashed.
+// See docs/plans/engine-stop-reports-a-crash.md.
+let stopping = false;
+for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+  process.on(sig, () => { stopping = true; child.kill(sig); });
+}
+child.on("exit", (code, signal) => {
+  if (stopping) process.exit(0);
+  process.exit(signal ? 1 : code ?? 1);
+});
 `
   writeFileSync(join(work, 'entry.ts'), entry)
 

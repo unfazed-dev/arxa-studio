@@ -617,4 +617,32 @@ if (packed) {
   relay(child.stdout)
   relay(child.stderr)
 }
-child.on('exit', (code, signal) => process.exit(signal ? 1 : code ?? 1))
+// SHUTDOWN (2026-09-08, docs/plans/engine-stop-reports-a-crash.md).
+// The shell restarts this service on every app open (it hands the engine a new
+// session token), so systemd sends SIGTERM here constantly. With no handler at
+// all, an ordinary stop was reported as `Main process exited, status=1/FAILURE`
+// and the unit landed in `failed` state — 466 times on the Omarchy box against
+// 23 clean stops. Nothing had actually crashed; a normal stop was wearing a
+// crash's clothes, and `Restart=always` hid it by starting a fresh engine.
+//
+// The unit uses KillMode=mixed, which signals ONLY this pid, so the engine
+// below never saw the stop either: systemd SIGKILLed it seconds later, every
+// time, with its registries and worktrees mid-flight. Forward the signal so it
+// gets to shut down properly, and report a requested stop as the success it is.
+let stopping = false
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
+  process.on(sig, () => {
+    if (stopping) return
+    stopping = true
+    try { child.kill(sig) } catch { /* already gone — the exit handler follows */ }
+    // Backstop well inside the unit's TimeoutStopSec=20: an engine that will
+    // not leave still loses, but on our terms and with the exit code right.
+    setTimeout(() => { try { child.kill('SIGKILL') } catch {} ; process.exit(0) }, 8000).unref()
+  })
+}
+child.on('exit', (code, signal) => {
+  // A child that stopped because we asked it to is a clean shutdown. Mapping
+  // that to 1 is what marked the unit failed on every single stop.
+  if (stopping) process.exit(0)
+  process.exit(signal ? 1 : code ?? 1)
+})
