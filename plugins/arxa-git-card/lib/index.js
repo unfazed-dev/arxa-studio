@@ -55,6 +55,20 @@ async function importPrflow() {
   return prflowCache
 }
 
+/** manifest-seat.js is not re-exported by the git-workspace barrel either
+  * (same reasoning as D116 above): reachable bare only through its own
+  * "./lib/manifest-seat.js" exports entry. */
+let manifestSeatCache = null
+async function importManifestSeat() {
+  if (manifestSeatCache) return manifestSeatCache
+  try {
+    manifestSeatCache = await import('git-workspace/lib/manifest-seat.js')
+  } catch {
+    manifestSeatCache = await import(new URL('../../git-workspace/lib/manifest-seat.js', import.meta.url).href)
+  }
+  return manifestSeatCache
+}
+
 /* ---------------------------------------------------------------------------
  * The review surface (docs/plans/github-conversations-in-the-insight-panel.md)
  * ------------------------------------------------------------------------- */
@@ -415,15 +429,21 @@ export function apply(ctx) {
            * the lookup was wrong.
            */
           const repoFor = async (s) => {
-            const fsm = await import('node:fs')
+            const { seatManifest } = await importManifestSeat()
             const isProject = s?.origin === 'project' && typeof s?.repoPath === 'string'
-            const file = isProject ? s.repoPath + '/project.json' : handle().path + '/org.json'
-            let m = {}
-            try { m = JSON.parse(fsm.readFileSync(file, 'utf8')) } catch { /* unreadable — fails just below */ }
+            // No org fallback for a project seat (team-lead ruling,
+            // freestyle-section Task 7): today's code never fell back to
+            // org.json for a project seat's own manifest, and a broken
+            // project.json must keep throwing project-not-published, not
+            // silently resolve to the OPEN ORG's repo.
+            const seat = isProject ? seatManifest(s.repoPath) : seatManifest(handle().path)
+            const m = seat.manifest ?? {}
             if (!m.repoOwner || !m.repoName) {
-              throw new Error(isProject
-                ? 'project-not-published: this project has no GitHub repo yet'
-                : 'org-not-published')
+              throw new Error(seat.kind === 'freestyle'
+                ? 'freestyle-not-published: this folder has no GitHub repo yet'
+                : isProject
+                  ? 'project-not-published: this project has no GitHub repo yet'
+                  : 'org-not-published')
             }
             return m
           }
@@ -565,8 +585,9 @@ export function apply(ctx) {
                   integrating: gw.isIntegrating(repoPath),
                 }
               }
-              let manifest = {}
-              try { manifest = JSON.parse((await import('node:fs')).readFileSync(cur.path + '/org.json', 'utf8')) } catch { /* unreadable — plain status */ }
+              const { seatManifest: resolveSeatManifest } = await importManifestSeat()
+              const openSeat = resolveSeatManifest(cur.path)
+              const manifest = openSeat.manifest ?? {}
               /* D98/D99: an org and a project each own a repo, and a project
                * seat's link state lives in its OWN project.json — the same
                * selection repoFor() makes for the actions. card.status read
@@ -581,15 +602,21 @@ export function apply(ctx) {
                * badge for the ordinary local-only project, which has neither
                * field set. Inherit only when the project is genuinely
                * unlinked — a published project is not local-only whatever its
-               * org says. */
+               * org says.
+               * Task 7 (freestyle-section): the seat's manifest is now
+               * resolved generically (freestyle.json / project.json /
+               * org.json), so a Freestyle root reports kind:'freestyle'
+               * here the same way an org reports 'org'. A project seat's
+               * own manifest is resolved with NO org fallback (team-lead
+               * ruling): today's code never fell back to org.json for a
+               * project seat on a missing/malformed project.json, and that
+               * must not change — a broken project manifest keeps reading
+               * unlinked, not silently inheriting the org's link state. */
               const seatIsProject = sessionRow?.origin === 'project' && typeof sessionRow.repoPath === 'string'
               const seatRepoPath = seatIsProject ? sessionRow.repoPath : cur.path
-              const seatKind = seatIsProject ? 'project' : 'org'
-              let seatManifest = manifest
-              if (seatIsProject) {
-                seatManifest = {}
-                try { seatManifest = JSON.parse((await import('node:fs')).readFileSync(sessionRow.repoPath + '/project.json', 'utf8')) } catch { /* unreadable — unlinked, and it inherits below */ }
-              }
+              const seat = seatIsProject ? resolveSeatManifest(seatRepoPath) : openSeat
+              const seatManifest = seat.manifest ?? {}
+              const seatKind = seat.kind ?? (seatIsProject ? 'project' : 'org')
               const seatLinked = Boolean(seatManifest.repoUrl)
               const seatLocalOnly = seatManifest.localOnly === true || (!seatLinked && manifest.localOnly === true)
               const g = await getGithub().catch(() => null)
@@ -620,6 +647,10 @@ export function apply(ctx) {
                 chip: health === 'ok' ? gw.versionChip(repoPath) : null,
                 linked: seatLinked,
                 localOnly: seatLocalOnly,
+                // Task 7 (freestyle-section): the resolved seat kind —
+                // 'freestyle' | 'project' | 'org' — same value fed into
+                // gw.frameStatus() just below.
+                kind: seatKind,
                 // `files` is the per-file state of the GENERATED frame. openOrg
                 // upgrades a stale file on its own, but one a human edited comes
                 // back `modified` and is deliberately left alone — without this

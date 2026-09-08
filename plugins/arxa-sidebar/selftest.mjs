@@ -368,7 +368,7 @@ check('S1/Q2: the mint reads the CROSS-REGISTRY aggregate — the id becomes the
   check('S3/Q8: the PR handlers resolve the repo from the session, not from org.json',
     card.includes('const repoFor = async (s) =>')
       && card.includes("s?.origin === 'project' && typeof s?.repoPath === 'string'")
-      && card.includes("s.repoPath + '/project.json'")
+      && card.includes('seatManifest(s.repoPath)')
       && !card.includes('project-session-pr-pending: PR flow'))
   // The clear commit is made AFTER the ahead/behind read, so nothing upstream
   // pushes it — leaving it would swap a stale error for a repo permanently 1
