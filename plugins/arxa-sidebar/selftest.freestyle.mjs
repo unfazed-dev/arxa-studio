@@ -15,6 +15,8 @@ assert.match(client, /function SidebarTabs\(\{ wide, active, onChange \}\)/, 'ta
 assert.match(client, /function FreestyleBrowser\(\{ wide, expandSidebar \}\)/, 'Freestyle shell is generated')
 assert.equal((client.match(/ctx\.slots\.register\(\{\s*name: "sidebar\.workspaces"/g) || []).length, 1, 'stock sidebar.workspaces registration stays singular')
 assert.match(client, /fetch\("\/__arxa\/freestyle\/action", \{[\s\S]*?action: "session\.new", arg: \{ rootId: sel\.rootId, relDir: sel\.relDir \}/, 'shell CTA posts the selected Freestyle folder')
+assert.match(client, /if \(typeof w\.refreshFreestyle === "function"\) w\.refreshFreestyle\(\)/, 'successful CTA creation refreshes the shared Freestyle store')
+assert.match(client, /b && b\.result && b\.result\.reason/, 'CTA failures preserve a structured result reason')
 assert.match(client, /fetch\("\/__arxa\/sidebar\/pick-folder", \{ method: "POST", headers: \{ "content-type": "application\/json" \}, body: JSON\.stringify\(\{ title \}\) \}\)/, 'add menu uses the existing native picker contract')
 for (const key of ['freestyle.tab.org', 'freestyle.tab.freestyle', 'freestyle.empty', 'freestyle.add.open', 'freestyle.add.new', 'freestyle.cta.pick', 'welcome.freestyle']) {
   assert.equal(client.split(`"${key}":`).length - 1, 3, `${key} is translated in en/pl/fr`)
@@ -32,14 +34,19 @@ assert.equal(typeof spliceFreestyleBrowser, 'function', 'generator exposes its g
 assert.throws(() => spliceFreestyleBrowser('anchor deliberately absent'), /OrgBrowser render anchor missing/, 'missing tab anchor fails loudly')
 
 const snippet = readFileSync(snippetPath, 'utf8')
+assert.doesNotMatch(snippet, /void freestyleStore\.refresh\(\)/, 'Freestyle boot I/O is not started at module scope')
+assert.match(client, /ctx\.effect\(\(\) => \{\s*const controller = new AbortController\(\);\s*void freestyleStore\.refresh\(\{ signal: controller\.signal \}\);\s*return \(\) => controller\.abort\(\)/, 'Freestyle boot refresh belongs to a disposable plugin effect')
 const requests = []
 let activeTab = 'org'
+let deferredState = null
 const fetch = async (url, options = {}) => {
   requests.push({ url, options })
+  if (url === '/__arxa/freestyle/state' && deferredState) return new Promise((resolve) => deferredState.push(resolve))
   if (url === '/__arxa/freestyle/state') return { json: async () => ({ roots: [{ id: 'root-1', hasHead: true }], trash: [], ui: { activeTab } }) }
   const body = JSON.parse(options.body)
   if (body.action === 'ui.tab') activeTab = body.arg.tab
   if (body.action === 'fail') return { json: async () => ({ ok: false, error: 'visible failure' }) }
+  if (body.action === 'refuse') return { json: async () => ({ ok: false, reason: 'raw refusal reason' }) }
   return { json: async () => ({ ok: true }) }
 }
 const context = { fetch, Set, JSON, Error }
@@ -62,6 +69,21 @@ assert.equal(requests.at(-1).url, '/__arxa/freestyle/state', 'every mutation ref
 
 await assert.rejects(store.mutate('fail', {}), /visible failure/, 'failed mutations surface the host error after refresh')
 assert.equal(requests.at(-1).url, '/__arxa/freestyle/state', 'failed mutations also refresh state')
+await assert.rejects(store.mutate('refuse', {}), /raw refusal reason/, 'failed mutations preserve the host result reason')
+assert.equal(requests.at(-1).url, '/__arxa/freestyle/state', 'reason-bearing failures also refresh state')
+
+deferredState = []
+const orderedStore = context.createFreestyleStore()
+const older = orderedStore.refresh()
+const newer = orderedStore.refresh()
+assert.equal(deferredState.length, 2, 'parallel refreshes reached the host')
+deferredState[1]({ json: async () => ({ roots: [{ id: 'newer' }], trash: [], ui: { activeTab: 'freestyle' } }) })
+await newer
+deferredState[0]({ json: async () => ({ roots: [{ id: 'older' }], trash: [], ui: { activeTab: 'org' } }) })
+await older
+assert.equal(orderedStore.get().roots[0].id, 'newer', 'a stale response cannot overwrite a newer refresh')
+deferredState = null
+
 dispose()
 const beforeDisposedSelect = emissions
 store.select('root-1', '')

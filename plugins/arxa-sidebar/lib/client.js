@@ -371,7 +371,8 @@ window.__ModuleLoader__.load({
 							headers: { "content-type": "application/json" },
 							body: JSON.stringify({ action: "session.new", arg: { rootId: sel.rootId, relDir: sel.relDir } })
 						}).then((r) => r.json()).then((b) => {
-							if (!b || !b.ok) notice(String((b && b.error) || "unknown"));
+							if (!b || !b.ok) { notice(String((b && b.result && b.result.reason) || (b && b.reason) || (b && b.error) || "unknown")); return; }
+							if (typeof w.refreshFreestyle === "function") w.refreshFreestyle();
 						}).catch((e) => notice(String((e && e.message) || e)));
 						return;
 					}
@@ -3446,6 +3447,9 @@ window.__ModuleLoader__.load({
 			selectedWorkspace() {
 				if (freestyleStore.get().ui.activeTab === "freestyle") return freestyleSelectedWorkspace();
 				return orgStore.get().selectedRowId ?? null;
+			},
+			refreshFreestyle() {
+				return freestyleStore.refresh();
 			},
 			/** CTA bridge (2026-09-01): the shell New Session button reads these
 			* at RENDER — single source of truth. The first cut (D70/D71) gated
@@ -6581,16 +6585,19 @@ window.__ModuleLoader__.load({
 		//#region arxa freestyle (F2) — __ARXA_FREESTYLE_REGION__
 		function createFreestyleStore() {
 			let state = { roots: [], trash: [], ui: { activeTab: "org" }, sel: null, tick: 0 };
+			let refreshSerial = 0;
 			const subs = new Set();
 			const emit = () => {
 				state = { ...state, tick: state.tick + 1 };
 				subs.forEach((f) => f());
 				if (typeof window !== "undefined") window.dispatchEvent(new Event("arxa-sidebar-state"));
 			};
-			async function refresh() {
+			async function refresh({ signal } = {}) {
+				const serial = ++refreshSerial;
 				try {
-					const r = await fetch("/__arxa/freestyle/state");
+					const r = await fetch("/__arxa/freestyle/state", signal ? { signal } : void 0);
 					const j = await r.json();
+					if (signal?.aborted || serial !== refreshSerial) return;
 					state = { ...state, roots: j.roots || [], trash: j.trash || [], ui: j.ui || state.ui };
 					emit();
 				} catch { /* keep the last usable state */ }
@@ -6606,7 +6613,7 @@ window.__ModuleLoader__.load({
 				}
 				await refresh();
 				if (failure) throw failure;
-				if (!result.ok) throw new Error(result.error || action + " failed");
+				if (!result.ok) throw new Error(result.reason || result.error || action + " failed");
 				return result;
 			}
 			return {
@@ -6620,7 +6627,6 @@ window.__ModuleLoader__.load({
 			};
 		}
 		const freestyleStore = createFreestyleStore();
-		void freestyleStore.refresh();
 		function useFreestyle() {
 			const [, force] = (0, react.useReducer)((x) => x + 1, 0);
 			(0, react.useEffect)(() => freestyleStore.subscribe(force), []);
@@ -6653,14 +6659,18 @@ window.__ModuleLoader__.load({
 			});
 			return (0, react_jsx_runtime.jsxs)("div", { role: "tablist", className: "aXa_fs_tabs" + (wide ? "" : " aXa_fs_tabsRail"), children: [
 				tab("org", t("freestyle.tab.org"), _deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16),
-				tab("freestyle", t("freestyle.tab.freestyle"), _deepseek_ai_dsh_client_ui_primitives.IconBrowseOutline16)
+				tab("freestyle", t("freestyle.tab.freestyle"), _deepseek_ai_dsh_client_ui_primitives.IconFolderClose16)
 			] });
 		}
 		function FreestyleBrowser({ wide, expandSidebar }) {
 			const t = orgT;
 			const st = useFreestyle();
 			const [menuOpen, setMenuOpen] = (0, react.useState)(false);
-			(0, react.useEffect)(() => { void freestyleStore.refresh(); }, []);
+			(0, react.useEffect)(() => {
+				const controller = new AbortController();
+				void freestyleStore.refresh({ signal: controller.signal });
+				return () => controller.abort();
+			}, []);
 			const pickFolder = async (title) => {
 				const r = await fetch("/__arxa/sidebar/pick-folder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }) });
 				const j = await r.json().catch(() => ({ ok: false, error: "bad json" }));
@@ -6749,6 +6759,11 @@ window.__ModuleLoader__.load({
 			// — the lookup chain falls back per-key to en (enOver merged), so a
 			// missing translation shows English, never a raw key.
 			ctx.effect(() => ctx.locale.register(NS, { zh, en: { ...en, ...enOver }, pl: plOver, fr: frOver }), "arxa-sidebar-workspace: dictionaries");
+			ctx.effect(() => {
+				const controller = new AbortController();
+				void freestyleStore.refresh({ signal: controller.signal });
+				return () => controller.abort();
+			}, "arxa-sidebar-workspace: Freestyle boot state");
 			orgHostInfo = {
 				// dsh 0.1.2-rc.1: connection.hostDescription is gone — the host-info
 				// face is now the remote $host snapshot, re-read on connection/reset
