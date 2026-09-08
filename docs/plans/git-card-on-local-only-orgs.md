@@ -89,24 +89,69 @@ cleared:
   the contract that actually holds — a refusal is *named* and *inert* — rather
   than inventing a uniform convention the codebase does not have.
 
-## Still open (noted, deliberately not fixed)
+## Follow-up pass — all four fixed (2026-09-08, "fix all")
 
-- `integrateMain` returns `reason: url ? 'current' : 'no-origin'` when
-  `behind === 0` (`git-workspace/lib/integrate.js:171`). For a local-only repo
-  the truth is `current` — "you are up to date" is computed entirely locally
-  by `git rev-list --count HEAD..main` and needs no remote. `no-origin` is
-  reported instead. **Not user-reachable**: the Integrate button only renders
-  when `behind > 0`, so nobody can click into this branch. Left alone rather
-  than fixed speculatively; it wants a pass over what `no-origin` is supposed
-  to signal across all its callers.
-- `card.status`'s `frame` and `main.checks` still read `cur.path` and the ORG
-  manifest for a project seat, so a project's frame state and main-branch
-  checks are the org's. Same class as the bug above; out of scope for a fix
-  aimed at the reported symptom, and it needs the D98/D99 model applied to
-  `mainChecksFor` and `frameStatus` together.
-- `card.ci.rerun` / `card.ci.cancel` answer `runId-required` on a local-only
-  org — technically true, useless as a message. Hidden from the UI, so
-  cosmetic.
+**FIXED — `integrateMain` reported `no-origin` for a certain answer.** At
+`behind === 0` it returned `reason: url ? 'current' : 'no-origin'`. `behind`
+is measured locally (`git rev-list --count HEAD..main`), so "nothing to
+integrate" is knowable with no remote at all — a local-only repo is genuinely
+`current`. `fetched` already carries the "we never synced" half, so `reason`
+did not need to be overloaded. Checked every caller first: nothing branches on
+it, and `selftest.integrate.mjs:206` was asserting
+`'no-origin' || 'current'` — loose enough to never notice. That assertion is
+now exact.
+
+**FIXED — `card.status` described the org's frame and checks for a project
+seat.** `mainChecksFor(cur.path, manifest, …)` and
+`frameStatus(cur.path, 'org', …)` now take the seat's own repo and kind.
+`frameStatus` has accepted a `'project'` kind all along (proven by
+`git-workspace/selftest.mjs:715`) — this call simply never passed it, so the
+D98/D99 concern that made this look like a bigger change did not materialise.
+
+**FIXED — `card.ci.rerun` / `card.ci.cancel` answered `runId-required`.** True
+and useless: it blamed the caller for omitting something that cannot exist on
+an unpublished repo. The runId check now happens AFTER the repo is resolved,
+so an unlinked seat gets `project-not-published` / `org-not-published` — the
+strings `repoFor` already uses, not a new vocabulary.
+
+**FIXED — the per-row `+` was a silent no-op on a bare stage.** Every tree row
+carries its own `+` inside the STOCK dsh bundle, and it kept calling
+`onCreate()` for a workspace the server refuses. `projectRowRefused`'s own
+comment already stated the intent — "a dead button is worse than none (D4)" —
+but the gate had only reached the dock CTA. Fixed where `client.js` is
+actually made: a new `ARXA_WS_NEW_REFUSED` hook in the region snippet
+(returning the reason string, so the stock scope needs no locale of its own)
+plus a one-line anchor replace in `gen-workspace.mjs`, then regenerated. The
+anchor is a single line and guarded for uniqueness — a multi-line anchor
+depended on the stock file's exact indentation and the guard caught it.
+
+Verified on the REBUILT app (payload `ce0d840a05d4`) — the lens assertion
+flipped and the whole live smoke is now green:
+
+```
+PASS  the + on a bare stage row is disabled, not a silent no-op
+ALL GREEN
+```
+
+## Correction: the surviving engine is NOT an orphan
+
+Recorded because it was reported as a bug in this session and it is not one.
+Quitting Arxa Studio leaves `arxa-studio --no-open` running with `PPID 1`, and
+a fresh one appears seconds after it is killed. That is **deliberate**:
+`lib.rs` decision 2 (2026-09-07) has the engine OUTLIVE the shell, supervised
+on macOS by a launchd agent (`engine_agent`, label
+`solutions.arxadigital.arxa.engine`), so the next launch is page-only (~1s
+instead of ~2.7s). `launchctl list` names the running process directly:
+
+```
+33520   0   solutions.arxadigital.arxa.engine
+```
+
+`PPID 1` is launchd owning it, not an orphan. The module doc is explicit —
+"We never kill a server we didn't start" — and `kill_spawned` says in its own
+comment that it is "not called on exit any more". Killing that process by pid
+(done three times in this session) only makes launchd restart it. No fix was
+applied and none is wanted.
 
 ## Test
 
