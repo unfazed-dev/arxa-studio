@@ -599,3 +599,57 @@ lister repeated all ten of POUTRE's folders. Projects now hide what is already
 a row, like every other kind (dc12da2). Fixed in
 `lib/workspace-region.snippet.txt` — `client.js` is generated; the drift gate
 catches editing it directly.
+
+## 2026-09-08 — building on the Omarchy box itself (Arch), and what it takes
+
+First native build on the target machine, done to replace hot patches with a
+real binary. Result: `Arxa Studio_0.1.1_amd64.AppImage` (355 MB) and a `.deb`
+(264 MB), installed via `scripts/install.sh` with `ARXA_STUDIO_APPIMAGE`.
+
+**Sibling repos the build needs.** `arxa-studio` alone is not enough, and each
+missing one fails at a different step, minutes apart:
+
+| path | needed by |
+|---|---|
+| `arxa/arxa` | `pack-cli.mjs` (`dart compile exe bin/arxa.dart`) |
+| `arxa/harness/{pi/arxa-gate.ts,dsh-external-gate,verdict.sh}` | `pack-sidecar.mjs` — the preset references them |
+| `arxa/mobile/src-tauri` | `arxa-desktop`'s Cargo path dep `arxa-mobile` |
+| `arxa/desktop` | the shell itself |
+
+`arxa/mobile/src-tauri` is 771 MB, but 770 MB of that is `gen/` (generated
+Android/iOS projects). Rust needs only the 1.3 MB crate — exclude `gen`.
+
+**Toolchain.** node, npm, git, rustup and Dart (under `~/fvm/versions/stable/bin`,
+not on PATH) were already present. Only **bun** was missing; `pack-sidecar`
+requires it with no fallback. It installs user-local to `~/.bun` — worth knowing
+because sudo on that box needs a password, and nothing here needs root.
+
+**linuxdeploy vs a rolling distro — two failures, both Debian assumptions.**
+
+1. `ERROR: Strip call failed … Unable to recognise the format of the input file`.
+   linuxdeploy bundles its own ancient `strip`, which cannot parse Arch's
+   current ELF. Fix: `NO_STRIP=true`.
+2. `[gtk/stderr] cp: cannot stat '/usr/lib/gdk-pixbuf-2.0/2.10.0'`. Arch compiles
+   the pixbuf loaders into the library instead of shipping modules, so that
+   directory does not exist and `linuxdeploy-plugin-gtk` cannot copy it. It
+   takes the path from `pkg-config`, so the fix is a private
+   `gdk-pixbuf-2.0.pc` on `PKG_CONFIG_PATH` pointing `gdk_pixbuf_binarydir` at
+   an empty stub dir — correct rather than a hack, since there is genuinely
+   nothing to bundle.
+
+So the working invocation on Arch is:
+
+```sh
+NO_STRIP=true PKG_CONFIG_PATH=$HOME/build/pc \
+  npx --yes @tauri-apps/cli@^2 build --bundles appimage deb \
+  --config '{"bundle":{"createUpdaterArtifacts":false}}'
+```
+
+The `createUpdaterArtifacts:false` keeps the real signing key out of it; a
+signed release still has to come from `release-linux`.
+
+**Verified after install:** the freshly extracted payload (`7023a41c4597`)
+carries the launcher stop fix, the track binding, the zero-org trash rescue and
+the preset path rebase; `systemctl --user restart arxa-engine` now logs
+`Stopping / Stopped / Started` with `Result=success` — no `status=1/FAILURE`,
+no `SIGKILL`. Both org-trash entries survived the upgrade.
