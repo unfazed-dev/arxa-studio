@@ -280,6 +280,28 @@ export function initOrgRepo(orgPath, env = process.env, { deferSnapshot = false,
 }
 
 /**
+ * Freestyle (F4): make an arbitrary user folder a repo without touching its
+ * contents or writing the org .gitignore (ORG_GITIGNORE is org-only — a
+ * Freestyle root has no projects/account layout to exclude). An existing
+ * repo is adopted as-is: a Freestyle folder may already be a repo the user
+ * brought themselves, and this must never rewrite or reconfigure it —
+ * `.arxa/` exclusion is the one exception, since it is local-only metadata
+ * (info/exclude, never committed) that every arxa-touched repo needs.
+ *
+ * @returns {{ created: boolean }}
+ */
+export function initPlainRepo(dir, env = process.env) {
+  if (isRepo(dir, env)) {
+    try { excludeArxaDir(path.join(dir, '.git')) } catch { /* exclusion is best-effort */ }
+    return { created: false }
+  }
+  initRepo(dir, env)
+  runGit(['add', '-A'], { cwd: dir, env })
+  runGit(['commit', '-q', '--allow-empty', '-m', 'chore: freestyle root adopted by arxa studio'], { cwd: dir, env })
+  return { created: true }
+}
+
+/**
  * Push the repo's PRIMARY branch to `url` (D73 publish half). Session
  * branches (`arxa/**`) are local working state — they never publish;
  * when HEAD sits on one (a session is open), the primary branch resolves
