@@ -120,18 +120,36 @@ export function createFreestyleSessions({ env = process.env, dshBridge }) {
       return FIN.finishSession(repoOfSession(root, id), id, { env, dryRun })
     },
     // Aggregated over reposOf(root), like list/archive/revive/finish — a
-    // session merged inside a nested repo is now swept too, not just ones
-    // in the root's own repo. sweepMerged has no "own sessions only" filter
-    // (unlike ownRows above), so this can also finish a merged session that
-    // belongs to a different org sharing the same nested repo; see
-    // task-5-report.md for why that residual gap wasn't closed here.
+    // session merged inside a nested repo is swept too, not just ones in the
+    // root's own repo. sweepMerged has no ownership concept of its own, so
+    // this never calls it with dryRun:false — that would finish (delete the
+    // branch + worktree of) ANY merged session in a shared nested repo,
+    // including one belonging to a different org. Instead it always probes
+    // read-only first (dryRun:true costs nothing: just `git branch --merged`
+    // / `git branch` plus a registry read, regardless of ownership), filters
+    // the candidates against ownRows — the SAME function `list` uses, not a
+    // second inlined copy of its prefix rule, so the two cannot disagree —
+    // and only then, for a real sweep, finishes the OWNED candidates itself
+    // via FIN.finishSession. A foreign merged session is never reported on
+    // and never touched.
     sweep(root, { dryRun = true } = {}) {
       const finished = [], skipped = []
       for (const repoPath of reposOf(root)) {
-        let result
-        try { result = FIN.sweepMerged(repoPath, { env, dryRun }) } catch { continue }
-        for (const r of result.finished) finished.push({ ...r, repoPath })
-        for (const r of result.skipped) skipped.push({ ...r, repoPath })
+        let candidates
+        try { candidates = FIN.sweepMerged(repoPath, { env, dryRun: true }) } catch { continue }
+        const owned = new Set(ownRows(root, repoPath).map((s) => s.id))
+        for (const r of candidates.skipped) {
+          if (owned.has(r.id)) skipped.push({ ...r, repoPath })
+        }
+        for (const r of candidates.finished) {
+          if (!owned.has(r.id)) continue
+          if (dryRun) { finished.push({ ...r, repoPath }); continue }
+          try {
+            finished.push({ ...FIN.finishSession(repoPath, r.id, { env, dryRun: false }), repoPath })
+          } catch (err) {
+            skipped.push({ id: r.id, branch: r.branch, reason: err.reason || err.message, repoPath })
+          }
+        }
       }
       return { finished, skipped }
     },

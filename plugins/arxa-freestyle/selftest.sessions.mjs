@@ -53,16 +53,34 @@ fs.writeFileSync(path.join(clonePath, 'seed.md'), 'seed')
 git(clonePath, 'add', '-A')
 git(clonePath, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'chore: seed')
 const s3 = await S.newSession(root, 'clone', 'temp')
+// Round 2: plant a merged session from a DIFFERENT org in this SAME nested
+// repo. sweepMerged has no ownership filter of its own — sweep must report
+// on neither array for it, and (the assertion that matters) must not
+// finish it either, even though its branch is just as trivially merged.
+const foreignCloneId = GW.mintSessionPath({
+  org: 'other-org', workspace: '', name: 'planted-in-clone', sessions: GW.listSessions(clonePath, env), ghosts: [],
+})
+const foreignCloneSession = GW.openSession(clonePath, { id: foreignCloneId, orgPath: clonePath, name: 'planted-in-clone', workspace: '', env })
 // A freshly-opened session's branch tip IS main's tip — trivially merged,
 // no extra commits needed to make it a sweep candidate.
 const dry = S.sweep(root, { dryRun: true })
 ok(dry.finished.some((f) => f.id === s3.id && f.repoPath === clonePath), 'sweep(dryRun:true) reports the nested-repo session as mergeable')
+ok(!dry.finished.some((f) => f.id === foreignCloneId) && !dry.skipped.some((f) => f.id === foreignCloneId), "dry-run sweep reports the foreign session in neither array — not this root's business")
 ok(fs.existsSync(s3.worktree), 'dry-run touches nothing: worktree still there')
 // sweep's default (unchanged by this fix) is dryRun:true, so an actual sweep
 // needs dryRun:false explicit, same as finish.js's own sweepMerged.
 const real = S.sweep(root, { dryRun: false })
-ok(real.finished.some((f) => f.id === s3.id && f.repoPath === clonePath), 'sweep(dryRun:false) actually finishes the nested-repo session')
+const s3Result = real.finished.find((f) => f.id === s3.id && f.repoPath === clonePath)
+ok(s3Result?.finished === true, "sweep(dryRun:false) actually finishes the nested-repo session, preserving finishSession's {finished:true,...} shape")
 ok(!fs.existsSync(s3.worktree), 'sweep removed the nested-repo session worktree')
+ok(!real.finished.some((f) => f.id === foreignCloneId) && !real.skipped.some((f) => f.id === foreignCloneId), 'real sweep still reports the foreign session in neither array')
+ok(git(clonePath, 'branch', '--list', foreignCloneSession.branch).length > 0, "the foreign session's branch still exists — verified with git, not the return value")
+// The FIX4 fixture (a different foreign session, planted earlier in
+// foreign/, a separate nested repo) is just as trivially merged — free
+// regression coverage that this fix protects EVERY nested repo, not just
+// clone/. This is the exact session round 1's probe showed flipping to
+// 'archived'; it must still read 'open' after a real sweep.
+ok(GW.listSessions(foreignRepo, env).find((s) => s.id === foreignId)?.state === 'open', "sweep leaves the FIX4 foreign-repo session untouched too — regression pin for the round-1 bug")
 
 // FIX3: a root whose folder name is not a valid git ref segment (spaces,
 // punctuation) must still mint sessions — REF_SEGMENT_RE would otherwise
