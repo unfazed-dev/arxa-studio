@@ -59,12 +59,58 @@ const dropRepo = (name) => {
   } catch { /* already gone, or no delete_repo scope — never mask the real failure */ }
 }
 
+/** The org this run registered in the LIVE app, once it exists.
+ *
+ * Leak #4, found by the lens pass on 2026-09-08: six D90SMOKE orgs were sitting
+ * in the operator's real sidebar, pointing at /tmp. `org.trash` is called on the
+ * happy path (step 5 below) — but S5 had been failing since the routing bug, so
+ * every run since had left one behind, and five of the six were EXPANDED. That
+ * pushed the real org's row out of the rendered tree entirely and cost the lens
+ * pass 7 of its 16 checks before anyone suspected the registry.
+ *
+ * Deleting the /tmp directory is not enough and never was: what pollutes the app
+ * is the REGISTRY ENTRY, which outlives the folder. */
+let bornOrgId = null
+
+/** Trash the org synchronously, for the same reason dropRepo is synchronous:
+ * fail() must stay a hard stop. A child `node -e` keeps the one await-free. */
+const dropOrg = () => {
+  if (!bornOrgId) return
+  try {
+    execFileSync(process.execPath, ['-e', `
+      fetch(${JSON.stringify(BASE)} + '/__arxa/sidebar/action', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'org.trash', arg: { orgId: ${JSON.stringify(bornOrgId)} } }),
+      }).then(() => {}, () => {})
+    `], { stdio: 'ignore', timeout: 15000 })
+    console.log('   deregistered org ' + NAME)
+  } catch { /* app down, or already gone — never mask the real failure */ }
+}
+
 const fail = (msg) => {
   console.error('SMOKE FAIL: ' + msg)
-  dropRepo(NAME)
-  dropRepo('Born-Smoke')
   process.exit(1)
 }
+
+/* The net has to hang off `exit`, not off fail().
+ *
+ * Proven the hard way twice in one session. A fail()-only net catches the
+ * failures the smoke ASSERTS and none of the ones it suffers: on 2026-09-08 a
+ * stray `import()` ran this file, the module threw somewhere past org.create-at,
+ * fail() was never called, and D90SMOKESP6PWK was left registered in the live
+ * app — the exact leak the net had just been written to stop.
+ *
+ * `exit` fires for every path out: fail(), an uncaught throw, and a clean
+ * finish. Handlers must be synchronous there, which is why dropRepo/dropOrg are
+ * execFileSync — an async cleanup here would be registered and never run.
+ * The happy path clears both handles as it consumes them, so this stays a net
+ * and never a second delete. */
+process.on('exit', () => {
+  dropRepo(NAME)
+  dropRepo('Born-Smoke')
+  dropOrg()
+})
 
 const orgOf = async (slug) => {
   const s = await state()
@@ -81,6 +127,11 @@ const manifest1 = JSON.parse(readFileSync('/tmp/arxa-d90-smoke/' + NAME + '/org.
 if (manifest1.localOnly !== true) fail('manifest missing localOnly after local-only create: ' + JSON.stringify(manifest1))
 if (manifest1.repoUrl) fail('local-only create published a repo: ' + manifest1.repoUrl)
 let org = await orgOf(NAME)
+// Arm the cleanup net the moment an id exists. `org.create-at` answers with the
+// registry FACE, not the row, so there is no id in its result to arm from — the
+// first place the id is knowable is here, and a net armed any later is a net the
+// failing run never has.
+bornOrgId = org?.id ?? null
 if (!org || org.connected !== false) fail('state connected must be false after local-only create: ' + JSON.stringify(org))
 console.log('1. local-only create: no repo, connected:false OK')
 
@@ -169,10 +220,25 @@ if (!ns.ok || !ns.result || !ns.result.id) fail('S5: new-session failed: ' + JSO
 const sid = ns.result.id
 const orgRow = await orgOf(org.slug)
 if (!orgRow || !orgRow.path) fail('S5: org row without path')
+// The probe belongs in the SESSION's worktree, not the org's.
+//
+// It used to be written to `<org>/notes/card-smoke.md`. A session is a git
+// worktree on its own branch with its own directory, so a file written into the
+// org checkout is invisible to the session: the watcher had nothing to commit,
+// `card.commit` answered `nothing-to-propose`, and the whole card loop below was
+// asserting against an edit the session never saw. The staleness was masked for
+// a long time because S5 could not reach this line at all (every card call went
+// to the sidebar route and died earlier).
+const sessionRow = (orgRow.sessions || []).find((x) => x.id === sid)
+if (!sessionRow || !sessionRow.worktree) {
+  fail('S5: session row carries no worktree path: ' + JSON.stringify(sessionRow ?? null).slice(0, 200))
+}
 {
   const fs = await import('node:fs')
   const p = await import('node:path')
-  fs.writeFileSync(p.join(orgRow.path, 'notes', 'card-smoke.md'), 'written out of band\n')
+  const dir = p.join(sessionRow.worktree, 'notes')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(p.join(dir, 'card-smoke.md'), 'written out of band\n')
 }
 await new Promise((r) => setTimeout(r, 6000)) // S2 watcher: out-of-band edit -> wip commit
 const st1 = await post('card.status', { sessionId: sid })
@@ -183,7 +249,19 @@ if (badC.ok !== false || !String(badC.error || '').includes('subject-not-convent
 const evd = await post('card.commit.draft', { sessionId: sid })
 if (!evd.ok || !evd.result || !String(evd.result.rule || '').includes('<type>')) fail('S5: draft evidence missing the rule: ' + JSON.stringify(evd).slice(0, 200))
 const cm = await post('card.commit', { sessionId: sid, subject: 'docs(notes): card smoke note added' })
-if (!cm.ok || !cm.result || cm.result.merged !== true) fail('S5: card.commit boundary failed: ' + JSON.stringify(cm).slice(0, 300))
+// A LINKED seat does not land on main locally — it squashes, runs the gate and
+// PUSHES for review (`shape: 'prflow'`, index.js:727), so `merged` is false by
+// design and the merge happens on GitHub in the PR steps below. The assertion
+// here used to demand `merged === true`, which is the LOCAL-ONLY shape: it could
+// only ever have passed against an unlinked org, and this whole section runs
+// against a linked one. It never got the chance to be wrong out loud, because
+// the routing bug killed S5 four calls earlier.
+if (!cm.ok || !cm.result) fail('S5: card.commit boundary failed: ' + JSON.stringify(cm).slice(0, 300))
+if (cm.result.shape !== 'prflow') fail('S5: linked seat did not take the PR flow: shape=' + JSON.stringify(cm.result.shape))
+if (cm.result.squashed !== true || !cm.result.sha) fail('S5: boundary did not squash the WIP run: ' + JSON.stringify(cm.result).slice(0, 250))
+if (cm.result.gate?.green !== true) fail('S5: gate was not green on the boundary: ' + JSON.stringify(cm.result.gate))
+if (cm.result.parked === true) fail('S5: a green gate must not park the session')
+if (cm.result.pushed?.ok !== true) fail('S5: the PR flow did not push the branch: ' + JSON.stringify(cm.result.pushed).slice(0, 200))
 const pu = await post('card.push', { sessionId: sid })
 if (!pu.ok || !pu.result || pu.result.ok !== true) fail('S5: card.push failed: ' + JSON.stringify(pu).slice(0, 300))
 const prArgs = { sessionId: sid, title: 'docs(notes): card smoke note added', problem: 'no smoke note', fix: 'added one via the card', model: 'smoke' }
@@ -231,6 +309,7 @@ console.log('5e. Part B card loop: status/subject-law/commit/push/PR+dedupe/squa
 
 // 6. purge the local-only org — no GitHub requirement, local folder gone.
 const trashed = await post('org.trash', { orgId: org.id })
+if (trashed?.ok) bornOrgId = null // consumed on the happy path; the exit net stays a net
 if (!trashed.ok) fail('trash failed: ' + JSON.stringify(trashed).slice(0, 200))
 const sAfter = await state()
 const entry = (sAfter.orgTrash || []).find((e) => (e.name || '').toUpperCase() === NAME)

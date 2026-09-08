@@ -714,3 +714,45 @@ but selecting it still does not bind the card to its seat. The dock injects the
 conversation exists there is no id to pass — while the sidebar has known the
 answer all along in `state.currentSessionId`. Closing this is the remaining
 half, and it is a wiring decision, not a toast.
+
+### Leak #4 fixed at source, and the net moved
+
+`org-link-smoke` now deregisters its org through `org.trash` on **every** exit
+path, not only the happy one. Two corrections were needed to get there, both
+found by the thing failing in front of me:
+
+- **The net has to hang off `exit`, not `fail()`.** A `fail()`-only net catches
+  the failures the smoke *asserts* and none of the ones it *suffers*. Proven
+  immediately: a stray `import()` — used as a "parse check", which for ESM
+  **executes the module** — ran the smoke, it threw past `org.create-at` without
+  ever reaching `fail()`, and left `D90SMOKESP6PWK` registered in the live app.
+  That is the exact leak the net had just been written to prevent. `exit` covers
+  fail, an uncaught throw and a clean finish; handlers there must be synchronous,
+  which is why the drops are `execFileSync`. (Parse-check ESM with
+  `node --check`, which does not execute.)
+- **Arm it where the id first exists.** `org.create-at` answers with the registry
+  face and no id, so the net armed from its result was never armed at all — the
+  run leaked anyway and reported a clean repo cleanup while doing it. The id is
+  first knowable at `orgOf(NAME)`.
+
+### S5's second staleness — and a third underneath it
+
+**The probe was written into the wrong repository.** `<org>/notes/card-smoke.md`
+is in the org checkout; the session is a worktree on its own branch in its own
+directory. The watcher had nothing to commit and `card.commit` answered
+`nothing-to-propose`. The session row already serves `worktree` — the probe now
+goes there. Fixed: the boundary squashes, the gate goes green, the branch pushes.
+
+**Underneath it, an assertion that could never have passed.** With the probe
+fixed, S5 then failed on `merged !== true`. The code is right and the test was
+wrong: a **linked** seat takes the PR flow (`shape: 'prflow'`,
+`arxa-git-card/lib/index.js:727`) — squash, gate, push, review on GitHub — so
+`merged` is false by design and the merge happens in the PR steps S5 runs next.
+The assertion demanded the **local-only** shape while running against a linked
+org. It could not have passed in any state of the code, and nobody found out
+because the routing bug killed S5 four calls earlier. Replaced with the six
+assertions the PR flow actually owes: shape, squashed, sha, gate green, not
+parked, pushed.
+
+Three defects stacked in one section, each hidden by the one before it. The
+routing bug hid the wrong probe path, which hid the wrong shape assertion.
