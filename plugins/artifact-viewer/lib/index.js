@@ -19,7 +19,7 @@ async function fromDsh(pkg, sub) {
 }
 const { default: z } = await fromDsh('@deepseek-ai/schemastery', 'lib/index.mjs')
 import { createOrgServer } from './org-server.js'
-import { startOrgFollow, readOpenOrg } from './follow.js'
+import { startRootFollow, readOpenOrg, readOpenRoots } from './follow.js'
 import { createWriteApi, createMainVersionRoute, createVersionRoute, resolveWorktree } from './write-api.js'
 import { createWorktreeRoute, createTreeRoute, createSessionChangesRoute, resolveWorktreeFile } from './wt-api.js'
 import { createOrgWatcher, createEventsRoute } from './watcher.js'
@@ -131,10 +131,20 @@ export function createTokenRoutes({ env = process.env, secret, getSettings, getO
         return json(res, 200, { token })
       }
       if (body.scope === 'tree-read') {
-        // D90 directory listing class — bound to the open org only.
-        const open0 = readOpenOrg(env)
-        if (!open0) return json(res, 403, { error: 'no org open' })
-        const token = issueToken({ secret, scope: 'tree-read', orgPath: open0.orgPath, ttlSeconds: ttl })
+        // D90 directory listing class. Task 8 (freestyle-section): body.rootId
+        // binds the token to any currently-open root (org or Freestyle),
+        // resolved fresh against readOpenRoots — omitted rootId still binds to
+        // the open org, so existing callers are unaffected.
+        const roots0 = readOpenRoots(env)
+        let target
+        if (typeof body.rootId === 'string' && body.rootId !== '') {
+          target = roots0.find((r) => r.id === body.rootId)
+          if (!target) return json(res, 403, { error: 'root not open' })
+        } else {
+          target = roots0.find((r) => r.kind === 'org')
+          if (!target) return json(res, 403, { error: 'no org open' })
+        }
+        const token = issueToken({ secret, scope: 'tree-read', orgPath: target.path, ttlSeconds: ttl })
         return json(res, 200, { token })
       }
       // read (default) — orgPath OPTIONAL: the open org is authoritative,
@@ -245,7 +255,9 @@ export function stopFollow() {
 
 function ensureFollow(secret, onServing) {
   if (follow) return follow
-  follow = startOrgFollow({
+  // Task 8 (freestyle-section): one server per open root (org + every open
+  // Freestyle root), not just the org. onServing(roots) gets the whole array.
+  follow = startRootFollow({
     env: process.env,
     onServing,
     createServer: (opts) => createOrgServer({
@@ -285,13 +297,25 @@ export function apply(ctx, config) {
     // the switch would be a process holding a handle on a folder the user
     // believes they closed.
     let lspBridge = null
-    const started = ensureFollow(secret, (orgPath) => {
-      watcher.setRoot(orgPath)
-      if (lspBridge) lspBridge.stopAll('org-switch')
+    // lastOrgPath: onServing(roots) now fires on ANY root's churn (a
+    // Freestyle root opening/closing counts too), but the LSP bridge is
+    // still org-only (D7/G8) — restarting its servers on unrelated
+    // Freestyle-root churn would be a spurious reindex. Gate stopAll on the
+    // org path specifically changing, matching the pre-Task-8 frequency.
+    let lastOrgPath
+    const started = ensureFollow(secret, (roots) => {
+      watcher.setRoots(roots.map((r) => r.path))
+      const orgPath = roots.find((r) => r.kind === 'org')?.path ?? null
+      if (orgPath !== lastOrgPath) {
+        if (lspBridge) lspBridge.stopAll('org-switch')
+        lastOrgPath = orgPath
+      }
     })
     const routes = createTokenRoutes({
       env: process.env, secret, getSettings: currentSettings,
-      getOrigin: () => started.current()?.origin ?? null,
+      // File-serving/LSP stay org-only in this task's scope; find the org's
+      // own served origin out of the multi-root array.
+      getOrigin: () => started.current().find((r) => r.kind === 'org')?.origin ?? null,
     })
     ctx.webServer?.register?.({
       path: '/__arxa/artifacts/token',

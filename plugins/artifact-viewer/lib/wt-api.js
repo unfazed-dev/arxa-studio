@@ -17,7 +17,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { MIME, parseRange } from './org-server.js'
-import { readOpenOrg } from './follow.js'
+import { readOpenOrg, readOpenRoots } from './follow.js'
 import { resolveWorktree } from './write-api.js'
 import { verifyToken } from './tokens.js'
 
@@ -134,24 +134,50 @@ export function createWorktreeRoute({ env = process.env, secret }) {
 }
 
 /**
- * GET /__arxa/artifacts/tree?dir=<rel>&avt=<token>
- * Token class 'tree-read' bound to the open orgPath. One directory per call
- * (the sidebar lazy-loads per expand). D94: only .git/ and .arxa/ are never
- * listed; all other dot-entries are (GitHub-parity visibility).
+ * GET /__arxa/artifacts/tree?dir=<rel>&avt=<token>&root=<id>
+ * Token class 'tree-read'. No `root` -> the open org, exactly as before
+ * (D90). `root=<id>` (Task 8, freestyle-section) lists inside that open
+ * root instead — org or Freestyle, resolved fresh against readOpenRoots on
+ * every request, so a root that has since closed or been forgotten simply
+ * isn't found (independent of whether an old token would otherwise still
+ * verify). One directory per call (the sidebar lazy-loads per expand). D94:
+ * only .git/ and .arxa/ are never listed; all other dot-entries are
+ * (GitHub-parity visibility).
  */
 export function createTreeRoute({ env = process.env, secret }) {
   async function handle(req, res) {
     try {
       if (req.method !== 'GET') return deny(res, 405, 'GET only')
       const dir = q(req, 'dir') || ''
-      const open = readOpenOrg(env)
-      if (!open) return deny(res, 403, 'no org open')
-      const ok = verifyToken(q(req, 'avt'), { secret, scope: 'tree-read', orgPath: open.orgPath })
+      const rootId = q(req, 'root')
+      let targetPath
+      if (rootId) {
+        const found = readOpenRoots(env).find((r) => r.id === rootId)
+        if (!found) return deny(res, 403, 'root not open')
+        targetPath = found.path
+      } else {
+        const open = readOpenOrg(env)
+        if (!open) return deny(res, 403, 'no org open')
+        targetPath = open.orgPath
+      }
+      const ok = verifyToken(q(req, 'avt'), { secret, scope: 'tree-read', orgPath: targetPath })
       if (!ok.ok) return deny(res, 403, 'missing or invalid token (' + (ok.reason || '?') + ')')
       let abs
       try {
-        const rootReal = fs.realpathSync(path.resolve(open.orgPath))
+        const rootReal = fs.realpathSync(path.resolve(targetPath))
         abs = dir === '' ? rootReal : inside(rootReal, dir)
+        // Symlink escape: inside() only checks the syntactic join. A symlink
+        // anywhere under the root (even one legitimately reachable from it)
+        // could otherwise point OUT — into another open root, say — and leak
+        // that root's listing through this one's token. realpath the
+        // resolved target and re-check containment, mirroring
+        // resolveWorktreeFile's double-check above. Same-root symlinks still
+        // resolve and list fine; only an actual escape is refused.
+        const absReal = fs.realpathSync(abs)
+        if (absReal !== rootReal && !absReal.startsWith(rootReal + path.sep)) {
+          return deny(res, 403, 'unresolvable dir')
+        }
+        abs = absReal
         const st = fs.statSync(abs)
         if (!st.isDirectory()) return deny(res, 404, 'not a directory')
       } catch (err) {
