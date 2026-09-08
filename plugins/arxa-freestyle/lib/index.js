@@ -16,6 +16,7 @@ import { dshSessionKey } from '../../git-workspace/lib/sessions.js'
 // primitives behind one package import instead of asking consumers to reach
 // through package-private lib subpaths.
 export { listRoots, createFreestyleSessions }
+export { resolveInside as resolveFreestyleInside } from './paths.js'
 
 export const name = 'arxa-freestyle'
 export const inject = ['webServer', 'sessions', 'workspaceRegistry', 'sessionTitle', 'agents']

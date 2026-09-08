@@ -8,7 +8,8 @@
 // → optimistic mtime check (409 on external change) → atomic write (tmp +
 // rename) → D18 WIP auto-commit via git-workspace's own helper.
 //
-// Writes land in the SESSION WORKTREE only (D80): main is never touched.
+// Org writes land in session worktrees (D80); explicit Freestyle root writes
+// save to that root's main working tree and auto-commit in the nearest repo.
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
@@ -26,6 +27,15 @@ async function gw() {
     gwCache = await import(new URL('../../git-workspace/lib/index.js', import.meta.url).href)
   }
   return gwCache
+}
+
+let freestyleCache = null
+async function freestyle() {
+  if (!freestyleCache) {
+    try { freestyleCache = await import('arxa-freestyle') }
+    catch { freestyleCache = await import(new URL('../../arxa-freestyle/lib/index.js', import.meta.url).href) }
+  }
+  return freestyleCache
 }
 
 const RESERVED = ['.arxa/', '.git/', 'account/']
@@ -165,32 +175,52 @@ export function createVersionRoute({ env = process.env, secret }) {
   }
 }
 
-export function createWriteApi({ env = process.env, secret, getSettings = () => ({}) }) {
+export function createWriteApi({ env = process.env, secret, getSettings = () => ({}), getRoot = () => null }) {
   async function handle(req, res) {
     try {
       if (req.method !== 'POST') return json(res, 405, { error: 'POST only' })
       let body
       try { body = JSON.parse((await readBody(req)) || '{}') } catch { return json(res, 400, { error: 'bad json' }) }
+      if (!body || typeof body !== 'object') return json(res, 400, { error: 'bad json' })
+      const rootWrite = body.rootId !== undefined && !body.worktreeId
+      if (rootWrite && (typeof body.rootId !== 'string' || !body.rootId)) return json(res, 400, { error: 'rootId required' })
+      const root = rootWrite ? await getRoot(body.rootId) : null
+      if (rootWrite && !root) return json(res, 404, { error: 'root not open' })
       const token = String(req.headers['x-arxa-write-token'] || '')
-      const verdict = verifyToken(token, { secret, scope: 'write', worktreeId: body.worktreeId ?? null })
-      if (!verdict.ok) return json(res, 401, { error: 'write token ' + verdict.reason })
+      const verdict = verifyToken(token, { secret, scope: 'write',
+        worktreeId: rootWrite ? 'root:' + body.rootId : body.worktreeId ?? null,
+        orgPath: rootWrite ? root.path : null,
+      })
+      if (!verdict.ok) return json(res, rootWrite ? 403 : 401, { error: 'write token ' + verdict.reason })
       const open = readOpenOrg(env)
-      if (!open) return json(res, 403, { error: 'no org open' })
-      if (typeof body.worktreeId !== 'string' || body.worktreeId === '') return json(res, 400, { error: 'worktreeId required' })
+      if (!rootWrite && (typeof body.worktreeId !== 'string' || body.worktreeId === '')) return json(res, 400, { error: 'worktreeId required' })
       if (typeof body.relPath !== 'string' || body.relPath === '') return json(res, 400, { error: 'relPath required' })
       if (typeof body.content !== 'string') return json(res, 400, { error: 'content required' })
       // D82 server-side twin of the editor cap: the client guard is UX, this
       // one is enforcement — a 40 MB paste never reaches the worktree.
       const cap = Number((getSettings() || {}).maxEditBytes) || 5 * 1024 * 1024
-      if (body.content.length > cap) return json(res, 413, { error: 'content over the ' + cap + ' byte edit cap (D82)' })
-      const found = await resolveWorktree({ env, orgPath: open.orgPath, worktreeId: body.worktreeId })
-      if (!found) return json(res, 404, { error: 'unknown session worktree for this org' })
-      const rel = body.relPath.replace(/^\/+/, '')
-      for (const r of RESERVED) {
-        if (rel === r.replace(/\/$/, '') || rel.startsWith(r)) return json(res, 403, { error: 'reserved path: ' + r })
-      }
+      if (Buffer.byteLength(body.content, 'utf8') > cap) return json(res, 413, { error: 'content over the ' + cap + ' byte edit cap (D82)' })
+      let rel = body.relPath
       let abs
-      try { abs = resolveInside(found.worktreePath, rel) } catch { return json(res, 403, { error: 'outside the worktree' }) }
+      let commitPath
+      if (rootWrite) {
+        const { resolveFreestyleInside } = await freestyle()
+        try { ({ abs, rel } = resolveFreestyleInside(root.path, rel)) }
+        catch { return json(res, 403, { error: 'outside the root or reserved path' }) }
+        // Resolve before writing: a missing/damaged repo must not receive a
+        // file that the promised WIP commit cannot record.
+        const gwMod = await gw()
+        commitPath = gwMod.resolveFreestyleRepo(root.path, path.posix.dirname(rel) === '.' ? '' : path.posix.dirname(rel), { env, requireHead: false }).repoPath
+      } else {
+        const found = await resolveWorktree({ env, orgPath: open?.orgPath ?? null, worktreeId: body.worktreeId })
+        if (!found) return json(res, 404, { error: 'unknown session worktree' })
+        rel = rel.replace(/^\/+/, '')
+        for (const r of RESERVED) {
+          if (rel === r.replace(/\/$/, '') || rel.startsWith(r)) return json(res, 403, { error: 'reserved path: ' + r })
+        }
+        try { abs = resolveInside(found.worktreePath, rel) } catch { return json(res, 403, { error: 'outside the worktree' }) }
+        commitPath = found.worktreePath
+      }
       let before = null
       try { before = fs.statSync(abs) } catch { /* new file */ }
       if (before && Number.isFinite(body.expectedMtimeMs) && Math.abs(before.mtimeMs - body.expectedMtimeMs) > 1) {
@@ -198,13 +228,15 @@ export function createWriteApi({ env = process.env, secret, getSettings = () => 
       }
       fs.mkdirSync(path.dirname(abs), { recursive: true })
       const tmp = abs + '.arxa-write-' + crypto.randomBytes(4).toString('hex')
-      fs.writeFileSync(tmp, body.content)
-      fs.renameSync(tmp, abs)
+      try {
+        fs.writeFileSync(tmp, body.content, before ? { mode: before.mode & 0o777 } : undefined)
+        fs.renameSync(tmp, abs)
+      } finally { try { fs.unlinkSync(tmp) } catch { /* rename consumed it */ } }
       let committed = false
       let warning = null
       try {
         const gwMod = await gw()
-        gwMod.wipCommit(found.worktreePath, { message: 'editor save ' + rel, env })
+        gwMod.wipCommit(commitPath, { message: 'editor save ' + rel, env })
         committed = true
       } catch (err) {
         warning = 'write landed but WIP commit failed: ' + String((err && err.message) || err)
