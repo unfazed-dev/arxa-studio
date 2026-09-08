@@ -965,6 +965,14 @@ check('client: agent verb + reason strings localized in en/pl/fr',
     gen.includes('if (arxaDecoInflight) return arxaDecoInflight;'))
   check('D117: rows subscribe, or a new map would paint nothing',
     gen.includes('ARXA_USE_DECO();') && gen.includes('window.addEventListener(ARXA_DECO_EVENT, on);'))
+  // Presence is not enough: this hook first shipped BELOW `if (!entry) return
+  // null`, so it ran on some renders and not others. React counts hooks per
+  // render — #310, the region unmounted, and the sidebar came up EMPTY. The
+  // string assertion above was green throughout. Position is the property that
+  // matters, so assert the order.
+  check('D117: the subscription runs before any early return (React #310)',
+    gen.indexOf('ARXA_USE_DECO();') < gen.indexOf('if (!entry) return null;')
+    && gen.indexOf('ARXA_USE_DECO();') !== -1 && gen.indexOf('if (!entry) return null;') !== -1)
   check('D117: leaving a session CLEARS the map rather than leaving it stale',
     gen.includes('arxaDeco = { sessionId: null, prefix: "", files: {}, dirs: {}, ok: false };'))
   check('D117: folders decorate from the folded map, files from the file map',

@@ -1977,6 +1977,15 @@
 			const [entry, setEntry] = (0, react.useState)(null);
 			const [openDirs, setOpenDirs] = (0, react.useState)({});
 			const [matIcons, setMatIcons] = (0, react.useState)(null);
+			// Without this the map updates and NOTHING repaints: the rows read
+			// `arxaDeco` at render time, so they need a reason to render again.
+			//
+			// It MUST sit up here with the other hooks. Placed lower — after the
+			// `if (!entry) return null` guard — it runs on some renders and not
+			// others, and React counts hooks per render: #310, the whole region
+			// unmounted, an empty sidebar. The tree looked broken rather than
+			// undecorated, which is a much worse failure than the feature missing.
+			ARXA_USE_DECO();
 			(0, react.useEffect)(() => {
 				let dead = false;
 				void arxaIcons().then((I) => { if (!dead) setMatIcons(I); });
@@ -2017,9 +2026,6 @@
 			// unbounded indent would walk the name column off a narrow sidebar.
 			// Depths 1-9 are untouched, so the measured alignment above stands.
 			const childStyle = (d) => ({ marginLeft: (Math.min(Math.max(0, d - 1), 8) * 14) + "px" });
-			// Without this the map updates and NOTHING repaints: the rows read
-			// `arxaDeco` at render time, so they need a reason to render again.
-			ARXA_USE_DECO();
 			// D-7: a decorated row opens THAT SESSION's copy. Without the id the
 			// viewer resolves the path against the org checkout, so clicking a file
 			// marked "modified" opens the version WITHOUT the modification — the

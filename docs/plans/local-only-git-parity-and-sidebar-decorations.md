@@ -879,3 +879,66 @@ returning an org-relative path→status map, a badge on the leaf rows, and a
 
 Everything done today was verification and test repair. That work found five real
 defects, but none of it is Decisions 3, 6 or 7.
+
+---
+
+## 8. Decisions 6 and 7 — built, 2026-09-09
+
+`plugins/git-workspace/lib/decorations.js` + the `session.decorations` route +
+badges on the tree. Live evidence:
+`designs/evidence/studio-deco-260909/04-session-open.png` — `AGENTS.md` and
+`check.sh` amber with an `M`, the rest of the tree untouched.
+
+### The measurement
+
+Two git calls per refresh, whatever the tree holds. Not per row: that shape is
+O(files) subprocesses on every repaint and gets slower exactly as a project grows
+big enough to need decorations.
+
+`diff --name-status main...HEAD` **unioned with** `status --porcelain`, status
+second so the newest observation wins.
+
+- **Both, or decorations blink.** The D18 auto-commit fires ~1.5s after every
+  Monaco save, so a status-only reading lights up on save and goes dark on the
+  commit — precisely when the file has most definitely changed. It reads as "my
+  edit was undone". The selftest's regression case commits a WIP and asserts the
+  marks survive.
+- **Three dots, not two.** Two dots diffs against main's *tip*, so any commit
+  another session lands on main decorates files this session never touched.
+  Three dots diffs against the fork point. Also a selftest case.
+
+### Four bugs the tests caught before the screen did
+
+1. **`runGit` trims the whole output**, eating the leading space of the *first*
+   porcelain line only, so a fixed `slice(3)` bit a character off one path —
+   `notes/edited.md` → `otes/edited.md`. Three of four cases passed and it read
+   as a fluke. The XY field is restored by testing for the separator space.
+2. **Invented theme tokens.** `status-warning/success/danger/info` do not exist;
+   `var()` falls back silently, so colours look right in the theme they were
+   authored in and drift in the other. The sidebar's conformance check names that
+   family for exactly this reason. Now `state-warn-label`, `brand-primary`,
+   `label-error` — all shipped. There is no green in the vocabulary, so ADDED and
+   RENAMED share the accent and the letter separates them.
+3. **The org-relative / worktree-relative mismatch (D-7).** The viewer already
+   read `detail.sessionId` and already fetched `artifacts/wt?session=…`; the
+   sidebar simply never sent one. But the tree speaks `projects/Tree/notes/a.md`
+   and `resolveWorktreeFile` resolves against the *worktree root*, where the same
+   file is `notes/a.md`. Sending the id without stripping the prefix would 404 —
+   the decoration promising a change and the click opening nothing. The route
+   returns the prefix it applied so the client can undo it.
+4. **React #310 — the whole sidebar went blank.** `ARXA_USE_DECO()` first shipped
+   *below* `if (!entry) return null`, so it ran on some renders and not others.
+   The tree looked broken rather than undecorated, which is far worse than the
+   feature missing. The string assertion was green throughout; the selftest now
+   asserts the hook's **position**, not its presence.
+
+### Known partial
+
+Folder rows in the **lister** decorate (via `foldDirs`). The **tree** rows —
+`Projects`, a project, a stage — do not: they are rendered by a different path
+that never consults the map. `foldDirs` already computes their marks, so this is
+a wiring gap, not a measurement one.
+
+Also inherent, not a bug: the tree lists the **org checkout**, so a file created
+only inside a session has no row to decorate. `M` and `D` on tracked files are
+the cases that show; a brand-new file appears once it reaches main.
