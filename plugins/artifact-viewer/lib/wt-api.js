@@ -31,6 +31,9 @@ function deny(res, status, msg) {
 function q(req, name) {
   try { return new URL(req.url, 'http://x').searchParams.get(name) } catch { return null }
 }
+function hasReservedSegment(relPath) {
+  return String(relPath ?? '').split(/[\\/]+/).some((part) => part === '.git' || part === '.arxa')
+}
 /** Escape-proof relPath inside rootReal; returns abs or throws {code}. */
 function inside(rootReal, relPath) {
   if (typeof relPath !== 'string' || relPath === '') throw Object.assign(new Error('bad path'), { code: 'BAD' })
@@ -149,6 +152,7 @@ export function createTreeRoute({ env = process.env, secret }) {
     try {
       if (req.method !== 'GET') return deny(res, 405, 'GET only')
       const dir = q(req, 'dir') || ''
+      if (hasReservedSegment(dir)) return deny(res, 403, 'reserved internal directory')
       const rootId = q(req, 'root')
       let targetPath
       if (rootId) {
@@ -176,6 +180,9 @@ export function createTreeRoute({ env = process.env, secret }) {
         const absReal = fs.realpathSync(abs)
         if (absReal !== rootReal && !absReal.startsWith(rootReal + path.sep)) {
           return deny(res, 403, 'unresolvable dir')
+        }
+        if (hasReservedSegment(path.relative(rootReal, absReal))) {
+          return deny(res, 403, 'reserved internal directory')
         }
         abs = absReal
         const st = fs.statSync(abs)

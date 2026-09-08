@@ -602,7 +602,8 @@ export async function runCommand (id, ...args) {
 
 /** Attach a language server to the editor over the host's LSP socket.
  *
- *  One client per language for the life of the page. The socket is opened with
+ *  One client per language, re-pointed to the file currently shown by the
+ *  single viewer surface. The socket is opened with
  *  ['arxa-lsp', token] as its subprotocol list — a browser cannot set headers
  *  on a WebSocket, so that is how the host's token travels.
  *
@@ -610,12 +611,22 @@ export async function runCommand (id, ...args) {
  *  language server, and a missing rust-analyzer must not degrade opening a file
  *  into an error. The returned promise resolves to false when no service could
  *  be attached, so the caller can say so if it wants to. */
-const langClients = new Map()
-export async function connectLanguageServer (lang, { url, token, relPath, session = null, selector = null, init = null } = {}) {
-  if (langClients.has(lang)) return true
+const langClients = new Map() // lang -> { client, socket, lang, rootId, uriPath }
+const langConnects = new Map() // serializes a root/file switch per language
+
+async function connectLanguageServerNow (lang, { url, token, relPath, uriPath, session = null, rootId = null, selector = null, init = null } = {}) {
+  if (typeof uriPath !== 'string' || uriPath === '') return false
+  const current = langClients.get(lang)
+  if (current && current.rootId === rootId && current.uriPath === uriPath) return true
+  if (current) {
+    langClients.delete(lang)
+    try { await current.client.stop() } catch {}
+    try { current.socket.close() } catch {}
+  }
   await start()
   const q = new URLSearchParams({ lang, path: relPath ?? '' })
   if (session) q.set('session', session)
+  if (rootId) q.set('rootId', rootId)
   const socket = new WebSocket(url + '?' + q.toString(), ['arxa-lsp', token])
   const opened = await new Promise((resolve) => {
     socket.addEventListener('open', () => resolve(true), { once: true })
@@ -635,7 +646,15 @@ export async function connectLanguageServer (lang, { url, token, relPath, sessio
       // server serves jsonc. A selector of just `lang` would connect a client
       // that then ignores every .js, .scss and .jsonc document it was started
       // for, with no error to show for it.
-      documentSelector: (selector ?? [lang]).map((language) => ({ language })),
+      // VS Code retains every model opened in the editor part for the page's
+      // lifetime. A language-only selector makes a root-A client subscribe to
+      // root-B models too. This viewer shows one file at a time, so bind the
+      // one live client to that exact file and re-point it on navigation.
+      documentSelector: (selector ?? [lang]).map((language) => ({
+        language,
+        scheme: 'file',
+        pattern: monaco.Uri.file(uriPath).path,
+      })),
       // Handshake options the HOST computed — typescript-language-server
       // refuses to start unless it is told where a compiler is, and only the
       // host knows where arxa put one.
@@ -651,22 +670,32 @@ export async function connectLanguageServer (lang, { url, token, relPath, sessio
     },
   })
   socket.addEventListener('close', () => {
-    langClients.delete(lang)
+    if (langClients.get(lang)?.client === client) langClients.delete(lang)
     try { client.stop() } catch {}
   }, { once: true })
-  langClients.set(lang, client)
+  langClients.set(lang, { client, socket, lang, rootId, uriPath })
   try {
     await client.start()
     return true
   } catch {
-    langClients.delete(lang)
+    if (langClients.get(lang)?.client === client) langClients.delete(lang)
+    try { socket.close() } catch {}
     return false
   }
 }
 
+export function connectLanguageServer (lang, options = {}) {
+  const prior = langConnects.get(lang) ?? Promise.resolve()
+  const next = prior.catch(() => false).then(() => connectLanguageServerNow(lang, options))
+  langConnects.set(lang, next)
+  return next.finally(() => {
+    if (langConnects.get(lang) === next) langConnects.delete(lang)
+  })
+}
+
 /** Which languages currently have a live server, for the client to show. */
 export function languageServers () {
-  return [...langClients.keys()]
+  return [...new Set([...langClients.values()].map((entry) => entry.lang))]
 }
 
 export { monaco, MonacoLanguageClient, toSocket, WebSocketMessageReader, WebSocketMessageWriter }

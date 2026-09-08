@@ -15,7 +15,9 @@ void here
 const { readOpenRoots, startRootFollow } = await import('./lib/follow.js')
 const { issueToken } = await import('./lib/tokens.js')
 const { createTreeRoute } = await import('./lib/wt-api.js')
-const { createOrgWatcher } = await import('./lib/watcher.js')
+const { createOrgWatcher, createEventsRoute } = await import('./lib/watcher.js')
+const viewerHost = await import('./lib/index.js')
+const { createTokenRoutes } = viewerHost
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const tmp = (prefix) => fs.mkdtempSync(path.join(os.tmpdir(), prefix))
@@ -50,6 +52,49 @@ writeJSON(path.join(home, 'freestyle.json'), {
   ui: { activeTab: 'org' },
 })
 
+function callToken(route, payload) {
+  return new Promise((resolve, reject) => {
+    const res = {
+      statusCode: 0, body: '',
+      writeHead(status) { this.statusCode = status },
+      end(body) { this.body = body || '' },
+    }
+    const req = {
+      method: 'POST',
+      on(event, fn) {
+        if (event === 'data') queueMicrotask(() => fn(Buffer.from(JSON.stringify(payload))))
+        if (event === 'end') queueMicrotask(fn)
+      },
+    }
+    route.handle(req, res).then(() => resolve(res), reject)
+  })
+}
+
+// ============================================================================
+// LSP file resolution: the selected root is a real filesystem boundary
+// ============================================================================
+{
+  assert.equal(typeof viewerHost.resolveLspFile, 'function', 'the host exposes its LSP root-bound file resolver')
+  const lspRoot = tmp('arxa-roots-lsp-bound-')
+  const outside = tmp('arxa-roots-lsp-outside-')
+  fs.writeFileSync(path.join(lspRoot, 'ok.ts'), 'export const ok = true\n')
+  fs.writeFileSync(path.join(outside, 'secret.ts'), 'export const secret = true\n')
+  fs.mkdirSync(path.join(lspRoot, '.git'))
+  fs.writeFileSync(path.join(lspRoot, '.git', 'config'), '[core]\n')
+  fs.mkdirSync(path.join(lspRoot, '.arxa'))
+  fs.writeFileSync(path.join(lspRoot, '.arxa', 'state.ts'), 'state\n')
+  fs.symlinkSync(path.join(outside, 'secret.ts'), path.join(lspRoot, 'escape.ts'))
+  fs.symlinkSync('.git/config', path.join(lspRoot, 'git-alias.ts'))
+
+  assert.equal(await viewerHost.resolveLspFile(lspRoot, 'ok.ts'), path.join(lspRoot, 'ok.ts'),
+    'an ordinary file resolves inside the selected root')
+  for (const relPath of ['.git/config', '.arxa/state.ts', 'git-alias.ts', 'escape.ts']) {
+    assert.equal(await viewerHost.resolveLspFile(lspRoot, relPath), null,
+      relPath + ' is not an LSP file inside the selected root')
+  }
+  console.log('PASS resolveLspFile: realpath confinement and reserved state hold at the LSP boundary')
+}
+
 // ============================================================================
 // readOpenRoots: org first, then open Freestyle roots, closed ones excluded
 // ============================================================================
@@ -64,6 +109,25 @@ writeJSON(path.join(home, 'freestyle.json'), {
   assert.equal(roots[1].path, rootOpenPath)
   assert.ok(!roots.some((r) => r.path === rootClosedPath), 'closed root never listed')
   console.log('PASS readOpenRoots: org + open freestyle root only, closed root excluded')
+}
+
+// LSP token classes bind to the selected open root. Install authority uses
+// the same root identity even though the installed binary is shared globally.
+{
+  const secret = 'roots-lsp-token-secret'
+  const route = createTokenRoutes({ env, secret, getSettings: () => ({ tokenTtlSeconds: 30 }) })
+  for (const scope of ['lsp', 'lsp-install']) {
+    const response = await callToken(route, { scope, rootId: idOpen })
+    assert.equal(response.statusCode, 200, scope + ' token issued for an open Freestyle root')
+    const token = JSON.parse(response.body).token
+    const payload = JSON.parse(Buffer.from(token.split('.')[0], 'base64url').toString('utf8'))
+    assert.equal(payload.orgPath, rootOpenPath, scope + ' token is bound to the selected root path')
+  }
+  assert.equal((await callToken(route, { scope: 'lsp', rootId: idClosed })).statusCode, 403,
+    'a closed root cannot mint an LSP token')
+  assert.equal((await callToken(route, { scope: 'lsp', rootId: 'unknown' })).statusCode, 403,
+    'an unknown root cannot mint an LSP token')
+  console.log('PASS LSP token routes: Freestyle root ids bind both LSP authority classes')
 }
 
 // missing/malformed freestyle.json degrades to org-only, never throws
@@ -237,7 +301,43 @@ async function callTree(route, url) {
   assert.equal(rSymlink.statusCode, 403, 'symlink inside root A pointing into root B is refused, got ' + rSymlink.statusCode + ' ' + rSymlink.body)
   fs.unlinkSync(path.join(rootOpenPath, 'escape-link'))
 
+  // Internal state is never a tree target, whether named directly or reached
+  // through an innocent-looking symlink alias inside the same root.
+  fs.mkdirSync(path.join(rootOpenPath, '.git'))
+  fs.writeFileSync(path.join(rootOpenPath, '.git', 'HEAD'), 'ref: refs/heads/main\n')
+  fs.mkdirSync(path.join(rootOpenPath, '.arxa'))
+  fs.writeFileSync(path.join(rootOpenPath, '.arxa', 'freestyle.json'), '{}\n')
+  fs.symlinkSync('.git', path.join(rootOpenPath, 'git-alias'))
+  fs.symlinkSync('.arxa', path.join(rootOpenPath, 'arxa-alias'))
+  for (const dir of ['.git', '.arxa', 'git-alias', 'arxa-alias']) {
+    const denied = await callTree(route, '/?root=' + idOpen + '&dir=' + encodeURIComponent(dir) + '&avt=' + openTok)
+    assert.equal(denied.statusCode, 403, dir + ' must never expose internal root state')
+  }
+
   console.log('PASS createTreeRoute: root=<id> lists that root; no cross-root read via wrong token, closed/forgotten root, dir escape, or symlink escape')
+}
+
+// ============================================================================
+// createEventsRoute: root paths stay internal; SSE carries the registry id
+// ============================================================================
+{
+  let emit = null
+  const watcher = {
+    onChange(fn) { emit = fn; return () => { emit = null } },
+  }
+  const route = createEventsRoute({
+    watcher,
+    rootIdForPath: (rootPath) => rootPath === rootOpenPath ? idOpen : null,
+  })
+  const chunks = []
+  const req = { method: 'GET', url: '/', on() {} }
+  const res = { writeHead() {}, write(chunk) { chunks.push(chunk) } }
+  await route.handle(req, res)
+  emit('a.md', 123, rootOpenPath)
+  const data = chunks.find((chunk) => chunk.startsWith('data: '))
+  assert.ok(data, 'an SSE data frame was serialized')
+  assert.deepEqual(JSON.parse(data.slice(6)), { relPath: 'a.md', mtimeMs: 123, rootId: idOpen })
+  console.log('PASS createEventsRoute: serialized SSE rootId is the registry id, never the root path')
 }
 
 // ============================================================================

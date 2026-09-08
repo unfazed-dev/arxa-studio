@@ -74,6 +74,31 @@ function absOf(orgPath, relPath) {
   } catch { return null }
 }
 
+let freestylePathApiP = null
+function freestylePathApi() {
+  return freestylePathApiP ??= import('arxa-freestyle').catch(() =>
+    import(new URL('../../arxa-freestyle/lib/index.js', import.meta.url).href))
+}
+
+/** Resolve an existing ordinary file under one selected root for LSP.
+ *  The shared Freestyle resolver owns lexical, reserved-segment and symlink
+ *  policy; this boundary adds the LSP-specific "must be a file" rule. */
+export async function resolveLspFile(rootPath, relPath) {
+  try {
+    const { resolveFreestyleInside } = await freestylePathApi()
+    if (typeof resolveFreestyleInside !== 'function') return null
+    const { abs } = resolveFreestyleInside(rootPath, relPath)
+    if (!fs.statSync(abs).isFile()) return null
+    return abs
+  } catch { return null }
+}
+
+function selectedOpenRoot(env, rootId) {
+  const roots = readOpenRoots(env)
+  if (typeof rootId === 'string' && rootId !== '') return roots.find((r) => r.id === rootId) ?? null
+  return roots.find((r) => r.kind === 'org') ?? null
+}
+
 export function createTokenRoutes({ env = process.env, secret, getSettings, getOrigin = () => null }) {
   function json(res, status, body) {
     res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' })
@@ -113,21 +138,21 @@ export function createTokenRoutes({ env = process.env, secret, getSettings, getO
         return json(res, 200, { token, absPath: wtAbs })
       }
       if (body.scope === 'lsp') {
-        // Bound to the open org, like tree-read. A SEPARATE class from read on
+        // Bound to the selected open root. A SEPARATE class from read on
         // purpose: this token opens a socket that spawns a language server, so
         // a leaked per-file read token must not be able to do it.
-        const openL = readOpenOrg(env)
-        if (!openL) return json(res, 403, { error: 'no org open' })
-        const token = issueToken({ secret, scope: 'lsp', orgPath: openL.orgPath, ttlSeconds: ttl })
+        const openL = selectedOpenRoot(env, body.rootId)
+        if (!openL) return json(res, 403, { error: body.rootId ? 'root not open' : 'no org open' })
+        const token = issueToken({ secret, scope: 'lsp', orgPath: openL.path, ttlSeconds: ttl })
         return json(res, 200, { token })
       }
       if (body.scope === 'lsp-install') {
         // A SEPARATE class from 'lsp' again: that one starts a server the user
-        // already has, this one puts new software on their machine. Same org
+        // already has, this one puts new software on their machine. Same root
         // binding, different authority — a leaked 'lsp' token must not install.
-        const openI = readOpenOrg(env)
-        if (!openI) return json(res, 403, { error: 'no org open' })
-        const token = issueToken({ secret, scope: 'lsp-install', orgPath: openI.orgPath, ttlSeconds: ttl })
+        const openI = selectedOpenRoot(env, body.rootId)
+        if (!openI) return json(res, 403, { error: body.rootId ? 'root not open' : 'no org open' })
+        const token = issueToken({ secret, scope: 'lsp-install', orgPath: openI.path, ttlSeconds: ttl })
         return json(res, 200, { token })
       }
       if (body.scope === 'tree-read') {
@@ -291,25 +316,17 @@ export function apply(ctx, config) {
   try {
     const secret = loadOrCreateSecret(process.env)
     const watcher = createOrgWatcher({ intervalMs: 250 })
+    let servingRoots = []
     // The LSP bridge needs the SAME org signal the watcher uses. onServing
     // fires on mount and on every switch, so a language server rooted at the
     // old org is killed the moment a new one is served — a server that outlived
     // the switch would be a process holding a handle on a folder the user
     // believes they closed.
     let lspBridge = null
-    // lastOrgPath: onServing(roots) now fires on ANY root's churn (a
-    // Freestyle root opening/closing counts too), but the LSP bridge is
-    // still org-only (D7/G8) — restarting its servers on unrelated
-    // Freestyle-root churn would be a spurious reindex. Gate stopAll on the
-    // org path specifically changing, matching the pre-Task-8 frequency.
-    let lastOrgPath
     const started = ensureFollow(secret, (roots) => {
+      servingRoots = roots
       watcher.setRoots(roots.map((r) => r.path))
-      const orgPath = roots.find((r) => r.kind === 'org')?.path ?? null
-      if (orgPath !== lastOrgPath) {
-        if (lspBridge) lspBridge.stopAll('org-switch')
-        lastOrgPath = orgPath
-      }
+      if (lspBridge) lspBridge.retainRoots(roots.map((r) => r.path))
     })
     const routes = createTokenRoutes({
       env: process.env, secret, getSettings: currentSettings,
@@ -344,14 +361,12 @@ export function apply(ctx, config) {
     lspBridge = createLspBridge({
       secret,
       getOrgPath: () => readOpenOrg(process.env)?.orgPath ?? null,
+      getRootPath: (rootId) => selectedOpenRoot(process.env, rootId)?.path ?? null,
       // The client names a file it already holds a token for; the HOST says
       // where that file is. Nothing the client sends is used as a path.
       resolveAbs: async ({ relPath, session, orgPath }) => {
         if (session) return (await resolveWorktreeFile({ env: process.env, orgPath, worktreeId: session, relPath })).abs
-        const rootReal = fs.realpathSync(path.resolve(orgPath))
-        const abs = path.resolve(rootReal, path.normalize(relPath))
-        if (abs !== rootReal && !abs.startsWith(rootReal + path.sep)) return null
-        return abs
+        return resolveLspFile(orgPath, relPath)
       },
       log: (m) => console.log('[arxa-artifact-viewer] ' + m),
     })
@@ -411,6 +426,7 @@ export function apply(ctx, config) {
     })
     const events = createEventsRoute({
       watcher,
+      rootIdForPath: (rootPath) => servingRoots.find((r) => r.path === rootPath)?.id ?? null,
       // Phase 1: the viewer's wt lane live-reloads on agent re-writes — the
       // worktree root resolves under the OPEN org only (unknown → org lane).
       resolveSessionRoot: async (sessionId) => {
@@ -454,9 +470,9 @@ export function apply(ctx, config) {
         if (req.method !== 'POST') return json2(405, { error: 'POST only' })
         let body = {}
         try { body = JSON.parse((await readBody(req)) || '{}') } catch { return json2(400, { error: 'bad json' }) }
-        const openI = readOpenOrg(process.env)
-        if (!openI) return json2(403, { error: 'no org open' })
-        if (!verifyToken(body.avt, { secret, scope: 'lsp-install', orgPath: openI.orgPath }).ok) {
+        const openI = selectedOpenRoot(process.env, body.rootId)
+        if (!openI) return json2(403, { error: body.rootId ? 'root not open' : 'no org open' })
+        if (!verifyToken(body.avt, { secret, scope: 'lsp-install', orgPath: openI.path }).ok) {
           return json2(403, { error: 'missing or invalid token' })
         }
         const lang = typeof body.lang === 'string' ? body.lang : ''
@@ -494,10 +510,11 @@ export function apply(ctx, config) {
         res.end(JSON.stringify(b))
       }
       try {
-        const openS = readOpenOrg(process.env)
-        if (!openS) return json2(403, { error: 'no org open' })
         const url = new URL(req.url ?? '/', 'http://x')
-        if (!verifyToken(url.searchParams.get('avt'), { secret, scope: 'lsp', orgPath: openS.orgPath }).ok) {
+        const rootId = url.searchParams.get('rootId')
+        const openS = selectedOpenRoot(process.env, rootId)
+        if (!openS) return json2(403, { error: rootId ? 'root not open' : 'no org open' })
+        if (!verifyToken(url.searchParams.get('avt'), { secret, scope: 'lsp', orgPath: openS.path }).ok) {
           return json2(403, { error: 'missing or invalid token' })
         }
         const extraPath = await lspBridge.extraPath()

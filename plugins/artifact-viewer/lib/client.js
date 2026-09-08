@@ -688,7 +688,7 @@ window.__ModuleLoader__.load({
      *  `docRef.current` holds the bundle's handle, not a monaco object. Five
      *  call sites in Panel read the live document through it, and keeping the
      *  seam narrow is what stops phases 4-6 from rewriting all of them. */
-    function CodeView({ relPath, absPath, session, text, editable, docRef, onDirty, diffOriginal }) {
+    function CodeView({ relPath, absPath, session, rootId, text, editable, docRef, onDirty, diffOriginal }) {
       const ref = React.useRef(null)
       // The uri the part currently holds, and a counter that ticks when it
       // lands. The mode effect below needs both: what to open, and a signal that
@@ -706,19 +706,19 @@ window.__ModuleLoader__.load({
       const connectLsp = React.useCallback(async (lang, token, init) => {
         const M = await ensureMonaco()
         const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + LSP_ROUTE
-        return M.connectLanguageServer(lang, { url: wsUrl, token, relPath, session,
+        return M.connectLanguageServer(lang, { url: wsUrl, token, relPath, uriPath: absPath, session, rootId,
           selector: LSP_SELECTORS[lang] || [lang], init: init || null })
-      }, [relPath, session])
+      }, [relPath, absPath, session, rootId])
       const installLsp = React.useCallback(async () => {
         if (!lsp) return
         const lang = lsp.lang
         setLsp((cur) => (cur ? { ...cur, busy: true, error: null } : cur))
         try {
-          const { token } = await fetchTokenRaw({ scope: 'lsp-install' })
+          const { token } = await fetchTokenRaw({ scope: 'lsp-install', rootId })
           const res = await fetch(LSP_ROUTE + '/install', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ lang, avt: token }),
+            body: JSON.stringify({ lang, avt: token, rootId }),
           })
           const body = await res.json().catch(() => ({}))
           if (!res.ok || !body.ok) {
@@ -728,8 +728,9 @@ window.__ModuleLoader__.load({
           // Installed: the strip goes away and the service starts on this file
           // — no reopen, because the model is already the right one.
           setLsp(null)
-          const { token: t2 } = await fetchTokenRaw({ scope: 'lsp' })
-          const st2 = await fetch(LSP_ROUTE + '/status?avt=' + encodeURIComponent(t2))
+          const { token: t2 } = await fetchTokenRaw({ scope: 'lsp', rootId })
+          const st2 = await fetch(LSP_ROUTE + '/status?avt=' + encodeURIComponent(t2)
+            + (rootId ? '&rootId=' + encodeURIComponent(rootId) : ''))
             .then((r) => (r.ok ? r.json() : null)).catch(() => null)
           await connectLsp(lang, t2, st2 && st2.langs && st2.langs[lang] ? st2.langs[lang].init : null)
         } catch (e) {
@@ -792,13 +793,14 @@ window.__ModuleLoader__.load({
           if (lang && absPath) {
             void (async () => {
               try {
-                const { token } = await fetchTokenRaw({ scope: 'lsp' })
+                const { token } = await fetchTokenRaw({ scope: 'lsp', rootId })
                 if (dead) return
                 // ASK before connecting. The host accepts the upgrade first and
                 // only then closes 4004 when there is no binary, so the close
                 // code cannot answer "is there a server" in time to decide
                 // whether to offer an Install.
-                const st = await fetch(LSP_ROUTE + '/status?avt=' + encodeURIComponent(token))
+                const st = await fetch(LSP_ROUTE + '/status?avt=' + encodeURIComponent(token)
+                  + (rootId ? '&rootId=' + encodeURIComponent(rootId) : ''))
                   .then((r) => (r.ok ? r.json() : null)).catch(() => null)
                 if (dead) return
                 const row = st && st.langs ? st.langs[lang] : null
@@ -814,7 +816,7 @@ window.__ModuleLoader__.load({
           if (handle) handle.dispose()
           if (docRef) docRef.current = null
         }
-      }, [relPath, absPath, session, editable])
+      }, [relPath, absPath, session, rootId, editable])
       // Bytes changed on disk under a CLEAN buffer — the watcher push and
       // reload-theirs are the only writers of `text` after the open. Push them
       // into the open document. Guarded on the uri: at a file switch `text`
@@ -1752,7 +1754,7 @@ window.__ModuleLoader__.load({
           // Keyed: the notes above it come and go (the "saved" note lands
           // 1.5s after the first keystroke), and an unkeyed sibling shifting
           // index is a remount of the live editor.
-          surface = h(CodeView, { key: 'surface', relPath: state.relPath, absPath: state.absPath, session: state.wt ?? null, text: state.text, editable: canEdit, docRef, onDirty,
+          surface = h(CodeView, { key: 'surface', relPath: state.relPath, absPath: state.absPath, session: state.wt ?? null, rootId: state.rootId ?? null, text: state.text, editable: canEdit, docRef, onDirty,
             diffOriginal: showDiff ? (mainText ?? '') : null })
         } else if (lane === 'image') {
           surface = h('div', { className: 'aXa_av_scroll' }, h('div', { className: 'aXa_av_media' }, h('img', { src: state.url, alt: state.relPath })))

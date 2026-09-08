@@ -43,6 +43,7 @@ const TYPES = {
 // this check stayed green. The bundle must bring its own stylesheet.
 const page = fs.readFileSync(path.join(here, 'src', 'spike.html'), 'utf8')
 const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-monaco-check-'))
+const lspOpenedByRoot = new Map()
 
 const server = http.createServer((req, res) => {
   const rel = new URL(req.url, 'http://x').pathname.replace(PREFIX, '')
@@ -59,6 +60,10 @@ const server = http.createServer((req, res) => {
       res.writeHead(204); res.end()
     })
     return
+  }
+  if (req.method === 'GET' && name === 'lsp-observed') {
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+    return res.end(JSON.stringify(Object.fromEntries(lspOpenedByRoot)))
   }
   if (name === 'spike.html') {
     res.writeHead(200, { 'content-type': 'text/html' })
@@ -98,7 +103,9 @@ const WEBKIT = process.argv.includes('--webkit')
 // the whole path is real — client started, document synced, diagnostics applied.
 const wss = new WebSocketServer({ noServer: true, handleProtocols: () => 'arxa-lsp' })
 server.on('upgrade', (rq, socket, head) => {
-  if (!new URL(rq.url, 'http://x').pathname.endsWith('/lsp-stub')) return socket.destroy()
+  const requestUrl = new URL(rq.url, 'http://x')
+  if (!requestUrl.pathname.endsWith('/lsp-stub')) return socket.destroy()
+  const rootId = requestUrl.searchParams.get('rootId')
   wss.handleUpgrade(rq, socket, head, (ws) => {
     // vscode-ws-jsonrpc frames one JSON message per websocket message — no
     // Content-Length headers, unlike the stdio transport the real host uses.
@@ -110,6 +117,9 @@ server.on('upgrade', (rq, socket, head) => {
       } else if (msg.method === 'shutdown') {
         ws.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: null }))
       } else if (msg.method === 'textDocument/didOpen') {
+        const opened = lspOpenedByRoot.get(rootId) ?? []
+        opened.push(msg.params.textDocument.uri)
+        lspOpenedByRoot.set(rootId, opened)
         ws.send(JSON.stringify({
           jsonrpc: '2.0',
           method: 'textDocument/publishDiagnostics',
@@ -118,7 +128,7 @@ server.on('upgrade', (rq, socket, head) => {
             diagnostics: [{
               range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } },
               severity: 1,
-              source: 'arxa-stub',
+              source: 'arxa-stub:' + rootId,
               message: 'stub diagnostic',
             }],
           },

@@ -332,7 +332,7 @@ export async function installServer ({
  *  one. `spawn` is injected so the selftest can drive a fake and so a confined
  *  spawner can replace it without this module changing. */
 export function createLspBridge ({
-  secret, getOrgPath, spawn = nodeSpawn, servers = LANG_SERVERS, log = () => {},
+  secret, getOrgPath, getRootPath = null, spawn = nodeSpawn, servers = LANG_SERVERS, log = () => {},
   env = process.env,
   // null = probe the login shell once, lazily. A test passes '' to skip it.
   shellPath = null,
@@ -351,14 +351,23 @@ export function createLspBridge ({
   let extraPathP = null
   const extraPath = () => (extraPathP ??= (shellPath === null ? readShellPath({ env }) : Promise.resolve(shellPath)))
 
+  function stopEntry (key, entry, why) {
+    running.delete(key)
+    for (const ws of entry.sockets) { try { ws.close(1001, why) } catch {} }
+    try { entry.child.kill() } catch {}
+    stats.killed++
+    log('lsp: stopped ' + key.replace('\0', ' / ') + ' (' + why + ')')
+  }
+
   function stopAll (why) {
-    for (const [key, entry] of running) {
-      for (const ws of entry.sockets) { try { ws.close(1001, why) } catch {} }
-      try { entry.child.kill() } catch {}
-      stats.killed++
-      log('lsp: stopped ' + key.replace('\0', ' / ') + ' (' + why + ')')
+    for (const [key, entry] of [...running]) stopEntry(key, entry, why)
+  }
+
+  function retainRoots (rootPaths) {
+    const wanted = new Set(rootPaths || [])
+    for (const [key, entry] of [...running]) {
+      if (!wanted.has(entry.authorityRoot)) stopEntry(key, entry, 'root-closed')
     }
-    running.clear()
   }
 
   /** Start (or join) the server for `lang` rooted at `root` — the PROJECT
@@ -367,7 +376,7 @@ export function createLspBridge ({
    *
    *  Returns null when the binary is absent: the caller closes the socket with
    *  a code the client reads as "no server", and the editor carries on. */
-  function ensureServer (root, lang, extra = '') {
+  function ensureServer (root, lang, extra = '', authorityRoot = root) {
     // NUL-separated: a path may contain spaces, so a space here would make
     // two different (root, lang) pairs collide on one key.
     const key = root + '\0' + lang
@@ -398,7 +407,7 @@ export function createLspBridge ({
       stats.spawnFailed++
       return null
     }
-    const entry = { child, sockets: new Set(), lang, root }
+    const entry = { child, sockets: new Set(), lang, root, authorityRoot }
     // A binary that is missing fails ASYNCHRONOUSLY on spawn (ENOENT on the
     // 'error' event), not by throwing, so the catch above is not enough.
     child.on('error', () => {
@@ -430,7 +439,8 @@ export function createLspBridge ({
     const url = new URL(req.url ?? '/', 'http://x')
     const lang = url.searchParams.get('lang') ?? ''
     const token = tokenFromProtocols(req.headers['sec-websocket-protocol'])
-    const orgPath = getOrgPath()
+    const rootId = url.searchParams.get('rootId')
+    const orgPath = rootId === null ? getOrgPath() : (getRootPath === null ? null : getRootPath(rootId))
     const deny = (why) => {
       stats.refused++
       log('lsp: refused (' + why + ')')
@@ -453,7 +463,7 @@ export function createLspBridge ({
     try {
       absFile = resolveAbs === null
         ? path.join(orgPath, relPath)
-        : await resolveAbs({ relPath, session, orgPath })
+        : await resolveAbs({ relPath, session, orgPath, rootId })
     } catch { absFile = null }
     if (absFile === null) return deny('unresolvable-path')
     // The project root, not the org: an arxa org holds notes and meetings as
@@ -465,7 +475,7 @@ export function createLspBridge ({
 
     const extra = await extraPath()
     wss.handleUpgrade(req, socket, head, (ws) => {
-      const entry = ensureServer(root, lang, extra)
+      const entry = ensureServer(root, lang, extra, orgPath)
       if (entry === null) {
         // The lane still opens; only the language service is missing.
         try { ws.close(4004, 'language-server-unavailable') } catch {}
@@ -487,5 +497,5 @@ export function createLspBridge ({
     })
   }
 
-  return { handleUpgrade, stopAll, ensureServer, stats: () => ({ ...stats }), running, extraPath }
+  return { handleUpgrade, stopAll, retainRoots, ensureServer, stats: () => ({ ...stats }), running, extraPath }
 }
