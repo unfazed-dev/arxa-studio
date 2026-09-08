@@ -38,11 +38,21 @@ export function createFreestyleSessions({ env = process.env, dshBridge }) {
     return [root.path, ...nestedRepos(root.path)]
   }
 
+  // mintSessionPath always sets `org` to the root's basename, so every id
+  // this module ever mints starts with "<basename>/". A nested repo (the
+  // user dropped an existing git-workspace-managed clone into their folder)
+  // can carry registry rows from a *different* org — filter those out so a
+  // foreign repo's unrelated sessions don't leak into this root's view.
+  function ownRows(root, repoPath) {
+    const prefix = path.basename(root.path) + '/'
+    let rows
+    try { rows = GW.listSessions(repoPath, env) } catch { return [] }
+    return rows.filter((s) => s.id.startsWith(prefix))
+  }
+
   function repoOfSession(root, id) {
     for (const repoPath of reposOf(root)) {
-      let rows
-      try { rows = GW.listSessions(repoPath, env) } catch { continue }
-      if (rows.some((s) => s.id === id)) return repoPath
+      if (ownRows(root, repoPath).some((s) => s.id === id)) return repoPath
     }
     throw new Error(`unknown-session: "${id}"`)
   }
@@ -77,9 +87,7 @@ export function createFreestyleSessions({ env = process.env, dshBridge }) {
     list(root) {
       const active = [], parked = [], archived = []
       for (const repoPath of reposOf(root)) {
-        let rows
-        try { rows = GW.listSessions(repoPath, env) } catch { continue }
-        for (const s of rows) {
+        for (const s of ownRows(root, repoPath)) {
           const row = { ...s, repoPath }
           if (s.state === 'archived') archived.push(row)
           else if (s.state === 'parked') parked.push(row)
