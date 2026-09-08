@@ -316,16 +316,43 @@ if (pst.result.checks.state !== 'none') {
     // checks at all; a runner that has not woken is the same situation arriving
     // by a different road, and failing the suite for it would train everyone to
     // ignore a red S5.
-    skipped.push('S5 merge-on-green tail: runner asleep (' + (runsSeen || 'queued') + ')')
+    skipped.push('S5 merge through card.pr.merge (it requires green): runner asleep (' + (runsSeen || 'queued') + ')')
     console.log('   SKIP the merge tail — GitHub had not started the checks after 240s')
   }
 }
 {
+  // Merge the way ARXA merges, which is deliberately NOT a squash.
+  //
+  // This shelled out to `gh pr merge --squash` and GitHub refused it outright:
+  // "Squash merges are not allowed on this repository." The refusal was doing us
+  // a favour. `git-workspace/lib/prflow.js` spells out why arxa never squash-
+  // merges: GitHub's squash writes a NEW commit to main whose CONTENT matches
+  // but whose ancestry does not, so `merge-base --is-ancestor` is false forever,
+  // `branch --merged main` never lists the branch again, and Finish and Sweep
+  // can never see the session as landed. arxa squashes ON THE BRANCH and then
+  // merges for real, which buys single-commit history AND true ancestry.
+  // `prSquashMergeApi` survives only so an import does not break — nothing calls
+  // it, and `mergeSessionPr` uses `merge_method: 'merge'` (frame.js:141).
+  //
+  // So `--squash` was not a wrong flag, it was a wrong WORLD: had GitHub allowed
+  // it, the repo would have been left in a shape arxa never produces, and every
+  // Finish and Sweep assertion downstream would have been measuring fiction
+  // while passing. TERRA, a real linked org, has squashMergeAllowed:false — the
+  // product needs nothing else.
   const { execFileSync } = await import('node:child_process')
-  try {
-    execFileSync('gh', ['pr', 'merge', String(pr.result.pr.number), '--squash', '--repo', 'unfazed-dev/' + NAME], { encoding: 'utf8', stdio: 'pipe' })
-  } catch (e) {
-    fail('S5: gh pr merge --squash failed: ' + String(e.message).slice(0, 200))
+  if (last.state === 'green') {
+    // The real path: arxa's own action, which re-checks green itself.
+    const mg = await post('card.pr.merge', { sessionId: sid })
+    if (!mg.ok || !mg.result || mg.result.ok !== true) fail('S5: card.pr.merge failed: ' + JSON.stringify(mg).slice(0, 300))
+  } else {
+    // Checks never started, so card.pr.merge refuses on `checks-pending`. Merge
+    // with arxa's METHOD so the repo lands in the shape the rest of the run
+    // expects, and record that the card's own merge went unexercised.
+    try {
+      execFileSync('gh', ['pr', 'merge', String(pr.result.pr.number), '--merge', '--repo', 'unfazed-dev/' + NAME], { encoding: 'utf8', stdio: 'pipe' })
+    } catch (e) {
+      fail('S5: gh pr merge --merge failed: ' + String(e.message).slice(0, 200))
+    }
   }
 }
 // cleanup the smoke runner instance (svc + dir; the shared tarball cache stays)

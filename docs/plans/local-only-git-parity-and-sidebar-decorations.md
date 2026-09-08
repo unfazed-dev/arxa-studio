@@ -796,3 +796,40 @@ line most runs are read by, and "ALL GREEN" printed over an unmeasured step is
 how a suite starts lying — the same vacuous-pass shape as `.every()` over an
 empty array, printed instead of computed. Both shapes have now been found in this
 one file today.
+
+### The wrong flag was a wrong world
+
+With the sleepy-runner skip in place, S5 reached the merge and GitHub refused it:
+
+```
+GraphQL: Squash merges are not allowed on this repository. (mergePullRequest)
+```
+
+The smoke had been shelling out to `gh pr merge --squash`. **The refusal was
+doing us a favour, and the product was right.**
+
+`git-workspace/lib/prflow.js` documents the D107 shape and why it is *not* a
+squash-merge: GitHub's squash writes a **new** commit to main whose content
+matches the branch but whose ancestry does not. `merge-base --is-ancestor` is
+then false forever, `branch --merged main` never lists the branch again, and
+**Finish and Sweep can never see the session as landed** — the two features this
+plan just built. arxa therefore squashes *on the branch* and merges for real,
+buying single-commit history *and* true ancestry. `mergeSessionPr` uses
+`merge_method: 'merge'` (`frame.js:141`); `prSquashMergeApi` survives only so an
+import does not break, and nothing calls it.
+
+So `--squash` was not a wrong flag, it was a wrong world: had GitHub allowed it,
+the repo would have been left in a shape arxa never produces, and every Finish
+and Sweep assertion downstream would have been measuring fiction **while
+passing**. TERRA — a real linked org — has `squashMergeAllowed: false`, and needs
+nothing else.
+
+The merge now takes arxa's own `card.pr.merge` when the checks are green, and
+falls back to `gh pr merge --merge` (arxa's method) only when the runner never
+woke, recording that the card's own merge went unexercised.
+
+**Pattern worth keeping.** Four of the five defects found in this file today were
+in the *test*, not the product, and each was hidden by the one before it:
+routing → wrong probe repo → wrong merge shape → wrong merge method. A suite
+that cannot reach its own assertions reports green for the same reason a suite
+with no assertions does.
