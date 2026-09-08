@@ -11,9 +11,11 @@ import * as FIN from '../../git-workspace/lib/finish.js'
 
 // Freestyle roots have no `projects/` layout, so a session can live in the
 // root's own repo OR in any git repo nested somewhere under it (the user
-// dropped a cloned repo inside their folder). Skip `.git`/`.arxa` (session
-// worktrees carry their own `.git` FILE — walking into one would surface
-// every open worktree as a bogus "nested repo") and `node_modules`.
+// dropped a cloned repo inside their folder). Skip `.git` (never itself a
+// nested repo root) and `node_modules`; skip `.arxa` too — that's where
+// session worktrees live (`.arxa/worktrees/<id>`, each with its own `.git`
+// FILE), so walking into it would surface every open worktree as a bogus
+// "nested repo".
 function nestedRepos(rootPath) {
   const out = []
   const walk = (dir) => {
@@ -30,6 +32,20 @@ function nestedRepos(rootPath) {
   return out
 }
 
+// A session id is also a git ref component (REF_SEGMENT_RE, git-workspace
+// /lib/sessions.js), but Freestyle roots use folder names verbatim — a
+// folder named "My Notes" would make every mint throw inside
+// `assertSessionIdShape`. Slug the basename with the engine's own
+// `slugSegment` (not reimplemented here) and use this SAME key everywhere
+// an id is minted (`newSession`) or matched (`ownRows`), so the two can
+// never disagree. An all-punctuation or emoji-only basename slugs to "" —
+// fall back to the root's own stable id rather than throwing. Renaming a
+// root (`roots.js` renameRoot) only changes its display name, never its
+// `path`, so this key is stable across renames.
+function sessionKey(root) {
+  return GW.slugSegment(path.basename(root.path)) || `root-${String(root.id).slice(0, 8)}`
+}
+
 export function createFreestyleSessions({ env = process.env, dshBridge }) {
   // `list`/`repoOfSession` are the only two functions that need to search
   // beyond the root's own repo — every other verb already knows its repo
@@ -38,13 +54,13 @@ export function createFreestyleSessions({ env = process.env, dshBridge }) {
     return [root.path, ...nestedRepos(root.path)]
   }
 
-  // mintSessionPath always sets `org` to the root's basename, so every id
-  // this module ever mints starts with "<basename>/". A nested repo (the
-  // user dropped an existing git-workspace-managed clone into their folder)
-  // can carry registry rows from a *different* org — filter those out so a
-  // foreign repo's unrelated sessions don't leak into this root's view.
+  // mintSessionPath always sets `org` to sessionKey(root), so every id this
+  // module ever mints starts with "<key>/". A nested repo (the user dropped
+  // an existing git-workspace-managed clone into their folder) can carry
+  // registry rows from a *different* org — filter those out so a foreign
+  // repo's unrelated sessions don't leak into this root's view.
   function ownRows(root, repoPath) {
-    const prefix = path.basename(root.path) + '/'
+    const prefix = sessionKey(root) + '/'
     let rows
     try { rows = GW.listSessions(repoPath, env) } catch { return [] }
     return rows.filter((s) => s.id.startsWith(prefix))
@@ -61,7 +77,7 @@ export function createFreestyleSessions({ env = process.env, dshBridge }) {
     async newSession(root, relDir = '', name) {
       const route = resolveFreestyleRepo(root.path, relDir, { env })
       const id = GW.mintSessionPath({
-        org: path.basename(root.path),
+        org: sessionKey(root),
         workspace: (relDir || '').replace(/\/+$/, ''),
         name,
         sessions: GW.listSessions(route.repoPath, env),
@@ -103,11 +119,21 @@ export function createFreestyleSessions({ env = process.env, dshBridge }) {
     finish(root, id, { dryRun = false } = {}) {
       return FIN.finishSession(repoOfSession(root, id), id, { env, dryRun })
     },
-    // Root-only (not aggregated over nestedRepos): matches the brief's
-    // sketch verbatim — a session living inside a nested repo won't be
-    // swept by this call. See task-5-report.md for the tradeoff.
+    // Aggregated over reposOf(root), like list/archive/revive/finish — a
+    // session merged inside a nested repo is now swept too, not just ones
+    // in the root's own repo. sweepMerged has no "own sessions only" filter
+    // (unlike ownRows above), so this can also finish a merged session that
+    // belongs to a different org sharing the same nested repo; see
+    // task-5-report.md for why that residual gap wasn't closed here.
     sweep(root, { dryRun = true } = {}) {
-      return FIN.sweepMerged(root.path, { env, dryRun })
+      const finished = [], skipped = []
+      for (const repoPath of reposOf(root)) {
+        let result
+        try { result = FIN.sweepMerged(repoPath, { env, dryRun }) } catch { continue }
+        for (const r of result.finished) finished.push({ ...r, repoPath })
+        for (const r of result.skipped) skipped.push({ ...r, repoPath })
+      }
+      return { finished, skipped }
     },
   }
 }
