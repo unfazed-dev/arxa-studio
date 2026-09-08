@@ -7,6 +7,8 @@
  *   trash + purge a local-only org without any GitHub requirement.
  * Exits non-zero on the FIRST broken contract. Name is unique per run.
  */
+import { execFileSync } from 'node:child_process'
+
 const BASE = process.env.ARXA_BASE || 'http://127.0.0.1:7891'
 const NAME = 'D90SMOKE' + Date.now().toString(36).toUpperCase().slice(-6)
 
@@ -34,8 +36,33 @@ const ghRepo = async (name) => {
   }
 }
 
+/* Safety net (2026-09-08): `fail()` exited straight out, so every broken run
+ * left its throwaway repo on GitHub forever — four had piled up by the time
+ * anyone looked, all from S5 failing at its first card call. The smoke deletes
+ * its repo as part of step 5 on the happy path; this is the unhappy one.
+ *
+ * SYNCHRONOUS on purpose. All 51 call sites are bare `fail('...')` with no
+ * await, so an async fail would return a promise and let the caller keep
+ * running past the failure it just reported — cascading errors ahead of the
+ * exit. execFileSync works fine here and keeps fail() a hard stop.
+ *
+ * Deliberately paranoid about WHAT it deletes: only names this run could have
+ * minted (D90SMOKE + 6 chars from its own Date.now, or the fixed project repo
+ * it publishes). Anything else is left alone — a cleanup path that can reach a
+ * real repository is worse than the litter it removes. */
+const DISPOSABLE = /^(D90SMOKE[A-Z0-9]{6}|Born-Smoke)$/
+const dropRepo = (name) => {
+  if (!DISPOSABLE.test(name)) return
+  try {
+    execFileSync('gh', ['repo', 'delete', 'unfazed-dev/' + name, '--yes'], { stdio: 'ignore' })
+    console.log('   cleaned up unfazed-dev/' + name)
+  } catch { /* already gone, or no delete_repo scope — never mask the real failure */ }
+}
+
 const fail = (msg) => {
   console.error('SMOKE FAIL: ' + msg)
+  dropRepo(NAME)
+  dropRepo('Born-Smoke')
   process.exit(1)
 }
 

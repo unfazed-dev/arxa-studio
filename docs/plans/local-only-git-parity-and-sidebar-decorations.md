@@ -297,10 +297,32 @@ something to squash. Not chased in this pass, and not a product bug: it
 reproduces against the old engine too. S5 needs its own repair, against a
 freshly launched engine.
 
-**Still owed:** `cicd-smoke.mjs --yes`, and the lens pass. The installed
-`/Applications/Arxa Studio.app` is also the pre-change build, so the lens pass
-needs a rebuild first — the same rebuild that would make the BASE-driven smokes
-meaningful.
+**Live results against current code (in-process smokes only):**
+
+| run | result |
+|---|---|
+| `card-cicd-smoke.mjs --yes` (org repo) | 31 PASS, 0 FAIL, repo deleted |
+| `card-cicd-smoke.mjs --yes --project` (project repo, D98/D99) | 34 PASS, 0 FAIL, repo deleted |
+| `cicd-smoke.mjs --yes` | 28 PASS, 0 FAIL, repo deleted |
+| offline `scripts/ci.mjs` | 84 GREEN |
+
+**`org-link-smoke.mjs` leaked a repo on every failed run.** `fail()` called
+`process.exit(1)` with no cleanup, so each broken run left `unfazed-dev/D90SMOKE…`
+behind — five had accumulated. The happy path deletes the repo as step 5; there
+was simply no unhappy path. Added a safety net that deletes only names this run
+could have minted (`/^(D90SMOKE[A-Z0-9]{6}|Born-Smoke)$/`), because a cleanup
+path that can reach a real repository is worse than the litter it removes.
+
+Kept **synchronous** deliberately: all 51 call sites are bare `fail('…')` with no
+`await`, so an async `fail` would hand back a promise and let the caller run on
+past the failure it just reported. `execFileSync` keeps it a hard stop. Verified
+on the next failing run — it cleaned up after itself.
+
+**Still owed:** repairing `org-link-smoke` S5 (second staleness: it writes its
+probe into the ORG worktree and expects the SESSION branch to have something to
+squash), and the lens pass. The installed `/Applications/Arxa Studio.app` is the
+pre-change build, so the lens pass needs a rebuild first — the same rebuild that
+would make the BASE-driven smokes describe current code.
 
 ---
 
