@@ -974,7 +974,7 @@ check('client: agent verb + reason strings localized in en/pl/fr',
   // only the SELECTED row, and after boot most dsh-less rows are not selected.
   check('D112: the dot is handed the row and marks EVERY dsh-less one',
     gen.includes('ARXA_SESSION_DOT(selected, row)')
-    && /const ARXA_SESSION_DOT = \(selected, row\) => \{[\s\S]{0,1600}?if \(row && row\.dshSessionId === null\) return/.test(gen))
+    && /const ARXA_SESSION_DOT = \(selected, row\) => \{[\s\S]{0,2400}?if \(row && row\.dshSessionId === null\) \{/.test(gen))
   // THE assertion that caught a pre-ship regression (2026-09-08): sessionNode
   // rebuilds the row as a fresh object literal, so without this transform both
   // fields are stripped and `row.dshSessionId` is `undefined` at render — which
@@ -983,10 +983,25 @@ check('client: agent verb + reason strings localized in en/pl/fr',
   check('D112: the link survives sessionNode, which rebuilds the row from scratch',
     /runningSubagentCount: descendants\.get\(s\.id\)\?\.runningCount \?\? 0,\n\t+dshSessionId: s\.dshSessionId \?\? null,\n\t+dshStatus: s\.dshStatus \?\? null,/.test(gen))
   check('D112: the guard is STRICT null — served-and-absent, not never-arrived',
-    gen.includes('if (row && row.dshSessionId === null) return')
-    && !gen.includes('if (row && row.dshSessionId == null) return'))
+    gen.includes('if (row && row.dshSessionId === null) {')
+    && !/row\.dshSessionId == null/.test(gen))
   check('D112: a later successful open clears the miss (no stale lens evidence)',
     /window\.__arxaNoConversation = null;\n\t+arxaClientSessions\.open\(dshId\);/.test(gen))
+  // The lens pass (2026-09-08) ran every check above green while the refusal
+  // was still invisible to the user: the ring explains itself only in a `title`,
+  // and the click that triggers it leaves the composer on a foreign conversation
+  // whose card then reads `main`. On the SELECTED row the mark must therefore
+  // carry words, in the row's own text, not just on hover.
+  check('D112: selecting a dsh-less row turns the mark into readable words',
+    gen.includes('children: sel ? orgT("rows.noConversationTag") : void 0')
+    && gen.includes('.aXa_arxaNoConvoTag{'))
+  check('D112: the tag is translated in every dictionary, not English-only',
+    (gen.match(/"rows\.noConversationTag":/g) || []).length === 3)
+  // The ring class must SURVIVE selection — it is the stable hook the lens and
+  // any future decoration test select on. Swapping classes instead of adding
+  // one would have made the mark vanish from the only row a test ever clicks.
+  check('D112: the tag adds a class rather than replacing the ring',
+    gen.includes('"aXa_arxaNoConvoDot", sel && "aXa_arxaNoConvoTag"'))
   check('D112: the mark is accessible and names the engine reason',
     gen.includes('"aria-label": orgT("rows.noConversation")')
     && gen.includes('row.dshStatus ? " (" + row.dshStatus + ")" : ""')

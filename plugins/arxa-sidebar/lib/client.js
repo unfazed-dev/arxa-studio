@@ -4203,6 +4203,10 @@ window.__ModuleLoader__.load({
 				// where a filled accent dot reads as "you are here". The two never
 				// collide — a row with no conversation cannot be the one you are in.
 				+ ".aXa_arxaNoConvoDot{width:6px;height:6px;flex:none;margin-left:6px;border-radius:50%;background:none;border:1px solid var(--dsw-alias-label-caption);opacity:.7}"
+				// The same mark, selected: the ring unrolls into its own sentence
+				// rather than a second element appearing beside it, so the row gains
+				// no new slot to collide with the timestamp.
+				+ ".aXa_arxaNoConvoTag{width:auto;height:auto;border-radius:3px;padding:0 4px;font-size:10px;line-height:14px;white-space:nowrap;opacity:.85}"
 				+ ".uV2eYG_root:not(.uV2eYG_hero) [data-arxa-preset-corner]{display:none}"
 				+ ".uV2eYG_hero [data-composer-card] :is(.uV2eYG_input,.uV2eYG_mirror,.uV2eYG_backdrop){box-sizing:border-box;padding-right:var(--arxa-preset-inset,120px)}";
 			document.head.appendChild(tag);
@@ -4341,12 +4345,24 @@ window.__ModuleLoader__.load({
 			// explicit null means "served, and absent" while `undefined` means the
 			// field never reached this row. Loose `== null` would conflate them and
 			// mark every row while swallowing the current-session dot below.
-			if (row && row.dshSessionId === null) return (0, react_jsx_runtime.jsx)("span", {
-				className: clsx(Rows_module_css_default.dot, "aXa_arxaNoConvoDot"),
-				role: "img",
-				"aria-label": orgT("rows.noConversation"),
-				title: orgT("rows.noConversation") + (row.dshStatus ? " (" + row.dshStatus + ")" : ""),
-			}, "arxa-no-convo");
+			// SELECTED, the ring grows words. The lens pass (2026-09-08) proved the
+			// ring alone is not enough: clicking such a row is refused, the composer
+			// keeps the conversation it already held, and that conversation's card
+			// then reads `main · clean` as though it were this session's. The user
+			// is told nothing — the explanation lived only in a `title` they have no
+			// reason to hover and a console they never open. Selection is exactly
+			// when they are owed the sentence, and it costs one class: the ring is
+			// still the at-a-glance mark on every other dsh-less row.
+			if (row && row.dshSessionId === null) {
+				const sel = selected === true;
+				return (0, react_jsx_runtime.jsx)("span", {
+					className: clsx(Rows_module_css_default.dot, "aXa_arxaNoConvoDot", sel && "aXa_arxaNoConvoTag"),
+					role: sel ? "note" : "img",
+					"aria-label": orgT("rows.noConversation"),
+					title: orgT("rows.noConversation") + (row.dshStatus ? " (" + row.dshStatus + ")" : ""),
+					children: sel ? orgT("rows.noConversationTag") : void 0,
+				}, "arxa-no-convo");
+			}
 			return selected !== true ? null : (0, react_jsx_runtime.jsx)("span", {
 			className: clsx(Rows_module_css_default.dot, "aXa_arxaCurrentDot"),
 			role: "img",
@@ -5986,6 +6002,7 @@ window.__ModuleLoader__.load({
 			"rows.ghSynced": "Synced with GitHub",
 			"rows.current": "You are here",
 			"rows.noConversation": "No conversation — the session's files are here, but nothing opened",
+			"rows.noConversationTag": "No conversation",
 			"org.create.ghToggle": "Publish to GitHub",
 			"org.create.ghOnHint": "A private GitHub repository is created and kept in sync.",
 			"org.create.ghOffHint": "This organisation stays on this device only. Connect it later from its menu.",
@@ -6207,6 +6224,7 @@ window.__ModuleLoader__.load({
 			"rows.ghSynced": "Zsynchronizowano z GitHub",
 			"rows.current": "Tu jesteś",
 			"rows.noConversation": "Brak rozmowy — pliki sesji są tutaj, ale nic się nie otworzyło",
+			"rows.noConversationTag": "Brak rozmowy",
 			"org.create.ghToggle": "Opublikuj na GitHub",
 			"org.create.ghOnHint": "Zostaje utworzone prywatne repozytorium GitHub i jest na bieżąco synchronizowane.",
 			"org.create.ghOffHint": "Ta organizacja pozostaje tylko na tym urządzeniu. Połącz ją później z jej menu.",
@@ -6428,6 +6446,7 @@ window.__ModuleLoader__.load({
 			"rows.ghSynced": "Synchronisé avec GitHub",
 			"rows.current": "Vous êtes ici",
 			"rows.noConversation": "Aucune conversation — les fichiers de la session sont là, mais rien ne s'est ouvert",
+			"rows.noConversationTag": "Aucune conversation",
 			"org.create.ghToggle": "Publier sur GitHub",
 			"org.create.ghOnHint": "Un dépôt GitHub privé est créé et synchronisé en continu.",
 			"org.create.ghOffHint": "Cette organisation reste uniquement sur cet appareil. Connectez-la plus tard depuis son menu.",
