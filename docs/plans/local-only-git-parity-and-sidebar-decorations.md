@@ -639,3 +639,78 @@ above.
 
 Also still open and untouched: **Bug B** — sessions writing into a trashed org,
 `docs/plans/org-trash-unreachable.md`.
+
+---
+
+## 6. The lens pass — run 2026-09-08, against live code
+
+### The "needs a rebuild" blocker was wrong
+
+The plan recorded that verifying the UI needed a Tauri rebuild. It does not.
+The desktop app runs its engine from a **packed snapshot** at
+`~/.arxa/engine/<sha12>/arxa-studio`, not from this checkout — which is why the
+port-7891 smokes described stale code. `bin/arxa-engine-sync.mjs` exists for
+exactly this and syncs repo plugins into that payload; bouncing the dsh child
+(kill its PID — the desktop's heartbeat watchdog respawns it) reseeds the shared
+profile. Total cost ~15 seconds, against a full app rebuild.
+
+**Verify the bounce behaviourally, never by hashing.** There are three copies —
+repo → payload → `~/.arxa/dsh/profiles/arxa/node_modules`, and only the respawn
+propagates to the third. A payload hash would match while the live engine still
+served old bytes. The probe that actually proves it: `card.finish` and
+`org.sweep` must stop answering `unknown-action`, with a route that does not
+exist (`org.list`) as the control.
+
+### Leak #4 — the smoke leaves organisations registered in the live app
+
+Six `D90SMOKE*` orgs pointing at `/tmp/arxa-d90-smoke/*` were sitting in the
+operator's real sidebar. `org-link-smoke.mjs:233` does call `org.trash`, but
+only on the happy path — **every failed run leaks an org forever**, and S5 had
+been failing since the routing bug. The GitHub cleanup net added earlier covers
+repos, not the local org registry.
+
+This was not cosmetic. Five of the six were expanded, so the tree carried
+`tracks=45` and WAW's row was pushed out of the rendered DOM entirely; the lens
+pass failed 7 of 16 checks purely because it could not find the org. Cleared via
+the app's own `org.trash` (reversible — they are in Trash, not deleted).
+
+**It also explains §5's Organisations/Tree anomaly.** The live DOM read shows
+the hierarchy is correct: `Organisations` → bold org rows → `Projects` dock →
+project → stages → tracks, exactly as the source said. What the operator saw was
+WAW buried under five expanded smoke orgs. Source was never wrong; the registry
+was polluted. §5 is closed.
+
+### An assertion that ratified the bug it was meant to catch
+
+`lens_studio_smoke.dart` asserted `RegExp('main').hasMatch(header)`. It was
+written against the value the ORIGINAL BUG produced, so it went green *precisely
+when* the card showed the wrong seat. Replaced with a non-empty-branch check
+plus a real one: the card may only read `main` while a session row is selected
+if that row's conversation genuinely refused to open.
+
+### What the ring verifies — and the gap it exposes
+
+Live, against WAW's `application-wt-260908-001`
+(`{"dshSessionId": null, "dshStatus": "dsh-unavailable"}`), all green:
+
+- the row renders the no-conversation mark (`.aXa_arxaNoConvoDot`)
+- it carries an `aria-label`
+- its tooltip names **why** — `dsh-unavailable`, not merely that
+- clicking it is recorded as a refusal (`window.__arxaNoConversation`)
+
+One honest failure, and it is the point of the pass:
+
+> **the refusal is visible on screen, not only in the console** — FAIL
+
+The mark and the console warn are the only signals. The click leaves the
+composer on whatever conversation it already held, whose card then correctly
+reports **that other seat** (`main · clean`) while the user believes they
+selected their session. Nothing on screen contradicts them. The tooltip needs a
+hover the user has no reason to attempt.
+
+So Decision 1 is **half-delivered**: the session is legitimate and now marked,
+but selecting it still does not bind the card to its seat. The dock injects the
+**dsh conversation id** (`gen-git-card.mjs`, `inject: (sessionId)`), so when no
+conversation exists there is no id to pass — while the sidebar has known the
+answer all along in `state.currentSessionId`. Closing this is the remaining
+half, and it is a wiring decision, not a toast.
