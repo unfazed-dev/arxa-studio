@@ -3466,7 +3466,7 @@ window.__ModuleLoader__.load({
 					const selected = freestyleStore.selected();
 					if (!selected) return false;
 					const root = (freestyleStore.get().roots || []).find((r) => r.id === selected.rootId);
-					return root?.hasHead === true;
+					return root?.open === true && root?.hasHead === true;
 				}
 				const s = orgStore.get();
 				const sel = s.selectedRowId;
@@ -3479,7 +3479,7 @@ window.__ModuleLoader__.load({
 				if (freestyleStore.get().ui.activeTab === "freestyle") {
 					const selected = freestyleStore.selected();
 					const root = selected && (freestyleStore.get().roots || []).find((r) => r.id === selected.rootId);
-					return selected && root?.hasHead === true ? void 0 : orgT("freestyle.cta.pick");
+					return selected && root?.open === true && root?.hasHead === true ? void 0 : orgT("freestyle.cta.pick");
 				}
 				// orgT (the captured NS locale seat), NOT the enOver/zhOver
 				// literals — those close over a LATER region scope and read as
@@ -3713,6 +3713,7 @@ window.__ModuleLoader__.load({
 		function ArxaHeroGuide({ t }) {
 			const ref = (0, react.useRef)(null);
 			const org = (0, react.useSyncExternalStore)(orgSubscribe, orgStore.get, orgStore.get);
+			const freestyle = useFreestyle();
 			const listSnap = (0, react.useSyncExternalStore)(arxaListSubscribe, arxaListGet, arxaListGet);
 			const current = listSnap ? listSnap.current : void 0;
 			const unbound = current === void 0 || current === null;
@@ -3731,7 +3732,7 @@ window.__ModuleLoader__.load({
 			if (unbound) return (0, react_jsx_runtime.jsxs)("div", {
 				ref,
 				"data-arxa-hero-guide": "",
-				children: [t("hero.guide")]
+				children: [t(freestyle.ui.activeTab === "freestyle" ? "hero.guide.freestyle" : "hero.guide")]
 			});
 			// Bound: nothing to say here. The composer crumb that used to mirror the
 			// path was dropped 2026-09-06 -- the git card above the composer already
@@ -4230,6 +4231,9 @@ window.__ModuleLoader__.load({
 				+ ".aXa_fs_tabOn{color:var(--dsw-alias-state-business-primary)}.aXa_fs_tabOn:after{content:'';position:absolute;left:10px;right:10px;bottom:0;height:2px;border-radius:1px 1px 0 0;background:var(--dsw-alias-state-business-primary)}"
 				+ ".aXa_fs_tabsRail{height:auto;flex-direction:column;border-bottom:0}.aXa_fs_tabsRail .aXa_fs_tab{width:40px;height:40px;flex:none;padding:0}.aXa_fs_tabsRail .aXa_fs_tabOn:after{inset:8px auto 8px 0;width:2px;height:auto;border-radius:0 1px 1px 0}"
 				+ ".aXa_fs_body{display:flex;min-height:0;flex:1;flex-direction:column}.aXa_fs_head{display:flex;align-items:center;justify-content:space-between;height:40px;padding:0 10px 0 14px;border-bottom:.5px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-tertiary);font:var(--dsw-font-xs-13)}.aXa_fs_empty{padding:18px 14px;color:var(--dsw-alias-label-tertiary);font:var(--dsw-font-xs-13)}"
+				+ ".aXa_fs_roots{min-height:0;overflow:auto;padding:6px 4px}.aXa_fs_tree{padding-left:10px}.aXa_fs_more{display:inline-flex;align-items:center;justify-content:center;flex:none;width:24px;height:24px;margin-left:auto;padding:0;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer}.aXa_fs_more:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}"
+				+ ".aXa_fs_rootName{font-weight:600}.aXa_fs_pill{flex:none;margin-left:6px;padding:1px 5px;border-radius:8px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-caption);font-size:10px;line-height:14px}.aXa_fs_sessionIndent{width:22px;flex:none}.aXa_fs_reason,.aXa_fs_meta{display:block;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-caption);font-size:10px}.aXa_fs_toggle{display:inline-flex;align-items:center;justify-content:center;flex:none;width:16px;height:20px;padding:0;border:0;background:transparent;color:inherit;cursor:pointer}.aXa_fs_inline{display:flex;align-items:center;min-height:28px;padding:0 8px 0 30px}.aXa_fs_name{min-width:0;flex:1;height:24px}.aXa_fs_nameBad{outline:1px solid var(--dsw-alias-label-error)}.aXa_fs_dropOn{box-shadow:inset 0 0 0 1px var(--dsw-alias-state-business-primary);background:var(--dsw-alias-interactive-bg-hover)}"
+				+ ".aXa_fs_section{margin-top:6px;border-top:.5px solid var(--dsw-alias-border-l2);padding-top:4px}.aXa_fs_disclosure{width:100%;padding:6px 10px;border:0;background:transparent;color:var(--dsw-alias-label-tertiary);font:var(--dsw-font-xs-13);text-align:left;cursor:pointer}.aXa_fs_disclosure:hover{color:var(--dsw-alias-label-primary)}.aXa_fs_subtle{padding:4px 12px;color:var(--dsw-alias-label-caption);font:var(--dsw-font-xs-13)}"
 				+ ".uV2eYG_root:not(.uV2eYG_hero) [data-arxa-preset-corner]{display:none}"
 				+ ".uV2eYG_hero [data-composer-card] :is(.uV2eYG_input,.uV2eYG_mirror,.uV2eYG_backdrop){box-sizing:border-box;padding-right:var(--arxa-preset-inset,120px)}";
 			document.head.appendChild(tag);
@@ -4926,27 +4930,79 @@ window.__ModuleLoader__.load({
 			});
 			return __arxaIconsPromise;
 		}
-		function ArxaDirRows({ dir, depth, mode, hideDirs }) {
+		function FreestyleEntryRow({ relPath, name, kind, depth, open, onToggle, onOpen, matIcons, rootId, verbs, onSelect, selected, reload }) {
+			const [editing, setEditing] = (0, react.useState)(null);
+			const [dragOver, setDragOver] = (0, react.useState)(false);
+			const indent = { marginLeft: (Math.min(Math.max(0, depth - 1), 8) * 14) + "px" };
+			const finish = (work) => Promise.resolve(work).catch(freestyleNotice);
+			const choose = (id) => {
+				if (id === "newFile" || id === "newFolder") { setEditing(id); return; }
+				if (id === "rename") { setEditing("rename"); return; }
+				if (id === "newSession") { Promise.resolve(verbs.newSession(relPath)).then(freestyleOpenConversation).catch(freestyleNotice); return; }
+				if (id === "trash") { verbs.ask({ action: "entry.trash", arg: { rootId, relPath }, title: orgT("freestyle.confirm.entryTrash"), body: relPath, confirm: orgT("freestyle.menu.trash") }); return; }
+				if (id === "duplicate" || id === "reveal") finish(verbs[id](relPath));
+			};
+			const drop = (e) => {
+				e.preventDefault(); e.stopPropagation(); setDragOver(false);
+				const parsed = parseFreestyleDrop(e.dataTransfer.getData(FREESTYLE_DRAG_TYPE), rootId, dropTargetFor(relPath, kind));
+				if (!parsed.ok) { if (parsed.reason === "cross-root") freestyleNotice(orgT("freestyle.move.crossRoot")); return; }
+				finish(verbs.move(parsed.relPath, parsed.toDir));
+			};
+			const items = freestyleMenuActions(kind).map((id) => ({
+				id,
+				label: orgT("freestyle.menu." + id),
+				danger: id === "trash"
+			}));
+			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+				(0, react_jsx_runtime.jsx)(FreestyleActionMenu, { items, onSelect: choose, children: ({ menu, menuOpen, onContextMenu }) => (0, react_jsx_runtime.jsxs)("div", {
+					className: clsx(Rows_module_css_default.projectRow, selected === relPath && Rows_module_css_default.selected, menuOpen && Rows_module_css_default.menuOpen, dragOver && "aXa_fs_dropOn"),
+					role: "treeitem",
+					"aria-expanded": kind === "dir" ? !!open : void 0,
+					draggable: editing === null,
+					onDragStart: (e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData(FREESTYLE_DRAG_TYPE, JSON.stringify({ rootId, rel: relPath })); },
+					onDragOver: (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDragOver(true); },
+					onDragLeave: () => setDragOver(false), onDrop: drop, onContextMenu,
+					onClick: () => { if (kind === "dir") { onSelect(relPath); onToggle(); } else onOpen(relPath); },
+					style: { ...indent, cursor: "pointer", borderRadius: 6 },
+					children: [
+						kind === "dir" ? (0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.chevron), children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTriangleRightFill14, { className: clsx(Rows_module_css_default.arrow, open && Rows_module_css_default.arrowOpen) }) }) : (0, react_jsx_runtime.jsx)("span", { style: { width: 16, flex: "none" } }),
+						kind === "dir" ? (0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder), children: open ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {}) }) : (0, react_jsx_runtime.jsx)("span", { style: { flex: "none", width: 16, height: 20, display: "inline-flex", alignItems: "center" }, children: matIcons ? (0, react_jsx_runtime.jsx)("span", { style: { width: 16, height: 16, display: "inline-flex" }, dangerouslySetInnerHTML: { __html: matIcons.file(name) } }) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconBrowseOutline16, {}) }),
+						editing === "rename" ? (0, react_jsx_runtime.jsx)(InlineName, { initial: name, onCancel: () => setEditing(null), onCommit: (next) => { setEditing(null); finish(verbs.rename(relPath, next)); } }) : (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: name }) }),
+						menu
+					]
+				}) }),
+				editing === "newFile" || editing === "newFolder" ? (0, react_jsx_runtime.jsx)("div", { className: "aXa_fs_inline", style: indent, children: (0, react_jsx_runtime.jsx)(InlineName, { onCancel: () => setEditing(null), onCommit: (next) => { const action = editing; setEditing(null); finish(verbs[action](relPath, next)); } }) }) : null
+			] });
+		}
+		function ArxaDirRows({ dir, depth, mode, hideDirs, rootId, verbs, onSelect, selected }) {
 			const [entry, setEntry] = (0, react.useState)(null);
 			const [openDirs, setOpenDirs] = (0, react.useState)({});
 			const [matIcons, setMatIcons] = (0, react.useState)(null);
+			const loadSerial = (0, react.useRef)(0);
+			const alive = (0, react.useRef)(true);
+			(0, react.useEffect)(() => {
+				alive.current = true;
+				return () => { alive.current = false; loadSerial.current++; };
+			}, []);
 			(0, react.useEffect)(() => {
 				let dead = false;
 				void arxaIcons().then((I) => { if (!dead) setMatIcons(I); });
 				return () => { dead = true; };
 			}, []);
 			const load = (0, react.useCallback)(async (theDir) => {
-				setEntry({ status: "loading", dirs: [], files: [] });
+				const serial = ++loadSerial.current;
+				setEntry((previous) => rootId && previous && (previous.status === "ready" || previous.refreshing) ? { ...previous, status: "ready", refreshing: true } : { status: "loading", dirs: [], files: [] });
 				// One fresh token per attempt; a 403 retries ONCE with a newly
 				// minted token (mint-to-use race seen once live 2026-08-31).
 				const mint = async () => {
-					const tokRes = await fetch("/__arxa/artifacts/token", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "tree-read" }) });
+					const req = freestyleTreeRequest(rootId, theDir, "");
+					const tokRes = await fetch("/__arxa/artifacts/token", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(req.tokenBody) });
 					const tokBody = await tokRes.json().catch(() => ({}));
 					if (!tokRes.ok) throw new Error(tokBody.error || ("token " + tokRes.status));
 					return tokBody.token || "";
 				};
 				const list = async (token) => {
-					const res = await fetch("/__arxa/artifacts/tree?dir=" + encodeURIComponent(theDir || "") + "&avt=" + encodeURIComponent(token));
+					const res = await fetch(freestyleTreeRequest(rootId, theDir, token).url);
 					const body = await res.json().catch(() => ({}));
 					return { ok: res.ok, status: res.status, body };
 				};
@@ -4954,12 +5010,18 @@ window.__ModuleLoader__.load({
 					let out = await list(await mint());
 					if (!out.ok && out.status === 403) out = await list(await mint());
 					if (!out.ok) throw new Error(out.body.error || ("tree " + out.status));
-					setEntry({ status: "ready", dirs: out.body.dirs || [], files: out.body.files || [] });
+					if (alive.current && serial === loadSerial.current) setEntry({ status: "ready", refreshing: false, dirs: out.body.dirs || [], files: out.body.files || [] });
 				} catch (e) {
-					setEntry({ status: "error", dirs: [], files: [], error: String((e && e.message) || e) });
+					if (alive.current && serial === loadSerial.current) setEntry((previous) => rootId && previous && (previous.dirs.length > 0 || previous.files.length > 0) ? { ...previous, status: "ready", refreshing: false, refreshError: String((e && e.message) || e) } : { status: "error", dirs: [], files: [], error: String((e && e.message) || e) });
 				}
-			}, []);
+			}, [rootId]);
 			(0, react.useEffect)(() => { void load(dir); }, [dir, load]);
+			(0, react.useEffect)(() => {
+				if (!rootId || typeof window === "undefined") return;
+				const refreshTree = (event) => { if (!event.detail || !event.detail.rootId || event.detail.rootId === rootId) void load(dir); };
+				window.addEventListener("arxa-freestyle-tree-refresh", refreshTree);
+				return () => window.removeEventListener("arxa-freestyle-tree-refresh", refreshTree);
+			}, [dir, load, rootId]);
 			if (!entry) return null;
 			// Rows compensate for the org-subtree container: the container already
 			// carries the depth-1 indent (measured live: file rowX 48 vs dock
@@ -4971,10 +5033,10 @@ window.__ModuleLoader__.load({
 			// Depths 1-9 are untouched, so the measured alignment above stands.
 			const childStyle = (d) => ({ marginLeft: (Math.min(Math.max(0, d - 1), 8) * 14) + "px" });
 			const openFile = (relPath) => {
-				try { window.dispatchEvent(new CustomEvent("arxa-av-open", { detail: { relPath } })); } catch { /* no bridge — ignore */ }
+				try { window.dispatchEvent(new CustomEvent("arxa-av-open", { detail: rootId ? { relPath, rootId } : { relPath } })); } catch { /* no bridge — ignore */ }
 			};
 			const statusRow = (d, text) => (0, react_jsx_runtime.jsx)("div", { style: { ...childStyle(d), fontSize: 12, opacity: 0.6, padding: "2px 8px" }, children: text });
-			const fileRow = (relPath, name, d) => (0, react_jsx_runtime.jsxs)("div", {
+			const fileRow = (relPath, name, d) => rootId ? (0, react_jsx_runtime.jsx)(FreestyleEntryRow, { relPath, name, kind: "file", depth: d, onOpen: openFile, matIcons, rootId, verbs, onSelect, selected, reload: () => load(dir) }, "f:" + relPath) : (0, react_jsx_runtime.jsxs)("div", {
 				className: Rows_module_css_default.projectRow,
 				role: "treeitem",
 				onClick: () => openFile(relPath),
@@ -4991,7 +5053,13 @@ window.__ModuleLoader__.load({
 					(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, style: { opacity: 0.92 }, children: name }) })
 				]
 			}, "f:" + relPath);
-			const dirRow = (sub, d) => (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+			const dirRow = (sub, d) => {
+				const relPath = dir ? dir + "/" + sub : sub;
+				if (rootId) return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+					(0, react_jsx_runtime.jsx)(FreestyleEntryRow, { relPath, name: sub, kind: "dir", depth: d, open: !!openDirs[sub], onToggle: () => setOpenDirs((s) => ({ ...s, [sub]: !s[sub] })), onOpen: openFile, matIcons, rootId, verbs, onSelect, selected, reload: () => load(dir) }),
+					openDirs[sub] ? (0, react_jsx_runtime.jsx)(ArxaDirRows, { dir: relPath, depth: depth + 1, mode, rootId, verbs, onSelect, selected }, "arxa-dir:" + relPath) : null
+				] }, "d:" + sub);
+				return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 				(0, react_jsx_runtime.jsxs)("div", {
 					className: Rows_module_css_default.projectRow,
 					role: "treeitem",
@@ -5008,8 +5076,9 @@ window.__ModuleLoader__.load({
 						(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: sub }) })
 					]
 				}),
-				openDirs[sub] ? (0, react_jsx_runtime.jsx)(ArxaDirRows, { dir: dir ? dir + "/" + sub : sub, depth: depth + 1, mode }, "arxa-dir:" + (dir ? dir + "/" + sub : sub)) : null
+				openDirs[sub] ? (0, react_jsx_runtime.jsx)(ArxaDirRows, { dir: relPath, depth: depth + 1, mode }, "arxa-dir:" + relPath) : null
 			] }, "d:" + sub);
+			};
 			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 				entry.status === "loading" ? statusRow(depth, "…") : null,
 				entry.status === "error" ? statusRow(depth, /no org open/i.test(entry.error || "") ? orgT("files.openHint") : entry.error) : null,
@@ -6010,6 +6079,7 @@ window.__ModuleLoader__.load({
 			"agents.why.service-unavailable": "This engine build does not provide that service.",
 			"agents.why.unavailable": "Not available here.",
 			"hero.guide": "Sessions start inside a workspace — open an organisation, expand to a folder row, hover it and press + to start a session.",
+			"hero.guide.freestyle": "Select a Freestyle folder, then use New session to start a conversation.",
 			"tree.dock.notes": "Notes",
 			"tree.dock.meetings": "Meetings",
 			"tree.dock.account": "Account",
@@ -6102,6 +6172,22 @@ window.__ModuleLoader__.load({
 			"freestyle.archives.revive": "Restore",
 			"freestyle.archives.toTrash": "Move to Trash",
 			"freestyle.move.crossRoot": "Move items within the same Freestyle folder.",
+			"freestyle.menu.publish": "Publish privately to GitHub",
+			"freestyle.publish.unlinked": "Link GitHub first",
+			"freestyle.publish.done": "Published privately to GitHub",
+			"freestyle.confirm.purge": "Delete forever?",
+			"freestyle.confirm.cancel": "Cancel",
+			"freestyle.confirm.forget": "Forget this folder?",
+			"freestyle.confirm.forgetBody": "The folder stays on disk.",
+			"freestyle.confirm.archiveTrash": "Move archived session to Trash?",
+			"freestyle.confirm.entryTrash": "Move this item to Trash?",
+			"freestyle.session.noConversation": "This session has no live conversation.",
+			"freestyle.session.archive": "Archive session",
+			"freestyle.session.parked": "Parked",
+			"freestyle.root.open": "open",
+			"freestyle.root.closed": "closed",
+			"freestyle.actions.aria": "More actions",
+			"freestyle.inline.name": "Name",
 		};
 		const plOver = {
 			"section.workspaces": "Organizacje",
@@ -6249,6 +6335,7 @@ window.__ModuleLoader__.load({
 			"agents.why.service-unavailable": "Ta wersja silnika nie udostępnia tej usługi.",
 			"agents.why.unavailable": "Niedostępne tutaj.",
 			"hero.guide": "Sesje zaczynają się wewnątrz obszaru roboczego — otwórz organizację, rozwiń do wiersza folderu, najedź na niego i naciśnij +, aby rozpocząć sesję.",
+			"hero.guide.freestyle": "Wybierz folder Freestyle, a następnie użyj opcji Nowa sesja, aby rozpocząć rozmowę.",
 			"tree.dock.notes": "Notatki",
 			"tree.dock.meetings": "Spotkania",
 			"tree.dock.account": "Konto",
@@ -6341,6 +6428,22 @@ window.__ModuleLoader__.load({
 			"freestyle.archives.revive": "Przywróć",
 			"freestyle.archives.toTrash": "Przenieś do Kosza",
 			"freestyle.move.crossRoot": "Przenoś elementy tylko w obrębie tego samego folderu Freestyle.",
+			"freestyle.menu.publish": "Opublikuj prywatnie w GitHub",
+			"freestyle.publish.unlinked": "Najpierw połącz GitHub",
+			"freestyle.publish.done": "Opublikowano prywatnie w GitHub",
+			"freestyle.confirm.purge": "Usunąć na zawsze?",
+			"freestyle.confirm.cancel": "Anuluj",
+			"freestyle.confirm.forget": "Zapomnieć ten folder?",
+			"freestyle.confirm.forgetBody": "Folder pozostanie na dysku.",
+			"freestyle.confirm.archiveTrash": "Przenieść zarchiwizowaną sesję do Kosza?",
+			"freestyle.confirm.entryTrash": "Przenieść ten element do Kosza?",
+			"freestyle.session.noConversation": "Ta sesja nie ma aktywnej rozmowy.",
+			"freestyle.session.archive": "Archiwizuj sesję",
+			"freestyle.session.parked": "Zaparkowana",
+			"freestyle.root.open": "otwarty",
+			"freestyle.root.closed": "zamknięty",
+			"freestyle.actions.aria": "Więcej działań",
+			"freestyle.inline.name": "Nazwa",
 		};
 		const frOver = {
 			"section.workspaces": "Organisations",
@@ -6488,6 +6591,7 @@ window.__ModuleLoader__.load({
 			"agents.why.service-unavailable": "Cette version du moteur ne fournit pas ce service.",
 			"agents.why.unavailable": "Indisponible ici.",
 			"hero.guide": "Les sessions démarrent dans un espace de travail — ouvrez une organisation, dépliez jusqu’à une ligne de dossier, survolez-la et appuyez sur + pour démarrer une session.",
+			"hero.guide.freestyle": "Sélectionnez un dossier Freestyle, puis utilisez Nouvelle session pour démarrer une conversation.",
 			"tree.dock.notes": "Notes",
 			"tree.dock.meetings": "Réunions",
 			"tree.dock.account": "Compte",
@@ -6580,6 +6684,22 @@ window.__ModuleLoader__.load({
 			"freestyle.archives.revive": "Restaurer",
 			"freestyle.archives.toTrash": "Déplacer vers la corbeille",
 			"freestyle.move.crossRoot": "Déplacez les éléments dans le même dossier Freestyle.",
+			"freestyle.menu.publish": "Publier en privé sur GitHub",
+			"freestyle.publish.unlinked": "Liez d’abord GitHub",
+			"freestyle.publish.done": "Publié en privé sur GitHub",
+			"freestyle.confirm.purge": "Supprimer définitivement ?",
+			"freestyle.confirm.cancel": "Annuler",
+			"freestyle.confirm.forget": "Oublier ce dossier ?",
+			"freestyle.confirm.forgetBody": "Le dossier restera sur le disque.",
+			"freestyle.confirm.archiveTrash": "Déplacer la session archivée vers la corbeille ?",
+			"freestyle.confirm.entryTrash": "Déplacer cet élément vers la corbeille ?",
+			"freestyle.session.noConversation": "Cette session n’a pas de conversation active.",
+			"freestyle.session.archive": "Archiver la session",
+			"freestyle.session.parked": "En pause",
+			"freestyle.root.open": "ouvert",
+			"freestyle.root.closed": "fermé",
+			"freestyle.actions.aria": "Plus d’actions",
+			"freestyle.inline.name": "Nom",
 		};
 		//#endregion
 		//#region arxa freestyle (F2) — __ARXA_FREESTYLE_REGION__
@@ -6598,8 +6718,11 @@ window.__ModuleLoader__.load({
 					const r = await fetch("/__arxa/freestyle/state", signal ? { signal } : void 0);
 					const j = await r.json();
 					if (signal?.aborted || serial !== refreshSerial) return;
-					state = { ...state, roots: j.roots || [], trash: j.trash || [], ui: j.ui || state.ui };
+					const roots = j.roots || [];
+					const sel = state.sel && roots.some((root) => root.id === state.sel.rootId && root.open) ? state.sel : null;
+					state = { ...state, roots, trash: j.trash || [], ui: j.ui || state.ui, sel };
 					emit();
+					if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("arxa-freestyle-tree-refresh"));
 				} catch { /* keep the last usable state */ }
 			}
 			async function mutate(action, arg) {
@@ -6635,13 +6758,112 @@ window.__ModuleLoader__.load({
 		function freestyleSelectedWorkspace(store = freestyleStore) {
 			if (store.get().ui.activeTab !== "freestyle") return null;
 			const selected = store.selected();
-			return selected ? { kind: "freestyle", ...selected } : null;
+			const root = selected && (store.get().roots || []).find((row) => row.id === selected.rootId);
+			return selected && root && root.open ? { kind: "freestyle", ...selected } : null;
 		}
 		function showWelcomeGate(orgCount, activeTab) {
 			return orgCount === 0 && activeTab !== "freestyle";
 		}
 		function freestyleNotice(error) {
 			window.dispatchEvent(new CustomEvent("arxa-sidebar-notice", { detail: { code: String((error && error.message) || error || "unknown") } }));
+		}
+		const FREESTYLE_DRAG_TYPE = "application/x-arxa-fs";
+		function validFreestyleName(name) {
+			return typeof name === "string" && name.trim() !== "" && !/[\\/]/.test(name);
+		}
+		function freestyleJoin(dir, name) {
+			return dir ? dir.replace(/\/$/, "") + "/" + name : name;
+		}
+		function freestyleParent(rel) {
+			const i = String(rel || "").lastIndexOf("/");
+			return i < 0 ? "" : rel.slice(0, i);
+		}
+		function freestyleTreeRequest(rootId, dir, token) {
+			return {
+				tokenBody: rootId ? { scope: "tree-read", rootId } : { scope: "tree-read" },
+				url: "/__arxa/artifacts/tree?dir=" + encodeURIComponent(dir || "") + "&avt=" + encodeURIComponent(token) + (rootId ? "&root=" + encodeURIComponent(rootId) : "")
+			};
+		}
+		function freestyleMenuActions(kind) {
+			return kind === "dir" ? ["newFile", "newFolder", "newSession", "rename", "duplicate", "reveal", "trash"] : ["rename", "duplicate", "reveal", "trash"];
+		}
+		function dropTargetFor(rel, kind) {
+			return kind === "dir" ? rel : freestyleParent(rel);
+		}
+		function parseFreestyleDrop(raw, rootId, toDir) {
+			let payload;
+			try { payload = JSON.parse(raw); } catch { return { ok: false, reason: "invalid" }; }
+			if (!payload || typeof payload.rel !== "string" || !payload.rootId) return { ok: false, reason: "invalid" };
+			if (payload.rootId !== rootId) return { ok: false, reason: "cross-root" };
+			const rel = payload.rel.replace(/^\/+|\/+$/g, "");
+			const target = String(toDir || "").replace(/^\/+|\/+$/g, "");
+			if (!rel || target === rel || target.startsWith(rel + "/") || freestyleParent(rel) === target) return { ok: false, reason: "self" };
+			return { ok: true, rootId, relPath: rel, toDir: target };
+		}
+		function InlineName({ initial = "", onCommit, onCancel }) {
+			const [value, setValue] = (0, react.useState)(initial);
+			const [invalid, setInvalid] = (0, react.useState)(false);
+			const done = (0, react.useRef)(false);
+			const commit = () => {
+				if (done.current) return;
+				const next = value.trim();
+				if (!validFreestyleName(next)) { setInvalid(true); return; }
+				done.current = true;
+				onCommit(next);
+			};
+			const cancel = () => { if (!done.current) { done.current = true; onCancel(); } };
+			return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Input, {
+				autoFocus: true,
+				value,
+				className: invalid ? "aXa_fs_name aXa_fs_nameBad" : "aXa_fs_name",
+				"aria-label": orgT("freestyle.inline.name"),
+				onChange: (e) => { setValue(e.target.value); setInvalid(false); },
+				onClick: (e) => e.stopPropagation(),
+				onKeyDown: (e) => { e.stopPropagation(); if (e.key === "Enter") { e.preventDefault(); commit(); } else if (e.key === "Escape") { e.preventDefault(); cancel(); } },
+				onBlur: () => value.trim() ? commit() : cancel()
+			});
+		}
+		function FreestyleActionMenu({ items, onSelect, children }) {
+			const [open, setOpen] = (0, react.useState)(false);
+			const [point, setPoint] = (0, react.useState)(null);
+			const showContext = (e) => { e.preventDefault(); e.stopPropagation(); setPoint({ left: e.clientX, top: e.clientY }); setOpen(true); };
+			const anchor = (0, react_jsx_runtime.jsx)("button", { type: "button", className: "aXa_fs_more", "aria-label": orgT("freestyle.actions.aria"), onClick: (e) => { e.stopPropagation(); setPoint(null); setOpen((v) => !v); }, children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconEllipsisOutline16, {}) });
+			const menu = (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {
+				open,
+				onClose: () => setOpen(false),
+				items,
+				onSelect: (id) => { setOpen(false); onSelect(id); },
+				portal: true,
+				anchor,
+				getAnchorRect: point ? () => ({ left: point.left, right: point.left, top: point.top, bottom: point.top, width: 0, height: 0 }) : void 0
+			});
+			return children({ menu, menuOpen: open, onContextMenu: showContext });
+		}
+		function FreestyleConfirmModal({ target, onClose }) {
+			const [busy, setBusy] = (0, react.useState)(false);
+			if (!target) return null;
+			const confirm = async () => {
+				setBusy(true);
+				try {
+					if (target.action === "trash.purge") await freestyleStore.mutate("trash.purge", target.arg);
+					else if (target.action === "archive.trash") await freestyleStore.mutate("archive.trash", target.arg);
+					else await freestyleStore.mutate(target.action, target.arg);
+					setBusy(false);
+					onClose();
+				}
+				catch (e) { freestyleNotice(e); setBusy(false); }
+			};
+			return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Modal, {
+				open: true,
+				onClose: busy ? () => {} : onClose,
+				title: target.title,
+				closeLabel: orgT("freestyle.confirm.cancel"),
+				footer: (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+					(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "ghost", disabled: busy, onClick: onClose, children: orgT("freestyle.confirm.cancel") }),
+					(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "primary", disabled: busy, onClick: confirm, children: target.confirm })
+				] }),
+				children: target.body
+			});
 		}
 		function SidebarTabs({ wide, active, onChange }) {
 			const t = orgT;
@@ -6666,10 +6888,27 @@ window.__ModuleLoader__.load({
 			const t = orgT;
 			const st = useFreestyle();
 			const [menuOpen, setMenuOpen] = (0, react.useState)(false);
+			const [githubLinked, setGithubLinked] = (0, react.useState)(null);
 			(0, react.useEffect)(() => {
 				const controller = new AbortController();
 				void freestyleStore.refresh({ signal: controller.signal });
 				return () => controller.abort();
+			}, []);
+			(0, react.useEffect)(() => {
+				let dead = false;
+				void ORG_POST("github.status").then((r) => { if (!dead) setGithubLinked(!!(r && r.result && r.result.linked && !r.result.relinkRequired)); }).catch(() => { if (!dead) setGithubLinked(false); });
+				return () => { dead = true; };
+			}, []);
+			(0, react.useEffect)(() => {
+				if (typeof EventSource !== "function") return;
+				const events = new EventSource("/__arxa/artifacts/events");
+				events.onmessage = (message) => {
+					try {
+						const detail = JSON.parse(message.data);
+						if (detail && detail.rootId) window.dispatchEvent(new CustomEvent("arxa-freestyle-tree-refresh", { detail: { rootId: detail.rootId } }));
+					} catch { /* malformed watcher event */ }
+				};
+				return () => events.close();
 			}, []);
 			const pickFolder = async (title) => {
 				const r = await fetch("/__arxa/sidebar/pick-folder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }) });
@@ -6705,10 +6944,136 @@ window.__ModuleLoader__.load({
 						anchor: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("freestyle.add"), onClick: () => setMenuOpen((v) => !v), children: "+" })
 					})
 				] }),
-				st.roots.length === 0 ? (0, react_jsx_runtime.jsx)("div", { className: "aXa_fs_empty", children: t("freestyle.empty") }) : (0, react_jsx_runtime.jsx)(FreestyleRoots, { roots: st.roots, trash: st.trash })
+				st.roots.length === 0 ? (0, react_jsx_runtime.jsx)("div", { className: "aXa_fs_empty", children: t("freestyle.empty") }) : null,
+				(0, react_jsx_runtime.jsx)(FreestyleRoots, { roots: st.roots, trash: st.trash, githubLinked })
 			] });
 		}
-		function FreestyleRoots() { return null; }
+		function freestyleRootVerbs(rootId, ask) {
+			const run = (action, arg) => freestyleStore.mutate(action, { rootId, ...arg });
+			return {
+				newFile: (dir, name) => run("file.create", { relPath: freestyleJoin(dir, name) }),
+				newFolder: (dir, name) => run("dir.create", { relPath: freestyleJoin(dir, name) }),
+				rename: (relPath, name) => run("entry.rename", { relPath, name }),
+				duplicate: (relPath) => run("entry.duplicate", { relPath }),
+				trash: (relPath) => run("entry.trash", { relPath }),
+				reveal: (relPath) => run("entry.reveal", { relPath }),
+				newSession: (relDir) => run("session.new", { relDir }),
+				move: (relPath, toDir) => freestyleStore.mutate("entry.move", { rootId, relPath, toDir }),
+				ask
+			};
+		}
+		function freestyleOpenConversation(row) {
+			if (!row || row.dshStatus !== "live") { freestyleNotice(orgT("freestyle.session.noConversation")); return; }
+			const dshId = row.dshSessionId;
+			if (!dshId) { freestyleNotice(orgT("freestyle.session.noConversation")); return; }
+			const open = () => {
+				if (!arxaClientSessions || typeof arxaClientSessions.open !== "function") return false;
+				arxaClientSessions.open(dshId);
+				return true;
+			};
+			if (open()) return;
+			let tries = 0;
+			const timer = setInterval(() => { if (open() || ++tries > 30) clearInterval(timer); }, 100);
+		}
+		function FreestyleSessionRows({ root }) {
+			const rows = [...((root.sessions && root.sessions.active) || []), ...((root.sessions && root.sessions.parked) || [])];
+			return (0, react_jsx_runtime.jsx)(react_jsx_runtime.Fragment, { children: rows.map((row) => (0, react_jsx_runtime.jsx)(FreestyleActionMenu, {
+				items: [{ id: "archive", label: orgT("freestyle.session.archive"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20, { size: 16 }) }],
+				onSelect: () => freestyleStore.mutate("session.archive", { rootId: root.id, id: row.id }).then(() => {
+					if (typeof row.dshSessionId !== "string" || !arxaClientSessions || typeof arxaClientSessions.clear !== "function") return;
+					const snap = arxaClientSessions.list && typeof arxaClientSessions.list.getSnapshot === "function" ? arxaClientSessions.list.getSnapshot() : null;
+					if (snap && snap.current === row.dshSessionId) arxaClientSessions.clear();
+				}).catch(freestyleNotice),
+				children: ({ menu, menuOpen, onContextMenu }) => (0, react_jsx_runtime.jsxs)("div", {
+					className: clsx(Rows_module_css_default.sessionRow, menuOpen && Rows_module_css_default.menuOpen),
+					role: "treeitem",
+					onClick: () => freestyleOpenConversation(row),
+					onContextMenu,
+					children: [
+						(0, react_jsx_runtime.jsx)("span", { className: "aXa_fs_sessionIndent" }),
+						(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconBranchOutline16, {}),
+						(0, react_jsx_runtime.jsxs)("span", { className: Rows_module_css_default.projectText, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: row.name || row.branch || row.id }), row.state === "parked" ? (0, react_jsx_runtime.jsx)("span", { className: "aXa_fs_reason", children: row.parkedReason || orgT("freestyle.session.parked") }) : null] }),
+						row.dshStatus === "live" ? null : (0, react_jsx_runtime.jsx)("span", { className: "aXa_arxaNoConvoDot", title: orgT("freestyle.session.noConversation") }),
+						menu
+					]
+				})
+			}, row.id)) });
+		}
+		function FreestyleRootRow({ root, githubLinked, ask }) {
+			const [renaming, setRenaming] = (0, react.useState)(false);
+			const [creating, setCreating] = (0, react.useState)(null);
+			const [dragOver, setDragOver] = (0, react.useState)(false);
+			const verbs = freestyleRootVerbs(root.id, ask);
+			const selected = freestyleStore.selected();
+			const menuItems = [
+				{ id: "newFile", label: orgT("freestyle.menu.newFile"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconProjectAddOutline16, {}) },
+				{ id: "newFolder", label: orgT("freestyle.menu.newFolder"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {}) },
+				{ id: "newSession", label: orgT("freestyle.menu.newSession"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconNewChatOutline16, {}) },
+				{ id: "rename", label: orgT("freestyle.menu.rename"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconEditOutline16, {}) },
+				{ id: root.open ? "close" : "open", label: orgT(root.open ? "freestyle.menu.close" : "freestyle.menu.open") },
+				{ id: "reveal", label: orgT("freestyle.menu.reveal"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) },
+				{ id: "publish", label: orgT("freestyle.menu.publish") + (githubLinked === false ? " · " + orgT("freestyle.publish.unlinked") : ""), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconBranchOutline16, {}), disabled: githubLinked !== true },
+				{ id: "forget", label: orgT("freestyle.menu.forget"), danger: true }
+			];
+			const onMenu = (id) => {
+				if (id === "newFile" || id === "newFolder") { setCreating(id); return; }
+				if (id === "newSession") { verbs.newSession("").then(freestyleOpenConversation).catch(freestyleNotice); return; }
+				if (id === "rename") { setRenaming(true); return; }
+				if (id === "open" || id === "close") { freestyleStore.mutate("root." + id, { rootId: root.id }).catch(freestyleNotice); return; }
+				if (id === "reveal") { verbs.reveal("").catch(freestyleNotice); return; }
+				if (id === "publish") { const rootId = root.id; freestyleStore.mutate("root.publish", { rootId, visibility: "private" }).then((r) => freestyleNotice(r.repoUrl || orgT("freestyle.publish.done"))).catch(freestyleNotice); return; }
+				if (id === "forget") ask({ action: "root.forget", arg: { rootId: root.id }, title: orgT("freestyle.confirm.forget"), body: orgT("freestyle.confirm.forgetBody"), confirm: orgT("freestyle.menu.forget") });
+			};
+			const drop = (e) => {
+				e.preventDefault(); setDragOver(false);
+				const parsed = parseFreestyleDrop(e.dataTransfer.getData(FREESTYLE_DRAG_TYPE), root.id, "");
+				if (!parsed.ok) { if (parsed.reason === "cross-root") freestyleNotice(orgT("freestyle.move.crossRoot")); return; }
+				verbs.move(parsed.relPath, parsed.toDir).catch(freestyleNotice);
+			};
+			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+				(0, react_jsx_runtime.jsx)(FreestyleActionMenu, { items: menuItems, onSelect: onMenu, children: ({ menu, menuOpen, onContextMenu }) => (0, react_jsx_runtime.jsxs)("div", {
+					className: clsx(Rows_module_css_default.projectRow, selected && selected.rootId === root.id && selected.relDir === "" && Rows_module_css_default.selected, menuOpen && Rows_module_css_default.menuOpen, dragOver && "aXa_fs_dropOn"),
+					role: "treeitem", "aria-expanded": !!root.open, onClick: () => freestyleStore.select(root.id, ""), onContextMenu, onDragOver: (e) => { e.preventDefault(); setDragOver(true); }, onDragLeave: () => setDragOver(false), onDrop: drop,
+					children: [
+						(0, react_jsx_runtime.jsx)("button", { type: "button", className: "aXa_fs_toggle", "aria-label": orgT(root.open ? "freestyle.menu.close" : "freestyle.menu.open"), onClick: (e) => { e.stopPropagation(); freestyleStore.mutate(root.open ? "root.close" : "root.open", { rootId: root.id }).catch(freestyleNotice); }, children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTriangleRightFill14, { className: clsx(Rows_module_css_default.arrow, root.open && Rows_module_css_default.arrowOpen) }) }),
+						(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder), children: root.open ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {}) }),
+						renaming ? (0, react_jsx_runtime.jsx)(InlineName, { initial: root.name, onCancel: () => setRenaming(false), onCommit: (name) => { setRenaming(false); freestyleStore.mutate("root.rename", { rootId: root.id, name }).catch(freestyleNotice); } }) : (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.title, "aXa_fs_rootName"), children: root.name }) }),
+						(0, react_jsx_runtime.jsx)("span", { className: "aXa_fs_pill", children: orgT(root.open ? "freestyle.root.open" : "freestyle.root.closed") }), menu
+					]
+				}) }),
+				creating ? (0, react_jsx_runtime.jsx)("div", { className: "aXa_fs_inline", children: (0, react_jsx_runtime.jsx)(InlineName, { onCancel: () => setCreating(null), onCommit: (name) => { const kind = creating; setCreating(null); verbs[kind]("", name).catch(freestyleNotice); } }) }) : null,
+				root.open ? (0, react_jsx_runtime.jsxs)("div", { className: "aXa_fs_tree", children: [
+					(0, react_jsx_runtime.jsx)(ArxaDirRows, { dir: "", depth: 1, mode: "full", rootId: root.id, verbs, onSelect: (relDir) => freestyleStore.select(root.id, relDir), selected: selected && selected.rootId === root.id ? selected.relDir : null }),
+					(0, react_jsx_runtime.jsx)(FreestyleSessionRows, { root })
+				] }) : null
+			] });
+		}
+		function FreestyleArchivesRows({ roots, ask }) {
+			const [open, setOpen] = (0, react.useState)(false);
+			const rows = roots.flatMap((root) => (((root.sessions && root.sessions.archived) || []).map((row) => ({ root, row }))));
+			return (0, react_jsx_runtime.jsxs)("div", { className: "aXa_fs_section", children: [
+				(0, react_jsx_runtime.jsx)("button", { type: "button", className: "aXa_fs_disclosure", "aria-expanded": open, onClick: () => setOpen((v) => !v), children: orgT("freestyle.archives.section") + " (" + rows.length + ")" }),
+				open && rows.length === 0 ? (0, react_jsx_runtime.jsx)("div", { className: "aXa_fs_subtle", children: orgT("freestyle.archives.empty") }) : null,
+				open ? rows.map(({ root, row }) => (0, react_jsx_runtime.jsx)(FreestyleActionMenu, { items: [{ id: "revive", label: orgT("freestyle.archives.revive") }, { id: "trash", label: orgT("freestyle.archives.toTrash"), danger: true }], onSelect: (id) => { if (id === "revive") freestyleStore.mutate("archive.revive", { rootId: root.id, id: row.id }).catch(freestyleNotice); else ask({ action: "archive.trash", arg: { rootId: root.id, id: row.id }, title: orgT("freestyle.confirm.archiveTrash"), body: root.name + " · " + (row.name || row.id), confirm: orgT("freestyle.archives.toTrash") }); }, children: ({ menu, onContextMenu }) => (0, react_jsx_runtime.jsxs)("div", { className: Rows_module_css_default.sessionRow, "data-root-id": root.id, onContextMenu, children: [(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20, { size: 16 }), (0, react_jsx_runtime.jsxs)("span", { className: Rows_module_css_default.projectText, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: row.name || row.id }), (0, react_jsx_runtime.jsx)("span", { className: "aXa_fs_meta", children: root.name })] }), menu] }) }, root.id + ":" + row.id)) : null
+			] });
+		}
+		function FreestyleTrashRows({ trash, roots, ask }) {
+			const [open, setOpen] = (0, react.useState)(false);
+			return (0, react_jsx_runtime.jsxs)("div", { className: "aXa_fs_section", children: [
+				(0, react_jsx_runtime.jsx)("button", { type: "button", className: "aXa_fs_disclosure", "aria-expanded": open, onClick: () => setOpen((v) => !v), children: orgT("freestyle.trash.section") + " (" + trash.length + ")" }),
+				open && trash.length === 0 ? (0, react_jsx_runtime.jsx)("div", { className: "aXa_fs_subtle", children: orgT("freestyle.trash.empty") }) : null,
+				open ? trash.map((row) => { const root = roots.find((item) => item.id === row.rootId); const rootName = root ? root.name : row.rootId; return (0, react_jsx_runtime.jsx)(FreestyleActionMenu, { items: [{ id: "restore", label: orgT("freestyle.trash.restore") }, { id: "purge", label: orgT("freestyle.trash.purge"), danger: true }], onSelect: (id) => { if (id === "restore") freestyleStore.mutate("trash.restore", { rootId: row.rootId, entryId: row.id }).catch(freestyleNotice); else ask({ action: "trash.purge", arg: { rootId: row.rootId, entryId: row.id }, title: orgT("freestyle.confirm.purge"), body: rootName + " · " + (row.name || row.relPath), confirm: orgT("freestyle.trash.purge") }); }, children: ({ menu, onContextMenu }) => (0, react_jsx_runtime.jsxs)("div", { className: Rows_module_css_default.projectRow, "data-root-id": row.rootId, onContextMenu, children: [(0, react_jsx_runtime.jsx)(row.kind === "session" ? _deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20 : _deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, { size: 16 }), (0, react_jsx_runtime.jsxs)("span", { className: Rows_module_css_default.projectText, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: row.name || row.relPath }), (0, react_jsx_runtime.jsx)("span", { className: "aXa_fs_meta", children: rootName })] }), menu] }) }, row.rootId + ":" + row.id); }) : null
+			] });
+		}
+		function FreestyleRoots({ roots, trash, githubLinked }) {
+			const [confirmTarget, setConfirmTarget] = (0, react.useState)(null);
+			return (0, react_jsx_runtime.jsxs)("div", { className: "aXa_fs_roots", role: "tree", children: [
+				roots.map((root) => (0, react_jsx_runtime.jsx)(FreestyleRootRow, { root, githubLinked, ask: setConfirmTarget }, root.id)),
+				(0, react_jsx_runtime.jsx)(FreestyleArchivesRows, { roots, ask: setConfirmTarget }),
+				(0, react_jsx_runtime.jsx)(FreestyleTrashRows, { trash, roots, ask: setConfirmTarget }),
+				(0, react_jsx_runtime.jsx)(FreestyleConfirmModal, { target: confirmTarget, onClose: () => setConfirmTarget(null) })
+			] });
+		}
 		function SidebarBrowser(props) {
 			orgT = props.t;
 			const fsState = useFreestyle();
@@ -6793,12 +7158,13 @@ window.__ModuleLoader__.load({
 			// workspace resident blank session on slow boots AFTER the bounded
 			// re-assert window — the rider must lose every race, not just fast
 			// ones. Invariant: with no user/resume open (currentSessionId null)
-			// the only legal bound session is an OPEN org one. Enforced on every
-			// store bump, forever; org/user opens win via the same guards.
+			// legal bound sessions belong to an open org or Freestyle root.
+			// Refresh both registries before enforcement so new sessions can land.
 			const orgDshIds = () => {
 				const ids = new Set();
 				const st = orgStore.get();
 				for (const o of st.orgs || []) for (const x of o.sessions || []) if (x.dshSessionId && x.state === "open") ids.add(x.dshSessionId);
+				for (const root of freestyleStore.get().roots || []) for (const x of [...(root.sessions?.active || []), ...(root.sessions?.parked || [])]) if (x.dshSessionId) ids.add(x.dshSessionId);
 				return ids;
 			};
 			const enforceNoRiders = () => {
@@ -6811,10 +7177,14 @@ window.__ModuleLoader__.load({
 			};
 			const liveRefresh = () => {
 				if (liveRefreshTimer) return;
-				liveRefreshTimer = window.setTimeout(() => { liveRefreshTimer = 0; orgStore.refresh().then(enforceNoRiders).catch(() => {}); }, 250);
+				liveRefreshTimer = window.setTimeout(() => { liveRefreshTimer = 0; Promise.all([orgStore.refresh(), freestyleStore.refresh()]).then(enforceNoRiders).catch(() => {}); }, 250);
 			};
-			try { ctx.get("workspaces").list.subscribe(() => { enforceNoRiders(); liveRefresh(); }) } catch { /* degrade */ }
-			try { if (arxaClientSessions && typeof arxaClientSessions.list.subscribe === "function") arxaClientSessions.list.subscribe(() => { enforceNoRiders(); liveRefresh(); }) } catch { /* degrade */ }
+			ctx.effect(() => {
+				const subscriptions = [];
+				try { subscriptions.push(ctx.get("workspaces").list.subscribe(liveRefresh)); } catch { /* degrade */ }
+				try { if (arxaClientSessions && typeof arxaClientSessions.list.subscribe === "function") subscriptions.push(arxaClientSessions.list.subscribe(liveRefresh)); } catch { /* degrade */ }
+				return () => { if (liveRefreshTimer) window.clearTimeout(liveRefreshTimer); liveRefreshTimer = 0; for (const release of subscriptions) if (typeof release === "function") release(); };
+			}, "arxa-sidebar-workspace: live registry refresh");
 			const browserInjected = () => ({
 				// use* hooks are pinned in OrgBrowser — see the region snippet.
 				startSession: (workspaceId) => {

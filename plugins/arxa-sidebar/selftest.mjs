@@ -249,7 +249,7 @@ check('content area: a boot with nothing to resume clears the selection — stra
 check('content area: the boot clear SURVIVES dsh startup reconnect (workspaces.startInitialSelection re-opens the recent workspace blank session over an early clear) — bounded re-assert, org/user opens win',
   client.includes('reassertEmpty') && client.includes('workspaces.startInitialSelection') && client.includes('if (orgIds.has(cur)) return;') && client.includes('if (tries > 20) return;'))
 check('content area (live, once-and-for-all): the rider kill is condition-driven, not a stopwatch — any current session that is not an OPEN org one is cleared on every store bump while no user/resume open owns the content (slow-boot stranding loses every race)',
-  client.includes('enforceNoRiders') && client.includes('x.state === "open"') && client.includes('orgStore.refresh().then(enforceNoRiders)'))
+  client.includes('enforceNoRiders') && client.includes('x.state === "open"') && client.includes('root.sessions?.active') && client.includes('root.sessions?.parked') && client.includes('Promise.all([orgStore.refresh(), freestyleStore.refresh()]).then(enforceNoRiders)'))
 check('content area (live): cross-client archive/rename reach every client without waiting on the 5s poll — the org view refreshes on dsh store bumps (sig-gated refresh makes repeats a no-op)',
   client.includes('ctx.get("workspaces").list.subscribe') && client.includes('arxaClientSessions.list.subscribe') && client.includes('orgStore.refresh()'))
 check('content area: the hero workspace picker is replaced by arxa guidance (raw engine sessions cannot be born from the hero)',
@@ -369,8 +369,8 @@ check('S1/Q2: the mint reads the CROSS-REGISTRY aggregate — the id becomes the
       && !card.includes('project-session-pr-pending: run control'))
   check('S3/Q8: the PR handlers resolve the repo from the session, not from org.json',
     card.includes('const repoFor = async (s) =>')
-      && card.includes("s?.origin === 'project' && typeof s?.repoPath === 'string'")
-      && card.includes('seatManifest(s.repoPath)')
+      && card.includes('const sessionRepoPath = (s, sid) =>')
+      && card.includes("const seat = seatManifest(sessionRepoPath(s, s?.id ?? '<unknown>'))")
       && !card.includes('project-session-pr-pending: PR flow'))
   // The clear commit is made AFTER the ahead/behind read, so nothing upstream
   // pushes it — leaving it would swap a stale error for a repo permanently 1
@@ -639,7 +639,7 @@ check('files: NO fixed depth ceiling — folders keep expanding however deep (a 
 check('files: the INDENT is what is bounded, not the tree — the step stops at 8 so a deep row keeps its name column',
   client.includes('marginLeft: (Math.min(Math.max(0, d - 1), 8) * 14) + "px"'))
 check('files: lazy tree route + one fresh-token 403 retry + arxa-av-open bridge unchanged',
-  client.includes('"/__arxa/artifacts/tree?dir="') && client.includes('scope: "tree-read"') && client.includes('window.dispatchEvent(new CustomEvent("arxa-av-open", { detail: { relPath } }))'))
+  client.includes('"/__arxa/artifacts/tree?dir="') && client.includes('scope: "tree-read"') && client.includes('detail: rootId ? { relPath, rootId } : { relPath }'))
 check('files: expanding an org row opens the org (tree-read rides the open handle) + human hint when it is not open',
   client.includes('if (isOrg && !open) orgStore.mutate("org.open", { orgId: d.orgId }).catch(() => {});') && client.includes('/no org open/i.test(entry.error || "")') && client.includes('"files.openHint": "Open this organisation to browse its files"') && client.includes('"files.openHint": "Otwórz tę organizację, aby przeglądać jej pliki"') && client.includes('"files.openHint": "Ouvrez cette organisation pour parcourir ses fichiers"'))
 check('trash: restore/delete icon buttons are gapped (flex span, 12px user-tuned)',
