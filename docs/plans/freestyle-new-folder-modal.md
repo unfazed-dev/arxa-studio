@@ -70,3 +70,10 @@ duplication of the generic `mutate(target.action, target.arg)` line and are gone
   rendered on both tabs.
 - The picker itself (`/__arxa/sidebar/pick-folder`, osascript `choose folder`) is
   shared with org creation and was not touched.
+
+## Installed
+
+- Commit `cb54244` on `main`, pushed. CI all green.
+- Sidecar 241.1 MB, payload sha12 `e5a77b90169b`; bundled binary `95ee8f3cd5204f44` matches the packed sidecar.
+- Installed engine `~/.arxa/engine/e5a77b90169b` — `client.js` sha `c6369e8ef2fd` byte-identical to the repo, zero `window.prompt(` calls, modal pin present. Only engine dir on disk (old `267abe53b73d` and a dead `.tmp-77537` pruned). LaunchAgent count 1, state route answering on 7891.
+- Rollback: `/Applications/Arxa Studio.app.bak`.
