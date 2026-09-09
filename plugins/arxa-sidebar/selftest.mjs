@@ -658,8 +658,11 @@ check('trash: restore/delete icon buttons are gapped (flex span, 12px user-tuned
 // ---- D84: the trash reads exactly like the tree above it ----
 check('trash: header row IS an org row (projectRow class, treeitem, 600 weight, no kebab)',
   client.includes('style: { marginLeft: 4, marginTop: 4, borderRadius: 6, cursor: "pointer", fontWeight: 600 }') && client.includes('"aria-expanded": open,') && client.includes('className: Rows_module_css_default.title, children: t("trash.section")') && !client.includes('borderRadius: 8, padding: "0 6px"'))
-check('trash: header count is the plain org-row count (11px, no pill)',
-  client.split('fontSize: 11, opacity: 0.55, flex: "none", marginRight: 4').length === 4)
+// Five now, not three: the Freestyle Archives and Trash headers were rebuilt on
+// this same org header row, so they carry the same count span. The pin still
+// catches a count rendered any OTHER way — a pill, a different size.
+check('trash: header count is the plain org-row count (11px, no pill) — org x3 + freestyle x2',
+  client.split('fontSize: 11, opacity: 0.55, flex: "none", marginRight: 4').length === 6)
 check('trash: entries are stock project rows at the depth-1 margin (18px, 14px title class)',
   client.includes('style: { marginLeft: 18, marginTop: 2, cursor: "default" }') && client.includes('className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, title: e.entryId'))
 check('trash: group labels are glyph-free 10px captions (no uppercase TRASHED wording anywhere)',

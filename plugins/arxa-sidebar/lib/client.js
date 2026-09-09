@@ -4340,8 +4340,12 @@ window.__ModuleLoader__.load({
 				+ ".aXa_fs_tabsRail{height:auto;flex-direction:column;border-bottom:0}.aXa_fs_tabsRail .aXa_fs_tab{width:40px;height:40px;flex:none;padding:0}.aXa_fs_tabsRail .aXa_fs_tabOn:after{inset:8px auto 8px 0;width:2px;height:auto;border-radius:0 1px 1px 0}"
 				+ ".aXa_fs_body{display:flex;min-height:0;flex:1;flex-direction:column}.aXa_fs_head{display:flex;align-items:center;justify-content:space-between;height:40px;padding:0 10px 0 14px;border-bottom:.5px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-tertiary);font:var(--dsw-font-xs-13)}.aXa_fs_empty{padding:18px 14px;color:var(--dsw-alias-label-tertiary);font:var(--dsw-font-xs-13)}"
 				+ ".aXa_fs_roots{min-height:0;overflow:auto;padding:6px 4px}.aXa_fs_tree{padding-left:10px}"
-				+ ".aXa_fs_rootName{font-weight:600}.aXa_fs_sessionIndent{width:22px;flex:none}.aXa_fs_reason,.aXa_fs_meta{display:block;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-caption);font-size:10px}.aXa_fs_toggle{padding:0;border:0;background:transparent;color:inherit;cursor:pointer}.aXa_fs_inline{display:flex;align-items:center;min-height:28px;padding:0 8px 0 30px}.aXa_fs_name{min-width:0;flex:1;height:24px}.aXa_fs_nameBad{outline:1px solid var(--dsw-alias-label-error)}.aXa_fs_dropOn{box-shadow:inset 0 0 0 1px var(--dsw-alias-state-business-primary);background:var(--dsw-alias-interactive-bg-hover)}"
-				+ ".aXa_fs_section{margin-top:6px;border-top:.5px solid var(--dsw-alias-border-l2);padding-top:4px}.aXa_fs_disclosure{display:flex;align-items:center;gap:6px;width:100%;padding:6px 10px;border:0;background:transparent;color:var(--dsw-alias-label-tertiary);font:var(--dsw-font-xs-13);text-align:left;cursor:pointer}.aXa_fs_disclosure:hover{color:var(--dsw-alias-label-primary)}.aXa_fs_subtle{padding:4px 12px;color:var(--dsw-alias-label-caption);font:var(--dsw-font-xs-13)}"
+				+ ".aXa_fs_rootName{font-weight:600}.aXa_fs_reason,.aXa_fs_meta{display:block;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-caption);font-size:10px}.aXa_fs_toggle{padding:0;border:0;background:transparent;color:inherit;cursor:pointer}.aXa_fs_inline{display:flex;align-items:center;min-height:28px;padding:0 8px 0 30px}.aXa_fs_name{min-width:0;flex:1;height:24px}.aXa_fs_nameBad{outline:1px solid var(--dsw-alias-label-error)}.aXa_fs_dropOn{box-shadow:inset 0 0 0 1px var(--dsw-alias-state-business-primary);background:var(--dsw-alias-interactive-bg-hover)}"
+				// The Freestyle section headers, entry rows and empty states now carry
+				// the stock Rows classes and the Organisations rows' inline styles, so
+				// aXa_fs_section / aXa_fs_disclosure / aXa_fs_subtle / aXa_fs_sessionIndent
+				// have no markup left to style.
+				+ ""
 				+ ".uV2eYG_root:not(.uV2eYG_hero) [data-arxa-preset-corner]{display:none}"
 				+ ".uV2eYG_hero [data-composer-card] :is(.uV2eYG_input,.uV2eYG_mirror,.uV2eYG_backdrop){box-sizing:border-box;padding-right:var(--arxa-preset-inset,120px)}";
 			document.head.appendChild(tag);
@@ -7179,7 +7183,13 @@ window.__ModuleLoader__.load({
 				})
 			});
 			return (0, react_jsx_runtime.jsxs)("div", { role: "tablist", className: "aXa_fs_tabs" + (wide ? "" : " aXa_fs_tabsRail"), children: [
-				tab("org", t("freestyle.tab.org"), _deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16),
+				// Each tab wears the glyph its own rows wear. Organisations gets
+				// OrgGlyph — "the building mark every org surface shares", per its
+				// own definition, already on the org tree row and the trash org
+				// group. It used to be an open folder, which put two near-identical
+				// folder icons side by side and left neither tab naming its content.
+				// Freestyle keeps the folder: folders are literally what it lists.
+				tab("org", t("freestyle.tab.org"), OrgGlyph),
 				tab("freestyle", t("freestyle.tab.freestyle"), _deepseek_ai_dsh_client_ui_primitives.IconFolderClose16)
 			] });
 		}
@@ -7337,9 +7347,13 @@ window.__ModuleLoader__.load({
 					role: "treeitem",
 					onClick: () => freestyleOpenConversation(row),
 					onContextMenu,
+					// Indent the way the Organisations entry rows do — an inline
+					// marginLeft, not a hand-rolled 22px spacer span. The icon goes in
+					// the stock 16x20 slot so it lines up with every other row glyph;
+					// bare, it sat at its own intrinsic size against the text.
+					style: { marginLeft: 18, marginTop: 2 },
 					children: [
-						(0, react_jsx_runtime.jsx)("span", { className: "aXa_fs_sessionIndent" }),
-						(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconBranchOutline16, {}),
+						(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.slot, children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconBranchOutline16, {}) }),
 						(0, react_jsx_runtime.jsxs)("span", { className: Rows_module_css_default.projectText, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: row.name || row.branch || row.id }), row.state === "parked" ? (0, react_jsx_runtime.jsx)("span", { className: "aXa_fs_reason", children: row.parkedReason || orgT("freestyle.session.parked") }) : null] }),
 						row.dshStatus === "live" ? null : (0, react_jsx_runtime.jsx)("span", { className: "aXa_arxaNoConvoDot", title: orgT("freestyle.session.noConversation") }),
 						menu
@@ -7383,12 +7397,16 @@ window.__ModuleLoader__.load({
 					className: clsx(Rows_module_css_default.projectRow, selected && selected.rootId === root.id && selected.relDir === "" && Rows_module_css_default.selected, menuOpen && Rows_module_css_default.menuOpen, dragOver && "aXa_fs_dropOn"),
 					role: "treeitem", "aria-expanded": !!root.open, onClick: () => freestyleStore.select(root.id, ""), onContextMenu, onDragOver: (e) => { e.preventDefault(); setDragOver(true); }, onDragLeave: () => setDragOver(false), onDrop: drop,
 					children: [
-						// Rows.slot for the 16x20 box the org rows use, but NOT Rows.chevron:
-						// the stock chevron is display:none until its row is hovered, because
-						// on an org row it swaps in for the folder icon. Freestyle's arrow is
-						// a persistent control that opens and closes the root, so it stays.
-						(0, react_jsx_runtime.jsx)("button", { type: "button", className: clsx(Rows_module_css_default.slot, "aXa_fs_toggle"), "aria-label": orgT(root.open ? "freestyle.menu.close" : "freestyle.menu.open"), onClick: (e) => { e.stopPropagation(); freestyleStore.mutate(root.open ? "root.close" : "root.open", { rootId: root.id }).catch(freestyleNotice); }, children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTriangleRightFill14, { className: clsx(Rows_module_css_default.arrow, root.open && Rows_module_css_default.arrowOpen) }) }),
+						// Folder slot first, chevron slot second — the org row order. Stock
+						// CSS swaps them on hover (`.projectRow:hover .folder{display:none}`
+						// / `.projectRow:hover .chevron{display:inline-flex}`), so one 16x20
+						// box shows one glyph. The old order put the arrow in its OWN box
+						// ahead of the folder, making every Freestyle row a slot wider than
+						// its Organisations counterpart. The arrow stays a <button> so the
+						// hover-revealed chevron is still clickable; the row's own click
+						// selects, and the context menu carries open/close for the keyboard.
 						(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder), children: root.open ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {}) }),
+						(0, react_jsx_runtime.jsx)("button", { type: "button", className: clsx(Rows_module_css_default.slot, Rows_module_css_default.chevron, "aXa_fs_toggle"), "aria-label": orgT(root.open ? "freestyle.menu.close" : "freestyle.menu.open"), onClick: (e) => { e.stopPropagation(); freestyleStore.mutate(root.open ? "root.close" : "root.open", { rootId: root.id }).catch(freestyleNotice); }, children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTriangleRightFill14, { className: clsx(Rows_module_css_default.arrow, root.open && Rows_module_css_default.arrowOpen) }) }),
 						renaming ? (0, react_jsx_runtime.jsx)(InlineName, { initial: root.name, onCancel: () => setRenaming(false), onCommit: (name) => { setRenaming(false); freestyleStore.mutate("root.rename", { rootId: root.id, name }).catch(freestyleNotice); } }) : (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.title, "aXa_fs_rootName"), children: root.name }) }),
 						menu
 					]
@@ -7403,24 +7421,52 @@ window.__ModuleLoader__.load({
 		function FreestyleArchivesRows({ roots, ask }) {
 			const [open, setOpen] = (0, react.useState)(false);
 			const rows = roots.flatMap((root) => (((root.sessions && root.sessions.archived) || []).map((row) => ({ root, row }))));
-			return (0, react_jsx_runtime.jsxs)("div", { className: "aXa_fs_section", children: [
-				(0, react_jsx_runtime.jsxs)("button", { type: "button", className: "aXa_fs_disclosure", "aria-expanded": open, onClick: () => setOpen((v) => !v), children: [
-					(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.slot, children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20, { size: 16 }) }),
-					orgT("freestyle.archives.section")
-				] }),
-				open && rows.length === 0 ? (0, react_jsx_runtime.jsx)("div", { className: "aXa_fs_subtle", children: orgT("freestyle.archives.empty") }) : null,
-				open ? rows.map(({ root, row }) => (0, react_jsx_runtime.jsx)(FreestyleActionMenu, { items: [{ id: "revive", label: orgT("freestyle.archives.revive") }, { id: "trash", label: orgT("freestyle.archives.toTrash"), danger: true }], onSelect: (id) => { if (id === "revive") freestyleStore.mutate("archive.revive", { rootId: root.id, id: row.id }).catch(freestyleNotice); else ask({ action: "archive.trash", arg: { rootId: root.id, id: row.id }, title: orgT("freestyle.confirm.archiveTrash"), body: root.name + " · " + (row.name || row.id), confirm: orgT("freestyle.archives.toTrash") }); }, children: ({ menu, menuOpen, onContextMenu }) => (0, react_jsx_runtime.jsxs)("div", { className: clsx(Rows_module_css_default.sessionRow, menuOpen && Rows_module_css_default.menuOpen), "data-root-id": root.id, onContextMenu, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.slot, children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20, { size: 16 }) }), (0, react_jsx_runtime.jsxs)("span", { className: Rows_module_css_default.projectText, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: row.name || row.id }), (0, react_jsx_runtime.jsx)("span", { className: "aXa_fs_meta", children: root.name })] }), menu] }) }, root.id + ":" + row.id)) : null
+			// Section header, copied from the Organisations Archives/Trash headers:
+			// a projectRow whose folder slot swaps to the chevron on hover. The
+			// aXa_fs_disclosure button it replaces was a different element with its
+			// own CSS, which is why the two tabs never lined up. tabIndex/onKeyDown
+			// come across too — a div has none of a button's keyboard activation.
+			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+				(0, react_jsx_runtime.jsxs)("div", {
+					className: Rows_module_css_default.projectRow,
+					role: "treeitem",
+					"aria-expanded": open,
+					tabIndex: 0,
+					onClick: () => setOpen((v) => !v),
+					onKeyDown: (e) => { if (e.key === "Enter" || e.key === " ") setOpen((v) => !v); },
+					style: { marginLeft: 4, marginTop: 4, borderRadius: 6, cursor: "pointer", fontWeight: 600 },
+					children: [
+						(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder), children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20, { size: 16 }) }),
+						(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.chevron), children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTriangleRightFill14, { className: clsx(Rows_module_css_default.arrow, open && Rows_module_css_default.arrowOpen) }) }),
+						(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: orgT("freestyle.archives.section") }) }),
+						rows.length > 0 ? (0, react_jsx_runtime.jsx)("span", { style: { fontSize: 11, opacity: 0.55, flex: "none", marginRight: 4 }, children: String(rows.length) }) : null
+					]
+				}),
+				open && rows.length === 0 ? (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, color: "var(--dsw-alias-label-tertiary)", padding: "4px 8px 2px 26px" }, children: orgT("freestyle.archives.empty") }) : null,
+				open ? rows.map(({ root, row }) => (0, react_jsx_runtime.jsx)(FreestyleActionMenu, { items: [{ id: "revive", label: orgT("freestyle.archives.revive") }, { id: "trash", label: orgT("freestyle.archives.toTrash"), danger: true }], onSelect: (id) => { if (id === "revive") freestyleStore.mutate("archive.revive", { rootId: root.id, id: row.id }).catch(freestyleNotice); else ask({ action: "archive.trash", arg: { rootId: root.id, id: row.id }, title: orgT("freestyle.confirm.archiveTrash"), body: root.name + " · " + (row.name || row.id), confirm: orgT("freestyle.archives.toTrash") }); }, children: ({ menu, menuOpen, onContextMenu }) => (0, react_jsx_runtime.jsxs)("div", { className: clsx(Rows_module_css_default.projectRow, menuOpen && Rows_module_css_default.menuOpen), style: { marginLeft: 18, marginTop: 2 }, "data-root-id": root.id, onContextMenu, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.slot, children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20, { size: 16 }) }), (0, react_jsx_runtime.jsxs)("span", { className: Rows_module_css_default.projectText, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: row.name || row.id }), (0, react_jsx_runtime.jsx)("span", { className: "aXa_fs_meta", children: root.name })] }), menu] }) }, root.id + ":" + row.id)) : null
 			] });
 		}
 		function FreestyleTrashRows({ trash, roots, ask }) {
 			const [open, setOpen] = (0, react.useState)(false);
-			return (0, react_jsx_runtime.jsxs)("div", { className: "aXa_fs_section", children: [
-				(0, react_jsx_runtime.jsxs)("button", { type: "button", className: "aXa_fs_disclosure", "aria-expanded": open, onClick: () => setOpen((v) => !v), children: [
-					(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.slot, children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}) }),
-					orgT("freestyle.trash.section")
-				] }),
-				open && trash.length === 0 ? (0, react_jsx_runtime.jsx)("div", { className: "aXa_fs_subtle", children: orgT("freestyle.trash.empty") }) : null,
-				open ? trash.map((row) => { const root = roots.find((item) => item.id === row.rootId); const rootName = root ? root.name : row.rootId; return (0, react_jsx_runtime.jsx)(FreestyleActionMenu, { items: [{ id: "restore", label: orgT("freestyle.trash.restore") }, { id: "purge", label: orgT("freestyle.trash.purge"), danger: true }], onSelect: (id) => { if (id === "restore") freestyleStore.mutate("trash.restore", { rootId: row.rootId, entryId: row.id }).catch(freestyleNotice); else ask({ action: "trash.purge", arg: { rootId: row.rootId, entryId: row.id }, title: orgT("freestyle.confirm.purge"), body: rootName + " · " + (row.name || row.relPath), confirm: orgT("freestyle.trash.purge") }); }, children: ({ menu, menuOpen, onContextMenu }) => (0, react_jsx_runtime.jsxs)("div", { className: clsx(Rows_module_css_default.projectRow, menuOpen && Rows_module_css_default.menuOpen), "data-root-id": row.rootId, onContextMenu, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.slot, children: (0, react_jsx_runtime.jsx)(row.kind === "session" ? _deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20 : _deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, { size: 16 }) }), (0, react_jsx_runtime.jsxs)("span", { className: Rows_module_css_default.projectText, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: row.name || row.relPath }), (0, react_jsx_runtime.jsx)("span", { className: "aXa_fs_meta", children: rootName })] }), menu] }) }, row.rootId + ":" + row.id); }) : null
+			// Same header grammar as Archives above and as the Organisations Trash.
+			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+				(0, react_jsx_runtime.jsxs)("div", {
+					className: Rows_module_css_default.projectRow,
+					role: "treeitem",
+					"aria-expanded": open,
+					tabIndex: 0,
+					onClick: () => setOpen((v) => !v),
+					onKeyDown: (e) => { if (e.key === "Enter" || e.key === " ") setOpen((v) => !v); },
+					style: { marginLeft: 4, marginTop: 4, borderRadius: 6, cursor: "pointer", fontWeight: 600 },
+					children: [
+						(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder), children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}) }),
+						(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.chevron), children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTriangleRightFill14, { className: clsx(Rows_module_css_default.arrow, open && Rows_module_css_default.arrowOpen) }) }),
+						(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: orgT("freestyle.trash.section") }) }),
+						trash.length > 0 ? (0, react_jsx_runtime.jsx)("span", { style: { fontSize: 11, opacity: 0.55, flex: "none", marginRight: 4 }, children: String(trash.length) }) : null
+					]
+				}),
+				open && trash.length === 0 ? (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, color: "var(--dsw-alias-label-tertiary)", padding: "4px 8px 2px 26px" }, children: orgT("freestyle.trash.empty") }) : null,
+				open ? trash.map((row) => { const root = roots.find((item) => item.id === row.rootId); const rootName = root ? root.name : row.rootId; return (0, react_jsx_runtime.jsx)(FreestyleActionMenu, { items: [{ id: "restore", label: orgT("freestyle.trash.restore") }, { id: "purge", label: orgT("freestyle.trash.purge"), danger: true }], onSelect: (id) => { if (id === "restore") freestyleStore.mutate("trash.restore", { rootId: row.rootId, entryId: row.id }).catch(freestyleNotice); else ask({ action: "trash.purge", arg: { rootId: row.rootId, entryId: row.id }, title: orgT("freestyle.confirm.purge"), body: rootName + " · " + (row.name || row.relPath), confirm: orgT("freestyle.trash.purge") }); }, children: ({ menu, menuOpen, onContextMenu }) => (0, react_jsx_runtime.jsxs)("div", { className: clsx(Rows_module_css_default.projectRow, menuOpen && Rows_module_css_default.menuOpen), style: { marginLeft: 18, marginTop: 2 }, "data-root-id": row.rootId, onContextMenu, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.slot, children: (0, react_jsx_runtime.jsx)(row.kind === "session" ? _deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20 : _deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, { size: 16 }) }), (0, react_jsx_runtime.jsxs)("span", { className: Rows_module_css_default.projectText, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: row.name || row.relPath }), (0, react_jsx_runtime.jsx)("span", { className: "aXa_fs_meta", children: rootName })] }), menu] }) }, row.rootId + ":" + row.id); }) : null
 			] });
 		}
 		function FreestyleRoots({ roots, trash, githubLinked }) {
