@@ -7,7 +7,7 @@ import { initPlainRepo, pushRepoAsync, setOrigin } from '../../git-workspace/lib
 import { protectionPayload, settingsPayload, writeFrameFiles } from '../../git-workspace/lib/frame.js'
 import { wipCommit } from '../../git-workspace/lib/commits.js'
 
-const EMPTY = () => ({ roots: [], ui: { activeTab: 'org' } })
+const EMPTY = () => ({ roots: [], rootTrash: [], ui: { activeTab: 'org' } })
 
 /**
  * Every exported function below takes options `{ env }`, never `env`
@@ -27,10 +27,13 @@ function resolveEnv(opts) {
   return o.env || process.env
 }
 
-/** { roots, ui } from disk, or the empty shape when unreadable/absent. */
+/** { roots, rootTrash, ui } from disk, or the empty shape when unreadable/absent.
+ *  Every key the registry keeps must be listed here: this is the only reader,
+ *  and `mutate` writes back what it returns, so an omitted key is erased on
+ *  the next write rather than preserved. */
 export function readRegistry(opts = {}) {
   const env = resolveEnv(opts)
-  try { const j = JSON.parse(fs.readFileSync(registryPath(env), 'utf8')); return { roots: j.roots || [], ui: { activeTab: 'org', ...(j.ui || {}) } } } catch { return EMPTY() }
+  try { const j = JSON.parse(fs.readFileSync(registryPath(env), 'utf8')); return { roots: j.roots || [], rootTrash: j.rootTrash || [], ui: { activeTab: 'org', ...(j.ui || {}) } } } catch { return EMPTY() }
 }
 
 /** Atomic write (tmp + rename) so a crash mid-write never corrupts the registry. */
@@ -42,6 +45,7 @@ export function writeRegistry(reg, opts = {}) {
 
 export function listRoots(opts = {}) { return readRegistry(opts).roots }
 export function rootById(id, opts = {}) { return listRoots(opts).find((r) => r.id === id) || null }
+export function listRootTrash(opts = {}) { return readRegistry(opts).rootTrash }
 
 /** <root>/.arxa/freestyle.json, or null when absent/unreadable. */
 export function readManifest(root) { try { return JSON.parse(fs.readFileSync(manifestPath(root.path), 'utf8')) } catch { return null } }
@@ -112,10 +116,43 @@ export function closeRoot(id, opts = {}) {
   return mutate(env, (reg) => { const r = reg.roots.find((x) => x.id === id); if (!r) throw new Error('unknown-root'); r.open = false; return r })
 }
 
-/** Registry only — never deletes anything on disk. */
-export function forgetRoot(id, opts = {}) {
+/** Deleting a Freestyle folder moves its ROW to the trash — registry only, the
+ *  directory on disk never moves, in or out. arxa did not create the folder, so
+ *  arxa never deletes it: `purgeRoot` drops the row and leaves the directory
+ *  exactly where the user put it. That is the one place Freestyle diverges from
+ *  an organisation, whose trash owns the folder it made and whose purge really
+ *  deletes it. A trashed root keeps its own `.arxa/trash` untouched, so
+ *  restoring it brings its trashed files back with it. */
+export function trashRoot(id, opts = {}) {
   const env = resolveEnv(opts)
-  return mutate(env, (reg) => { const i = reg.roots.findIndex((x) => x.id === id); if (i < 0) throw new Error('unknown-root'); const [r] = reg.roots.splice(i, 1); return r })
+  return mutate(env, (reg) => {
+    const i = reg.roots.findIndex((x) => x.id === id); if (i < 0) throw new Error('unknown-root')
+    const [r] = reg.roots.splice(i, 1)
+    const row = { ...r, open: false, trashedAt: new Date().toISOString() }
+    reg.rootTrash.unshift(row)
+    return row
+  })
+}
+
+export function restoreRoot(id, opts = {}) {
+  const env = resolveEnv(opts)
+  return mutate(env, (reg) => {
+    const i = reg.rootTrash.findIndex((x) => x.id === id); if (i < 0) throw new Error('unknown-trashed-root')
+    const [r] = reg.rootTrash.splice(i, 1)
+    const { trashedAt, ...row } = r
+    reg.roots.push(row)
+    return row
+  })
+}
+
+/** Drops the trashed row. The folder stays on disk — see trashRoot. */
+export function purgeRoot(id, opts = {}) {
+  const env = resolveEnv(opts)
+  return mutate(env, (reg) => {
+    const i = reg.rootTrash.findIndex((x) => x.id === id); if (i < 0) throw new Error('unknown-trashed-root')
+    const [r] = reg.rootTrash.splice(i, 1)
+    return r
+  })
 }
 
 /** Display-only: the folder on disk never moves. */

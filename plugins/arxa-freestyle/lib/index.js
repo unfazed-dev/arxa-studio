@@ -5,7 +5,7 @@
 //
 //   GET  /__arxa/freestyle/state   -> { roots, trash, ui }
 //   POST /__arxa/freestyle/action  body { action, arg } -> { ok, ... } | { ok:false, error }
-import { readRegistry, listRoots, rootById, addRoot, newRoot, openRoot, closeRoot, forgetRoot, renameRoot, publishRoot, setActiveTab } from './roots.js'
+import { readRegistry, listRoots, rootById, addRoot, newRoot, openRoot, closeRoot, trashRoot, restoreRoot, purgeRoot, renameRoot, publishRoot, setActiveTab } from './roots.js'
 import { createFile, createDir, renameEntry, moveEntry, duplicateEntry, trashEntry, listTrash, readTrashEntry, restoreEntry, purgeEntry, revealEntry } from './files.js'
 import { createFreestyleSessions } from './sessions.js'
 import { isRepo, hasHead } from '../../git-workspace/lib/repos.js'
@@ -209,7 +209,10 @@ export function apply(ctx, opts = {}) {
       }
     })
     const trash = roots.flatMap((r) => listTrash(r).map((e) => ({ ...e, rootId: r.id })))
-    return { roots, trash, ui: reg.ui }
+    // Trashed FOLDERS are registry rows, not entries inside a root, so they
+    // ride their own list. A trashed root contributes no entry-trash here —
+    // its `.arxa/trash` travels with it and comes back on restore.
+    return { roots, trash, rootTrash: reg.rootTrash, ui: reg.ui }
   }
 
   const ACTIONS = {
@@ -217,7 +220,9 @@ export function apply(ctx, opts = {}) {
     'root.new': ({ parent, name }) => ({ root: newRoot(parent, name, { env }) }),
     'root.open': ({ rootId }) => ({ root: openRoot(rootId, { env }) }),
     'root.close': ({ rootId }) => ({ root: closeRoot(rootId, { env }) }),
-    'root.forget': ({ rootId }) => ({ root: forgetRoot(rootId, { env }) }),
+    'root.trash': ({ rootId }) => ({ root: trashRoot(rootId, { env }) }),
+    'roottrash.restore': ({ rootId }) => ({ root: restoreRoot(rootId, { env }) }),
+    'roottrash.purge': ({ rootId }) => ({ root: purgeRoot(rootId, { env }) }),
     'root.rename': ({ rootId, name }) => ({ root: renameRoot(rootId, name, { env }) }),
     'root.publish': async ({ rootId, visibility }) => {
       if (visibility !== 'private') throw new Error('private-visibility-required')

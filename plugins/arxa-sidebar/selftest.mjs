@@ -974,6 +974,48 @@ check('client: agent verb + reason strings localized in en/pl/fr',
     (gen.match(/orgStore\.mutate\("orgtrash\.restore"/g) || []).length === 1)
 }
 
+// ============================================================
+// S-parity — the Freestyle Archives/Trash rows are the SAME rows as the
+// Organisations ones. They were built by copying the header markup but not
+// the SECTION wrapper, so Freestyle had no divider above it, no 8px gap, no
+// dim while empty and no auto-open: side by side the two tabs read as two
+// different designs. docs/plans/freestyle-trash-parity.md.
+{
+  const gen = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
+  const roots = readFileSync(new URL('../arxa-freestyle/lib/roots.js', import.meta.url), 'utf8')
+  const fsHost = readFileSync(new URL('../arxa-freestyle/lib/index.js', import.meta.url), 'utf8')
+  const SECTION = 'style: { borderTop: "1px solid var(--dsw-alias-border-l2)", marginTop: 8, padding: "0 0 8px", opacity: total === 0 ? 0.45 : 1 }'
+  check('S-parity: four sections share one wrapper — org Archives/Trash and Freestyle Archives/Trash',
+    (gen.split(SECTION).length - 1) === 4)
+  check('S-parity: all four auto-open while they hold something, first toggle wins',
+    (gen.match(/const open = manual === null \? total > 0 : manual;/g) || []).length === 4)
+  check('S-parity: the Freestyle Trash total counts trashed folders as well as files',
+    gen.includes('const total = rootTrash.length + trash.length;'))
+  check('S-parity: no Freestyle section is left as a bare Fragment',
+    !/function FreestyleArchivesRows[\s\S]{0,900}?react_jsx_runtime\.Fragment, \{ children/.test(gen)
+    && !/function FreestyleTrashRows[\s\S]{0,900}?react_jsx_runtime\.Fragment, \{ children/.test(gen))
+
+  // Deleting a Freestyle folder trashes it, like everything else in the sidebar.
+  check('S-parity: the folder menu trashes, it does not forget',
+    gen.includes('action: "root.trash"') && !gen.includes('root.forget') && !gen.includes('freestyle.menu.forget'))
+  check('S-parity: no forget copy survives in any dictionary',
+    !/"freestyle\.confirm\.forget/.test(gen))
+  check('S-parity: the trashed folder has a restore and a remove, both from the Trash row',
+    gen.includes('freestyleStore.mutate("roottrash.restore"') && gen.includes('action: "roottrash.purge"'))
+  check('S-parity: the host serves the trashed folders on the state payload',
+    fsHost.includes('rootTrash: reg.rootTrash'))
+  check('S-parity: the registry reader keeps rootTrash, so a later write cannot erase it',
+    roots.includes('rootTrash: j.rootTrash || []'))
+  // arxa did not create a Freestyle folder, so no path here deletes one — the
+  // one place Freestyle diverges from an organisation, whose purge is real.
+  check('S-parity: nothing in the folder-trash lifecycle touches the disk',
+    ['trashRoot', 'restoreRoot', 'purgeRoot'].every((fn) => {
+      const body = roots.slice(roots.indexOf('export function ' + fn))
+      return !/^\s*(fs\.rm|fs\.unlink|fs\.rename)/m.test(body.slice(0, body.indexOf('\n}')))
+    }))
+}
+
+
 // ---- D117: VS Code-style decorations on the file tree ----
 {
   // The decorations live in the WORKSPACE region (client.js), not the host —

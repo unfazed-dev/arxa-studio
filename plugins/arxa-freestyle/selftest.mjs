@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import { resolveInside, registryPath, manifestPath } from './lib/paths.js'
-import { addRoot, newRoot, listRoots, openRoot, closeRoot, forgetRoot, renameRoot, readManifest, rootById } from './lib/roots.js'
+import { addRoot, newRoot, listRoots, openRoot, closeRoot, trashRoot, restoreRoot, purgeRoot, listRootTrash, renameRoot, setActiveTab, readManifest, rootById } from './lib/roots.js'
 import { isRepo, hasHead } from '../git-workspace/lib/repos.js'
 let n = 0; const ok = (c, m) => { assert.ok(c, m); n++; console.log('  ok', n, '-', m) }
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-fs-'))
@@ -25,7 +25,14 @@ assert.throws(() => newRoot(tmp, 'Fresh', { env }), /exists/); ok(true, 'newRoot
 closeRoot(r.id, { env }); ok(rootById(r.id, { env }).open === false, 'closeRoot flips open')
 openRoot(r.id, { env }); ok(rootById(r.id, { env }).open === true && rootById(r.id, { env }).lastOpenedAt, 'openRoot flips open and stamps')
 renameRoot(r.id, 'Notes', { env }); ok(rootById(r.id, { env }).name === 'Notes' && readManifest(rootById(r.id, { env })).name === 'Notes' && path.basename(rootById(r.id, { env }).path) === 'Scratch', 'rename is display-only, folder untouched')
-forgetRoot(r.id, { env }); ok(!rootById(r.id, { env }) && fs.existsSync(folder), 'forget drops the row and never deletes the folder')
+trashRoot(r.id, { env }); ok(!rootById(r.id, { env }) && listRootTrash({ env }).length === 1 && fs.existsSync(folder), 'deleting a folder moves its row to the trash and never touches the folder')
+restoreRoot(r.id, { env }); ok(rootById(r.id, { env }) && rootById(r.id, { env }).open === false && !listRootTrash({ env }).length, 'restore brings the row back, closed')
+trashRoot(r.id, { env }); purgeRoot(r.id, { env }); ok(!rootById(r.id, { env }) && !listRootTrash({ env }).length && fs.existsSync(folder), 'purge drops the trashed row and STILL never deletes the folder')
+// The registry reader is the only place that decides which keys survive a
+// write: a key it drops is erased on the next mutation, not preserved. This
+// catches that silently losing a user's trashed folder.
+trashRoot(addRoot(folder, { env, name: 'Scratch' }).id, { env }); setActiveTab('freestyle', { env })
+ok(listRootTrash({ env }).length === 1, 'the trashed row survives an unrelated registry write')
 
 // FIX 2 coverage: a raw env object (not wrapped in { env }) passed where
 // opts goes must throw loudly, not silently fall through to process.env and

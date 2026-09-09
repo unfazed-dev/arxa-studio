@@ -14,7 +14,7 @@ assert.equal((client.match(/__ARXA_FREESTYLE_REGION__/g) || []).length, 1, 'gene
 assert.match(client, /function SidebarTabs\(\{ wide, active, onChange \}\)/, 'tab strip is generated')
 assert.match(client, /function FreestyleBrowser\(\{ wide, expandSidebar \}\)/, 'Freestyle shell is generated')
 assert.match(client, /function FreestyleRootRow\(/, 'Freestyle roots render as real rows')
-assert.match(client, /function FreestyleTrashRows\(\{ trash, roots, ask \}\)/, 'Freestyle trash is an independent disclosure surface')
+assert.match(client, /function FreestyleTrashRows\(\{ trash, rootTrash, roots, ask \}\)/, 'Freestyle trash is an independent disclosure surface that also holds trashed folders')
 assert.match(client, /function FreestyleArchivesRows\(\{ roots, ask \}\)/, 'Freestyle archives are an independent disclosure surface')
 assert.match(client, /function FreestyleSessionRows\(\{ root \}\)/, 'active Freestyle sessions render beneath their root')
 assert.equal((client.match(/ctx\.slots\.register\(\{\s*name: "sidebar\.workspaces"/g) || []).length, 1, 'stock sidebar.workspaces registration stays singular')
@@ -52,7 +52,7 @@ assert.match(client, /className: "aXa_fs_meta", children: rootName/, 'trash rows
 assert.match(client, /hero\.guide\.freestyle/, 'the empty conversation hero follows the active Freestyle tab')
 assert.match(client, /snap && snap\.current === row\.dshSessionId\) arxaClientSessions\.clear\(\)/, 'archiving clears only the conversation owned by that row')
 assert.match(client, /for \(const root of freestyleStore\.get\(\)\.roots \|\| \[\]\)[\s\S]*?root\.sessions\?\.active/, 'rider ownership includes active Freestyle conversations')
-for (const key of ['freestyle.tab.org', 'freestyle.tab.freestyle', 'freestyle.empty', 'freestyle.add.open', 'freestyle.add.new', 'freestyle.cta.pick', 'freestyle.menu.publish', 'freestyle.publish.unlinked', 'freestyle.confirm.purge', 'freestyle.session.noConversation']) {
+for (const key of ['freestyle.tab.org', 'freestyle.tab.freestyle', 'freestyle.empty', 'freestyle.add.open', 'freestyle.add.new', 'freestyle.cta.pick', 'freestyle.menu.publish', 'freestyle.publish.unlinked', 'freestyle.confirm.purge', 'freestyle.confirm.rootTrash', 'freestyle.confirm.rootTrashBody', 'freestyle.confirm.rootPurge', 'freestyle.confirm.rootPurgeBody', 'freestyle.trash.removeFolder', 'freestyle.session.noConversation']) {
   assert.equal(client.split(`"${key}":`).length - 1, 3, `${key} is translated in en/pl/fr`)
 }
 
@@ -214,7 +214,7 @@ await store.refresh()
 store.select('root-1', 'notes')
 rootsPresent = false
 await store.refresh()
-assert.equal(store.selected(), null, 'forgetting a selected root clears the hidden CTA target')
+assert.equal(store.selected(), null, 'trashing a selected root clears the hidden CTA target')
 rootsPresent = true
 
 await assert.rejects(store.mutate('fail', {}), /visible failure/, 'failed mutations surface the host error after refresh')
