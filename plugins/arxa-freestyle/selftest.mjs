@@ -3,8 +3,8 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import { resolveInside, registryPath, manifestPath } from './lib/paths.js'
-import { addRoot, newRoot, createRoot, listRoots, openRoot, closeRoot, trashRoot, restoreRoot, purgeRoot, listRootTrash, renameRoot, setActiveTab, readManifest, rootById } from './lib/roots.js'
-import { isRepo, hasHead } from '../git-workspace/lib/repos.js'
+import { addRoot, newRoot, createRoot, listRoots, openRoot, closeRoot, trashRoot, restoreRoot, purgeRoot, listRootTrash, renameRoot, setActiveTab, readManifest, writeManifest, rootById, disconnectRoot, syncRoot } from './lib/roots.js'
+import { isRepo, hasHead, getOrigin, setOrigin } from '../git-workspace/lib/repos.js'
 let n = 0; const ok = (c, m) => { assert.ok(c, m); n++; console.log('  ok', n, '-', m) }
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-fs-'))
 const env = { ...process.env, ARXA_HOME: path.join(tmp, 'home') }
@@ -33,6 +33,21 @@ ok(r4.path === path.join(tmp, 'Empty') && isRepo(r4.path), 'createRoot adopts an
 await assert.rejects(() => createRoot({ name: '!!!', path: tmp, link: false }, { env }), /no slug/); ok(true, 'createRoot refuses a name that slugs to nothing')
 await assert.rejects(() => createRoot({ name: 'Pub', path: tmp, link: true }, { env, github: { status: async () => ({ ok: true, linked: false }) } }), /linked-required/)
 ok(listRoots({ env }).some((x) => x.name === 'Pub') && readManifest(listRoots({ env }).find((x) => x.name === 'Pub')).localOnly === true, 'link on an unlinked account: folder created local-only, modal told linked-required')
+
+// Org parity: disconnect (keep / remove) and sync mirror lifecycle.js disconnectOne / syncRepoNow.
+ok((await syncRoot(r3, { env })) === 'local', 'syncRoot on a local-only root says local')
+ok((await disconnectRoot(r3, { env })).skipped === 'not-connected', 'disconnectRoot on a local-only root is a no-op')
+writeManifest(r3, { localOnly: false, repoOwner: 'evan', repoName: 'evans-notes', repoUrl: 'https://github.com/evan/evans-notes' }); setOrigin(r3.path, 'https://github.com/evan/evans-notes', env)
+const kept = await disconnectRoot(r3, { env, removeRepos: false })
+ok(kept.ok && kept.removed === false && kept.repo === 'evan/evans-notes' && readManifest(r3).localOnly === true && readManifest(r3).repoUrl === null && getOrigin(r3.path, env) !== null, 'disconnect KEEP strips the link state and leaves origin for a later publish')
+writeManifest(r3, { localOnly: false, repoOwner: 'evan', repoName: 'evans-notes', repoUrl: 'https://github.com/evan/evans-notes' })
+const deleted = []
+const removed = await disconnectRoot(r3, { env, removeRepos: true, github: { deleteRepo: async (o, n) => { deleted.push(o + '/' + n); return { ok: true } } } })
+ok(removed.removed === true && deleted[0] === 'evan/evans-notes' && getOrigin(r3.path, env) === null, 'disconnect REMOVE deletes the GitHub repo and drops origin')
+writeManifest(r3, { localOnly: false, repoOwner: 'evan', repoName: 'evans-notes', repoUrl: 'https://github.com/evan/evans-notes' })
+await assert.rejects(() => disconnectRoot(r3, { env, removeRepos: true, github: { deleteRepo: async () => ({ ok: false, reason: '403' }) } }), /disconnect incomplete/)
+ok(readManifest(r3).localOnly === false, 'a refused GitHub deletion leaves the folder connected')
+ok((await syncRoot(r3, { env })) === 'no-creds' && (await syncRoot(r3, { env, github: { gitCredentials: async () => ({ ok: false }) } })) === 'no-creds', 'syncRoot without credentials reports no-creds, never throws')
 
 closeRoot(r.id, { env }); ok(rootById(r.id, { env }).open === false, 'closeRoot flips open')
 openRoot(r.id, { env }); ok(rootById(r.id, { env }).open === true && rootById(r.id, { env }).lastOpenedAt, 'openRoot flips open and stamps')

@@ -1005,11 +1005,11 @@ check('client: agent verb + reason strings localized in en/pl/fr',
 
   // Deleting a Freestyle folder trashes it, like everything else in the sidebar.
   check('S-parity: the folder menu trashes, it does not forget',
-    gen.includes('action: "root.trash"') && !gen.includes('root.forget') && !gen.includes('freestyle.menu.forget'))
+    gen.includes('freestyleStore.mutate("root.trash", { rootId: root.id })') && !gen.includes('root.forget') && !gen.includes('freestyle.menu.forget'))
   check('S-parity: no forget copy survives in any dictionary',
     !/"freestyle\.confirm\.forget/.test(gen))
   check('S-parity: the trashed folder has a restore and a remove, both from the Trash row',
-    gen.includes('freestyleStore.mutate("roottrash.restore"') && gen.includes('action: "roottrash.purge"'))
+    gen.includes('freestyleStore.mutate("roottrash.restore"') && gen.includes('call: () => freestyleStore.mutate("roottrash.purge", { rootId: row.id })'))
   check('S-parity: the host serves the trashed folders on the state payload',
     fsHost.includes('rootTrash: reg.rootTrash'))
   check('S-parity: the registry reader keeps rootTrash, so a later write cannot erase it',
@@ -1042,9 +1042,51 @@ check('S-newfolder: an existing Freestyle folder offers "open it instead" throug
   && hostSrc().includes("isFreestyle = fs.existsSync(path.join(expanded, '.arxa', 'freestyle.json'))"))
 check('S-newfolder: the host mirrors org.create-at — slug(name) under the parent, non-empty refusal, sticky parent, link publishes',
   (() => { const s = readFileSync(join(here, '..', 'arxa-freestyle', 'lib', 'roots.js'), 'utf8'); return s.includes('export async function createRoot({ name, path: parent, link = true } = {}, opts = {})') && s.includes("throw new Error('folder-exists: ' + target + ' already exists and is not empty')") && s.includes("'create-root.json'") && s.includes("pub.reason === 'github-unlinked' ? 'linked-required'"); })())
-check('S-newfolder: the confirm modal collects no names — one modal per job, the way the org tab does it',
-  !client.includes('target.input')
-  && (client.match(/\(0, react_jsx_runtime\.jsx\)\(FreestyleConfirmModal, \{ target: confirmTarget/g) || []).length === 1)
+check('S-newfolder: Freestyle owns no modal of its own — the org modals serve every conversation',
+  !client.includes('function FreestyleConfirmModal') && !client.includes('target.input')
+  && client.includes('function FreestyleModals({ modal, onClose })')
+  && (client.match(/\(0, react_jsx_runtime\.jsx\)\(FreestyleModals, \{ modal, onClose/g) || []).length === 1)
+
+// S-orgparity (ruling 2026-09-09): rename, publish, disconnect, sweep and
+// purge on the Freestyle tab ARE the Organisations modals with
+// kind: "freestyle" on the target, backed by mirrored host verbs.
+check('S-orgparity: the Freestyle row menu carries the org items in the org order, then the file verbs',
+  client.includes('{ id: "rename", label: orgT("menu.org.rename")') && client.includes('{ id: "sync", label: orgT("menu.org.sync")')
+  && client.includes('{ id: "sweep", label: orgT("freestyle.menu.sweep")')
+  && client.includes('root.connected ? { id: "disconnect", label: orgT("menu.org.disconnect"), icon: fsGhMark() } : { id: "connect", label: orgT("menu.org.connect"), icon: fsGhMark() }')
+  && !client.includes('freestyle.menu.publish'))
+check('S-orgparity: rename / publish / disconnect / sweep open the org modals through one setter',
+  client.includes('ask({ modal: "rename", kind: "freestyle", rootId: root.id, currentName: root.name })')
+  && client.includes('ask({ modal: "publish", kind: "freestyle", rootId: root.id, orgName: root.name })')
+  && client.includes('ask({ modal: "disconnect", kind: "freestyle", rootId: root.id, name: root.name, slug: root.repoName || "" })')
+  && client.includes('ask({ modal: "sweep", kind: "freestyle", rootId: root.id, name: root.name })'))
+check('S-orgparity: each org modal has its Freestyle branch on the store (the route spreads the result)',
+  client.includes('? freestyleStore.mutate("root.rename", { rootId: target.rootId, name: n })')
+  && client.includes('? freestyleStore.mutate("root.publish", { rootId: target.rootId, visibility: "private" })')
+  && client.includes('? freestyleStore.mutate("root.disconnect", { rootId: target.rootId, removeRepos })')
+  && client.includes('? freestyleStore.mutate("session.sweep", { rootId: target.rootId, ...extra })')
+  && client.includes('const res = target.kind === "freestyle" ? b : b && b.result;'))
+check('S-orgparity: purge rides OrgPurgeModal with the typed-name gate; a trashed folder is only untracked, a trashed file really goes',
+  client.includes('? target.call()') && client.includes('title: target.scope === "freestyle" ? target.title :')
+  && client.includes('call: () => freestyleStore.mutate("trash.purge", { rootId: row.rootId, entryId: row.id })'))
+check('S-orgparity: sync is the org row\'s sync — same summary, same span',
+  client.includes('.then((b) => setSyncState(arxaSyncSummary(b.repos)))') && client.includes('"data-arxa-sync": syncState.busy ? "busy" : syncState.bad ? "failed" : "ok"')
+  && (client.match(/"data-arxa-sync": syncState\.busy/g) || []).length === 2)
+check('S-orgparity: Move to Trash asks nothing anywhere on the tab (restorable, like the org rows)',
+  client.includes('freestyleStore.mutate("archive.trash", { rootId: root.id, id: row.id }).catch(freestyleNotice)')
+  && client.includes('if (id === "trash") { verbs.trash(relPath).catch(freestyleNotice); return; }')
+  && !client.includes('freestyle.confirm.rootTrash') && !client.includes('freestyle.confirm.entryTrash') && !client.includes('freestyle.confirm.archiveTrash'))
+check('S-orgparity: the host mirrors the org verbs — disconnect (keep/remove), sync (fetch, park, push, ff), sweep with `only`, connected on the row',
+  (() => {
+    const fsIdx = readFileSync(join(here, '..', 'arxa-freestyle', 'lib', 'index.js'), 'utf8');
+    const fsRoots = readFileSync(join(here, '..', 'arxa-freestyle', 'lib', 'roots.js'), 'utf8');
+    const fsSess = readFileSync(join(here, '..', 'arxa-freestyle', 'lib', 'sessions.js'), 'utf8');
+    return fsIdx.includes("'root.disconnect': async ({ rootId, removeRepos })") && fsIdx.includes("'root.sync': async ({ rootId })")
+      && fsIdx.includes('connected: !!(m && m.localOnly === false && m.repoUrl)')
+      && fsRoots.includes('export async function disconnectRoot(root, opts = {})') && fsRoots.includes('export async function syncRoot(root, opts = {})')
+      && fsRoots.includes("if (state.diverged) {") && fsRoots.includes("runGit(['remote', 'remove', 'origin']")
+      && fsSess.includes('if (Array.isArray(only) && !only.includes(r.id)) continue');
+  })())
 
 
 // ---- D117: VS Code-style decorations on the file tree ----
@@ -1198,10 +1240,10 @@ check('S-newfolder: the confirm modal collects no names — one modal per job, t
   // WIP watcher can auto-commit a refused worktree clean and silently promote a
   // session the operator was never shown. Preview must be a CEILING.
   check('D113: the confirm posts back the ids the preview showed',
-    gen.includes('ORG_POST("org.sweep", { ...scope, dryRun: false, only: goers.map((r) => r.id) })')
+    gen.includes('sweep({ dryRun: false, only: goers.map((r) => r.id) })') && gen.includes(': ORG_POST("org.sweep", { ...scope, ...extra })')
     && host.includes("const only = Array.isArray(arg?.only) ? arg.only.filter((x) => typeof x === 'string') : null"))
   check('D113: opening the dialog previews first — it never acts on open',
-    gen.includes('ORG_POST("org.sweep", { ...scope, dryRun: true })'))
+    gen.includes('sweep({ dryRun: true }).then((r) => {'))
   check('D113: the primary button is dark when there is nothing to sweep',
     gen.includes("disabled: phase !== \"confirm\" || goers.length === 0"))
   // Skipped reasons ARE the deliverable (same reason D97 uses ORG_POST for

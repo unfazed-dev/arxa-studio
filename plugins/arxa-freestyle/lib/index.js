@@ -5,7 +5,7 @@
 //
 //   GET  /__arxa/freestyle/state   -> { roots, trash, ui }
 //   POST /__arxa/freestyle/action  body { action, arg } -> { ok, ... } | { ok:false, error }
-import { readRegistry, listRoots, rootById, addRoot, createRoot, openRoot, closeRoot, trashRoot, restoreRoot, purgeRoot, renameRoot, publishRoot, setActiveTab } from './roots.js'
+import { readManifest, disconnectRoot, syncRoot, readRegistry, listRoots, rootById, addRoot, createRoot, openRoot, closeRoot, trashRoot, restoreRoot, purgeRoot, renameRoot, publishRoot, setActiveTab } from './roots.js'
 import { createFile, createDir, renameEntry, moveEntry, duplicateEntry, trashEntry, listTrash, readTrashEntry, restoreEntry, purgeEntry, revealEntry } from './files.js'
 import { createFreestyleSessions } from './sessions.js'
 import { isRepo, hasHead } from '../../git-workspace/lib/repos.js'
@@ -199,10 +199,16 @@ export function apply(ctx, opts = {}) {
     const roots = reg.roots.map((r) => {
       const repo = isRepo(r.path, env)
       const head = repo && hasHead(r.path, env)
+      // Org parity: the row shows the GitHub mark and a connect/disconnect
+      // item from the manifest's link state, the way org rows read `connected`.
+      const m = readManifest(r)
       return {
         ...r,
         isRepo: repo,
         hasHead: head,
+        connected: !!(m && m.localOnly === false && m.repoUrl),
+        repoName: (m && m.repoName) || null,
+        repoUrl: (m && m.repoUrl) || null,
         sessions: r.open ? S.list(r) : { active: [], parked: [], archived: [] },
         trashCount: listTrash(r).length,
         deco: decoFor(r, head),
@@ -228,6 +234,13 @@ export function apply(ctx, opts = {}) {
     'root.publish': async ({ rootId, visibility }) => {
       if (visibility !== 'private') throw new Error('private-visibility-required')
       return publishRoot(rootOr(rootId), { github: await github(), env })
+    },
+    // Org parity: the same three doors the org row menu has.
+    'root.disconnect': async ({ rootId, removeRepos }) => disconnectRoot(rootOr(rootId), { env, removeRepos: removeRepos === true, github: removeRepos === true ? await github() : null }),
+    'root.sync': async ({ rootId }) => {
+      const root = rootOr(rootId)
+      // The route spreads the result, so the list rides under a key.
+      return { repos: [{ repo: root.path, kind: 'freestyle', slug: root.name, status: await syncRoot(root, { env, github: await github().catch(() => null) }) }] }
     },
     'file.create': ({ rootId, relPath }) => createFile(rootOr(rootId), relPath, { env }),
     'dir.create': ({ rootId, relPath }) => createDir(rootOr(rootId), relPath, { env }),
@@ -256,7 +269,7 @@ export function apply(ctx, opts = {}) {
     'archive.revive': ({ rootId, id }) => S.revive(rootOr(rootId), id),
     'archive.trash': ({ rootId, id }) => S.trashArchived(rootOr(rootId), id),
     'session.finish': ({ rootId, id, dryRun }) => S.finish(rootOr(rootId), id, { dryRun: !!dryRun }),
-    'session.sweep': ({ rootId, dryRun }) => S.sweep(rootOr(rootId), { dryRun: dryRun !== false }),
+    'session.sweep': ({ rootId, dryRun, only }) => S.sweep(rootOr(rootId), { dryRun: dryRun !== false, only: Array.isArray(only) ? only.filter((x) => typeof x === 'string') : null }),
     'ui.tab': ({ tab }) => ({ ui: setActiveTab(tab, { env }) }),
   }
 

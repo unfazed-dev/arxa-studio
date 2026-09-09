@@ -387,7 +387,10 @@ export function createFreestyleSessions({ env = process.env, dshBridge, githubBr
     // and only then, for a real sweep, finishes the OWNED candidates itself
     // via FIN.finishSession. A foreign merged session is never reported on
     // and never touched.
-    sweep(root, { dryRun = true } = {}) {
+    // `only` (org parity, D113): the ids the sweep modal SHOWED — a ceiling,
+    // so a session that became sweepable between preview and click is never
+    // finished unseen.
+    sweep(root, { dryRun = true, only = null } = {}) {
       const finished = [], skipped = []
       for (const repoPath of reposOf(root)) {
         let candidates
@@ -398,6 +401,7 @@ export function createFreestyleSessions({ env = process.env, dshBridge, githubBr
         }
         for (const r of candidates.finished) {
           if (!owned.has(r.id)) continue
+          if (Array.isArray(only) && !only.includes(r.id)) continue
           if (dryRun) { finished.push({ ...r, repoPath }); continue }
           try {
             finished.push({ ...FIN.finishSession(repoPath, r.id, { env, dryRun: false }), repoPath })

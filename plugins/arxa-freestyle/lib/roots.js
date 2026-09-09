@@ -4,7 +4,8 @@
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'; import { randomUUID } from 'node:crypto'
 import { arxaHome, registryPath, manifestPath } from './paths.js'
 import { slugify } from '../../workspace/lib/slug.js'
-import { initPlainRepo, pushRepoAsync, setOrigin } from '../../git-workspace/lib/repos.js'
+import { initPlainRepo, pushRepoAsync, setOrigin, fetchRepoAsync, mainSyncState, ffMergeMain } from '../../git-workspace/lib/repos.js'
+import { runGit } from '../../git-workspace/lib/run.js'
 import { protectionPayload, settingsPayload, writeFrameFiles } from '../../git-workspace/lib/frame.js'
 import { wipCommit } from '../../git-workspace/lib/commits.js'
 
@@ -197,6 +198,75 @@ export function renameRoot(id, name, opts = {}) {
   return mutate(env, (reg) => { const r = reg.roots.find((x) => x.id === id); if (!r) throw new Error('unknown-root'); r.name = clean; writeManifest(r, { name: clean }); return r })
 }
 
+/** Keep origin free of credentials: a token is scoped to one network call,
+ *  matching file-org-shell's publish path; local test remotes pass through. */
+function authedUrl(repoUrl, credentials) {
+  return repoUrl.startsWith('https://github.com/')
+    ? 'https://' + encodeURIComponent(credentials.login) + ':' + encodeURIComponent(credentials.token) + '@' + repoUrl.slice('https://'.length)
+    : repoUrl
+}
+
+/**
+ * Org parity (docs/plans/freestyle-org-parity.md; org side: lifecycle.js
+ * disconnectOne): strip the link state and keep the files. Only a REMOVE
+ * deletes the GitHub repository and, with it, the origin remote — KEEP leaves
+ * origin pointing at the live repo so a later publish is a plain push.
+ * @returns {Promise<{ ok: true, repo: string|null, removed: boolean, skipped?: string }>}
+ */
+export async function disconnectRoot(root, opts = {}) {
+  const env = resolveEnv(opts)
+  const removeRepos = opts.removeRepos === true
+  const m = readManifest(root)
+  if (!m || !m.repoUrl) return { ok: true, skipped: 'not-connected', repo: null, removed: false }
+  const full = m.repoOwner + '/' + m.repoName
+  if (removeRepos) {
+    const github = opts.github
+    if (!github || typeof github.deleteRepo !== 'function') throw new Error('github-unavailable')
+    const made = await github.deleteRepo(m.repoOwner, m.repoName)
+    if (!made?.ok) throw new Error('disconnect incomplete: GitHub deletion failed for ' + full + ' (' + (made?.error || made?.reason) + ') — the folder stays connected')
+  }
+  writeManifest(root, { localOnly: true, repoOwner: null, repoName: null, repoUrl: null, pendingPublish: null, githubStatus: null })
+  wipCommit(root.path, { message: 'chore(github): remove the GitHub link state', env })
+  if (removeRepos) { try { runGit(['remote', 'remove', 'origin'], { cwd: root.path, env, allowFail: true }) } catch { /* best-effort */ } }
+  return { ok: true, repo: full, removed: removeRepos }
+}
+
+/**
+ * Org parity (org side: lifecycle.js syncRepoNow, D95/D96): make main match
+ * GitHub. Fetch first; diverged → park loudly on the manifest, never merge;
+ * ahead → push; behind → fast-forward only. Never throws — returns the same
+ * status words the org row summarises (`arxaSyncSummary`).
+ */
+export async function syncRoot(root, opts = {}) {
+  const env = resolveEnv(opts)
+  const github = opts.github
+  try {
+    const m = readManifest(root)
+    if (!m) return 'no-manifest'
+    if (!m.repoUrl || m.localOnly) return 'local'
+    if (!github || typeof github.gitCredentials !== 'function') return 'no-creds'
+    const creds = await github.gitCredentials()
+    if (!creds?.ok) return 'no-creds'
+    const url = authedUrl(m.repoUrl, creds)
+    if (!(await fetchRepoAsync(root.path, url, env))) return 'fetch-failed'
+    const note = 'sync-conflict: local and GitHub main both moved — resolve manually'
+    const state = mainSyncState(root.path, env)
+    if (state.diverged) {
+      if (m.githubStatus !== note) { writeManifest(root, { githubStatus: note }); wipCommit(root.path, { message: 'chore(github): record sync conflict', env }) }
+      return 'diverged'
+    }
+    // A healthy end state clears a stale conflict note, and the clearing
+    // commit is pushed right away so the root never sits 1 ahead for it.
+    const heal = async () => { if (m.githubStatus === note) { writeManifest(root, { githubStatus: null }); wipCommit(root.path, { message: 'chore(github): clear a healed sync status', env }); await pushRepoAsync(root.path, url, env).catch(() => null) } }
+    if (state.ahead > 0) { await pushRepoAsync(root.path, url, env); await heal(); return 'pushed' }
+    if (state.behind > 0) { const pulled = ffMergeMain(root.path, env); await heal(); return pulled ? 'pulled' : 'in-sync' }
+    await heal()
+    return 'in-sync'
+  } catch (err) {
+    return 'error: ' + String(err?.message ?? err).slice(0, 120)
+  }
+}
+
 /** Put a local-only Freestyle root on GitHub as a private repository. */
 export async function publishRoot(root, opts = {}) {
   const env = resolveEnv(opts)
@@ -234,11 +304,7 @@ export async function publishRoot(root, opts = {}) {
 
     const credentials = await github.gitCredentials()
     if (!credentials?.ok) return { ok: false, reason: credentials?.reason || 'github-unavailable' }
-    const pushUrl = repo.repoUrl.startsWith('https://github.com/')
-      ? 'https://' + encodeURIComponent(credentials.login) + ':' + encodeURIComponent(credentials.token)
-        + '@' + repo.repoUrl.slice('https://'.length)
-      : repo.repoUrl
-    await pushRepoAsync(root.path, pushUrl, env)
+    await pushRepoAsync(root.path, authedUrl(repo.repoUrl, credentials), env)
 
     writeManifest(root, {
       localOnly: false,

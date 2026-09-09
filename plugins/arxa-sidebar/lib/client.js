@@ -5091,7 +5091,8 @@ window.__ModuleLoader__.load({
 				if (id === "newFile" || id === "newFolder") { setEditing(id); return; }
 				if (id === "rename") { setEditing("rename"); return; }
 				if (id === "newSession") { Promise.resolve(verbs.newSession(relPath)).then(freestyleOpenConversation).catch(freestyleNotice); return; }
-				if (id === "trash") { verbs.ask({ action: "entry.trash", arg: { rootId, relPath }, title: orgT("freestyle.confirm.entryTrash"), body: relPath, confirm: orgT("freestyle.menu.trash") }); return; }
+				// Move to Trash is restorable, so it asks nothing — the org rows and VS Code agree.
+				if (id === "trash") { verbs.trash(relPath).catch(freestyleNotice); return; }
 				if (id === "duplicate" || id === "reveal") finish(verbs[id](relPath));
 			};
 			const drop = (e) => {
@@ -5541,14 +5542,19 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			const reasonText = (reason) => {
 				const r = String(reason || "");
 				if (r.indexOf("initial-snapshot-pending") === 0) return t("publish.errPending");
-				if (r === "not-linked" || r === "linked-required") return t("publish.errNotLinked");
+				if (r === "not-linked" || r === "linked-required" || r === "github-unlinked") return t(target.kind === "freestyle" ? "freestyle.publish.errNotLinked" : "publish.errNotLinked");
 				if (r === "github-unavailable") return t("publish.errUnavailable");
 				return r || t("publish.errGeneric");
 			};
 			const confirm = () => {
 				setPhase("busy"); setErrMsg(null);
-				ORG_POST(target.projectSlug ? "project.connect" : "github.publish", target.projectSlug ? { orgId: target.orgId, projectSlug: target.projectSlug } : { orgId: target.orgId }).then((b) => {
-					const res = b && b.result;
+				// Freestyle (parity ruling 2026-09-09): same modal, its own store. The
+				// Freestyle route spreads the result at the top level, so `b` is it.
+				const call = target.kind === "freestyle"
+					? freestyleStore.mutate("root.publish", { rootId: target.rootId, visibility: "private" })
+					: ORG_POST(target.projectSlug ? "project.connect" : "github.publish", target.projectSlug ? { orgId: target.orgId, projectSlug: target.projectSlug } : { orgId: target.orgId });
+				call.then((b) => {
+					const res = target.kind === "freestyle" ? b : b && b.result;
 					if (res && res.ok) { setResult(res); setPhase("done"); orgStore.refresh(); }
 					else { setErrMsg(reasonText(res && res.reason)); setPhase("error"); }
 				}, (e) => {
@@ -5578,7 +5584,7 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 				children: (0, react_jsx_runtime.jsxs)("div", { children: [
 					phase === "confirm" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 14, fontWeight: 600, marginBottom: 8 }, children: target.projectSlug ? (target.projectName || target.projectSlug) : target.orgName }),
-						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75 }, children: t(target.projectSlug ? "publish.projectConfirmDesc" : "publish.confirmDesc") })
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75 }, children: t(target.kind === "freestyle" ? "freestyle.publish.confirmDesc" : target.projectSlug ? "publish.projectConfirmDesc" : "publish.confirmDesc") })
 					] }),
 					phase === "busy" && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75 }, children: t("publish.busy") }),
 					phase === "done" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
@@ -5689,9 +5695,11 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 				const n = name.trim();
 				if (n === "" || n === target.currentName || phase === "busy") return;
 				setPhase("busy"); setErrMsg(null);
-				const call = target.kind === "org"
-					? ORG_POST("org.rename", { orgId: target.orgId, name: n })
-					: ORG_POST("project.rename", { orgId: target.orgId, projectSlug: target.projectSlug, name: n });
+				const call = target.kind === "freestyle"
+					? freestyleStore.mutate("root.rename", { rootId: target.rootId, name: n })
+					: target.kind === "org"
+						? ORG_POST("org.rename", { orgId: target.orgId, name: n })
+						: ORG_POST("project.rename", { orgId: target.orgId, projectSlug: target.projectSlug, name: n });
 				call.then((b) => {
 					setRenamed((b && b.result) || {});
 					setPhase("done");
@@ -5703,15 +5711,18 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 				});
 			};
 			const field = { width: "100%", boxSizing: "border-box", fontSize: 13, padding: "6px 8px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 6, background: "transparent", color: "inherit" };
+			// Freestyle renames the row only — arxa never moves a folder it did not
+			// create (sessions' worktrees live inside it) — so its words say so.
+			const busyText = target.kind === "freestyle" ? t("freestyle.rename.busy") : t("rename.busy");
 			const footer = (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 				(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "outline", onClick: dismiss, children: phase === "done" ? t("rename.close") : t("publish.cancel") }),
-				phase !== "done" && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "primary", disabled: name.trim() === "" || name.trim() === target.currentName || phase === "busy", onClick: submit, children: phase === "busy" ? t("rename.busy") : t("rename.cta") })
+				phase !== "done" && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "primary", disabled: name.trim() === "" || name.trim() === target.currentName || phase === "busy", onClick: submit, children: phase === "busy" ? busyText : t("rename.cta") })
 			] });
 			return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Modal, {
 				open: true,
 				onClose: dismiss,
 				closeLabel: t("publish.cancel"),
-				title: target.kind === "org" ? t("rename.orgTitle") : t("rename.projectTitle"),
+				title: target.kind === "freestyle" ? t("freestyle.rename.title") : target.kind === "org" ? t("rename.orgTitle") : t("rename.projectTitle"),
 				footer,
 				children: (0, react_jsx_runtime.jsxs)("div", { children: [
 					phase !== "done" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
@@ -5723,8 +5734,8 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 						onKeyDown: (e) => { if (e.key === "Enter") submit(); },
 						style: field
 						}),
-						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.55, marginTop: 8 }, children: target.kind === "org" ? t("rename.orgNote") : t("rename.projectNote") }),
-						phase === "busy" && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginTop: 10 }, children: t("rename.busy") }),
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.55, marginTop: 8 }, children: target.kind === "freestyle" ? t("freestyle.rename.note") : target.kind === "org" ? t("rename.orgNote") : t("rename.projectNote") }),
+						phase === "busy" && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginTop: 10 }, children: busyText }),
 						(0, react_jsx_runtime.jsx)(ErrorNote, { msg: errMsg })
 					] }),
 					phase === "done" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
@@ -5778,9 +5789,15 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			const submit = () => {
 				if (phase === "busy") return;
 				setPhase("busy"); setErrMsg(null);
-				ORG_POST(target.scope === "org" ? "orgtrash.purge" : target.scope === "session" ? "sessiontrash.purge" : "projecttrash.purge", target.scope === "session" ? { orgId: target.orgId, entryId: target.entryId } : { entryId: target.entryId }).then((r) => {
+				// Freestyle (parity ruling 2026-09-09): the target brings its own call
+				// and words (a trashed folder is only untracked, a trashed file is
+				// really deleted); everything else in this conversation is shared.
+				const call = target.scope === "freestyle"
+					? target.call()
+					: ORG_POST(target.scope === "org" ? "orgtrash.purge" : target.scope === "session" ? "sessiontrash.purge" : "projecttrash.purge", target.scope === "session" ? { orgId: target.orgId, entryId: target.entryId } : { entryId: target.entryId });
+				call.then((r) => {
 					// D88 success summary: exactly what left the machine.
-					const res = r && r.result;
+					const res = target.scope === "freestyle" ? r : r && r.result;
 					const parts = [target.name];
 					if (res && Array.isArray(res.deletedRepos) && res.deletedRepos.length > 0) parts.push(res.deletedRepos.join(", "));
 					setSummary(parts.join(" — "));
@@ -5817,18 +5834,18 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			};
 			const footer = (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 				(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "outline", disabled: phase === "busy", onClick: dismiss, children: phase === "done" ? t("purge.close") : t("publish.cancel") }),
-				phase !== "done" && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "primary", disabled: !matches || phase === "busy", onClick: submit, children: phase === "busy" ? t("purge.busy") : t("purge.confirm") })
+				phase !== "done" && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "primary", disabled: !matches || phase === "busy", onClick: submit, children: phase === "busy" ? (target.busy || t("purge.busy")) : (target.cta || t("purge.confirm")) })
 			] });
 			return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Modal, {
 				open: true,
 				onClose: dismiss,
 				closeLabel: t("publish.cancel"),
-				title: target.scope === "org" ? t("purge.orgTitle") : target.scope === "session" ? t("purge.sessionTitle") : t("purge.projectTitle"),
+				title: target.scope === "freestyle" ? target.title : target.scope === "org" ? t("purge.orgTitle") : target.scope === "session" ? t("purge.sessionTitle") : t("purge.projectTitle"),
 				footer,
 				children: (0, react_jsx_runtime.jsxs)("div", { children: [
 					phase !== "done" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, marginBottom: 8 }, children: target.name }),
-						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginBottom: 8 }, children: target.scope === "org" ? t("purge.orgWarn") : target.scope === "session" ? t("purge.sessionWarn") : t("purge.projectWarn") }),
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginBottom: 8 }, children: target.scope === "freestyle" ? target.warn : target.scope === "org" ? t("purge.orgWarn") : target.scope === "session" ? t("purge.sessionWarn") : t("purge.projectWarn") }),
 					target.scope === "session" && pre && pre.openPr && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, color: "var(--dsw-alias-label-error)", marginTop: 6 }, children: t("purge.prLine").replace("{n}", String(pre.openPr.number ?? "?")).replace("{title}", String(pre.openPr.title ?? "")) }),
 					target.scope === "session" && pre && !pre.openPr && pre.repo && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginTop: 6 }, children: t("purge.repoLine").replace("{repo}", pre.repo.owner + "/" + pre.repo.name) }),
 					target.scope === "session" && pre && pre.repoGone && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginTop: 6 }, children: t("purge.repoGoneLine") }),
@@ -5885,11 +5902,16 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 		const [result, setResult] = (0, react.useState)(null);
 		const [errMsg, setErrMsg] = (0, react.useState)(null);
 		const scope = target ? (target.projectSlug ? { orgId: target.orgId, projectSlug: target.projectSlug } : { orgId: target.orgId }) : null;
+		// Freestyle (parity ruling 2026-09-09): the same two-step sweep through
+		// the Freestyle store (session.sweep, whose route spreads the result).
+		const sweep = (extra) => target && target.kind === "freestyle"
+			? freestyleStore.mutate("session.sweep", { rootId: target.rootId, ...extra })
+			: ORG_POST("org.sweep", { ...scope, ...extra }).then((r) => r && r.result);
 		(0, react.useEffect)(() => {
 			setPhase("loading"); setPreview(null); setResult(null); setErrMsg(null);
 			if (!target) return;
-			ORG_POST("org.sweep", { ...scope, dryRun: true }).then((r) => {
-				setPreview((r && r.result) || { finished: [], skipped: [] });
+			sweep({ dryRun: true }).then((r) => {
+				setPreview(r || { finished: [], skipped: [] });
 				setPhase("confirm");
 			}, (e) => { setErrMsg(e instanceof Error ? e.message : String(e)); setPhase("confirm"); });
 		}, [target]);
@@ -5900,8 +5922,8 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 		const submit = () => {
 			if (phase !== "confirm" || goers.length === 0) return;
 			setPhase("busy"); setErrMsg(null);
-			ORG_POST("org.sweep", { ...scope, dryRun: false, only: goers.map((r) => r.id) }).then((r) => {
-				setResult((r && r.result) || { finished: [], skipped: [] });
+			sweep({ dryRun: false, only: goers.map((r) => r.id) }).then((r) => {
+				setResult(r || { finished: [], skipped: [] });
 				setPhase("done");
 				orgStore.refresh();
 			}, (e) => { setErrMsg(e instanceof Error ? e.message : String(e)); setPhase("confirm"); });
@@ -5924,7 +5946,7 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			footer,
 			children: (0, react_jsx_runtime.jsxs)("div", { children: [
 				(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, marginBottom: 4 }, children: target.name }),
-				(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75 }, children: t("sweep.scope") }),
+				(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75 }, children: t(target.kind === "freestyle" ? "freestyle.sweep.scope" : "sweep.scope") }),
 				phase === "loading" && (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.6, marginTop: 8 }, children: t("sweep.loading") }),
 				phase === "done"
 					? (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
@@ -5956,8 +5978,11 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 		const submit = () => {
 			if (phase === "busy" || (removeRepos && !matches)) return;
 			setPhase("busy"); setErrMsg(null);
-			ORG_POST(target.kind === "project" ? "project.disconnect" : "org.disconnect", target.kind === "project" ? { orgId: target.orgId, projectSlug: target.projectSlug, removeRepos } : { orgId: target.orgId, removeRepos }).then((r) => {
-				const res = r && r.result;
+			const call = target.kind === "freestyle"
+				? freestyleStore.mutate("root.disconnect", { rootId: target.rootId, removeRepos })
+				: ORG_POST(target.kind === "project" ? "project.disconnect" : "org.disconnect", target.kind === "project" ? { orgId: target.orgId, projectSlug: target.projectSlug, removeRepos } : { orgId: target.orgId, removeRepos });
+			call.then((r) => {
+				const res = target.kind === "freestyle" ? r : r && r.result;
 				const removed = res && Array.isArray(res.removedRepos) ? res.removedRepos : res && res.removed && res.repo ? [res.repo] : [];
 				setSummary(removed.length > 0 ? t("disconnect.doneRemoved").replace("{repos}", removed.join(", ")) : t("disconnect.doneKept"));
 				setPhase("done");
@@ -5999,7 +6024,7 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			children: (0, react_jsx_runtime.jsxs)("div", { children: [
 				phase !== "done" && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 					(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, marginBottom: 8 }, children: target.name }),
-					(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginBottom: 8 }, children: target.kind === "project" ? t("disconnect.projectWarn") : t("disconnect.orgWarn") }),
+					(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, opacity: 0.75, marginBottom: 8 }, children: target.kind === "freestyle" ? t("freestyle.disconnect.warn") : target.kind === "project" ? t("disconnect.projectWarn") : t("disconnect.orgWarn") }),
 					(0, react_jsx_runtime.jsxs)("label", { style: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }, children: [
 						(0, react_jsx_runtime.jsx)("input", { type: "radio", name: "arxa-disconnect-mode", checked: !removeRepos, onChange: () => { setRemoveRepos(false); setTyped(""); }, disabled: phase === "busy" }),
 						t("disconnect.keep")
@@ -6391,17 +6416,20 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			"freestyle.archives.revive": "Restore",
 			"freestyle.archives.toTrash": "Move to Trash",
 			"freestyle.move.crossRoot": "Move items within the same Freestyle folder.",
-			"freestyle.menu.publish": "Publish privately to GitHub",
-			"freestyle.publish.unlinked": "Link GitHub first",
-			"freestyle.publish.done": "Published privately to GitHub",
+			"freestyle.menu.sweep": "Sweep merged sessions",
+			"freestyle.rename.title": "Rename folder",
+			"freestyle.rename.note": "Only the name shown in the sidebar changes — the folder on disk and its GitHub repo keep theirs.",
+			"freestyle.rename.busy": "Renaming…",
+			"freestyle.publish.confirmDesc": "Creates one private GitHub repository for this folder and pushes its full commit history. Session branches stay local.",
+			"freestyle.publish.errNotLinked": "GitHub isn’t linked. Sign in with GitHub in Settings first, then publish again.",
+			"freestyle.disconnect.warn": "Unlinks this folder's repository. Your files stay on this device.",
+			"freestyle.sweep.scope": "This folder's repository — sessions whose work is already on main.",
 			"freestyle.confirm.purge": "Delete forever?",
-			"freestyle.confirm.cancel": "Cancel",
-			"freestyle.confirm.archiveTrash": "Move archived session to Trash?",
-			"freestyle.confirm.entryTrash": "Move this item to Trash?",
-			"freestyle.confirm.rootTrash": "Move this folder to Trash?",
-			"freestyle.confirm.rootTrashBody": "The folder stays on disk. Restore it from the Trash.",
+			"freestyle.purge.entryWarn": "This permanently deletes the item from the folder's Trash. This cannot be undone.",
+			"freestyle.purge.entryBusy": "Deleting…",
 			"freestyle.confirm.rootPurge": "Remove this folder from the Trash?",
 			"freestyle.confirm.rootPurgeBody": "The folder stays on disk — arxa just stops tracking it.",
+			"freestyle.purge.rootBusy": "Removing…",
 			"freestyle.session.noConversation": "This session has no live conversation.",
 			"freestyle.session.archive": "Archive session",
 			"freestyle.session.parked": "Parked",
@@ -6670,17 +6698,20 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			"freestyle.archives.revive": "Przywróć",
 			"freestyle.archives.toTrash": "Przenieś do Kosza",
 			"freestyle.move.crossRoot": "Przenoś elementy tylko w obrębie tego samego folderu Freestyle.",
-			"freestyle.menu.publish": "Opublikuj prywatnie w GitHub",
-			"freestyle.publish.unlinked": "Najpierw połącz GitHub",
-			"freestyle.publish.done": "Opublikowano prywatnie w GitHub",
+			"freestyle.menu.sweep": "Uprzątnij scalone sesje",
+			"freestyle.rename.title": "Zmień nazwę folderu",
+			"freestyle.rename.note": "Zmienia się tylko nazwa widoczna na pasku bocznym — folder na dysku i jego repo na GitHub zachowują swoje.",
+			"freestyle.rename.busy": "Zmiana nazwy…",
+			"freestyle.publish.confirmDesc": "Tworzy jedno prywatne repozytorium GitHub dla tego folderu i wypycha pełną historię commitów. Gałęzie sesji zostają lokalnie.",
+			"freestyle.publish.errNotLinked": "GitHub nie jest połączony. Najpierw zaloguj się przez GitHub w Ustawieniach, potem opublikuj ponownie.",
+			"freestyle.disconnect.warn": "Odłącza repozytorium tego folderu. Twoje pliki zostają na tym urządzeniu.",
+			"freestyle.sweep.scope": "Repozytorium tego folderu — sesje, których praca jest już na main.",
 			"freestyle.confirm.purge": "Usunąć na zawsze?",
-			"freestyle.confirm.cancel": "Anuluj",
-			"freestyle.confirm.archiveTrash": "Przenieść zarchiwizowaną sesję do Kosza?",
-			"freestyle.confirm.entryTrash": "Przenieść ten element do Kosza?",
-			"freestyle.confirm.rootTrash": "Przenieść ten folder do Kosza?",
-			"freestyle.confirm.rootTrashBody": "Folder pozostanie na dysku. Przywróć go z Kosza.",
+			"freestyle.purge.entryWarn": "To trwale usuwa element z Kosza folderu. Tej operacji nie można cofnąć.",
+			"freestyle.purge.entryBusy": "Usuwanie…",
 			"freestyle.confirm.rootPurge": "Usunąć ten folder z Kosza?",
 			"freestyle.confirm.rootPurgeBody": "Folder pozostanie na dysku — arxa przestanie go tylko śledzić.",
+			"freestyle.purge.rootBusy": "Usuwanie z Kosza…",
 			"freestyle.session.noConversation": "Ta sesja nie ma aktywnej rozmowy.",
 			"freestyle.session.archive": "Archiwizuj sesję",
 			"freestyle.session.parked": "Zaparkowana",
@@ -6949,17 +6980,20 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			"freestyle.archives.revive": "Restaurer",
 			"freestyle.archives.toTrash": "Déplacer vers la corbeille",
 			"freestyle.move.crossRoot": "Déplacez les éléments dans le même dossier Freestyle.",
-			"freestyle.menu.publish": "Publier en privé sur GitHub",
-			"freestyle.publish.unlinked": "Liez d’abord GitHub",
-			"freestyle.publish.done": "Publié en privé sur GitHub",
+			"freestyle.menu.sweep": "Nettoyer les sessions fusionnées",
+			"freestyle.rename.title": "Renommer le dossier",
+			"freestyle.rename.note": "Seul le nom affiché dans la barre latérale change — le dossier sur le disque et son dépôt GitHub gardent le leur.",
+			"freestyle.rename.busy": "Renommage…",
+			"freestyle.publish.confirmDesc": "Crée un dépôt GitHub privé pour ce dossier et pousse tout l’historique des commits. Les branches de session restent locales.",
+			"freestyle.publish.errNotLinked": "GitHub n’est pas lié. Connectez-vous d’abord avec GitHub dans les Réglages, puis publiez à nouveau.",
+			"freestyle.disconnect.warn": "Dissocie le dépôt de ce dossier. Vos fichiers restent sur cet appareil.",
+			"freestyle.sweep.scope": "Le dépôt de ce dossier — les sessions dont le travail est déjà sur main.",
 			"freestyle.confirm.purge": "Supprimer définitivement ?",
-			"freestyle.confirm.cancel": "Annuler",
-			"freestyle.confirm.archiveTrash": "Déplacer la session archivée vers la corbeille ?",
-			"freestyle.confirm.entryTrash": "Déplacer cet élément vers la corbeille ?",
-			"freestyle.confirm.rootTrash": "Déplacer ce dossier vers la corbeille ?",
-			"freestyle.confirm.rootTrashBody": "Le dossier restera sur le disque. Restaurez-le depuis la corbeille.",
+			"freestyle.purge.entryWarn": "Supprime définitivement l’élément de la corbeille du dossier. Cette action est irréversible.",
+			"freestyle.purge.entryBusy": "Suppression…",
 			"freestyle.confirm.rootPurge": "Retirer ce dossier de la corbeille ?",
 			"freestyle.confirm.rootPurgeBody": "Le dossier restera sur le disque — arxa cesse simplement de le suivre.",
+			"freestyle.purge.rootBusy": "Retrait…",
 			"freestyle.session.noConversation": "Cette session n’a pas de conversation active.",
 			"freestyle.session.archive": "Archiver la session",
 			"freestyle.session.parked": "En pause",
@@ -7120,42 +7154,20 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			}) });
 			return children({ menu, menuOpen: open, onContextMenu: showContext });
 		}
-		/** One confirm modal for every Freestyle question (trash, purge). Names are
-		 * never collected here: creating a folder goes through OrgCreateModal in
-		 * Freestyle mode, and window.prompt is banned (null, no dialog, in the
-		 * Tauri WKWebView). Errors stay in the modal, the way the org modals keep them. */
-		function FreestyleConfirmModal({ target, onClose }) {
-			const [busy, setBusy] = (0, react.useState)(false);
-			const [error, setError] = (0, react.useState)(null);
-			const key = target ? target.action + ":" + JSON.stringify(target.arg || {}) : "";
-			(0, react.useEffect)(() => { setError(null); }, [key]);
-			if (!target) return null;
-			const ready = !busy;
-			const confirm = async () => {
-				if (!ready) return;
-				setBusy(true);
-				setError(null);
-				try {
-					await freestyleStore.mutate(target.action, target.arg);
-					setBusy(false);
-					onClose();
-				}
-				catch (e) { setError(String((e && e.message) || e)); setBusy(false); }
-			};
-			return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Modal, {
-				open: true,
-				onClose: busy ? () => {} : onClose,
-				title: target.title,
-				closeLabel: orgT("freestyle.confirm.cancel"),
-				footer: (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-					(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "ghost", disabled: busy, onClick: onClose, children: orgT("freestyle.confirm.cancel") }),
-					(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "primary", disabled: !ready, onClick: confirm, children: target.confirm })
-				] }),
-				children: (0, react_jsx_runtime.jsxs)("div", { children: [
-					target.body ? (0, react_jsx_runtime.jsx)("div", { style: { wordBreak: "break-all" }, children: target.body }) : null,
-					(0, react_jsx_runtime.jsx)(ErrorNote, { msg: error })
-				] })
-			});
+		/** Freestyle owns NO modal of its own (parity ruling 2026-09-09): every
+		 * conversation — create, rename, publish, disconnect, sweep, purge — is
+		 * the Organisations modal with `kind: "freestyle"` on its target. Rows
+		 * ask through one setter; FreestyleBrowser mounts the modals, because the
+		 * org tab's own mounts (OrgBrowser) are not rendered while this tab is. */
+		function FreestyleModals({ modal, onClose }) {
+			const pick = (name) => (modal && modal.modal === name ? modal : null);
+			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+				(0, react_jsx_runtime.jsx)(OrgRenameModal, { t: orgT, target: pick("rename"), onClose }),
+				(0, react_jsx_runtime.jsx)(OrgPublishModal, { t: orgT, target: pick("publish"), onClose }),
+				(0, react_jsx_runtime.jsx)(OrgDisconnectModal, { t: orgT, target: pick("disconnect"), onClose }),
+				(0, react_jsx_runtime.jsx)(OrgSweepModal, { t: orgT, target: pick("sweep"), onClose }),
+				(0, react_jsx_runtime.jsx)(OrgPurgeModal, { t: orgT, target: pick("purge"), onClose })
+			] });
 		}
 		function SidebarTabs({ wide, active, onChange }) {
 			const t = orgT;
@@ -7220,8 +7232,8 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			const st = useFreestyle();
 			const [menuOpen, setMenuOpen] = (0, react.useState)(false);
 			const [githubLinked, setGithubLinked] = (0, react.useState)(null);
-			// One confirm modal for the whole tab: the + menu and the rows share it.
-			const [confirmTarget, setConfirmTarget] = (0, react.useState)(null);
+			// One modal conversation at a time for the whole tab — { modal, kind: "freestyle", … } | null.
+			const [modal, setModal] = (0, react.useState)(null);
 			// The create modal (OrgCreateModal, Freestyle mode) — component-local
 			// open state, the way the org tab keeps its own.
 			const [creating, setCreating] = (0, react.useState)(false);
@@ -7382,8 +7394,8 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 				] }),
 				st.roots.length === 0 ? (0, react_jsx_runtime.jsx)("div", { className: "aXa_fs_empty", children: t("freestyle.empty") }) : null,
 				st.roots.length > 0 && visibleRoots.length === 0 ? (0, react_jsx_runtime.jsx)("div", { className: WorkspaceBrowser_module_css_default.searchStatus, children: t("freestyle.search.noMatches") }) : null,
-				(0, react_jsx_runtime.jsx)(FreestyleRoots, { roots: visibleRoots, trash: st.trash, rootTrash: st.rootTrash, githubLinked, ask: setConfirmTarget }),
-				(0, react_jsx_runtime.jsx)(FreestyleConfirmModal, { target: confirmTarget, onClose: () => setConfirmTarget(null) }),
+				(0, react_jsx_runtime.jsx)(FreestyleRoots, { roots: visibleRoots, trash: st.trash, rootTrash: st.rootTrash, githubLinked, ask: setModal }),
+				(0, react_jsx_runtime.jsx)(FreestyleModals, { modal, onClose: () => setModal(null) }),
 				(0, react_jsx_runtime.jsx)(OrgCreateModal, { t, kind: "freestyle", open: creating, onClose: () => setCreating(false) })
 			] });
 		}
@@ -7488,30 +7500,53 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 				})
 			}, row.id)) });
 		}
+		/** The GitHub mark the org rows wear (D91), same path, same box. A
+		 * function, not a constant: the snippet is evaluated bare in selftests. */
+		const fsGhMark = () => (0, react_jsx_runtime.jsx)("svg", { width: 16, height: 16, viewBox: "0 0 16 16", fill: "currentColor", "aria-hidden": "true", children: (0, react_jsx_runtime.jsx)("path", { d: GH_MARK }) });
 		function FreestyleRootRow({ root, githubLinked, ask }) {
-			const [renaming, setRenaming] = (0, react.useState)(false);
 			const [creating, setCreating] = (0, react.useState)(null);
 			const [dragOver, setDragOver] = (0, react.useState)(false);
+			// D97 parity: last sync outcome for THIS row — null | { busy } | { key, detail, bad }.
+			const [syncState, setSyncState] = (0, react.useState)(null);
 			const verbs = freestyleRootVerbs(root.id, ask);
 			const selected = freestyleStore.selected();
+			// The Organisations row menu, item for item and in its order — rename,
+			// open, sync, sweep, connect|disconnect, trash (parity ruling
+			// 2026-09-09) — plus the file verbs a folder needs, which an org keeps
+			// one level down on its project rows.
 			const menuItems = [
+				{ id: "rename", label: orgT("menu.org.rename"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconEditOutline16, {}) },
+				{ id: root.open ? "close" : "open", label: orgT(root.open ? "freestyle.menu.close" : "freestyle.menu.open"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) },
+				{ id: "sync", label: orgT("menu.org.sync"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconRefreshOutline16, {}) },
+				{ id: "sweep", label: orgT("freestyle.menu.sweep"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20, {}) },
+				root.connected ? { id: "disconnect", label: orgT("menu.org.disconnect"), icon: fsGhMark() } : { id: "connect", label: orgT("menu.org.connect"), icon: fsGhMark() },
+				{ type: "separator", id: "sep-fs-files" },
 				{ id: "newFile", label: orgT("freestyle.menu.newFile"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconProjectAddOutline16, {}) },
 				{ id: "newFolder", label: orgT("freestyle.menu.newFolder"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {}) },
 				{ id: "newSession", label: orgT("freestyle.menu.newSession"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconNewChatOutline16, {}) },
-				{ id: "rename", label: orgT("freestyle.menu.rename"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconEditOutline16, {}) },
-				{ id: root.open ? "close" : "open", label: orgT(root.open ? "freestyle.menu.close" : "freestyle.menu.open") },
 				{ id: "reveal", label: orgT("freestyle.menu.reveal"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) },
-				{ id: "publish", label: orgT("freestyle.menu.publish") + (githubLinked === false ? " · " + orgT("freestyle.publish.unlinked") : ""), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconBranchOutline16, {}), disabled: githubLinked !== true },
+				{ type: "separator", id: "sep-fs-trash" },
 				{ id: "trash", label: orgT("freestyle.menu.trash"), icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}), danger: true }
 			];
 			const onMenu = (id) => {
 				if (id === "newFile" || id === "newFolder") { setCreating(id); return; }
 				if (id === "newSession") { verbs.newSession("").then(freestyleOpenConversation).catch(freestyleNotice); return; }
-				if (id === "rename") { setRenaming(true); return; }
+				// Every conversation is the org modal with kind: "freestyle" (FreestyleModals).
+				if (id === "rename") { ask({ modal: "rename", kind: "freestyle", rootId: root.id, currentName: root.name }); return; }
 				if (id === "open" || id === "close") { freestyleStore.mutate("root." + id, { rootId: root.id }).catch(freestyleNotice); return; }
+				if (id === "sync") {
+					setSyncState({ busy: true });
+					freestyleStore.mutate("root.sync", { rootId: root.id })
+						.then((b) => setSyncState(arxaSyncSummary(b.repos)))
+						.catch((e) => setSyncState({ key: "rows.sync.failed", detail: String(e?.message ?? e), bad: true }));
+					return;
+				}
+				if (id === "sweep") { ask({ modal: "sweep", kind: "freestyle", rootId: root.id, name: root.name }); return; }
+				if (id === "connect") { ask({ modal: "publish", kind: "freestyle", rootId: root.id, orgName: root.name }); return; }
+				if (id === "disconnect") { ask({ modal: "disconnect", kind: "freestyle", rootId: root.id, name: root.name, slug: root.repoName || "" }); return; }
 				if (id === "reveal") { verbs.reveal("").catch(freestyleNotice); return; }
-				if (id === "publish") { const rootId = root.id; freestyleStore.mutate("root.publish", { rootId, visibility: "private" }).then((r) => freestyleNotice(r.repoUrl || orgT("freestyle.publish.done"))).catch(freestyleNotice); return; }
-				if (id === "trash") ask({ action: "root.trash", arg: { rootId: root.id }, title: orgT("freestyle.confirm.rootTrash"), body: orgT("freestyle.confirm.rootTrashBody"), confirm: orgT("freestyle.menu.trash") });
+				// Move to Trash is restorable, so it asks nothing — the org rows do the same.
+				if (id === "trash") freestyleStore.mutate("root.trash", { rootId: root.id }).catch(freestyleNotice);
 			};
 			const drop = (e) => {
 				e.preventDefault(); setDragOver(false);
@@ -7543,7 +7578,11 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 						// selects, and the context menu carries open/close for the keyboard.
 						(0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder), children: root.open ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {}) }),
 						(0, react_jsx_runtime.jsx)("button", { type: "button", className: clsx(Rows_module_css_default.slot, Rows_module_css_default.chevron, "aXa_fs_toggle"), "aria-label": orgT(root.open ? "freestyle.menu.close" : "freestyle.menu.open"), onClick: (e) => { e.stopPropagation(); freestyleStore.mutate(root.open ? "root.close" : "root.open", { rootId: root.id }).catch(freestyleNotice); }, children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTriangleRightFill14, { className: clsx(Rows_module_css_default.arrow, root.open && Rows_module_css_default.arrowOpen) }) }),
-						renaming ? (0, react_jsx_runtime.jsx)(InlineName, { initial: root.name, onCancel: () => setRenaming(false), onCommit: (name) => { setRenaming(false); freestyleStore.mutate("root.rename", { rootId: root.id, name }).catch(freestyleNotice); } }) : (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.title, "aXa_fs_rootName"), children: root.name }) }),
+						(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.title, "aXa_fs_rootName"), children: root.name }) }),
+						// D91 parity: the GitHub mark on connected rows only.
+						root.connected ? (0, react_jsx_runtime.jsx)("span", { title: orgT("rows.ghSynced"), style: { display: "inline-flex", alignItems: "center", marginLeft: 6, opacity: 0.55, flex: "none" }, children: fsGhMark() }) : null,
+						// D97 parity: the last sync outcome, the span the org row shows.
+						syncState ? (0, react_jsx_runtime.jsx)("span", { title: syncState.detail || undefined, "data-arxa-sync": syncState.busy ? "busy" : syncState.bad ? "failed" : "ok", style: { fontSize: 11, flex: "none", marginLeft: 6, marginRight: 2, opacity: syncState.bad ? 1 : 0.55, color: syncState.bad ? "var(--dsw-alias-state-error-primary)" : undefined }, children: orgT(syncState.busy ? "rows.sync.busy" : syncState.key) }) : null,
 						menu
 					]
 				}) }),
@@ -7589,7 +7628,7 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 						]
 					}),
 					open && total === 0 ? (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, color: "var(--dsw-alias-label-tertiary)", padding: "4px 8px 2px 26px" }, children: orgT("freestyle.archives.empty") }) : null,
-					open ? rows.map(({ root, row }) => (0, react_jsx_runtime.jsx)(FreestyleActionMenu, { items: [{ id: "revive", label: orgT("freestyle.archives.revive") }, { id: "trash", label: orgT("freestyle.archives.toTrash"), danger: true }], onSelect: (id) => { if (id === "revive") freestyleStore.mutate("archive.revive", { rootId: root.id, id: row.id }).catch(freestyleNotice); else ask({ action: "archive.trash", arg: { rootId: root.id, id: row.id }, title: orgT("freestyle.confirm.archiveTrash"), body: root.name + " · " + (row.name || row.id), confirm: orgT("freestyle.archives.toTrash") }); }, children: ({ menu, menuOpen, onContextMenu }) => (0, react_jsx_runtime.jsxs)("div", { className: clsx(Rows_module_css_default.projectRow, menuOpen && Rows_module_css_default.menuOpen), style: { marginLeft: 18, marginTop: 2 }, "data-root-id": root.id, onContextMenu, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.slot, children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20, { size: 16 }) }), (0, react_jsx_runtime.jsxs)("span", { className: Rows_module_css_default.projectText, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: row.name || row.id }), (0, react_jsx_runtime.jsx)("span", { className: "aXa_fs_meta", children: root.name })] }), menu] }) }, root.id + ":" + row.id)) : null
+					open ? rows.map(({ root, row }) => (0, react_jsx_runtime.jsx)(FreestyleActionMenu, { items: [{ id: "revive", label: orgT("freestyle.archives.revive") }, { id: "trash", label: orgT("freestyle.archives.toTrash"), danger: true }], onSelect: (id) => { if (id === "revive") freestyleStore.mutate("archive.revive", { rootId: root.id, id: row.id }).catch(freestyleNotice); else freestyleStore.mutate("archive.trash", { rootId: root.id, id: row.id }).catch(freestyleNotice); }, children: ({ menu, menuOpen, onContextMenu }) => (0, react_jsx_runtime.jsxs)("div", { className: clsx(Rows_module_css_default.projectRow, menuOpen && Rows_module_css_default.menuOpen), style: { marginLeft: 18, marginTop: 2 }, "data-root-id": root.id, onContextMenu, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.slot, children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20, { size: 16 }) }), (0, react_jsx_runtime.jsxs)("span", { className: Rows_module_css_default.projectText, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: row.name || row.id }), (0, react_jsx_runtime.jsx)("span", { className: "aXa_fs_meta", children: root.name })] }), menu] }) }, root.id + ":" + row.id)) : null
 				]
 			});
 		}
@@ -7626,8 +7665,8 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 						]
 					}),
 					open && total === 0 ? (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, color: "var(--dsw-alias-label-tertiary)", padding: "4px 8px 2px 26px" }, children: orgT("freestyle.trash.empty") }) : null,
-					open ? rootTrash.map((row) => (0, react_jsx_runtime.jsx)(FreestyleActionMenu, { items: [{ id: "restore", label: orgT("freestyle.trash.restore") }, { id: "purge", label: orgT("freestyle.trash.removeFolder"), danger: true }], onSelect: (id) => { if (id === "restore") freestyleStore.mutate("roottrash.restore", { rootId: row.id }).catch(freestyleNotice); else ask({ action: "roottrash.purge", arg: { rootId: row.id }, title: orgT("freestyle.confirm.rootPurge"), body: orgT("freestyle.confirm.rootPurgeBody"), confirm: orgT("freestyle.trash.removeFolder") }); }, children: ({ menu, menuOpen, onContextMenu }) => (0, react_jsx_runtime.jsxs)("div", { className: clsx(Rows_module_css_default.projectRow, menuOpen && Rows_module_css_default.menuOpen), style: { marginLeft: 18, marginTop: 2 }, "data-root-id": row.id, onContextMenu, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.slot, children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, { size: 16 }) }), (0, react_jsx_runtime.jsxs)("span", { className: Rows_module_css_default.projectText, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: row.name }), (0, react_jsx_runtime.jsx)("span", { className: "aXa_fs_meta", children: row.path })] }), menu] }) }, "root:" + row.id)) : null,
-					open ? trash.map((row) => { const root = roots.find((item) => item.id === row.rootId); const rootName = root ? root.name : row.rootId; return (0, react_jsx_runtime.jsx)(FreestyleActionMenu, { items: [{ id: "restore", label: orgT("freestyle.trash.restore") }, { id: "purge", label: orgT("freestyle.trash.purge"), danger: true }], onSelect: (id) => { if (id === "restore") freestyleStore.mutate("trash.restore", { rootId: row.rootId, entryId: row.id }).catch(freestyleNotice); else ask({ action: "trash.purge", arg: { rootId: row.rootId, entryId: row.id }, title: orgT("freestyle.confirm.purge"), body: rootName + " · " + (row.name || row.relPath), confirm: orgT("freestyle.trash.purge") }); }, children: ({ menu, menuOpen, onContextMenu }) => (0, react_jsx_runtime.jsxs)("div", { className: clsx(Rows_module_css_default.projectRow, menuOpen && Rows_module_css_default.menuOpen), style: { marginLeft: 18, marginTop: 2 }, "data-root-id": row.rootId, onContextMenu, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.slot, children: (0, react_jsx_runtime.jsx)(row.kind === "session" ? _deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20 : _deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, { size: 16 }) }), (0, react_jsx_runtime.jsxs)("span", { className: Rows_module_css_default.projectText, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: row.name || row.relPath }), (0, react_jsx_runtime.jsx)("span", { className: "aXa_fs_meta", children: rootName })] }), menu] }) }, row.rootId + ":" + row.id); }) : null
+					open ? rootTrash.map((row) => (0, react_jsx_runtime.jsx)(FreestyleActionMenu, { items: [{ id: "restore", label: orgT("freestyle.trash.restore") }, { id: "purge", label: orgT("freestyle.trash.removeFolder"), danger: true }], onSelect: (id) => { if (id === "restore") freestyleStore.mutate("roottrash.restore", { rootId: row.id }).catch(freestyleNotice); else ask({ modal: "purge", scope: "freestyle", name: row.name, title: orgT("freestyle.confirm.rootPurge"), warn: orgT("freestyle.confirm.rootPurgeBody"), cta: orgT("freestyle.trash.removeFolder"), busy: orgT("freestyle.purge.rootBusy"), call: () => freestyleStore.mutate("roottrash.purge", { rootId: row.id }) }); }, children: ({ menu, menuOpen, onContextMenu }) => (0, react_jsx_runtime.jsxs)("div", { className: clsx(Rows_module_css_default.projectRow, menuOpen && Rows_module_css_default.menuOpen), style: { marginLeft: 18, marginTop: 2 }, "data-root-id": row.id, onContextMenu, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.slot, children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, { size: 16 }) }), (0, react_jsx_runtime.jsxs)("span", { className: Rows_module_css_default.projectText, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: row.name }), (0, react_jsx_runtime.jsx)("span", { className: "aXa_fs_meta", children: row.path })] }), menu] }) }, "root:" + row.id)) : null,
+					open ? trash.map((row) => { const root = roots.find((item) => item.id === row.rootId); const rootName = root ? root.name : row.rootId; return (0, react_jsx_runtime.jsx)(FreestyleActionMenu, { items: [{ id: "restore", label: orgT("freestyle.trash.restore") }, { id: "purge", label: orgT("freestyle.trash.purge"), danger: true }], onSelect: (id) => { if (id === "restore") freestyleStore.mutate("trash.restore", { rootId: row.rootId, entryId: row.id }).catch(freestyleNotice); else ask({ modal: "purge", scope: "freestyle", name: row.name || row.relPath, title: orgT("freestyle.confirm.purge"), warn: orgT("freestyle.purge.entryWarn"), cta: orgT("freestyle.trash.purge"), busy: orgT("freestyle.purge.entryBusy"), call: () => freestyleStore.mutate("trash.purge", { rootId: row.rootId, entryId: row.id }) }); }, children: ({ menu, menuOpen, onContextMenu }) => (0, react_jsx_runtime.jsxs)("div", { className: clsx(Rows_module_css_default.projectRow, menuOpen && Rows_module_css_default.menuOpen), style: { marginLeft: 18, marginTop: 2 }, "data-root-id": row.rootId, onContextMenu, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.slot, children: (0, react_jsx_runtime.jsx)(row.kind === "session" ? _deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20 : _deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, { size: 16 }) }), (0, react_jsx_runtime.jsxs)("span", { className: Rows_module_css_default.projectText, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: row.name || row.relPath }), (0, react_jsx_runtime.jsx)("span", { className: "aXa_fs_meta", children: rootName })] }), menu] }) }, row.rootId + ":" + row.id); }) : null
 				]
 			});
 		}
