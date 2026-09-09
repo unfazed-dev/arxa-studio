@@ -983,11 +983,12 @@ check('client: agent verb + reason strings localized in en/pl/fr',
   check('D117: leaving a session CLEARS the map rather than leaving it stale',
     gen.includes('arxaDeco = { sessionId: null, prefix: "", files: {}, dirs: {}, ok: false };'))
   check('D117: folders decorate from the folded map, files from the file map',
-    gen.includes('kind === "dir" ? arxaDeco.dirs : arxaDeco.files'))
+    gen.includes('kind === "dir" ? src.dirs : src.files'))
   check('D117: both row kinds carry a badge',
     gen.includes('ARXA_DECO_BADGE(relPath, "file")') && gen.includes('ARXA_DECO_BADGE(dir ? dir + "/" + sub : sub, "dir")'))
   check('D117: the mark is announced, not colour-only',
-    gen.includes('"aria-label": orgT(ARXA_DECO_TITLE[letter]'))
+    gen.includes('const label = orgT(titles[letter] || titles.M);')
+    && gen.includes('"aria-label": label,'))
   check('D117: every decoration string is translated in all three dictionaries',
     (gen.match(/"rows\.deco\.modified":/g) || []).length === 3
     && (gen.match(/"rows\.deco\.deleted":/g) || []).length === 3)
@@ -1006,6 +1007,25 @@ check('client: agent verb + reason strings localized in en/pl/fr',
     && hostSrc().includes('dirs: gw.foldDirs(files)'))
   check('D117: a dsh-less session still decorates (D112 sessions are legitimate)',
     hostSrc().includes('x.id === sid || x.dshSessionId === sid'))
+
+  // ---- The Freestyle half, which shipped as prose and not as code ----
+  // Both plans recorded that Freestyle rows decorate "through the same
+  // ArxaDirRows path, with rootId and relPath" and therefore needed no code.
+  // Neither was true: ArxaDirRows hands every Freestyle row to
+  // FreestyleEntryRow, which carried no badge at all, and the map was keyed to
+  // the selected ORG session, so a Freestyle lookup could only ever miss.
+  // These four pin the parts that were missing, not the parts that were there.
+  check('D117: Freestyle rows carry a badge (the row component the org path skips)',
+    gen.includes('ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId)'))
+  check('D117: the Freestyle map is per ROOT — that tab shows several repos at once',
+    gen.includes('const src = rootId ? arxaFsDeco[rootId] : arxaDeco;'))
+  check('D117: the Freestyle map rides the state payload, not a second poll',
+    gen.includes('for (const root of roots) if (root.deco) nextDeco[root.id] = root.deco;')
+    && (gen.match(/ORG_POST\("session\.decorations"/g) || []).length === 1)
+  check('D117: a Freestyle badge never claims "in this session" — it has no session',
+    gen.includes('const ARXA_DECO_TITLE_LOCAL = ')
+    && (gen.match(/"rows\.deco\.local\.modified":/g) || []).length === 3
+    && (gen.match(/"rows\.deco\.local\.deleted":/g) || []).length === 3)
 }
 
 // ---- D112: a session with no conversation is NAMED, never silent ----

@@ -596,6 +596,15 @@
 		 * the operator wants to know what THIS session changed, and the row they
 		 * click should open that session's copy of the file. */
 		let arxaDeco = { sessionId: null, prefix: "", files: {}, dirs: {}, ok: false };
+		/* The Freestyle half of the same idea, keyed by root id because that tab
+		 * shows several repos at once and each speaks its own path space. It
+		 * arrives on the freestyle state payload (no second poll — the tree is
+		 * already refreshing on that fetch) and answers a DIFFERENT question:
+		 * org rows are session files, so they decorate session-vs-main; Freestyle
+		 * rows are the root working tree, so they decorate against HEAD —
+		 * "changed on disk, not committed yet". Same letters, different claim,
+		 * which is why the tooltips are their own strings. */
+		let arxaFsDeco = {};
 		const ARXA_DECO_EVENT = "arxa-deco";
 		let arxaDecoInflight = null;
 		const arxaRefreshDeco = () => {
@@ -636,18 +645,25 @@
 		/** The mark for one row, or null. `kind` picks which map: a folder is lit
 		 * when anything INSIDE it changed, which is what makes a decoration
 		 * survive collapsing the folder. */
-		const ARXA_DECO_FOR = (relPath, kind) => {
-			const m = kind === "dir" ? arxaDeco.dirs : arxaDeco.files;
+		const ARXA_DECO_FOR = (relPath, kind, rootId) => {
+			const src = rootId ? arxaFsDeco[rootId] : arxaDeco;
+			const m = src && (kind === "dir" ? src.dirs : src.files);
 			return (m && m[relPath]) || null;
 		};
 		const ARXA_DECO_TITLE = { M: "rows.deco.modified", A: "rows.deco.added", D: "rows.deco.deleted", R: "rows.deco.renamed" };
-		const ARXA_DECO_BADGE = (relPath, kind) => {
-			const letter = ARXA_DECO_FOR(relPath, kind);
+		/* A Freestyle root usually has no session at all, so the org strings —
+		 * "Modified in this session" — would name something that does not exist.
+		 * Same letters, own sentences. */
+		const ARXA_DECO_TITLE_LOCAL = { M: "rows.deco.local.modified", A: "rows.deco.local.added", D: "rows.deco.local.deleted", R: "rows.deco.local.renamed" };
+		const ARXA_DECO_BADGE = (relPath, kind, rootId) => {
+			const letter = ARXA_DECO_FOR(relPath, kind, rootId);
 			if (!letter) return null;
+			const titles = rootId ? ARXA_DECO_TITLE_LOCAL : ARXA_DECO_TITLE;
+			const label = orgT(titles[letter] || titles.M);
 			return (0, react_jsx_runtime.jsx)("span", {
 				className: "aXa_deco aXa_deco_" + letter,
-				title: orgT(ARXA_DECO_TITLE[letter] || "rows.deco.modified"),
-				"aria-label": orgT(ARXA_DECO_TITLE[letter] || "rows.deco.modified"),
+				title: label,
+				"aria-label": label,
 				children: letter,
 			}, "deco");
 		};
@@ -2026,6 +2042,10 @@
 				label: orgT("freestyle.menu." + id),
 				danger: id === "trash"
 			}));
+			// D117 on this tab. The org rows read the map inline three times; here
+			// it is read once, because `kind` has to be translated into the map's
+			// vocabulary anyway and the row needs the letter twice.
+			const decoLetter = ARXA_DECO_FOR(relPath, kind === "dir" ? "dir" : "file", rootId);
 			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 				(0, react_jsx_runtime.jsx)(FreestyleActionMenu, { items, onSelect: choose, children: ({ menu, menuOpen, onContextMenu }) => (0, react_jsx_runtime.jsxs)("div", {
 					className: clsx(Rows_module_css_default.projectRow, selected === relPath && Rows_module_css_default.selected, menuOpen && Rows_module_css_default.menuOpen, dragOver && "aXa_fs_dropOn"),
@@ -2040,7 +2060,8 @@
 					children: [
 						kind === "dir" ? (0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.chevron), children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTriangleRightFill14, { className: clsx(Rows_module_css_default.arrow, open && Rows_module_css_default.arrowOpen) }) }) : (0, react_jsx_runtime.jsx)("span", { style: { width: 16, flex: "none" } }),
 						kind === "dir" ? (0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder), children: open ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {}) }) : (0, react_jsx_runtime.jsx)("span", { style: { flex: "none", width: 16, height: 20, display: "inline-flex", alignItems: "center" }, children: matIcons ? (0, react_jsx_runtime.jsx)("span", { style: { width: 16, height: 16, display: "inline-flex" }, dangerouslySetInnerHTML: { __html: matIcons.file(name) } }) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconBrowseOutline16, {}) }),
-						editing === "rename" ? (0, react_jsx_runtime.jsx)(InlineName, { initial: name, onCancel: () => setEditing(null), onCommit: (next) => { setEditing(null); finish(verbs.rename(relPath, next)); } }) : (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: name }) }),
+						editing === "rename" ? (0, react_jsx_runtime.jsx)(InlineName, { initial: name, onCancel: () => setEditing(null), onCommit: (next) => { setEditing(null); finish(verbs.rename(relPath, next)); } }) : (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.title, decoLetter && "aXa_decoText", decoLetter && ("aXa_deco_" + decoLetter)), children: name }) }),
+ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 						menu
 					]
 				}) }),
@@ -3193,6 +3214,10 @@
 			"rows.deco.added": "Added in this session",
 			"rows.deco.deleted": "Deleted in this session",
 			"rows.deco.renamed": "Renamed in this session",
+			"rows.deco.local.modified": "Modified, not committed yet",
+			"rows.deco.local.added": "New, not committed yet",
+			"rows.deco.local.deleted": "Deleted, not committed yet",
+			"rows.deco.local.renamed": "Renamed, not committed yet",
 			"org.create.ghToggle": "Publish to GitHub",
 			"org.create.ghOnHint": "A private GitHub repository is created and kept in sync.",
 			"org.create.ghOffHint": "This organisation stays on this device only. Connect it later from its menu.",
@@ -3469,6 +3494,10 @@
 			"rows.deco.added": "Dodany w tej sesji",
 			"rows.deco.deleted": "Usunięty w tej sesji",
 			"rows.deco.renamed": "Zmieniona nazwa w tej sesji",
+			"rows.deco.local.modified": "Zmieniony, jeszcze niezatwierdzony",
+			"rows.deco.local.added": "Nowy, jeszcze niezatwierdzony",
+			"rows.deco.local.deleted": "Usunięty, jeszcze niezatwierdzony",
+			"rows.deco.local.renamed": "Zmieniona nazwa, jeszcze niezatwierdzona",
 			"org.create.ghToggle": "Opublikuj na GitHub",
 			"org.create.ghOnHint": "Zostaje utworzone prywatne repozytorium GitHub i jest na bieżąco synchronizowane.",
 			"org.create.ghOffHint": "Ta organizacja pozostaje tylko na tym urządzeniu. Połącz ją później z jej menu.",
@@ -3745,6 +3774,10 @@
 			"rows.deco.added": "Ajouté dans cette session",
 			"rows.deco.deleted": "Supprimé dans cette session",
 			"rows.deco.renamed": "Renommé dans cette session",
+			"rows.deco.local.modified": "Modifié, pas encore validé",
+			"rows.deco.local.added": "Nouveau, pas encore validé",
+			"rows.deco.local.deleted": "Supprimé, pas encore validé",
+			"rows.deco.local.renamed": "Renommé, pas encore validé",
 			"org.create.ghToggle": "Publier sur GitHub",
 			"org.create.ghOnHint": "Un dépôt GitHub privé est créé et synchronisé en continu.",
 			"org.create.ghOffHint": "Cette organisation reste uniquement sur cet appareil. Connectez-la plus tard depuis son menu.",

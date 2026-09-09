@@ -944,3 +944,12 @@ only inside a session has no row to decorate. `M` and `D` on tracked files are
 the cases that show; a brand-new file appears once it reaches main.
 
 Freestyle integration: Freestyle rows use the same `ArxaDirRows` decoration path, with `rootId` and repo-relative `relPath`; see [the Freestyle plan](freestyle-section.md).
+
+> **Corrected 2026-09-09 — this line was wrong, and the feature was invisible on
+> that tab for as long as it stood.** `ArxaDirRows` hands every Freestyle row to
+> `FreestyleEntryRow`, which carried no badge markup at all, and this map is keyed
+> to the selected ORG session, so a Freestyle lookup could only ever miss. Both
+> gaps are fixed in
+> [`freestyle-git-decorations.md`](freestyle-git-decorations.md), which also
+> explains why a Freestyle root decorates against **HEAD** rather than `main`:
+> its rows are the root working tree, never a session's files.

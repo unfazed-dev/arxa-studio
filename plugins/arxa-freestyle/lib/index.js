@@ -9,6 +9,7 @@ import { readRegistry, listRoots, rootById, addRoot, newRoot, openRoot, closeRoo
 import { createFile, createDir, renameEntry, moveEntry, duplicateEntry, trashEntry, listTrash, readTrashEntry, restoreEntry, purgeEntry, revealEntry } from './files.js'
 import { createFreestyleSessions } from './sessions.js'
 import { isRepo, hasHead } from '../../git-workspace/lib/repos.js'
+import { decorate, foldDirs } from '../../git-workspace/lib/decorations.js'
 import { dshSessionKey } from '../../git-workspace/lib/sessions.js'
 import { createHash } from 'node:crypto'
 
@@ -165,15 +166,48 @@ export function apply(ctx, opts = {}) {
 
   const rootOr = (id) => { const r = rootById(id, { env }); if (!r) throw new Error('unknown-root: ' + id); return r }
 
+  /** D117 for a Freestyle root — the letters beside each file row.
+   *
+   * Baseline is HEAD, not `main`. The org tab decorates session-vs-main because
+   * an org row IS a session file; a Freestyle row is always the ROOT working
+   * tree, because Freestyle sessions live in their own worktrees under `.arxa`
+   * (sessions.js:21). So the only claim this map can honestly make is "changed
+   * on disk, not committed yet" — which is what `base:'HEAD'` produces: the
+   * three-dot diff collapses to empty and `status --porcelain` is the answer.
+   *
+   * Open roots only. A closed root renders no rows, so its two git calls would
+   * buy nothing, and roots are the unit a user collapses precisely when they
+   * stop caring about what is inside.
+   *
+   * ponytail: the root repo only. A repo nested inside the root reports as one
+   * entry from the root's side rather than its own map — per-repo maps if
+   * someone actually keeps repos in a Freestyle folder.
+   */
+  const decoFor = (root, repoOk) => {
+    if (!root.open || !repoOk) return null
+    try {
+      const d = decorate(root.path, { env, base: 'HEAD' })
+      return d.ok ? { files: d.files, dirs: foldDirs(d.files), ok: true } : { files: {}, dirs: {}, ok: false }
+    } catch {
+      // Decorations are presentation. A root on a flaky mount must still list.
+      return { files: {}, dirs: {}, ok: false }
+    }
+  }
+
   const state = () => {
     const reg = readRegistry({ env })
-    const roots = reg.roots.map((r) => ({
-      ...r,
-      isRepo: isRepo(r.path, env),
-      hasHead: isRepo(r.path, env) && hasHead(r.path, env),
-      sessions: r.open ? S.list(r) : { active: [], parked: [], archived: [] },
-      trashCount: listTrash(r).length,
-    }))
+    const roots = reg.roots.map((r) => {
+      const repo = isRepo(r.path, env)
+      const head = repo && hasHead(r.path, env)
+      return {
+        ...r,
+        isRepo: repo,
+        hasHead: head,
+        sessions: r.open ? S.list(r) : { active: [], parked: [], archived: [] },
+        trashCount: listTrash(r).length,
+        deco: decoFor(r, head),
+      }
+    })
     const trash = roots.flatMap((r) => listTrash(r).map((e) => ({ ...e, rootId: r.id })))
     return { roots, trash, ui: reg.ui }
   }
