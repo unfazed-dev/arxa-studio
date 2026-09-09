@@ -46,9 +46,15 @@ assert.match(client, /onClick: \(e\) => e\.stopPropagation\(\)/, 'inline editing
 assert.match(client, /freestyleStore\.mutate\(root\.open \? "root\.close" : "root\.open"/, 'root disclosure toggles independently from selection')
 assert.match(client, /if \(id === "trash"\) \{ verbs\.trash\(relPath\)\.catch\(freestyleNotice\); return; \}/, 'entry trash moves to the folder trash at once — restorable, like the org rows')
 assert.doesNotMatch(client, /function FreestyleConfirmModal/, 'Freestyle owns no confirm modal — the Organisations modals serve every conversation')
-assert.match(client, /"data-root-id": root\.id/, 'archive rows expose their owning root identity')
-assert.match(client, /"data-root-id": row\.rootId/, 'trash rows expose their owning root identity')
-assert.match(client, /className: "aXa_fs_meta", children: rootName/, 'trash rows show the owning root as secondary text')
+assert.match(client, /fsEntryRow\(\{ key: root\.id \+ ":" \+ row\.id, rootId: root\.id/, 'archive rows expose their owning root identity')
+assert.match(client, /fsEntryRow\(\{ key: row\.rootId \+ ":" \+ row\.id, rootId: row\.rootId/, 'trash rows expose their owning root identity')
+assert.match(client, /fsGroupLabel\(rootName\)/, 'trash rows sit under their owning root as an uppercase group label, the Organisations grammar')
+assert.match(client, /"data-root-id": rootId,/, 'entry rows carry the owning root id for the lens')
+// Row grammar parity (2026-09-09, user screenshots): Archives/Trash entries are the org entryRow —
+// glyph slot, title alone, restore + destructive icon buttons. No path subtitle, no kebab.
+assert.doesNotMatch(client, /className: "aXa_fs_meta", children: (rootName|root\.name|row\.path)/, 'archive/trash rows carry no secondary text — the org rows carry none')
+assert.match(client, /fsEntryAction\(restoreLabel, _deepseek_ai_dsh_client_ui_primitives\.IconRefreshOutline16, onRestore\),\s*fsEntryAction\(purgeLabel, _deepseek_ai_dsh_client_ui_primitives\.IconTrashOutline16, onPurge, true\)/, 'entry rows carry the org restore/delete icon buttons, destructive in error ink')
+assert.match(client, /fsGroupLabel\(orgT\("freestyle\.trash\.folderSection"\)\)/, 'trashed folders sit under a Folders group label')
 assert.match(client, /hero\.guide\.freestyle/, 'the empty conversation hero follows the active Freestyle tab')
 assert.match(client, /snap && snap\.current === row\.dshSessionId\) arxaClientSessions\.clear\(\)/, 'archiving clears only the conversation owned by that row')
 assert.match(client, /for \(const root of freestyleStore\.get\(\)\.roots \|\| \[\]\)[\s\S]*?root\.sessions\?\.active/, 'rider ownership includes active Freestyle conversations')

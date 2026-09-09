@@ -6407,6 +6407,7 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			"freestyle.menu.duplicate": "Duplicate",
 			"freestyle.menu.trash": "Move to Trash",
 			"freestyle.trash.section": "Trash",
+			"freestyle.trash.folderSection": "Folders",
 			"freestyle.trash.empty": "Trash is empty",
 			"freestyle.trash.restore": "Restore",
 			"freestyle.trash.purge": "Delete forever",
@@ -6689,6 +6690,7 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			"freestyle.menu.duplicate": "Duplikuj",
 			"freestyle.menu.trash": "Przenieś do Kosza",
 			"freestyle.trash.section": "Kosz",
+			"freestyle.trash.folderSection": "Foldery",
 			"freestyle.trash.empty": "Kosz jest pusty",
 			"freestyle.trash.restore": "Przywróć",
 			"freestyle.trash.purge": "Usuń na zawsze",
@@ -6971,6 +6973,7 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			"freestyle.menu.duplicate": "Dupliquer",
 			"freestyle.menu.trash": "Déplacer vers la corbeille",
 			"freestyle.trash.section": "Corbeille",
+			"freestyle.trash.folderSection": "Dossiers",
 			"freestyle.trash.empty": "La corbeille est vide",
 			"freestyle.trash.restore": "Restaurer",
 			"freestyle.trash.purge": "Supprimer définitivement",
@@ -7593,6 +7596,46 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 				] }) : null
 			] });
 		}
+		// Archives/Trash entry rows, the Organisations grammar verbatim: the
+		// stock projectRow at the depth-1 margin, a bare glyph slot, the title
+		// alone (no path/root subtitle) and the two 28px icon buttons under
+		// Tooltips (restore = refresh glyph, the destructive one in error ink).
+		// Group labels are the same 10px uppercase caption. No kebab menu.
+		function fsEntryAction(label, Icon, onClick, danger) {
+			return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Tooltip, {
+				label,
+				side: "bottom",
+				children: (0, react_jsx_runtime.jsx)("button", {
+					type: "button",
+					className: Rows_module_css_default.iconButton,
+					"aria-label": label,
+					onClick: (e) => { e.stopPropagation(); onClick(); },
+					style: danger ? { color: "var(--dsw-alias-label-error)" } : void 0,
+					children: (0, react_jsx_runtime.jsx)(Icon, {})
+				})
+			});
+		}
+		function fsGroupLabel(text, key) {
+			return (0, react_jsx_runtime.jsx)("div", {
+				style: { fontSize: 10, lineHeight: "16px", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--dsw-alias-label-tertiary)", padding: "8px 8px 2px 26px" },
+				children: text
+			}, key);
+		}
+		function fsEntryRow({ key, rootId, glyph, name, hint, restoreLabel, onRestore, purgeLabel, onPurge }) {
+			return (0, react_jsx_runtime.jsxs)("div", {
+				className: Rows_module_css_default.projectRow,
+				style: { marginLeft: 18, marginTop: 2, cursor: "default" },
+				"data-root-id": rootId,
+				children: [
+					(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.slot, children: glyph }),
+					(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.projectText, children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, title: hint, children: name }) }),
+					(0, react_jsx_runtime.jsx)("span", { style: { display: "flex", gap: 12, flex: "none", alignItems: "center" }, children: [
+						fsEntryAction(restoreLabel, _deepseek_ai_dsh_client_ui_primitives.IconRefreshOutline16, onRestore),
+						fsEntryAction(purgeLabel, _deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, onPurge, true)
+					] })
+				]
+			}, key);
+		}
 		function FreestyleArchivesRows({ roots, ask }) {
 			const rows = roots.flatMap((root) => (((root.sessions && root.sessions.archived) || []).map((row) => ({ root, row }))));
 			const total = rows.length;
@@ -7628,7 +7671,10 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 						]
 					}),
 					open && total === 0 ? (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, color: "var(--dsw-alias-label-tertiary)", padding: "4px 8px 2px 26px" }, children: orgT("freestyle.archives.empty") }) : null,
-					open ? rows.map(({ root, row }) => (0, react_jsx_runtime.jsx)(FreestyleActionMenu, { items: [{ id: "revive", label: orgT("freestyle.archives.revive") }, { id: "trash", label: orgT("freestyle.archives.toTrash"), danger: true }], onSelect: (id) => { if (id === "revive") freestyleStore.mutate("archive.revive", { rootId: root.id, id: row.id }).catch(freestyleNotice); else freestyleStore.mutate("archive.trash", { rootId: root.id, id: row.id }).catch(freestyleNotice); }, children: ({ menu, menuOpen, onContextMenu }) => (0, react_jsx_runtime.jsxs)("div", { className: clsx(Rows_module_css_default.projectRow, menuOpen && Rows_module_css_default.menuOpen), style: { marginLeft: 18, marginTop: 2 }, "data-root-id": root.id, onContextMenu, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.slot, children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20, { size: 16 }) }), (0, react_jsx_runtime.jsxs)("span", { className: Rows_module_css_default.projectText, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: row.name || row.id }), (0, react_jsx_runtime.jsx)("span", { className: "aXa_fs_meta", children: root.name })] }), menu] }) }, root.id + ":" + row.id)) : null
+					open ? [...new Map(rows.map(({ root }) => [root.id, root])).values()].map((root) => (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+						fsGroupLabel(root.name),
+						rows.filter((x) => x.root.id === root.id).map(({ row }) => fsEntryRow({ key: root.id + ":" + row.id, rootId: root.id, glyph: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20, { size: 16 }), name: row.name || row.id, hint: root.name + " \u00b7 " + row.id, restoreLabel: orgT("freestyle.archives.revive"), onRestore: () => freestyleStore.mutate("archive.revive", { rootId: root.id, id: row.id }).catch(freestyleNotice), purgeLabel: orgT("freestyle.archives.toTrash"), onPurge: () => freestyleStore.mutate("archive.trash", { rootId: root.id, id: row.id }).catch(freestyleNotice) }))
+					] }, root.id)) : null
 				]
 			});
 		}
@@ -7665,8 +7711,12 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 						]
 					}),
 					open && total === 0 ? (0, react_jsx_runtime.jsx)("div", { style: { fontSize: 12, color: "var(--dsw-alias-label-tertiary)", padding: "4px 8px 2px 26px" }, children: orgT("freestyle.trash.empty") }) : null,
-					open ? rootTrash.map((row) => (0, react_jsx_runtime.jsx)(FreestyleActionMenu, { items: [{ id: "restore", label: orgT("freestyle.trash.restore") }, { id: "purge", label: orgT("freestyle.trash.removeFolder"), danger: true }], onSelect: (id) => { if (id === "restore") freestyleStore.mutate("roottrash.restore", { rootId: row.id }).catch(freestyleNotice); else ask({ modal: "purge", scope: "freestyle", name: row.name, title: orgT("freestyle.confirm.rootPurge"), warn: orgT("freestyle.confirm.rootPurgeBody"), cta: orgT("freestyle.trash.removeFolder"), busy: orgT("freestyle.purge.rootBusy"), call: () => freestyleStore.mutate("roottrash.purge", { rootId: row.id }) }); }, children: ({ menu, menuOpen, onContextMenu }) => (0, react_jsx_runtime.jsxs)("div", { className: clsx(Rows_module_css_default.projectRow, menuOpen && Rows_module_css_default.menuOpen), style: { marginLeft: 18, marginTop: 2 }, "data-root-id": row.id, onContextMenu, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.slot, children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, { size: 16 }) }), (0, react_jsx_runtime.jsxs)("span", { className: Rows_module_css_default.projectText, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: row.name }), (0, react_jsx_runtime.jsx)("span", { className: "aXa_fs_meta", children: row.path })] }), menu] }) }, "root:" + row.id)) : null,
-					open ? trash.map((row) => { const root = roots.find((item) => item.id === row.rootId); const rootName = root ? root.name : row.rootId; return (0, react_jsx_runtime.jsx)(FreestyleActionMenu, { items: [{ id: "restore", label: orgT("freestyle.trash.restore") }, { id: "purge", label: orgT("freestyle.trash.purge"), danger: true }], onSelect: (id) => { if (id === "restore") freestyleStore.mutate("trash.restore", { rootId: row.rootId, entryId: row.id }).catch(freestyleNotice); else ask({ modal: "purge", scope: "freestyle", name: row.name || row.relPath, title: orgT("freestyle.confirm.purge"), warn: orgT("freestyle.purge.entryWarn"), cta: orgT("freestyle.trash.purge"), busy: orgT("freestyle.purge.entryBusy"), call: () => freestyleStore.mutate("trash.purge", { rootId: row.rootId, entryId: row.id }) }); }, children: ({ menu, menuOpen, onContextMenu }) => (0, react_jsx_runtime.jsxs)("div", { className: clsx(Rows_module_css_default.projectRow, menuOpen && Rows_module_css_default.menuOpen), style: { marginLeft: 18, marginTop: 2 }, "data-root-id": row.rootId, onContextMenu, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.slot, children: (0, react_jsx_runtime.jsx)(row.kind === "session" ? _deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20 : _deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, { size: 16 }) }), (0, react_jsx_runtime.jsxs)("span", { className: Rows_module_css_default.projectText, children: [(0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: row.name || row.relPath }), (0, react_jsx_runtime.jsx)("span", { className: "aXa_fs_meta", children: rootName })] }), menu] }) }, row.rootId + ":" + row.id); }) : null
+					open && rootTrash.length > 0 ? fsGroupLabel(orgT("freestyle.trash.folderSection")) : null,
+					open ? rootTrash.map((row) => fsEntryRow({ key: "root:" + row.id, rootId: row.id, glyph: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {}), name: row.name, hint: row.path, restoreLabel: orgT("freestyle.trash.restore"), onRestore: () => freestyleStore.mutate("roottrash.restore", { rootId: row.id }).catch(freestyleNotice), purgeLabel: orgT("freestyle.trash.removeFolder"), onPurge: () => ask({ modal: "purge", scope: "freestyle", name: row.name, title: orgT("freestyle.confirm.rootPurge"), warn: orgT("freestyle.confirm.rootPurgeBody"), cta: orgT("freestyle.trash.removeFolder"), busy: orgT("freestyle.purge.rootBusy"), call: () => freestyleStore.mutate("roottrash.purge", { rootId: row.id }) }) })) : null,
+					open ? [...new Set(trash.map((row) => row.rootId))].map((rootId) => { const root = roots.find((item) => item.id === rootId); const rootName = root ? root.name : rootId; return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+						fsGroupLabel(rootName),
+						trash.filter((row) => row.rootId === rootId).map((row) => fsEntryRow({ key: row.rootId + ":" + row.id, rootId: row.rootId, glyph: (0, react_jsx_runtime.jsx)(row.kind === "session" ? _deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20 : _deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, { size: 16 }), name: row.name || row.relPath, hint: rootName + " \u00b7 " + (row.relPath || row.id), restoreLabel: orgT("freestyle.trash.restore"), onRestore: () => freestyleStore.mutate("trash.restore", { rootId: row.rootId, entryId: row.id }).catch(freestyleNotice), purgeLabel: orgT("freestyle.trash.purge"), onPurge: () => ask({ modal: "purge", scope: "freestyle", name: row.name || row.relPath, title: orgT("freestyle.confirm.purge"), warn: orgT("freestyle.purge.entryWarn"), cta: orgT("freestyle.trash.purge"), busy: orgT("freestyle.purge.entryBusy"), call: () => freestyleStore.mutate("trash.purge", { rootId: row.rootId, entryId: row.id }) }) }))
+					] }, rootId); }) : null
 				]
 			});
 		}
