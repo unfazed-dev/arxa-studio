@@ -127,3 +127,11 @@ two here because Freestyle must be able to open an arbitrary folder, F1);
 - Installed engine `~/.arxa/engine/840ace568bee` — `client.js` sha `d439d7adfd36` byte-identical to the repo; `FreestyleModals` and `root.disconnect` present. LaunchAgent count 1, Freestyle state route answering on 7891.
 - Rollback: `/Applications/Arxa Studio.app.bak`.
 - Observed in the Part 2 capture, not touched: with the Trash section auto-opened, the "Trash" header text and the trashed row's title overlap for a moment. Pre-existing section geometry from the trash-parity round; worth its own look.
+
+## Part 3 — row grammar (2026-09-09, user screenshots)
+
+**Problem.** The Freestyle Archives/Trash entries rendered as folder glyph + title + path/root subtitle + a "…" kebab menu. The Organisations entries are glyph + title + two hover icon buttons (restore = refresh, delete/trash in error ink) under uppercase group labels.
+
+**Fix.** `freestyle-region.snippet.txt`: `fsEntryAction` / `fsGroupLabel` / `fsEntryRow` copied from the org `TrashSection`/`ArchivesSection`; Archives entries grouped by owning folder, Trash entries under a FOLDERS group (trashed folders) then per-folder groups (trashed files/sessions). No subtitle, no kebab. Locale `freestyle.trash.folderSection` (Folders / Foldery / Dossiers). The `+` menu ("Open existing folder…" / "Create new folder…") stays — user checked it and ruled it fine.
+
+**Proof.** `docs/plans/phase0b-snapshots/freestyle/trash-rows-parity.png`; selftest.freestyle pins (`fsEntryRow`, `fsGroupLabel`, no `aXa_fs_meta` in the sections); CI 103 green. Commit `594ee77`. Installed engine `d3854bed4859`, client.js `a36583f75da9` = repo.
