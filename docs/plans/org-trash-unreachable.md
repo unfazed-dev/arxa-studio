@@ -1,5 +1,12 @@
 # Trashing your last org made the trash unreachable
 
+> **Superseded (2026-09-09).** The welcome-view Restore this round added was a
+> rescue for a gate that covered the sidebar. The gate now steps aside for the
+> sidebar column, the sidebar's own Trash row is reachable at zero orgs, and
+> that rescue has been removed. See
+> [`org-delete-trash-reachability.md`](org-delete-trash-reachability.md).
+
+
 Date: 2026-09-08. Reported as "the repo just got deleted without moving to
 trash and without following the flow arxa studio has" (Omarchy, org PROTONFEW).
 

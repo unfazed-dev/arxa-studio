@@ -314,7 +314,7 @@ function computeColumns(viewport, sidebar, details, viewer, centerMin) {
 			return (0, react_jsx_runtime.jsxs)("div", {
 				ref: frameRef,
 				className: AppFrame_module_css_default.frame,
-				style: { gridTemplateColumns: `${cols.sidebar}px minmax(0, 1fr) ${cols.details}px ${cols.viewer}px` },
+				style: { gridTemplateColumns: `${cols.sidebar}px minmax(0, 1fr) ${cols.details}px ${cols.viewer}px`, "--aXa-fr-sidebar": cols.sidebar + "px" },
 				"data-sidebar-collapsed": sidebarCollapsed || void 0,
 				"data-details-collapsed": cols.details === 0 || void 0,
 				"data-viewer-collapsed": cols.viewer === 0 || void 0,

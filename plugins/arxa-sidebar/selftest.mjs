@@ -939,26 +939,37 @@ check('client: agent verb + reason strings localized in en/pl/fr',
 
 // ============================================================
 // S-rescue — the way back from a zero-org state (2026-09-08,
-// docs/plans/org-trash-unreachable.md). smoke.mjs drives the SERVER half end
-// to end; these pin the client half, which is the part that was invisible: the
-// welcome gate covers the whole app at zero orgs, Trash row included.
+// docs/plans/org-trash-unreachable.md; superseded 2026-09-09 by
+// docs/plans/org-delete-trash-reachability.md). smoke.mjs drives the SERVER
+// half end to end; these pin the client half. The 2026-09-08 round could not
+// reach the sidebar's Trash row at zero orgs, so the welcome gate grew a
+// restore of its own. The gate now steps aside for the sidebar column instead,
+// and that rescue is gone — these pins hold BOTH halves of that trade, because
+// deleting the rescue without the offset is the original data-loss bug back.
 {
   const gen = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
   const host = readFileSync(new URL('./lib/index.js', import.meta.url), 'utf8')
+  const frame = readFileSync(new URL('../arxa-frame/lib/client.js', import.meta.url), 'utf8')
   check('S-rescue: the zero-org snapshot still carries the org trash',
     host.includes('...emptySnap(SEAM_LIFECYCLE_STUBBED), orgTrash: await orgTrashRows()'))
   check('S-rescue: orgtrash.restore is answered with NO lifecycle',
     /if \(!l\) \{[\s\S]{0,900}?if \(action === 'orgtrash\.restore'\)/.test(host)
     && host.includes('shell.touchRecent(out.restoredPath)'))
-  check('S-rescue: the welcome gate reads the trash and offers restore',
-    gen.includes('const trashed = useOrg((s) => s.orgTrash) || [];')
-    && /trashed\.length > 0 \?/.test(gen)
-    && gen.includes('orgStore.mutate("orgtrash.restore", { entryId: e.entryId })'))
-  check('S-rescue: restoring from the gate cannot also create an org',
-    /onClick: \(ev\) => \{ ev\.stopPropagation\(\); orgStore\.mutate\("orgtrash\.restore"/.test(gen))
-  check('S-rescue: every locale answers the two gate strings',
-    (gen.match(/"welcome\.trashed":/g) || []).length === (gen.match(/"welcome\.businessSoon":/g) || []).length
-    && (gen.match(/"welcome\.restore":/g) || []).length === (gen.match(/"welcome\.businessSoon":/g) || []).length)
+  // The reachability half. The frame publishes its live sidebar width and the
+  // gate starts after it, so the Trash row underneath stays clickable.
+  check('S-rescue: the frame publishes its sidebar width to the overlay layer',
+    frame.includes('"--aXa-fr-sidebar": cols.sidebar + "px"'))
+  check('S-rescue: the welcome gate does not span the sidebar column',
+    gen.includes('left: "var(--aXa-fr-sidebar, 0px)"')
+    && !/style: \{ position: "absolute", inset: 0, background: "var\(--dsw-alias-bg-base\)"/.test(gen))
+  // The removal half. A gate that still minted its own restore would keep the
+  // two doors out of sync — the sidebar row is now the only one.
+  check('S-rescue: the welcome gate no longer offers a restore of its own',
+    !gen.includes('const trashed = useOrg((s) => s.orgTrash) || [];')
+    && !/trashed\.length > 0 \?/.test(gen)
+    && !gen.includes('"welcome.trashed"') && !gen.includes('"welcome.restore"'))
+  check('S-rescue: the sidebar Trash row is the single door back',
+    (gen.match(/orgStore\.mutate\("orgtrash\.restore"/g) || []).length === 1)
 }
 
 // ---- D117: VS Code-style decorations on the file tree ----
