@@ -1013,7 +1013,11 @@ export function apply(ctx, opts = {}) {
           // the create modal's "already lives here — open it instead" branch.
           let isOrg = false
           try { isOrg = fs.existsSync(path.join(expanded, 'org.json')) } catch { isOrg = false }
-          return json(res, { ok: true, path: expanded, exists, entryCount, isOrg })
+          // Freestyle mode of the same modal: a folder that already carries the
+          // Freestyle manifest gets "open it instead" rather than a refusal.
+          let isFreestyle = false
+          try { isFreestyle = fs.existsSync(path.join(expanded, '.arxa', 'freestyle.json')) } catch { isFreestyle = false }
+          return json(res, { ok: true, path: expanded, exists, entryCount, isOrg, isFreestyle })
         } catch (e) {
           json(res, { ok: false, error: String(e?.message ?? e) })
         }

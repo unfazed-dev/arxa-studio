@@ -52,7 +52,7 @@ assert.match(client, /className: "aXa_fs_meta", children: rootName/, 'trash rows
 assert.match(client, /hero\.guide\.freestyle/, 'the empty conversation hero follows the active Freestyle tab')
 assert.match(client, /snap && snap\.current === row\.dshSessionId\) arxaClientSessions\.clear\(\)/, 'archiving clears only the conversation owned by that row')
 assert.match(client, /for \(const root of freestyleStore\.get\(\)\.roots \|\| \[\]\)[\s\S]*?root\.sessions\?\.active/, 'rider ownership includes active Freestyle conversations')
-for (const key of ['freestyle.tab.org', 'freestyle.tab.freestyle', 'freestyle.empty', 'freestyle.add.open', 'freestyle.add.new', 'freestyle.add.newPrompt', 'freestyle.add.submit', 'freestyle.cta.pick', 'freestyle.menu.publish', 'freestyle.publish.unlinked', 'freestyle.confirm.purge', 'freestyle.confirm.rootTrash', 'freestyle.confirm.rootTrashBody', 'freestyle.confirm.rootPurge', 'freestyle.confirm.rootPurgeBody', 'freestyle.trash.removeFolder', 'freestyle.session.noConversation']) {
+for (const key of ['freestyle.tab.org', 'freestyle.tab.freestyle', 'freestyle.empty', 'freestyle.add.open', 'freestyle.add.new', 'freestyle.add.submit', 'freestyle.create.title', 'freestyle.create.name', 'freestyle.create.exists.root', 'freestyle.create.ghOffHint', 'freestyle.create.ghUnavailableHint', 'freestyle.cta.pick', 'freestyle.menu.publish', 'freestyle.publish.unlinked', 'freestyle.confirm.purge', 'freestyle.confirm.rootTrash', 'freestyle.confirm.rootTrashBody', 'freestyle.confirm.rootPurge', 'freestyle.confirm.rootPurgeBody', 'freestyle.trash.removeFolder', 'freestyle.session.noConversation']) {
   assert.equal(client.split(`"${key}":`).length - 1, 3, `${key} is translated in en/pl/fr`)
 }
 

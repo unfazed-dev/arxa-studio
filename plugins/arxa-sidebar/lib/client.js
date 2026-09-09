@@ -5307,7 +5307,15 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			if (!msg) return null;
 			return (0, react_jsx_runtime.jsx)("div", { role: "alert", style: { marginTop: 10, fontSize: 12, color: "var(--dsw-alias-label-error)" }, children: msg });
 		}
-		function OrgCreateModal({ t, createWorkspace, open, onClose }) {
+		function OrgCreateModal({ t, createWorkspace, open, onClose, kind }) {
+			/** Parity ruling (2026-09-09, docs/plans/freestyle-org-parity.md): the
+			 * Freestyle tab creates folders through THIS modal — same fields, same
+			 * preview, same collision check, same publish switch. Only the words
+			 * that say "organisation" and the store behind Submit change; the
+			 * scaffold on disk is the host's business (generic frame vs org tree). */
+			const fsKind = kind === "freestyle";
+			const FS_KEYS = { name: "freestyle.create.name", title: "freestyle.create.title", submit: "freestyle.add.submit", "exists.org": "freestyle.create.exists.root", ghOffHint: "freestyle.create.ghOffHint", ghUnavailableHint: "freestyle.create.ghUnavailableHint" };
+			const K = (s) => t((fsKind && FS_KEYS[s]) || (s === "name" ? "field.workspaceName" : "org.create." + s));
 			const [name, setName] = (0, react.useState)("");
 			const [location, setLocation] = (0, react.useState)("~/Arxa");
 			const [busy, setBusy] = (0, react.useState)(false);
@@ -5399,7 +5407,9 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 				// the moment the create lands. A bare POST left the stale empty
 				// list up for the 5s poll — the gate lingered, and any tap on
 				// the welcome card re-opened this modal (create-again loop).
-				const ready = orgStore.mutate("org.create-at", { name: orgName, path: location.trim(), link: publishOn });
+				const ready = fsKind
+					? freestyleStore.mutate("root.new", { name: orgName, path: location.trim(), link: publishOn })
+					: orgStore.mutate("org.create-at", { name: orgName, path: location.trim(), link: publishOn });
 				ready.then(() => {
 					onClose();
 				}, (e) => {
@@ -5446,7 +5456,7 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 				open: true,
 				onClose: dismiss,
 				closeLabel: t("cancel"),
-				title: t("org.create.title"),
+				title: K("title"),
 				footer: (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 					(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {
 						variant: "outline",
@@ -5457,15 +5467,15 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 						variant: "primary",
 						disabled: !canSubmit,
 						onClick: submit,
-						children: t("org.create.submit")
+						children: K("submit")
 					})
 				] }),
 				children: (0, react_jsx_runtime.jsxs)("div", { children: [
-					(0, react_jsx_runtime.jsx)("div", { style: label, children: t("field.workspaceName") }),
+					(0, react_jsx_runtime.jsx)("div", { style: label, children: K("name") }),
 					(0, react_jsx_runtime.jsx)("input", {
 						ref: nameRef,
 						value: name,
-						placeholder: t("field.workspaceName"),
+						placeholder: K("name"),
 						onChange: (e) => setName(e.target.value),
 						onKeyDown: (e) => {
 							if (e.key === "Enter") submit();
@@ -5486,9 +5496,9 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 							style: field
 						}),
 						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.65, marginTop: 6, wordBreak: "break-all" }, children: t("org.create.preview") + ": " + (previewPath || "\u2026") }),
-						folderInfo && folderInfo.exists && folderInfo.entryCount > 0 && (folderInfo.isOrg ? (0, react_jsx_runtime.jsxs)("div", { style: { marginTop: 10, padding: "8px 10px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 6, fontSize: 12 }, children: [
-							(0, react_jsx_runtime.jsx)("div", { children: t("org.create.exists.org").replace("{name}", name.trim()) }),
-							(0, react_jsx_runtime.jsx)("button", { type: "button", disabled: busy, onClick: () => { if (!busy) { onClose(); orgStore.mutate("org.open", folderInfo.path).catch(() => {}); } }, style: { marginTop: 6, fontSize: 12, cursor: "pointer" }, children: t("org.create.exists.open") })
+						folderInfo && folderInfo.exists && folderInfo.entryCount > 0 && ((fsKind ? folderInfo.isFreestyle : folderInfo.isOrg) ? (0, react_jsx_runtime.jsxs)("div", { style: { marginTop: 10, padding: "8px 10px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 6, fontSize: 12 }, children: [
+							(0, react_jsx_runtime.jsx)("div", { children: K("exists.org").replace("{name}", name.trim()) }),
+							(0, react_jsx_runtime.jsx)("button", { type: "button", disabled: busy, onClick: () => { if (!busy) { onClose(); (fsKind ? freestyleStore.mutate("root.add", { path: folderInfo.path }) : orgStore.mutate("org.open", folderInfo.path)).catch(() => {}); } }, style: { marginTop: 6, fontSize: 12, cursor: "pointer" }, children: t("org.create.exists.open") })
 						] }) : (0, react_jsx_runtime.jsx)(ErrorNote, { msg: t("org.create.exists.nonempty") })),
 						// D90: the Publish-to-GitHub switch — pill + knob, ARIA switch role.
 						(0, react_jsx_runtime.jsx)("div", { style: { marginTop: 12, padding: "8px 10px", border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 6 }, children: (0, react_jsx_runtime.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 8, fontSize: 12 }, children: [
@@ -5504,7 +5514,7 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 							}),
 							(0, react_jsx_runtime.jsx)("span", { children: t("org.create.ghToggle") })
 							] }) }),
-						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.55, marginTop: 6 }, children: ghAvailable ? t(publishOn ? "org.create.ghOnHint" : "org.create.ghOffHint") : t("org.create.ghUnavailableHint") }),
+						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 11, opacity: 0.55, marginTop: 6 }, children: ghAvailable ? K(publishOn ? "ghOnHint" : "ghOffHint") : K("ghUnavailableHint") }),
 					] }),
 					(0, react_jsx_runtime.jsx)(ErrorNote, { msg: error })
 				] })
@@ -6354,8 +6364,12 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			"freestyle.add": "Add Freestyle folder",
 			"freestyle.add.open": "Open existing folder…",
 			"freestyle.add.new": "Create new folder…",
-			"freestyle.add.newPrompt": "New folder name",
 			"freestyle.add.submit": "Create folder",
+			"freestyle.create.title": "New folder",
+			"freestyle.create.name": "Folder name",
+			"freestyle.create.exists.root": "{name} is already a Freestyle folder here.",
+			"freestyle.create.ghOffHint": "This folder stays on this device only. Publish it later from its menu.",
+			"freestyle.create.ghUnavailableHint": "GitHub isn't linked — the folder will be created on this device only. Publish it later from its menu.",
 			"freestyle.add.unavailable": "Folder picker unavailable",
 			"freestyle.cta.pick": "Select a git-backed Freestyle folder to start a session",
 			"freestyle.menu.rename": "Rename…",
@@ -6629,8 +6643,12 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			"freestyle.add": "Dodaj folder Freestyle",
 			"freestyle.add.open": "Otwórz istniejący folder…",
 			"freestyle.add.new": "Utwórz nowy folder…",
-			"freestyle.add.newPrompt": "Nazwa nowego folderu",
 			"freestyle.add.submit": "Utwórz folder",
+			"freestyle.create.title": "Nowy folder",
+			"freestyle.create.name": "Nazwa folderu",
+			"freestyle.create.exists.root": "{name} jest już folderem Freestyle w tym miejscu.",
+			"freestyle.create.ghOffHint": "Ten folder pozostaje tylko na tym urządzeniu. Opublikuj go później z jego menu.",
+			"freestyle.create.ghUnavailableHint": "GitHub nie jest połączony — folder zostanie utworzony tylko na tym urządzeniu. Opublikuj go później z jego menu.",
 			"freestyle.add.unavailable": "Wybór folderu jest niedostępny",
 			"freestyle.cta.pick": "Wybierz folder Freestyle z repozytorium git, aby rozpocząć sesję",
 			"freestyle.menu.rename": "Zmień nazwę…",
@@ -6904,8 +6922,12 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			"freestyle.add": "Ajouter un dossier Freestyle",
 			"freestyle.add.open": "Ouvrir un dossier existant…",
 			"freestyle.add.new": "Créer un nouveau dossier…",
-			"freestyle.add.newPrompt": "Nom du nouveau dossier",
 			"freestyle.add.submit": "Créer le dossier",
+			"freestyle.create.title": "Nouveau dossier",
+			"freestyle.create.name": "Nom du dossier",
+			"freestyle.create.exists.root": "{name} est déjà un dossier Freestyle ici.",
+			"freestyle.create.ghOffHint": "Ce dossier reste uniquement sur cet appareil. Publiez-le plus tard depuis son menu.",
+			"freestyle.create.ghUnavailableHint": "GitHub n’est pas lié — le dossier sera créé uniquement sur cet appareil. Publiez-le plus tard depuis son menu.",
 			"freestyle.add.unavailable": "Le sélecteur de dossier est indisponible",
 			"freestyle.cta.pick": "Sélectionnez un dossier Freestyle avec un dépôt git pour démarrer une session",
 			"freestyle.menu.rename": "Renommer…",
@@ -7098,27 +7120,23 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			}) });
 			return children({ menu, menuOpen: open, onContextMenu: showContext });
 		}
-		/** One modal for every Freestyle question. With `target.input` it also
-		 * collects a name — the same in-bundle field the org create modal uses,
-		 * for the same reason: window.prompt returns null in the Tauri WKWebView
-		 * with no dialog, so "Create new folder…" silently did nothing. Errors
-		 * stay in the modal, the way the org modal keeps them. */
+		/** One confirm modal for every Freestyle question (trash, purge). Names are
+		 * never collected here: creating a folder goes through OrgCreateModal in
+		 * Freestyle mode, and window.prompt is banned (null, no dialog, in the
+		 * Tauri WKWebView). Errors stay in the modal, the way the org modals keep them. */
 		function FreestyleConfirmModal({ target, onClose }) {
 			const [busy, setBusy] = (0, react.useState)(false);
-			const [value, setValue] = (0, react.useState)("");
 			const [error, setError] = (0, react.useState)(null);
 			const key = target ? target.action + ":" + JSON.stringify(target.arg || {}) : "";
-			(0, react.useEffect)(() => { setValue(""); setError(null); }, [key]);
+			(0, react.useEffect)(() => { setError(null); }, [key]);
 			if (!target) return null;
-			const name = value.trim();
-			const ready = !busy && (!target.input || validFreestyleName(name));
+			const ready = !busy;
 			const confirm = async () => {
 				if (!ready) return;
 				setBusy(true);
 				setError(null);
 				try {
-					const arg = target.input ? { ...target.arg, [target.input]: name } : target.arg;
-					await freestyleStore.mutate(target.action, arg);
+					await freestyleStore.mutate(target.action, target.arg);
 					setBusy(false);
 					onClose();
 				}
@@ -7135,7 +7153,6 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 				] }),
 				children: (0, react_jsx_runtime.jsxs)("div", { children: [
 					target.body ? (0, react_jsx_runtime.jsx)("div", { style: { wordBreak: "break-all" }, children: target.body }) : null,
-					target.input ? (0, react_jsx_runtime.jsx)("div", { style: { display: "flex", marginTop: 10 }, children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Input, { autoFocus: true, value, className: "aXa_fs_name", "aria-label": orgT("freestyle.add.newPrompt"), placeholder: orgT("freestyle.add.newPrompt"), onChange: (e) => setValue(e.target.value), onKeyDown: (e) => { if (e.key === "Enter") { e.preventDefault(); void confirm(); } } }) }) : null,
 					(0, react_jsx_runtime.jsx)(ErrorNote, { msg: error })
 				] })
 			});
@@ -7203,8 +7220,11 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			const st = useFreestyle();
 			const [menuOpen, setMenuOpen] = (0, react.useState)(false);
 			const [githubLinked, setGithubLinked] = (0, react.useState)(null);
-			// One confirm/name modal for the whole tab: the + menu and the rows share it.
+			// One confirm modal for the whole tab: the + menu and the rows share it.
 			const [confirmTarget, setConfirmTarget] = (0, react.useState)(null);
+			// The create modal (OrgCreateModal, Freestyle mode) — component-local
+			// open state, the way the org tab keeps its own.
+			const [creating, setCreating] = (0, react.useState)(false);
 			// The Organisations header is the stock WorkspaceBrowser sectionHeader:
 			// label, a search that expands over it, then view-options + add. This
 			// tab had only the add button, so the two headers never matched. Same
@@ -7272,14 +7292,11 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 				const path = await pickFolder(t("freestyle.add.open"));
 				if (path) await freestyleStore.mutate("root.add", { path });
 			};
-			const addNew = async () => {
-				const parent = await pickFolder(t("freestyle.add.new"));
-				if (!parent) return;
-				// The name comes from the modal, never window.prompt: WKWebView
-				// answers prompt with null and shows nothing, so the old flow ended
-				// here with no folder, no error and no sign anything was clicked.
-				setConfirmTarget({ action: "root.new", arg: { parent }, input: "name", title: t("freestyle.add.new"), body: parent, confirm: t("freestyle.add.submit") });
-			};
+			// "Create new folder…" is the org create modal in Freestyle mode — name,
+			// location (typed or picked), live preview, collision check, publish
+			// switch — the parity ruling of 2026-09-09. Never window.prompt: the
+			// Tauri WKWebView answers it with null and no dialog.
+			const addNew = async () => setCreating(true);
 			if (!wide) return null;
 			return (0, react_jsx_runtime.jsxs)("div", { className: "aXa_fs_body", children: [
 				// The Organisations header, class for class: the stock
@@ -7366,7 +7383,8 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 				st.roots.length === 0 ? (0, react_jsx_runtime.jsx)("div", { className: "aXa_fs_empty", children: t("freestyle.empty") }) : null,
 				st.roots.length > 0 && visibleRoots.length === 0 ? (0, react_jsx_runtime.jsx)("div", { className: WorkspaceBrowser_module_css_default.searchStatus, children: t("freestyle.search.noMatches") }) : null,
 				(0, react_jsx_runtime.jsx)(FreestyleRoots, { roots: visibleRoots, trash: st.trash, rootTrash: st.rootTrash, githubLinked, ask: setConfirmTarget }),
-				(0, react_jsx_runtime.jsx)(FreestyleConfirmModal, { target: confirmTarget, onClose: () => setConfirmTarget(null) })
+				(0, react_jsx_runtime.jsx)(FreestyleConfirmModal, { target: confirmTarget, onClose: () => setConfirmTarget(null) }),
+				(0, react_jsx_runtime.jsx)(OrgCreateModal, { t, kind: "freestyle", open: creating, onClose: () => setCreating(false) })
 			] });
 		}
 		function freestyleRootVerbs(rootId, ask) {

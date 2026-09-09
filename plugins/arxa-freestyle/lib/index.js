@@ -5,7 +5,7 @@
 //
 //   GET  /__arxa/freestyle/state   -> { roots, trash, ui }
 //   POST /__arxa/freestyle/action  body { action, arg } -> { ok, ... } | { ok:false, error }
-import { readRegistry, listRoots, rootById, addRoot, newRoot, openRoot, closeRoot, trashRoot, restoreRoot, purgeRoot, renameRoot, publishRoot, setActiveTab } from './roots.js'
+import { readRegistry, listRoots, rootById, addRoot, createRoot, openRoot, closeRoot, trashRoot, restoreRoot, purgeRoot, renameRoot, publishRoot, setActiveTab } from './roots.js'
 import { createFile, createDir, renameEntry, moveEntry, duplicateEntry, trashEntry, listTrash, readTrashEntry, restoreEntry, purgeEntry, revealEntry } from './files.js'
 import { createFreestyleSessions } from './sessions.js'
 import { isRepo, hasHead } from '../../git-workspace/lib/repos.js'
@@ -217,7 +217,8 @@ export function apply(ctx, opts = {}) {
 
   const ACTIONS = {
     'root.add': ({ path: p }) => ({ root: addRoot(p, { env }) }),
-    'root.new': ({ parent, name }) => ({ root: newRoot(parent, name, { env }) }),
+    // Same contract as the org tab's org.create-at: { name, path (parent), link }.
+    'root.new': async (arg) => ({ root: await createRoot({ ...arg, path: arg?.path ?? arg?.parent }, { env, github: arg?.link === false ? null : await github().catch(() => null) }) }),
     'root.open': ({ rootId }) => ({ root: openRoot(rootId, { env }) }),
     'root.close': ({ rootId }) => ({ root: closeRoot(rootId, { env }) }),
     'root.trash': ({ rootId }) => ({ root: trashRoot(rootId, { env }) }),

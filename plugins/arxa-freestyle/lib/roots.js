@@ -1,8 +1,9 @@
 // arxa-freestyle roots registry — ~/.arxa/freestyle.json (F1), one row per
 // user-picked folder, each backed by its own plain git repo (F4) with the
 // generic day-zero frame (F8, docs/plans/freestyle-section.md).
-import fs from 'node:fs'; import path from 'node:path'; import { randomUUID } from 'node:crypto'
-import { registryPath, manifestPath } from './paths.js'
+import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'; import { randomUUID } from 'node:crypto'
+import { arxaHome, registryPath, manifestPath } from './paths.js'
+import { slugify } from '../../workspace/lib/slug.js'
 import { initPlainRepo, pushRepoAsync, setOrigin } from '../../git-workspace/lib/repos.js'
 import { protectionPayload, settingsPayload, writeFrameFiles } from '../../git-workspace/lib/frame.js'
 import { wipCommit } from '../../git-workspace/lib/commits.js'
@@ -95,6 +96,40 @@ export function addRoot(absPath, opts = {}) {
   // is what makes a freshly added root come back clean.
   wipCommit(real, { message: 'chore: arxa freestyle frame', env })
   return row
+}
+
+/**
+ * The org create contract, mirrored (parity ruling 2026-09-09,
+ * docs/plans/freestyle-org-parity.md; org side: arxa-sidebar `org.create-at`):
+ * `path` is ALWAYS the parent, the folder is ALWAYS parent + slug(name), a
+ * non-empty target is a hard refusal (never merge, never version foreign files
+ * unasked), the parent is remembered for the next modal, and `link` publishes
+ * at once. Only the scaffold differs — addRoot writes the generic frame, never
+ * the org tree — which is the whole reason Freestyle exists.
+ * @returns {Promise<object>} the root row
+ */
+export async function createRoot({ name, path: parent, link = true } = {}, opts = {}) {
+  const env = resolveEnv(opts)
+  const nm = String(name || '').trim(); if (!nm) throw new Error('folder name required')
+  const requested = String(parent || '').trim(); if (!requested) throw new Error('folder path required')
+  const expanded = requested.startsWith('~') ? path.join(os.homedir(), requested.slice(1)) : path.resolve(requested)
+  const slug = slugify(nm)
+  if (slug === 'untitled') throw new Error('folder name has no slug: ' + nm)
+  const target = path.join(expanded, slug)
+  let entries = 0; try { entries = fs.readdirSync(target).length } catch { entries = 0 }
+  if (entries > 0) throw new Error('folder-exists: ' + target + ' already exists and is not empty')
+  fs.mkdirSync(target, { recursive: true })
+  const root = addRoot(target, { env, name: nm })
+  // ponytail: the org host writes the same file under os.homedir()/.arxa —
+  // identical in production, ARXA_HOME-scoped here so selftests stay contained.
+  try { fs.mkdirSync(arxaHome(env), { recursive: true }); fs.writeFileSync(path.join(arxaHome(env), 'create-root.json'), JSON.stringify({ root: requested }, null, 2)) } catch { /* best-effort memory */ }
+  if (link) {
+    // The folder exists and is registered whatever happens next: a refused
+    // publish surfaces in the modal, and the row menu can publish later.
+    const pub = await publishRoot(root, { github: opts.github, env })
+    if (!pub.ok) throw new Error(pub.reason === 'github-unlinked' ? 'linked-required' : 'publish failed: ' + pub.reason)
+  }
+  return root
 }
 
 /** mkdir then addRoot; refuses an existing target so callers never adopt by accident. */

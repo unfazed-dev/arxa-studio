@@ -708,8 +708,8 @@ check('create: D90 fragment children EVALUATE to 6 elements (guards the ASI call
   try {
     const el = () => ({ ok: true });
     const noop = () => {};
-    const fn = new Function('react_jsx_runtime', 't', 'label', 'location', 'browseLocation', 'field', 'submit', 'folderInfo', 'publishOn', 'ghAvailable', 'busy', 'name', 'orgStore', 'onClose', 'previewPath', 'setGhPublish', 'return [' + region.slice(from + 1, end) + ']');
-    const arr = fn({ jsx: el, jsxs: el, Fragment: {} }, (k) => k, {}, '', noop, {}, noop, null, true, true, false, '', { mutate: () => ({ catch: noop }) }, noop, '/root/slug', noop);
+    const fn = new Function('react_jsx_runtime', 't', 'label', 'location', 'browseLocation', 'field', 'submit', 'folderInfo', 'publishOn', 'ghAvailable', 'busy', 'name', 'orgStore', 'onClose', 'previewPath', 'setGhPublish', 'K', 'fsKind', 'freestyleStore', 'return [' + region.slice(from + 1, end) + ']');
+    const arr = fn({ jsx: el, jsxs: el, Fragment: {} }, (k) => k, {}, '', noop, {}, noop, null, true, true, false, '', { mutate: () => ({ catch: noop }) }, noop, '/root/slug', noop, (k) => k, false, { mutate: () => ({ catch: noop }) });
     return arr.length === 6 && arr[4] && arr[4].ok === true;
   } catch { return false; }
 })())
@@ -1023,22 +1023,27 @@ check('client: agent verb + reason strings localized in en/pl/fr',
     }))
 }
 
-// S-newfolder: "Create new folder…" collects its name in the shared modal.
-// The old flow called window.prompt after the native picker; in the Tauri
-// WKWebView prompt returns null with no dialog, so the click ended in
-// silence — no folder, no error. These pins keep the name in the bundle.
-check('S-newfolder: the + menu asks the modal for the name instead of prompting',
-  client.includes('setConfirmTarget({ action: "root.new", arg: { parent }, input: "name", title: t("freestyle.add.new"), body: parent, confirm: t("freestyle.add.submit") });'))
-check('S-newfolder: the modal merges the typed name into the action argument',
-  client.includes('const arg = target.input ? { ...target.arg, [target.input]: name } : target.arg;'))
-check('S-newfolder: the modal validates the name the way inline rename does and gates the primary button on it',
-  client.includes('const ready = !busy && (!target.input || validFreestyleName(name));')
-  && client.includes('disabled: !ready, onClick: confirm, children: target.confirm'))
-check('S-newfolder: a failed action stays visible inside the modal',
-  client.includes('catch (e) { setError(String((e && e.message) || e)); setBusy(false); }')
-  && client.includes('(0, react_jsx_runtime.jsx)(ErrorNote, { msg: error })'))
-check('S-newfolder: one modal serves the tab — the rows ask through the prop, the browser owns the state',
-  client.includes('function FreestyleRoots({ roots, trash, rootTrash, githubLinked, ask })')
+// S-newfolder (parity ruling 2026-09-09): "Create new folder…" IS the org
+// create modal in Freestyle mode — name, location + picker, live preview,
+// collision check, publish switch — and the host mirrors org.create-at.
+// window.prompt stays banned (null, no dialog, in the Tauri WKWebView).
+check('S-newfolder: the + menu opens the org create modal in Freestyle mode',
+  client.includes('const addNew = async () => setCreating(true);')
+  && client.includes('(0, react_jsx_runtime.jsx)(OrgCreateModal, { t, kind: "freestyle", open: creating, onClose: () => setCreating(false) })'))
+check('S-newfolder: submit rides the Freestyle store with the org contract { name, path, link }',
+  client.includes('freestyleStore.mutate("root.new", { name: orgName, path: location.trim(), link: publishOn })')
+  && client.includes('orgStore.mutate("org.create-at", { name: orgName, path: location.trim(), link: publishOn })'))
+check('S-newfolder: only the organisation words change — title, submit, exists, publish hints',
+  client.includes('const FS_KEYS = { name: "freestyle.create.name", title: "freestyle.create.title", submit: "freestyle.add.submit", "exists.org": "freestyle.create.exists.root", ghOffHint: "freestyle.create.ghOffHint", ghUnavailableHint: "freestyle.create.ghUnavailableHint" };')
+  && client.includes('title: K("title"),') && client.includes('children: K("submit")') && client.includes('placeholder: K("name"),'))
+check('S-newfolder: an existing Freestyle folder offers "open it instead" through root.add; the host answers isFreestyle',
+  client.includes('(fsKind ? folderInfo.isFreestyle : folderInfo.isOrg)')
+  && client.includes('freestyleStore.mutate("root.add", { path: folderInfo.path })')
+  && hostSrc().includes("isFreestyle = fs.existsSync(path.join(expanded, '.arxa', 'freestyle.json'))"))
+check('S-newfolder: the host mirrors org.create-at — slug(name) under the parent, non-empty refusal, sticky parent, link publishes',
+  (() => { const s = readFileSync(join(here, '..', 'arxa-freestyle', 'lib', 'roots.js'), 'utf8'); return s.includes('export async function createRoot({ name, path: parent, link = true } = {}, opts = {})') && s.includes("throw new Error('folder-exists: ' + target + ' already exists and is not empty')") && s.includes("'create-root.json'") && s.includes("pub.reason === 'github-unlinked' ? 'linked-required'"); })())
+check('S-newfolder: the confirm modal collects no names — one modal per job, the way the org tab does it',
+  !client.includes('target.input')
   && (client.match(/\(0, react_jsx_runtime\.jsx\)\(FreestyleConfirmModal, \{ target: confirmTarget/g) || []).length === 1)
 
 

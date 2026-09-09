@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import { resolveInside, registryPath, manifestPath } from './lib/paths.js'
-import { addRoot, newRoot, listRoots, openRoot, closeRoot, trashRoot, restoreRoot, purgeRoot, listRootTrash, renameRoot, setActiveTab, readManifest, rootById } from './lib/roots.js'
+import { addRoot, newRoot, createRoot, listRoots, openRoot, closeRoot, trashRoot, restoreRoot, purgeRoot, listRootTrash, renameRoot, setActiveTab, readManifest, rootById } from './lib/roots.js'
 import { isRepo, hasHead } from '../git-workspace/lib/repos.js'
 let n = 0; const ok = (c, m) => { assert.ok(c, m); n++; console.log('  ok', n, '-', m) }
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-fs-'))
@@ -21,6 +21,18 @@ ok(addRoot(folder, { env }).id === r.id && listRoots({ env }).length === 1, 'add
 const r2 = newRoot(tmp, 'Fresh', { env })
 ok(fs.existsSync(path.join(tmp, 'Fresh')) && isRepo(r2.path) && listRoots({ env }).length === 2, 'newRoot mkdirs then adds')
 assert.throws(() => newRoot(tmp, 'Fresh', { env }), /exists/); ok(true, 'newRoot refuses an existing folder')
+
+// createRoot: the org create contract (parity ruling 2026-09-09).
+const r3 = await createRoot({ name: "Evan's Notes", path: tmp, link: false }, { env })
+ok(r3.path === path.join(tmp, 'Evans-Notes') && r3.name === "Evan's Notes" && isRepo(r3.path) && listRoots({ env }).length === 3, 'createRoot makes parent + slug(name), keeps the display name')
+ok(JSON.parse(fs.readFileSync(path.join(tmp, 'home', 'create-root.json'), 'utf8')).root === tmp, 'createRoot remembers the parent for the next modal')
+await assert.rejects(() => createRoot({ name: 'Scratch', path: tmp, link: false }, { env }), /folder-exists/); ok(true, 'createRoot refuses a non-empty target')
+fs.mkdirSync(path.join(tmp, 'Empty'))
+const r4 = await createRoot({ name: 'Empty', path: tmp, link: false }, { env })
+ok(r4.path === path.join(tmp, 'Empty') && isRepo(r4.path), 'createRoot adopts an existing EMPTY folder, like org.create-at')
+await assert.rejects(() => createRoot({ name: '!!!', path: tmp, link: false }, { env }), /no slug/); ok(true, 'createRoot refuses a name that slugs to nothing')
+await assert.rejects(() => createRoot({ name: 'Pub', path: tmp, link: true }, { env, github: { status: async () => ({ ok: true, linked: false }) } }), /linked-required/)
+ok(listRoots({ env }).some((x) => x.name === 'Pub') && readManifest(listRoots({ env }).find((x) => x.name === 'Pub')).localOnly === true, 'link on an unlinked account: folder created local-only, modal told linked-required')
 
 closeRoot(r.id, { env }); ok(rootById(r.id, { env }).open === false, 'closeRoot flips open')
 openRoot(r.id, { env }); ok(rootById(r.id, { env }).open === true && rootById(r.id, { env }).lastOpenedAt, 'openRoot flips open and stamps')
