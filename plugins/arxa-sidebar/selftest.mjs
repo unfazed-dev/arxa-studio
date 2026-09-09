@@ -984,11 +984,19 @@ check('client: agent verb + reason strings localized in en/pl/fr',
   const gen = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
   const roots = readFileSync(new URL('../arxa-freestyle/lib/roots.js', import.meta.url), 'utf8')
   const fsHost = readFileSync(new URL('../arxa-freestyle/lib/index.js', import.meta.url), 'utf8')
-  const SECTION = 'style: { borderTop: "1px solid var(--dsw-alias-border-l2)", marginTop: 8, padding: "0 0 8px", opacity: total === 0 ? 0.45 : 1 }'
+  // The shared fragment, not the whole declaration: the Freestyle pair adds a
+  // marginLeft to step back over the row list's 4px inset, which the org pair
+  // does not need (its sections are siblings of that list, not inside it).
+  const SECTION = 'style: { borderTop: "1px solid var(--dsw-alias-border-l2)", marginTop: 8, padding: "0 0 8px", opacity: total === 0 ? 0.45 : 1'
   check('S-parity: four sections share one wrapper — org Archives/Trash and Freestyle Archives/Trash',
     (gen.split(SECTION).length - 1) === 4)
   check('S-parity: all four auto-open while they hold something, first toggle wins',
     (gen.match(/const open = manual === null \? total > 0 : manual;/g) || []).length === 4)
+  check('S-parity: the Freestyle sections step back over the row list inset',
+    (gen.match(/opacity: total === 0 \? 0\.45 : 1, marginLeft: -4 \}/g) || []).length === 2)
+  check('S-parity: the Freestyle body carries the same right inset as the stock root',
+    gen.includes('.aXa_fs_body{display:flex;min-height:0;flex:1;flex-direction:column;padding-right:12px}')
+    && gen.includes('.aXa_fs_roots{min-height:0;overflow:auto;padding:6px 0 6px 4px}'))
   check('S-parity: the Freestyle Trash total counts trashed folders as well as files',
     gen.includes('const total = rootTrash.length + trash.length;'))
   check('S-parity: no Freestyle section is left as a bare Fragment',

@@ -583,7 +583,7 @@
 			// own CSS, which is why the two tabs never lined up. tabIndex/onKeyDown
 			// come across too — a div has none of a button's keyboard activation.
 			return (0, react_jsx_runtime.jsxs)("div", {
-				style: { borderTop: "1px solid var(--dsw-alias-border-l2)", marginTop: 8, padding: "0 0 8px", opacity: total === 0 ? 0.45 : 1 },
+				style: { borderTop: "1px solid var(--dsw-alias-border-l2)", marginTop: 8, padding: "0 0 8px", opacity: total === 0 ? 0.45 : 1, marginLeft: -4 },
 				children: [
 					(0, react_jsx_runtime.jsxs)("div", {
 						className: Rows_module_css_default.projectRow,
@@ -620,7 +620,7 @@
 			const open = manual === null ? total > 0 : manual;
 			const toggle = () => setManual(!open);
 			return (0, react_jsx_runtime.jsxs)("div", {
-				style: { borderTop: "1px solid var(--dsw-alias-border-l2)", marginTop: 8, padding: "0 0 8px", opacity: total === 0 ? 0.45 : 1 },
+				style: { borderTop: "1px solid var(--dsw-alias-border-l2)", marginTop: 8, padding: "0 0 8px", opacity: total === 0 ? 0.45 : 1, marginLeft: -4 },
 				children: [
 					(0, react_jsx_runtime.jsxs)("div", {
 						className: Rows_module_css_default.projectRow,

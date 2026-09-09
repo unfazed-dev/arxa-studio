@@ -163,3 +163,43 @@ folder row → "Remove from Trash" → the confirm modal → confirm:
 and the folder afterwards: `.arxa/`, `.git/`, `check.sh`, `hello.md` — every
 byte still there. The only destructive-sounding verb in the new set keeps the
 promise its copy makes.
+
+## Round 2 — the geometry, after the styles matched
+
+> "the padding on the right of the sidebar header is not identical"
+
+Correct, and the round above did not catch it: those checks compared the
+sections' **computed style**, which was identical, and never compared their
+**position**, which was not. Three separate offsets, measured from the live DOM:
+
+| | Organisations | Freestyle (before) | off by |
+|---|---|---|---|
+| add button, right edge | 268 | 280 | 12px |
+| root row | 16 → 268 | 16 → 276 | 8px |
+| Archives/Trash row, left edge | 16 | 20 | 4px |
+
+**Cause.** The stock Organisations pane is `.aXa_wsb_root{padding:0 12px 0 0}`
+and its section rows are siblings of the padded row list. `.aXa_fs_body` had no
+right inset at all, so the header's add button ran to the sidebar edge; and the
+Freestyle sections live *inside* `.aXa_fs_roots`, whose 4px left padding pushed
+their header rows 4px right of the org ones.
+
+**Fix** — mirror the stock box, three lines:
+
+- `.aXa_fs_body` gains `padding-right:12px`, the stock root's inset.
+- `.aXa_fs_roots` drops its right padding (`6px 0 6px 4px`) — the body now
+  supplies it, so rows land on 268 instead of 264.
+- the two section wrappers carry `marginLeft: -4`, stepping back over the row
+  list's inset to start at the container edge the way the org sections do.
+
+**Verified, same engine, both tabs:**
+
+```json
+{"orgs":      {"addBtnRight":268,"row":{"L":16,"R":268},"Archives":{"L":16,"R":268},"Trash":{"L":16,"R":268}},
+ "freestyle": {"addBtnRight":268,"row":{"L":16,"R":268},"Archives":{"L":16,"R":268},"Trash":{"L":16,"R":268}},
+ "match": true}
+```
+
+The `S-parity` pins now check position as well as style: the shared style
+fragment still appears four times, the Freestyle pair additionally carries the
+`marginLeft: -4`, and both CSS rules are pinned by their exact text.

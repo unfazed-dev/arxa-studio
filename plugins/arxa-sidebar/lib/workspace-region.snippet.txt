@@ -1291,8 +1291,8 @@
 				+ ".aXa_fs_tab:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.aXa_fs_tab:focus-visible{outline:1px solid var(--dsw-alias-state-business-primary);outline-offset:-1px}"
 				+ ".aXa_fs_tabOn{color:var(--dsw-alias-state-business-primary)}.aXa_fs_tabOn:after{content:'';position:absolute;left:10px;right:10px;bottom:0;height:2px;border-radius:1px 1px 0 0;background:var(--dsw-alias-state-business-primary)}"
 				+ ".aXa_fs_tabsRail{height:auto;flex-direction:column;border-bottom:0}.aXa_fs_tabsRail .aXa_fs_tab{width:40px;height:40px;flex:none;padding:0}.aXa_fs_tabsRail .aXa_fs_tabOn:after{inset:8px auto 8px 0;width:2px;height:auto;border-radius:0 1px 1px 0}"
-				+ ".aXa_fs_body{display:flex;min-height:0;flex:1;flex-direction:column}.aXa_fs_empty{padding:18px 14px;color:var(--dsw-alias-label-tertiary);font:var(--dsw-font-xs-13)}"
-				+ ".aXa_fs_roots{min-height:0;overflow:auto;padding:6px 4px}.aXa_fs_tree{padding-left:10px}"
+				+ ".aXa_fs_body{display:flex;min-height:0;flex:1;flex-direction:column;padding-right:12px}.aXa_fs_empty{padding:18px 14px;color:var(--dsw-alias-label-tertiary);font:var(--dsw-font-xs-13)}"
+				+ ".aXa_fs_roots{min-height:0;overflow:auto;padding:6px 0 6px 4px}.aXa_fs_tree{padding-left:10px}"
 				+ ".aXa_fs_rootName{font-weight:600}.aXa_fs_reason,.aXa_fs_meta{display:block;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-caption);font-size:10px}.aXa_fs_toggle{padding:0;border:0;background:transparent;color:inherit;cursor:pointer}.aXa_fs_inline{display:flex;align-items:center;min-height:28px;padding:0 8px 0 30px}.aXa_fs_name{min-width:0;flex:1;height:24px}.aXa_fs_nameBad{outline:1px solid var(--dsw-alias-label-error)}.aXa_fs_dropOn{box-shadow:inset 0 0 0 1px var(--dsw-alias-state-business-primary);background:var(--dsw-alias-interactive-bg-hover)}"
 				// The Freestyle section headers, entry rows and empty states now carry
 				// the stock Rows classes and the Organisations rows' inline styles, so
