@@ -74,6 +74,55 @@ rows are single-line and have no equivalent), `aXa_fs_name` / `aXa_fs_inline`
 reset so a `<button>` can wear `Rows.slot`), `aXa_fs_rootName`, and the
 `aXa_fs_tab*` strip — no `Tabs`/`SegmentedControl` primitive exists in stock dsh.
 
+## Round 3 — the header
+
+Rounds 1 and 2 fixed the rows and left the bar above them alone. That bar was
+the visible mismatch: Organisations carries the stock `WorkspaceBrowser`
+`sectionHeader` — label, a search that expands over the label, then
+`headerActions` holding view-options and add — and Freestyle had a bare
+`aXa_fs_head` div with one ghost `Button`. Three actions against one.
+
+The Freestyle header is now that same stock markup, class for class. Measured
+on both tabs in one run:
+
+```json
+{"freestyle":     {"kids":["sectionLabel wide","searchSlot","headerActions"],
+                   "btns":[{"aria":"Search folders","cls":"searchButton","svg":"14"},
+                           {"aria":"View options","cls":"iconButton wide","svg":"16"},
+                           {"aria":"Add Freestyle folder","cls":"iconButton","svg":"16"}]},
+ "organisations": {"kids":["sectionLabel wide","searchSlot","headerActions", …],
+                   "btns":[{"aria":"Search sessions","cls":"searchButton","svg":"14"},
+                           {"aria":"View options","cls":"iconButton wide","svg":"16"},
+                           {"aria":"New organisation…","cls":"iconButton","svg":"16"}]}}
+```
+
+Same children, same button classes, same glyph sizes. The two extra children on
+the Organisations side are its `WorkspacePickFlow` portal root, not header
+furniture.
+
+Both new controls are wired, not decorative — a search that filtered nothing
+would match the reference and lie about it. Search filters the root list by
+name; view-options reorders it (`manual` = registry order, which the arxa
+locale labels "As created"; `updated` = most-recently-opened first, from each
+root's `lastOpenedAt`).
+
+Two deliberate non-copies:
+
+- `ViewOptionsMenu` is not reused. Its anchor is reproduced exactly (same
+  `iconButton wide`, same `IconPersonalizationOutline16`, same dense/align
+  Menu), but its group-by half is Project / Flat — a session concept with
+  nothing to say about a folder. `FreestyleViewOptions` carries the order-by
+  half only.
+- The search strings are new `freestyle.search*` keys, not the stock ones.
+  `search.placeholder` reads "Search sessions..." and `search.noMatches` "No
+  matching sessions"; overriding those in the arxa locale would have changed
+  the Organisations header too. `search.clear`, `viewOptions.label` and
+  `orderBy.*` are noun-neutral and reused as-is.
+
+`.aXa_fs_head` dropped with its markup.
+
+Screenshot: [row-grammar-r3-header.png](row-grammar-r3-header.png).
+
 ## Assertions (headless Chrome via `tool/lens_check.dart`, real engine)
 
 Scratch `ARXA_HOME`, a seeded Freestyle root with files, root open, Freestyle

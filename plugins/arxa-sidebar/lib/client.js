@@ -4338,7 +4338,7 @@ window.__ModuleLoader__.load({
 				+ ".aXa_fs_tab:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.aXa_fs_tab:focus-visible{outline:1px solid var(--dsw-alias-state-business-primary);outline-offset:-1px}"
 				+ ".aXa_fs_tabOn{color:var(--dsw-alias-state-business-primary)}.aXa_fs_tabOn:after{content:'';position:absolute;left:10px;right:10px;bottom:0;height:2px;border-radius:1px 1px 0 0;background:var(--dsw-alias-state-business-primary)}"
 				+ ".aXa_fs_tabsRail{height:auto;flex-direction:column;border-bottom:0}.aXa_fs_tabsRail .aXa_fs_tab{width:40px;height:40px;flex:none;padding:0}.aXa_fs_tabsRail .aXa_fs_tabOn:after{inset:8px auto 8px 0;width:2px;height:auto;border-radius:0 1px 1px 0}"
-				+ ".aXa_fs_body{display:flex;min-height:0;flex:1;flex-direction:column}.aXa_fs_head{display:flex;align-items:center;justify-content:space-between;height:40px;padding:0 10px 0 14px;border-bottom:.5px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-tertiary);font:var(--dsw-font-xs-13)}.aXa_fs_empty{padding:18px 14px;color:var(--dsw-alias-label-tertiary);font:var(--dsw-font-xs-13)}"
+				+ ".aXa_fs_body{display:flex;min-height:0;flex:1;flex-direction:column}.aXa_fs_empty{padding:18px 14px;color:var(--dsw-alias-label-tertiary);font:var(--dsw-font-xs-13)}"
 				+ ".aXa_fs_roots{min-height:0;overflow:auto;padding:6px 4px}.aXa_fs_tree{padding-left:10px}"
 				+ ".aXa_fs_rootName{font-weight:600}.aXa_fs_reason,.aXa_fs_meta{display:block;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-caption);font-size:10px}.aXa_fs_toggle{padding:0;border:0;background:transparent;color:inherit;cursor:pointer}.aXa_fs_inline{display:flex;align-items:center;min-height:28px;padding:0 8px 0 30px}.aXa_fs_name{min-width:0;flex:1;height:24px}.aXa_fs_nameBad{outline:1px solid var(--dsw-alias-label-error)}.aXa_fs_dropOn{box-shadow:inset 0 0 0 1px var(--dsw-alias-state-business-primary);background:var(--dsw-alias-interactive-bg-hover)}"
 				// The Freestyle section headers, entry rows and empty states now carry
@@ -6410,6 +6410,9 @@ window.__ModuleLoader__.load({
 			"freestyle.tab.freestyle": "Freestyle",
 			"freestyle.section": "Freestyle folders",
 			"freestyle.empty": "Add a folder to start working in Freestyle.",
+			"freestyle.search": "Search folders",
+			"freestyle.search.placeholder": "Search folders...",
+			"freestyle.search.noMatches": "No matching folders",
 			"freestyle.add": "Add Freestyle folder",
 			"freestyle.add.open": "Open existing folder…",
 			"freestyle.add.new": "Create new folder…",
@@ -6683,6 +6686,9 @@ window.__ModuleLoader__.load({
 			"freestyle.tab.freestyle": "Freestyle",
 			"freestyle.section": "Foldery Freestyle",
 			"freestyle.empty": "Dodaj folder, aby rozpocząć pracę w Freestyle.",
+			"freestyle.search": "Szukaj folderów",
+			"freestyle.search.placeholder": "Szukaj folderów...",
+			"freestyle.search.noMatches": "Brak pasujących folderów",
 			"freestyle.add": "Dodaj folder Freestyle",
 			"freestyle.add.open": "Otwórz istniejący folder…",
 			"freestyle.add.new": "Utwórz nowy folder…",
@@ -6956,6 +6962,9 @@ window.__ModuleLoader__.load({
 			"freestyle.tab.freestyle": "Freestyle",
 			"freestyle.section": "Dossiers Freestyle",
 			"freestyle.empty": "Ajoutez un dossier pour commencer dans Freestyle.",
+			"freestyle.search": "Rechercher des dossiers",
+			"freestyle.search.placeholder": "Rechercher des dossiers…",
+			"freestyle.search.noMatches": "Aucun dossier correspondant",
 			"freestyle.add": "Ajouter un dossier Freestyle",
 			"freestyle.add.open": "Ouvrir un dossier existant…",
 			"freestyle.add.new": "Créer un nouveau dossier…",
@@ -7193,11 +7202,53 @@ window.__ModuleLoader__.load({
 				tab("freestyle", t("freestyle.tab.freestyle"), _deepseek_ai_dsh_client_ui_primitives.IconFolderClose16)
 			] });
 		}
+		/** The Organisations header's view-options control, with the items that
+		 * are true for folders. Same anchor as the stock ViewOptionsMenu — same
+		 * iconButton class, same IconPersonalizationOutline16, same align/dense
+		 * Menu — so the header reads identically; the stock component itself is
+		 * not reused because its group-by half (Project / Flat) is a session
+		 * concept with nothing to say about a Freestyle folder. */
+		function FreestyleViewOptions({ orderBy, onOrderPick, t }) {
+			const [open, setOpen] = (0, react.useState)(false);
+			return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {
+				open,
+				onClose: () => setOpen(false),
+				items: [
+					{ type: "label", id: "order-by", text: t("orderBy.label") },
+					{ id: "manual", label: t("orderBy.manual") },
+					{ id: "updated", label: t("orderBy.updated") }
+				],
+				selectedIds: [orderBy],
+				onSelect: (id) => { if (id === "manual" || id === "updated") onOrderPick(id); setOpen(false); },
+				align: "end",
+				dense: true,
+				portal: true,
+				anchor: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Tooltip, {
+					label: t("viewOptions.label"), side: "bottom", delayMs: 500,
+					children: (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: clsx(WorkspaceBrowser_module_css_default.iconButton, WorkspaceBrowser_module_css_default.wide),
+						"aria-label": t("viewOptions.label"),
+						onClick: () => setOpen((v) => !v),
+						children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconPersonalizationOutline16, {})
+					})
+				})
+			});
+		}
 		function FreestyleBrowser({ wide, expandSidebar }) {
 			const t = orgT;
 			const st = useFreestyle();
 			const [menuOpen, setMenuOpen] = (0, react.useState)(false);
 			const [githubLinked, setGithubLinked] = (0, react.useState)(null);
+			// The Organisations header is the stock WorkspaceBrowser sectionHeader:
+			// label, a search that expands over it, then view-options + add. This
+			// tab had only the add button, so the two headers never matched. Same
+			// state the stock header keeps, so the same markup can be used below.
+			const [searchExpanded, setSearchExpanded] = (0, react.useState)(false);
+			const [query, setQuery] = (0, react.useState)("");
+			const [orderBy, setOrderBy] = (0, react.useState)("manual");
+			const searchRoot = (0, react.useRef)(null);
+			const searchInput = (0, react.useRef)(null);
 			(0, react.useEffect)(() => {
 				const controller = new AbortController();
 				void freestyleStore.refresh({ signal: controller.signal });
@@ -7219,6 +7270,17 @@ window.__ModuleLoader__.load({
 				};
 				return () => events.close();
 			}, []);
+			// What the header's two new controls actually do. A search box that
+			// filtered nothing and a view menu that reordered nothing would look
+			// identical to Organisations and be a lie; both are wired to the root
+			// list. "manual" is registry order (the arxa locale calls it "As
+			// created"), "updated" is most-recently-opened first.
+			const visibleRoots = (() => {
+				const needle = query.trim().toLowerCase();
+				const rows = needle === "" ? st.roots : st.roots.filter((r) => String(r.name || "").toLowerCase().includes(needle));
+				if (orderBy !== "updated") return rows;
+				return [...rows].sort((a, b) => String(b.lastOpenedAt || "").localeCompare(String(a.lastOpenedAt || "")));
+			})();
 			const pickFolder = async (title) => {
 				const r = await fetch("/__arxa/sidebar/pick-folder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }) });
 				const j = await r.json().catch(() => ({ ok: false, error: "bad json" }));
@@ -7238,26 +7300,90 @@ window.__ModuleLoader__.load({
 			};
 			if (!wide) return null;
 			return (0, react_jsx_runtime.jsxs)("div", { className: "aXa_fs_body", children: [
-				(0, react_jsx_runtime.jsxs)("div", { className: "aXa_fs_head", children: [
-					(0, react_jsx_runtime.jsx)("span", { children: t("freestyle.section") }),
-					(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {
-						open: menuOpen,
-						onClose: () => setMenuOpen(false),
-						items: [{ id: "open", label: t("freestyle.add.open") }, { id: "new", label: t("freestyle.add.new") }],
-						onSelect: (id) => {
-							setMenuOpen(false);
-							const action = id === "open" ? addOpen : id === "new" ? addNew : null;
-							if (action) action().catch(freestyleNotice);
-						},
-						portal: true,
-						// A glyph, not a literal "+" character: the Organisations header
-						// spends real dsh icons on its actions, so a text plus read as a
-						// different class of control sitting at the same size.
-						anchor: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("freestyle.add"), onClick: () => setMenuOpen((v) => !v), children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconProjectAddOutline16, {}) })
+				// The Organisations header, class for class: the stock
+				// WorkspaceBrowser sectionHeader — label, a search that expands over
+				// the label, then headerActions holding view-options and add. This
+				// header used to be a bare aXa_fs_head div with a single ghost
+				// Button, which is why the two tabs never lined up no matter how
+				// well the rows below them matched.
+				(0, react_jsx_runtime.jsxs)("div", { className: WorkspaceBrowser_module_css_default.sectionHeader, children: [
+					wide && (0, react_jsx_runtime.jsx)("span", {
+						className: clsx(WorkspaceBrowser_module_css_default.sectionLabel, WorkspaceBrowser_module_css_default.wide, searchExpanded && WorkspaceBrowser_module_css_default.sectionLabelHidden),
+						children: t("freestyle.section")
+					}),
+					wide && (0, react_jsx_runtime.jsx)("div", {
+						className: clsx(WorkspaceBrowser_module_css_default.searchSlot, searchExpanded && WorkspaceBrowser_module_css_default.searchSlotExpanded),
+						children: (0, react_jsx_runtime.jsxs)("div", {
+							ref: searchRoot,
+							className: clsx(WorkspaceBrowser_module_css_default.search, searchExpanded && WorkspaceBrowser_module_css_default.searchExpanded),
+							onClick: () => { setMenuOpen(false); setSearchExpanded(true); searchInput.current?.focus(); },
+							children: [
+								(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Tooltip, {
+									label: t("freestyle.search"), side: "bottom", delayMs: 500, disabled: searchExpanded,
+									children: (0, react_jsx_runtime.jsx)("button", {
+										type: "button",
+										className: WorkspaceBrowser_module_css_default.searchButton,
+										"aria-label": t("freestyle.search"),
+										"aria-expanded": searchExpanded,
+										onClick: () => { setMenuOpen(false); setSearchExpanded(true); },
+										children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconSearchOutline16, { size: searchExpanded ? 11 : 14 })
+									})
+								}),
+								(0, react_jsx_runtime.jsx)("input", {
+									ref: searchInput,
+									className: WorkspaceBrowser_module_css_default.searchInput,
+									type: "text",
+									placeholder: t("freestyle.search.placeholder"),
+									maxLength: 200,
+									value: query,
+									tabIndex: searchExpanded ? 0 : -1,
+									onChange: (e) => setQuery(e.target.value),
+									onKeyDown: (e) => { if (e.key !== "Escape") return; setQuery(""); setSearchExpanded(false); }
+								}),
+								searchExpanded && (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									className: WorkspaceBrowser_module_css_default.clearButton,
+									"aria-label": t("search.clear"),
+									onClick: (e) => { e.stopPropagation(); setQuery(""); setSearchExpanded(false); },
+									children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconCloseFill14, {})
+								})
+							]
+						})
+					}),
+					(0, react_jsx_runtime.jsxs)("div", {
+						className: clsx(WorkspaceBrowser_module_css_default.headerActions, wide && searchExpanded && WorkspaceBrowser_module_css_default.headerActionsHidden),
+						children: [
+							wide && (0, react_jsx_runtime.jsx)(FreestyleViewOptions, { orderBy, onOrderPick: setOrderBy, t }),
+							(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {
+								open: menuOpen,
+								onClose: () => setMenuOpen(false),
+								items: [{ id: "open", label: t("freestyle.add.open") }, { id: "new", label: t("freestyle.add.new") }],
+								onSelect: (id) => {
+									setMenuOpen(false);
+									const action = id === "open" ? addOpen : id === "new" ? addNew : null;
+									if (action) action().catch(freestyleNotice);
+								},
+								align: "end",
+								portal: true,
+								// The stock add button: same iconButton class, same glyph,
+								// same 16/18 size split by rail — not a ghost Button.
+								anchor: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Tooltip, {
+									label: t("freestyle.add"), side: "bottom", delayMs: 500,
+									children: (0, react_jsx_runtime.jsx)("button", {
+										type: "button",
+										className: WorkspaceBrowser_module_css_default.iconButton,
+										"aria-label": t("freestyle.add"),
+										onClick: () => setMenuOpen((v) => !v),
+										children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconProjectAddOutline16, { size: wide ? 16 : 18 })
+									})
+								})
+							})
+						]
 					})
 				] }),
 				st.roots.length === 0 ? (0, react_jsx_runtime.jsx)("div", { className: "aXa_fs_empty", children: t("freestyle.empty") }) : null,
-				(0, react_jsx_runtime.jsx)(FreestyleRoots, { roots: st.roots, trash: st.trash, githubLinked })
+				st.roots.length > 0 && visibleRoots.length === 0 ? (0, react_jsx_runtime.jsx)("div", { className: WorkspaceBrowser_module_css_default.searchStatus, children: t("freestyle.search.noMatches") }) : null,
+				(0, react_jsx_runtime.jsx)(FreestyleRoots, { roots: visibleRoots, trash: st.trash, githubLinked })
 			] });
 		}
 		function freestyleRootVerbs(rootId, ask) {
