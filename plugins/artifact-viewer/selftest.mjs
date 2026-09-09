@@ -90,7 +90,7 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   assert.match(t5client, /if \(ok\) return/, 'wt lane wins; org lane is the fallback on a miss')
   // Phase 1 conformance rebuild (docs/plans/dsh-plugin-ui-conformance.md):
   // store-based ingress replaces the D93 retry ladder + parked payload.
-  assert.match(t5client, /const openArtifact = async \(relPathArg\) => \{/, 'openArtifact takes the relPath argument')
+  assert.match(t5client, /const openArtifact = async \(relPathArg, rootId = null\) => \{/, 'openArtifact takes the relPath and optional root identity')
   assert.match(t5client, /String\(relPathArg \|\| ''\)/, 'the debug path-input form and its draft state are gone')
   const t5code = t5client.replace(/\/\*\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
   assert.doesNotMatch(t5code, /__ARXA_AV_PENDING__|for \(const delay of \[0, 120, 400, 1000, 2000\]\)|setInterval\(/,
@@ -98,8 +98,27 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   assert.doesNotMatch(t5code, /__ARXA_AV_CHIP_INTERCEPT__|__ARXA_SESSIONS__|__ARXA_AV_DEBUG__/,
     'window debug globals are gone (ctx.effect disposal replaces the install-once flag)')
   assert.match(t5client, /function createAvStore\(\)/, 'ingress store exists')
-  assert.match(t5client, /store\.request\(\{ sessionId: detail\.sessionId \|\| null, relPath: detail\.relPath, t0: Math\.round\(performance\.now\(\)\) \}\)/, 'apply() parks opens in the store, stamped with the click time')
+  assert.match(t5client, /store\.request\(\{ sessionId: detail\.sessionId \|\| null, rootId: detail\.rootId \|\| null, relPath: detail\.relPath, t0: Math\.round\(performance\.now\(\)\) \}\)/, 'apply() parks root-aware opens in the store, stamped with the click time')
   assert.match(t5client, /store\.consume\(\)/, 'the mounted panel consumes the pending open')
+  const saveStart = t5client.indexOf('const save = async (force = false) =>')
+  const saveEnd = t5client.indexOf('/** Auto-save:', saveStart)
+  const saveSrc = t5client.slice(saveStart, saveEnd)
+  assert.ok(saveSrc.indexOf('content = docRef.current.getText()') < saveSrc.indexOf('await fetchToken('),
+    'save freezes document bytes before the token wait so navigation cannot cross-write files')
+  const saveTokenAt = saveSrc.indexOf('await fetchToken(')
+  const savePostAt = saveSrc.indexOf('const res = await fetch(WRITE_ROUTE', saveTokenAt)
+  const saveBodyAt = saveSrc.indexOf('const body = await res.json()', savePostAt)
+  assert.doesNotMatch(saveSrc.slice(saveTokenAt, savePostAt), /request !== openRequestRef\.current/,
+    'navigation does not cancel a frozen autosave before its write reaches the old target')
+  assert.match(saveSrc.slice(saveBodyAt), /if \(request !== openRequestRef\.current\) return/,
+    'a completed old-target save cannot alter the newly opened viewer UI')
+  const changesStart = t5client.indexOf('const refreshChanges = React.useCallback')
+  const changesEnd = t5client.indexOf('React.useEffect(() => {', changesStart)
+  const changesSrc = t5client.slice(changesStart, changesEnd)
+  assert.doesNotMatch(changesSrc, /ensureSession\(/,
+    'passive changes refresh never creates an org session when a root file opens')
+  assert.match(changesSrc, /if \(!sessionId\) \{ setChanges\(\[\]\); return \}/,
+    'changes refresh is empty when no current session already exists')
   assert.match(t5client, /ctx\.layout\.openViewer\(\)/, 'the listener opens the column through the layout face')
   assert.match(t5client, /sessions\.list\.subscribe/, 'session tracking subscribes the dsh sessions snapshot store')
   assert.match(t5client, /MutationObserver/, 'first-produced-file-per-turn auto-open observer present')
@@ -635,7 +654,7 @@ assert.ok(spikeSrc.includes('out.narrowMinimap === false') && spikeSrc.includes(
 // for its own path checks) and hands it back with the token.
 const hostSrc = fs.readFileSync(path2.join(here, 'lib', 'index.js'), 'utf8')
 const lspSrc = fs.readFileSync(path2.join(here, 'lib', 'lsp.js'), 'utf8')
-assert.ok(hostSrc.includes("absPath: absOf(open.orgPath, body.relPath)"), 'the read token route returns the file\'s real path')
+assert.ok(hostSrc.includes("absPath: absOf(open.path, body.relPath)"), 'the read token route returns the file\'s real path')
 assert.ok(hostSrc.includes('absPath: wtAbs'), 'the worktree token route returns it too (resolveWorktreeFile already knew it)')
 assert.ok(hostSrc.includes("path: '/__arxa/artifacts/lsp'"), 'the lsp socket is registered as an upgrade route')
 assert.ok(hostSrc.includes('lspBridge.retainRoots(roots.map((r) => r.path))'),
@@ -736,7 +755,8 @@ assert.ok(lspSrc.includes('tsserver: { fallbackPath:'),
 assert.match(clientSrc, /catch \{ \/\* no language service; the editor is unaffected \*\/ \}/,
   'a missing language service NEVER fails the open — the editor works without one')
 assert.ok(entrySrc.includes("['arxa-lsp', token]"), 'the bundle sends the token as a subprotocol (a browser cannot set headers)')
-assert.ok(entrySrc.includes('const current = langClients.get(lang)') && entrySrc.includes('pattern: monaco.Uri.file(uriPath).path')
+assert.ok(entrySrc.includes('const current = langClients.get(lang)') && entrySrc.includes('pattern: literalPattern')
+  && entrySrc.includes("if (ch === '[') return '[[]'")
   && entrySrc.includes('await current.client.stop()'),
   'one client per language is re-pointed with an exact file selector, so retained models cannot cross roots')
 // The LSP lane is now proven in a BROWSER, not only by these string pins. A
@@ -770,9 +790,9 @@ assert.ok(clientSrc.includes("await M.openDiff(uri, diffOriginal, {"),
 // takes either, so the viewer's mirrored session reaches its worktree.
 {
   const wa = fs.readFileSync(path2.join(here, 'lib', 'write-api.js'), 'utf8')
-  assert.ok(wa.includes("(r.id === worktreeId || r.dshSessionId === worktreeId)"),
+  assert.ok(wa.includes("row.id !== worktreeId && row.dshSessionId !== worktreeId"),
     'resolveWorktree matches the dsh session id as well as the registry id')
-  assert.ok(wa.includes('? row.worktree') && wa.includes('return { repoPath, worktreePath, worktree: worktreePath }'),
+  assert.ok(wa.includes('? row.worktree') && wa.includes('matches.set(key, { repoPath, worktreePath, worktree: worktreePath })'),
     'resolveWorktree takes the path from the registry row and returns it under both names wt-api and write-api read')
   const wt = fs.readFileSync(path2.join(here, 'lib', 'wt-api.js'), 'utf8')
   assert.ok(!wt.includes("/[/\\\\]/.test(worktreeId)"), 'resolveWorktreeFile no longer refuses the slash every registry id carries')
@@ -788,7 +808,7 @@ assert.ok(fs.readFileSync(path2.join(here, 'lib', 'index.js'), 'utf8').includes(
 // Decision B (2026-09-07): with a session current, a tree open shows the
 // SESSION's copy of the file — where the viewer's own saves land (D38) — and
 // falls back to the org copy quietly when the session has none.
-assert.ok(clientSrc.includes("const sid = p.sessionId || store.getSnapshot().sessionId || null")
+assert.ok(clientSrc.includes("const sid = rootId ? null : (p.sessionId || store.getSnapshot().sessionId || null)")
   && clientSrc.includes("openWorktreeRef.current(sid, p.relPath, { quiet: true })"),
   'a plain tree open routes through the current session worktree with a quiet org fallback')
 assert.ok(/const openWorktree = async \(sessionId, relPath, \{ quiet = false \} = \{\}\)/.test(clientSrc)

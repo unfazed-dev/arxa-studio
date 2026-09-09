@@ -637,6 +637,14 @@ async function connectLanguageServerNow (lang, { url, token, relPath, uriPath, s
   })
   if (!opened) return false
   const rpc = toSocket(socket)
+  // documentSelector.pattern is a glob, even when it looks like an absolute
+  // URI path. Escape filename metacharacters so routes such as [slug].tsx
+  // select that literal model rather than a one-character glob class.
+  const literalPattern = monaco.Uri.file(uriPath).path.replace(/[?*[\]{}]/g, (ch) => {
+    if (ch === '[') return '[[]'
+    if (ch === ']') return '[]]'
+    return '[' + ch + ']'
+  })
   const client = new MonacoLanguageClient({
     id: 'arxa-' + lang,
     name: 'arxa ' + lang,
@@ -653,7 +661,7 @@ async function connectLanguageServerNow (lang, { url, token, relPath, uriPath, s
       documentSelector: (selector ?? [lang]).map((language) => ({
         language,
         scheme: 'file',
-        pattern: monaco.Uri.file(uriPath).path,
+        pattern: literalPattern,
       })),
       // Handshake options the HOST computed — typescript-language-server
       // refuses to start unless it is told where a compiler is, and only the

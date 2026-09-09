@@ -54,6 +54,28 @@ function readOpenFreestyleRoots(env) {
   } catch { return [] }
 }
 
+/** Every open request identity, including aliases that share one physical
+ * path. Server/watcher lifecycle uses readOpenRoots() below to dedupe paths;
+ * request authorization must retain the registry id the UI put on the wire. */
+export function readOpenRootAliases(env = process.env) {
+  const roots = []
+  const org = readOpenOrg(env)
+  if (org) roots.push({ id: org.slug, path: org.orgPath, slug: org.slug, kind: 'org', name: org.slug })
+  for (const r of readOpenFreestyleRoots(env)) {
+    roots.push({ id: r.id, path: r.path, slug: path.basename(r.path), kind: 'freestyle', name: typeof r.name === 'string' && r.name ? r.name : path.basename(r.path) })
+  }
+  return roots
+}
+
+/** Resolve an explicit open root id. Duplicate ids are ambiguous and fail
+ * closed; an omitted id retains the legacy open-org default. */
+export function readOpenRoot(env = process.env, rootId = null) {
+  const aliases = readOpenRootAliases(env)
+  if (typeof rootId !== 'string' || rootId === '') return aliases.find((r) => r.kind === 'org') ?? null
+  const matches = aliases.filter((r) => r.id === rootId)
+  return matches.length === 1 ? matches[0] : null
+}
+
 /**
  * Freestyle-section Task 8: every root the viewer should follow — the open
  * org first (if any), then every open Freestyle root. Pure fs, no locks, no
@@ -64,12 +86,7 @@ function readOpenFreestyleRoots(env) {
 export function readOpenRoots(env = process.env) {
   const roots = []
   const seen = new Set()
-  const org = readOpenOrg(env)
-  if (org) {
-    roots.push({ id: org.slug, path: org.orgPath, slug: org.slug, kind: 'org', name: org.slug })
-    seen.add(path.resolve(org.orgPath))
-  }
-  for (const r of readOpenFreestyleRoots(env)) {
+  for (const r of readOpenRootAliases(env)) {
     // A Freestyle root can point at the same folder as the open org (a
     // project nested in a Freestyle root, or a stray duplicate registry
     // row). First-wins keeps the org's identity — two servers on one path
@@ -79,7 +96,7 @@ export function readOpenRoots(env = process.env) {
     const key = path.resolve(r.path)
     if (seen.has(key)) continue
     seen.add(key)
-    roots.push({ id: r.id, path: r.path, slug: path.basename(r.path), kind: 'freestyle', name: typeof r.name === 'string' && r.name ? r.name : path.basename(r.path) })
+    roots.push(r)
   }
   return roots
 }

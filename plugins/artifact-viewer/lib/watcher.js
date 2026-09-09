@@ -39,13 +39,12 @@ export function createOrgWatcher({ intervalMs = 250 } = {}) {
       const w = fs.watch(root, { recursive: true }, (_event, filename) => {
         if (!filename) return
         const rel = String(filename)
-        if (rel === '.arxa' || rel === '.git' || rel.startsWith('.arxa/') || rel.startsWith('.git/') || rel.includes('/.arxa/') || rel.includes('/.git/')) return
+        if (rel.split(/[\\/]+/).some((part) => part === '.arxa' || part === '.git')) return
         let mtime = null
         try {
           const st = fs.statSync(path.join(root, rel))
-          if (!st.isFile()) return
           mtime = st.mtimeMs
-        } catch { return }
+        } catch { /* deletion: null is the tree invalidation signal */ }
         schedule(root, rel, mtime)
       })
       // fs.watch can also fail asynchronously (for example EMFILE).
@@ -80,9 +79,18 @@ export function createEventsRoute({ watcher, resolveSessionRoot, rootIdForPath =
         'connection': 'keep-alive',
       })
       res.write('retry: 2000\n\n')
+      let requestedRootId = null
+      try { requestedRootId = new URL(req.url, 'http://x').searchParams.get('root') } catch {}
       const push = (relPath, mtimeMs, rootPath = null) => {
-        const rootId = rootPath === null ? null : rootIdForPath(rootPath)
-        try { res.write('data: ' + JSON.stringify({ relPath, mtimeMs, rootId }) + '\n\n') } catch {}
+        const resolved = rootPath === null ? null : rootIdForPath(rootPath, requestedRootId)
+        if (requestedRootId && rootPath !== null && resolved == null) return
+        // One physical path may have both the org id and a Freestyle registry
+        // id. Unfiltered subscribers need one frame per public alias while a
+        // root-filtered viewer connection receives only its requested id.
+        const rootIds = Array.isArray(resolved) ? resolved : [resolved]
+        for (const rootId of rootIds) {
+          try { res.write('data: ' + JSON.stringify({ relPath, mtimeMs, rootId }) + '\n\n') } catch {}
+        }
       }
       // Worktree lane: ?session=<id> resolves one dedicated watcher for this
       // connection. Its rootId is null because the session already identifies it.

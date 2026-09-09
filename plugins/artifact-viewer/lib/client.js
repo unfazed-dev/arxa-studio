@@ -39,6 +39,8 @@ window.__ModuleLoader__.load({
     const CARD_ROUTE = '/__arxa/git-card/action'
     const SIDEBAR_ROUTE = '/__arxa/sidebar/action'
     const EVENTS_ROUTE = '/__arxa/artifacts/events'
+    const ROOTS_ROUTE = '/__arxa/artifacts/roots'
+    const WT_ROUTE = '/__arxa/artifacts/wt'
     const VENDOR = (n) => '/__arxa/artifacts/vendor/' + n
     const LSP_ROUTE = '/__arxa/artifacts/lsp'
     const TRACE_ROUTE = '/__arxa/artifacts/trace'
@@ -122,6 +124,7 @@ window.__ModuleLoader__.load({
       + '.aXa_av_head{flex:none;display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--dsw-alias-border-l2);min-width:0}'
       + '.aXa_av_titleWrap{flex:1;min-width:0;display:flex;align-items:center;gap:8px;overflow:hidden}'
       + '.aXa_av_filename{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-primary)}'
+      + '.aXa_av_rootName{flex:none;font-size:12px;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40%}'
       + '.aXa_av_lane{flex:none;font-size:11px;line-height:16px;padding:1px 8px;border-radius:9px;border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary)}'
       + '.aXa_av_chip{flex:none;font-size:11px;line-height:16px;padding:1px 8px;border-radius:9px;border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;font:inherit}'
       + '.aXa_av_chip:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}'
@@ -527,13 +530,13 @@ window.__ModuleLoader__.load({
     // apply() requests; the mounted panel consumes. The store holds a pending
     // open until the panel exists — no retries, no parked window global.
     function createAvStore() {
-      let state = { pending: null, tick: 0, sessionId: null }
+      let state = { pending: null, tick: 0, sessionId: null, rootId: null }
       const subs = new Set()
       const emit = () => { for (const fn of [...subs]) { try { fn() } catch {} } }
       return {
         getSnapshot: () => state,
         subscribe(fn) { subs.add(fn); return () => subs.delete(fn) },
-        request(payload) { state = { ...state, pending: payload, tick: state.tick + 1 }; emit() },
+        request(payload) { state = { ...state, pending: payload, rootId: payload?.rootId || null, tick: state.tick + 1 }; emit() },
         consume() {
           if (!state.pending) return null
           const p = state.pending
@@ -644,8 +647,12 @@ window.__ModuleLoader__.load({
       return body
     }
 
-    async function fetchToken(relPath, writeFor) {
-      const payload = writeFor ? { scope: 'write', worktreeId: writeFor } : { relPath }
+    async function fetchToken(relPath, writeFor, rootId) {
+      const payload = writeFor
+        ? { scope: 'write', worktreeId: writeFor }
+        : rootId && relPath == null
+          ? { scope: 'write', rootId }
+          : { relPath, ...(rootId ? { rootId } : {}) }
       const res = await fetch(TOKEN_ROUTE, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),
@@ -653,6 +660,19 @@ window.__ModuleLoader__.load({
       const body = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(body.error || ('token route ' + res.status))
       return body
+    }
+
+    async function fetchRoot(rootId) {
+      const res = await fetch(ROOTS_ROUTE)
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.error || ('roots route ' + res.status))
+      const root = (body.roots || []).find((row) => rootId ? row.id === rootId : row.kind === 'org')
+      if (rootId && !root) throw new Error('root not open')
+      return root || null
+    }
+
+    function matchesArtifactEvent(ev, relPath, eventRootId) {
+      return !!ev && ev.relPath === relPath && (!eventRootId || ev.rootId === eventRootId)
     }
 
     /** D80 transparent ensure: an open session of the open org — the most
@@ -1301,6 +1321,7 @@ window.__ModuleLoader__.load({
       const seenSessionRef = React.useRef(null)
       const openArtifactRef = React.useRef(null)
       const openWorktreeRef = React.useRef(null)
+      const openRequestRef = React.useRef(0)
       React.useEffect(() => { dirtyRef.current = dirty }, [dirty])
 
       /** The live document, or the loaded bytes when no editor is mounted yet.
@@ -1313,7 +1334,7 @@ window.__ModuleLoader__.load({
 
       const lane = state.kind ? state.kind.lane : null
       const editableLane = EDITABLE_LANES.has(lane)
-      const canEdit = editableLane && !state.readOnly && !!session
+      const canEdit = editableLane && !state.readOnly && (!!session || !!state.rootId)
 
       // D82 cap from the host settings namespace when available.
       React.useEffect(() => {
@@ -1343,6 +1364,7 @@ window.__ModuleLoader__.load({
           trace.mark('panel-mounted=' + (mountedAtRef.current - p.t0) + ' consumed')
         }
         if (p.kind === 'insight') {
+          openRequestRef.current++
           setOpen(true)
           setState({ phase: 'insight', view: p.view, sessionId: p.sessionId || null, orgId: p.orgId || null, rows: p.rows || null })
           return
@@ -1353,9 +1375,12 @@ window.__ModuleLoader__.load({
         // is the only one that shows the user's edits — opening the org copy
         // made a saved edit look lost on the next click. A file the session
         // has no copy of (untracked in the org) falls back to the org lane.
-        const sid = p.sessionId || store.getSnapshot().sessionId || null
+        const rootId = p.rootId || null
+        const sid = rootId ? null : (p.sessionId || store.getSnapshot().sessionId || null)
         if (p.relPath && p.t0 == null) trace.begin(p.relPath)
-        if (sid && p.relPath) {
+        if (rootId && p.relPath) {
+          void (openArtifactRef.current && openArtifactRef.current(p.relPath, rootId))
+        } else if (sid && p.relPath) {
           void Promise.resolve(openWorktreeRef.current && openWorktreeRef.current(sid, p.relPath, { quiet: true })).then((ok) => {
             if (ok) return
             void (openArtifactRef.current && openArtifactRef.current(p.relPath))
@@ -1368,11 +1393,11 @@ window.__ModuleLoader__.load({
       // D93 session switch: the dsh sessions service is the event source
       // (the 4 s ensureSession poll is gone). A current-session change resets
       // the panel to idle and re-binds the changes list.
-      const refreshChanges = React.useCallback(async () => {
+      const refreshChanges = React.useCallback(async (sessionId) => {
+        if (!sessionId) { setChanges([]); return }
         try {
-          const s = await ensureSession()
-          const { token } = await fetchTokenRaw({ scope: 'changes-read', worktreeId: s.id })
-          const r = await fetch('/__arxa/artifacts/session-changes?session=' + encodeURIComponent(s.id) + '&avt=' + encodeURIComponent(token))
+          const { token } = await fetchTokenRaw({ scope: 'changes-read', worktreeId: sessionId })
+          const r = await fetch('/__arxa/artifacts/session-changes?session=' + encodeURIComponent(sessionId) + '&avt=' + encodeURIComponent(token))
           const body = await r.json().catch(() => ({}))
           if (r.ok) setChanges(body.files || [])
         } catch { setChanges([]) }
@@ -1382,7 +1407,7 @@ window.__ModuleLoader__.load({
         const prev = seenSessionRef.current
         if (prev === id) return
         seenSessionRef.current = id
-        void refreshChanges()
+        void refreshChanges(id)
         // 2026-09-01 user directive: opening a session must not leave a stale
         // artifact on screen. The old guard (prev && id && prev !== id) only
         // fired on session->session transitions and skipped the most common
@@ -1395,6 +1420,7 @@ window.__ModuleLoader__.load({
         // current session so it re-fetches, rather than closing the column the
         // user just opened. The sessions view is org-keyed and ignores this.
         if (state.phase === 'insight') { setState((st) => ({ ...st, sessionId: id })); return }
+        if (state.rootId) return
         if (id && wtRef.current && wtRef.current.sessionId === id) return
         // Close the LAYOUT column (the frame face), not just the panel state:
         // the old reset only flipped internal state while the frame kept the
@@ -1407,48 +1433,68 @@ window.__ModuleLoader__.load({
         // state.phase is a dep on purpose: the insight guard above reads it,
         // and without it a panel that BECAME an insight after the last session
         // change would be judged by a stale closure and closed.
-      }, [snap.sessionId, open, refreshChanges, state.phase])
-      React.useEffect(() => { void refreshChanges() }, [refreshChanges])
-
+      }, [snap.sessionId, open, refreshChanges, state.phase, state.rootId])
       // D86 external-change push. Org lane: the org watcher. Worktree lane:
       // the same route with ?session= (host watches the worktree for this
       // connection). Clean buffer auto-reloads; dirty buffer conflicts.
       React.useEffect(() => {
         if (!open || !state.relPath || state.phase !== 'ready') return
-        const url = EVENTS_ROUTE + (wtRef.current ? '?session=' + encodeURIComponent(wtRef.current.sessionId) : '')
+        let disposed = false
+        const url = EVENTS_ROUTE + (wtRef.current
+          ? '?session=' + encodeURIComponent(wtRef.current.sessionId)
+          : state.eventRootId ? '?root=' + encodeURIComponent(state.eventRootId) : '')
         const es = new EventSource(url)
         es.onmessage = (m) => {
           try {
             const ev = JSON.parse(m.data)
-            if (!ev || ev.relPath !== state.relPath) return
+            if (!matchesArtifactEvent(ev, state.relPath, state.eventRootId)) return
             if (dirtyRef.current) {
               externalRef.current = ev.mtimeMs
               setSavePhase('conflict')
               setSaveNote('')
             } else {
+              const request = openRequestRef.current
               void (async () => {
                 try {
                   let text
+                  let readMtime = ev.mtimeMs
                   if (wtRef.current) {
                     const { token } = await fetchTokenRaw({ scope: 'wt-read', worktreeId: wtRef.current.sessionId, relPath: state.relPath })
                     const r = await fetch('/__arxa/artifacts/wt?session=' + encodeURIComponent(wtRef.current.sessionId) + '&path=' + encodeURIComponent(state.relPath) + '&avt=' + encodeURIComponent(token))
                     if (!r.ok) return
+                    readMtime = Number(r.headers.get('x-arxa-mtime-ms')) || ev.mtimeMs
+                    text = await r.text()
+                  } else if (state.rootId) {
+                    const { token } = await fetchToken(state.relPath, null, state.rootId)
+                    const r = await fetch(WT_ROUTE + '?root=' + encodeURIComponent(state.rootId) + '&path=' + encodeURIComponent(state.relPath) + '&avt=' + encodeURIComponent(token))
+                    if (!r.ok) return
+                    readMtime = Number(r.headers.get('x-arxa-mtime-ms')) || ev.mtimeMs
                     text = await r.text()
                   } else {
-                    const { token, origin } = await fetchToken(state.relPath)
+                    const { token, origin } = await fetchToken(state.relPath, null, null)
                     const r = await fetch(origin + '/' + encodeURI(state.relPath) + '?avt=' + encodeURIComponent(token))
                     if (!r.ok) return
                     text = await r.text()
                   }
-                  mtimeRef.current = ev.mtimeMs
+                  if (disposed || request !== openRequestRef.current) return
+                  // The buffer may have become dirty while token/read awaited.
+                  // Keep those edits and surface the same conflict UI as an
+                  // event that arrived dirty in the first place.
+                  if (dirtyRef.current) {
+                    externalRef.current = readMtime
+                    setSavePhase('conflict')
+                    setSaveNote('')
+                    return
+                  }
+                  mtimeRef.current = readMtime
                   setState((s) => ({ ...s, text }))
                 } catch { /* transient */ }
               })()
             }
           } catch {}
         }
-        return () => es.close()
-      }, [open, state.relPath, state.phase])
+        return () => { disposed = true; es.close() }
+      }, [open, state.relPath, state.phase, state.rootId, state.eventRootId])
 
       const resetForOpen = () => {
         setDirty(false); setSavePhase('idle'); setSaveNote(''); mtimeRef.current = null
@@ -1460,7 +1506,7 @@ window.__ModuleLoader__.load({
       /** Editable lanes ensure the session AT OPEN (D80 transparent ensure,
        * moved off the old edit toggle): the lane lands already-editable, or
        * view-only with the reason when the ensure/guards refuse. */
-      const applyEditability = async (kind, relPath, text, len, prebound) => {
+      const applyEditability = async (kind, relPath, text, len, prebound, rootId) => {
         const cap = maxBytesRef.current
         if (len > cap) {
           return { readOnly: true, guardNote: t('guard.tooLarge', { size: Math.round(len / 1048576 * 10) / 10, cap: Math.round(cap / 1048576 * 10) / 10 }), session: prebound || null }
@@ -1469,6 +1515,7 @@ window.__ModuleLoader__.load({
           return { readOnly: true, guardNote: t('guard.binary'), session: prebound || null }
         }
         if (prebound) return { readOnly: false, guardNote: '', session: prebound }
+        if (rootId) return { readOnly: false, guardNote: '', session: null }
         try {
           const s = await ensureSession()
           return { readOnly: false, guardNote: '', session: s }
@@ -1478,43 +1525,59 @@ window.__ModuleLoader__.load({
         }
       }
 
-      const openArtifact = async (relPathArg) => {
+      const openArtifact = async (relPathArg, rootId = null) => {
         const relPath = String(relPathArg || '').trim().replace(/^\/+/, '')
         if (!relPath) return
+        const request = ++openRequestRef.current
         resetForOpen()
         setSession(null)
         setOpen(true)
         wtRef.current = null
-        setState({ phase: 'loading', relPath })
-        trace.mark('org:loading')
+        setState({ phase: 'loading', relPath, rootId })
+        trace.mark(rootId ? 'root:loading' : 'org:loading')
         try {
-          const { token, origin, absPath } = await fetchToken(relPath)
+          const [{ token, origin, absPath }, root] = await Promise.all([
+            fetchToken(relPath, null, rootId),
+            fetchRoot(rootId),
+          ])
+          if (request !== openRequestRef.current) return
           trace.mark('token')
-          const url = origin + '/' + encodeURI(relPath) + '?avt=' + encodeURIComponent(token)
+          const url = rootId
+            ? WT_ROUTE + '?root=' + encodeURIComponent(rootId) + '&path=' + encodeURIComponent(relPath) + '&avt=' + encodeURIComponent(token)
+            : origin + '/' + encodeURI(relPath) + '?avt=' + encodeURIComponent(token)
           const kind = kindFor(relPath)
-          void (async () => {
+          if (!rootId) void (async () => {
             try {
               const tk = await fetchToken(relPath)
               const r = await fetch('/__arxa/artifacts/version?relPath=' + encodeURIComponent(relPath) + '&avt=' + encodeURIComponent(tk.token))
               const body = await r.json().catch(() => ({}))
-              if (r.ok) { setChip(body.chip || null); setTimeline(body.timeline || []) }
+              if (r.ok && request === openRequestRef.current) { setChip(body.chip || null); setTimeline(body.timeline || []) }
             } catch { /* chip stays hidden — never blocks the artifact */ }
           })()
           if (EDITABLE_LANES.has(kind.lane)) {
             const r = await fetch(url)
             if (!r.ok) throw new Error('fetch ' + r.status)
+            if (request !== openRequestRef.current) return
+            const readMtime = rootId ? Number(r.headers.get('x-arxa-mtime-ms')) || null : null
             const len = Number(r.headers.get('content-length') || '0')
             const text = await r.text()
             trace.mark('bytes')
-            const edit = await applyEditability(kind, relPath, text, len, null)
+            const edit = await applyEditability(kind, relPath, text, len, null, rootId)
+            if (request !== openRequestRef.current) return
+            if (rootId) mtimeRef.current = readMtime
             trace.mark('session')
             setSession(edit.session)
-            setState({ phase: 'ready', kind, relPath, url, text, absPath, readOnly: edit.readOnly, guardNote: edit.guardNote })
+            setState({ phase: 'ready', kind, relPath, url, text, absPath, rootId,
+              eventRootId: root?.id ?? null, rootName: rootId ? root?.name ?? null : null,
+              readOnly: edit.readOnly, guardNote: edit.guardNote })
           } else {
-            setState({ phase: 'ready', kind, relPath, url })
+            if (request !== openRequestRef.current) return
+            setState({ phase: 'ready', kind, relPath, url, rootId,
+              eventRootId: root?.id ?? null, rootName: rootId ? root?.name ?? null : null })
             trace.end('ready:' + kind.lane)
           }
         } catch (e) {
+          if (request !== openRequestRef.current) return
           trace.end('error')
           setState({ phase: 'error', relPath, note: t('error.load', { path: relPath, reason: String(e && e.message || e) }) })
         }
@@ -1522,6 +1585,7 @@ window.__ModuleLoader__.load({
 
       const openWorktree = async (sessionId, relPath, { quiet = false } = {}) => {
         if (!sessionId || !relPath) return false
+        const request = ++openRequestRef.current
         resetForOpen()
         setOpen(true)
         setState({ phase: 'loading', relPath })
@@ -1531,24 +1595,31 @@ window.__ModuleLoader__.load({
           const prebound = { id: sessionId, name: sessionId }
           setSession(prebound)
           const { token, absPath } = await fetchTokenRaw({ scope: 'wt-read', worktreeId: sessionId, relPath })
+          if (request !== openRequestRef.current) return true
           trace.mark('token')
           const url = '/__arxa/artifacts/wt?session=' + encodeURIComponent(sessionId) + '&path=' + encodeURIComponent(relPath) + '&avt=' + encodeURIComponent(token)
           const kind = kindFor(relPath)
           if (EDITABLE_LANES.has(kind.lane)) {
             const r = await fetch(url)
             if (!r.ok) throw new Error('fetch ' + r.status)
+            if (request !== openRequestRef.current) return true
+            const readMtime = Number(r.headers.get('x-arxa-mtime-ms')) || null
             const len = Number(r.headers.get('content-length') || '0')
             const text = await r.text()
             trace.mark('bytes')
-            const edit = await applyEditability(kind, relPath, text, len, prebound)
+            const edit = await applyEditability(kind, relPath, text, len, prebound, null)
+            if (request !== openRequestRef.current) return true
+            mtimeRef.current = readMtime
             setSession(edit.session)
             setState({ phase: 'ready', kind, relPath, url, text, absPath, readOnly: edit.readOnly, guardNote: edit.guardNote, wt: sessionId })
             return true
           }
+          if (request !== openRequestRef.current) return true
           setState({ phase: 'ready', kind, relPath, url, wt: sessionId })
           trace.end('ready:' + kind.lane)
           return true
         } catch (e) {
+          if (request !== openRequestRef.current) return true
           trace.mark('wt:miss')
           // quiet: the caller has an org-lane fallback, and a file the session
           // has no copy of must not flash an error on its way there.
@@ -1560,22 +1631,34 @@ window.__ModuleLoader__.load({
       openWorktreeRef.current = openWorktree
 
       const save = async (force = false) => {
-        if (!session || !state.relPath || !docRef.current) return
+        if ((!session && !state.rootId) || !state.relPath || !docRef.current) return
         if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null }
+        // Freeze one coherent write before the token wait. Navigation replaces
+        // docRef.current; reading it after await could send the new document's
+        // bytes to the old root/path captured by this render.
+        const request = openRequestRef.current
+        const targetRootId = state.rootId ?? null
+        const targetSessionId = session?.id ?? null
+        const targetRelPath = state.relPath
+        let content
+        try { content = docRef.current.getText() }
+        catch (e) { setSavePhase('error'); setSaveNote(String(e && e.message || e)); return }
+        const expectedMtimeMs = mtimeRef.current
         setSavePhase('saving'); setSaveNote('')
         try {
-          const { token } = await fetchToken(null, session.id)
+          const { token } = await fetchToken(null, targetSessionId, targetRootId)
           const res = await fetch(WRITE_ROUTE, {
             method: 'POST',
             headers: { 'content-type': 'application/json', 'x-arxa-write-token': token },
             body: JSON.stringify({
-              worktreeId: session.id,
-              relPath: state.relPath,
-              content: docRef.current.getText(),
-              ...(!force && mtimeRef.current != null ? { expectedMtimeMs: mtimeRef.current } : {}),
+              ...(targetRootId ? { rootId: targetRootId } : { worktreeId: targetSessionId }),
+              relPath: targetRelPath,
+              content,
+              ...(!force && expectedMtimeMs != null ? { expectedMtimeMs } : {}),
             }),
           })
           const body = await res.json().catch(() => ({}))
+          if (request !== openRequestRef.current) return
           if (res.status === 409) {
             setSavePhase('conflict'); setSaveNote('')
             if (body.mtimeMs) mtimeRef.current = body.mtimeMs
@@ -1585,8 +1668,9 @@ window.__ModuleLoader__.load({
           mtimeRef.current = body.mtimeMs
           setDirty(false)
           setSavePhase('saved')
-          setSaveNote(body.committed ? t('saved.committed', { session: session.name }) : t('saved.wipPending', { warning: body.warning || '?' }))
+          setSaveNote(body.committed ? t('saved.committed', { session: state.rootName || session?.name || targetRootId }) : t('saved.wipPending', { warning: body.warning || '?' }))
         } catch (e) {
+          if (request !== openRequestRef.current) return
           setSavePhase('error'); setSaveNote(String(e && e.message || e))
         }
       }
@@ -1604,10 +1688,11 @@ window.__ModuleLoader__.load({
         const rel = state.relPath
         if (!rel) return
         if (wtRef.current) await openWorktree(wtRef.current.sessionId, rel)
-        else await openArtifact(rel)
+        else await openArtifact(rel, state.rootId ?? null)
       }
 
       const toggleDiff = () => {
+        if (state.rootId) return
         if (showDiff) { setShowDiff(false); return }
         void (async () => {
           try {
@@ -1662,7 +1747,7 @@ window.__ModuleLoader__.load({
         : savePhase === 'saving' ? t('state.saving')
         : dirty ? t('state.dirty')
         : savePhase === 'saved' ? (saveNote || t('state.saved'))
-        : session ? t('session.badge', { name: session.name }) : t('state.saved')
+        : session ? t('session.badge', { name: session.name }) : (state.rootName || t('state.saved'))
 
       // ---- header --------------------------------------------------------------
       const iconBtn = (key, label, onClick, Icon, opts = {}) =>
@@ -1675,6 +1760,7 @@ window.__ModuleLoader__.load({
       const header = h('div', { className: 'aXa_av_head' },
         h('div', { className: 'aXa_av_titleWrap' },
           filename && h(FileIcon, { name: filename }),
+          state.rootName && h('span', { className: 'aXa_av_rootName', title: state.rootName }, state.rootName),
           h('span', { className: 'aXa_av_filename' },
             state.phase === 'insight' ? t('insight.title.' + state.view) : (filename || t('title'))),
           state.phase === 'ready' && lane && h('span', { className: 'aXa_av_lane' }, t('lane.' + lane) !== 'lane.' + lane ? t('lane.' + lane) : lane),
@@ -1707,7 +1793,7 @@ window.__ModuleLoader__.load({
               'aria-pressed': prettierOn ? 'true' : 'false', 'data-on': prettierOn ? 'true' : undefined,
             }, h('img', { className: 'aXa_av_prettierMark', 'data-off': prettierOn ? undefined : 'true', src: VENDOR('prettier.png'), alt: '', draggable: false }))),
           canFormat && iconBtn('format', t('action.format'), () => void doFormat(), P.IconEnhanceOutline16),
-          state.phase === 'ready' && editableLane && iconBtn('diff', t('action.diff'), toggleDiff, P.IconInspectOutline12, { on: showDiff }),
+          state.phase === 'ready' && editableLane && !state.rootId && iconBtn('diff', t('action.diff'), toggleDiff, P.IconInspectOutline12, { on: showDiff }),
           frameProps.maximize && iconBtn('max', t('action.maximize'), () => frameProps.maximize(), P.IconFullscreenOutline16),
           frameProps.close && !frameProps.sheet && iconBtn('close', t('close'), () => frameProps.close(), P.IconCloseOutline16)))
 
@@ -1837,7 +1923,7 @@ window.__ModuleLoader__.load({
             store.request({ kind: 'insight', view: detail.view, sessionId: detail.sessionId || null, orgId: detail.orgId || null })
           } else {
             if (!detail.relPath) return
-            store.request({ sessionId: detail.sessionId || null, relPath: detail.relPath, t0: Math.round(performance.now()) })
+            store.request({ sessionId: detail.sessionId || null, rootId: detail.rootId || null, relPath: detail.relPath, t0: Math.round(performance.now()) })
           }
           try { if (ctx.layout && typeof ctx.layout.openViewer === 'function') ctx.layout.openViewer() } catch { /* face not wired yet */ }
         }

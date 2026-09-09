@@ -50,27 +50,46 @@ export async function resolveWorktree({ env = process.env, orgPath, worktreeId }
   const gwMod = await gw()
   const listSessions = gwMod.listSessions
   const SESSIONS_DIR = gwMod.SESSIONS_DIR
-  const candidates = [orgPath]
-  try {
-    for (const name of fs.readdirSync(path.join(orgPath, 'projects'))) {
-      const p = path.join(orgPath, 'projects', name)
-      if (fs.statSync(p).isDirectory()) candidates.push(p)
-    }
-  } catch { /* no projects dir — org repo only */ }
-  for (const repoPath of candidates) {
-    let rows = []
-    try { rows = listSessions(repoPath, env) } catch { continue }
-    const row = rows.find((r) => r && (r.id === worktreeId || r.dshSessionId === worktreeId) && r.state === 'open')
-    if (!row) continue
-    // The path comes from the REGISTRY ROW, never from the caller's id: the
-    // row is what git-workspace wrote, and the id may be the dsh form that
-    // names no directory. `worktree` is returned under both names because
-    // wt-api read `found.worktree` while this returned `worktreePath` — the
-    // session read lane threw on every call and 404'd (traced 2026-09-07).
+  const candidates = []
+  if (typeof orgPath === 'string' && orgPath !== '') {
+    candidates.push(orgPath)
+    try {
+      for (const name of fs.readdirSync(path.join(orgPath, 'projects'))) {
+        const p = path.join(orgPath, 'projects', name)
+        if (fs.statSync(p).isDirectory()) candidates.push(p)
+      }
+    } catch { /* no projects dir — org repo only */ }
+  }
+  const matches = new Map()
+  const take = (repoPath, row) => {
+    if (!row || (row.id !== worktreeId && row.dshSessionId !== worktreeId) || row.state !== 'open') return
     const worktreePath = typeof row.worktree === 'string' && row.worktree !== ''
       ? row.worktree
       : path.join(repoPath, ...SESSIONS_DIR.split('/'), row.id)
-    if (fs.existsSync(worktreePath)) return { repoPath, worktreePath, worktree: worktreePath }
+    if (!fs.existsSync(worktreePath)) return
+    let key = path.resolve(repoPath) + '\0' + row.id
+    try { key = fs.realpathSync(repoPath) + '\0' + row.id } catch {}
+    matches.set(key, { repoPath, worktreePath, worktree: worktreePath })
+  }
+  for (const repoPath of candidates) {
+    let rows = []
+    try { rows = listSessions(repoPath, env) } catch { continue }
+    for (const row of rows) take(repoPath, row)
+  }
+  // Freestyle sessions may belong to any registered root and any git repo
+  // nested under it. Reuse that package's ownership-aware aggregation instead
+  // of guessing a projects/* layout. This also works when no org is open.
+  try {
+    const { listRoots, createFreestyleSessions } = await freestyle()
+    const sessions = createFreestyleSessions({ env, dshBridge: { spawn: async () => ({ ok: false, reason: 'lookup-only' }) } })
+    for (const root of listRoots({ env }).filter((row) => row.open === true)) {
+      const groups = sessions.list(root)
+      for (const row of [...groups.active, ...groups.parked, ...groups.archived]) take(row.repoPath, row)
+    }
+  } catch { /* missing/broken Freestyle registry leaves the org lane intact */ }
+  if (matches.size === 1) return matches.values().next().value
+  if (matches.size > 1) {
+    console.log('[arxa-artifact-viewer] ambiguous session id refused: ' + String(worktreeId).slice(0, 120))
   }
   return null
 }
@@ -223,7 +242,10 @@ export function createWriteApi({ env = process.env, secret, getSettings = () => 
       }
       let before = null
       try { before = fs.statSync(abs) } catch { /* new file */ }
-      if (before && Number.isFinite(body.expectedMtimeMs) && Math.abs(before.mtimeMs - body.expectedMtimeMs) > 1) {
+      if (!before && Number.isFinite(body.expectedMtimeMs)) {
+        return json(res, 409, { error: 'file changed externally', mtimeMs: null })
+      }
+      if (before && Number.isFinite(body.expectedMtimeMs) && before.mtimeMs !== body.expectedMtimeMs) {
         return json(res, 409, { error: 'file changed externally', mtimeMs: before.mtimeMs })
       }
       fs.mkdirSync(path.dirname(abs), { recursive: true })

@@ -19,7 +19,7 @@ async function fromDsh(pkg, sub) {
 }
 const { default: z } = await fromDsh('@deepseek-ai/schemastery', 'lib/index.mjs')
 import { createOrgServer } from './org-server.js'
-import { startRootFollow, readOpenOrg, readOpenRoots } from './follow.js'
+import { startRootFollow, readOpenOrg, readOpenRoot, readOpenRootAliases } from './follow.js'
 import { createWriteApi, createMainVersionRoute, createVersionRoute, resolveWorktree } from './write-api.js'
 import { createWorktreeRoute, createTreeRoute, createSessionChangesRoute, resolveWorktreeFile } from './wt-api.js'
 import { createOrgWatcher, createEventsRoute } from './watcher.js'
@@ -85,18 +85,54 @@ function freestylePathApi() {
  *  policy; this boundary adds the LSP-specific "must be a file" rule. */
 export async function resolveLspFile(rootPath, relPath) {
   try {
-    const { resolveFreestyleInside } = await freestylePathApi()
-    if (typeof resolveFreestyleInside !== 'function') return null
-    const { abs } = resolveFreestyleInside(rootPath, relPath)
-    if (!fs.statSync(abs).isFile()) return null
-    return abs
+    return await resolveReadFile(rootPath, relPath)
   } catch { return null }
 }
 
+async function resolveReadFile(rootPath, relPath) {
+  const { resolveFreestyleInside } = await freestylePathApi()
+  if (typeof resolveFreestyleInside !== 'function') throw new Error('resolver unavailable')
+  const { abs } = resolveFreestyleInside(rootPath, relPath)
+  const st = fs.statSync(abs)
+  if (!st.isFile()) throw Object.assign(new Error('not a file'), { code: 'NOT_FILE' })
+  return abs
+}
+
 function selectedOpenRoot(env, rootId) {
-  const roots = readOpenRoots(env)
-  if (typeof rootId === 'string' && rootId !== '') return roots.find((r) => r.id === rootId) ?? null
-  return roots.find((r) => r.kind === 'org') ?? null
+  return readOpenRoot(env, rootId)
+}
+
+/** Map one watched physical path to its public identities. A filtered stream
+ * receives exactly the requested identity or no frame; an unfiltered stream
+ * fans out aliases so same-path org/Freestyle consumers both invalidate. */
+export function rootIdsForPath(env, rootPath, requestedId = null) {
+  if (requestedId) {
+    const requested = selectedOpenRoot(env, requestedId)
+    return requested && path.resolve(requested.path) === path.resolve(rootPath)
+      ? requested.id
+      : null
+  }
+  const aliases = readOpenRootAliases(env)
+    .filter((r) => path.resolve(r.path) === path.resolve(rootPath))
+    .map((r) => r.id)
+  return aliases.length ? aliases : null
+}
+
+/** Tiny trusted-origin metadata route for the viewer header. Physical paths
+ * stay host-only; aliases remain visible so a same-path Freestyle id keeps
+ * its own display name. */
+export function createRootsRoute({ env = process.env } = {}) {
+  return {
+    handle(req, res) {
+      if (req.method !== 'GET') {
+        res.writeHead(405, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+        return res.end('{"error":"GET only"}')
+      }
+      const roots = readOpenRootAliases(env).map(({ id, name, kind }) => ({ id, name, kind }))
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+      res.end(JSON.stringify({ roots }))
+    },
+  }
 }
 
 export function createTokenRoutes({ env = process.env, secret, getSettings, getOrigin = () => null }) {
@@ -111,6 +147,12 @@ export function createTokenRoutes({ env = process.env, secret, getSettings, getO
       try { body = JSON.parse((await readBody(req)) || '{}') } catch { return json(res, 400, { error: 'bad json' }) }
       const ttl = (getSettings() || {}).tokenTtlSeconds || 120
       if (body.scope === 'write') {
+        if (typeof body.rootId === 'string' && body.rootId !== '' && !body.worktreeId) {
+          const root = selectedOpenRoot(env, body.rootId)
+          if (!root) return json(res, 403, { error: 'root not open' })
+          const token = issueToken({ secret, scope: 'write', worktreeId: 'root:' + body.rootId, orgPath: root.path, ttlSeconds: ttl })
+          return json(res, 200, { token })
+        }
         if (typeof body.worktreeId !== 'string' || body.worktreeId === '') {
           return json(res, 400, { error: 'worktreeId required for write tokens' })
         }
@@ -160,40 +202,31 @@ export function createTokenRoutes({ env = process.env, secret, getSettings, getO
         // binds the token to any currently-open root (org or Freestyle),
         // resolved fresh against readOpenRoots — omitted rootId still binds to
         // the open org, so existing callers are unaffected.
-        const roots0 = readOpenRoots(env)
-        let target
-        if (typeof body.rootId === 'string' && body.rootId !== '') {
-          target = roots0.find((r) => r.id === body.rootId)
-          if (!target) return json(res, 403, { error: 'root not open' })
-        } else {
-          target = roots0.find((r) => r.kind === 'org')
-          if (!target) return json(res, 403, { error: 'no org open' })
-        }
+        const target = selectedOpenRoot(env, body.rootId)
+        if (!target) return json(res, 403, { error: body.rootId ? 'root not open' : 'no org open' })
         const token = issueToken({ secret, scope: 'tree-read', orgPath: target.path, ttlSeconds: ttl })
         return json(res, 200, { token })
       }
       // read (default) — orgPath OPTIONAL: the open org is authoritative,
       // a client-declared orgPath must MATCH it (no org-path probing).
-      const open = readOpenOrg(env)
-      if (!open) return json(res, 403, { error: 'no org open' })
-      if (body.orgPath != null && body.orgPath !== open.orgPath) return json(res, 403, { error: 'org not open' })
+      const open = selectedOpenRoot(env, body.rootId)
+      if (!open) return json(res, 403, { error: body.rootId ? 'root not open' : 'no org open' })
+      if (body.orgPath != null && body.orgPath !== open.path) return json(res, 403, { error: 'root not open' })
       if (typeof body.relPath !== 'string' || body.relPath === '') return json(res, 400, { error: 'relPath required' })
-      try {
-        const rootReal = fs.realpathSync(path.resolve(open.orgPath))
-        const abs = path.resolve(rootReal, path.normalize(body.relPath))
-        if (abs !== rootReal && !abs.startsWith(rootReal + path.sep)) return json(res, 403, { error: 'outside the org root' })
-        if (!fs.statSync(abs).isFile()) return json(res, 404, { error: 'not a file' })
-      } catch (err) {
-        return json(res, err.code === 'ENOENT' ? 404 : 403, { error: 'unresolvable path' })
+      let abs
+      try { abs = await resolveReadFile(open.path, body.relPath) }
+      catch (err) {
+        return json(res, err?.code === 'ENOENT' || err?.code === 'ENOTDIR' || err?.code === 'NOT_FILE' ? 404 : 403, { error: 'unresolvable path' })
       }
-      const token = issueToken({ secret, scope: 'read', relPath: body.relPath, orgPath: open.orgPath, ttlSeconds: ttl })
+      const token = issueToken({ secret, scope: 'read', relPath: body.relPath, orgPath: open.path, ttlSeconds: ttl })
+      if (body.rootId) return json(res, 200, { token, absPath: abs })
       const origin = getOrigin()
       if (!origin) return json(res, 503, { error: 'org server not up yet — retry' })
       // absPath is the file's REAL identity. The editor keys its model on it so
       // a language server's diagnostics land on the right file — a model at
       // /<relPath> would put every underline on a path the server never heard
       // of. Resolved here, server-side, exactly like the path check above.
-      return json(res, 200, { token, origin, absPath: absOf(open.orgPath, body.relPath) })
+      return json(res, 200, { token, origin, absPath: absOf(open.path, body.relPath) })
     } catch (err) {
       return json(res, 500, { error: 'internal error' })
     }
@@ -391,7 +424,12 @@ export function apply(ctx, config) {
         },
       })
     }
-    const writeApi = createWriteApi({ env: process.env, secret, getSettings: currentSettings })
+    const writeApi = createWriteApi({
+      env: process.env,
+      secret,
+      getSettings: currentSettings,
+      getRoot: (rootId) => selectedOpenRoot(process.env, rootId),
+    })
     ctx.webServer?.register?.({
       path: '/__arxa/artifacts/write',
       handler: (req, res) => { void writeApi.handle(req, res) },
@@ -424,15 +462,19 @@ export function apply(ctx, config) {
       path: '/__arxa/artifacts/version',
       handler: (req, res) => { void versionRoute.handle(req, res) },
     })
+    const rootsRoute = createRootsRoute({ env: process.env })
+    ctx.webServer?.register?.({
+      path: '/__arxa/artifacts/roots',
+      handler: (req, res) => { void rootsRoute.handle(req, res) },
+    })
     const events = createEventsRoute({
       watcher,
-      rootIdForPath: (rootPath) => servingRoots.find((r) => r.path === rootPath)?.id ?? null,
+      rootIdForPath: (rootPath, requestedId) => rootIdsForPath(process.env, rootPath, requestedId),
       // Phase 1: the viewer's wt lane live-reloads on agent re-writes — the
       // worktree root resolves under the OPEN org only (unknown → org lane).
       resolveSessionRoot: async (sessionId) => {
         const open = readOpenOrg(process.env)
-        if (!open) return null
-        const row = await resolveWorktree({ env: process.env, orgPath: open.orgPath, worktreeId: sessionId })
+        const row = await resolveWorktree({ env: process.env, orgPath: open?.orgPath ?? null, worktreeId: sessionId })
         return row ? row.worktreePath : null
       },
     })

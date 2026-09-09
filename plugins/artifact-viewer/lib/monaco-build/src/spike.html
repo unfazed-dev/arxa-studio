@@ -323,10 +323,10 @@
     const mk = m.monaco.editor.getModelMarkers({ resource: m.monaco.Uri.file('/spike/notes.md') })
     out.lspMarkers = mk.length
     out.lspSource = mk.length > 0 ? String(mk[0].source ?? '') : ''
-    await m.openFile(partEl, '/spike/other.md', '# Other\n\nsecond root\n')
+    await m.openFile(partEl, '/spike/[slug].md', '# Other\n\nsecond root\n')
     out.lspStartedB = await m.connectLanguageServer('markdown', {
       url: 'ws://' + location.host + '/__arxa/artifacts/vendor/lsp-stub',
-      token: 'stub', relPath: 'other.md', uriPath: '/spike/other.md', rootId: 'spike-root-b', selector: ['markdown'],
+      token: 'stub', relPath: '[slug].md', uriPath: '/spike/[slug].md', rootId: 'spike-root-b', selector: ['markdown'],
     })
     await settle(2500)
     out.lspObserved = await fetch('lsp-observed').then((r) => r.json())
@@ -699,7 +699,7 @@
       'out.lspMarkers > 0',
       "out.lspSource === 'arxa-stub:spike-root-a'",
       "JSON.stringify(out.lspObserved['spike-root-a']) === '[\"file:///spike/notes.md\"]'",
-      "JSON.stringify(out.lspObserved['spike-root-b']) === '[\"file:///spike/other.md\"]'",
+      "JSON.stringify(out.lspObserved['spike-root-b']) === '[\"file:///spike/%5Bslug%5D.md\"]'",
       // External change under UNSAVED edits: VS Code must not raise a second
       // prompt on top of the viewer's own conflict banner, and must not throw
       // the user's edits away. Measured: no dialog, edits kept.

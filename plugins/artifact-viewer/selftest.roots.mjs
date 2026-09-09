@@ -374,6 +374,25 @@ async function callTree(route, url) {
   const bEvent = events.find((e) => e.rel === 'c.md')
   assert.equal(bEvent.rootId, wRootB, 'event for a file written under B carries B as rootId')
 
+  fs.mkdirSync(path.join(wRootB, 'empty-dir'))
+  await armWith(
+    () => {},
+    () => events.some((e) => e.rel === 'empty-dir'),
+    'empty directory creation emits an invalidation event',
+  )
+  fs.rmSync(path.join(wRootB, 'empty-dir'), { recursive: true })
+  await armWith(
+    () => {},
+    () => events.filter((e) => e.rel === 'empty-dir').some((e) => e.mtime === null),
+    'directory deletion emits an invalidation event with null mtime',
+  )
+  fs.rmSync(path.join(wRootB, 'c.md'))
+  await armWith(
+    () => {},
+    () => events.some((e) => e.rel === 'c.md' && e.mtime === null),
+    'file deletion emits an invalidation event with null mtime',
+  )
+
   // dropping a root via setRoots stops watching it
   w.setRoots([wRootA])
   await sleep(150)
