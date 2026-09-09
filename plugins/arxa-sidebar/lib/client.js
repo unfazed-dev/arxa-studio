@@ -3318,6 +3318,7 @@ window.__ModuleLoader__.load({
 				refresh,
 				mutate(action, arg) {
 					if (action === "session.open" && arg && typeof arg.sessionId === "string") {
+						cancelFreestyleOpen();
 						currentSessionId = arg.sessionId;
 						state = { ...state, currentSessionId };
 						state.sessionsView = sessionsList(state);
@@ -7019,6 +7020,7 @@ window.__ModuleLoader__.load({
 				} catch { /* keep the last usable state */ }
 			}
 			async function mutate(action, arg) {
+				if (action === "session.archive" || action === "root.close" || action === "root.forget") cancelFreestyleOpen();
 				let result;
 				let failure;
 				try {
@@ -7255,18 +7257,64 @@ window.__ModuleLoader__.load({
 				ask
 			};
 		}
+		let freestyleOpenWait = null;
+		function cancelFreestyleOpen() {
+			const wait = freestyleOpenWait;
+			if (!wait) return;
+			freestyleOpenWait = null;
+			wait.done = true;
+			if (wait.interval) window.clearInterval(wait.interval);
+			if (wait.timeout) window.clearTimeout(wait.timeout);
+			try { wait.unsubscribe(); } catch { /* disposal is best-effort */ }
+		}
 		function freestyleOpenConversation(row) {
+			if (freestyleOpenWait && row && freestyleOpenWait.dshId === row.dshSessionId) return;
+			cancelFreestyleOpen();
 			if (!row || row.dshStatus !== "live") { freestyleNotice(orgT("freestyle.session.noConversation")); return; }
 			const dshId = row.dshSessionId;
 			if (!dshId) { freestyleNotice(orgT("freestyle.session.noConversation")); return; }
-			const open = () => {
-				if (!arxaClientSessions || typeof arxaClientSessions.open !== "function") return false;
-				arxaClientSessions.open(dshId);
-				return true;
+			const listed = (service) => {
+				const list = service && service.list;
+				const snap = list && typeof list.getSnapshot === "function" ? list.getSnapshot() : null;
+				return !(snap && Array.isArray(snap.ids) && !snap.ids.includes(dshId));
 			};
-			if (open()) return;
-			let tries = 0;
-			const timer = setInterval(() => { if (open() || ++tries > 30) clearInterval(timer); }, 100);
+			const open = (service) => {
+				try { service.open(dshId); }
+				catch (error) { freestyleNotice(error); }
+			};
+			const ready = arxaClientSessions && typeof arxaClientSessions.open === "function" ? arxaClientSessions : null;
+			if (ready && listed(ready)) { open(ready); return; }
+
+			const wait = { dshId, done: false, interval: 0, timeout: 0, unsubscribe: () => {} };
+			freestyleOpenWait = wait;
+			const finish = (service) => {
+				if (wait.done || freestyleOpenWait !== wait) return;
+				cancelFreestyleOpen();
+				open(service);
+			};
+			const armCatalog = (service) => {
+				if (wait.done) return;
+				if (wait.interval) { window.clearInterval(wait.interval); wait.interval = 0; }
+				if (listed(service)) { finish(service); return; }
+				const list = service.list;
+				if (!list || typeof list.subscribe !== "function") return;
+				const release = list.subscribe(() => { if (listed(service)) finish(service); });
+				if (wait.done) { if (typeof release === "function") release(); }
+				else wait.unsubscribe = typeof release === "function" ? release : () => {};
+				if (listed(service)) finish(service);
+			};
+			const seekService = () => {
+				if (wait.done) return;
+				const service = arxaClientSessions && typeof arxaClientSessions.open === "function" ? arxaClientSessions : null;
+				if (service) armCatalog(service);
+			};
+			wait.interval = window.setInterval(seekService, 100);
+			wait.timeout = window.setTimeout(() => {
+				if (wait.done || freestyleOpenWait !== wait) return;
+				cancelFreestyleOpen();
+				freestyleNotice(orgT("freestyle.session.noConversation"));
+			}, 10000);
+			seekService();
 		}
 		function FreestyleSessionRows({ root }) {
 			const rows = [...((root.sessions && root.sessions.active) || []), ...((root.sessions && root.sessions.parked) || [])];
@@ -7420,7 +7468,7 @@ window.__ModuleLoader__.load({
 			ctx.effect(() => {
 				const controller = new AbortController();
 				void freestyleStore.refresh({ signal: controller.signal });
-				return () => controller.abort();
+				return () => { controller.abort(); cancelFreestyleOpen(); };
 			}, "arxa-sidebar-workspace: Freestyle boot state");
 			orgHostInfo = {
 				// dsh 0.1.2-rc.1: connection.hostDescription is gone — the host-info

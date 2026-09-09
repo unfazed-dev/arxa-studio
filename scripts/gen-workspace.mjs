@@ -311,7 +311,7 @@ const ourApply = [
   T(3) + 'ctx.effect(() => {',
   T(4) + 'const controller = new AbortController();',
   T(4) + 'void freestyleStore.refresh({ signal: controller.signal });',
-  T(4) + 'return () => controller.abort();',
+  T(4) + 'return () => { controller.abort(); cancelFreestyleOpen(); };',
   T(3) + '}, "arxa-sidebar-workspace: Freestyle boot state");',
   T(3) + 'orgHostInfo = {',
   T(4) + '// dsh 0.1.2-rc.1: connection.hostDescription is gone — the host-info',

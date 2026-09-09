@@ -255,6 +255,7 @@
 				refresh,
 				mutate(action, arg) {
 					if (action === "session.open" && arg && typeof arg.sessionId === "string") {
+						cancelFreestyleOpen();
 						currentSessionId = arg.sessionId;
 						state = { ...state, currentSessionId };
 						state.sessionsView = sessionsList(state);

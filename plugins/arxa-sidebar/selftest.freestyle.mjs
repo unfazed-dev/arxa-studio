@@ -32,6 +32,7 @@ assert.match(client, /freestyleStore\.mutate\("trash\.purge"/, 'trash entries ca
 assert.match(client, /arxaClientSessions\.open\(dshId\)/, 'Freestyle session rows open their DSH conversation')
 assert.match(client, /const dshId = row\.dshSessionId;/, 'session clicks use the persisted root-scoped DSH id')
 assert.doesNotMatch(client, /const dshId = row\.dshSessionId \|\|/, 'session clicks do not derive an ambiguous fallback id')
+assert.match(client, /if \(action === "session\.open"[\s\S]{0,180}?cancelFreestyleOpen\(\)/, 'an organisation session selection supersedes a pending Freestyle open')
 assert.match(client, /root\.sessions && root\.sessions\.parked/, 'parked Freestyle sessions remain visible')
 assert.match(client, /verbs\.newSession\(relPath\)\)\.then\(freestyleOpenConversation\)/, 'folder-created sessions open their conversation immediately')
 assert.match(client, /verbs\.newSession\(""\)\.then\(freestyleOpenConversation\)/, 'root-created sessions open their conversation immediately')
@@ -68,7 +69,7 @@ assert.throws(() => spliceFreestyleBrowser('anchor deliberately absent'), /OrgBr
 
 const snippet = readFileSync(snippetPath, 'utf8')
 assert.doesNotMatch(snippet, /void freestyleStore\.refresh\(\)/, 'Freestyle boot I/O is not started at module scope')
-assert.match(client, /ctx\.effect\(\(\) => \{\s*const controller = new AbortController\(\);\s*void freestyleStore\.refresh\(\{ signal: controller\.signal \}\);\s*return \(\) => controller\.abort\(\)/, 'Freestyle boot refresh belongs to a disposable plugin effect')
+assert.match(client, /ctx\.effect\(\(\) => \{\s*const controller = new AbortController\(\);\s*void freestyleStore\.refresh\(\{ signal: controller\.signal \}\);\s*return \(\) => \{ controller\.abort\(\); cancelFreestyleOpen\(\); \}/, 'Freestyle boot refresh and pending conversation open belong to a disposable plugin effect')
 const requests = []
 let activeTab = 'org'
 let rootOpen = true
@@ -84,9 +85,80 @@ const fetch = async (url, options = {}) => {
   if (body.action === 'refuse') return { json: async () => ({ ok: false, reason: 'raw refusal reason' }) }
   return { json: async () => ({ ok: true }) }
 }
-const context = { fetch, Set, JSON, Error }
+const catalog = { ids: [] }
+const opened = []
+let catalogListener = null
+let catalogUnsubscribed = 0
+let timerId = 0
+const timers = new Map()
+const context = {
+  fetch, Set, Map, JSON, Error,
+  orgT: (key) => key,
+  arxaClientSessions: {
+    open: (id) => { opened.push(id) },
+    list: {
+      getSnapshot: () => catalog,
+      subscribe: (listener) => { catalogListener = listener; return () => { catalogUnsubscribed++ } },
+    },
+  },
+  window: {
+    setInterval: (fn) => { const id = ++timerId; timers.set(id, fn); return id },
+    clearInterval: (id) => timers.delete(id),
+    setTimeout: (fn) => { const id = ++timerId; timers.set(id, fn); return id },
+    clearTimeout: (id) => timers.delete(id),
+    dispatchEvent: () => {},
+  },
+  Event: class Event { constructor(type) { this.type = type } },
+  CustomEvent: class CustomEvent { constructor(type, init) { this.type = type; this.detail = init?.detail } },
+}
 context.globalThis = context
-vm.runInNewContext(`(function () {\n${snippet}\nglobalThis.createFreestyleStore = createFreestyleStore;\nglobalThis.freestyleSelectedWorkspace = freestyleSelectedWorkspace;\nglobalThis.showWelcomeGate = showWelcomeGate;\nglobalThis.validFreestyleName = validFreestyleName;\nglobalThis.freestyleJoin = freestyleJoin;\nglobalThis.freestyleTreeRequest = freestyleTreeRequest;\nglobalThis.freestyleMenuActions = freestyleMenuActions;\nglobalThis.dropTargetFor = dropTargetFor;\nglobalThis.parseFreestyleDrop = parseFreestyleDrop;\n})()`, context, { filename: snippetPath })
+vm.runInNewContext(`(function () {\n${snippet}\nglobalThis.createFreestyleStore = createFreestyleStore;\nglobalThis.freestyleSelectedWorkspace = freestyleSelectedWorkspace;\nglobalThis.showWelcomeGate = showWelcomeGate;\nglobalThis.validFreestyleName = validFreestyleName;\nglobalThis.freestyleJoin = freestyleJoin;\nglobalThis.freestyleTreeRequest = freestyleTreeRequest;\nglobalThis.freestyleMenuActions = freestyleMenuActions;\nglobalThis.dropTargetFor = dropTargetFor;\nglobalThis.parseFreestyleDrop = parseFreestyleDrop;\nglobalThis.freestyleOpenConversation = freestyleOpenConversation;\nglobalThis.cancelFreestyleOpen = cancelFreestyleOpen;\n})()`, context, { filename: snippetPath })
+
+const delayedRow = { dshSessionId: 'persisted-dsh-id', dshStatus: 'live' }
+context.freestyleOpenConversation(delayedRow)
+context.freestyleOpenConversation(delayedRow)
+assert.deepEqual(opened, [], 'a Freestyle conversation is not opened before its persisted id reaches the dsh catalog')
+assert.equal(typeof catalogListener, 'function', 'a missing catalog id installs one bounded subscription')
+catalog.ids.push('persisted-dsh-id')
+catalogListener()
+catalogListener()
+assert.deepEqual(opened, ['persisted-dsh-id'], 'catalog arrival opens the persisted dsh id exactly once')
+assert.equal(catalogUnsubscribed, 1, 'catalog arrival releases the transient subscription')
+assert.equal(timers.size, 0, 'catalog arrival clears every transient open timer')
+
+catalog.ids.length = 0
+context.freestyleOpenConversation({ dshSessionId: 'old-choice', dshStatus: 'live' })
+const staleCatalogListener = catalogListener
+context.freestyleOpenConversation({ dshSessionId: 'new-choice', dshStatus: 'live' })
+catalog.ids.push('old-choice')
+staleCatalogListener()
+assert.deepEqual(opened, ['persisted-dsh-id'], 'a superseded catalog arrival cannot reopen the old selection')
+catalog.ids.push('new-choice')
+catalogListener()
+assert.deepEqual(opened, ['persisted-dsh-id', 'new-choice'], 'the newest selection opens when its persisted id arrives')
+assert.equal(catalogUnsubscribed, 3, 'supersession and final arrival release both transient subscriptions')
+assert.equal(timers.size, 0, 'superseded and completed waits leave no timers')
+
+catalog.ids.length = 0
+context.freestyleOpenConversation({ dshSessionId: 'freestyle-before-org', dshStatus: 'live' })
+const beforeOrgListener = catalogListener
+context.cancelFreestyleOpen()
+catalog.ids.push('freestyle-before-org')
+beforeOrgListener()
+assert.deepEqual(opened, ['persisted-dsh-id', 'new-choice'], 'an organisation selection cancellation prevents a stale Freestyle open')
+assert.equal(catalogUnsubscribed, 4, 'organisation selection releases the pending Freestyle subscription')
+assert.equal(timers.size, 0, 'organisation selection clears the pending Freestyle timer')
+
+catalog.ids.length = 0
+context.freestyleOpenConversation({ dshSessionId: 'catalog-timeout', dshStatus: 'live' })
+const timeoutCatalogListener = catalogListener
+assert.equal(timers.size, 1, 'a catalog wait owns one bounded timeout after service discovery')
+Array.from(timers.values())[0]()
+catalog.ids.push('catalog-timeout')
+timeoutCatalogListener()
+assert.deepEqual(opened, ['persisted-dsh-id', 'new-choice'], 'a timed-out catalog wait cannot open later')
+assert.equal(catalogUnsubscribed, 5, 'catalog timeout releases its transient subscription')
+assert.equal(timers.size, 0, 'catalog timeout clears its timer')
 
 assert.equal(context.validFreestyleName('notes.md'), true, 'inline names accept a normal file name')
 assert.equal(context.validFreestyleName(''), false, 'inline names reject empty input')
@@ -116,11 +188,22 @@ await store.refresh()
 assert.equal(store.get().roots[0].id, 'root-1', 'refresh installs server roots')
 assert.equal(context.freestyleSelectedWorkspace(store), null, 'organisation tab does not expose a Freestyle selection')
 
+catalog.ids.length = 0
+context.freestyleOpenConversation({ dshSessionId: 'archive-before-catalog', dshStatus: 'live' })
+const archivedCatalogListener = catalogListener
+const archiveMutation = store.mutate('session.archive', { rootId: 'root-1', id: 'session-1' })
+assert.equal(timers.size, 0, 'archiving a pending Freestyle session cancels its open before host I/O completes')
+await archiveMutation
+catalog.ids.push('archive-before-catalog')
+archivedCatalogListener()
+assert.deepEqual(opened, ['persisted-dsh-id', 'new-choice'], 'an archived session cannot open on a stale catalog arrival')
+assert.equal(catalogUnsubscribed, 6, 'archive cancellation releases the pending catalog subscription')
+
 store.select('root-1', 'notes')
 assert.deepEqual({ ...store.selected() }, { rootId: 'root-1', relDir: 'notes' }, 'selection retains root and relative directory')
 await store.setTab('freestyle')
 assert.deepEqual({ ...context.freestyleSelectedWorkspace(store) }, { kind: 'freestyle', rootId: 'root-1', relDir: 'notes' }, 'Freestyle tab exposes the selected folder to the shell CTA')
-assert.deepEqual(JSON.parse(requests.find((r) => r.url === '/__arxa/freestyle/action').options.body), { action: 'ui.tab', arg: { tab: 'freestyle' } }, 'setTab posts the action contract')
+assert.deepEqual(JSON.parse(requests.find((r) => r.url === '/__arxa/freestyle/action' && JSON.parse(r.options.body).action === 'ui.tab').options.body), { action: 'ui.tab', arg: { tab: 'freestyle' } }, 'setTab posts the action contract')
 assert.equal(requests.at(-1).url, '/__arxa/freestyle/state', 'every mutation refreshes state')
 
 rootOpen = false
