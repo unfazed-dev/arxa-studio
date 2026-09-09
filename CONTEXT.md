@@ -6,9 +6,16 @@ vocabulary only.
 
 ## Terms
 
-- **Recents** — the list of organisation folders the user has opened,
-  stored at `~/.arxa/organisation.json`. Replaces the retired
-  workspace-root tree (D36 superseded by D69).
+- **Recents** — two independent lists: organisation folders in
+  `~/.arxa/organisation.json` and Freestyle roots in `~/.arxa/freestyle.json`.
+  The organisation list replaces the retired workspace-root tree (D69).
+- **Freestyle tab** — the sidebar tab beside Organisations for arbitrary
+  folders, files and sessions. It works locally without GitHub or an open
+  organisation, and owns its own archives and trash. (D118–D126)
+- **Root** — an existing or newly created folder remembered by Freestyle.
+  Several roots can be open beside the single open organisation. Its
+  `.arxa/freestyle.json` identifies the repo seat; the registry ID travels
+  as `rootId` in viewer, tree and watcher requests. (D118, D124)
 - **Organisation (org)** — one folder the user picks at creation; the
   org root directly holds `org.json` and the five categories (no nesting
   parent). A company/client the user works for or with. On disk: one git
@@ -25,9 +32,9 @@ vocabulary only.
   Collisions get numeric suffixes. Renames move the folder and the
   remote as one git-tracked operation (D72 supersedes D41's
   slug-stability clause).
-- **Viewer column** — the docked, session-bound fourth AppFrame column
-  (D88/D93): opens only while a non-blank session is current, follows the
-  session on switch, clamps at 320px, and its dragged width persists.
+- **Viewer column** — the docked fourth AppFrame column (D88/D93):
+  follows the selected session or an explicitly opened Freestyle root
+  file, clamps at 320px, and its dragged width persists.
   Below 1024px viewport it presents as a full-frame sheet (D92).
 - **Files section** — the org file tree rows in the sidebar (D90): lazy
   per-directory listing via the artifacts tree route; a file row opens
@@ -36,20 +43,21 @@ vocabulary only.
 - **Produced-file chip** — a stock deliverables chip for a file the agent
   wrote (D91): clicking opens the viewer column, worktree lane first,
   org lane as fallback. Never auto-opens.
-- **Manifest** — the folder-local file (`org.json` / `project.json`)
-  holding display name and stable id. Renames touch the manifest, not
+- **Manifest** — the folder-local file (`org.json`, `project.json`, or
+  `.arxa/freestyle.json`) holding display name and stable id. Renames touch the manifest, not
   the slug. (Q3)
 - **Context file** — an `AGENTS.md` in any folder; the folder's
   standing instructions. Discovered natively by both harnesses (dsh,
   PI) via the ancestor chain. Org root's copy is the thin layer
   (D1-capped). (D43)
 - **Session** — one work context (chat/agent thread or interactive
-  editing surface). Every session owns a git branch + worktree; main
-  is never edited directly. Sessions never end — they are archived.
-  Belongs to exactly one workspace (category or project) — the live dsh
-  conversation runs inside the worktree. (D38, D71)
-- **Workspace** — a sidebar row that owns sessions: one of the five
-  categories or a project. Maps 1:1 onto the dsh workspace concept
+  editing surface). Every session owns a git branch and worktree; the live
+  dsh conversation runs inside it. Org sessions belong to a category or
+  project; Freestyle sessions start at a root or any folder and bind to the
+  nearest enclosing repo. Freestyle explorer verbs and editor saves act on
+  the root working tree and auto-commit separately. (D38, D71, D122–D123)
+- **Workspace** — a sidebar row that owns sessions: an org category or
+  project, or a selected Freestyle root/folder. Maps onto the dsh workspace concept
   (registry record over a directory, sessions grouped by cwd).
   (D70, D71)
 - **GitHub link** — the user's connected GitHub account: one-click

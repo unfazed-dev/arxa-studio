@@ -434,3 +434,5 @@ above.
 
 Also still open and untouched: **Bug B** — sessions writing into a trashed org,
 `docs/plans/org-trash-unreachable.md`.
+
+Freestyle integration: Freestyle rows use the same `ArxaDirRows` decoration path, with `rootId` and repo-relative `relPath`; see [the Freestyle plan](freestyle-section.md).

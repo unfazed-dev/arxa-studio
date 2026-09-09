@@ -55,6 +55,18 @@ or `~/.pi`:
 - `pi/arxa-memory.ts` — H5 Pi adapter: injects recall output once per
   session on `before_agent_start`. Symlink into `~/.pi/agent/extensions/`.
 
+## Sidebar
+
+**Organisations** and **Freestyle** share the sidebar. Freestyle opens any
+existing folder or creates a new one, remembers multiple roots, and works
+without a GitHub account. Its explorer supports inline create/rename,
+move, duplicate, reveal, and trash with restore or confirmed purge. Files
+open in the viewer and saves auto-commit; sessions start from any folder
+in the enclosing repo's worktree and use the shared checks and merge
+lifecycle. Publishing a root creates a private GitHub repo and its CI
+frame. Organisation rules (D42/D69/D70/D71) remain specific to the
+Organisations tab. See [the Freestyle plan](docs/plans/freestyle-section.md).
+
 ## What deliberately stays in arxa
 
 The guard is engine policy: `hooks/arxa-guard.js`, `harness/verdict.sh`,
