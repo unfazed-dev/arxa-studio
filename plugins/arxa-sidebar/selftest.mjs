@@ -1022,6 +1022,13 @@ check('client: agent verb + reason strings localized in en/pl/fr',
   check('D117: the Freestyle map rides the state payload, not a second poll',
     gen.includes('for (const root of roots) if (root.deco) nextDeco[root.id] = root.deco;')
     && (gen.match(/ORG_POST\("session\.decorations"/g) || []).length === 1)
+  // Without this the feature is only correct on page load. The payload is
+  // fetched on mount and after mutations; a file changing UNDER the sidebar is
+  // neither, and a content edit changes no directory listing, so the tree
+  // refresh cannot stand in for it.
+  check('D117: a file changing under the sidebar repaints the Freestyle map',
+    gen.includes('decoTimer = window.setTimeout(() => { decoTimer = null; void freestyleStore.refresh({ signal: decoAbort.signal }); }, 500);')
+    && gen.includes('return () => { if (decoTimer) window.clearTimeout(decoTimer); decoAbort.abort(); events.close(); };'))
   check('D117: a Freestyle badge never claims "in this session" — it has no session',
     gen.includes('const ARXA_DECO_TITLE_LOCAL = ')
     && (gen.match(/"rows\.deco\.local\.modified":/g) || []).length === 3

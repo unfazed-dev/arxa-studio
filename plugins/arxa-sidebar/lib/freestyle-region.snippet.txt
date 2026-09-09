@@ -262,14 +262,29 @@
 			}, []);
 			(0, react.useEffect)(() => {
 				if (typeof EventSource !== "function") return;
+				// The decoration map lives on the state payload, and that payload is
+				// fetched on mount and after mutations — neither of which happens when a
+				// file changes UNDER us, which is the case these letters exist for. Worse,
+				// an edit to a file's CONTENT changes no directory listing, so the tree
+				// refresh below cannot stand in: M, the commonest letter, would never
+				// appear on its own until the next mutation or a reload.
+				//
+				// The watcher speaks once per changed FILE, so the listing refresh stays
+				// immediate and the state re-fetch (two git calls per open root) waits for
+				// the burst to end. A branch switch touching two hundred files is then one
+				// map rebuild, not two hundred.
+				let decoTimer = null;
+				const decoAbort = new AbortController();
 				const events = new EventSource("/__arxa/artifacts/events");
 				events.onmessage = (message) => {
 					try {
 						const detail = JSON.parse(message.data);
 						if (detail && detail.rootId) window.dispatchEvent(new CustomEvent("arxa-freestyle-tree-refresh", { detail: { rootId: detail.rootId } }));
 					} catch { /* malformed watcher event */ }
+					if (decoTimer) window.clearTimeout(decoTimer);
+					decoTimer = window.setTimeout(() => { decoTimer = null; void freestyleStore.refresh({ signal: decoAbort.signal }); }, 500);
 				};
-				return () => events.close();
+				return () => { if (decoTimer) window.clearTimeout(decoTimer); decoAbort.abort(); events.close(); };
 			}, []);
 			// What the header's two new controls actually do. A search box that
 			// filtered nothing and a view menu that reordered nothing would look

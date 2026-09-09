@@ -75,12 +75,26 @@ contract, which the WIP net depends on; out of scope here and recorded instead.
 |---|---|
 | `arxa-freestyle/lib/index.js` | `state()` carries `deco: { files, dirs, ok }` per **open** root, from `decorate(root.path, {base:'HEAD'})` + `foldDirs`. No new route, no new poll — the tree already refreshes on this payload. |
 | `workspace-region.snippet.txt` | `arxaFsDeco` map; `ARXA_DECO_FOR`/`ARXA_DECO_BADGE` take an optional `rootId` and read it; `FreestyleEntryRow` gains the badge and the title classes. |
-| `freestyle-region.snippet.txt` | the store's `refresh()` fills `arxaFsDeco` and fires `ARXA_DECO_EVENT` only when the map moved. |
+| `freestyle-region.snippet.txt` | the store's `refresh()` fills `arxaFsDeco` and fires `ARXA_DECO_EVENT` only when the map moved; the watcher stream re-fetches state on a 500ms trailing timer. |
 | locales ×3 | `rows.deco.local.*` — the org strings say "in this session", which a root with no session does not have. |
 
 Nested repos inside a root report from the root repo's side only (one entry for
 the whole nested tree). Marked `ponytail:` at the source; per-nested-repo maps
 if anyone actually keeps repos in there.
+
+### The half that would have shipped broken
+
+The state payload is fetched on mount and after mutations. A file changing
+*under* the sidebar is neither — and that is the only case these letters exist
+for, since anything arxa does to a file commits it. Worse, editing a file's
+**content** changes no directory listing, so the existing
+`arxa-freestyle-tree-refresh` could not stand in: `M`, the commonest letter,
+would never have appeared on its own. Every check above still passes in that
+world, because a lens capture is a fresh page load.
+
+The watcher stream (`/__arxa/artifacts/events`, already driving the tree) now
+also re-fetches state on a 500ms trailing timer — it speaks once per changed
+file, so a branch switch touching two hundred files is one map rebuild.
 
 ## Verification
 
@@ -105,6 +119,12 @@ if anyone actually keeps repos in there.
   File letters, the folder rollup on a collapsed `docs`, and the tinted row text
   — and no label claiming "in this session". Screenshot:
   [git-decorations.png](phase0b-snapshots/freestyle/git-decorations.png).
+
+- **Lens, live repaint** — the test the capture above cannot do. Root seeded
+  **clean**, page loaded (assertion: zero badges on screen, or a later badge
+  proves nothing), then `hello.md` edited on disk 7s after load with no reload
+  and no interaction: `M` appeared. This is the path that would otherwise have
+  shipped broken.
 
 `node scripts/ci.mjs`: ALL GREEN, drift gate included.
 
