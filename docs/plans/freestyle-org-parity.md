@@ -135,3 +135,5 @@ two here because Freestyle must be able to open an arbitrary folder, F1);
 **Fix.** `freestyle-region.snippet.txt`: `fsEntryAction` / `fsGroupLabel` / `fsEntryRow` copied from the org `TrashSection`/`ArchivesSection`; Archives entries grouped by owning folder, Trash entries under a FOLDERS group (trashed folders) then per-folder groups (trashed files/sessions). No subtitle, no kebab. Locale `freestyle.trash.folderSection` (Folders / Foldery / Dossiers). The `+` menu ("Open existing folder…" / "Create new folder…") stays — user checked it and ruled it fine.
 
 **Proof.** `docs/plans/phase0b-snapshots/freestyle/trash-rows-parity.png`; selftest.freestyle pins (`fsEntryRow`, `fsGroupLabel`, no `aXa_fs_meta` in the sections); CI 103 green. Commit `594ee77`. Installed engine `d3854bed4859`, client.js `a36583f75da9` = repo.
+
+**Labels (2026-09-09, user):** the Freestyle section header and the trash group read "Repositories" (pl "Repozytoria", fr "Dépôts") — keys `freestyle.section`, `freestyle.trash.folderSection`. Commit `b7c4c42`; installed engine `1d93617f56fb`, client.js `5dfc97dba710` = repo.
