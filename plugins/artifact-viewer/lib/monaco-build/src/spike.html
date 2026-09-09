@@ -317,12 +317,19 @@
     out.step = 'lsp'
     out.lspStarted = await m.connectLanguageServer('markdown', {
       url: 'ws://' + location.host + '/__arxa/artifacts/vendor/lsp-stub',
-      token: 'stub', relPath: 'notes.md', selector: ['markdown'],
+      token: 'stub', relPath: 'notes.md', uriPath: '/spike/notes.md', rootId: 'spike-root-a', selector: ['markdown'],
     })
     await settle(2500)
     const mk = m.monaco.editor.getModelMarkers({ resource: m.monaco.Uri.file('/spike/notes.md') })
     out.lspMarkers = mk.length
     out.lspSource = mk.length > 0 ? String(mk[0].source ?? '') : ''
+    await m.openFile(partEl, '/spike/[slug].md', '# Other\n\nsecond root\n')
+    out.lspStartedB = await m.connectLanguageServer('markdown', {
+      url: 'ws://' + location.host + '/__arxa/artifacts/vendor/lsp-stub',
+      token: 'stub', relPath: '[slug].md', uriPath: '/spike/[slug].md', rootId: 'spike-root-b', selector: ['markdown'],
+    })
+    await settle(2500)
+    out.lspObserved = await fetch('lsp-observed').then((r) => r.json())
     out.lspLangs = m.languageServers().join(',')
 
     // ---- the DIFF editor --------------------------------------------------
@@ -687,9 +694,12 @@
       // Code created was synced, and the server's diagnostic became a marker on
       // the model. A source pin alone once let this whole function be deleted.
       'out.lspStarted === true',
+      'out.lspStartedB === true',
       "out.lspLangs === 'markdown'",
       'out.lspMarkers > 0',
-      "out.lspSource === 'arxa-stub'",
+      "out.lspSource === 'arxa-stub:spike-root-a'",
+      "JSON.stringify(out.lspObserved['spike-root-a']) === '[\"file:///spike/notes.md\"]'",
+      "JSON.stringify(out.lspObserved['spike-root-b']) === '[\"file:///spike/%5Bslug%5D.md\"]'",
       // External change under UNSAVED edits: VS Code must not raise a second
       // prompt on top of the viewer's own conflict banner, and must not throw
       // the user's edits away. Measured: no dialog, edits kept.
@@ -723,11 +733,11 @@
     diffModRO2: out.diffModRO2, diffTyped2: out.diffTyped2,
     hostBox: out.hostBox, prodPartBox: out.prodPartBox, prodEdBox: out.prodEdBox, prodLines: out.prodLines,
     absOpened: out.absOpened, absText: out.absText, absPane: out.absPane, absRes: out.absRes, absLines: out.absLines,
-    lspStarted: out.lspStarted, lspMarkers: out.lspMarkers, lspSource: out.lspSource, lspLangs: out.lspLangs,
+    lspStarted: out.lspStarted, lspStartedB: out.lspStartedB, lspMarkers: out.lspMarkers, lspSource: out.lspSource, lspObserved: out.lspObserved, lspLangs: out.lspLangs,
     dirtyBefore: out.dirtyBefore, dialogs: out.dialogs, afterConflict: out.afterConflict,
   }, null, 1)
   if (location.search.includes('dump')) document.body.appendChild(dump)
   try {
-    await fetch('report', { method: 'POST', body: JSON.stringify({ step: out.step, fail: out.fail, t: out.t, flow: out.flow, typedSeen: out.typedSeen, remountKeeps: out.remountKeeps, remountText: out.remountText, diffInsBg: out.diffInsBg, diffDelBg: out.diffDelBg, partErr: out.partErr, error: out.error }) })
+    await fetch('report', { method: 'POST', body: JSON.stringify({ step: out.step, fail: out.fail, t: out.t, flow: out.flow, typedSeen: out.typedSeen, remountKeeps: out.remountKeeps, remountText: out.remountText, diffInsBg: out.diffInsBg, diffDelBg: out.diffDelBg, lspObserved: out.lspObserved, partErr: out.partErr, error: out.error }) })
   } catch { /* the harness may not be listening */ }
 </script>

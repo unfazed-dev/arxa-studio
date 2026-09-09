@@ -108,6 +108,20 @@ async function importGitWorkspace() {
   return gwCache
 }
 
+/** manifest-seat.js is not re-exported by the git-workspace barrel (same
+  * pnpm-store reasoning as importGitWorkspace above): reachable bare only
+  * through its own "./lib/manifest-seat.js" exports entry. */
+let manifestSeatCache = null
+async function importManifestSeat() {
+  if (manifestSeatCache) return manifestSeatCache
+  try {
+    manifestSeatCache = await import('git-workspace/lib/manifest-seat.js')
+  } catch {
+    manifestSeatCache = await import(new URL('../../git-workspace/lib/manifest-seat.js', import.meta.url).href)
+  }
+  return manifestSeatCache
+}
+
 export function apply(ctx, opts = {}) {
   console.log('[arxa-boot] sidebar apply')
   // Single-flight the persisted session listing (2026-09-07 boot trace: two
@@ -1630,9 +1644,11 @@ export function apply(ctx, opts = {}) {
                 let route = null
                 try { route = gw.resolveSessionRepo(cur.path, ws, { env: process.env }) } catch { route = null }
                 if (route) {
-                  const manifestFile = route.repoPath + (route.kind === 'project' ? '/project.json' : '/org.json')
-                  let manifest = {}
-                  try { manifest = JSON.parse((await import('node:fs')).readFileSync(manifestFile, 'utf8')) } catch {}
+                  // Task 7 (freestyle-section): resolved generically so a
+                  // Freestyle root's .arxa/freestyle.json is picked up here
+                  // the same way org.json/project.json already were.
+                  const { seatManifest } = await importManifestSeat()
+                  const manifest = seatManifest(route.repoPath).manifest ?? {}
                   const checks = await mainChecksFor(route.repoPath, manifest, g, gw).catch(() => null)
                   if (checks) {
                     if (checks.state === 'red') throw new Error('main-red')

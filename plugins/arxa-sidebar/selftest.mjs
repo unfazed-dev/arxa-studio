@@ -107,7 +107,8 @@ check('G3 dot: its label is translated in all 3 dictionaries',
 
 // ---- 3. rows-world content ----------------------------------------------------
 check('rows: org store present', client.includes('function createOrgStore()'))
-check('rows: OrgBrowser is the slot component', client.includes('}, OrgBrowser));'))
+check('rows: tab wrapper owns the slot and retains OrgBrowser for the organisation tab',
+  client.includes('}, SidebarBrowser));') && client.includes('(0, react_jsx_runtime.jsx)(OrgBrowser, { ...props })'))
 check('rows: org data hooks pinned at the component boundary', client.includes('useWorkspaces: orgUseWorkspaces, useSessions: orgUseSessions') && client.includes('const orgUseWorkspaces = (sel) => useOrg'))
 check('rows: honest content search (empty fetch)', client.includes('searchSessions: async () => ({ items: [], hasMore: false })'))
 check('rows: trash surface wired (Q6)', client.includes('function TrashSection(') && client.includes('trash: () => orgStore.toggleTrash()'))
@@ -119,7 +120,8 @@ check('create-modal: sign-in CTA carries the GitHub brand mark', client.includes
 check('create-modal: D90 sign-in wall is GONE — submit always present, GitHub rides the switch', !client.includes('!showSignin && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {') && !client.includes('showSignin') && client.includes('const canSubmit = name.trim() !== "" && !busy && location.trim() !== "" && !blocked;'))
 check('create-modal: device-flow code surfaces in the sign-in step (github.device poll + big code)', client.includes('"github.device"') && client.includes('github.signin.codeHint') && client.includes('devCode.userCode'))
 check('create-modal: D90 device-flow copy/open-link moved to the relink paths (purge + disconnect modals)', client.includes('open-external') && client.includes('https://github.com/login/device') && client.includes('devCode.userCode'))
-check('rows: window.prompt is gone (Tauri WKWebView never implements it)', !client.includes('window.prompt('))
+check('rows: window.prompt remains isolated to Freestyle new-folder naming (organisation create stays WebView-safe)',
+  (client.match(/window\.prompt\(/g) || []).length === 1 && client.includes('window.prompt(t("freestyle.add.newPrompt"))'))
 check('rows: location field opens the OS folder locator (Tauri dialog when injected, host osascript locator otherwise)',
   client.includes('window.__TAURI__.dialog') && client.includes('directory: true') && client.includes('pick-folder'))
 check('host: macOS folder locator route exists', hostSrc().includes('choose folder') && hostSrc().includes('pick-folder'))
@@ -238,7 +240,7 @@ check('conformance: ErrorNote dedup — one shared error line across the org mod
 check('conformance: locale world is en/pl/fr — zhOver deleted, sparse plOver/frOver registered with per-key en fallback',
   client.includes('ctx.locale.register(NS, { zh, en: { ...en, ...enOver }, pl: plOver, fr: frOver })')
   && !client.includes('const zhOver = {') && client.includes('const plOver = {') && client.includes('const frOver = {'))
-check('welcome: TWO buttons - arxa studio (create) + arxa business (disabled, later)', client.includes('t("welcome.studio")') && client.includes('t("welcome.business")') && client.includes('"welcome.businessSoon"') && !client.includes('t("welcome.cta")'))
+check('welcome: organisation, Freestyle and future-business choices stay reachable', client.includes('t("welcome.studio")') && client.includes('t("welcome.freestyle")') && client.includes('t("welcome.business")') && client.includes('"welcome.businessSoon"') && !client.includes('t("welcome.cta")'))
 check('welcome: one-shot resume to newest session of the open org', client.includes('resumeTried') && client.includes('maybeResume(next.orgs)') && client.includes('orgStore.mutate("session.open"'))
 check('content area (2026-08-30): arxa is the sole driver — row open + resume focus the conversation via the client sessions service (dsh own open call)',
   client.includes('arxaOpenConversation(sessionId)') && client.includes('arxaOpenConversation(cand.id)') && client.includes('arxaClientSessions.open(dshId)') && client.includes('snap.ids.includes(dshId)'))
@@ -247,7 +249,7 @@ check('content area: a boot with nothing to resume clears the selection — stra
 check('content area: the boot clear SURVIVES dsh startup reconnect (workspaces.startInitialSelection re-opens the recent workspace blank session over an early clear) — bounded re-assert, org/user opens win',
   client.includes('reassertEmpty') && client.includes('workspaces.startInitialSelection') && client.includes('if (orgIds.has(cur)) return;') && client.includes('if (tries > 20) return;'))
 check('content area (live, once-and-for-all): the rider kill is condition-driven, not a stopwatch — any current session that is not an OPEN org one is cleared on every store bump while no user/resume open owns the content (slow-boot stranding loses every race)',
-  client.includes('enforceNoRiders') && client.includes('x.state === "open"') && client.includes('orgStore.refresh().then(enforceNoRiders)'))
+  client.includes('enforceNoRiders') && client.includes('x.state === "open"') && client.includes('root.sessions?.active') && client.includes('root.sessions?.parked') && client.includes('Promise.all([orgStore.refresh(), freestyleStore.refresh()]).then(enforceNoRiders)'))
 check('content area (live): cross-client archive/rename reach every client without waiting on the 5s poll — the org view refreshes on dsh store bumps (sig-gated refresh makes repeats a no-op)',
   client.includes('ctx.get("workspaces").list.subscribe') && client.includes('arxaClientSessions.list.subscribe') && client.includes('orgStore.refresh()'))
 check('content area: the hero workspace picker is replaced by arxa guidance (raw engine sessions cannot be born from the hero)',
@@ -367,8 +369,8 @@ check('S1/Q2: the mint reads the CROSS-REGISTRY aggregate — the id becomes the
       && !card.includes('project-session-pr-pending: run control'))
   check('S3/Q8: the PR handlers resolve the repo from the session, not from org.json',
     card.includes('const repoFor = async (s) =>')
-      && card.includes("s?.origin === 'project' && typeof s?.repoPath === 'string'")
-      && card.includes("s.repoPath + '/project.json'")
+      && card.includes('const sessionRepoPath = (s, sid) =>')
+      && card.includes("const seat = seatManifest(sessionRepoPath(s, s?.id ?? '<unknown>'))")
       && !card.includes('project-session-pr-pending: PR flow'))
   // The clear commit is made AFTER the ahead/behind read, so nothing upstream
   // pushes it — leaving it would swap a stale error for a repo permanently 1
@@ -647,6 +649,8 @@ check('files: lazy tree route + one fresh-token 403 retry + arxa-av-open carries
   && client.includes('window.dispatchEvent(new CustomEvent("arxa-av-open", { detail }))')
   && client.includes('const detail = sessionId ? { relPath: inWorktree, sessionId } : { relPath };')
   && client.includes('relPath.startsWith(arxaDeco.prefix)'))
+check('files: Freestyle tree opens files against the owning root',
+  client.includes('if (rootId) {') && client.includes('const detail = { relPath, rootId };'))
 check('files: expanding an org row opens the org (tree-read rides the open handle) + human hint when it is not open',
   client.includes('if (isOrg && !open) orgStore.mutate("org.open", { orgId: d.orgId }).catch(() => {});') && client.includes('/no org open/i.test(entry.error || "")') && client.includes('"files.openHint": "Open this organisation to browse its files"') && client.includes('"files.openHint": "Otwórz tę organizację, aby przeglądać jej pliki"') && client.includes('"files.openHint": "Ouvrez cette organisation pour parcourir ses fichiers"'))
 check('trash: restore/delete icon buttons are gapped (flex span, 12px user-tuned)',

@@ -46,6 +46,28 @@ function childEnv(identity, env, objectDir) {
   delete child.GIT_COMMON_DIR
   child.GIT_CONFIG_NOSYSTEM = '1'
   child.GIT_CONFIG_GLOBAL = os.devNull // git >= 2.32; older git ignores it, -c overrides below still pin the essentials
+  // The engine parses git's human-readable stdout/stderr in a few places
+  // (commits.js's embedded-repo and nothing-to-commit tolerance checks;
+  // any future caller doing the same). Those checks match git's compiled-in
+  // English strings. Under a non-English LANG/LC_ALL on the user's machine,
+  // gettext translates the same messages and the match silently misses —
+  // verified empirically on git 2.51: `LC_ALL=fr_FR.UTF-8` turns "does not
+  // have a commit checked out" into "n'a pas de commit extrait" and
+  // "nothing added to commit but untracked files present" into "aucune
+  // modification ajoutée à la validation mais des fichiers non suivis sont
+  // présents". `LC_ALL=C` reliably reverts both to the English source
+  // strings (also verified empirically). No caller in this engine parses
+  // git output *as localized UI text* to show a user in their language —
+  // every match is against a fixed English pattern — so forcing C here
+  // costs nothing and fixes every such parser at once, not just wipCommit's.
+  // LANGUAGE is cleared too, defensively. GNU gettext (which git/Homebrew
+  // link against) documents LANGUAGE as able to override the catalog choice
+  // even when LC_ALL requests a specific locale — but that precedence
+  // against LC_ALL=C could NOT be empirically tested here (this sandbox
+  // refuses any shell command that sets LANGUAGE). Deleting it removes the
+  // question rather than relying on an unverified precedence claim.
+  child.LC_ALL = 'C'
+  delete child.LANGUAGE
   child.GIT_AUTHOR_NAME = identity.name
   child.GIT_AUTHOR_EMAIL = identity.email
   child.GIT_COMMITTER_NAME = identity.name

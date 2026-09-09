@@ -1034,7 +1034,7 @@ try {
   // because the route lives in artifact-viewer (route test belongs there).
   {
     const wtApiSrc = fs.readFileSync(new URL('../artifact-viewer/lib/wt-api.js', import.meta.url), 'utf8')
-    ok(wtApiSrc.includes("if (name === '.git' || name === '.arxa') continue"), 'D94: tree route hides only .git/ and .arxa/')
+    ok(wtApiSrc.includes("if (name === '.git' || name === '.arxa' || (rootId && name === '.gitkeep')) continue"), 'D94: org tree hides only .git/ and .arxa/; Freestyle also hides its placeholder')
     ok(!wtApiSrc.includes("if (name.startsWith('.')) continue"), 'D94: the blanket dotfile filter is gone')
   }
   console.log(`\nfile-org-shell selftest: ${passed} checks passed`)

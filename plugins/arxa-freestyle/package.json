@@ -1,0 +1,9 @@
+{
+  "name": "arxa-freestyle",
+  "version": "0.1.0",
+  "private": true,
+  "description": "arxa Freestyle: any folder as a root, VS Code-style file verbs, own trash and archives, sessions through the git-workspace engine (F1-F9, docs/plans/freestyle-section.md). Host half only; the sidebar bundle renders the tab.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": { ".": "./lib/index.js", "./package.json": "./package.json" }
+}

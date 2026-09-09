@@ -110,7 +110,7 @@ check('G5 icons: the two names that never existed are gone',
 check('D113: the card has a finish route at all',
   hostSrc().includes("'card.finish': async () => {"))
 check('D113: the enabled state comes from finishSession\'s OWN dryRun, not a second opinion',
-  hostSrc().includes("gw.finishSession(cur.path, sessionRow.id, { env: process.env, dryRun: true })")
+  hostSrc().includes("gw.finishSession(primaryRepoPath, sessionRow.id, { env: process.env, dryRun: true })")
   && hostSrc().includes("finish = { can: dry.wouldFinish === true, reason: dry.reason ?? null }"))
 // D40: parked is never deleted — absent, not merely disabled, and the route
 // refuses too so a stale card cannot post its way past the missing button.

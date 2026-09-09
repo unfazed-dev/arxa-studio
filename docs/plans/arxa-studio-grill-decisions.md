@@ -1312,3 +1312,26 @@ architecture; this grill settles the editor extension it never covered.
   dsh's `archivedSessionIds` keeps its no-unarchive-API residue (D39
   upstream note) — the arxa rows world ignores the set, so revived rows
   render regardless.
+
+## Freestyle (2026-09-08 grill)
+
+D42, D69, D70 and D71 continue to govern the Organisations tab only.
+Freestyle introduces a separate section; it does not replace those decisions.
+
+- **D118 — Any folder is a Freestyle root.** Existing folders are opened in place; New Folder takes a name and location. Roots are remembered in `~/.arxa/freestyle.json`, without forcing them under the Studio home. See [Freestyle F1](freestyle-section.md#1-decisions-grilled-2026-09-08-all-confirmed-by-the-operator).
+
+- **D119 — Two sidebar tabs, independent trash.** Organisations and Freestyle share the existing sidebar slot, with two icon buttons on the collapsed rail. Freestyle owns its archives and trash separately. See [Freestyle F2](freestyle-section.md#1-decisions-grilled-2026-09-08-all-confirmed-by-the-operator).
+
+- **D120 — One git/session engine.** Freestyle is a third routing kind in git-workspace. Its `.arxa/freestyle.json` seat uses the same git card, session worktrees, checks, Finish, Sweep and GitHub flow as org seats. See [Freestyle F3](freestyle-section.md#1-decisions-grilled-2026-09-08-all-confirmed-by-the-operator).
+
+- **D121 — Local git is enough.** Adding a plain folder initializes local git on main; an existing repository is adopted as-is. No GitHub account is required. A linked account enables private publication. See [Freestyle F4](freestyle-section.md#1-decisions-grilled-2026-09-08-all-confirmed-by-the-operator).
+
+- **D122 — Sessions from any folder.** A session can start at a root or any nested folder. The nearest enclosing repository owns the worktree under `<repo>/.arxa/worktrees/<session-id>`; the conversation cwd preserves the selected folder within it, including spaces and Unicode. Git-unsafe folder names map to bounded branch identities; new dsh conversation IDs hash the full root/session identity. See [Freestyle F5](freestyle-section.md#1-decisions-grilled-2026-09-08-all-confirmed-by-the-operator).
+
+- **D123 — Explorer edits auto-commit.** Create, rename, move, duplicate and trash act on the root working tree and end in a WIP commit. Sidebar verbs and viewer saves share root confinement and owning-repository WIP commits. Per-root `.arxa/trash` supports restore and confirmed purge. See [Freestyle F6](freestyle-section.md#1-decisions-grilled-2026-09-08-all-confirmed-by-the-operator).
+
+- **D124 — Roots coexist with organisations.** Several Freestyle roots can be open beside the single open org. Viewer, watcher and language features resolve a generic root; the org lock remains org-only. See [Freestyle F7](freestyle-section.md#1-decisions-grilled-2026-09-08-all-confirmed-by-the-operator).
+
+- **D125 — Local checks before publication.** Adding a folder installs a stack-detecting check.sh for package.json, pubspec.yaml, Cargo.toml, go.mod or pyproject.toml. CI workflow, PR template and remote protection are added at publication through the shared frame code. See [Freestyle F8](freestyle-section.md#1-decisions-grilled-2026-09-08-all-confirmed-by-the-operator).
+
+- **D126 — Freestyle v1 explorer scope.** The core explorer includes inline new file/folder and rename, drag-drop move, duplicate, reveal, viewer open, per-row sessions, lazy tree refresh and shared git decorations. `.git` and `.arxa` stay hidden and inaccessible. Multi-select, clipboard operations, compact folders, file nesting and sort options are deferred. See [Freestyle F9](freestyle-section.md#1-decisions-grilled-2026-09-08-all-confirmed-by-the-operator).

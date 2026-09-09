@@ -32,6 +32,15 @@ const DSH_VERSION = '0.1.2-rc.1'
 const T = (n) => '\t'.repeat(n)
 const stockPath = join(root, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
 const regionPath = join(root, 'plugins', 'arxa-sidebar', 'lib', 'workspace-region.snippet.txt')
+const freestyleRegionPath = join(root, 'plugins', 'arxa-sidebar', 'lib', 'freestyle-region.snippet.txt')
+
+/** Replace the one slot component seat; absence or duplication means dsh moved. */
+export function spliceFreestyleBrowser(source) {
+  const anchor = T(3) + '}, OrgBrowser));'
+  const first = source.indexOf(anchor)
+  if (first < 0 || source.indexOf(anchor, first + 1) >= 0) throw new Error('OrgBrowser render anchor missing — stock shape moved?')
+  return source.slice(0, first) + T(3) + '}, SidebarBrowser));' + source.slice(first + anchor.length)
+}
 
 // ---- shell part (gen-sidebar prints it to stdout) -------------------------
 const shellPart = execFileSync(process.execPath, [join(root, 'scripts', 'gen-sidebar.mjs')], {
@@ -265,6 +274,16 @@ if (!out.includes(LAST_REGION)) throw new Error('last region anchor missing — 
 const region = readFileSync(regionPath, 'utf8').replace(/\n$/, '')
 out = out.replace(LAST_REGION, region + '\n' + LAST_REGION)
 
+// 9b. Freestyle store + tabs + shell sit directly after the organisations
+//     region. Its marker is a byte-level provenance guard: one source region
+//     becomes exactly one generated region, never a stale duplicate.
+const FREESTYLE_MARKER = '__ARXA_FREESTYLE_REGION__'
+if (out.includes(FREESTYLE_MARKER)) throw new Error('freestyle region already present before splice')
+const freestyleRegion = readFileSync(freestyleRegionPath, 'utf8').replace(/\n$/, '')
+if ((freestyleRegion.match(new RegExp(FREESTYLE_MARKER, 'g')) || []).length !== 1) throw new Error('freestyle region source marker missing/duplicate')
+out = out.replace(LAST_REGION, freestyleRegion + '\n' + LAST_REGION)
+if ((out.match(new RegExp(FREESTYLE_MARKER, 'g')) || []).length !== 1) throw new Error('freestyle region splice missing/duplicate')
+
 // 10. replace the stock apply tail with the org-backed one. The stock
 //     WorkspacePicker (conversation hero) registration dies with it — a
 //     session lives in exactly one org; cross-org move is not a model concept.
@@ -289,6 +308,11 @@ const ourApply = [
   T(3) + '// — the lookup chain falls back per-key to en (enOver merged), so a',
   T(3) + '// missing translation shows English, never a raw key.',
   T(3) + 'ctx.effect(() => ctx.locale.register(NS, { zh, en: { ...en, ...enOver }, pl: plOver, fr: frOver }), "arxa-sidebar-workspace: dictionaries");',
+  T(3) + 'ctx.effect(() => {',
+  T(4) + 'const controller = new AbortController();',
+  T(4) + 'void freestyleStore.refresh({ signal: controller.signal });',
+  T(4) + 'return () => controller.abort();',
+  T(3) + '}, "arxa-sidebar-workspace: Freestyle boot state");',
   T(3) + 'orgHostInfo = {',
   T(4) + '// dsh 0.1.2-rc.1: connection.hostDescription is gone — the host-info',
   T(4) + '// face is now the remote $host snapshot, re-read on connection/reset',
@@ -318,12 +342,13 @@ const ourApply = [
   T(3) + '// workspace resident blank session on slow boots AFTER the bounded',
   T(3) + '// re-assert window — the rider must lose every race, not just fast',
   T(3) + '// ones. Invariant: with no user/resume open (currentSessionId null)',
-  T(3) + '// the only legal bound session is an OPEN org one. Enforced on every',
-  T(3) + '// store bump, forever; org/user opens win via the same guards.',
+  T(3) + '// legal bound sessions belong to an open org or Freestyle root.',
+  T(3) + '// Refresh both registries before enforcement so new sessions can land.',
   T(3) + 'const orgDshIds = () => {',
   T(4) + 'const ids = new Set();',
   T(4) + 'const st = orgStore.get();',
   T(4) + 'for (const o of st.orgs || []) for (const x of o.sessions || []) if (x.dshSessionId && x.state === "open") ids.add(x.dshSessionId);',
+  T(4) + 'for (const root of freestyleStore.get().roots || []) for (const x of [...(root.sessions?.active || []), ...(root.sessions?.parked || [])]) if (x.dshSessionId) ids.add(x.dshSessionId);',
   T(4) + 'return ids;',
   T(3) + '};',
   T(3) + 'const enforceNoRiders = () => {',
@@ -336,10 +361,14 @@ const ourApply = [
   T(3) + '};',
   T(3) + 'const liveRefresh = () => {',
   T(4) + 'if (liveRefreshTimer) return;',
-  T(4) + 'liveRefreshTimer = window.setTimeout(() => { liveRefreshTimer = 0; orgStore.refresh().then(enforceNoRiders).catch(() => {}); }, 250);',
+  T(4) + 'liveRefreshTimer = window.setTimeout(() => { liveRefreshTimer = 0; Promise.all([orgStore.refresh(), freestyleStore.refresh()]).then(enforceNoRiders).catch(() => {}); }, 250);',
   T(3) + '};',
-  T(3) + 'try { ctx.get("workspaces").list.subscribe(() => { enforceNoRiders(); liveRefresh(); }) } catch { /* degrade */ }',
-  T(3) + 'try { if (arxaClientSessions && typeof arxaClientSessions.list.subscribe === "function") arxaClientSessions.list.subscribe(() => { enforceNoRiders(); liveRefresh(); }) } catch { /* degrade */ }',
+  T(3) + 'ctx.effect(() => {',
+  T(4) + 'const subscriptions = [];',
+  T(4) + 'try { subscriptions.push(ctx.get("workspaces").list.subscribe(liveRefresh)); } catch { /* degrade */ }',
+  T(4) + 'try { if (arxaClientSessions && typeof arxaClientSessions.list.subscribe === "function") subscriptions.push(arxaClientSessions.list.subscribe(liveRefresh)); } catch { /* degrade */ }',
+  T(4) + 'return () => { if (liveRefreshTimer) window.clearTimeout(liveRefreshTimer); liveRefreshTimer = 0; for (const release of subscriptions) if (typeof release === "function") release(); };',
+  T(3) + '}, "arxa-sidebar-workspace: live registry refresh");',
   T(3) + 'const browserInjected = () => ({',
   T(4) + '// use* hooks are pinned in OrgBrowser — see the region snippet.',
   T(4) + 'startSession: (workspaceId) => {',
@@ -456,12 +485,13 @@ const ourApply = [
   T(2) + 'exports.apply = apply;',
 ].join('\n')
 out = out.slice(0, headAt) + ourApply + out.slice(expAt + EXPORTS.length)
+out = spliceFreestyleBrowser(out)
 
 // 11. provenance header
 const HEADER = [
   '// Browser half of arxa-sidebar (workspace-section part). GENERATED by',
   '// scripts/gen-workspace.mjs from @deepseek-ai/dsh-client-ui-workspace',
-  '// lib/client.js (dsh ' + DSH_VERSION + ') + lib/workspace-region.snippet.txt +',
+  '// lib/client.js (dsh ' + DSH_VERSION + ') + workspace/freestyle region snippets +',
   '// the deltas listed in that script; composed after the shell part from',
   '// scripts/gen-sidebar.mjs into lib/client.js. Do not hand-edit: regenerate',
   '// and let the selftest drift gate compare bytes. The stock component tree',

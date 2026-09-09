@@ -43,39 +43,110 @@ export function readOpenOrg(env = process.env) {
   return null
 }
 
+/** Every Freestyle root with open:true, from ~/.arxa/freestyle.json. Defensive:
+ * a missing or unparseable registry means "no Freestyle roots", never throws
+ * (registry shape/identity convention: plugins/arxa-freestyle/lib/roots.js). */
+function readOpenFreestyleRoots(env) {
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(arxaHome(env), 'freestyle.json'), 'utf8'))
+    const rows = Array.isArray(j.roots) ? j.roots : []
+    return rows.filter((r) => r && r.open === true && typeof r.id === 'string' && typeof r.path === 'string')
+  } catch { return [] }
+}
+
+/** Every open request identity, including aliases that share one physical
+ * path. Server/watcher lifecycle uses readOpenRoots() below to dedupe paths;
+ * request authorization must retain the registry id the UI put on the wire. */
+export function readOpenRootAliases(env = process.env) {
+  const roots = []
+  const org = readOpenOrg(env)
+  if (org) roots.push({ id: org.slug, path: org.orgPath, slug: org.slug, kind: 'org', name: org.slug })
+  for (const r of readOpenFreestyleRoots(env)) {
+    roots.push({ id: r.id, path: r.path, slug: path.basename(r.path), kind: 'freestyle', name: typeof r.name === 'string' && r.name ? r.name : path.basename(r.path) })
+  }
+  return roots
+}
+
+/** Resolve an explicit open root id. Duplicate ids are ambiguous and fail
+ * closed; an omitted id retains the legacy open-org default. */
+export function readOpenRoot(env = process.env, rootId = null) {
+  const aliases = readOpenRootAliases(env)
+  if (typeof rootId !== 'string' || rootId === '') return aliases.find((r) => r.kind === 'org') ?? null
+  const matches = aliases.filter((r) => r.id === rootId)
+  return matches.length === 1 ? matches[0] : null
+}
+
 /**
- * Poll the open-org truth and reconcile one server.
- * createServer is injectable for tests ({ orgRoot, orgSlug } -> { origin, close() }).
- * Returns { stop(), current() }; never throws into the poll loop.
+ * Freestyle-section Task 8: every root the viewer should follow — the open
+ * org first (if any), then every open Freestyle root. Pure fs, no locks, no
+ * git; never throws (a broken freestyle.json degrades to "no Freestyle
+ * roots", the org path keeps working).
+ * @returns {{ id: string, path: string, slug: string, kind: 'org'|'freestyle', name: string }[]}
  */
-export function startOrgFollow({ env = process.env, intervalMs = 2000, createServer, log = () => {}, onServing = null }) {
-  let serving = null // { orgPath, handle }
+export function readOpenRoots(env = process.env) {
+  const roots = []
+  const seen = new Set()
+  for (const r of readOpenRootAliases(env)) {
+    // A Freestyle root can point at the same folder as the open org (a
+    // project nested in a Freestyle root, or a stray duplicate registry
+    // row). First-wins keeps the org's identity — two servers on one path
+    // would orphan a socket in startRootFollow and, worse, current() would
+    // stop reporting kind:'org', so getOrigin() would go null forever and
+    // the org read lane would 503 permanently. Org was pushed first above.
+    const key = path.resolve(r.path)
+    if (seen.has(key)) continue
+    seen.add(key)
+    roots.push(r)
+  }
+  return roots
+}
+
+/**
+ * Poll open-root truth (readOpenRoots) and reconcile one server per open
+ * root — org and every open Freestyle root alike.
+ * createServer is injectable for tests ({ orgRoot, orgSlug } -> { origin, close() }).
+ * Returns { stop(), current() }; current() is the array of roots being
+ * served, each with its handle's origin attached. Never throws into the poll
+ * loop; a single root's open() failing does not stop the others from
+ * reconciling (a deliberate divergence from the old single-org wrapper,
+ * which had only one root to lose).
+ */
+export function startRootFollow({ env = process.env, intervalMs = 2000, createServer, log = () => {}, onServing = null }) {
+  const serving = new Map() // path -> { root, handle }
   let switching = false
   let stopped = false
 
+  function current() {
+    return [...serving.values()].map((e) => ({ ...e.root, origin: e.handle.origin }))
+  }
+
   async function reconcile() {
     if (stopped || switching) return
-    const want = readOpenOrg(env)
-    const cur = serving
-    if (want && cur && want.orgPath === cur.orgPath) return
-    if (!want && !cur) return
+    const want = readOpenRoots(env)
+    const wantByPath = new Map(want.map((r) => [r.path, r]))
+    const toClose = [...serving.keys()].filter((p) => !wantByPath.has(p))
+    const toOpen = want.filter((r) => !serving.has(r.path))
+    if (toClose.length === 0 && toOpen.length === 0) return
     switching = true
     try {
-      if (cur) {
-        serving = null
-        await cur.handle.close().catch((err) => log('close failed for ' + cur.orgPath + ': ' + err.message))
-        log('org server closed: ' + cur.orgPath)
+      for (const p of toClose) {
+        const entry = serving.get(p)
+        serving.delete(p)
+        await entry.handle.close().catch((err) => log('close failed for ' + p + ': ' + err.message))
+        log('root server closed: ' + p)
       }
-      if (want) {
-        const handle = await createServer({ orgRoot: want.orgPath, orgSlug: want.slug })
-        serving = { orgPath: want.orgPath, handle }
-        log('org server serving ' + want.orgPath + ' at ' + handle.origin)
+      for (const r of toOpen) {
+        try {
+          const handle = await createServer({ orgRoot: r.path, orgSlug: r.slug })
+          serving.set(r.path, { root: r, handle })
+          log('root server serving ' + r.path + ' at ' + handle.origin)
+        } catch (err) {
+          log('reconcile failed to open ' + r.path + ': ' + (err && err.message))
+        }
       }
-    } catch (err) {
-      log('reconcile failed: ' + (err && err.message))
     } finally {
       switching = false
-      if (onServing) { try { onServing(serving ? serving.orgPath : null) } catch {} }
+      if (onServing) { try { onServing(current()) } catch {} }
     }
   }
 
@@ -85,8 +156,31 @@ export function startOrgFollow({ env = process.env, intervalMs = 2000, createSer
     stop() {
       stopped = true
       clearInterval(timer)
-      return serving ? serving.handle.close() : Promise.resolve()
+      return Promise.all([...serving.values()].map((e) => e.handle.close()))
     },
-    current() { return serving ? { orgPath: serving.orgPath, origin: serving.handle.origin } : null },
+    current,
+  }
+}
+
+/**
+ * Backward-compat wrapper over startRootFollow: the pre-Task-8 single-org
+ * contract, unchanged for existing callers — current() returns
+ * { orgPath, origin } | null, onServing(orgPath | null).
+ * Returns { stop(), current() }; never throws into the poll loop.
+ */
+export function startOrgFollow({ env = process.env, intervalMs = 2000, createServer, log = () => {}, onServing = null }) {
+  const rf = startRootFollow({
+    env, intervalMs, log, createServer,
+    onServing: onServing ? (roots) => {
+      const org = roots.find((r) => r.kind === 'org')
+      onServing(org ? org.path : null)
+    } : null,
+  })
+  return {
+    stop: () => rf.stop(),
+    current() {
+      const org = rf.current().find((r) => r.kind === 'org')
+      return org ? { orgPath: org.path, origin: org.origin } : null
+    },
   }
 }

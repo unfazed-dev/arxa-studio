@@ -942,3 +942,5 @@ a wiring gap, not a measurement one.
 Also inherent, not a bug: the tree lists the **org checkout**, so a file created
 only inside a session has no row to decorate. `M` and `D` on tracked files are
 the cases that show; a brand-new file appears once it reaches main.
+
+Freestyle integration: Freestyle rows use the same `ArxaDirRows` decoration path, with `rootId` and repo-relative `relPath`; see [the Freestyle plan](freestyle-section.md).

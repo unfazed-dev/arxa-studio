@@ -38,8 +38,10 @@ export const DOCK_ROUTES = Object.freeze([
   Object.freeze({ dock: 'account', kind: 'refuse', reason: 'account' }),
 ])
 
-/** Refusal reasons, in the order the resolver can raise them. */
-export const ROUTING_REASONS = Object.freeze(['account', 'unknown-dock', 'no-head'])
+/** Refusal reasons, in the order the resolver can raise them. `outside-root`
+ * and the freestyle-flavoured `no-head` are raised only by
+ * resolveFreestyleRepo (F5), below. */
+export const ROUTING_REASONS = Object.freeze(['account', 'unknown-dock', 'no-head', 'outside-root'])
 
 /**
  * The no-HEAD refusal reuses lifecycle.js's session wording byte-for-byte
@@ -150,6 +152,118 @@ export function resolveSessionRepo(orgPath, workspace, { env = process.env, requ
     throw new RoutingRefusedError('no-head', INITIAL_SNAPSHOT_PENDING, { workspace, repoPath })
   }
   return { repoPath, kind: 'project', slug: route.slug }
+}
+
+/**
+ * The deepest ancestor of `p` (inclusive) that exists on disk, realpathed.
+ * `p` itself may not exist yet (Freestyle targets can be minted before their
+ * folder is created) — walk up until something real is found, then resolve
+ * THAT, so any symlink anywhere in the existing prefix is followed.
+ */
+function realpathDeepestExisting(p) {
+  let dir = p
+  while (!fs.existsSync(dir)) {
+    const parent = path.dirname(dir)
+    if (parent === dir) break // hit the filesystem root without finding anything real
+    dir = parent
+  }
+  return fs.realpathSync(dir)
+}
+
+/**
+ * Physical containment, not just lexical: `p` (or its deepest existing
+ * ancestor) must realpath to somewhere inside `rootReal`. The lexical check
+ * in `resolveFreestyleRepo` (a `path.relative` against `path.resolve`d
+ * strings) does not see through symlinks — a folder placed inside the root
+ * that points elsewhere on disk would sail past it and bind a session to a
+ * repo the root never actually contains.
+ */
+function assertPhysicallyInside(rootReal, p, relDir, rootPath) {
+  const real = realpathDeepestExisting(p)
+  if (real !== rootReal && !real.startsWith(rootReal + path.sep)) {
+    throw new RoutingRefusedError(
+      'outside-root',
+      `outside-root: "${relDir}" escapes ${rootPath} through a symlink`,
+      { repoPath: rootReal },
+    )
+  }
+}
+
+/**
+ * Resolve a Freestyle target folder to the nearest enclosing git repo (F5).
+ * A Freestyle root has no dock table — any folder under it is fair game — so
+ * this is a pure path walk from `<rootPath>/<relDir>` up to `rootPath`
+ * itself, stopping at the first directory that `isRepo`. No filesystem
+ * writes happen here; adding the root as a repo is `initPlainRepo`'s job
+ * (repos.js), run once when a folder is added through Freestyle.
+ *
+ * @param {string} rootPath   the Freestyle root's directory
+ * @param {string} [relDir]   the target folder, relative to rootPath ('' = the root itself)
+ * @param {object} [opts]
+ * @param {object} [opts.env]                env for git calls
+ * @param {boolean} [opts.requireHead=true]  refuse when the enclosing repo has no HEAD yet
+ *   — same "first snapshot not done" contract as resolveSessionRepo.
+ * @returns {{ repoPath: string, kind: 'freestyle', cwdRel: string }}
+ *   `repoPath` is a WORKING DIRECTORY. `cwdRel` is `relDir` re-expressed
+ *   relative to `repoPath` (POSIX separators, so it can sit in a branch/id).
+ */
+export function resolveFreestyleRepo(rootPath, relDir = '', { env = process.env, requireHead = true } = {}) {
+  // path.resolve, not realpathSync, for the LEXICAL walk and the returned
+  // repoPath: callers get back the path they typed, not a resolved alias
+  // they never wrote (`isRepo` already realpaths both sides internally —
+  // repos.js:47 — for the macOS /var → /private/var tmpdir case, so this
+  // stays correct for THAT). Symlink escapes are a different threat and get
+  // their own physical check, below, via assertPhysicallyInside.
+  const rootAbs = path.resolve(rootPath)
+  const target = path.resolve(rootAbs, relDir || '')
+  const rel = path.relative(rootAbs, target)
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new RoutingRefusedError(
+      'outside-root',
+      `outside-root: "${relDir}" is not inside ${rootPath}`,
+      { repoPath: rootAbs },
+    )
+  }
+  // A deleted or moved root is the same human situation as "never added
+  // through Freestyle" (the no-repo-at-all case below) — no-head, not a raw
+  // ENOENT. realpathSync throws for a missing path, so this has to be its
+  // own guard rather than falling through to the walk-up loop's own throw.
+  let rootReal
+  try {
+    rootReal = fs.realpathSync(rootAbs)
+  } catch {
+    throw new RoutingRefusedError(
+      'no-head',
+      `no-head: ${rootPath} does not exist — add it through Freestyle first`,
+      { repoPath: rootAbs },
+    )
+  }
+  assertPhysicallyInside(rootReal, target, relDir, rootPath)
+
+  let dir = target
+  while (true) {
+    if (isRepo(dir, env)) {
+      // The repo the walk lands on must ALSO be physically inside the root:
+      // a symlinked intermediate directory could otherwise let `isRepo` find
+      // — and bind a session to — a repo the root never actually contains.
+      assertPhysicallyInside(rootReal, dir, relDir, rootPath)
+      if (requireHead && !hasHead(dir, env)) {
+        throw new RoutingRefusedError('no-head', `no-head: ${dir} is a repo with no commits yet`, { repoPath: dir })
+      }
+      return { repoPath: dir, kind: 'freestyle', cwdRel: path.relative(dir, target).split(path.sep).join('/') }
+    }
+    if (dir === rootAbs) break
+    dir = path.dirname(dir)
+  }
+  // No repo anywhere between the target and the root, inclusive: the root
+  // itself was never added through Freestyle (that step runs initPlainRepo).
+  // Same reason as the no-commits-yet case above — a caller branches on
+  // `reason`, not on which of the two produced it.
+  throw new RoutingRefusedError(
+    'no-head',
+    `no-head: ${rootPath} is not a git repo — add it through Freestyle first`,
+    { repoPath: rootAbs },
+  )
 }
 
 /**

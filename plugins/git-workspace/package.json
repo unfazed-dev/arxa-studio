@@ -8,6 +8,7 @@
   "exports": {
     ".": "./lib/index.js",
     "./lib/prflow.js": "./lib/prflow.js",
+    "./lib/manifest-seat.js": "./lib/manifest-seat.js",
     "./package.json": "./package.json"
   }
 }

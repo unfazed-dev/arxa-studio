@@ -143,6 +143,54 @@ await refuses('a language nothing serves', { lang: 'cobol' })
 await refuses('a path the host cannot resolve', { relPath: '' })
 await refuses('a file with no project manifest above it', { exists: () => false })
 
+// ---- Freestyle root selection + cross-root denial -------------------------
+{
+  const rootA = '/tmp/arxa-lsp-freestyle-a'
+  const rootB = '/tmp/arxa-lsp-freestyle-b'
+  const resolved = []
+  const spawned = []
+  const fakeChild = () => ({
+    stdout: { on: () => {} }, stderr: { on: () => {} }, stdin: { write: () => {} },
+    on: () => {}, kill: () => {},
+  })
+  const bridge = createLspBridge({
+    secret: SECRET,
+    getOrgPath: () => ORG,
+    getRootPath: (rootId) => ({ 'root-a': rootA, 'root-b': rootB })[rootId] ?? null,
+    resolveAbs: async (args) => { resolved.push(args); return path.join(args.orgPath, args.relPath) },
+    exists: (p) => p === '/bin/fake-rust' || p === path.join(rootA, 'Cargo.toml'),
+    spawn: (_cmd, _args, opts) => { spawned.push(opts.cwd); return fakeChild() },
+    shellPath: '',
+    servers: { rust: { exts: ['.rs'], cmd: '/bin/fake-rust', args: [], rootMarkers: ['Cargo.toml'] } },
+  })
+  let upgraded = 0
+  const wss = { handleUpgrade: (_req, _socket, _head, cb) => { upgraded++; cb({ on: () => {}, close: () => {}, send: () => {} }) } }
+  const tokenA = issueToken({ secret: SECRET, scope: 'lsp', orgPath: rootA })
+  const accepted = fakeSocket()
+  await bridge.handleUpgrade({
+    url: '/__arxa/artifacts/lsp?lang=rust&path=src/main.rs&rootId=root-a',
+    headers: { 'sec-websocket-protocol': 'arxa-lsp, ' + tokenA },
+  }, accepted, Buffer.alloc(0), wss)
+  assert.equal(accepted.destroyed, false, 'a token for the selected Freestyle root is accepted')
+  assert.equal(upgraded, 1, 'the accepted Freestyle request reaches WebSocket upgrade')
+  assert.equal(resolved[0].orgPath, rootA, 'path resolution is bounded by the selected Freestyle root')
+  assert.equal(resolved[0].rootId, 'root-a', 'the selected registry id reaches path resolution')
+  assert.deepEqual(spawned, [rootA], 'the language server roots at the Freestyle project')
+
+  const wrong = fakeSocket()
+  const tokenB = issueToken({ secret: SECRET, scope: 'lsp', orgPath: rootB })
+  await bridge.handleUpgrade({
+    url: '/__arxa/artifacts/lsp?lang=rust&path=src/main.rs&rootId=root-a',
+    headers: { 'sec-websocket-protocol': 'arxa-lsp, ' + tokenB },
+  }, wrong, Buffer.alloc(0), wss)
+  assert.equal(wrong.destroyed, true, 'a token for root B cannot open a socket against root A')
+  assert.equal(upgraded, 1, 'cross-root denial happens before WebSocket upgrade')
+  assert.equal(resolved.length, 1, 'cross-root denial happens before filesystem resolution')
+  bridge.retainRoots([rootB])
+  assert.equal(bridge.running.size, 0, 'closing a Freestyle root reaps its language server')
+  ok('Freestyle LSP selects the requested open root and denies cross-root tokens')
+}
+
 // ---- 2c: the rest of the languages -----------------------------------------
 {
   for (const [ext, lang] of [

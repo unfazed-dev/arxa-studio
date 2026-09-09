@@ -17,7 +17,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { MIME, parseRange } from './org-server.js'
-import { readOpenOrg } from './follow.js'
+import { readOpenOrg, readOpenRoot } from './follow.js'
 import { resolveWorktree } from './write-api.js'
 import { verifyToken } from './tokens.js'
 
@@ -30,6 +30,9 @@ function deny(res, status, msg) {
 }
 function q(req, name) {
   try { return new URL(req.url, 'http://x').searchParams.get(name) } catch { return null }
+}
+function hasReservedSegment(relPath) {
+  return String(relPath ?? '').split(/[\\/]+/).some((part) => part === '.git' || part === '.arxa')
 }
 /** Escape-proof relPath inside rootReal; returns abs or throws {code}. */
 function inside(rootReal, relPath) {
@@ -83,7 +86,7 @@ export async function resolveWorktreeFile({ env, orgPath, worktreeId, relPath })
   if (real !== rootReal && !real.startsWith(rootReal + path.sep)) {
     throw Object.assign(new Error('escape'), { code: 'ESCAPE' })
   }
-  return { abs, size: st.size }
+  return { abs, size: st.size, mtimeMs: st.mtimeMs }
 }
 
 /**
@@ -95,14 +98,33 @@ export function createWorktreeRoute({ env = process.env, secret }) {
     try {
       if (req.method !== 'GET' && req.method !== 'HEAD') return deny(res, 405, 'GET/HEAD only')
       const session = q(req, 'session')
+      const rootId = q(req, 'root')
       const relPath = q(req, 'path')
-      const ok = verifyToken(q(req, 'avt'), { secret, scope: 'wt-read', worktreeId: session, relPath })
+      if (session && rootId) return deny(res, 400, 'choose session or root')
+      const root = rootId ? readOpenRoot(env, rootId) : null
+      if (rootId && !root) return deny(res, 403, 'root not open')
+      const ok = verifyToken(q(req, 'avt'), root
+        ? { secret, scope: 'read', orgPath: root.path, relPath }
+        : { secret, scope: 'wt-read', worktreeId: session, relPath })
       if (!ok.ok) return deny(res, 403, 'missing or invalid token (' + (ok.reason || '?') + ')')
       const open = readOpenOrg(env)
       let file
       const t0 = Date.now()
       try {
-        file = await resolveWorktreeFile({ env, orgPath: open ? open.orgPath : null, worktreeId: session, relPath })
+        if (root) {
+          try {
+            const mod = await import('arxa-freestyle').catch(() => import(new URL('../../arxa-freestyle/lib/index.js', import.meta.url).href))
+            const resolved = mod.resolveFreestyleInside(root.path, relPath)
+            const st = fs.statSync(resolved.abs)
+            if (!st.isFile()) throw Object.assign(new Error('not a file'), { code: 'NOT_FILE' })
+            file = { abs: resolved.abs, size: st.size, mtimeMs: st.mtimeMs }
+          } catch (err) {
+            if (err?.code === 'ENOENT' || err?.code === 'ENOTDIR' || err?.code === 'NOT_FILE') throw Object.assign(new Error('not a file'), { code: 'NOT_FILE' })
+            throw Object.assign(new Error('root escape'), { code: 'ESCAPE' })
+          }
+        } else {
+          file = await resolveWorktreeFile({ env, orgPath: open ? open.orgPath : null, worktreeId: session, relPath })
+        }
         // Server-side cost only; the trace line on the client shows the wait.
         if (Date.now() - t0 > 100) console.log('[arxa-artifact-viewer] wt-read resolve took ' + (Date.now() - t0) + 'ms ' + String(relPath).slice(0, 80))
       } catch (err) {
@@ -111,7 +133,12 @@ export function createWorktreeRoute({ env = process.env, secret }) {
         return deny(res, code, code === 500 ? 'internal error' : (err.message || 'unresolvable'))
       }
       const type = MIME[path.extname(file.abs).toLowerCase()] || 'application/octet-stream'
-      const base = { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }
+      const base = {
+        'content-type': type,
+        'cache-control': 'no-store',
+        'x-content-type-options': 'nosniff',
+        'x-arxa-mtime-ms': String(file.mtimeMs),
+      }
       const range = parseRange(req.headers.range, file.size)
       if (range) {
         res.writeHead(206, {
@@ -134,24 +161,54 @@ export function createWorktreeRoute({ env = process.env, secret }) {
 }
 
 /**
- * GET /__arxa/artifacts/tree?dir=<rel>&avt=<token>
- * Token class 'tree-read' bound to the open orgPath. One directory per call
- * (the sidebar lazy-loads per expand). D94: only .git/ and .arxa/ are never
- * listed; all other dot-entries are (GitHub-parity visibility).
+ * GET /__arxa/artifacts/tree?dir=<rel>&avt=<token>&root=<id>
+ * Token class 'tree-read'. No `root` -> the open org, exactly as before
+ * (D90). `root=<id>` (Task 8, freestyle-section) lists inside that open
+ * root instead — org or Freestyle, resolved fresh against readOpenRoots on
+ * every request, so a root that has since closed or been forgotten simply
+ * isn't found (independent of whether an old token would otherwise still
+ * verify). One directory per call (the sidebar lazy-loads per expand). D94:
+ * only .git/ and .arxa/ are never listed; all other dot-entries are
+ * (GitHub-parity visibility).
  */
 export function createTreeRoute({ env = process.env, secret }) {
   async function handle(req, res) {
     try {
       if (req.method !== 'GET') return deny(res, 405, 'GET only')
       const dir = q(req, 'dir') || ''
-      const open = readOpenOrg(env)
-      if (!open) return deny(res, 403, 'no org open')
-      const ok = verifyToken(q(req, 'avt'), { secret, scope: 'tree-read', orgPath: open.orgPath })
+      if (hasReservedSegment(dir)) return deny(res, 403, 'reserved internal directory')
+      const rootId = q(req, 'root')
+      let targetPath
+      if (rootId) {
+        const found = readOpenRoot(env, rootId)
+        if (!found) return deny(res, 403, 'root not open')
+        targetPath = found.path
+      } else {
+        const open = readOpenOrg(env)
+        if (!open) return deny(res, 403, 'no org open')
+        targetPath = open.orgPath
+      }
+      const ok = verifyToken(q(req, 'avt'), { secret, scope: 'tree-read', orgPath: targetPath })
       if (!ok.ok) return deny(res, 403, 'missing or invalid token (' + (ok.reason || '?') + ')')
       let abs
       try {
-        const rootReal = fs.realpathSync(path.resolve(open.orgPath))
+        const rootReal = fs.realpathSync(path.resolve(targetPath))
         abs = dir === '' ? rootReal : inside(rootReal, dir)
+        // Symlink escape: inside() only checks the syntactic join. A symlink
+        // anywhere under the root (even one legitimately reachable from it)
+        // could otherwise point OUT — into another open root, say — and leak
+        // that root's listing through this one's token. realpath the
+        // resolved target and re-check containment, mirroring
+        // resolveWorktreeFile's double-check above. Same-root symlinks still
+        // resolve and list fine; only an actual escape is refused.
+        const absReal = fs.realpathSync(abs)
+        if (absReal !== rootReal && !absReal.startsWith(rootReal + path.sep)) {
+          return deny(res, 403, 'unresolvable dir')
+        }
+        if (hasReservedSegment(path.relative(rootReal, absReal))) {
+          return deny(res, 403, 'reserved internal directory')
+        }
+        abs = absReal
         const st = fs.statSync(abs)
         if (!st.isDirectory()) return deny(res, 404, 'not a directory')
       } catch (err) {
@@ -167,7 +224,7 @@ export function createTreeRoute({ env = process.env, secret }) {
         // Everything else (including .github/, .gitignore, dotfiles) is a
         // real sidebar row: generated files must be visible here, not only
         // in the GitHub repo (the 2026-09-01 sync/visibility grill).
-        if (name === '.git' || name === '.arxa') continue
+        if (name === '.git' || name === '.arxa' || (rootId && name === '.gitkeep')) continue
         let isDir = false
         try { isDir = fs.statSync(path.join(abs, name)).isDirectory() } catch { continue }
         ;(isDir ? dirs : files).push(name)

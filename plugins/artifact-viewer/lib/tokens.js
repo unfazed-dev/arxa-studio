@@ -21,7 +21,11 @@ function sign(payload, secret) {
   return crypto.createHmac('sha256', secret).update(payload).digest('base64url')
 }
 
-/** Issue a token. ttlSeconds is clamped into [1, TOKEN_TTL_CEILING_SECONDS]. */
+/** Issue a token. ttlSeconds is clamped into [1, TOKEN_TTL_CEILING_SECONDS].
+ * Freestyle-section Task 8: the orgPath claim now means "root path" — it
+ * binds a token to any open root (the org or a Freestyle root), not only
+ * the org. No behavior change here: verifyToken below still does exact
+ * string equality against whatever path the caller passes in. */
 export function issueToken({ secret, scope, relPath = null, orgPath = null, worktreeId = null, ttlSeconds = 120, now = () => Math.floor(Date.now() / 1000) }) {
   if (!secret || typeof scope !== 'string') throw new TypeError('issueToken: secret and scope are required')
   const ttl = Math.max(1, Math.min(Number(ttlSeconds) || 120, TOKEN_TTL_CEILING_SECONDS))

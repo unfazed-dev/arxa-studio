@@ -19,7 +19,7 @@
 export const name = 'arxa-git-workspace'
 
 export { GitUnavailableError, probeGit, resetProbe, ensureGit, gitBin } from './probe.js'
-export { FRAME_JOB, FRAME_VERSION, SUBJECT_TYPES, SUBJECT_RE, orgCheckSh, projectCheckSh, ciYml, prTemplate, protectionPayload, settingsPayload, writeFrameFiles, frameStatus, frameFileState } from './frame.js'
+export { FRAME_JOB, FRAME_VERSION, SUBJECT_TYPES, SUBJECT_RE, orgCheckSh, projectCheckSh, freestyleCheckSh, ciYml, prTemplate, protectionPayload, settingsPayload, writeFrameFiles, frameStatus, frameFileState } from './frame.js'
 export { createWipWatcher } from './watch.js'
 export {
   DOCK_ROUTES,
@@ -28,11 +28,12 @@ export {
   RoutingRefusedError,
   routeDock,
   resolveSessionRepo,
+  resolveFreestyleRepo,
   projectRepos,
 } from './routing.js'
 export { runGit, runGitAsync, STAGE_IDENTITY, WIP_IDENTITY } from './run.js'
 export { reviewedTip } from './commits.js'
-export { ORG_GITIGNORE, FRAME_UNIGNORE_LINES, orgIgnoreFor, ensureFrameUnignored, isRepo, hasHead, initOrgRepo, initProjectRepo, getOrigin, setOrigin, pushRepo, fetchRepo, mainSyncState, ffMergeMain, readSnapshotMarker, snapshotOrgRepo, snapshotWorkerLive, spawnSnapshotOrgRepo, fetchRepoAsync, pushRepoAsync } from './repos.js'
+export { ORG_GITIGNORE, FRAME_UNIGNORE_LINES, orgIgnoreFor, ensureFrameUnignored, isRepo, hasHead, initOrgRepo, initPlainRepo, initProjectRepo, getOrigin, setOrigin, pushRepo, fetchRepo, mainSyncState, ffMergeMain, readSnapshotMarker, snapshotOrgRepo, snapshotWorkerLive, spawnSnapshotOrgRepo, fetchRepoAsync, pushRepoAsync } from './repos.js'
 export {
   STAGE_BASE_REF,
   WIP_PREFIX,

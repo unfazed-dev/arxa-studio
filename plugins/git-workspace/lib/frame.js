@@ -258,6 +258,40 @@ export function projectCheckSh() {
   return checkShHead() + '\n' + body + '\n' + subjectCheckSh() + '\n'
 }
 
+/** Freestyle repos (F4/F8): one root, ANY stack (or none), no stage/track
+ * layout to assume — a Freestyle folder is not an arxa-scaffolded project,
+ * so this probes for whichever stack marker lives at the root and runs its
+ * own test command when the tool is on PATH. Green by absence: an
+ * unrecognised root still passes on commit hygiene alone. */
+export function freestyleCheckSh() {
+  const body = [
+    '',
+    '# --- freestyle stack probe (whatever lives at the root) -------------------',
+    'if [ -f package.json ]; then',
+    '  if command -v npm >/dev/null 2>&1 && grep -q \'"test"\' package.json; then',
+    '    npm test --silent || fail "npm test"',
+    '  fi',
+    'elif [ -f pubspec.yaml ]; then',
+    '  if command -v flutter >/dev/null 2>&1; then',
+    '    flutter test || fail "flutter test"',
+    '  fi',
+    'elif [ -f Cargo.toml ]; then',
+    '  if command -v cargo >/dev/null 2>&1; then',
+    '    cargo test --quiet || fail "cargo test"',
+    '  fi',
+    'elif [ -f go.mod ]; then',
+    '  if command -v go >/dev/null 2>&1; then',
+    '    go test ./... || fail "go test"',
+    '  fi',
+    'elif [ -f pyproject.toml ] || [ -f requirements.txt ]; then',
+    '  if command -v python3 >/dev/null 2>&1; then',
+    '    python3 -m pytest -q || fail "pytest"',
+    '  fi',
+    'fi',
+  ].join('\n')
+  return checkShHead() + '\n' + body + '\n' + subjectCheckSh() + '\n'
+}
+
 /** ci.yml — canon: self-hosted labels, concurrency+cancel, timeout always. */
 export function ciYml() {
   return [
@@ -348,13 +382,22 @@ export function settingsPayload() {
  * The generated frame files. `stamped` files carry a version + content hash so
  * a later fix can be rolled out to repos that already exist; the PR template is
  * prose a human is meant to edit, so it is written once and never upgraded.
+ *
+ * Freestyle (F4) is not GitHub-shaped by default: a Freestyle root has no
+ * PR workflow assumed (it may never be pushed anywhere), so it gets check.sh
+ * alone unless the caller opts into ci.yml for publish time — at which point
+ * it gets the PR template too, same as org/project, since publishing is what
+ * makes the GitHub-hosted-repo conventions apply.
  */
 function frameFiles(kind, includeCiYml) {
-  const isOrg = kind === 'org'
-  const files = [
-    { rel: 'check.sh', content: isOrg ? orgCheckSh() : projectCheckSh(), mode: 0o755, stamped: true },
-    { rel: path.join('.github', 'pull_request_template.md'), content: prTemplate(), mode: 0o644, stamped: false },
-  ]
+  let checkContent
+  if (kind === 'org') checkContent = orgCheckSh()
+  else if (kind === 'project') checkContent = projectCheckSh()
+  else if (kind === 'freestyle') checkContent = freestyleCheckSh()
+  else throw new TypeError('frame kind must be org|project|freestyle')
+
+  const files = [{ rel: 'check.sh', content: checkContent, mode: 0o755, stamped: true }]
+  if (kind !== 'freestyle' || includeCiYml) files.push({ rel: path.join('.github', 'pull_request_template.md'), content: prTemplate(), mode: 0o644, stamped: false })
   if (includeCiYml) files.push({ rel: path.join('.github', 'workflows', 'ci.yml'), content: ciYml(), mode: 0o644, stamped: true })
   return files
 }

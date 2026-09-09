@@ -90,7 +90,7 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   assert.match(t5client, /if \(ok\) return/, 'wt lane wins; org lane is the fallback on a miss')
   // Phase 1 conformance rebuild (docs/plans/dsh-plugin-ui-conformance.md):
   // store-based ingress replaces the D93 retry ladder + parked payload.
-  assert.match(t5client, /const openArtifact = async \(relPathArg\) => \{/, 'openArtifact takes the relPath argument')
+  assert.match(t5client, /const openArtifact = async \(relPathArg, rootId = null\) => \{/, 'openArtifact takes the relPath and optional root identity')
   assert.match(t5client, /String\(relPathArg \|\| ''\)/, 'the debug path-input form and its draft state are gone')
   const t5code = t5client.replace(/\/\*\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
   assert.doesNotMatch(t5code, /__ARXA_AV_PENDING__|for \(const delay of \[0, 120, 400, 1000, 2000\]\)|setInterval\(/,
@@ -98,8 +98,27 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   assert.doesNotMatch(t5code, /__ARXA_AV_CHIP_INTERCEPT__|__ARXA_SESSIONS__|__ARXA_AV_DEBUG__/,
     'window debug globals are gone (ctx.effect disposal replaces the install-once flag)')
   assert.match(t5client, /function createAvStore\(\)/, 'ingress store exists')
-  assert.match(t5client, /store\.request\(\{ sessionId: detail\.sessionId \|\| null, relPath: detail\.relPath, t0: Math\.round\(performance\.now\(\)\) \}\)/, 'apply() parks opens in the store, stamped with the click time')
+  assert.match(t5client, /store\.request\(\{ sessionId: detail\.sessionId \|\| null, rootId: detail\.rootId \|\| null, relPath: detail\.relPath, t0: Math\.round\(performance\.now\(\)\) \}\)/, 'apply() parks root-aware opens in the store, stamped with the click time')
   assert.match(t5client, /store\.consume\(\)/, 'the mounted panel consumes the pending open')
+  const saveStart = t5client.indexOf('const save = async (force = false) =>')
+  const saveEnd = t5client.indexOf('/** Auto-save:', saveStart)
+  const saveSrc = t5client.slice(saveStart, saveEnd)
+  assert.ok(saveSrc.indexOf('content = docRef.current.getText()') < saveSrc.indexOf('await fetchToken('),
+    'save freezes document bytes before the token wait so navigation cannot cross-write files')
+  const saveTokenAt = saveSrc.indexOf('await fetchToken(')
+  const savePostAt = saveSrc.indexOf('const res = await fetch(WRITE_ROUTE', saveTokenAt)
+  const saveBodyAt = saveSrc.indexOf('const body = await res.json()', savePostAt)
+  assert.doesNotMatch(saveSrc.slice(saveTokenAt, savePostAt), /request !== openRequestRef\.current/,
+    'navigation does not cancel a frozen autosave before its write reaches the old target')
+  assert.match(saveSrc.slice(saveBodyAt), /if \(request !== openRequestRef\.current\) return/,
+    'a completed old-target save cannot alter the newly opened viewer UI')
+  const changesStart = t5client.indexOf('const refreshChanges = React.useCallback')
+  const changesEnd = t5client.indexOf('React.useEffect(() => {', changesStart)
+  const changesSrc = t5client.slice(changesStart, changesEnd)
+  assert.doesNotMatch(changesSrc, /ensureSession\(/,
+    'passive changes refresh never creates an org session when a root file opens')
+  assert.match(changesSrc, /if \(!sessionId\) \{ setChanges\(\[\]\); return \}/,
+    'changes refresh is empty when no current session already exists')
   assert.match(t5client, /ctx\.layout\.openViewer\(\)/, 'the listener opens the column through the layout face')
   assert.match(t5client, /sessions\.list\.subscribe/, 'session tracking subscribes the dsh sessions snapshot store')
   assert.match(t5client, /MutationObserver/, 'first-produced-file-per-turn auto-open observer present')
@@ -635,27 +654,28 @@ assert.ok(spikeSrc.includes('out.narrowMinimap === false') && spikeSrc.includes(
 // for its own path checks) and hands it back with the token.
 const hostSrc = fs.readFileSync(path2.join(here, 'lib', 'index.js'), 'utf8')
 const lspSrc = fs.readFileSync(path2.join(here, 'lib', 'lsp.js'), 'utf8')
-assert.ok(hostSrc.includes("absPath: absOf(open.orgPath, body.relPath)"), 'the read token route returns the file\'s real path')
+assert.ok(hostSrc.includes("absPath: absOf(open.path, body.relPath)"), 'the read token route returns the file\'s real path')
 assert.ok(hostSrc.includes('absPath: wtAbs'), 'the worktree token route returns it too (resolveWorktreeFile already knew it)')
 assert.ok(hostSrc.includes("path: '/__arxa/artifacts/lsp'"), 'the lsp socket is registered as an upgrade route')
-assert.ok(hostSrc.includes("lspBridge.stopAll('org-switch')"), 'an org switch stops every language server')
+assert.ok(hostSrc.includes('lspBridge.retainRoots(roots.map((r) => r.path))'),
+  'root reconciliation stops language servers only for roots that closed')
 assert.ok(hostSrc.includes('resolveAbs: async ({ relPath, session, orgPath })'), 'the HOST resolves paths — the client never names one')
 assert.ok(lspSrc.includes('const root = projectRootFor(absFile, orgPath, servers[lang].rootMarkers, exists,'),
   'the server is rooted at the project, not the org (an org has no Cargo.toml, so it would report nothing)')
 assert.ok(lspSrc.includes('{ fallbackToFileDir: servers[lang].rootFallback === true }'),
   'a language with no manifest (html, css, json, a loose .ts) roots at the file\'s own directory instead of being denied')
 assert.ok(clientSrc.includes("M.openFile(ref.current, absPath || ('/' + relPath), text"), 'the model is keyed on the real path, falling back to the relative one')
-assert.ok(clientSrc.includes("fetchTokenRaw({ scope: 'lsp' })"), 'the socket uses the separate lsp token class')
-assert.ok(clientSrc.includes('M.connectLanguageServer(lang, { url: wsUrl, token, relPath, session,'),
-  'the editor attaches a language client, passing the session so a worktree file resolves')
+assert.ok(clientSrc.includes("fetchTokenRaw({ scope: 'lsp', rootId })"), 'the socket uses the root-bound lsp token class')
+assert.ok(clientSrc.includes('M.connectLanguageServer(lang, { url: wsUrl, token, relPath, uriPath: absPath, session, rootId,'),
+  'the editor attaches a language client, passing its exact file URI, session and root identity')
 
 // ---- 2c: the rest of the languages + the Install door -----------------------
 assert.ok(hostSrc.includes("path: '/__arxa/artifacts/lsp/install'") && hostSrc.includes("path: '/__arxa/artifacts/lsp/status'"),
   'the install door and the status face are both registered')
 assert.ok(hostSrc.includes("body.scope === 'lsp-install'"),
   'installing has its own token class — a leaked lsp token starts a server, it must not put new software on the machine')
-assert.ok(hostSrc.includes("scope: 'lsp-install', orgPath: openI.orgPath") && hostSrc.includes('const installing = new Map()'),
-  'the install door is org-bound and runs one npm per language at a time')
+assert.ok(hostSrc.includes("scope: 'lsp-install', orgPath: openI.path") && hostSrc.includes('selectedOpenRoot(process.env, body.rootId)') && hostSrc.includes('const installing = new Map()'),
+  'the install door is root-bound and runs one npm per language at a time')
 assert.ok(!hostSrc.includes('void installServer(') && hostSrc.includes('installArgv(lang) === null'),
   'nothing installs on its own: the door refuses any language without an npm row (dart and rust are locate-only)')
 for (const ext of ["'.ts'", "'.tsx'", "'.js'", "'.html'", "'.css'", "'.scss'", "'.json'"]) {
@@ -663,15 +683,15 @@ for (const ext of ["'.ts'", "'.tsx'", "'.js'", "'.html'", "'.css'", "'.scss'", "
 }
 assert.ok(clientSrc.includes("fetch(LSP_ROUTE + '/status?avt='"),
   'the editor ASKS whether a server exists before connecting — the 4004 close arrives after the socket opens, too late to decide')
-assert.ok(clientSrc.includes("fetchTokenRaw({ scope: 'lsp-install' })") && clientSrc.includes("LSP_ROUTE + '/install'"),
-  'the Install button is the only thing that installs')
+assert.ok(clientSrc.includes("fetchTokenRaw({ scope: 'lsp-install', rootId })") && clientSrc.includes("LSP_ROUTE + '/install'"),
+  'the Install button is the only thing that installs, with authority bound to the selected root')
 assert.ok(clientSrc.includes('lsp.installable') && clientSrc.includes('install its SDK'),
   'a locate-only language gets a sentence, not a download button')
 assert.ok(clientSrc.includes("h('div', { className: 'aXa_av_lspHost', ref })"),
   'the editor host keeps a stable child slot, so showing the strip cannot unmount a live editor')
 const entrySrc2c = fs.readFileSync(path2.join(here, 'lib', 'monaco-build', 'src', 'entry.mjs'), 'utf8')
-assert.ok(entrySrc2c.includes('(selector ?? [lang]).map((language) => ({ language }))'),
-  'one server can own several monaco language ids (js for the ts server, scss/less for css, jsonc for json)')
+assert.ok(entrySrc2c.includes('(selector ?? [lang]).map((language) => ({') && entrySrc2c.includes("scheme: 'file'"),
+  'one root-scoped server can own several monaco language ids (js for ts, scss/less for css, jsonc for json)')
 assert.ok(entrySrc2c.includes("import '@codingame/monaco-vscode-markdown-basics-default-extension'"),
   'markdown has a GRAMMAR: with only the feature extension a .md file opened as plaintext')
 assert.ok(entrySrc2c.includes("import '@codingame/monaco-vscode-markdown-language-features-default-extension'"),
@@ -735,14 +755,18 @@ assert.ok(lspSrc.includes('tsserver: { fallbackPath:'),
 assert.match(clientSrc, /catch \{ \/\* no language service; the editor is unaffected \*\/ \}/,
   'a missing language service NEVER fails the open — the editor works without one')
 assert.ok(entrySrc.includes("['arxa-lsp', token]"), 'the bundle sends the token as a subprotocol (a browser cannot set headers)')
-assert.ok(entrySrc.includes('if (langClients.has(lang)) return true'), 'one language client per language, not one per file opened')
+assert.ok(entrySrc.includes('const current = langClients.get(lang)') && entrySrc.includes('pattern: literalPattern')
+  && entrySrc.includes("if (ch === '[') return '[[]'")
+  && entrySrc.includes('await current.client.stop()'),
+  'one client per language is re-pointed with an exact file selector, so retained models cannot cross roots')
 // The LSP lane is now proven in a BROWSER, not only by these string pins. A
 // splice deleted connectLanguageServer once and the build stayed green, because
 // nothing in the bundle imports it — only client.js does, at runtime.
 assert.ok(checkSrc.includes('WebSocketServer') && checkSrc.includes("method: 'textDocument/publishDiagnostics'"),
   'the check harness runs a stub language server')
-assert.ok(spikeSrc.includes("out.lspMarkers > 0") && spikeSrc.includes("out.lspSource === 'arxa-stub'"),
-  'and asserts the server\'s diagnostic became a MARKER on the model — client started, document synced, diagnostic applied')
+assert.ok(spikeSrc.includes("out.lspMarkers > 0") && spikeSrc.includes("out.lspSource === 'arxa-stub:spike-root-a'")
+  && spikeSrc.includes("JSON.stringify(out.lspObserved['spike-root-b'])"),
+  'and proves same-language clients sync only their selected root model while diagnostics still reach Monaco')
 assert.ok(spikeSrc.includes('out.dialogs === 0') && spikeSrc.includes("out.afterConflict.startsWith('EDITED')"),
   'an external change under unsaved edits raises NO VS Code dialog and keeps the edits — the viewer\'s conflict banner stays the only prompt')
 assert.match(clientSrc, /IconEnhanceOutline16/, 'format action uses the enhance glyph')
@@ -766,9 +790,9 @@ assert.ok(clientSrc.includes("await M.openDiff(uri, diffOriginal, {"),
 // takes either, so the viewer's mirrored session reaches its worktree.
 {
   const wa = fs.readFileSync(path2.join(here, 'lib', 'write-api.js'), 'utf8')
-  assert.ok(wa.includes("(r.id === worktreeId || r.dshSessionId === worktreeId)"),
+  assert.ok(wa.includes("row.id !== worktreeId && row.dshSessionId !== worktreeId"),
     'resolveWorktree matches the dsh session id as well as the registry id')
-  assert.ok(wa.includes('? row.worktree') && wa.includes('return { repoPath, worktreePath, worktree: worktreePath }'),
+  assert.ok(wa.includes('? row.worktree') && wa.includes('matches.set(key, { repoPath, worktreePath, worktree: worktreePath })'),
     'resolveWorktree takes the path from the registry row and returns it under both names wt-api and write-api read')
   const wt = fs.readFileSync(path2.join(here, 'lib', 'wt-api.js'), 'utf8')
   assert.ok(!wt.includes("/[/\\\\]/.test(worktreeId)"), 'resolveWorktreeFile no longer refuses the slash every registry id carries')
@@ -784,7 +808,7 @@ assert.ok(fs.readFileSync(path2.join(here, 'lib', 'index.js'), 'utf8').includes(
 // Decision B (2026-09-07): with a session current, a tree open shows the
 // SESSION's copy of the file — where the viewer's own saves land (D38) — and
 // falls back to the org copy quietly when the session has none.
-assert.ok(clientSrc.includes("const sid = p.sessionId || store.getSnapshot().sessionId || null")
+assert.ok(clientSrc.includes("const sid = rootId ? null : (p.sessionId || store.getSnapshot().sessionId || null)")
   && clientSrc.includes("openWorktreeRef.current(sid, p.relPath, { quiet: true })"),
   'a plain tree open routes through the current session worktree with a quiet org fallback')
 assert.ok(/const openWorktree = async \(sessionId, relPath, \{ quiet = false \} = \{\}\)/.test(clientSrc)
@@ -795,7 +819,7 @@ assert.ok(/const openWorktree = async \(sessionId, relPath, \{ quiet = false \} 
 // bytes back over the document. Register once; disk changes use updateFile.
 assert.ok(entrySrc.includes('else if (loaded.get(uriPath) !== text) await syncFile(uriPath, text)'),
   'openFile syncs only a NEW load; a re-open with the same loaded bytes leaves the document alone')
-assert.ok(/\}, \[relPath, absPath, session, editable\]\)/.test(clientSrc) && clientSrc.includes('M.updateFile(uri, text)'),
+assert.ok(/\}, \[relPath, absPath, session, rootId, editable\]\)/.test(clientSrc) && clientSrc.includes('M.updateFile(uri, text)'),
   'the client does not re-open on a text change; a clean-buffer disk change goes through updateFile')
 assert.ok(clientSrc.includes("h(CodeView, { key: 'surface'"),
   'the editor surface is keyed so a note appearing above it cannot remount it')

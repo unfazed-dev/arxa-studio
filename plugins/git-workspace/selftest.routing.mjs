@@ -50,7 +50,7 @@ ok('table: every dock in DOCK_ROUTES has a kind, and the set is the D99 list', (
     DOCK_ROUTES.map((r) => r.dock).sort(),
     ['account', 'communications', 'meetings', 'notes', 'projects'],
   )
-  assert.deepEqual([...ROUTING_REASONS], ['account', 'unknown-dock', 'no-head'])
+  assert.deepEqual([...ROUTING_REASONS], ['account', 'unknown-dock', 'no-head', 'outside-root'])
 })
 
 ok('table: notes/meetings/communications route to the org repo', () => {
