@@ -118,3 +118,12 @@ two here because Freestyle must be able to open an arbitrary folder, F1);
   purge modal "Remove this folder from the Trash?" with the button dead until
   "Sandbox" is retyped. Capture (the purge modal, armed):
   `docs/plans/phase0b-snapshots/freestyle/parity-purge-modal.png`.
+- Committed as `52262e9`.
+
+## Installed
+
+- `2fa57f4` + `52262e9` on `main`, pushed. CI 103 suites ALL GREEN.
+- Sidecar 241.1 MB, payload sha12 `840ace568bee`; bundled binary `57db2fe3ac2cc076` matches the packed sidecar.
+- Installed engine `~/.arxa/engine/840ace568bee` — `client.js` sha `d439d7adfd36` byte-identical to the repo; `FreestyleModals` and `root.disconnect` present. LaunchAgent count 1, Freestyle state route answering on 7891.
+- Rollback: `/Applications/Arxa Studio.app.bak`.
+- Observed in the Part 2 capture, not touched: with the Trash section auto-opened, the "Trash" header text and the trashed row's title overlap for a moment. Pre-existing section geometry from the trash-parity round; worth its own look.
