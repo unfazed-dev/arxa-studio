@@ -118,6 +118,9 @@ try {
   const tree = await callGet(createTreeRoute({ env, secret }), '/?root=fs-alias&avt=' + encodeURIComponent(treeToken))
   assert.equal(tree.status, 200)
   assert.equal(tree.body.files.includes('.gitkeep'), false, 'Freestyle placeholder stays hidden')
+  const orgTree = await callGet(createTreeRoute({ env, secret }), '/?avt=' + encodeURIComponent(treeToken))
+  assert.equal(orgTree.status, 200)
+  assert.equal(orgTree.body.files.includes('.gitkeep'), true, 'the same file stays visible through the unchanged org tree')
   console.log('PASS root aliases resolve token, metadata, tree and file reads without duplicating servers')
 
   const globalRootDir = path.join(sandbox, 'global-root')
