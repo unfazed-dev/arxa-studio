@@ -203,3 +203,15 @@ their header rows 4px right of the org ones.
 The `S-parity` pins now check position as well as style: the shared style
 fragment still appears four times, the Freestyle pair additionally carries the
 `marginLeft: -4`, and both CSS rules are pinned by their exact text.
+
+**Narrow rail:** `.aXa_fs_body` has exactly one render site
+(`freestyle-region.snippet.txt:315`) and `FreestyleBrowser` returns `null` one
+line above it when `!wide`, so the new 12px inset cannot reach the collapsed
+sidebar — the element does not exist there.
+
+**Known ceiling, stated rather than solved.** The new pins assert the CSS
+*declarations* by exact text, not the resulting geometry. A future change to the
+stock `.aXa_wsb_root` inset would move the Organisations pane and leave
+Freestyle behind, and nothing in CI would go red. The six-edge measurement above
+is the check that would catch it, and it needs a live engine — worth re-running
+by hand when the stock browser CSS changes, not worth a geometry harness in CI.
