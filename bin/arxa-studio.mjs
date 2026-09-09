@@ -486,6 +486,16 @@ if (packed) {
   // ERR_MODULE_NOT_FOUND for git-workspace/lib/repos.js).
   rmSync(join(nm, 'arxa-freestyle'), { recursive: true, force: true })
   cpSync(freestyleDir, join(nm, 'arxa-freestyle'), { recursive: true })
+  // pnpm's file dependency excludes the gitignored Monaco build, even when
+  // it exists in this checkout. Keep the built editor available in the dev
+  // profile as it is in packed payloads; otherwise opening a file returns
+  // 404 for arxa-monaco.js. Build tools/node_modules are never copied here.
+  const monacoDist = join(artifactViewerDir, 'lib', 'monaco-build', 'dist')
+  const installedMonacoDist = join(nm, 'arxa-artifact-viewer', 'lib', 'monaco-build', 'dist')
+  if (existsSync(monacoDist) && existsSync(join(nm, 'arxa-artifact-viewer'))) {
+    rmSync(installedMonacoDist, { recursive: true, force: true })
+    cpSync(monacoDist, installedMonacoDist, { recursive: true })
+  }
   for (const [name, dir] of fiveLibs) {
     rmSync(join(nm, name), { recursive: true, force: true })
     cpSync(dir, join(nm, name), { recursive: true })
