@@ -213,12 +213,27 @@ export function createTokenRoutes({ env = process.env, secret, getSettings, getO
       if (!open) return json(res, 403, { error: body.rootId ? 'root not open' : 'no org open' })
       if (body.orgPath != null && body.orgPath !== open.path) return json(res, 403, { error: 'root not open' })
       if (typeof body.relPath !== 'string' || body.relPath === '') return json(res, 400, { error: 'relPath required' })
+      // An org holds several repos that share filenames — <org>/check.sh and
+      // <org>/projects/<slug>/check.sh both exist and differ. A session file's
+      // relPath is WORKTREE-relative, so resolving it against the org root
+      // silently answers with the org's own same-named file. Callers that know
+      // the session say so, and the worktree rides IN the token so the reader
+      // downstream (main-version) need not guess a repo. No worktreeId is
+      // every existing caller, unchanged.
+      const wtId = typeof body.worktreeId === 'string' && body.worktreeId !== '' ? body.worktreeId : null
       let abs
+      if (wtId) {
+        try { abs = (await resolveWorktreeFile({ env, orgPath: open.path, worktreeId: wtId, relPath: body.relPath })).abs }
+        catch (err) {
+          const map = { BAD: 400, ESCAPE: 403, NO_SESSION: 404, NOT_FILE: 404 }
+          return json(res, map[err?.code] || 404, { error: 'unresolvable worktree file' })
+        }
+      } else
       try { abs = await resolveReadFile(open.path, body.relPath) }
       catch (err) {
         return json(res, err?.code === 'ENOENT' || err?.code === 'ENOTDIR' || err?.code === 'NOT_FILE' ? 404 : 403, { error: 'unresolvable path' })
       }
-      const token = issueToken({ secret, scope: 'read', relPath: body.relPath, orgPath: open.path, ttlSeconds: ttl })
+      const token = issueToken({ secret, scope: 'read', relPath: body.relPath, orgPath: open.path, worktreeId: wtId, ttlSeconds: ttl })
       if (body.rootId) return json(res, 200, { token, absPath: abs })
       const origin = getOrigin()
       if (!origin) return json(res, 503, { error: 'org server not up yet — retry' })
@@ -226,7 +241,7 @@ export function createTokenRoutes({ env = process.env, secret, getSettings, getO
       // a language server's diagnostics land on the right file — a model at
       // /<relPath> would put every underline on a path the server never heard
       // of. Resolved here, server-side, exactly like the path check above.
-      return json(res, 200, { token, origin, absPath: absOf(open.path, body.relPath) })
+      return json(res, 200, { token, origin, absPath: wtId ? abs : absOf(open.path, body.relPath) })
     } catch (err) {
       return json(res, 500, { error: 'internal error' })
     }

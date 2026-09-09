@@ -1696,7 +1696,11 @@ window.__ModuleLoader__.load({
         if (showDiff) { setShowDiff(false); return }
         void (async () => {
           try {
-            const { token } = await fetchToken(state.relPath)
+            // Name the session: this row's relPath is worktree-relative, and
+            // the org root holds a file of the same name that is NOT this one.
+            const { token } = await fetchTokenRaw(wtRef.current
+              ? { relPath: state.relPath, worktreeId: wtRef.current.sessionId }
+              : { relPath: state.relPath })
             const r = await fetch('/__arxa/artifacts/main-version?relPath=' + encodeURIComponent(state.relPath) + '&avt=' + encodeURIComponent(token))
             const body = await r.json().catch(() => ({}))
             if (!r.ok) throw new Error(body.error || ('main-version ' + r.status))

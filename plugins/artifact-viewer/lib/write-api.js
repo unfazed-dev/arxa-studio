@@ -108,7 +108,8 @@ function readBody(req) {
 }
 
 /** GET /__arxa/artifacts/main-version?relPath=&avt= — main's blob of the
- *  OPEN org repo file, read-token gated (same per-file token class as the
+ *  file, read from the repo that OWNS it (the token's worktree, else the
+ *  open org root), read-token gated (same per-file token class as the
  *  viewer), containment-checked, for D84 worktree-vs-main diffs. Empty
  *  content when the file does not exist on main (new-file diffs). */
 export function createMainVersionRoute({ env = process.env, secret }) {
@@ -129,11 +130,28 @@ export function createMainVersionRoute({ env = process.env, secret }) {
         if (!verdict.ok) return json2(403, { error: 'read token ' + verdict.reason })
         let rootReal
         try { rootReal = fs.realpathSync(path.resolve(open.orgPath)) } catch { return json2(403, { error: 'org unreadable' }) }
-        try { resolveInside(rootReal, relPath) } catch { return json2(403, { error: 'outside the org root' }) }
+        // WHICH REPO owns this file. A session file's relPath is worktree-
+        // relative ('check.sh'), and one org holds several repos that share
+        // filenames: <org>/check.sh and <org>/projects/<slug>/check.sh both
+        // exist and differ. Reading 'main:check.sh' from the org root for a
+        // file that came from a project worktree diffs two unrelated files
+        // that happen to share a name — a large, entirely fabricated diff.
+        // The worktree comes from the SIGNED token, never from the query.
+        const worktreeId = verdict.body ? verdict.body.worktreeId : null
+        let base = rootReal
+        if (worktreeId) {
+          const found = await resolveWorktree({ env, orgPath: open.orgPath, worktreeId })
+          // Nothing owns it — a Freestyle 'root:<id>' write id, or a session
+          // closed since the token was minted. 'What does main say?' has no
+          // answer here, and the org root's same-named file is not it.
+          if (!found) return json2(200, { branch: null, content: '' })
+          try { base = fs.realpathSync(path.resolve(found.repoPath)) } catch { return json2(403, { error: 'repo unreadable' }) }
+        }
+        try { resolveInside(base, relPath) } catch { return json2(403, { error: 'outside the repo root' }) }
         for (const branch of ['main', 'master']) {
           try {
             const content = execFileSync('git', ['show', branch + ':' + relPath], {
-              cwd: rootReal, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
+              cwd: base, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
             })
             return json2(200, { branch, content })
           } catch (err) {

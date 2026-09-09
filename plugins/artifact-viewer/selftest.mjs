@@ -68,6 +68,10 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   const clientSrc = fs.readFileSync(join(here, 'lib', 'client.js'), 'utf8')
   assert.doesNotMatch(clientSrc, /inject\('shell\.overlay'/, 'viewer never floats over the frame again (D88)')
   assert.match(clientSrc, /inject\('viewer'/, 'viewer registers into the docked viewer seat')
+  // The diff toggle must NAME the session, or the server's repo resolution has
+  // nothing to resolve and the base silently falls back to the org root.
+  assert.match(clientSrc, /worktreeId: wtRef\.current\.sessionId \}\s*\n\s*: \{ relPath: state\.relPath \}\)/,
+    'the diff toggle mints its base token against the worktree it is showing')
   const frameSrc = fs.readFileSync(join(root, 'plugins', 'arxa-frame', 'lib', 'client.js'), 'utf8')
   assert.match(frameSrc, /renderSlot\("viewer"/, 'frame renders the viewer seat')
   assert.match(frameSrc, /session-maybe/, 'viewer seat is session-scoped (D88 presence)')
@@ -654,7 +658,7 @@ assert.ok(spikeSrc.includes('out.narrowMinimap === false') && spikeSrc.includes(
 // for its own path checks) and hands it back with the token.
 const hostSrc = fs.readFileSync(path2.join(here, 'lib', 'index.js'), 'utf8')
 const lspSrc = fs.readFileSync(path2.join(here, 'lib', 'lsp.js'), 'utf8')
-assert.ok(hostSrc.includes("absPath: absOf(open.path, body.relPath)"), 'the read token route returns the file\'s real path')
+assert.ok(hostSrc.includes("absPath: wtId ? abs : absOf(open.path, body.relPath)"), 'the read token route returns the file\'s real path — the worktree\'s when the token names one')
 assert.ok(hostSrc.includes('absPath: wtAbs'), 'the worktree token route returns it too (resolveWorktreeFile already knew it)')
 assert.ok(hostSrc.includes("path: '/__arxa/artifacts/lsp'"), 'the lsp socket is registered as an upgrade route')
 assert.ok(hostSrc.includes('lspBridge.retainRoots(roots.map((r) => r.path))'),
@@ -982,6 +986,49 @@ const wrongRel = issueToken({ secret, scope: 'read', relPath: 'other.md', orgPat
 assert.equal((await callMain('seed.md', wrongRel)).statusCode, 403, 'relPath-bound token enforced')
 const esc = await callMain('../outside.md', issueToken({ secret, scope: 'read', relPath: '../outside.md', orgPath: orgRepo, ttlSeconds: 30 }))
 assert.equal(esc.statusCode, 403, 'escape -> 403')
+// D84 regression: one org holds several repos that share filenames. A session
+// file's relPath is worktree-relative ('seed.md'), so reading 'main:seed.md'
+// from the ORG root serves a DIFFERENT repo's same-named file as the base —
+// a large, entirely fabricated diff. Observed live on 2026-09-09 (org check.sh
+// rendered as the base for a project session's check.sh). The owning repo
+// comes from the signed token's worktreeId, never from the query string.
+const proj9 = path2.join(orgRepo, 'projects', 'p9')
+fs.mkdirSync(proj9, { recursive: true })
+g(['init', '-b', 'main'], proj9)
+fs.writeFileSync(path2.join(proj9, 'seed.md'), 'project seed\n')
+g(['add', '.'], proj9)
+g(['commit', '-m', 'project init'], proj9)
+sessions.openSession(proj9, { id: 'p9sess', name: 'P9', env: gitEnv })
+const mProj = await callMain('seed.md', issueToken({ secret, scope: 'read', relPath: 'seed.md', orgPath: orgRepo, worktreeId: 'p9sess', ttlSeconds: 30 }))
+assert.equal(mProj.statusCode, 200, 'project-session main-version 200')
+assert.equal(JSON.parse(mProj.body).content, 'project seed\n', 'base comes from the repo that OWNS the file, not the org root')
+// A worktreeId nothing owns (a Freestyle 'root:<id>' write id, a session closed
+// since the token was minted) must not fall back to the org root's namesake.
+const mOrphan = await callMain('seed.md', issueToken({ secret, scope: 'read', relPath: 'seed.md', orgPath: orgRepo, worktreeId: 'root:gone', ttlSeconds: 30 }))
+assert.equal(mOrphan.statusCode, 200, 'unresolvable worktree still 200')
+assert.equal(JSON.parse(mOrphan.body).content, '', 'unresolvable worktree gets an empty base, not the org file')
+assert.equal(JSON.parse(mOrphan.body).branch, null, 'unresolvable worktree names no branch')
+// The org repo's own files still read from the org root (no worktreeId).
+assert.equal(JSON.parse((await callMain('seed.md', readT)).body).content, 'seed\n', 'org-root file unchanged by repo resolution')
+// End-to-end through the REAL token route. The server-side repo resolution is
+// inert unless the token actually carries the worktree, and until 2026-09-09
+// the diff toggle minted a bare { relPath } — so the base still came from the
+// org root. Mint the way the client mints, then read the base with it.
+const tokenRoutes = createTokenRoutes({ env: gitEnvHome, secret, getSettings: () => ({ tokenTtlSeconds: 120 }), getOrigin: () => 'http://127.0.0.1:1' })
+const callTokenRoute = (payload) => new Promise((resolve, rejectP) => {
+  const res = { statusCode: 0, headers: null, body: '', writeHead(st, h) { this.statusCode = st; this.headers = h }, end(b) { this.body = b || '' } }
+  const rq = { method: 'POST', on(ev, fn) {
+    if (ev === 'data') queueMicrotask(() => fn(Buffer.from(JSON.stringify(payload))))
+    if (ev === 'end') queueMicrotask(() => fn())
+  } }
+  tokenRoutes.handle(rq, res).then(() => resolve(res), rejectP)
+})
+const tkRes = await callTokenRoute({ relPath: 'seed.md', worktreeId: 'p9sess' })
+assert.equal(tkRes.statusCode, 200, 'read token for a worktree file -> 200')
+const tkBody = JSON.parse(tkRes.body)
+assert.ok(tkBody.absPath && tkBody.absPath.includes('.arxa/worktrees'), 'the token route resolves a session file in its WORKTREE, not the org root')
+assert.equal(JSON.parse((await callMain('seed.md', tkBody.token)).body).content, 'project seed\n', 'client-shaped token drives the base to the owning repo')
+
 console.log('arxa-artifact-viewer selftest: GREEN (main-version diff route)');
 
 // ---- Task 10: version chip + timeline route (D20/D44) ----------------------

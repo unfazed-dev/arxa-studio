@@ -128,9 +128,11 @@ file, so a branch switch touching two hundred files is one map rebuild.
 
 `node scripts/ci.mjs`: ALL GREEN, drift gate included.
 
-**Not re-verified:** that the Organisations tab renders its own badges live.
-Its path is unchanged here and carries twelve D117 pins, but no capture in this
-round put a dirty org session on screen.
+**Since re-verified** (2026-09-09): the Organisations tab does render its own
+badges — a dirty scratch-org session puts `M` on `check.sh` with the org
+wording. See [`org-diff-base-wrong-repo.md`](org-diff-base-wrong-repo.md),
+which also records the real defect that round surfaced: the viewer's diff base
+was read from the wrong repository.
 
 ## Correction to the two plans
 
