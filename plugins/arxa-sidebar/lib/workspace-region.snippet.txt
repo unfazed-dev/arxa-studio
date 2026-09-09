@@ -2792,67 +2792,6 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 				] })
 			});
 		}
-		/** Welcome gate (D69): with no organisation in recents the app IS a
-		 * blank page with one clickable card — covering any stray dsh-home
-		 * sessions the stock boot may restore. Creating the first org (or
-		 * opening the create modal) lifts it. Phase 2 (conformance plan):
-		 * registered into the frame's declared shell.overlay slot instead of
-		 * fighting the shell with a hand-layered fixed z-index war — the
-		 * overlay layer owns positioning AND pointer events, so this gate is
-		 * lens-screenshot-able like every other overlay. */
-		function WelcomeGate({ t }) {
-			const count = useOrg((s) => s.orgs.length);
-			const freestyle = useFreestyle();
-			const [freestyleError, setFreestyleError] = (0, react.useState)(null);
-			// 2026-09-08: this gate covers the WHOLE app when the org count hits
-			// zero — including the Trash row. Trash your last org and the only
-			// door back was behind the overlay, so the app read as "your work is
-			// gone" while it sat parked and intact in <scope>/.arxa/trash.
-			// The way back therefore has to live on the gate itself.
-			if (!showWelcomeGate(count, freestyle.ui.activeTab)) return null;
-			return (0, react_jsx_runtime.jsx)("div", {
-				// The overlay layer spans every grid column, so inset:0 here buried the
-				// sidebar — and with it the Trash row holding the org you just deleted.
-				// The frame publishes its live sidebar width; start after it. 0px when
-				// collapsed or narrow, which is exactly when there is nothing to spare.
-				style: { position: "absolute", top: 0, right: 0, bottom: 0, left: "var(--aXa-fr-sidebar, 0px)", background: "var(--dsw-alias-bg-base)", display: "flex", alignItems: "center", justifyContent: "center" },
-				children: (0, react_jsx_runtime.jsxs)("div", {
-					role: "button",
-					tabIndex: 0,
-					onClick: () => window.dispatchEvent(new Event("arxa-create-org")),
-					onKeyDown: (e) => { if (e.key === "Enter" || e.key === " ") window.dispatchEvent(new Event("arxa-create-org")); },
-					style: { border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 14, padding: "28px 34px", textAlign: "center", cursor: "pointer", maxWidth: 380, background: "var(--dsw-alias-bg-layer-1)" },
-					children: [
-						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 17, fontWeight: 600, marginBottom: 8 }, children: t("welcome.title") }),
-						(0, react_jsx_runtime.jsx)("div", { style: { fontSize: 13, opacity: 0.65, marginBottom: 18 }, children: t("welcome.desc") }),
-						(0, react_jsx_runtime.jsxs)("div", { style: { display: "flex", gap: 10, justifyContent: "center" }, children: [
-							(0, react_jsx_runtime.jsx)("button", {
-								onClick: () => window.dispatchEvent(new Event("arxa-create-org")),
-								style: { border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 8, padding: "8px 18px", fontSize: 13, cursor: "pointer", background: "var(--dsw-alias-bg-layer-2)", color: "var(--dsw-alias-label-primary)" },
-								children: t("welcome.studio")
-							}),
-							(0, react_jsx_runtime.jsx)("button", {
-								onClick: (e) => {
-									e.stopPropagation();
-									setFreestyleError(null);
-									freestyleStore.setTab("freestyle").catch((error) => setFreestyleError(String((error && error.message) || error)));
-								},
-								onKeyDown: (e) => e.stopPropagation(),
-								style: { border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 8, padding: "8px 18px", fontSize: 13, cursor: "pointer", background: "var(--dsw-alias-bg-layer-2)", color: "var(--dsw-alias-label-primary)" },
-								children: t("welcome.freestyle")
-							}),
-							(0, react_jsx_runtime.jsx)("button", {
-								disabled: true,
-								title: t("welcome.businessSoon"),
-								style: { border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 8, padding: "8px 18px", fontSize: 13, cursor: "not-allowed", background: "transparent", color: "inherit", opacity: 0.5 },
-								children: t("welcome.business")
-							})
-						] }),
-						freestyleError ? (0, react_jsx_runtime.jsx)("div", { role: "status", style: { marginTop: 10, color: "var(--dsw-alias-state-error-primary)", fontSize: 12 }, children: freestyleError }) : null,
-					]
-				})
-			});
-		}
 		/** D90: the Disconnect GitHub conversation — per org (covering every
 	 * project repo under it) or per single project. Grilled shape: Keep on
 	 * GitHub is the DEFAULT; "remove too" arms only after the exact repo
@@ -3101,9 +3040,10 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			orgT = props.t; // stock-scope render sites read the locale through this
 			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, {
 				children: [
-					// WelcomeGate no longer mounts here (Phase 2): it registers
-					// into the frame's shell.overlay slot in apply() — the
-					// declared overlay surface, not a hand-layered fixed div.
+					// There is no welcome gate any more (2026-09-09). An empty app
+					// shows the same hero as an app with nothing open, so the state
+					// no longer depends on whether an org happens to exist. The
+					// sidebar's own "New organisation…" button creates the first one.
 					// D83: TrashSection no longer mounts here — ARXA_TRASH_AFTER_ORGS
 					// renders it inside the org tree, right under the last org row.
 					(0, react_jsx_runtime.jsx)(WorkspaceBrowser, patched),
@@ -3229,11 +3169,6 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			"newSession.needsTrack": "Pick the application or website inside this stage — sessions belong to one of them",
 			"files.openHint": "Open this organisation to browse its files",
 			"newSession.snapshotPending": "Preparing git snapshot — sessions unlock when it lands",
-			"welcome.title": "Welcome to arxa studio",
-			"welcome.desc": "Create your first organisation to start — arxa studio manages everything through git.",
-			"welcome.studio": "arxa studio",
-			"welcome.business": "arxa business",
-			"welcome.businessSoon": "arxa business (agency) — coming soon",
 			"tree.dock.projects": "Projects",
 			"agents.jobs.empty": "No background jobs",
 			"agents.jobs.emptyHint": "Background jobs appear here once one is started. Open the panel for details.",
@@ -3359,7 +3294,6 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			"freestyle.add.newPrompt": "New folder name",
 			"freestyle.add.unavailable": "Folder picker unavailable",
 			"freestyle.cta.pick": "Select a git-backed Freestyle folder to start a session",
-			"welcome.freestyle": "Use Freestyle",
 			"freestyle.menu.rename": "Rename…",
 			"freestyle.menu.close": "Close",
 			"freestyle.menu.open": "Open",
@@ -3507,11 +3441,6 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			"newSession.needsTrack": "Wybierz aplikację lub witrynę w tym etapie — sesje należą do jednej z nich",
 			"files.openHint": "Otwórz tę organizację, aby przeglądać jej pliki",
 			"newSession.snapshotPending": "Przygotowywanie migawki git — sesje odblokują się, gdy będzie gotowa",
-			"welcome.title": "Witamy w arxa studio",
-			"welcome.desc": "Utwórz pierwszą organizację, aby zacząć — arxa studio zarządza wszystkim przez git.",
-			"welcome.studio": "arxa studio",
-			"welcome.business": "arxa business",
-			"welcome.businessSoon": "arxa business (agencja) — wkrótce",
 			"tree.dock.projects": "Projekty",
 			"agents.jobs.empty": "Brak zadań w tle",
 			"agents.jobs.emptyHint": "Zadania w tle pojawią się tutaj po uruchomieniu. Otwórz panel, aby zobaczyć szczegóły.",
@@ -3637,7 +3566,6 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			"freestyle.add.newPrompt": "Nazwa nowego folderu",
 			"freestyle.add.unavailable": "Wybór folderu jest niedostępny",
 			"freestyle.cta.pick": "Wybierz folder Freestyle z repozytorium git, aby rozpocząć sesję",
-			"welcome.freestyle": "Użyj Freestyle",
 			"freestyle.menu.rename": "Zmień nazwę…",
 			"freestyle.menu.close": "Zamknij",
 			"freestyle.menu.open": "Otwórz",
@@ -3785,11 +3713,6 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			"newSession.needsTrack": "Choisissez l’application ou le site web dans cette étape — une session appartient à l’un des deux",
 			"files.openHint": "Ouvrez cette organisation pour parcourir ses fichiers",
 			"newSession.snapshotPending": "Préparation de l’instantané git — les sessions se débloqueront quand il sera prêt",
-			"welcome.title": "Bienvenue dans arxa studio",
-			"welcome.desc": "Créez votre première organisation pour commencer — arxa studio gère tout via git.",
-			"welcome.studio": "arxa studio",
-			"welcome.business": "arxa business",
-			"welcome.businessSoon": "arxa business (agence) — bientôt disponible",
 			"tree.dock.projects": "Projets",
 			"agents.jobs.empty": "Aucune tâche en arrière-plan",
 			"agents.jobs.emptyHint": "Les tâches en arrière-plan apparaîtront ici une fois lancées. Ouvrez le panneau pour les détails.",
@@ -3915,7 +3838,6 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			"freestyle.add.newPrompt": "Nom du nouveau dossier",
 			"freestyle.add.unavailable": "Le sélecteur de dossier est indisponible",
 			"freestyle.cta.pick": "Sélectionnez un dossier Freestyle avec un dépôt git pour démarrer une session",
-			"welcome.freestyle": "Utiliser Freestyle",
 			"freestyle.menu.rename": "Renommer…",
 			"freestyle.menu.close": "Fermer",
 			"freestyle.menu.open": "Ouvrir",

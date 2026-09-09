@@ -136,3 +136,61 @@ restore; only purge touches the remote.
 **Not verified:** a real GitHub-linked org against the live GitHub API — the
 remote here is a URL on a scratch repo, which exercises the code path that
 matters (trash and restore never call GitHub) but not the network.
+
+---
+
+## Round 2 — the gate removed outright (same day)
+
+The offset above shipped, and the reporter came straight back with two
+screenshots: zero orgs showed the "Welcome to arxa studio" card, one org showed
+the `Flowing High` hero.
+
+> "need to see the same thing regardless of what is in the trash — we need to
+> always see: Flowing High / Sessions start inside a workspace … when empty or
+> no session is active"
+
+So the gate goes entirely. **This partly undoes the section above**: the
+sidebar-width offset made the Trash reachable *past* the gate; with no gate
+there is nothing to reach past, and the offset is deleted with it. The record
+above stays as written — it is what was true for that hour.
+
+### What was removed
+
+| Layer | Change |
+|---|---|
+| `workspace-region.snippet.txt` | the `WelcomeGate` component (61 lines) and its six `welcome.*` strings across all three dictionaries (18 lines) |
+| `freestyle-region.snippet.txt` | `showWelcomeGate` — the gate was its only caller |
+| `gen-workspace.mjs` | the sidebar's `shell.overlay` seat. **`design-panel` also registers into that slot**, so only our registration went; the frame's declaration and the inject stay |
+| `gen-frame.mjs` | `--aXa-fr-sidebar` reverted — the gate was its only consumer, and a published mechanism nothing reads is worse than none |
+
+### Why nothing is lost
+
+Checked live at zero orgs before cutting, because the gate held the only
+`arxa-create-org` dispatch sites in the tree:
+
+- the sidebar header carries a **"New organisation…"** button, and firing
+  `arxa-create-org` mounts the modal — name, location, and the D36 "Creates at"
+  root picker. First-run org creation never depended on the card.
+- "Use Freestyle" duplicated a visible peer tab; "arxa business" was disabled.
+
+### Verified — the same view either way
+
+One engine, org present then trashed live, comparing every text node in the
+content column:
+
+```json
+{"withOrg":  ["Flowing High","Sessions start inside a workspace — …","design"],
+ "zeroOrgs": ["Flowing High","Sessions start inside a workspace — …","design"],
+ "same": true, "ok": true}
+```
+
+[hero-with-org.png](phase0b-snapshots/org/hero-with-org.png) ·
+[hero-at-zero-orgs.png](phase0b-snapshots/org/hero-at-zero-orgs.png) — identical
+content column; only the sidebar differs, which is the point. The saturated hero
+background appears in **both**, so it is the hero's own, not a side effect of
+removing the gate.
+
+`node scripts/ci.mjs`: ALL GREEN. Three stale pins retired rather than left to
+fail — the gate-registration pin, the `welcome.freestyle` locale-parity entry,
+and three `showWelcomeGate` behaviour assertions whose intent (a zero-org app
+stays usable) is now structural instead of conditional.

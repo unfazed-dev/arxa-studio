@@ -235,13 +235,8 @@ repString(LF + T(3) + "const [dragging, setDragging] = (0, react.useState)(false
   s = s.slice(0, stop) + add + s.slice(stop)
   log.push("5b viewer callbacks + maximize")
 }
-// The overlay layer spans every column, so anything mounted into
-// shell.overlay covers the sidebar too. Publishing the live sidebar width here
-// — the one place that already computes it — lets an overlay opt out of that
-// column instead of guessing. Derived from cols.sidebar, so collapsed is 0px
-// and narrow needs no branch of its own.
 repString("style: { gridTemplateColumns: `${cols.sidebar}px minmax(0, 1fr) ${cols.details}px` },",
-  "style: { gridTemplateColumns: `${cols.sidebar}px minmax(0, 1fr) ${cols.details}px ${cols.viewer}px`, \"--aXa-fr-sidebar\": cols.sidebar + \"px\" },", "5c grid columns")
+  "style: { gridTemplateColumns: `${cols.sidebar}px minmax(0, 1fr) ${cols.details}px ${cols.viewer}px` },", "5c grid columns")
 repString("\"data-details-collapsed\": cols.details === 0 || void 0,",
   "\"data-details-collapsed\": cols.details === 0 || void 0," + LF + T(4) + "\"data-viewer-collapsed\": cols.viewer === 0 || void 0,", "5d data attr")
 {

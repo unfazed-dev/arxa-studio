@@ -70,9 +70,6 @@
 			const root = selected && (store.get().roots || []).find((row) => row.id === selected.rootId);
 			return selected && root && root.open ? { kind: "freestyle", ...selected } : null;
 		}
-		function showWelcomeGate(orgCount, activeTab) {
-			return orgCount === 0 && activeTab !== "freestyle";
-		}
 		function freestyleNotice(error) {
 			window.dispatchEvent(new CustomEvent("arxa-sidebar-notice", { detail: { code: String((error && error.message) || error || "unknown") } }));
 		}

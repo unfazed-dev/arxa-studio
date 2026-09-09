@@ -52,7 +52,7 @@ assert.match(client, /className: "aXa_fs_meta", children: rootName/, 'trash rows
 assert.match(client, /hero\.guide\.freestyle/, 'the empty conversation hero follows the active Freestyle tab')
 assert.match(client, /snap && snap\.current === row\.dshSessionId\) arxaClientSessions\.clear\(\)/, 'archiving clears only the conversation owned by that row')
 assert.match(client, /for \(const root of freestyleStore\.get\(\)\.roots \|\| \[\]\)[\s\S]*?root\.sessions\?\.active/, 'rider ownership includes active Freestyle conversations')
-for (const key of ['freestyle.tab.org', 'freestyle.tab.freestyle', 'freestyle.empty', 'freestyle.add.open', 'freestyle.add.new', 'freestyle.cta.pick', 'welcome.freestyle', 'freestyle.menu.publish', 'freestyle.publish.unlinked', 'freestyle.confirm.purge', 'freestyle.session.noConversation']) {
+for (const key of ['freestyle.tab.org', 'freestyle.tab.freestyle', 'freestyle.empty', 'freestyle.add.open', 'freestyle.add.new', 'freestyle.cta.pick', 'freestyle.menu.publish', 'freestyle.publish.unlinked', 'freestyle.confirm.purge', 'freestyle.session.noConversation']) {
   assert.equal(client.split(`"${key}":`).length - 1, 3, `${key} is translated in en/pl/fr`)
 }
 
@@ -112,7 +112,7 @@ const context = {
   CustomEvent: class CustomEvent { constructor(type, init) { this.type = type; this.detail = init?.detail } },
 }
 context.globalThis = context
-vm.runInNewContext(`(function () {\n${snippet}\nglobalThis.createFreestyleStore = createFreestyleStore;\nglobalThis.freestyleSelectedWorkspace = freestyleSelectedWorkspace;\nglobalThis.showWelcomeGate = showWelcomeGate;\nglobalThis.validFreestyleName = validFreestyleName;\nglobalThis.freestyleJoin = freestyleJoin;\nglobalThis.freestyleTreeRequest = freestyleTreeRequest;\nglobalThis.freestyleMenuActions = freestyleMenuActions;\nglobalThis.dropTargetFor = dropTargetFor;\nglobalThis.parseFreestyleDrop = parseFreestyleDrop;\nglobalThis.freestyleOpenConversation = freestyleOpenConversation;\nglobalThis.cancelFreestyleOpen = cancelFreestyleOpen;\n})()`, context, { filename: snippetPath })
+vm.runInNewContext(`(function () {\n${snippet}\nglobalThis.createFreestyleStore = createFreestyleStore;\nglobalThis.freestyleSelectedWorkspace = freestyleSelectedWorkspace;\nglobalThis.validFreestyleName = validFreestyleName;\nglobalThis.freestyleJoin = freestyleJoin;\nglobalThis.freestyleTreeRequest = freestyleTreeRequest;\nglobalThis.freestyleMenuActions = freestyleMenuActions;\nglobalThis.dropTargetFor = dropTargetFor;\nglobalThis.parseFreestyleDrop = parseFreestyleDrop;\nglobalThis.freestyleOpenConversation = freestyleOpenConversation;\nglobalThis.cancelFreestyleOpen = cancelFreestyleOpen;\n})()`, context, { filename: snippetPath })
 
 const delayedRow = { dshSessionId: 'persisted-dsh-id', dshStatus: 'live' }
 context.freestyleOpenConversation(delayedRow)
@@ -239,8 +239,10 @@ const beforeDisposedSelect = emissions
 store.select('root-1', '')
 assert.equal(emissions, beforeDisposedSelect, 'subscription disposer removes the listener')
 
-assert.equal(context.showWelcomeGate(0, 'org'), true, 'zero-organisation organisation view keeps the welcome gate')
-assert.equal(context.showWelcomeGate(0, 'freestyle'), false, 'zero-organisation Freestyle view remains reachable')
-assert.equal(context.showWelcomeGate(1, 'org'), false, 'an organisation lifts the welcome gate')
+// The welcome gate is gone (2026-09-09): an empty app shows the same hero as
+// an app with nothing open, so there is no longer a gate to keep Freestyle
+// reachable *past*. What the three assertions here used to protect — that a
+// zero-org app is still usable — is now structural rather than conditional.
+assert.ok(!snippet.includes('showWelcomeGate'), 'no welcome gate survives in the Freestyle region')
 
 console.log('arxa-sidebar selftest.freestyle: ALL GREEN')

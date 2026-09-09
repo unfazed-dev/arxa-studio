@@ -228,11 +228,7 @@ check('org.open: D92 by-path fallback is REACHABLE (awaited inside the try — a
   hostSrc().includes('return await ensureOpen(ref)') && !hostSrc().includes('return ensureOpen(ref)'))
 check('create: D92 sticky root + defaults action + open-by-path fallback',
   hostSrc().includes('create-root.json') && hostSrc().includes("'create.defaults'") && hostSrc().includes("fs.existsSync(ref + '/org.json')") && client.includes('ORG_POST("create.defaults")'))
-check('rows-snap: create submit refreshes through the store (gate lifts at once, no create-again loop)', client.includes('orgStore.mutate("org.create-at"') && !client.includes('ORG_POST("org.create-at"'))
-check('welcome: blank-page gate registers into the frame shell.overlay slot (Phase 2 — the fixed z-index war is gone)',
-  client.includes('function WelcomeGate(') && client.includes('"welcome.title": "Welcome to arxa studio"')
-  && client.includes('ctx.slots.inject("shell.overlay"') && client.includes('id: "arxa-welcome-gate",')
-  && !client.includes('zIndex: 2147483000') && !client.includes('position: "fixed", inset: 0, zIndex'))
+check('rows-snap: create submit refreshes through the store (the new org appears at once, no create-again loop)', client.includes('orgStore.mutate("org.create-at"') && !client.includes('ORG_POST("org.create-at"'))
 check('conformance: invented theme tokens are gone (text-critical/text-link/status-danger/text-secondary/bg-raised never existed)',
   !/dsw-alias-(text-critical|text-link|status-danger|text-secondary|bg-raised)/.test(client))
 check('conformance: ErrorNote dedup — one shared error line across the org modals',
@@ -240,7 +236,9 @@ check('conformance: ErrorNote dedup — one shared error line across the org mod
 check('conformance: locale world is en/pl/fr — zhOver deleted, sparse plOver/frOver registered with per-key en fallback',
   client.includes('ctx.locale.register(NS, { zh, en: { ...en, ...enOver }, pl: plOver, fr: frOver })')
   && !client.includes('const zhOver = {') && client.includes('const plOver = {') && client.includes('const frOver = {'))
-check('welcome: organisation, Freestyle and future-business choices stay reachable', client.includes('t("welcome.studio")') && client.includes('t("welcome.freestyle")') && client.includes('t("welcome.business")') && client.includes('"welcome.businessSoon"') && !client.includes('t("welcome.cta")'))
+check('welcome: organisation and Freestyle stay reachable without a gate — the\n  sidebar creates orgs and the Freestyle tab is a peer tab, not a card button',
+  client.includes('window.dispatchEvent(new Event("arxa-create-org"))')
+  && client.includes('"freestyle.tab.freestyle"') && !client.includes('"welcome.freestyle"'))
 check('welcome: one-shot resume to newest session of the open org', client.includes('resumeTried') && client.includes('maybeResume(next.orgs)') && client.includes('orgStore.mutate("session.open"'))
 check('content area (2026-08-30): arxa is the sole driver — row open + resume focus the conversation via the client sessions service (dsh own open call)',
   client.includes('arxaOpenConversation(sessionId)') && client.includes('arxaOpenConversation(cand.id)') && client.includes('arxaClientSessions.open(dshId)') && client.includes('snap.ids.includes(dshId)'))
@@ -938,14 +936,13 @@ check('client: agent verb + reason strings localized in en/pl/fr',
 }
 
 // ============================================================
-// S-rescue — the way back from a zero-org state (2026-09-08,
-// docs/plans/org-trash-unreachable.md; superseded 2026-09-09 by
-// docs/plans/org-delete-trash-reachability.md). smoke.mjs drives the SERVER
-// half end to end; these pin the client half. The 2026-09-08 round could not
-// reach the sidebar's Trash row at zero orgs, so the welcome gate grew a
-// restore of its own. The gate now steps aside for the sidebar column instead,
-// and that rescue is gone — these pins hold BOTH halves of that trade, because
-// deleting the rescue without the offset is the original data-loss bug back.
+// S-rescue — the way back from a zero-org state. Two rounds of history:
+// docs/plans/org-trash-unreachable.md (2026-09-08) gave the welcome gate a
+// restore of its own because the gate covered the sidebar's Trash row;
+// docs/plans/org-delete-trash-reachability.md (2026-09-09) offset the gate so
+// the row was reachable, then removed the gate outright — an empty app now
+// shows the same hero as an app with nothing open. These pin what is left:
+// no gate, no strings for one, and exactly one door back.
 {
   const gen = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
   const host = readFileSync(new URL('./lib/index.js', import.meta.url), 'utf8')
@@ -955,19 +952,24 @@ check('client: agent verb + reason strings localized in en/pl/fr',
   check('S-rescue: orgtrash.restore is answered with NO lifecycle',
     /if \(!l\) \{[\s\S]{0,900}?if \(action === 'orgtrash\.restore'\)/.test(host)
     && host.includes('shell.touchRecent(out.restoredPath)'))
-  // The reachability half. The frame publishes its live sidebar width and the
-  // gate starts after it, so the Trash row underneath stays clickable.
-  check('S-rescue: the frame publishes its sidebar width to the overlay layer',
-    frame.includes('"--aXa-fr-sidebar": cols.sidebar + "px"'))
-  check('S-rescue: the welcome gate does not span the sidebar column',
-    gen.includes('left: "var(--aXa-fr-sidebar, 0px)"')
-    && !/style: \{ position: "absolute", inset: 0, background: "var\(--dsw-alias-bg-base\)"/.test(gen))
-  // The removal half. A gate that still minted its own restore would keep the
-  // two doors out of sync — the sidebar row is now the only one.
-  check('S-rescue: the welcome gate no longer offers a restore of its own',
-    !gen.includes('const trashed = useOrg((s) => s.orgTrash) || [];')
-    && !/trashed\.length > 0 \?/.test(gen)
-    && !gen.includes('"welcome.trashed"') && !gen.includes('"welcome.restore"'))
+  // No gate at all: not the component, not its guard, not its strings, and no
+  // seat registering it into the overlay the design panel also rides.
+  check('S-rescue: no welcome gate is built or registered',
+    !gen.includes('WelcomeGate') && !gen.includes('showWelcomeGate')
+    && !gen.includes('arxa-welcome-gate'))
+  check('S-rescue: no welcome-gate strings survive in any locale',
+    !/"welcome\.[a-zA-Z]+":/.test(gen))
+  // The gate was the only consumer of the frame's published sidebar width;
+  // it went with it rather than lingering as a mechanism nothing reads.
+  check('S-rescue: the frame publishes no sidebar-width var for a gate that is gone',
+    !frame.includes('--aXa-fr-sidebar'))
+  // What replaces it: the app's own empty state, which needs no org to exist.
+  check('S-rescue: the hero guide is what an empty app shows',
+    gen.includes('"hero.guide"') && gen.includes('data-arxa-hero-guide'))
+  // And creating the first org does not depend on the deleted card.
+  check('S-rescue: the first org is created from the sidebar, not a gate',
+    gen.includes('window.dispatchEvent(new Event("arxa-create-org"))')
+    && gen.includes('window.addEventListener("arxa-create-org", open)'))
   check('S-rescue: the sidebar Trash row is the single door back',
     (gen.match(/orgStore\.mutate\("orgtrash\.restore"/g) || []).length === 1)
 }
