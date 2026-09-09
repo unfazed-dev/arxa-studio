@@ -70,7 +70,16 @@ export function createFreestyleSessions({ env = process.env, dshBridge, githubBr
     try { rows = GW.listSessions(repoPath, env) } catch { return [] }
     return rows.filter((s) => {
       if (typeof s.freestyleRootId === 'string' && s.freestyleRootId !== '') return s.freestyleRootId === root.id
-      return s.id.startsWith(prefix) // legacy rows predate explicit ownership
+      if (!s.id.startsWith(prefix)) return false
+      // Legacy rows predate explicit UUID ownership. Their path-shaped id,
+      // workspace and worktree must still resolve under this exact root;
+      // basename prefix alone aliases nested same-name roots.
+      try {
+        const identity = sessionIdentity(root, s)
+        assertSessionRepo(root, repoPath, identity)
+        sessionWorktree(root, repoPath, s, { legacy: true })
+        return true
+      } catch { return false }
     })
   }
 
@@ -102,23 +111,77 @@ export function createFreestyleSessions({ env = process.env, dshBridge, githubBr
     return real
   }
 
+  function sessionIdentity(root, session) {
+    if (!session || typeof session.id !== 'string' || typeof session.workspace !== 'string') throw new Error('invalid-session')
+    GW.assertSessionIdShape(session.id)
+    const workspace = session.workspace.split('/').filter(Boolean).join('/')
+    const expectedParent = [sessionKey(root), ...(workspace ? workspace.split('/') : [])].join('/')
+    const idParts = session.id.split('/')
+    if (idParts.slice(0, -1).join('/') !== expectedParent) throw new Error('invalid-session')
+    const expectedBranch = GW.SESSION_BRANCH_PREFIX + session.id
+    if (session.branch !== expectedBranch) throw new Error('invalid-session')
+    return { workspace, expectedBranch }
+  }
+
+  function sameRepo(a, b) {
+    try { return fs.realpathSync(a) === fs.realpathSync(b) } catch { return false }
+  }
+
+  function assertSessionRepo(root, repoPath, identity) {
+    const routed = resolveFreestyleRepo(root.path, identity.workspace, { env, requireHead: false }).repoPath
+    if (!sameRepo(routed, repoPath)) throw new Error('repo-mismatch')
+  }
+
+  function worktreeAt(base, id) {
+    return path.resolve(base, GW.SESSIONS_DIR, ...id.split('/'))
+  }
+
+  function physicalPath(location) {
+    let existing = path.resolve(location)
+    const tail = []
+    while (!fs.existsSync(existing)) {
+      const parent = path.dirname(existing)
+      if (parent === existing) break
+      tail.unshift(path.basename(existing))
+      existing = parent
+    }
+    return path.join(fs.realpathSync(existing), ...tail)
+  }
+
+  function sessionWorktree(root, repoPath, session, { legacy = false } = {}) {
+    const actual = path.resolve(session.worktree || '')
+    const rootLocal = worktreeAt(root.path, session.id)
+    const repoLocal = worktreeAt(repoPath, session.id)
+    // Rows predating explicit root UUIDs were created at the Freestyle root.
+    // Keep that narrow fallback so overlapping same-basename roots cannot
+    // claim an unannotated row through a nested repository.
+    const actualPhysical = physicalPath(actual)
+    if (actualPhysical !== physicalPath(rootLocal) && (legacy || actualPhysical !== physicalPath(repoLocal))) {
+      throw new Error('invalid-session')
+    }
+    return actual
+  }
+
   function sessionEntry(root, entryId) {
     const found = readTrashEntry(root, entryId)
     const e = found.entry
-    let expectedBranch
+    let identity
     try {
-      GW.assertSessionIdShape(e.sessionId)
-      expectedBranch = GW.SESSION_BRANCH_PREFIX + e.sessionId
+      if (
+        e.kind !== 'session' || e.freestyleRootId !== root.id ||
+        typeof e.sessionId !== 'string' || !e.session || e.session.id !== e.sessionId ||
+        e.session.freestyleRootId !== root.id || e.session.state !== 'archived'
+      ) throw new Error('invalid-session')
+      identity = sessionIdentity(root, e.session)
     } catch { throw new Error('unknown-entry') }
-    const expectedWorktree = path.resolve(root.path, GW.SESSIONS_DIR, ...e.sessionId.split('/'))
-    if (
-      e.kind !== 'session' || e.freestyleRootId !== root.id ||
-      typeof e.sessionId !== 'string' || !e.session || e.session.id !== e.sessionId ||
-      e.session.freestyleRootId !== root.id || e.session.state !== 'archived' ||
-      e.branch !== expectedBranch || e.session.branch !== expectedBranch ||
-      path.resolve(e.session.worktree || '') !== expectedWorktree
-    ) throw new Error('unknown-entry')
-    return { ...found, repoPath: repoFromEntry(root, e), expectedBranch, expectedWorktree }
+    if (e.branch !== identity.expectedBranch) throw new Error('unknown-entry')
+    const repoPath = repoFromEntry(root, e)
+    if (isRepo(repoPath, env)) {
+      try { assertSessionRepo(root, repoPath, identity) } catch { throw new Error('repo-mismatch') }
+    }
+    let expectedWorktree
+    try { expectedWorktree = sessionWorktree(root, repoPath, e.session) } catch { throw new Error('unknown-entry') }
+    return { ...found, repoPath, ...identity, expectedWorktree }
   }
 
   function ghostsFor(root, repoPath) {
@@ -139,7 +202,7 @@ export function createFreestyleSessions({ env = process.env, dshBridge, githubBr
         ghosts: ghostsFor(root, route.repoPath),
       })
       const session = GW.openSession(route.repoPath, {
-        id, orgPath: root.path, name: name?.trim() || undefined, workspace: relDir || '', env,
+        id, orgPath: route.repoPath, name: name?.trim() || undefined, workspace: relDir || '', env,
       })
       const cwd = path.join(session.worktree, route.cwdRel)
       fs.mkdirSync(cwd, { recursive: true })
@@ -177,6 +240,15 @@ export function createFreestyleSessions({ env = process.env, dshBridge, githubBr
       if (!row) throw new Error(`unknown-session: "${id}"`)
       if (row.state !== 'archived') {
         throw new Error(`not-archived: session "${id}" is ${row.state} — archive it first`)
+      }
+      let identity
+      try {
+        identity = sessionIdentity(root, row)
+        assertSessionRepo(root, repoPath, identity)
+        sessionWorktree(root, repoPath, row, { legacy: !row.freestyleRootId })
+      } catch {
+        if (!row.freestyleRootId) throw new Error(`legacy-ownership: session "${id}" does not belong unambiguously to this root`)
+        throw new Error(`invalid-session-ownership: session "${id}" does not match its root and repository`)
       }
 
       // Marker first, registry removal second. If the process stops between
@@ -227,7 +299,7 @@ export function createFreestyleSessions({ env = process.env, dshBridge, githubBr
       const { entry, repoPath, expectedBranch, expectedWorktree } = sessionEntry(root, entryId)
       const out = { entryId, sessionId: entry.sessionId, remoteBranch: 'no-origin', refs: null, deleted: null }
       if (!isRepo(repoPath, env)) {
-        out.refs = { id: entry.sessionId, branch: entry.branch, branchDropped: false, baseRefDropped: false, repoGone: true }
+        throw new Error(`repo-gone: ${entry.repoPath} is unavailable — the trash entry was kept for retry`)
       } else {
         const registryRowExists = () => GW.listSessions(repoPath, env).some((row) => row.id === entry.sessionId)
         if (registryRowExists()) {

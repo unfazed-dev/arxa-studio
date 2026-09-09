@@ -60,6 +60,10 @@ fs.writeFileSync(path.join(clonePath, 'seed.md'), 'seed')
 git(clonePath, 'add', '-A')
 git(clonePath, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'chore: seed')
 const s3 = await S.newSession(root, 'clone', 'temp')
+ok(
+  s3.worktree === path.join(clonePath, '.arxa', 'worktrees', ...s3.id.split('/')),
+  'a nested repository owns its Freestyle session worktree under its own .arxa directory',
+)
 // Round 2: plant a merged session from a DIFFERENT org in this SAME nested
 // repo. sweepMerged has no ownership filter of its own — sweep must report
 // on neither array for it, and (the assertion that matters) must not

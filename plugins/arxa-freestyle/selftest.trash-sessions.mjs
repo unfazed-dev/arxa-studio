@@ -104,6 +104,42 @@ try {
   const restoredNested = N.list(nestedRoot).archived.find((row) => row.id === nestedSession.id)
   ok(restoredNested && fs.realpathSync(restoredNested.repoPath) === fs.realpathSync(nestedRepo), 'Restore writes the row back to its nested owning repo')
 
+  // Compatibility: sessions created before D122 alignment stored a nested
+  // repo's worktree under the Freestyle root. Their exact recorded location
+  // remains restorable, but workspace tampering cannot redirect their refs.
+  const oldLocationId = GW.mintSessionPath({
+    org: 'nested-root', workspace: 'child', name: 'old location',
+    sessions: GW.listSessions(nestedRepo, env), ghosts: [],
+  })
+  GW.openSession(nestedRepo, {
+    id: oldLocationId, orgPath: nestedRoot.path, name: 'old location', workspace: 'child', env,
+  })
+  GW.annotateSession(nestedRepo, oldLocationId, { freestyleRootId: nestedRoot.id }, env)
+  N.archive(nestedRoot, oldLocationId)
+  const oldLocationEntry = N.trashArchived(nestedRoot, oldLocationId)
+  const oldLocationMarkerPath = path.join(nestedRoot.path, '.arxa', 'trash', oldLocationEntry.entryId, 'entry.json')
+  const oldLocationMarker = JSON.parse(fs.readFileSync(oldLocationMarkerPath, 'utf8'))
+  git(nestedRoot.path, 'branch', oldLocationId.startsWith('arxa/') ? oldLocationId : 'arxa/' + oldLocationId)
+  oldLocationMarker.repoPath = '.'
+  oldLocationMarker.session.workspace = ''
+  fs.writeFileSync(oldLocationMarkerPath, JSON.stringify(oldLocationMarker, null, 2) + '\n')
+  await assert.rejects(N.purgeTrash(nestedRoot, oldLocationEntry.entryId), /unknown-entry|repo-mismatch/)
+  ok(
+    git(nestedRoot.path, 'rev-parse', '--verify', oldLocationMarker.branch) !== ''
+      && git(nestedRepo, 'rev-parse', '--verify', oldLocationMarker.branch) !== ''
+      && listTrash(nestedRoot).some((e) => e.id === oldLocationEntry.entryId),
+    'workspace plus repoPath tampering cannot redirect an old root-local marker to its ancestor repo',
+  )
+  oldLocationMarker.repoPath = 'child'
+  oldLocationMarker.session.workspace = 'child'
+  fs.writeFileSync(oldLocationMarkerPath, JSON.stringify(oldLocationMarker, null, 2) + '\n')
+  N.restoreTrash(nestedRoot, oldLocationEntry.entryId)
+  const restoredOldLocation = N.list(nestedRoot).archived.find((row) => row.id === oldLocationId)
+  ok(
+    restoredOldLocation?.worktree === path.join(nestedRoot.path, '.arxa', 'worktrees', ...oldLocationId.split('/')),
+    'an existing nested session at the old root-local worktree location still restores',
+  )
+
   // A hand-edited marker cannot redirect purge at a sibling repository.
   const guarded = N.trashArchived(nestedRoot, nestedSession.id)
   const outsideRepo = path.join(tmp, 'outside-repo')
@@ -115,6 +151,23 @@ try {
   git(outsideRepo, 'branch', nestedSession.branch)
   const markerPath = path.join(nestedRoot.path, '.arxa', 'trash', guarded.entryId, 'entry.json')
   const marker = JSON.parse(fs.readFileSync(markerPath, 'utf8'))
+  const siblingRepo = path.join(nestedRoot.path, 'sibling')
+  fs.mkdirSync(siblingRepo)
+  git(siblingRepo, 'init', '-qb', 'main')
+  fs.writeFileSync(path.join(siblingRepo, 'seed.txt'), 'sibling\n')
+  git(siblingRepo, 'add', 'seed.txt')
+  git(siblingRepo, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'seed')
+  git(siblingRepo, 'branch', nestedSession.branch)
+  marker.repoPath = 'sibling'
+  fs.writeFileSync(markerPath, JSON.stringify(marker, null, 2) + '\n')
+  await assert.rejects(N.purgeTrash(nestedRoot, guarded.entryId), /unknown-entry|repo-mismatch/)
+  ok(
+    git(siblingRepo, 'rev-parse', '--verify', nestedSession.branch) !== ''
+      && git(nestedRepo, 'rev-parse', '--verify', nestedSession.branch) !== ''
+      && listTrash(nestedRoot).some((e) => e.id === guarded.entryId),
+    'a marker cannot redirect purge to another repository inside the same root',
+  )
+
   marker.repoPath = path.relative(nestedRoot.path, outsideRepo)
   fs.writeFileSync(markerPath, JSON.stringify(marker, null, 2) + '\n')
   await assert.rejects(N.purgeTrash(nestedRoot, guarded.entryId), /unknown-entry/)
@@ -163,6 +216,52 @@ try {
   ok(listTrash(legacyRoot).find((e) => e.id === legacyEntry.entryId)?.session?.freestyleRootId === legacyRoot.id, 'Move-to-Trash normalizes explicit ownership onto a legacy row snapshot')
   L.restoreTrash(legacyRoot, legacyEntry.entryId)
   ok(L.list(legacyRoot).archived.find((row) => row.id === legacySession.id)?.freestyleRootId === legacyRoot.id, 'a legacy session round trip restores as an explicitly owned archived row')
+
+  // A same-basename root nested inside another added root produces the same
+  // legacy id prefix. The parent must not claim the child's unannotated row.
+  const parentPath = path.join(tmp, 'legacy-parent', 'notes')
+  fs.mkdirSync(parentPath, { recursive: true })
+  const parentRoot = addRoot(parentPath, { env })
+  const childPath = path.join(parentPath, 'inside', 'notes')
+  fs.mkdirSync(childPath, { recursive: true })
+  const childRoot = addRoot(childPath, { env })
+  const Child = createFreestyleSessions({ env, dshBridge })
+  const Parent = createFreestyleSessions({ env, dshBridge })
+  const childLegacy = await Child.newSession(childRoot, '', 'legacy child')
+  Child.archive(childRoot, childLegacy.id)
+  const childCommonDir = path.resolve(childRoot.path, git(childRoot.path, 'rev-parse', '--git-common-dir'))
+  const childRegistryFile = path.join(childCommonDir, 'arxa', 'sessions.json')
+  const childRegistry = JSON.parse(fs.readFileSync(childRegistryFile, 'utf8'))
+  delete childRegistry.sessions.find((row) => row.id === childLegacy.id).freestyleRootId
+  fs.writeFileSync(childRegistryFile, JSON.stringify(childRegistry, null, 2) + '\n')
+  assert.throws(() => Parent.trashArchived(parentRoot, childLegacy.id), /legacy-ownership|unknown-session/)
+  ok(
+    Child.list(childRoot).archived.some((row) => row.id === childLegacy.id)
+      && !Parent.list(parentRoot).archived.some((row) => row.id === childLegacy.id)
+      && !listTrash(parentRoot).some((e) => e.kind === 'session'),
+    'a parent root hides and refuses an ambiguous legacy child row without removing it or creating a marker',
+  )
+
+  // A temporarily missing nested repository retains its Trash marker. Once
+  // restored at the recorded path, purge can retry and remove its refs.
+  const missingRoot = rootAt('missing-repo-root')
+  const missingRepo = path.join(missingRoot.path, 'nested')
+  fs.mkdirSync(missingRepo)
+  git(missingRepo, 'init', '-qb', 'main')
+  fs.writeFileSync(path.join(missingRepo, 'seed.txt'), 'missing\n')
+  git(missingRepo, 'add', 'seed.txt')
+  git(missingRepo, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'seed')
+  const M = createFreestyleSessions({ env, dshBridge })
+  const missingSession = await M.newSession(missingRoot, 'nested', 'missing')
+  M.archive(missingRoot, missingSession.id)
+  const missingEntry = M.trashArchived(missingRoot, missingSession.id)
+  const movedRepo = path.join(tmp, 'temporarily-moved-repo')
+  fs.renameSync(missingRepo, movedRepo)
+  await assert.rejects(M.purgeTrash(missingRoot, missingEntry.entryId), /repo-gone|owning repo.*unavailable/)
+  ok(listTrash(missingRoot).some((e) => e.id === missingEntry.entryId), 'purge keeps the marker while its owning nested repository is unavailable')
+  fs.renameSync(movedRepo, missingRepo)
+  const missingRetried = await M.purgeTrash(missingRoot, missingEntry.entryId)
+  ok(missingRetried.refs?.branchDropped === true && !listTrash(missingRoot).some((e) => e.id === missingEntry.entryId), 'purge succeeds after the recorded nested repository returns')
 
   // A marker duplicated by a crash is harmless while the matching row is
   // still archived. If that row has since been revived, restore must retain
