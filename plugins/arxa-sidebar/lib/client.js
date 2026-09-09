@@ -7396,6 +7396,15 @@ window.__ModuleLoader__.load({
 				(0, react_jsx_runtime.jsx)(FreestyleActionMenu, { items: menuItems, onSelect: onMenu, children: ({ menu, menuOpen, onContextMenu }) => (0, react_jsx_runtime.jsxs)("div", {
 					className: clsx(Rows_module_css_default.projectRow, selected && selected.rootId === root.id && selected.relDir === "" && Rows_module_css_default.selected, menuOpen && Rows_module_css_default.menuOpen, dragOver && "aXa_fs_dropOn"),
 					role: "treeitem", "aria-expanded": !!root.open, onClick: () => freestyleStore.select(root.id, ""), onContextMenu, onDragOver: (e) => { e.preventDefault(); setDragOver(true); }, onDragLeave: () => setDragOver(false), onDrop: drop,
+					// The arrow used to be a permanently visible button, so it was
+					// focusable. Wearing Rows.chevron it is display:none at rest —
+					// correct visually, but it took the keyboard path to open/close
+					// with it, on a row that announces role=treeitem + aria-expanded.
+					// The row itself carries it now, the same Enter/Space handler the
+					// section headers use. tabIndex renders nothing, so the row still
+					// looks exactly like its Organisations counterpart.
+					tabIndex: 0,
+					onKeyDown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); freestyleStore.mutate(root.open ? "root.close" : "root.open", { rootId: root.id }).catch(freestyleNotice); } },
 					children: [
 						// Folder slot first, chevron slot second — the org row order. Stock
 						// CSS swaps them on hover (`.projectRow:hover .folder{display:none}`

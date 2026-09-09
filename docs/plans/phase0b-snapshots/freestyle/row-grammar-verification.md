@@ -100,6 +100,42 @@ deterministic; a matching element under a shipped rule swaps.
 Dead CSS: the four removed class names appear in the shipped bundle only inside
 two source comments — no rule, no `className`.
 
+### The keyboard path the chevron took with it
+
+Giving the root's arrow `Rows.chevron` made it `display:none` at rest, which is
+correct visually and cost the row its only keyboard route to open/close: the
+arrow had been a permanently visible `<button>`, so it was focusable. The `…`
+menu is no help — it lives in `rowActions`, also hidden at rest — and
+`onContextMenu` is right-click. A `role="treeitem"` with `aria-expanded` and no
+activation path is worse than the style delta it fixed.
+
+The row now carries `tabIndex: 0` and the same Enter/Space handler as the
+section headers. `tabIndex` renders nothing, so the row still matches its
+Organisations counterpart pixel for pixel.
+
+### Trash, actually rendered
+
+Earlier captures had an empty Archives and Trash, so the entry-row shape and
+the header count had never been on screen — they were claimed from source, not
+seen. Seeding one trashed file (`trashEntry` in the plugin's own `files.js`)
+and clicking the header open:
+
+```json
+{"headerText":"Trash1","headerTabIndex":0,"entryFound":true,
+ "entry":{"cls":"projectRow","marginLeft":"18px","marginTop":"2px",
+          "height":34,"slot":true,"title":true}}
+```
+
+That is org's `entryRow` exactly — `projectRow`, `marginLeft:18`, `marginTop:2`,
+the stock 34px row height — and the header count is real, not inferred.
+Screenshot: [row-grammar-r2-trash.png](row-grammar-r2-trash.png).
+
+**Still unrendered:** the conversation row and the archives entry row. Both are
+verbatim copies of the same org `entryRow` the trash row proves, but seeding
+them needs the git-workspace session engine (real branches + session metadata),
+which a scratch boot cannot stand up. Verified by construction and by the
+selftest pins, not by capture.
+
 Screenshots: [row-grammar-after.png](row-grammar-after.png) (round 1),
 [row-grammar-r2-freestyle.png](row-grammar-r2-freestyle.png) (round 2). The
 modal in both is dsh's own first-run notice on a scratch home, not part of the
