@@ -16,6 +16,10 @@ const sandbox = mkdtempSync(path.join(tmpdir(), 'arxa-freestyle-actions-'))
 process.env.ARXA_HOME = path.join(sandbox, 'home')
 const folder = path.join(sandbox, 'my-notes')
 mkdirSync(folder, { recursive: true })
+mkdirSync(path.join(folder, 'docs-a', 'b'), { recursive: true })
+mkdirSync(path.join(folder, 'docs', 'a-b'), { recursive: true })
+const longWorkspace = 's'.repeat(240)
+mkdirSync(path.join(folder, longWorkspace), { recursive: true })
 const sameNameA = path.join(sandbox, 'left', 'notes')
 const sameNameB = path.join(sandbox, 'right', 'notes')
 mkdirSync(sameNameA, { recursive: true })
@@ -164,7 +168,35 @@ let primarySession
     JSON.stringify({ a: live.get(sa.dshSessionId)?.meta, b: live.get(sb.dshSessionId)?.meta }))
 }
 
-// 7. Shared trash verbs dispatch by marker kind: session entries restore to
+// 7. Freestyle dsh birth ids encode the full root/session pair without slash
+// flattening aliases and stay within a single filesystem component.
+{
+  const left = await act('session.new', { rootId, relDir: 'docs-a/b', name: 'collision' })
+  const right = await act('session.new', { rootId, relDir: 'docs/a-b', name: 'collision' })
+  check('slash-flattening collision pair retains distinct git session ids',
+    left.ok === true && right.ok === true && left.id !== right.id,
+    JSON.stringify({ left: left.id, right: right.id }))
+  check('slash-flattening collision pair gets distinct dsh conversations',
+    left.dshLive === true && right.dshLive === true && left.dshSessionId !== right.dshSessionId,
+    JSON.stringify({ left: left.dshSessionId, right: right.dshSessionId }))
+  check('slash-flattening collision pair retains exact conversation cwd',
+    live.get(left.dshSessionId)?.meta?.cwd === left.cwd
+      && live.get(right.dshSessionId)?.meta?.cwd === right.cwd,
+    JSON.stringify({ left: live.get(left.dshSessionId)?.meta, right: live.get(right.dshSessionId)?.meta }))
+
+  const long = await act('session.new', { rootId, relDir: longWorkspace })
+  check('long workspace gets a fixed-size filesystem-safe dsh id',
+    long.ok === true
+      && long.dshLive === true
+      && /^arxa-fs-[A-Za-z0-9_-]{43}$/.test(long.dshSessionId)
+      && Buffer.byteLength(long.dshSessionId, 'utf8') <= 255,
+    JSON.stringify({ id: long.dshSessionId, bytes: Buffer.byteLength(long.dshSessionId || '', 'utf8') }))
+  check('long workspace conversation retains exact cwd',
+    live.get(long.dshSessionId)?.meta?.cwd === long.cwd,
+    JSON.stringify(live.get(long.dshSessionId)?.meta))
+}
+
+// 8. Shared trash verbs dispatch by marker kind: session entries restore to
 // Archives and purge refs, while ordinary file entries keep their own path.
 {
   let r = await act('session.archive', { rootId, id: primarySession.id })

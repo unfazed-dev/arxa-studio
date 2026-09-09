@@ -145,12 +145,14 @@ async function main() {
   const added = await freestyle('root.add', { path: rootPath })
   ok('root.add', added.ok === true && typeof added.root?.id === 'string', JSON.stringify(added))
   const rootId = added.root.id
+  const selectedFolder = 'My Notes'
 
-  const created = await freestyle('file.create', { rootId, relPath: 'notes/seed.md' })
-  ok('file.create notes/seed.md', created.ok === true && created.rel === 'notes/seed.md', JSON.stringify(created))
+  const created = await freestyle('file.create', { rootId, relPath: selectedFolder + '/seed.md' })
+  ok('file.create My Notes/seed.md', created.ok === true && created.rel === selectedFolder + '/seed.md', JSON.stringify(created))
 
-  const opened = await freestyle('session.new', { rootId, relDir: 'notes', name: 'Freestyle smoke' })
-  ok('session.new below notes', opened.ok === true && opened.workspace === 'notes' && existsSync(opened.worktree), JSON.stringify(opened))
+  const opened = await freestyle('session.new', { rootId, relDir: selectedFolder, name: 'Freestyle smoke' })
+  ok('session.new below My Notes', opened.ok === true && opened.workspace === selectedFolder
+    && opened.cwd === join(opened.worktree, selectedFolder) && existsSync(opened.cwd), JSON.stringify(opened))
   // dshLive is computed by the host from ctx.agents.get(dshSessionId), after
   // the production bridge returns. No prompt or model request is involved.
   ok('session.new created a dsh conversation with a live engine agent',
@@ -162,7 +164,7 @@ async function main() {
 
   const committed = await card('card.commit', { sessionId: opened.dshSessionId, subject: 'feat: add the real engine proof' })
   ok('card.commit through the card route', committed.ok === true && committed.result?.merged === true, JSON.stringify(committed))
-  ok('main contains the session file', git(['show', 'main:notes/engine-proof.md']).includes('Real engine proof'), git(['log', '--oneline', '-3', 'main']))
+  ok('main contains the session file', git(['show', 'main:' + selectedFolder + '/engine-proof.md']).includes('Real engine proof'), git(['log', '--oneline', '-3', 'main']))
 
   const preview = await freestyle('session.finish', { rootId, id: opened.id, dryRun: true })
   ok('session.finish dry-run would finish', preview.ok === true && preview.dryRun === true && preview.wouldFinish === true, JSON.stringify(preview))
@@ -171,7 +173,7 @@ async function main() {
   const finished = await freestyle('session.finish', { rootId, id: opened.id, dryRun: false })
   ok('session.finish real', finished.ok === true && finished.finished === true && finished.worktreeRemoved === true, JSON.stringify(finished))
   ok('worktree is gone', !existsSync(opened.worktree), opened.worktree)
-  ok('main still contains the file after Finish', git(['show', 'main:notes/engine-proof.md']).includes('Real engine proof'))
+  ok('main still contains the file after Finish', git(['show', 'main:' + selectedFolder + '/engine-proof.md']).includes('Real engine proof'))
 }
 
 try {

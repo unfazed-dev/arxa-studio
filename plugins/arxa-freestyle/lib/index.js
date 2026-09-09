@@ -10,6 +10,7 @@ import { createFile, createDir, renameEntry, moveEntry, duplicateEntry, trashEnt
 import { createFreestyleSessions } from './sessions.js'
 import { isRepo, hasHead } from '../../git-workspace/lib/repos.js'
 import { dshSessionKey } from '../../git-workspace/lib/sessions.js'
+import { createHash } from 'node:crypto'
 
 // The git card resolves session seats through the installed package in a
 // profile and through this same entry in a checkout. Keep the registry
@@ -22,6 +23,13 @@ export const name = 'arxa-freestyle'
 export const inject = ['webServer', 'sessions', 'workspaceRegistry', 'sessionTitle', 'agents']
 
 const noDshBridge = { spawn: async () => ({ ok: false, reason: 'dsh-unavailable' }) }
+
+function freestyleDshBirthKey(rootId, sessionId) {
+  const digest = createHash('sha256')
+    .update(JSON.stringify([rootId, sessionId]))
+    .digest('base64url')
+  return 'fs-' + digest
+}
 
 async function importShell() {
   try { return await import('arxa-file-org-shell') }
@@ -136,7 +144,7 @@ export function apply(ctx, opts = {}) {
         } catch { productionBridge = noDshBridge }
       }
       const id = typeof arg?.rootId === 'string' && arg.rootId !== ''
-        ? arg.rootId + '/' + arg.id
+        ? freestyleDshBirthKey(arg.rootId, arg.id)
         : arg?.id
       return productionBridge.spawn({ ...arg, id })
     },
