@@ -150,3 +150,16 @@ numbers above are from a fresh load for that reason.
 from `node_modules/@deepseek-ai/dsh-web-frontend/dist/assets/index-Df-65__b.js`
 — a stock boot race in the vendored bundle, present on both tabs, in no file
 this round touched.
+
+**Purge, driven through the UI rather than the route.** Right-click a trashed
+folder row → "Remove from Trash" → the confirm modal → confirm:
+
+```json
+{"rowFound":true,"menuHasRemove":true,"modalOpen":true,
+ "modalTitle":"Remove this folder from the Trash?The folder stays on disk — arxa just stops tracking it.",
+ "clickedConfirm":true,"rootTrash":0,"roots":0}
+```
+
+and the folder afterwards: `.arxa/`, `.git/`, `check.sh`, `hello.md` — every
+byte still there. The only destructive-sounding verb in the new set keeps the
+promise its copy makes.
