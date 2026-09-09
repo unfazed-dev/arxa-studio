@@ -107,3 +107,46 @@ Two consequences, decided rather than discovered:
 - `plugins/arxa-sidebar/selftest.freestyle.mjs` — locale parity extended to the
   five new keys.
 - `node scripts/ci.mjs`: ALL GREEN, drift gate included.
+
+### Lens, real engine, 1440×900
+
+A scratch Studio holding exactly what the two screenshots hold: one org, one
+Freestyle folder, both Archives/Trash sections empty. The four section wrappers
+measured from the live DOM:
+
+```json
+{"same": true,
+ "orgs":      {"Archives": {"borderTop":"1px solid rgba(0, 0, 0, 0.1)","marginTop":"8px","paddingBottom":"8px","opacity":"0.45"},
+               "Trash":    {"borderTop":"1px solid rgba(0, 0, 0, 0.1)","marginTop":"8px","paddingBottom":"8px","opacity":"0.45"}},
+ "freestyle": {"Archives": {"borderTop":"1px solid rgba(0, 0, 0, 0.1)","marginTop":"8px","paddingBottom":"8px","opacity":"0.45"},
+               "Trash":    {"borderTop":"1px solid rgba(0, 0, 0, 0.1)","marginTop":"8px","paddingBottom":"8px","opacity":"0.45"}}}
+```
+
+Screenshots: [sections-organisations.png](phase0b-snapshots/freestyle/sections-organisations.png),
+[sections-freestyle.png](phase0b-snapshots/freestyle/sections-freestyle.png).
+
+**The folder round trip, same engine.** `root.trash` on the live root:
+registry `roots 1 → 0`, `rootTrash 0 → 1`; the folder's own contents
+(`hello.md`, `check.sh`) still on disk, untouched. On the next load the
+Freestyle Trash section reads:
+
+```json
+{"Trash":    {"opacity":"1","header":"Trash1","rows":["Scratchpad · <path>"]},
+ "Archives": {"opacity":"0.45","header":"Archives","rows":[]}}
+```
+
+— un-dimmed because it holds something, auto-opened without a click, count 1,
+the folder named with its path as secondary text. `roottrash.restore` then put
+it back closed, `rootTrash` empty again.
+
+**One thing measured and rejected as evidence:** driving the trash by POSTing
+the route directly leaves the sidebar showing the old rows, because the repaint
+hangs off `freestyleStore.mutate` (which always refreshes) and not off the
+route. That is the harness bypassing the store, not a stale UI —
+`selftest.freestyle.mjs` already pins "every mutation refreshes state". The
+numbers above are from a fresh load for that reason.
+
+**Unrelated error seen in ~1 of 3 lens runs:** `Error: web app: missing #root`
+from `node_modules/@deepseek-ai/dsh-web-frontend/dist/assets/index-Df-65__b.js`
+— a stock boot race in the vendored bundle, present on both tabs, in no file
+this round touched.
