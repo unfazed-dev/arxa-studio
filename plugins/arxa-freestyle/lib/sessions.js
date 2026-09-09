@@ -5,7 +5,7 @@
 // in ../../git-workspace/lib for the functions this file calls.
 import fs from 'node:fs'
 import path from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { ensureTrashDir, listTrash, purgeEntry, readTrashEntry } from './files.js'
 import { resolveFreestyleRepo } from '../../git-workspace/lib/routing.js'
 import { getOrigin, isRepo } from '../../git-workspace/lib/repos.js'
@@ -49,6 +49,38 @@ function nestedRepos(rootPath) {
 // `path`, so this key is stable across renames.
 function sessionKey(root) {
   return GW.slugSegment(path.basename(root.path)) || `root-${String(root.id).slice(0, 8)}`
+}
+
+// Git-workspace identities normally mirror workspace paths verbatim, but a
+// Freestyle folder may contain spaces, Unicode, a leading dot, or enough deep
+// components that an escaped mirror exceeds filesystem limits. Keep every
+// ordinary Git-safe workspace unchanged. Otherwise one fixed-size hash segment
+// represents the whole normalized workspace; the raw `session.workspace`
+// remains the human/routing authority. Hash-looking literal folders are hashed
+// too, so they cannot collide with this reserved namespace.
+const FREESTYLE_ID_ESCAPE = 'arxa-fs--'
+const FREESTYLE_ID_WORD_MAX = 120
+
+function freestyleIdentityWorkspace(workspace) {
+  const rawParts = String(workspace ?? '').split('/').filter(Boolean)
+  const rawWorkspace = rawParts.join('/')
+  let safe = true
+  for (const raw of rawParts) {
+    try { GW.assertSessionIdShape(raw) } catch { safe = false }
+    if (raw.startsWith(FREESTYLE_ID_ESCAPE)) safe = false
+  }
+  if (safe) return { workspace: rawWorkspace, rawLeaf: rawParts.at(-1) ?? '' }
+  const digest = createHash('sha256').update(rawWorkspace, 'utf8').digest('base64url')
+  return { workspace: FREESTYLE_ID_ESCAPE + digest, rawLeaf: rawParts.at(-1) ?? '' }
+}
+
+function freestyleIdentityWord(name, rawLeaf) {
+  let word = GW.slugSegment(name)
+  if (!word) {
+    const folder = rawLeaf.length > 3 && rawLeaf.endsWith('s') ? rawLeaf.slice(0, -1) : rawLeaf
+    word = GW.slugSegment(folder) || 'session'
+  }
+  return word.slice(0, FREESTYLE_ID_WORD_MAX)
 }
 
 export function createFreestyleSessions({ env = process.env, dshBridge, githubBridge }) {
@@ -115,9 +147,11 @@ export function createFreestyleSessions({ env = process.env, dshBridge, githubBr
     if (!session || typeof session.id !== 'string' || typeof session.workspace !== 'string') throw new Error('invalid-session')
     GW.assertSessionIdShape(session.id)
     const workspace = session.workspace.split('/').filter(Boolean).join('/')
-    const expectedParent = [sessionKey(root), ...(workspace ? workspace.split('/') : [])].join('/')
+    const identity = freestyleIdentityWorkspace(workspace)
+    const expectedParent = [sessionKey(root), ...(identity.workspace ? identity.workspace.split('/') : [])].join('/')
     const idParts = session.id.split('/')
-    if (idParts.slice(0, -1).join('/') !== expectedParent) throw new Error('invalid-session')
+    const actualParent = idParts.slice(0, -1).join('/')
+    if (actualParent !== expectedParent) throw new Error('invalid-session')
     const expectedBranch = GW.SESSION_BRANCH_PREFIX + session.id
     if (session.branch !== expectedBranch) throw new Error('invalid-session')
     return { workspace, expectedBranch }
@@ -194,10 +228,11 @@ export function createFreestyleSessions({ env = process.env, dshBridge, githubBr
   return {
     async newSession(root, relDir = '', name) {
       const route = resolveFreestyleRepo(root.path, relDir, { env })
+      const identity = freestyleIdentityWorkspace((relDir || '').replace(/\/+$/, ''))
       const id = GW.mintSessionPath({
         org: sessionKey(root),
-        workspace: (relDir || '').replace(/\/+$/, ''),
-        name,
+        workspace: identity.workspace,
+        name: freestyleIdentityWord(name, identity.rawLeaf),
         sessions: GW.listSessions(route.repoPath, env),
         ghosts: ghostsFor(root, route.repoPath),
       })

@@ -2,9 +2,10 @@
 // Selftest: Freestyle sessions (F5) — any folder, worktree of the enclosing repo, cwd inside it.
 import assert from 'node:assert/strict'
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
+import { Buffer } from 'node:buffer'
 import { execFileSync } from 'node:child_process'
 import { addRoot } from './lib/roots.js'
-import { createDir } from './lib/files.js'
+import { createDir, listTrash } from './lib/files.js'
 import { createFreestyleSessions } from './lib/sessions.js'
 import * as GW from '../git-workspace/lib/sessions.js'
 const git = (cwd, ...a) => execFileSync('git', a, { cwd, encoding: 'utf8' }).trim()
@@ -28,6 +29,106 @@ const a = await S.archive(root, s2.id)
 ok(!fs.existsSync(s2.worktree) && S.list(root).archived.length === 1, 'archive removes the worktree and parks/merges per D39')
 await S.revive(root, s2.id); ok(fs.existsSync(path.join(root.path, '.arxa', 'worktrees', s2.id)) && S.list(root).archived.length === 0, 'revive rebuilds the worktree')
 await assert.rejects(S.newSession(root, '../out', 'nope'), /outside-root/); ok(true, 'escaping relDir refuses')
+
+// Freestyle accepts real folder names that Git cannot use verbatim in a ref.
+// The registry keeps the raw workspace/cwd while only the session identity is
+// encoded. Similar-looking names and a literal encoded-looking name must stay
+// distinct, otherwise one root can mint the same DSH identity twice.
+for (const rel of ['docs/My Notes', 'docs/My-Notes', 'docs/你好', 'docs/.draft', 'docs/arxa-fs--TXkgTm90ZXM']) {
+  fs.mkdirSync(path.join(root.path, rel), { recursive: true })
+}
+const unusual = []
+for (const rel of ['docs/My Notes', 'docs/My-Notes', 'docs/你好', 'docs/.draft', 'docs/arxa-fs--TXkgTm90ZXM']) {
+  const session = await S.newSession(root, rel, rel === 'docs/My Notes' ? undefined : 'write')
+  unusual.push(session)
+  ok(session.workspace === rel && session.cwd === path.join(session.worktree, rel), `raw workspace and cwd survive identity encoding: ${rel}`)
+  ok(GW.assertSessionIdShape(session.id) === session.id, `encoded identity remains a valid git session path: ${rel}`)
+}
+ok(new Set(unusual.map((session) => session.id)).size === unusual.length, 'spaces, Unicode, leading dots, safe lookalikes and the reserved escape prefix mint distinct identities')
+ok(
+  [0, 2, 3, 4].every((index) => /^r\/arxa-fs--[A-Za-z0-9_-]{43}\//.test(unusual[index].id)),
+  'an unsafe or escape-prefixed workspace maps to one bounded hash component',
+)
+const unusualEntry = (() => {
+  const session = unusual[0]
+  S.archive(root, session.id)
+  return { session, entry: S.trashArchived(root, session.id) }
+})()
+S.restoreTrash(root, unusualEntry.entry.entryId)
+const unusualRestored = S.list(root).archived.find((session) => session.id === unusualEntry.session.id)
+ok(unusualRestored?.workspace === 'docs/My Notes' && unusualRestored.worktree === unusualEntry.session.worktree, 'archive to Trash and restore preserves the raw workspace and worktree identity')
+
+const longUnsafeLeaf = 'a'.repeat(200) + ' b'
+const longUnsafeWorkspace = 'docs/' + longUnsafeLeaf
+fs.mkdirSync(path.join(root.path, longUnsafeWorkspace), { recursive: true })
+const longUnsafe = await S.newSession(root, longUnsafeWorkspace)
+ok(
+  longUnsafe.workspace === longUnsafeWorkspace
+    && /^r\/arxa-fs--[A-Za-z0-9_-]{43}\//.test(longUnsafe.id)
+    && longUnsafe.id.split('/').every((segment) => Buffer.byteLength(segment) <= 240),
+  'a long unsafe folder keeps its raw workspace while every identity component stays bounded',
+)
+S.archive(root, longUnsafe.id)
+const longUnsafeEntry = S.trashArchived(root, longUnsafe.id)
+S.restoreTrash(root, longUnsafeEntry.entryId)
+ok(S.list(root).archived.some((session) => session.id === longUnsafe.id && session.workspace === longUnsafeWorkspace), 'a long hashed workspace survives archive to Trash and restore')
+
+const hashLookingWorkspace = 'docs/' + longUnsafe.id.split('/')[1]
+fs.mkdirSync(path.join(root.path, hashLookingWorkspace), { recursive: true })
+const hashLooking = await S.newSession(root, hashLookingWorkspace)
+ok(hashLooking.id !== longUnsafe.id && hashLooking.workspace === hashLookingWorkspace, 'a literal hash-looking folder cannot collide with the workspace whose hash it resembles')
+
+const longSafeWorkspace = 'docs/' + 'z'.repeat(240)
+fs.mkdirSync(path.join(root.path, longSafeWorkspace), { recursive: true })
+const longSafe = await S.newSession(root, longSafeWorkspace)
+ok(
+  longSafe.workspace === longSafeWorkspace
+    && longSafe.id.split('/')[2].length === 240
+    && Buffer.byteLength(longSafe.id.split('/').at(-1)) <= 160,
+  'a valid 240-byte folder keeps its ordinary ID path and gets a bounded default leaf',
+)
+
+// IDs remain root-unique even when two nested repositories have folder names
+// that collapse to the same ordinary slug. Repo-local worktrees do not make
+// duplicate DSH identities safe because production scopes DSH by root + id.
+const initNested = (name) => {
+  const repo = path.join(root.path, name)
+  fs.mkdirSync(repo)
+  git(repo, '-c', 'init.defaultBranch=main', 'init', '-q')
+  fs.writeFileSync(path.join(repo, 'seed.md'), name)
+  git(repo, 'add', '-A')
+  git(repo, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'chore: seed')
+  return repo
+}
+const spacedNested = initNested('repo A')
+const dashedNested = initNested('repo-A')
+const nestedLookalikeA = await S.newSession(root, 'repo A', 'nested')
+const nestedLookalikeB = await S.newSession(root, 'repo-A', 'nested')
+ok(nestedLookalikeA.id !== nestedLookalikeB.id, 'slug-similar folders in different nested repositories keep distinct identities')
+ok(nestedLookalikeA.workspace === 'repo A' && nestedLookalikeA.worktree.startsWith(spacedNested + path.sep), 'encoded nested workspace keeps its raw value and owning repo worktree')
+ok(nestedLookalikeB.workspace === 'repo-A' && nestedLookalikeB.worktree.startsWith(dashedNested + path.sep), 'ordinary nested workspace keeps its existing identity and owning repo worktree')
+
+// The escape prefix is reserved, including while validating mutable Trash
+// markers. Otherwise a marker can reinterpret encoded `repo A` as a literal
+// hash-looking workspace and redirect purge to that sibling repository.
+const encodedRepoSegment = nestedLookalikeA.id.split('/')[1]
+const encodedLiteralRepo = initNested(encodedRepoSegment)
+S.archive(root, nestedLookalikeA.id)
+const encodedEntry = S.trashArchived(root, nestedLookalikeA.id)
+const encodedMarkerPath = path.join(root.path, '.arxa', 'trash', encodedEntry.entryId, 'entry.json')
+const encodedMarker = JSON.parse(fs.readFileSync(encodedMarkerPath, 'utf8'))
+git(encodedLiteralRepo, 'branch', encodedMarker.branch)
+encodedMarker.repoPath = encodedRepoSegment
+encodedMarker.session.workspace = encodedRepoSegment
+encodedMarker.session.worktree = path.join(encodedLiteralRepo, '.arxa', 'worktrees', ...encodedMarker.session.id.split('/'))
+fs.writeFileSync(encodedMarkerPath, JSON.stringify(encodedMarker, null, 2) + '\n')
+await assert.rejects(S.purgeTrash(root, encodedEntry.entryId), /unknown-entry|repo-mismatch/)
+ok(
+  git(spacedNested, 'rev-parse', '--verify', encodedMarker.branch) !== ''
+    && git(encodedLiteralRepo, 'rev-parse', '--verify', encodedMarker.branch) !== ''
+    && listTrash(root).some((entry) => entry.id === encodedEntry.entryId),
+  'the reserved prefix cannot redirect an encoded session purge to a literal-prefix repository',
+)
 
 // FIX4: a nested repo can carry session rows from a different org that
 // happens to share the same repo — those foreign rows must never leak into
