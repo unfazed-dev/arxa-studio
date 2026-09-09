@@ -152,3 +152,35 @@ Two harness notes, so the next run does not re-derive them:
   engine's `org.open` then correctly refuses. Seed the org, then let the engine
   open it. (Checked before filing: the refusal was a live lock held by the
   seeder, not stale-lock mishandling — no bug there.)
+
+### The fixed base, observed in a running engine
+
+The tests above are the host in isolation. This is the whole chain — token
+mint, repo resolution, `git show` — in a booted engine on a scratch org built
+to carry the same collision as `WAW`: an org root `check.sh` and a project
+`check.sh`, both real arxa gate files, different content. Session
+`CollisionOrg/projects/Demo/02-design/application/application-wt-260909-001`,
+the same shape as the report's.
+
+Both mints issued against the same running engine, same relPath:
+
+| mint | token `absPath` | base blob |
+|---|---|---|
+| `{relPath, worktreeId}` — what the client sends now | `…/application-wt-260909-001/check.sh` | `c05c694e7e0ee526` |
+| `{relPath}` — what it sent before | `CollisionOrg/check.sh` | `f547748ddf6f170c` |
+
+And on disk: `projects/Demo` `main:check.sh` is `c05c694e7e0ee526`; the org
+root's is `f547748ddf6f170c`. The new mint reads the project's file; the old
+one read the org's. `resolveWorktree` answers `CollisionOrg/projects/Demo` for
+that session.
+
+**Not captured:** the diff pane itself repainting. The base *content* the pane
+receives was observed end-to-end through the live routes; Monaco rendering that
+content is stock and unchanged here.
+
+### What the report's own file does now
+
+`WAW`'s session resolves to `/Volumes/business_ssd/WAW/projects/Tree`, whose
+`main:check.sh` is `f043fd57225996e9` — identical to the worktree copy on
+screen. So that diff now shows **no changes**, which is the truth and agrees
+with the empty decoration map. The red and green were the bug.
