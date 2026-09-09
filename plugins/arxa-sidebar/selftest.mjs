@@ -120,8 +120,8 @@ check('create-modal: sign-in CTA carries the GitHub brand mark', client.includes
 check('create-modal: D90 sign-in wall is GONE — submit always present, GitHub rides the switch', !client.includes('!showSignin && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {') && !client.includes('showSignin') && client.includes('const canSubmit = name.trim() !== "" && !busy && location.trim() !== "" && !blocked;'))
 check('create-modal: device-flow code surfaces in the sign-in step (github.device poll + big code)', client.includes('"github.device"') && client.includes('github.signin.codeHint') && client.includes('devCode.userCode'))
 check('create-modal: D90 device-flow copy/open-link moved to the relink paths (purge + disconnect modals)', client.includes('open-external') && client.includes('https://github.com/login/device') && client.includes('devCode.userCode'))
-check('rows: window.prompt remains isolated to Freestyle new-folder naming (organisation create stays WebView-safe)',
-  (client.match(/window\.prompt\(/g) || []).length === 1 && client.includes('window.prompt(t("freestyle.add.newPrompt"))'))
+check('rows: window.prompt is gone from the bundle — WKWebView answers it with null and no dialog, so every name is collected in a modal',
+  !/window\.prompt\(/.test(client))
 check('rows: location field opens the OS folder locator (Tauri dialog when injected, host osascript locator otherwise)',
   client.includes('window.__TAURI__.dialog') && client.includes('directory: true') && client.includes('pick-folder'))
 check('host: macOS folder locator route exists', hostSrc().includes('choose folder') && hostSrc().includes('pick-folder'))
@@ -1022,6 +1022,24 @@ check('client: agent verb + reason strings localized in en/pl/fr',
       return !/^\s*(fs\.rm|fs\.unlink|fs\.rename)/m.test(body.slice(0, body.indexOf('\n}')))
     }))
 }
+
+// S-newfolder: "Create new folder…" collects its name in the shared modal.
+// The old flow called window.prompt after the native picker; in the Tauri
+// WKWebView prompt returns null with no dialog, so the click ended in
+// silence — no folder, no error. These pins keep the name in the bundle.
+check('S-newfolder: the + menu asks the modal for the name instead of prompting',
+  client.includes('setConfirmTarget({ action: "root.new", arg: { parent }, input: "name", title: t("freestyle.add.new"), body: parent, confirm: t("freestyle.add.submit") });'))
+check('S-newfolder: the modal merges the typed name into the action argument',
+  client.includes('const arg = target.input ? { ...target.arg, [target.input]: name } : target.arg;'))
+check('S-newfolder: the modal validates the name the way inline rename does and gates the primary button on it',
+  client.includes('const ready = !busy && (!target.input || validFreestyleName(name));')
+  && client.includes('disabled: !ready, onClick: confirm, children: target.confirm'))
+check('S-newfolder: a failed action stays visible inside the modal',
+  client.includes('catch (e) { setError(String((e && e.message) || e)); setBusy(false); }')
+  && client.includes('(0, react_jsx_runtime.jsx)(ErrorNote, { msg: error })'))
+check('S-newfolder: one modal serves the tab — the rows ask through the prop, the browser owns the state',
+  client.includes('function FreestyleRoots({ roots, trash, rootTrash, githubLinked, ask })')
+  && (client.match(/\(0, react_jsx_runtime\.jsx\)\(FreestyleConfirmModal, \{ target: confirmTarget/g) || []).length === 1)
 
 
 // ---- D117: VS Code-style decorations on the file tree ----

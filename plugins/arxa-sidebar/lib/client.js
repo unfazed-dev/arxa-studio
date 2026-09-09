@@ -6355,6 +6355,7 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			"freestyle.add.open": "Open existing folder…",
 			"freestyle.add.new": "Create new folder…",
 			"freestyle.add.newPrompt": "New folder name",
+			"freestyle.add.submit": "Create folder",
 			"freestyle.add.unavailable": "Folder picker unavailable",
 			"freestyle.cta.pick": "Select a git-backed Freestyle folder to start a session",
 			"freestyle.menu.rename": "Rename…",
@@ -6629,6 +6630,7 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			"freestyle.add.open": "Otwórz istniejący folder…",
 			"freestyle.add.new": "Utwórz nowy folder…",
 			"freestyle.add.newPrompt": "Nazwa nowego folderu",
+			"freestyle.add.submit": "Utwórz folder",
 			"freestyle.add.unavailable": "Wybór folderu jest niedostępny",
 			"freestyle.cta.pick": "Wybierz folder Freestyle z repozytorium git, aby rozpocząć sesję",
 			"freestyle.menu.rename": "Zmień nazwę…",
@@ -6903,6 +6905,7 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			"freestyle.add.open": "Ouvrir un dossier existant…",
 			"freestyle.add.new": "Créer un nouveau dossier…",
 			"freestyle.add.newPrompt": "Nom du nouveau dossier",
+			"freestyle.add.submit": "Créer le dossier",
 			"freestyle.add.unavailable": "Le sélecteur de dossier est indisponible",
 			"freestyle.cta.pick": "Sélectionnez un dossier Freestyle avec un dépôt git pour démarrer une session",
 			"freestyle.menu.rename": "Renommer…",
@@ -7095,19 +7098,31 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			}) });
 			return children({ menu, menuOpen: open, onContextMenu: showContext });
 		}
+		/** One modal for every Freestyle question. With `target.input` it also
+		 * collects a name — the same in-bundle field the org create modal uses,
+		 * for the same reason: window.prompt returns null in the Tauri WKWebView
+		 * with no dialog, so "Create new folder…" silently did nothing. Errors
+		 * stay in the modal, the way the org modal keeps them. */
 		function FreestyleConfirmModal({ target, onClose }) {
 			const [busy, setBusy] = (0, react.useState)(false);
+			const [value, setValue] = (0, react.useState)("");
+			const [error, setError] = (0, react.useState)(null);
+			const key = target ? target.action + ":" + JSON.stringify(target.arg || {}) : "";
+			(0, react.useEffect)(() => { setValue(""); setError(null); }, [key]);
 			if (!target) return null;
+			const name = value.trim();
+			const ready = !busy && (!target.input || validFreestyleName(name));
 			const confirm = async () => {
+				if (!ready) return;
 				setBusy(true);
+				setError(null);
 				try {
-					if (target.action === "trash.purge") await freestyleStore.mutate("trash.purge", target.arg);
-					else if (target.action === "archive.trash") await freestyleStore.mutate("archive.trash", target.arg);
-					else await freestyleStore.mutate(target.action, target.arg);
+					const arg = target.input ? { ...target.arg, [target.input]: name } : target.arg;
+					await freestyleStore.mutate(target.action, arg);
 					setBusy(false);
 					onClose();
 				}
-				catch (e) { freestyleNotice(e); setBusy(false); }
+				catch (e) { setError(String((e && e.message) || e)); setBusy(false); }
 			};
 			return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Modal, {
 				open: true,
@@ -7116,9 +7131,13 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 				closeLabel: orgT("freestyle.confirm.cancel"),
 				footer: (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 					(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "ghost", disabled: busy, onClick: onClose, children: orgT("freestyle.confirm.cancel") }),
-					(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "primary", disabled: busy, onClick: confirm, children: target.confirm })
+					(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "primary", disabled: !ready, onClick: confirm, children: target.confirm })
 				] }),
-				children: target.body
+				children: (0, react_jsx_runtime.jsxs)("div", { children: [
+					target.body ? (0, react_jsx_runtime.jsx)("div", { style: { wordBreak: "break-all" }, children: target.body }) : null,
+					target.input ? (0, react_jsx_runtime.jsx)("div", { style: { display: "flex", marginTop: 10 }, children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Input, { autoFocus: true, value, className: "aXa_fs_name", "aria-label": orgT("freestyle.add.newPrompt"), placeholder: orgT("freestyle.add.newPrompt"), onChange: (e) => setValue(e.target.value), onKeyDown: (e) => { if (e.key === "Enter") { e.preventDefault(); void confirm(); } } }) }) : null,
+					(0, react_jsx_runtime.jsx)(ErrorNote, { msg: error })
+				] })
 			});
 		}
 		function SidebarTabs({ wide, active, onChange }) {
@@ -7184,6 +7203,8 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			const st = useFreestyle();
 			const [menuOpen, setMenuOpen] = (0, react.useState)(false);
 			const [githubLinked, setGithubLinked] = (0, react.useState)(null);
+			// One confirm/name modal for the whole tab: the + menu and the rows share it.
+			const [confirmTarget, setConfirmTarget] = (0, react.useState)(null);
 			// The Organisations header is the stock WorkspaceBrowser sectionHeader:
 			// label, a search that expands over it, then view-options + add. This
 			// tab had only the add button, so the two headers never matched. Same
@@ -7254,8 +7275,10 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			const addNew = async () => {
 				const parent = await pickFolder(t("freestyle.add.new"));
 				if (!parent) return;
-				const name = window.prompt(t("freestyle.add.newPrompt"));
-				if (name) await freestyleStore.mutate("root.new", { parent, name });
+				// The name comes from the modal, never window.prompt: WKWebView
+				// answers prompt with null and shows nothing, so the old flow ended
+				// here with no folder, no error and no sign anything was clicked.
+				setConfirmTarget({ action: "root.new", arg: { parent }, input: "name", title: t("freestyle.add.new"), body: parent, confirm: t("freestyle.add.submit") });
 			};
 			if (!wide) return null;
 			return (0, react_jsx_runtime.jsxs)("div", { className: "aXa_fs_body", children: [
@@ -7342,7 +7365,8 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 				] }),
 				st.roots.length === 0 ? (0, react_jsx_runtime.jsx)("div", { className: "aXa_fs_empty", children: t("freestyle.empty") }) : null,
 				st.roots.length > 0 && visibleRoots.length === 0 ? (0, react_jsx_runtime.jsx)("div", { className: WorkspaceBrowser_module_css_default.searchStatus, children: t("freestyle.search.noMatches") }) : null,
-				(0, react_jsx_runtime.jsx)(FreestyleRoots, { roots: visibleRoots, trash: st.trash, rootTrash: st.rootTrash, githubLinked })
+				(0, react_jsx_runtime.jsx)(FreestyleRoots, { roots: visibleRoots, trash: st.trash, rootTrash: st.rootTrash, githubLinked, ask: setConfirmTarget }),
+				(0, react_jsx_runtime.jsx)(FreestyleConfirmModal, { target: confirmTarget, onClose: () => setConfirmTarget(null) })
 			] });
 		}
 		function freestyleRootVerbs(rootId, ask) {
@@ -7589,13 +7613,11 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 				]
 			});
 		}
-		function FreestyleRoots({ roots, trash, rootTrash, githubLinked }) {
-			const [confirmTarget, setConfirmTarget] = (0, react.useState)(null);
+		function FreestyleRoots({ roots, trash, rootTrash, githubLinked, ask }) {
 			return (0, react_jsx_runtime.jsxs)("div", { className: "aXa_fs_roots", role: "tree", children: [
-				roots.map((root) => (0, react_jsx_runtime.jsx)(FreestyleRootRow, { root, githubLinked, ask: setConfirmTarget }, root.id)),
-				(0, react_jsx_runtime.jsx)(FreestyleArchivesRows, { roots, ask: setConfirmTarget }),
-				(0, react_jsx_runtime.jsx)(FreestyleTrashRows, { trash, rootTrash, roots, ask: setConfirmTarget }),
-				(0, react_jsx_runtime.jsx)(FreestyleConfirmModal, { target: confirmTarget, onClose: () => setConfirmTarget(null) })
+				roots.map((root) => (0, react_jsx_runtime.jsx)(FreestyleRootRow, { root, githubLinked, ask }, root.id)),
+				(0, react_jsx_runtime.jsx)(FreestyleArchivesRows, { roots, ask }),
+				(0, react_jsx_runtime.jsx)(FreestyleTrashRows, { trash, rootTrash, roots, ask })
 			] });
 		}
 		function SidebarBrowser(props) {

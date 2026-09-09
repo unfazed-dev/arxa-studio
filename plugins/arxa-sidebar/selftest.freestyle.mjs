@@ -26,9 +26,9 @@ assert.match(client, /function ArxaDirRows\(\{ dir, depth, mode, hideDirs, rootI
 assert.match(client, /freestyleStore\.mutate\("root\.publish", \{ rootId, visibility: "private" \}\)/, 'root menu publishes privately through the Freestyle action')
 assert.match(client, /freestyleStore\.mutate\("entry\.move", \{ rootId, relPath, toDir \}\)/, 'same-root drops use the entry.move action')
 assert.match(client, /freestyleStore\.mutate\("archive\.revive"/, 'archives can be revived')
-assert.match(client, /freestyleStore\.mutate\("archive\.trash"/, 'archives can move to trash')
+assert.match(client, /ask\(\{ action: "archive\.trash"/, 'archives can move to trash after confirmation')
 assert.match(client, /freestyleStore\.mutate\("trash\.restore"/, 'trash entries can be restored')
-assert.match(client, /freestyleStore\.mutate\("trash\.purge"/, 'trash entries can be purged after confirmation')
+assert.match(client, /ask\(\{ action: "trash\.purge"/, 'trash entries can be purged after confirmation')
 assert.match(client, /arxaClientSessions\.open\(dshId\)/, 'Freestyle session rows open their DSH conversation')
 assert.match(client, /const dshId = row\.dshSessionId;/, 'session clicks use the persisted root-scoped DSH id')
 assert.doesNotMatch(client, /const dshId = row\.dshSessionId \|\|/, 'session clicks do not derive an ambiguous fallback id')
@@ -52,7 +52,7 @@ assert.match(client, /className: "aXa_fs_meta", children: rootName/, 'trash rows
 assert.match(client, /hero\.guide\.freestyle/, 'the empty conversation hero follows the active Freestyle tab')
 assert.match(client, /snap && snap\.current === row\.dshSessionId\) arxaClientSessions\.clear\(\)/, 'archiving clears only the conversation owned by that row')
 assert.match(client, /for \(const root of freestyleStore\.get\(\)\.roots \|\| \[\]\)[\s\S]*?root\.sessions\?\.active/, 'rider ownership includes active Freestyle conversations')
-for (const key of ['freestyle.tab.org', 'freestyle.tab.freestyle', 'freestyle.empty', 'freestyle.add.open', 'freestyle.add.new', 'freestyle.cta.pick', 'freestyle.menu.publish', 'freestyle.publish.unlinked', 'freestyle.confirm.purge', 'freestyle.confirm.rootTrash', 'freestyle.confirm.rootTrashBody', 'freestyle.confirm.rootPurge', 'freestyle.confirm.rootPurgeBody', 'freestyle.trash.removeFolder', 'freestyle.session.noConversation']) {
+for (const key of ['freestyle.tab.org', 'freestyle.tab.freestyle', 'freestyle.empty', 'freestyle.add.open', 'freestyle.add.new', 'freestyle.add.newPrompt', 'freestyle.add.submit', 'freestyle.cta.pick', 'freestyle.menu.publish', 'freestyle.publish.unlinked', 'freestyle.confirm.purge', 'freestyle.confirm.rootTrash', 'freestyle.confirm.rootTrashBody', 'freestyle.confirm.rootPurge', 'freestyle.confirm.rootPurgeBody', 'freestyle.trash.removeFolder', 'freestyle.session.noConversation']) {
   assert.equal(client.split(`"${key}":`).length - 1, 3, `${key} is translated in en/pl/fr`)
 }
 
