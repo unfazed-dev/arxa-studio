@@ -3123,6 +3123,7 @@ window.__ModuleLoader__.load({
 			if (!b.ok) throw new Error(b.error || action);
 			return b;
 		});
+		const LAST_ROW_KEY = "arxa.dashboard.last";
 		function createOrgStore() {
 			let resumeTried = false;
 		let bootDecided = false;
@@ -3163,90 +3164,54 @@ window.__ModuleLoader__.load({
 					const cur = snap ? snap.current : void 0;
 					if (cur === void 0 || cur === null) return;
 					if (currentSessionId) return;
-					const orgIds = new Set();
-					for (const o of state.orgs || []) for (const x of o.sessions || []) if (x.dshSessionId) orgIds.add(x.dshSessionId);
-					if (orgIds.has(cur)) return;
+					// D12 (2026-09-09): an org session dsh reconnects on its own (the
+					// recent workspace's session) is a rider too — boot lands on the
+					// dashboard, never on a resumed conversation. Only a user open
+					// (currentSessionId, set by session.open) keeps the content.
 					if (tries > 20) return;
 					try { arxaClientSessions.clear() } catch { /* degrade */ }
 					window.setTimeout(reassertEmpty, 250);
 				};
 				window.setTimeout(reassertEmpty, 250);
 			};
+			/** Landing (docs/plans/org-row-dashboard.md D12, 2026-09-09): boot no
+			 * longer resumes a conversation. Once the org list settles the content
+			 * area is cleared (clearIfNothingToResume — its bounded rider kill
+			 * stays) and the LAST container row the user selected before quitting
+			 * (selectRow persists it under localStorage LAST_ROW_KEY) is selected
+			 * again, so the hero lands on that row's dashboard — the stats view of
+			 * the client the user was looking at. A saved row whose org is gone,
+			 * or no saved row at all, lands on the first org's dashboard. No orgs:
+			 * the welcome guide as before. Never fights the user: runs ONCE. */
 			const maybeResume = (orgs) => {
 				if (resumeTried) return;
-				if (!orgs || orgs.length === 0) {
-					// Welcome world (no orgs): land on the empty state too.
-					if (!state.loading) resumeTried = true; // boot decision is made ONCE the org list settled — a row the user creates later is never a stale boot candidate (found live 2026-09-02: fresh "+" session dropped by dropIfEmpty)
-					clearIfNothingToResume();
-					return;
-				}
-				// The open-org handle is server memory — after every relaunch NO org
-				// is open, so an open-org-only candidate never resumes anything
-				// (welcome hero on every boot). Design keeps "no org auto-opened"
-				// (file-org-shell lifecycle), so the org is opened BECAUSE a session
-				// is resumed: `session.open` runs ensureOpen(orgId) server-side.
-				// Candidate = the open org's last open-state row when one is open;
-				// otherwise the most recently updated open-state row across orgs.
-				const pickIn = (org) => {
-					const rows = (org && org.sessions) || [];
-					const openRows = rows.filter((x) => x.state === "open");
-					return openRows.length ? openRows[openRows.length - 1] : null;
-				};
-				let open = orgs.find((o) => o.open);
-				let cand = open ? (pickIn(open) || (open.sessions || [])[open.sessions.length - 1] || null) : null;
-				if (!cand) {
-					const ts = (x) => Date.parse(x.updatedAt || x.createdAt || "") || 0;
-					open = null;
-					for (const o of orgs) {
-						const r = pickIn(o);
-						if (r && (!cand || ts(r) > ts(cand))) { cand = r; open = o; }
-					}
-				}
-				if (!open || !cand) {
-					if (!state.loading) resumeTried = true; // boot decision is made ONCE the org list settled — a row the user creates later is never a stale boot candidate (found live 2026-09-02: fresh "+" session dropped by dropIfEmpty)
-					clearIfNothingToResume();
-					return;
-				}
+				if (state.loading) return;
 				resumeTried = true;
-				bootDecided = true;
-				currentSessionId = cand.id;
-			// The sig gate blocks the next state replacement when server data is
-			// unchanged — surface current NOW or the stock auto-expand (which
-			// keys off sessionsView.current) never sees the resumed session.
-			state = { ...state, currentSessionId: cand.id };
-			state.sessionsView = sessionsList(state);
-			emit();
-			// Host revive first (may spawn the engine conversation), then the
-			// refresh the mutate carries lands the fresh dshSessionId, then
-			// open the conversation — dsh's own resume call. Boot passes
-			// dropIfEmpty (Q3): a candidate that never received a user message
-			// comes back { dropped: true } — the row is gone; land on the
-			// welcome hero instead of an empty thread. Otherwise reveal the row
-			// in the tree (Q6) before opening.
-			bootMark("open-req");
-			// ORG_POST + a parallel refresh, not mutate (2026-09-07): mutate resolves
-			// only after the refresh that follows the action, and on boot that
-			// refresh cost ~0.5s the conversation open was waiting on for nothing
-			// — a row that has conversed already carries its dshSessionId. Only a
-			// row born without one (spawned by this very resume) waits for the
-			// refresh, which is what delivers the new id.
-			ORG_POST("session.open", { orgId: open.id, sessionId: cand.id, dropIfEmpty: true }).then((res) => {
-				bootMark("open-res");
-				const r = res ? res.result : void 0;
-				const refreshed = refresh();
-				if (r && r.dropped === true) {
-					currentSessionId = null;
-					bootDecided = false;
-					state = { ...state, currentSessionId: null };
-					state.sessionsView = sessionsList(state);
-					emit();
-					clearIfNothingToResume();
-					return;
+				clearIfNothingToResume();
+				const list = orgs || [];
+				if (list.length === 0) return;
+				let saved = null;
+				try { saved = JSON.parse(window.localStorage.getItem(LAST_ROW_KEY) || "null"); } catch { saved = null; }
+				const org = saved && typeof saved.orgId === "string" ? list.find((o) => o.id === saved.orgId) : null;
+				const sel = org
+					? { orgId: org.id, rowId: typeof saved.rowId === "string" ? saved.rowId : "", kind: saved.kind === "dock" || saved.kind === "project" ? saved.kind : "org", label: typeof saved.label === "string" && saved.label ? saved.label : org.name }
+					: { orgId: list[0].id, rowId: "", kind: "org", label: list[0].name };
+				// Reveal the row like revealSession does: org + every container
+				// prefix written true (never toggled).
+				const x = { ...(state.expanded ?? {}) };
+				x[sel.orgId] = true;
+				let prefix = "";
+				for (const p of (sel.rowId || "").split("/").filter(Boolean)) {
+					prefix = prefix ? prefix + "/" + p : p;
+					x[sel.orgId + "|" + prefix] = true;
 				}
-				try { orgStore.revealSession(cand.id) } catch { /* reveal is presentation — never blocks the open */ }
-				if (cand.dshSessionId) return arxaOpenConversation(cand.id);
-				return refreshed.then(() => arxaOpenConversation(cand.id));
-			}).catch(() => { refresh(); });
+				state = { ...state, expanded: x, selectedRowId: sel };
+				state.emit = buildEmit(state);
+				emit();
+				// An expanded org row browses the open-org tree lane (T4 v2) — open
+				// the org like the row click does. Best-effort: the dashboard reads
+				// the registry, it needs no open handle.
+				ORG_POST("org.open", { orgId: sel.orgId }).then(() => refresh()).catch(() => {});
 			};
 			const emit = () => {
 				subs.forEach((l) => l());
@@ -3348,6 +3313,11 @@ window.__ModuleLoader__.load({
 				* "projects/topo/design") | null. Server truth is untouched. */
 				selectRow(sel) {
 					state = { ...state, selectedRowId: sel };
+					// D12: a container row (org / dock / project) is the boot landing
+					// candidate — leaf workspace selections are not dashboards.
+					if (sel && (sel.kind === "org" || sel.kind === "dock" || sel.kind === "project")) {
+						try { window.localStorage.setItem(LAST_ROW_KEY, JSON.stringify({ orgId: sel.orgId, rowId: sel.rowId || "", kind: sel.kind, label: sel.label || "" })); } catch { /* storage optional */ }
+					}
 					emit();
 				},
 				/** Client-side container expansion (default-collapsed, 2026-08-30):
@@ -3444,6 +3414,22 @@ window.__ModuleLoader__.load({
 			get orgOpen() {
 				return orgStore.get().orgs.some((o) => o.open);
 			},
+			/** The BOUND session — what the content area is showing right now,
+			* { orgId, sessionId } | null (org-row-dashboard.md D10, 2026-09-10).
+			* arxa-dashboard heartbeats focus time against it; the dashboard
+			* itself is never up while a session is bound, so this is the only
+			* way it can know what the operator is looking at. dsh's list keys
+			* on ITS session id, the registry on arxa's — match either. */
+			boundSession() {
+				const snap = arxaListGet();
+				const cur = snap ? snap.current : null;
+				if (typeof cur !== "string" || cur === "") return null;
+				for (const o of orgStore.get().orgs) {
+					const hit = (o.sessions || []).find((x) => x && (x.id === cur || x.dshSessionId === cur));
+					if (hit) return { orgId: o.id, sessionId: hit.id };
+				}
+				return null;
+			},
 			/** Selected workspace row (v2): the shell New Session CTA target —
 			* { orgId, rowId } | null. Org-level creation is gone; a null
 			* selection no-ops (the CTA is disabled). */
@@ -3453,6 +3439,34 @@ window.__ModuleLoader__.load({
 			},
 			refreshFreestyle() {
 				return freestyleStore.refresh();
+			},
+			/** The rows the dashboard may navigate between (org-row-dashboard
+			* §14 Q3, 2026-09-10): the org itself plus its five FIXED docks, in
+			* tree order. The dashboard renders these as nav pills; a fixed shape
+			* means the pill row never reflows while data loads. Unknown org or a
+			* tree that failed to read degrades to [] — the pills disappear, the
+			* dashboard does not. */
+			orgRows(orgId) {
+				const o = orgStore.get().orgs.find((x) => x && x.id === orgId);
+				if (!o) return [];
+				const docks = o.tree && Array.isArray(o.tree.docks) ? o.tree.docks : [];
+				return [{ rowId: "", kind: "org", label: o.name }].concat(docks.map((d) => ({
+					rowId: d.slug,
+					kind: "dock",
+					label: orgT("tree.dock." + d.slug),
+				})));
+			},
+			/** Navigate the dashboard to another row of the SAME org (§14 Q3).
+			* Delegates to the store's own selection — the one the tree rows call —
+			* so the sidebar highlight, the New Session CTA target and the boot
+			* landing memory all move together. A caller-shaped object is refused
+			* rather than stored: a bad selection would strand the hero. */
+			selectRow(sel) {
+				if (!sel || typeof sel.orgId !== "string" || sel.orgId === "") return false;
+				if (typeof sel.rowId !== "string") return false;
+				if (!orgStore.get().orgs.some((o) => o && o.id === sel.orgId)) return false;
+				orgStore.selectRow({ orgId: sel.orgId, rowId: sel.rowId, kind: sel.kind, label: sel.label });
+				return true;
 			},
 			/** CTA bridge (2026-09-01): the shell New Session button reads these
 			* at RENDER — single source of truth. The first cut (D70/D71) gated
@@ -3473,7 +3487,9 @@ window.__ModuleLoader__.load({
 				}
 				const s = orgStore.get();
 				const sel = s.selectedRowId;
-				if (!sel) return false;
+				// An org row selects with rowId "" (dashboard D2); it is never a
+				// session seat, so the CTA stays dark exactly as with no selection.
+				if (!sel || !sel.rowId) return false;
 				if (projectRowRefused(sel.rowId)) return false;
 				const o = (s.orgs || []).find((y) => y.id === sel.orgId);
 				return !(o && o.open && o.snapshotPending === true);
@@ -3491,7 +3507,7 @@ window.__ModuleLoader__.load({
 				// slot). orgT resolves through the registered dicts instead.
 				const s = orgStore.get();
 				const sel = s.selectedRowId;
-				if (!sel) return orgT("newSession.selectFirst");
+				if (!sel || !sel.rowId) return orgT("newSession.selectFirst");
 				if (projectRowRefused(sel.rowId)) return orgT("newSession.needsTrack");
 				const o = (s.orgs || []).find((y) => y.id === sel.orgId);
 				return o && o.open && o.snapshotPending === true ? orgT("newSession.snapshotPending") : void 0;
@@ -3815,13 +3831,40 @@ window.__ModuleLoader__.load({
 			const listSnap = (0, react.useSyncExternalStore)(arxaListSubscribe, arxaListGet, arxaListGet);
 			const current = listSnap ? listSnap.current : void 0;
 			const unbound = current === void 0 || current === null;
+			// Dashboard seam (docs/plans/org-row-dashboard.md D1/D8/D9, 2026-09-09):
+			// arxa-dashboard publishes its Root on window and announces it; while a
+			// container row is selected and nothing is bound, this slot renders
+			// that Root instead of the guide and marks the stack so the
+			// dashboard's own CSS can reshape the hero. Leaf workspace rows keep
+			// the guide (D3). Without the plugin the guide renders as before.
+			const [, dashTick] = (0, react.useState)(0);
+			(0, react.useEffect)(() => {
+				const on = () => dashTick((n) => n + 1);
+				window.addEventListener("arxa-dashboard-ready", on);
+				return () => window.removeEventListener("arxa-dashboard-ready", on);
+			}, []);
+			const sel = org.selectedRowId;
+			const dash = typeof window !== "undefined" ? window.__ARXA_DASHBOARD__ : void 0;
+			// Organisations tab ONLY (found live 2026-09-09: the org dashboard stayed
+			// up after switching to Freestyle) — Freestyle keeps its own guide.
+			const showDash = unbound && freestyle.ui.activeTab !== "freestyle" && !!sel && (sel.kind === "org" || sel.kind === "dock" || sel.kind === "project") && !!(dash && typeof dash.Root === "function");
 			(0, react.useEffect)(() => {
 				const stack = ref.current ? ref.current.parentElement?.parentElement?.parentElement : null;
 				if (!stack) return;
 				if (unbound) stack.setAttribute("data-arxa-empty", "");
 				else stack.removeAttribute("data-arxa-empty");
-				return () => stack.removeAttribute("data-arxa-empty");
+				if (showDash) stack.setAttribute("data-arxa-dashboard", "");
+				else stack.removeAttribute("data-arxa-dashboard");
+				return () => { stack.removeAttribute("data-arxa-empty"); stack.removeAttribute("data-arxa-dashboard"); };
 			});
+			if (showDash) {
+				const orgRow = (org.orgs || []).find((o) => o.id === sel.orgId);
+				return (0, react_jsx_runtime.jsx)("div", {
+					ref,
+					"data-arxa-dashboard-seat": "",
+					children: (0, react_jsx_runtime.jsx)(dash.Root, { selection: { orgId: sel.orgId, rowId: sel.rowId || "", kind: sel.kind, label: sel.label || "", orgName: orgRow ? orgRow.name : "" } }, sel.orgId + "|" + (sel.rowId || ""))
+				});
+			}
 			// Q1 (grilled 2026-09-02): the "sessions start…" guide ONLY when
 			// nothing is bound. A bound session — resumed or fresh — shows where
 			// it lives instead (Q2 cordis crumb: org / dock / project / session /
@@ -4527,7 +4570,18 @@ window.__ModuleLoader__.load({
 		};
 		const ARXA_SELECT_WS = (workspaceId) => {
 			const { orgId, ws } = wsParts(workspaceId);
-			if (ws !== "") orgStore.selectRow({ orgId, rowId: ws });
+			if (ws === "") return;
+			// D3/D12 (found live 2026-09-09): the WORKSPACE docks (notes / meetings /
+			// account / communications) are stock workspace rows, not
+			// OrgContainerRows — their click lands here, and a selection without a
+			// kind kept the hero on the guide (only Projects, a container dock,
+			// showed its dashboard). A top-level workspace IS a dock in the org
+			// model: tag it so the hero shows the category dashboard. Deeper
+			// workspaces stay leaf picks (guide + CTA target, D3).
+			if (ws.includes("/")) { orgStore.selectRow({ orgId, rowId: ws }); return; }
+			const named = orgT("tree.dock." + ws);
+			const label = typeof named === "string" && named && !named.startsWith("tree.dock.") ? named : ws.charAt(0).toUpperCase() + ws.slice(1);
+			orgStore.selectRow({ orgId, rowId: ws, kind: "dock", label });
 		};
 		/** The PER-ROW + affordance, gated by the same rule as the dock CTA.
 		 * `projectRowRefused` was wired into ctaReady when tracks landed, but
@@ -4683,6 +4737,16 @@ window.__ModuleLoader__.load({
 		function OrgContainerRow({ d, offset }) {
 			const expandedMap = useOrg((s) => s.expanded ?? {});
 			const isOrg = d.kind === "org";
+			// The row this dashboard is showing (org-row-dashboard.md §14,
+			// 2026-09-10). selectedRowId existed since D2 but NOTHING in the tree
+			// read it, so navigating — by clicking a row or, since §14, by a nav
+			// pill — left every row looking unselected. The rowId shape must match
+			// the one the click writes below, or the mark lands on no row at all.
+			const selfRowId = isOrg ? "" : d.kind === "dock" ? d.slug : "projects/" + d.slug;
+			const isSelected = useOrg((st) => {
+				const sel = st.selectedRowId;
+				return !!sel && sel.orgId === d.orgId && (sel.rowId ?? "") === selfRowId;
+			});
 			const open = !!expandedMap[d.key];
 			const [menuOpen, setMenuOpen] = (0, react.useState)(false);
 			// D97: last sync outcome for THIS row — null (never synced this
@@ -4755,14 +4819,30 @@ window.__ModuleLoader__.load({
 				className: clsx(Rows_module_css_default.projectRow, menuOpen && Rows_module_css_default.menuOpen),
 				role: "treeitem",
 				"aria-expanded": open,
+				"aria-current": isSelected ? "true" : void 0,
+				"data-arxa-row-selected": isSelected ? "" : void 0,
 				onClick: () => {
 					orgStore.toggleExpand(d.key);
 					// T4 v2: expanding an org row OPENS the org (single handle) —
 					// the inline file listings ride the open-org tree-read lane;
 					// a collapsed-row browse would 403 with no handle at all.
 					if (isOrg && !open) orgStore.mutate("org.open", { orgId: d.orgId }).catch(() => {});
+					// Dashboard (docs/plans/org-row-dashboard.md D2/D3, 2026-09-09): a
+					// click also SELECTS the row. rowId is the workspace key the CTA
+					// posts ("" for an org — org-level creation stays removed, the
+					// CTA levers refuse an empty rowId); kind/label feed the hero.
+					orgStore.selectRow({ orgId: d.orgId, rowId: isOrg ? "" : d.kind === "dock" ? d.slug : "projects/" + d.slug, kind: d.kind, label: d.label || d.slug || d.orgId });
 				},
-				style: { marginLeft: (offset ?? 4 + d.depth * 14) + "px", cursor: "pointer", borderRadius: 6, marginTop: isOrg ? 4 : 0, fontWeight: isOrg ? 600 : void 0 },
+				style: {
+					marginLeft: (offset ?? 4 + d.depth * 14) + "px", cursor: "pointer", borderRadius: 6,
+					marginTop: isOrg ? 4 : 0,
+					// The selected row is the accent one. Weight and a 2px inset
+					// marker carry it as well as colour does, so it still reads for
+					// anyone who cannot see the hue.
+					fontWeight: isSelected ? 600 : isOrg ? 600 : void 0,
+					color: isSelected ? "var(--dsw-alias-state-business-primary)" : void 0,
+					boxShadow: isSelected ? "inset 2px 0 0 var(--dsw-alias-state-business-primary)" : void 0,
+				},
 				children: [
 					(0, react_jsx_runtime.jsx)("span", {
 						className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder),

@@ -239,13 +239,20 @@ check('conformance: locale world is en/pl/fr — zhOver deleted, sparse plOver/f
 check('welcome: organisation and Freestyle stay reachable without a gate — the\n  sidebar creates orgs and the Freestyle tab is a peer tab, not a card button',
   client.includes('window.dispatchEvent(new Event("arxa-create-org"))')
   && client.includes('"freestyle.tab.freestyle"') && !client.includes('"welcome.freestyle"'))
-check('welcome: one-shot resume to newest session of the open org', client.includes('resumeTried') && client.includes('maybeResume(next.orgs)') && client.includes('orgStore.mutate("session.open"'))
+check('welcome (D12, 2026-09-09): boot lands on the last-selected org dashboard, ONCE the org list settled — no session resume, no boot open',
+  client.includes('const LAST_ROW_KEY = "arxa.dashboard.last";') && client.includes('maybeResume(next.orgs)') && /if \(state\.loading\) return;\s*resumeTried = true;\s*clearIfNothingToResume\(\);/.test(client)
+  && client.includes('window.localStorage.getItem(LAST_ROW_KEY)') && !client.includes('dropIfEmpty: true') && !client.includes('arxaOpenConversation(cand.id)'))
+check('D12: selectRow persists container rows only (org / dock / project) — leaf workspace picks never become a landing',
+  client.includes('window.localStorage.setItem(LAST_ROW_KEY, JSON.stringify({ orgId: sel.orgId, rowId: sel.rowId || "", kind: sel.kind, label: sel.label || "" }))')
+  && client.includes('if (sel && (sel.kind === "org" || sel.kind === "dock" || sel.kind === "project")) {'))
+check('D12: the landing reveals the row (org + container prefixes written true) and opens the org like the row click, best-effort',
+  client.includes('x[sel.orgId + "|" + prefix] = true;') && client.includes('ORG_POST("org.open", { orgId: sel.orgId }).then(() => refresh()).catch(() => {});'))
 check('content area (2026-08-30): arxa is the sole driver — row open + resume focus the conversation via the client sessions service (dsh own open call)',
-  client.includes('arxaOpenConversation(sessionId)') && client.includes('arxaOpenConversation(cand.id)') && client.includes('arxaClientSessions.open(dshId)') && client.includes('snap.ids.includes(dshId)'))
+  client.includes('arxaOpenConversation(sessionId)') && client.includes('arxaClientSessions.open(dshId)') && client.includes('snap.ids.includes(dshId)'))
 check('content area: a boot with nothing to resume clears the selection — stranding pre-arxa/hero sessions stop riding along',
   client.includes('arxaClientSessions.clear()') && client.includes('clearIfNothingToResume') && client.includes('let bootDecided = false;'))
-check('content area: the boot clear SURVIVES dsh startup reconnect (workspaces.startInitialSelection re-opens the recent workspace blank session over an early clear) — bounded re-assert, org/user opens win',
-  client.includes('reassertEmpty') && client.includes('workspaces.startInitialSelection') && client.includes('if (orgIds.has(cur)) return;') && client.includes('if (tries > 20) return;'))
+check('content area: the boot clear SURVIVES dsh startup reconnect (workspaces.startInitialSelection re-opens the recent workspace session over an early clear) — bounded re-assert; ONLY a user open wins (D12: a reconnected org session is a rider too)',
+  client.includes('reassertEmpty') && client.includes('workspaces.startInitialSelection') && !client.includes('if (orgIds.has(cur)) return;') && client.includes('if (currentSessionId) return;') && client.includes('if (tries > 20) return;'))
 check('content area (live, once-and-for-all): the rider kill is condition-driven, not a stopwatch — any current session that is not an OPEN org one is cleared on every store bump while no user/resume open owns the content (slow-boot stranding loses every race)',
   client.includes('enforceNoRiders') && client.includes('x.state === "open"') && client.includes('root.sessions?.active') && client.includes('root.sessions?.parked') && client.includes('Promise.all([orgStore.refresh(), freestyleStore.refresh()]).then(enforceNoRiders)'))
 check('content area (live): cross-client archive/rename reach every client without waiting on the 5s poll — the org view refreshes on dsh store bumps (sig-gated refresh makes repeats a no-op)',
@@ -272,10 +279,8 @@ check('Q5 (corner, 2026-09-03): the preset chip lives INSIDE the composer card t
   && !client.includes('.wSkVaW_heroWorkspaceRow>:last-child{margin-left:auto'))
 check('Q5 (revised): the hero row crumb is rendered once — bound hero returns a hidden anchor, the composer left zone owns the crumb',
   client.includes('"data-arxa-hero-anchor": ""') && !client.includes('return arxaCrumbNav(t, org, current, ref);'))
-check('Q3 guard: the boot resume decision is made ONCE the org list settled — no-candidate branches set resumeTried, so a row created later via "+" is never opened with dropIfEmpty',
-  (client.match(/if \(!state\.loading\) resumeTried = true;/g) || []).length === 2)
-check('Q3: boot resume asks the host to drop a never-typed-in candidate and lands on the welcome hero when it did',
-  client.includes('dropIfEmpty: true') && client.includes('if (r && r.dropped === true) {') && client.includes('return r ? r.result : void 0'))
+check('Q3 guard (D12 form): the boot landing decision is made ONCE the org list settled — a row created later via "+" is never touched by boot',
+  client.includes('if (state.loading) return;') && (client.match(/resumeTried = true;/g) || []).length === 1 && !client.includes('dropIfEmpty: true'))
 check('Q6: opening/resuming a session reveals its row — ancestors expanded (never toggled), stock leaf group opened, row scrolled into view',
   client.includes('revealSession(sessionId) {') && client.includes('arxaViewActions = actions;') && client.includes('"data-session-id": node.id') && client.includes('el.scrollIntoView({ block: "nearest" })') && client.split('orgStore.revealSession(').length >= 4)
 {

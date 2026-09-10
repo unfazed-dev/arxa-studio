@@ -143,6 +143,10 @@ const sidebarDir = resolve(here, '..', 'plugins', 'arxa-sidebar')
 // host half serves /__arxa/git-card/action over the sidebar's org shell;
 // browser half is the conversation.input.dock card in stock QueueDock grammar.
 const gitCardDir = resolve(here, '..', 'plugins', 'arxa-git-card')
+// Row dashboard (docs/plans/org-row-dashboard.md): host half serves
+// /__arxa/dashboard/action over the sidebar's org shell; browser half
+// publishes the Root the sidebar's hero guide renders for a selected row.
+const dashboardDir = resolve(here, '..', 'plugins', 'arxa-dashboard')
 // Freestyle (docs/plans/freestyle-section.md): host half serves
 // /__arxa/freestyle/state and /__arxa/freestyle/action for user-picked
 // folders backed by their own plain git repos.
@@ -199,6 +203,7 @@ const PROFILE_PLUGINS = [
   ['arxa-pairing', pairingDir],
   ['arxa-sidebar', sidebarDir],
   ['arxa-git-card', gitCardDir],
+  ['arxa-dashboard', dashboardDir],
   ['arxa-freestyle', freestyleDir],
   ['arxa-jobs', jobsDir],
   ['arxa-file-org-shell', fileOrgShellDir],
@@ -392,7 +397,7 @@ engineLog('dsh bin resolved: ' + dshBin)
 // The design panel, brand and gen-ui plugins resolve by package name (their
 // browser halves are discovered through package.json dsh.client, which a
 // file-path entry never reaches).
-const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa-mcp-apps', 'arxa-waiting-page', 'arxa-theme-accent', 'arxa-pairing', 'arxa-sidebar', 'arxa-git-card', 'arxa-artifact-viewer', 'arxa-frame', 'arxa-locale', 'arxa-prism', 'arxa-provider-status', 'arxa-freestyle']
+const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa-mcp-apps', 'arxa-waiting-page', 'arxa-theme-accent', 'arxa-pairing', 'arxa-sidebar', 'arxa-git-card', 'arxa-dashboard', 'arxa-artifact-viewer', 'arxa-frame', 'arxa-locale', 'arxa-prism', 'arxa-provider-status', 'arxa-freestyle']
 // ALWAYS install, never skip on presence: these are file: dependencies, and
 // pnpm copies them into .pnpm at add-time. A plain `pnpm install` sees the
 // lockfile entry unchanged and keeps the OLD copy — measured 2026-08-25: the

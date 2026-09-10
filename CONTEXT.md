@@ -167,3 +167,20 @@ vocabulary only.
   (D95), remote advances fast-forward (D96), divergence parks as a
   sync-conflict note. Runs detached on open, on the throttled sidebar
   refresh, and via the `org.sync` action.
+- **Selected row** — the sidebar tree row the content column is about:
+  `{orgId, rowId, kind, label}` on `orgStore.selectedRowId` (D2). `rowId`
+  is `""` for the org itself, a dock slug for a dock, `projects/<slug>`
+  for a project. Clicking a row still expands or collapses it AND sets
+  the selection; the selected row carries the accent, an inset marker
+  and `aria-current`. The last selection is persisted client-side and is
+  where the app lands on the next boot (D12) — a session is never
+  resumed.
+- **Dashboard** — what the content column shows for the selected row
+  when no session is open (D1): a hero, a range/refresh toolbar, and a
+  twelve-column bento of cards that always fills its grid — Sessions
+  (a horizontal carousel of session cards with an expanding summary),
+  Activity, Repository, Time, Delivery and Engine. Every figure is
+  measured, never inferred: an absent unit reads as an em dash, because
+  zero is a claim. Delivery is GitHub through the user's own
+  `github-link` grant; Engine reads the arxa engine's on-disk file
+  contract (D5) and says so when the engine never ran.

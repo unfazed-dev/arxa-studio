@@ -621,6 +621,11 @@ export function apply(ctx, opts = {}) {
     * test harness that applies twice sees the latest ctx/opts (fake github). */
   Object.assign(sidebarHost, {
     ready: true,
+    /** arxa-dashboard (docs/plans/org-row-dashboard.md D9, 2026-09-09): the
+     * row session lister below — registry rows ⋈ dsh live — so the dashboard
+     * lists exactly what the tree lists. Arrow keeps the const below out of
+     * the TDZ at assign time. */
+    sessionsOf: (l, org) => orgSessions(l, org),
     seam: SEAM_LIFECYCLE_STUBBED,
     orgContext: async () => {
       const l = await getLifecycle()
@@ -674,6 +679,9 @@ export function apply(ctx, opts = {}) {
         // The crumb last segment (Q2: … / session / worktree) reads this — it was
         // never served, so the segment silently never rendered (2026-09-02).
         worktree: s.worktree ?? null,
+        // Focus time the dashboard accumulates on this row (D10, 2026-09-10):
+        // absent on every row written before the heartbeat existed.
+        focusMs: typeof s.focusMs === 'number' && Number.isFinite(s.focusMs) ? s.focusMs : null,
       })
       const rows = all.filter((s) => s.state !== 'archived').map(shape)
       // D39 browse face: archived rows ride the Archives section (the one

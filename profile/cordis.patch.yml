@@ -254,6 +254,18 @@
   - id: arxa-git-card
     name: arxa-git-card
 
+# 11d-bis. The row dashboard (docs/plans/org-row-dashboard.md, 2026-09-09):
+#      its own plugin. Host half serves POST /__arxa/dashboard/action over the
+#      sidebar's org shell (row identity now; git / sessions / GitHub / engine
+#      sources in later steps). Browser half owns NO slot: it publishes its
+#      Root on window.__ARXA_DASHBOARD__ and arxa-sidebar's hero guide renders
+#      it for the selected org / category / project row while no session is
+#      bound. By PACKAGE NAME; must sit AFTER arxa-sidebar (reads the host
+#      object the sidebar publishes in apply()).
+- insert:
+  - id: arxa-dashboard
+    name: arxa-dashboard
+
 # 11b-bis. arxa-jobs (2026-09-03): background-job list + cancel for one session.
 #      HOST PLANE. The stock `@deepseek-ai/dsh-client-ui-jobs` chip (mounted by
 #      dsh-web-app) is READ-ONLY by construction — `JobView` reaches the browser

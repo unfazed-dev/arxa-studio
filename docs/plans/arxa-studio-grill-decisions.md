@@ -1335,3 +1335,51 @@ Freestyle introduces a separate section; it does not replace those decisions.
 - **D125 — Local checks before publication.** Adding a folder installs a stack-detecting check.sh for package.json, pubspec.yaml, Cargo.toml, go.mod or pyproject.toml. CI workflow, PR template and remote protection are added at publication through the shared frame code. See [Freestyle F8](freestyle-section.md#1-decisions-grilled-2026-09-08-all-confirmed-by-the-operator).
 
 - **D126 — Freestyle v1 explorer scope.** The core explorer includes inline new file/folder and rename, drag-drop move, duplicate, reveal, viewer open, per-row sessions, lazy tree refresh and shared git decorations. `.git` and `.arxa` stay hidden and inaccessible. Multi-select, clipboard operations, compact folders, file nesting and sort options are deferred. See [Freestyle F9](freestyle-section.md#1-decisions-grilled-2026-09-08-all-confirmed-by-the-operator).
+
+## Organisation row dashboard (2026-09-09/10 grills)
+
+The dashboard's own grill numbered its decisions D1–D16 locally; those
+numbers stay in [the plan](org-row-dashboard.md) and are promoted here as
+D127–D142. The second grill (§14, the reference restyle) adds D143–D147.
+
+- **D127 — The dashboard replaces the hero, it never displaces a chat.** A selected row renders in the no-session content column; an open session is never pushed aside. A "Dashboard" tab inside an open session is parked, not rejected. See [plan D1](org-row-dashboard.md).
+
+- **D128 — Clicking a row expands it AND selects it.** The existing expand/collapse habit is kept; selection is added on top and the dashboard follows it. Chevron-only expansion was rejected — it breaks the habit selftests. See [plan D2](org-row-dashboard.md).
+
+- **D129 — Three row kinds carry a dashboard.** Org, category (dock) and project rows. File rows still open the viewer, session rows still open the chat, free folders still only expand. See [plan D3](org-row-dashboard.md).
+
+- **D130 — All four data tiers ship, in order.** Local git/files → dsh projections → GitHub via `github-link` → the arxa engine. Each tier is shippable on its own and degrades to a stated `reason` rather than blocking the row. See [plan D4](org-row-dashboard.md).
+
+- **D131 — The engine tier reads FILES, never the `arxa` binary.** `pipeline/state/run.state.json` (falling back to `default.state.json`, the `StateReader` precedence), `pipeline/state/deploy-ledger.json` and `design/structure.json`. Shelling out was rejected on PATH fragility, proven by the monaco work. `evidence/` is never walked — one lens smoke is 1.5 MB per project. See [plan D5](org-row-dashboard.md).
+
+- **D132 — Charts are hand-rolled inline SVG.** Heatmap, bars, sparkline, donut, over theme tokens. Bundling uPlot or Chart.js through esbuild was rejected for one plugin's cards.
+
+- **D133 — Load on select, 60 s cache for GitHub, a manual refresh on the toolbar.** Polling was rejected. Only the refresh button bypasses the cache; selecting another row still reads it.
+
+- **D134 — The composer hides while a row is selected.** The dashboard header carries "New session in <row>" wired to `workspace.new-session` with the sidebar CTA's own enable rules. Org rows get no CTA — org-level session creation stays removed.
+
+- **D135 — The dashboard is its own plugin.** `plugins/arxa-dashboard`, a hand-written client, reached from arxa-sidebar through two bridge seams (`orgRows`, `selectRow`). Putting it inside the sidebar's generated client was rejected.
+
+- **D136 — Time per session is four numbers, not one.** Model time, tool time and wall span come from dsh; focus time is a client heartbeat persisted as `focusMs` on the registry row. Local only, no database. Focus is a DIFFERENT CLOCK from engine time and is never added into the same total.
+
+- **D137 — Interactivity is a fixed drill-down set plus client-side filters.** Ranges (30/90/365/all) refetch; state filters and drill-downs run over already-fetched data. Read-only cards were rejected.
+
+- **D138 — Boot lands on the last selected row's dashboard, never on a session.** The selection is persisted client-side; a missing org falls back to the first org, and no orgs shows the welcome guide. Resuming the newest session was explicitly dropped by the operator.
+
+- **D139 — Session cards are cards, and expanding one shows FACTS.** Goal, todos, files, commands, tools and the four time figures — from dsh's own projections, never transcript text. "Open session" reuses the sidebar's `openCreated` flow.
+
+- **D140 — An org has exactly five fixed docks.** projects, notes, meetings, account, communications. The nav pills are generated from that list, not from a free-form tree.
+
+- **D141 — Absent unit ⇒ null, never zero.** Every card prints an em dash for a figure it could not read. A repo with no workflow runs reports `rate: null`; a project with no deploy ledger reports `shipped: null`. Zero is a claim about the world and is only printed when a file states it.
+
+- **D142 — No dashboard feature may require the Arxa Digital Solutions database.** Delivery rides the user's own `github-link` OAuth grant (OS keyring, no cloud), Engine reads local files, everything else is local git and dsh. Unlinked and not-set-up are first-class rendered states.
+
+- **D143 — The bento fills its grid at every width.** Twelve columns; the span ladder sums to twelve at every rung so resizing never opens negative space. The smoke measures GEOMETRY (row edges, inter-card gaps, per-row heights), not class names.
+
+- **D144 — One rail primitive, two axes.** The nav pills, the session carousel and long card bodies all use the same scroller, with `overscroll-behavior` contained so a trackpad swipe cannot fire the shell's back-navigation. A card whose body would grow the card scrolls instead.
+
+- **D145 — A plain horizontal carousel: no peek, no fan, no sideways text.** Scroll-driven depth was built and removed — it needs `animation-timeline`, which the shipping WKWebView may skip, and it never engaged on a non-overflowing rail. Vertical session names were rejected outright by the operator.
+
+- **D146 — The Time ring is model vs tool only.** The grill settled on "model / tool / focus"; that was corrected during the build because focus is a different clock and ringing all three totals overlapping axes. Focus is stated separately, beneath.
+
+- **D147 — Lens-green is not app-green.** The lens drives headless Chrome; the shipping shell is WKWebView. Anything bleeding-edge is gated and then read back from the LIVE computed style of the installed app by `scripts/installed-check.mjs`, which waits for the engine to finish booting before it asserts anything.

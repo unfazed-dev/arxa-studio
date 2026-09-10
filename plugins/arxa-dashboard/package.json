@@ -1,0 +1,24 @@
+{
+  "name": "arxa-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "arxa's per-row dashboard (docs/plans/org-row-dashboard.md): host half serves POST /__arxa/dashboard/action over the sidebar's org shell; browser half publishes the dashboard Root that arxa-sidebar's hero guide renders for the selected org / category / project row.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./projections": "./lib/projections.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "platform": "web"
+    }
+  }
+}

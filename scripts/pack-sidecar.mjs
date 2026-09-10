@@ -263,6 +263,20 @@ child.on("exit", (code, signal) => {
   rmSync(outFile, { force: true })
   cpSync(compiled, outFile)
   chmodSync(outFile, 0o755)
+  // macOS TCC keys its answers on the binary's code requirement. bun's ad-hoc
+  // linker signature is a per-build cdhash, so every repack makes macOS forget
+  // the operator's answer to the "access Apple Music / media library" prompt
+  // and ask again ("Failed to match existing code requirement", tccd,
+  // 2026-09-09). A STABLE identity (self-signed code-signing cert or a
+  // Developer ID) keeps the answer: set ARXA_CODESIGN_IDENTITY to its name.
+  // Unset ⇒ ad-hoc re-sign with a fixed identifier (still per-build for TCC,
+  // but at least valid after any later copy — see docs/plans/org-row-dashboard.md §9).
+  if (process.platform === 'darwin') {
+    const identity = process.env.ARXA_CODESIGN_IDENTITY?.trim() || '-'
+    const cs = spawnSync('codesign', ['--force', '--sign', identity, '--identifier', 'solutions.arxadigital.arxa.engine', outFile], { encoding: 'utf8' })
+    if (cs.status !== 0) throw new Error('codesign failed: ' + (cs.stderr || cs.stdout))
+    console.log(`pack-sidecar: signed ${identity === '-' ? 'ad-hoc (set ARXA_CODESIGN_IDENTITY for a TCC-stable identity)' : 'with ' + identity}`)
+  }
 
   // Linux ships the engine OUTSIDE usr/bin and usr/lib — tauri.linux.conf.json
   // maps it to /usr/libexec/arxa-studio/ — because linuxdeploy patchelfs every
