@@ -60,7 +60,14 @@ const ok = (label, condition, detail = '') => {
 // it rotates the desktop token while it does. Reading the token file once and
 // asserting immediately reported seven false failures twice before this poll
 // existed, so re-read the file every attempt and wait for a real cookie.
-const WAIT_TRIES = 120
+// 900 × 2 s ≈ 30 min of sleeps (plus request time): a cold payload swap
+// re-materialises the profile before the engine rotates the desktop token —
+// measured 26 min on this machine (2026-09-10, bootstrap 14:24 → first cookie
+// 14:49, against a concurrently compiling sibling repo). The old 120 × 2 s
+// covered only an already-booted engine and failed every post-install run.
+// One failure condition, no second mode: a genuinely broken install fails at
+// the ceiling; the per-minute notes below keep a human from waiting blind.
+const WAIT_TRIES = 900
 const WAIT_MS = 2000
 async function waitForEngine() {
   const started = Date.now()
@@ -76,6 +83,7 @@ async function waitForEngine() {
       last = JSON.stringify(exchange).slice(0, 200)
     }
     if (i === 0) console.log('note  waiting for the installed engine to serve…')
+    else if (i % 30 === 0) console.log('note  still waiting (' + Math.round((i * WAIT_MS) / 1000) + 's) — last: ' + last.slice(0, 120))
     await new Promise((r) => setTimeout(r, WAIT_MS))
   }
   return { session: null, cookies: [], waitedMs: Date.now() - started, last }

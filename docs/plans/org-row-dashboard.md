@@ -1276,9 +1276,12 @@ below) · installed check `node scripts/installed-check.mjs`.
 - **A swapped engine serving is a third event, after install and after
   extract.** The first check run spent its whole 240 s window on
   ECONNREFUSED: the first boot after a payload swap re-materialises the
-  profile before it rotates the desktop token — measured **317 s**. The
-  poller's ceiling held on the second boot (`waited 0s`). If a cold swap
-  outruns it again, raise `WAIT_MS`; do not add a second failure mode.
+  profile before it rotates the desktop token — bootstrap 14:24 → first
+  cookie 14:49, **26 minutes** on this machine (a check started mid-boot
+  measured 317 s of it). `waitForEngine` is now 900 × 2 s with a
+  per-minute progress note — raised the same day; one failure condition, no
+  second mode, and an agent running it should give the tool call a
+  40-minute ceiling of its own.
 - **The lens died on a compiler, not on the app.** Mid-check the operator's
   palette session was editing `../arxa` live: the `arxa` wrapper rebuilds on
   staleness, their in-flight tree did not compile (a generated file not yet
