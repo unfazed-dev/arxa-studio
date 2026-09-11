@@ -1,6 +1,6 @@
 {
   "name": "arxa-brand",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "arxa identity for the dsh web surface: moss-green accent palette, arxa wordmark over the baked-in brand SVG, tab title/favicon, and the arxa-worded web-surface prompt section (the DeepSeek-worded one is disabled via web-runtime surfaceContext: false).",
   "type": "module",

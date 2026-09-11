@@ -96,6 +96,38 @@ check('malformed phaseStatus does not throw and yields null status',
   check('no project has a deploy ledger ⇒ the roll-up shipped is null, never 0', e.shipped === null)
 }
 
+// ---- the contract, checked against bytes the ENGINE wrote (2026-09-11) -------
+// Every check above runs on JSON this file invented. That proves the reader, not
+// the CONTRACT: nothing here had ever been compared with what the engine's own
+// Dart emits, because no project on any machine here has run the FSM (§15 step 6).
+// So the FSM was driven for real and its output pinned in engine-authored.fixture.json
+// (that file's `_how` names the exact calls). The smoke writes the SAME bytes into
+// its scratch project, so the card and the reader are proven against one source.
+// ponytail: pinned bytes, not a live Dart run — a selftest that needs the Dart SDK
+// stops being runnable in CI. Re-pin when pipeline_fsm.dart changes shape.
+{
+  const pinned = JSON.parse(readFileSync(join(here, 'engine-authored.fixture.json'), 'utf8')).files
+  // initPipeline writes default.state.json, NOT run.state.json — the live file only
+  // appears when something overrides it. The reader's precedence must survive that.
+  check('the pinned bytes are the engine\u2019s own: the FSM writes default.state.json, and a run file was never invented',
+    Object.keys(pinned).join(' ') === 'pipeline/state/default.state.json pipeline/state/deploy-ledger.json design/structure.json')
+  const files = {}
+  for (const rel of Object.keys(pinned)) files['/acme/' + rel] = pinned[rel]
+  const e = engineOf(fs(files), '/acme', 'Acme')
+  check('engine-authored state: the phase, its position and the CURRENT phase\u2019s gate are read as the FSM left them',
+    e.phase === 'design' && e.step === 3 && e.status === 'ready' && e.attempts === 1,
+    JSON.stringify({ phase: e.phase, step: e.step, status: e.status, attempts: e.attempts }))
+  check('engine-authored state: a rejected review reads back as dirty, one rejection, not approved \u2014 the rewind to design is visible',
+    e.dirty === true && e.rejections === 1 && e.approved === false)
+  check('engine-authored state: targets and updatedAt are the engine\u2019s own values, not defaults',
+    JSON.stringify(e.targets) === '["macos","web"]' && typeof e.updatedAt === 'string' && e.updatedAt.endsWith('Z'))
+  check('engine-authored ledger + structure: shipped 1, halted 0 (a REAL zero \u2014 the ledger exists), screens 8, flows 2',
+    e.shipped === 1 && e.halted === 0 && e.screens === 8 && e.flows === 2,
+    JSON.stringify({ shipped: e.shipped, halted: e.halted, screens: e.screens, flows: e.flows }))
+  check('engine-authored state: keys the card has no use for (schema, approvalTokens, humanApproved, createdAt) are ignored, never passed through',
+    !('schema' in e) && !('approvalTokens' in e) && !('humanApproved' in e) && !('createdAt' in e))
+}
+
 // ---- evidence/ is never walked -----------------------------------------------
 const engineSrc = readFileSync(join(here, 'lib', 'engine.js'), 'utf8')
 // The whole point of the file contract is that it stays cheap: an org roll-up

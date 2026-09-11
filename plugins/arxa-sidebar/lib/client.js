@@ -963,7 +963,7 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 		//#region \0dsh-css:/home/runner/work/deepseek-harness/deepseek-harness/packages/client/ui-workspace/src/client/rows/Rows.module.css.mjs
-		const css$2 = ".aXa_wsr_projectRow,.aXa_wsr_sessionRow{cursor:pointer;user-select:none;color:var(--dsw-alias-label-primary);border-radius:8px;align-items:center;gap:6px;padding:0 8px;display:flex}.aXa_wsr_projectRow:hover,.aXa_wsr_sessionRow:hover,.aXa_wsr_sessionRow.aXa_wsr_selected{background:var(--dsw-alias-interactive-bg-hover)}.aXa_wsr_searchResultRow{box-sizing:border-box;cursor:pointer;text-align:left;width:100%;min-height:48px;color:var(--dsw-alias-label-primary);background:0 0;border:none;border-radius:8px;flex-direction:column;align-items:stretch;padding:4px 8px;display:flex}.aXa_wsr_searchResultRow:hover,.aXa_wsr_searchResultRow.aXa_wsr_selected{background:var(--dsw-alias-interactive-bg-hover)}.aXa_wsr_searchResultHeading{align-items:center;min-width:0;display:flex}.aXa_wsr_searchResultTitle{text-overflow:ellipsis;white-space:nowrap;flex:0 auto;min-width:0;margin-left:4px;font-size:14px;line-height:20px;overflow:hidden}.aXa_wsr_searchResultMeta{align-items:center;gap:6px;min-width:0;margin-left:20px;display:flex}.aXa_wsr_searchResultWorkspace,.aXa_wsr_searchResultSnippet{text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:17px;overflow:hidden}.aXa_wsr_searchResultWorkspace{max-width:40%;color:var(--dsw-alias-label-tertiary);flex:none}.aXa_wsr_searchResultSnippet{min-width:0;color:var(--dsw-alias-label-secondary);flex:1}.aXa_wsr_projectRow{box-sizing:border-box;align-items:center;height:34px}.aXa_wsr_projectRow .aXa_wsr_rowActions{height:20px}.aXa_wsr_sessionRow{height:32px;animation:aXa_wsr_row-in .15s var(--ds-ease-in-out);gap:0}.aXa_wsr_sessionRow .aXa_wsr_title{margin:0 6px 0 4px}.aXa_wsr_flatSessionRowWithoutStatus .aXa_wsr_title{margin-left:0}@keyframes aXa_wsr_row-in{0%{opacity:0}}.aXa_wsr_slot{width:16px;height:20px;color:var(--dsw-alias-label-tertiary);flex:none;justify-content:center;align-items:center;display:inline-flex}.aXa_wsr_visuallyHidden{clip:rect(0 0 0 0);white-space:nowrap;width:1px;height:1px;position:absolute;overflow:hidden}.aXa_wsr_folderActive{color:var(--dsw-alias-state-business-primary)}.aXa_wsr_projectRow .aXa_wsr_chevron{display:none}.aXa_wsr_projectRow:hover .aXa_wsr_chevron{display:inline-flex}.aXa_wsr_projectRow:hover .aXa_wsr_folder{display:none}.aXa_wsr_arrow{transition:transform .15s var(--ds-ease-in-out)}.aXa_wsr_arrowOpen{transform:rotate(90deg)}.aXa_wsr_projectText{flex-direction:column;flex:1;gap:2px;min-width:0;display:flex}.aXa_wsr_title{text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:14px;line-height:20px;overflow:hidden}.aXa_wsr_renameInput{border:.5px solid var(--dsw-alias-border-l4);background:var(--dsw-alias-button-elevated-fill);min-width:0;color:inherit;border-radius:4px;outline:none;padding:0 2px;font-size:14px;line-height:20px}.aXa_wsr_sessionRow .aXa_wsr_title{flex:1}.aXa_wsr_meta{text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:20px;overflow:hidden}.aXa_wsr_time{color:var(--dsw-alias-label-tertiary);flex:none;font-size:12px;line-height:20px}.aXa_wsr_scheduleIndicator{width:16px;height:20px;color:var(--dsw-alias-label-tertiary);flex:none;justify-content:center;align-items:center;margin-right:6px;display:inline-flex}.aXa_wsr_searchScheduleIndicator{margin-left:4px;margin-right:0}.aXa_wsr_dot{flex:none}.aXa_wsr_rowActions{flex:none;align-items:center;gap:12px;display:none}.aXa_wsr_projectRow:hover .aXa_wsr_rowActions,.aXa_wsr_sessionRow:hover .aXa_wsr_rowActions,.aXa_wsr_projectRow.aXa_wsr_menuOpen .aXa_wsr_rowActions,.aXa_wsr_sessionRow.aXa_wsr_menuOpen .aXa_wsr_rowActions{display:inline-flex}.aXa_wsr_sessionRow:hover .aXa_wsr_time,.aXa_wsr_sessionRow.aXa_wsr_menuOpen .aXa_wsr_time{display:none}.aXa_wsr_projectRow.aXa_wsr_menuOpen,.aXa_wsr_sessionRow.aXa_wsr_menuOpen{background:var(--dsw-alias-interactive-bg-hover)}.aXa_wsr_sessionRow.aXa_wsr_dropBefore,.aXa_wsr_sessionRow.aXa_wsr_dropAfter{position:relative}.aXa_wsr_sessionRow.aXa_wsr_dropBefore:before,.aXa_wsr_sessionRow.aXa_wsr_dropAfter:after{content:\"\";z-index:1;background:linear-gradient(55deg, transparent calc(50% - 1px), var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)) 0 0 / 5px 7px no-repeat, linear-gradient(125deg, transparent calc(50% - 1px), var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)) 0 5px / 5px 7px no-repeat, linear-gradient(var(--dsw-alias-state-business-primary) 0 0) 4px 5px / calc(100% - 4px) 2px no-repeat;pointer-events:none;height:12px;position:absolute;left:0;right:4px}.aXa_wsr_sessionRow.aXa_wsr_dropBefore:before{top:-7px}.aXa_wsr_sessionRow.aXa_wsr_dropAfter:after{bottom:-7px}.aXa_wsr_hoverContent{flex-direction:column;gap:8px;display:flex}.aXa_wsr_hoverTitle{color:#fff;overflow-wrap:break-word;font-size:14px;line-height:20px}.aXa_wsr_hoverPath{color:#cfd3d6;word-break:break-all;font-size:12px;line-height:16px}.aXa_wsr_hoverTime{color:#cfd3d6;font-size:12px;line-height:16px}.aXa_wsr_hoverStatus{color:#adb2b8;align-items:center;gap:8px;font-size:12px;line-height:20px;display:flex}.aXa_wsr_iconButton{cursor:pointer;width:16px;height:16px;color:var(--dsw-alias-label-tertiary);background:0 0;border:none;border-radius:4px;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}.aXa_wsr_iconButton:hover{color:var(--dsw-alias-label-primary)}.aXa_wsr_chevron{color:var(--dsw-alias-label-caption)}@media (prefers-reduced-motion:reduce){.aXa_wsr_sessionRow,.aXa_wsr_arrow{transition:none;animation:none}}";
+		const css$2 = ".aXa_wsr_projectRow,.aXa_wsr_sessionRow{cursor:pointer;user-select:none;color:var(--dsw-alias-label-primary);border-radius:8px;align-items:center;gap:6px;padding:0 8px;display:flex}.aXa_wsr_projectRow:hover,.aXa_wsr_sessionRow:hover{background:var(--dsw-alias-interactive-bg-hover)}.aXa_wsr_projectRow.aXa_wsr_selected,.aXa_wsr_sessionRow.aXa_wsr_selected{background:var(--dsw-specific-sidebar-nav-item-active)}.aXa_wsr_searchResultRow{box-sizing:border-box;cursor:pointer;text-align:left;width:100%;min-height:48px;color:var(--dsw-alias-label-primary);background:0 0;border:none;border-radius:8px;flex-direction:column;align-items:stretch;padding:4px 8px;display:flex}.aXa_wsr_searchResultRow:hover{background:var(--dsw-alias-interactive-bg-hover)}.aXa_wsr_searchResultRow.aXa_wsr_selected{background:var(--dsw-specific-sidebar-nav-item-active)}.aXa_wsr_searchResultHeading{align-items:center;min-width:0;display:flex}.aXa_wsr_searchResultTitle{text-overflow:ellipsis;white-space:nowrap;flex:0 auto;min-width:0;margin-left:4px;font-size:14px;line-height:20px;overflow:hidden}.aXa_wsr_searchResultMeta{align-items:center;gap:6px;min-width:0;margin-left:20px;display:flex}.aXa_wsr_searchResultWorkspace,.aXa_wsr_searchResultSnippet{text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:17px;overflow:hidden}.aXa_wsr_searchResultWorkspace{max-width:40%;color:var(--dsw-alias-label-tertiary);flex:none}.aXa_wsr_searchResultSnippet{min-width:0;color:var(--dsw-alias-label-secondary);flex:1}.aXa_wsr_projectRow{box-sizing:border-box;align-items:center;height:34px}.aXa_wsr_projectRow .aXa_wsr_rowActions{height:20px}.aXa_wsr_sessionRow{height:32px;animation:aXa_wsr_row-in .15s var(--ds-ease-in-out);gap:0}.aXa_wsr_sessionRow .aXa_wsr_title{margin:0 6px 0 4px}.aXa_wsr_flatSessionRowWithoutStatus .aXa_wsr_title{margin-left:0}@keyframes aXa_wsr_row-in{0%{opacity:0}}.aXa_wsr_slot{width:16px;height:20px;color:var(--dsw-alias-label-tertiary);flex:none;justify-content:center;align-items:center;display:inline-flex}.aXa_wsr_visuallyHidden{clip:rect(0 0 0 0);white-space:nowrap;width:1px;height:1px;position:absolute;overflow:hidden}.aXa_wsr_folderActive{color:var(--dsw-alias-state-business-primary)}.aXa_wsr_projectRow .aXa_wsr_chevron{display:none}.aXa_wsr_projectRow:hover .aXa_wsr_chevron{display:inline-flex}.aXa_wsr_projectRow:hover .aXa_wsr_folder{display:none}.aXa_wsr_arrow{transition:transform .15s var(--ds-ease-in-out)}.aXa_wsr_arrowOpen{transform:rotate(90deg)}.aXa_wsr_projectText{flex-direction:column;flex:1;gap:2px;min-width:0;display:flex}.aXa_wsr_title{text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:14px;line-height:20px;overflow:hidden}.aXa_wsr_renameInput{border:.5px solid var(--dsw-alias-border-l4);background:var(--dsw-alias-button-elevated-fill);min-width:0;color:inherit;border-radius:4px;outline:none;padding:0 2px;font-size:14px;line-height:20px}.aXa_wsr_sessionRow .aXa_wsr_title{flex:1}.aXa_wsr_meta{text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:20px;overflow:hidden}.aXa_wsr_time{color:var(--dsw-alias-label-tertiary);flex:none;font-size:12px;line-height:20px}.aXa_wsr_scheduleIndicator{width:16px;height:20px;color:var(--dsw-alias-label-tertiary);flex:none;justify-content:center;align-items:center;margin-right:6px;display:inline-flex}.aXa_wsr_searchScheduleIndicator{margin-left:4px;margin-right:0}.aXa_wsr_dot{flex:none}.aXa_wsr_rowActions{flex:none;align-items:center;gap:12px;display:none}.aXa_wsr_projectRow:hover .aXa_wsr_rowActions,.aXa_wsr_sessionRow:hover .aXa_wsr_rowActions,.aXa_wsr_projectRow.aXa_wsr_menuOpen .aXa_wsr_rowActions,.aXa_wsr_sessionRow.aXa_wsr_menuOpen .aXa_wsr_rowActions{display:inline-flex}.aXa_wsr_sessionRow:hover .aXa_wsr_time,.aXa_wsr_sessionRow.aXa_wsr_menuOpen .aXa_wsr_time{display:none}.aXa_wsr_projectRow.aXa_wsr_menuOpen,.aXa_wsr_sessionRow.aXa_wsr_menuOpen{background:var(--dsw-alias-interactive-bg-hover)}.aXa_wsr_sessionRow.aXa_wsr_dropBefore,.aXa_wsr_sessionRow.aXa_wsr_dropAfter{position:relative}.aXa_wsr_sessionRow.aXa_wsr_dropBefore:before,.aXa_wsr_sessionRow.aXa_wsr_dropAfter:after{content:\"\";z-index:1;background:linear-gradient(55deg, transparent calc(50% - 1px), var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)) 0 0 / 5px 7px no-repeat, linear-gradient(125deg, transparent calc(50% - 1px), var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)) 0 5px / 5px 7px no-repeat, linear-gradient(var(--dsw-alias-state-business-primary) 0 0) 4px 5px / calc(100% - 4px) 2px no-repeat;pointer-events:none;height:12px;position:absolute;left:0;right:4px}.aXa_wsr_sessionRow.aXa_wsr_dropBefore:before{top:-7px}.aXa_wsr_sessionRow.aXa_wsr_dropAfter:after{bottom:-7px}.aXa_wsr_hoverContent{flex-direction:column;gap:8px;display:flex}.aXa_wsr_hoverTitle{color:#fff;overflow-wrap:break-word;font-size:14px;line-height:20px}.aXa_wsr_hoverPath{color:#cfd3d6;word-break:break-all;font-size:12px;line-height:16px}.aXa_wsr_hoverTime{color:#cfd3d6;font-size:12px;line-height:16px}.aXa_wsr_hoverStatus{color:#adb2b8;align-items:center;gap:8px;font-size:12px;line-height:20px;display:flex}.aXa_wsr_iconButton{cursor:pointer;width:16px;height:16px;color:var(--dsw-alias-label-tertiary);background:0 0;border:none;border-radius:4px;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}.aXa_wsr_iconButton:hover{color:var(--dsw-alias-label-primary)}.aXa_wsr_chevron{color:var(--dsw-alias-label-caption)}@media (prefers-reduced-motion:reduce){.aXa_wsr_sessionRow,.aXa_wsr_arrow{transition:none;animation:none}}";
 		const tagId$2 = "arxa-sidebar-workspace/Rows.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$2) + "]") === null) {
 			const tag = document.createElement("style");
@@ -1101,10 +1101,12 @@ window.__ModuleLoader__.load({
 				danger: true
 			}];
 			const ownRow = (0, react_jsx_runtime.jsxs)("div", {
-				className: clsx(Rows_module_css_default.projectRow, menuOpen && Rows_module_css_default.menuOpen),
+				className: clsx(Rows_module_css_default.projectRow, (active || ARXA_WS_SELECTED(row.workspaceId)) && Rows_module_css_default.selected, menuOpen && Rows_module_css_default.menuOpen),
 				role: "treeitem",
 				"aria-expanded": row.expanded,
 				onClick: () => { onToggle(); ARXA_SELECT_WS(row.workspaceId); },
+				"aria-current": ARXA_WS_SELECTED(row.workspaceId) ? "true" : void 0,
+				"data-arxa-row-selected": ARXA_WS_SELECTED(row.workspaceId) ? "" : void 0,
 				draggable: drag !== void 0,
 				onDragStart: drag === void 0 ? void 0 : (e) => {
 					e.dataTransfer.effectAllowed = "move";
@@ -1114,8 +1116,8 @@ window.__ModuleLoader__.load({
 				onDragEnd: drag?.end,
 				children: [
 					(0, react_jsx_runtime.jsx)("span", {
-						className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder, active && Rows_module_css_default.folderActive),
-						children: row.expanded ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {})
+						className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder, (active || ARXA_WS_SELECTED(row.workspaceId)) && Rows_module_css_default.folderActive),
+						children: ARXA_WS_DASH(row.workspaceId) ? (0, react_jsx_runtime.jsx)(DashGlyph, {}) : row.expanded ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {})
 					}),
 					(0, react_jsx_runtime.jsx)("span", {
 						className: clsx(Rows_module_css_default.slot, Rows_module_css_default.chevron),
@@ -4583,6 +4585,33 @@ window.__ModuleLoader__.load({
 			const label = typeof named === "string" && named && !named.startsWith("tree.dock.") ? named : ws.charAt(0).toUpperCase() + ws.slice(1);
 			orgStore.selectRow({ orgId, rowId: ws, kind: "dock", label });
 		};
+		/** Is THIS stock workspace row the selected row? (operator-reported
+		 * 2026-09-10: "notes is not being synced in the sidebar".)
+		 *
+		 * buildEmit skips workspace docks, so `notes` — the one dock with no
+		 * containers, which the host reports as workspace:true — never becomes
+		 * an OrgContainerRow and never got the mark that row draws for itself.
+		 * The same is true of every DEEPER workspace row (notes/<sub>,
+		 * meetings/scheduler, a project container). ARXA_SELECT_WS has always
+		 * set selectedRowId for them; only the drawing was missing, which is
+		 * why the dashboard followed the click and the tree did not.
+		 *
+		 * Read straight off the store like ARXA_WS_HIDDEN does: the tree
+		 * re-renders on every store emit, so no subscription of its own. */
+		const ARXA_WS_SELECTED = (workspaceId) => {
+			const { orgId, ws } = wsParts(workspaceId);
+			const sel = orgStore.get().selectedRowId;
+			return !!sel && sel.orgId === orgId && (sel.rowId ?? "") === ws;
+		};
+		/** Dashboard-row mark (2026-09-11): the five DOCK rows carry a
+		 * dashboard (ARXA_SELECT_WS tags kind:"dock" for exactly a top-level
+		 * ws — the same shape decides here, so glyph and click can never
+		 * disagree). Deeper workspaces and project containers open the
+		 * guide, not a dashboard, and keep their folders. */
+		const ARXA_WS_DASH = (workspaceId) => {
+			const { ws } = wsParts(workspaceId);
+			return ws !== "" && !ws.includes("/");
+		};
 		/** The PER-ROW + affordance, gated by the same rule as the dock CTA.
 		 * `projectRowRefused` was wired into ctaReady when tracks landed, but
 		 * every tree row carries its own + button inside the stock bundle and
@@ -4693,9 +4722,9 @@ window.__ModuleLoader__.load({
 		 * (open / close / trash); docks and projects are fixed containers:
 		 * collapse only. Click = collapse/expand ALL children; switching
 		 * orgs is implicit through any action inside one, or explicit via
-		 * the org menu. Docks/projects use the stock folder glyph
-		 * (open/closed by expansion) — the exact folder icon the docks
-		 * always had; the org row gets the organisation glyph. */
+		 * the org menu. Docks carry the dashboard glyph (2026-09-11: their
+		 * click opens a dashboard, so their mark says so); projects keep the
+		 * stock folder glyph; the org row gets the organisation glyph. */
 		/** Organisation glyph (D82 hoisted from the org row): the building
 		 * mark every org surface shares — the tree row AND the trash
 		 * section's org group read as "organisation" through it. */
@@ -4714,6 +4743,28 @@ window.__ModuleLoader__.load({
 					(0, react_jsx_runtime.jsx)("rect", { x: "2.5", y: "1.5", width: "8", height: "13", rx: "1" }),
 					(0, react_jsx_runtime.jsx)("path", { d: "M10.5 6h3v8.5" }),
 					(0, react_jsx_runtime.jsx)("path", { d: "M5 4.5h3M5 7.5h3M5 10.5h3" })
+				]
+			});
+		}
+		/** Dashboard glyph (2026-09-11): the 2×2 tile mark of a row whose
+		 * click opens a dashboard — the five docks. OrgGlyph's stroke style
+		 * verbatim so the tree reads as one family. */
+		function DashGlyph({ size }) {
+			return (0, react_jsx_runtime.jsxs)("svg", {
+				width: size ?? 15,
+				height: size ?? 15,
+				viewBox: "0 0 16 16",
+				fill: "none",
+				stroke: "currentColor",
+				strokeWidth: 1.3,
+				strokeLinecap: "round",
+				strokeLinejoin: "round",
+				"aria-hidden": "true",
+				children: [
+					(0, react_jsx_runtime.jsx)("rect", { x: "1.5", y: "1.5", width: "5.5", height: "5.5", rx: "1" }),
+					(0, react_jsx_runtime.jsx)("rect", { x: "9", y: "1.5", width: "5.5", height: "5.5", rx: "1" }),
+					(0, react_jsx_runtime.jsx)("rect", { x: "1.5", y: "9", width: "5.5", height: "5.5", rx: "1" }),
+					(0, react_jsx_runtime.jsx)("rect", { x: "9", y: "9", width: "5.5", height: "5.5", rx: "1" })
 				]
 			});
 		}
@@ -4816,7 +4867,11 @@ window.__ModuleLoader__.load({
 			// .github/ — generated files visible in the sidebar, not just on
 			// GitHub). Project rows hide nothing: their tree is real content.
 			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsxs)("div", {
-				className: clsx(Rows_module_css_default.projectRow, menuOpen && Rows_module_css_default.menuOpen),
+				// The selected mark is the unified soft-accent fill (2026-09-12,
+				// operator): the settings-nav recipe on
+				// --dsw-specific-sidebar-nav-item-active — same style as every
+				// other active row in arxa, replacing the old accent bar + text.
+				className: clsx(Rows_module_css_default.projectRow, isSelected && Rows_module_css_default.selected, menuOpen && Rows_module_css_default.menuOpen),
 				role: "treeitem",
 				"aria-expanded": open,
 				"aria-current": isSelected ? "true" : void 0,
@@ -4836,17 +4891,17 @@ window.__ModuleLoader__.load({
 				style: {
 					marginLeft: (offset ?? 4 + d.depth * 14) + "px", cursor: "pointer", borderRadius: 6,
 					marginTop: isOrg ? 4 : 0,
-					// The selected row is the accent one. Weight and a 2px inset
-					// marker carry it as well as colour does, so it still reads for
-					// anyone who cannot see the hue.
-					fontWeight: isSelected ? 600 : isOrg ? 600 : void 0,
-					color: isSelected ? "var(--dsw-alias-state-business-primary)" : void 0,
-					boxShadow: isSelected ? "inset 2px 0 0 var(--dsw-alias-state-business-primary)" : void 0,
+					fontWeight: isOrg ? 600 : void 0,
 				},
 				children: [
 					(0, react_jsx_runtime.jsx)("span", {
-						className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder),
-						children: isOrg ? (0, react_jsx_runtime.jsx)(OrgGlyph, {}) : open ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {})
+						// Selected ⇒ accent glyph (operator, 2026-09-11): the row
+						// text already carries the accent inline, but the slot's own
+						// tertiary color would win over inheritance — the stock
+						// folderActive rule is what repaints it. The one mark the
+						// selected row draws is also the one that must not grey out.
+						className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder, isSelected && Rows_module_css_default.folderActive),
+						children: isOrg ? (0, react_jsx_runtime.jsx)(OrgGlyph, {}) : d.kind === "dock" ? (0, react_jsx_runtime.jsx)(DashGlyph, {}) : open ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {})
 					}),
 					(0, react_jsx_runtime.jsx)("span", {
 						className: clsx(Rows_module_css_default.slot, Rows_module_css_default.chevron),

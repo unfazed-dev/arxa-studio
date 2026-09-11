@@ -1,18 +1,48 @@
 // Browser half of arxa-theme-accent. Hand-written in the __ModuleLoader__
 // factory shape every dsh client bundle uses (same as arxa-waiting-page).
 //
-// Registers TWO rows into `settings.personalisation.item` (the Settings >
-// Personalisation tab since 0.2.5; `settings.general.item` before): "Accent"
-// — three fixed
-// swatches (#0EBAE4 / #0EE4E0 / #12D49A). The chosen hex re-derives the
-// dsh accent scale (--dsw-static-deepseek-50…900) as color-mix() tints,
-// set INLINE on <body>: inline style beats both token blocks in the theme
-// bundle (:root light + body[data-ds-dark-theme] dark), so every alias
-// token built on the scale — sidebar active accent, links, selection —
-// follows in both themes with no per-consumer patching.
+// 0.3.6 (2026-09-12, operator: 20% was "too much — lower to a strict
+// minimum"): the ink fold sits at 15% — the smallest step that still reads
+// palette-hued (10% read un-themed black, 20% read loud).
 //
-// Reactivity: same tab applies on click; other tabs/windows (desktop shell
-// + browser session share the origin) follow via the `storage` event.
+// 0.3.5 (2026-09-12, operator: "raise it"): the label-ink stops of the
+// neutral wash fold the accent at 20% (surfaces stay 10%) — app text now
+// reads visibly palette-hued instead of near-stock black. Both the inline
+// painter and the solveStudio contrast mirror use the same per-stop mix.
+//
+// 0.3.0 (2026-09-11, grilled): the Accent row became the PALETTE row.
+// Three built-in coolors palettes — Mystic Evening (the default, for
+// everyone out of the box), Earthy Green, Light Steel — plus ONE custom
+// slot: paste a coolors URL (or a bare hex list), 2–10 unique swatches.
+// Tapping a strip swatch picks the accent inside that palette; the default
+// accent is the most-saturated swatch (monochrome → 2nd-darkest). The old
+// three fixed hexes are GONE; a stored legacy choice is simply ignored and
+// the default palette takes over (remove + migrate, operator ruling).
+//
+// The chosen accent re-derives the dsh accent scale (--dsw-static-deepseek-*
+// and --dsw-static-blue-*) as color-mix() tints set INLINE on <body> — inline
+// beats both token blocks in the theme bundle (:root light +
+// body[data-ds-dark-theme] dark) and the brand stylesheet — plus the whole
+// 19-stop neutral-bluish surface ramp (10% accent wash over the fixed
+// lightness ladder). Same mechanism as 0.2.5, palette-fed.
+//
+// CONTRAST (the engine): every palette — built-in or pasted — is computed
+// before it paints, against WCAG 2.2 AA pairs (4.5:1 body, 3:1 non-text;
+// APCA advisory readout only). The engine lives in lib/contrast.js (ported
+// from arxa/arxa/lib/palette_contrast.dart, locked 2026-09-11) and is
+// served by the host half at /__arxa/theme-accent/contrast.js — ONE copy,
+// dynamically imported here, so host and client can never drift. The solve
+// moves the DERIVED accent's lightness only (hue/chroma preserved, smallest
+// step clearing every pair at once; polarity-flip to the palette's far end
+// when no lightness can). The pasted swatches are anchors and never move;
+// surfaces never move (scope A ruling). What cannot clear is reported
+// honestly in the row's readout, never silently painted.
+//
+// Reactivity: same tab applies on click; other tabs/windows follow via the
+// `storage` event; other devices converge on the 5s engine poll (the engine
+// file is the source of truth, localStorage the instant cache). A pick's PUT
+// is tracked (`landing`) so a poll that predates it can never converge the
+// older choice back over it (the deselect race, live-caught 2026-09-11).
 window.__ModuleLoader__.load({
   id: 'arxa-theme-accent',
   factory: (require) => {
@@ -22,19 +52,14 @@ window.__ModuleLoader__.load({
     const React = require('react')
     const h = React.createElement
 
-    const STORE_KEY = 'arxa.themeAccent'
-    const SERVER_PATH = '/__arxa/theme-accent'
+    const STORE_KEY = 'arxa.themePalette'
+    const SERVER_PATH = '/__arxa/theme-accent/palette'
+    const ENGINE_URL = '/__arxa/theme-accent/contrast.js'
     // Editor font choice (2026-09-03): localStorage-backed (the editor is a
-    // desktop-first surface; the accent's engine-file cross-device sync does
+    // desktop-first surface; the palette's engine-file cross-device sync does
     // not extend to it). Applied as body-inline --arxa-editor-font, which the
     // artifact-viewer's cm-content consumes with the same Fira-free default
-    // stack as its var() fallback. (2026-09-01 render-truthed: the dsh
-    // --ds-font-family-code token can no longer be the editor fallback — it
-    // lists "Fira Code" third, and with "SF Mono" unresolvable in this
-    // WKWebView + JetBrains Mono absent, it resolved to the system-installed
-    // Fira Code: Default rendered Fira and the toggle was a visual no-op.
-    // Measured: token stack == explicit "Fira Code" at 366.61px, Menlo
-    // 367.86px, unmatched names 242.31px.)
+    // stack as its var() fallback.
     const FONT_STORE_KEY = 'arxa.editorFont'
     const FONT_SRC = '/__arxa/artifacts/vendor/'
     // Default must NEVER resolve to a Fira design or Default == Fira visually.
@@ -60,11 +85,9 @@ window.__ModuleLoader__.load({
     // @font-face below lazy-loads on FIRST USE — which is exactly when the
     // artifact-viewer's CodeMirror first paints. macOS 26 (Tahoe) app
     // webviews have a WebKit regression in that window: text already laid
-    // out with the fallback never re-renders when the webfont resolves
-    // (Apple FB18869578 class; Chromium swaps fine). Registering the faces
-    // eagerly at plugin load — bytes fetched via fetch() and added through
-    // the FontFace API — means any editor created later measures and paints
-    // with the real font from the first frame.
+    // out with the fallback never re-renders when the webfont resolves.
+    // Registering the faces eagerly at plugin load means any editor created
+    // later measures and paints with the real font from the first frame.
     let editorFontReady = null
     function preloadEditorFont() {
       if (editorFontReady !== null) return editorFontReady
@@ -84,21 +107,65 @@ window.__ModuleLoader__.load({
       ])
       return editorFontReady
     }
-    const SWATCHES = ['#0EBAE4', '#0EE4E0', '#12D49A']
-    const DEFAULT = SWATCHES[0]
-    // Cross-DEVICE convergence cadence: the engine is the source of truth,
-    // so a desktop-side change reaches the phone's webview within one tick.
+
+    // ── palettes ────────────────────────────────────────────────────────────
+    // The three built-ins are named in coolors' own data (verified live via
+    // the lens, 2026-09-11); a custom paste names itself "Custom" unless the
+    // host's best-effort fetch extracts the page's <h1> (offline is fine).
+    const PRESETS = [
+      { id: 'mystic-evening', name: 'Mystic Evening', palette: '1a1423-372549-774c60-b75d69-eacdc2' },
+      { id: 'earthy-green', name: 'Earthy Green', palette: 'cad2c5-84a98c-52796f-354f52-2f3e46' },
+      { id: 'light-steel', name: 'Light Steel', palette: 'f8f9fa-e9ecef-dee2e6-ced4da-adb5bd-6c757d-495057-343a40-212529' },
+    ]
+    const DEFAULT = PRESETS[0]
+    // Cross-DEVICE convergence cadence: the engine is the source of truth.
     const POLL_MS = 5000
-    // Same-tab localStorage writes never fire the storage event - row UI
+    // Same-tab localStorage writes never fire the storage event — row UI
     // (and any other listener) learns about converges through this set.
     const listeners = new Set()
+
+    /** Parse a pasted coolors URL or bare hex list → normalized unique
+     * 6-digit lowercase hexes, or null. Bounds 2–10 are coolors' own
+     * (lens-verified 2026-09-11: 1 → 404, 2 ✓, 10 ✓, 11+ refused). */
+    function parsePaletteInput(text) {
+      const t = String(text || '').trim()
+      if (!t) return null
+      const m = /\/palette\/([0-9a-fA-F#-]+)/.exec(t)
+      const body = m ? m[1] : t
+      const raw = body.split(/[-\s,]+/).map((x) => x.replace(/^#/, '')).filter(Boolean)
+      const norm = []
+      for (const r of raw) {
+        let hx = r.toLowerCase()
+        if (/^[0-9a-f]{3}$/.test(hx)) hx = hx.split('').map((c) => c + c).join('')
+        if (!/^[0-9a-f]{6}$/.test(hx)) return null
+        if (!norm.includes(hx)) norm.push(hx)
+      }
+      return norm.length >= 2 && norm.length <= 10 ? norm : null
+    }
+
+    const paletteHexes = (palette) => String(palette || '').split('-').filter(Boolean)
+    /** Anchors must reach paintRamps as #-prefixed uppercase hexes — a
+     *  bare hex is an INVALID CSS color at use time (live-caught 2026-09-11:
+     *  palette 000814-…-ffd60a, whose anchor the solve never moves, painted
+     *  `--dsw-static-deepseek-500: ffd60a` and the whole accent ramp broke). */
+    const withHash = (hx) => (/^#?[0-9a-fA-F]{6}$/.test(String(hx || '')) ? '#' + String(hx).replace(/^#/, '').toUpperCase() : hx)
+
+    /** Default accent: most-saturated swatch; a monochrome palette (all
+     * chroma < 0.04) falls to the 2nd-darkest (ascending by L puts the
+     * darkest FIRST — index 1, never length-2 which reads the 2nd-lightest).
+     * Tapping a swatch overrides. */
+    function autoAccent(palette, E) {
+      const labs = paletteHexes(palette).map((hx) => ({ hx, ok: E.toOklch(E.hexToRgb(hx)) }))
+      const maxC = labs.reduce((mx, x) => Math.max(mx, x.ok.c), 0)
+      if (maxC >= 0.04) return labs.sort((a, b) => b.ok.c - a.ok.c)[0].hx
+      const sorted = labs.sort((a, b) => a.ok.l - b.ok.l)
+      return sorted[1].hx
+    }
 
     // Tint ladders mirroring the stock lightness curves. oklab keeps hue
     // steady across mixes. ponytail: eyeballed percentages, tune per-stop if
     // design asks. BOTH accent ramps are owned here: the frontend's accent
-    // aliases resolve through --dsw-static-blue-* AND --dsw-static-deepseek-*
-    // (arxa-brand repaints both to moss by source order; inline-on-<body>
-    // outranks any stylesheet, so this wins over brand AND the theme bundle).
+    // aliases resolve through --dsw-static-blue-* AND --dsw-static-deepseek-*.
     const TINTS = {
       50: 'color-mix(in oklab, ACC 8%, white)',
       '50p': 'color-mix(in oklab, ACC 9%, white)',
@@ -119,99 +186,257 @@ window.__ModuleLoader__.load({
       deepseek: [50, 100, 200, 300, 400, 450, 500, 600, 800, 900],
       blue: [50, '50p', 75, 100, 300, 400, 450, 500, 600, 800, 900, 950],
     }
-
-    // Surface hue: arxa-brand repaints the ENTIRE neutral-bluish ramp (every
-    // background surface in the app) with green-tinted neutrals, so the
-    // studio's overall hue stayed moss no matter which accent was picked —
-    // only accent-alias consumers (buttons, links, sidebar) reacted.
-    // Re-derive the same lightness ladder from the chosen accent instead:
-    // a light accent wash folded into a pure gray of matching value.
-    // ponytail: gray values eyeballed from the moss ladder's luminance;
-    // tune NEUTRAL_MIX per-stop if design asks.
+    // Surface hue: the neutral-bluish ramp (every background surface in the
+    // app) re-derived from the accent — a light accent wash folded into a
+    // pure gray of matching value. The LIGHTNESS ladder is fixed (scope A
+    // ruling: palettes repaint hue, never surface depth).
     const NEUTRAL_L = {
       '00': 254, 50: 250, 60: 245, 75: 241, 100: 238, 150: 236, 200: 230,
       300: 209, 400: 177, 500: 156, 600: 132, 700: 100, 750: 68, 800: 53,
       850: 44, 875: 35, 900: 27, 950: 21, 1000: 16,
     }
     const NEUTRAL_MIX = 10 // % of accent folded into each gray stop
+    // Ink stops fold harder (operator, 2026-09-12: "raise it", then "too
+    // much — strict minimum") — the label
+    // aliases read 50/200/300/400/600/700/750/1000 across the two themes
+    // (measured map: light primary/secondary/tertiary/caption/dimmed =
+    // 1000/700/600/400/200, dark = 50/300/400/600/750), and a 10% fold into
+    // near-black reads un-themed black while 20% reads loud. 15% is the
+    // strict minimum that still shows the hue, and keeps every label pair
+    // far above target (light ink ≈ oklab L .26 on the .94 bg). Surfaces
+    // keep 10% —
+    // depth never moves (scope A); solveStudio mirrors this exactly so the
+    // contrast readout describes what actually paints.
+    const INK_MIX = 15
+    const INK_STOPS = new Set(['50', '200', '300', '400', '600', '700', '750', '1000'])
+    const mixFor = (stop) => (INK_STOPS.has(stop) ? INK_MIX : NEUTRAL_MIX)
+    const grayHex = (g) => '#' + [g, g, g].map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('')
+    // Stock PLAIN-neutral stops the scrollbar aliases consume (light:
+    // 200/300, dark: 550/600/700) + 850 (dark bg-multi-select). The bluish
+    // ramp gets the wash below; this ramp never did, so scrollbars stayed
+    // stock gray while every other surface carried the palette.
+    const SCROLLBAR_NEUTRALS = { 200: '#e5e5e5', 300: '#d4d4d4', 550: '#65676b', 600: '#545557', 700: '#3c3c3d', 850: '#212123' }
 
-    const stored = () => {
-      try {
-        const v = localStorage.getItem(STORE_KEY)
-        return SWATCHES.includes(v) ? v : DEFAULT
-      } catch { return DEFAULT }
-    }
+    // The one engine import — cached. Served by the host half, so lib/
+    // contrast.js is the ONLY copy (host and client cannot drift).
+    let engineReady = null
+    const engine = () => (engineReady ??= import(ENGINE_URL))
 
-    // Apply an accent everywhere THIS document tracks it: CSS vars,
-    // localStorage cache, and in-tab listeners. No server I/O.
-    function converge(hex) {
-      if (!SWATCHES.includes(hex) || hex === stored()) return
-      try { localStorage.setItem(STORE_KEY, hex) } catch { /* still applies */ }
-      applyAccent(hex)
-      for (const fn of listeners) fn(hex)
-    }
-
-    // The engine is the source of truth; localStorage is the instant cache.
-    // Divergence means another device chose - follow it.
-    async function syncFromServer() {
-      try {
-        const res = await fetch(SERVER_PATH, { cache: 'no-store' })
-        if (!res.ok) return
-        const hex = (await res.json())?.accent
-        if (SWATCHES.includes(hex)) {
-          // Engine has a choice: it wins (localStorage is only a cache).
-          converge(hex)
-        } else {
-          // Migration: the engine file starts empty while this device may
-          // already carry a choice - promote it to the source of truth once.
-          const local = stored()
-          if (local !== DEFAULT) pushToServer(local)
+    /** The studio pair contract — the REAL token map, measured from
+     *  @deepseek-ai/dsh-client-ui-theme (2026-09-11), not guessed:
+     *    light theme: bg-layer-1/2/3 ALL read neutral-00; the accent
+     *      alias reads deepseek-400; labels read neutral-1000/400.
+     *    dark theme: bg-layer-1/2/3 read neutral-875/850/800; the accent
+     *      reads deepseek-500; labels read neutral-50/600.
+     *  business-primary is consumed as TEXT + focus + marks (5 color: uses,
+     *  ZERO background uses in the shipped CSS) — so the accent pairs gate
+     *  at 3:1 (SC 1.4.11 non-text/marks; stock light accent #679efe on #fff
+     *  is itself 2.66:1 — the solve IMPROVES on stock, never enforces
+     *  4.5:1 text on it). Labels pair at body/3:1. The engine's Radix law
+     *  holds: each accent slot carries its whole pair set at once. alt =
+     *  the palette's far end in lightness (the polarity escape — e.g. a
+     *  near-black anchor on the dark surfaces flips to the palette's light
+     *  end). Labels and surfaces are scope-A-fixed: any engine move on them
+     *  is reverted, the residue re-reported honestly. */
+    function solveStudio(palette, accentHex, E) {
+      const washed = {}
+      for (const stop of Object.keys(NEUTRAL_L)) {
+        washed[stop] = E.mixOklab(accentHex, mixFor(stop), grayHex(NEUTRAL_L[stop]))
+      }
+      const slots = {
+        accentDark: withHash(accentHex), // the deepseek-500 position — the dark accent (always paintable)
+        accentLight: E.mixOklab(accentHex, 78, '#FFFFFF'), // deepseek-400 = ACC 78%
+        bgL: washed['00'], // light: every bg layer reads neutral-00
+        bgD1: washed['875'], bgD2: washed['850'], bgD3: washed['800'],
+        labelPL: washed['1000'], labelPD: washed['50'],
+        labelTL: washed['400'], labelTD: washed['600'],
+      }
+      const pairs = [
+        { fg: 'accentLight', bg: 'bgL', level: 'nontext' },
+        { fg: 'labelPL', bg: 'bgL', level: 'body' },
+        { fg: 'labelTL', bg: 'bgL', level: 'nontext' },
+        { fg: 'accentDark', bg: 'bgD1', level: 'nontext' },
+        { fg: 'accentDark', bg: 'bgD2', level: 'nontext' },
+        { fg: 'accentDark', bg: 'bgD3', level: 'nontext' },
+        { fg: 'labelPD', bg: 'bgD1', level: 'body' },
+        { fg: 'labelTD', bg: 'bgD1', level: 'nontext' },
+      ]
+      const anchorL = E.toOklch(E.hexToRgb(accentHex)).l
+      const alt = (slot) => {
+        if (slot !== 'accentDark') return null
+        let best = null
+        for (const hx of paletteHexes(palette)) {
+          if (hx.toUpperCase() === accentHex.toUpperCase()) continue
+          const l = E.toOklch(E.hexToRgb(hx)).l
+          if (best === null || Math.abs(l - anchorL) > Math.abs(best.l - anchorL)) best = { l, hx }
         }
-      } catch { /* engine unreachable - the cached accent keeps rendering */ }
+        return best ? withHash(best.hx) : null
+      }
+      const { hexes: solved } = E.solveContrast(slots, pairs, alt)
+      // Honest residue against the ORIGINAL slots (labels + surfaces never move).
+      const passes = (pair) => (E.contrastRatio(solved[pair.fg], slots[pair.bg]) ?? 0) >= E.pairTarget(pair.level)
+      const unsolved = pairs.filter((p) => !passes(p)).map((p) => p.fg + ' on ' + p.bg)
+      return {
+        accentDark: solved.accentDark,
+        accentLight: solved.accentLight,
+        moved: solved.accentDark.toUpperCase() !== accentHex.toUpperCase()
+          || solved.accentLight.toUpperCase() !== slots.accentLight.toUpperCase(),
+        unsolved,
+        ratios: {
+          light: E.contrastRatio(solved.accentLight, washed['00']),
+          dark: E.contrastRatio(solved.accentDark, washed['800']),
+        },
+      }
     }
 
-    function pushToServer(hex) {
-      fetch(SERVER_PATH, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ accent: hex }),
-      }).catch(() => { /* offline: local stays, converges on a later poll */ })
-    }
-
-    function applyAccent(hex) {
+    /** Paint the solved accents through the ramps + wash (0.2.5 mechanism;
+     *  the two accent-alias positions take the SOLVED hexes — every other
+     *  stop stays the stock ladder formula off the dark anchor). */
+    function paintRamps(accentDark, accentLight) {
       const body = document.body
       if (!body) {
-        // `immediately: true` bundles can run before <body> parses — retry
-        // once the document is ready or the initial accent silently no-ops.
-        document.addEventListener('DOMContentLoaded',
-          () => applyAccent(hex), { once: true })
+        document.addEventListener('DOMContentLoaded', () => paintRamps(accentDark, accentLight), { once: true })
         return
       }
       for (const ramp of Object.keys(RAMPS)) {
         for (const stop of RAMPS[ramp]) {
-          body.style.setProperty(
-            '--dsw-static-' + ramp + '-' + stop,
-            TINTS[stop].replace('ACC', hex))
+          const value = stop === 400
+            ? accentLight // the deepseek-400/blue-400 position = the light accent
+            : TINTS[stop].replace('ACC', accentDark)
+          body.style.setProperty('--dsw-static-' + ramp + '-' + stop, value)
         }
       }
       for (const stop of Object.keys(NEUTRAL_L)) {
         const g = NEUTRAL_L[stop]
         body.style.setProperty(
           '--dsw-static-neutral-bluish-' + stop,
-          'color-mix(in oklab, ' + hex + ' ' + NEUTRAL_MIX + '%, rgb(' +
+          'color-mix(in oklab, ' + accentDark + ' ' + mixFor(stop) + '%, rgb(' +
             g + ', ' + g + ', ' + g + '))')
+      }
+      // Scrollbars ride the PLAIN neutral ramp — wash it too (same 10%,
+      // stock values kept as-is: depth never moves, scope A). The remnant
+      // sweep, 2026-09-11: bars used to stay stock gray mid-palette.
+      for (const [stop, stock] of Object.entries(SCROLLBAR_NEUTRALS)) {
+        body.style.setProperty(
+          '--dsw-static-neutral-' + stop,
+          'color-mix(in oklab, ' + accentDark + ' ' + NEUTRAL_MIX + '%, ' + stock + ')')
       }
     }
 
-    //#region row styles (Language-row metrics, own class names)
+    // ── state + convergence ────────────────────────────────────────────────
+    const validState = (v) => {
+      if (!v || typeof v !== 'object') return null
+      const hexes = parsePaletteInput(v.palette)
+      if (!hexes) return null
+      const accent = typeof v.accent === 'string' && hexes.includes(v.accent.replace(/^#/, '').toLowerCase())
+        ? '#' + v.accent.replace(/^#/, '').toLowerCase() : null
+      return { palette: hexes.join('-'), accent, name: typeof v.name === 'string' && v.name && v.name !== 'Palette' ? v.name.slice(0, 60) : null }
+    }
+    const stored = () => {
+      try {
+        const v = validState(JSON.parse(localStorage.getItem(STORE_KEY) || 'null'))
+        return v || { palette: DEFAULT.palette, accent: null, name: DEFAULT.name }
+      } catch { return { palette: DEFAULT.palette, accent: null, name: DEFAULT.name } }
+    }
+
+    /** Apply a palette everywhere THIS document tracks it: solve, paint,
+     *  localStorage cache, in-tab listeners. No server I/O. */
+    async function applyPalette(state) {
+      const s = validState(state) || stored()
+      const anchor = s.accent || autoAccentFallback(s.palette)
+      try {
+        const E = await engine()
+        const a = s.accent || autoAccent(s.palette, E)
+        const r = solveStudio(s.palette, a, E)
+        paintRamps(r.accentDark, r.accentLight)
+      } catch {
+        // Engine unreachable (offline first boot): paint the anchor raw —
+        // the ramps still apply; the solve lands on the next convergence.
+        paintRamps(withHash(anchor), withHash(anchor))
+      }
+      return s
+    }
+    // Regex-only auto fallback when the engine import failed — the engine
+    // path is the real one; this just paints SOMETHING sane offline.
+    // ponytail: crude (2nd swatch), the solve corrects it on convergence.
+    function autoAccentFallback(palette) {
+      const hexes = paletteHexes(palette)
+      return hexes[Math.min(hexes.length - 1, 1)]
+    }
+
+    async function converge(state) {
+      const s = validState(state)
+      if (!s) return
+      if (landing) return // this GET predates our in-flight pick — never revert it
+      const cur = stored()
+      if (s.palette === cur.palette && s.accent === cur.accent) {
+        // The fetched NAME catching up (palette+accent already match): adopt
+        // it into the cache + listeners — no repaint needed.
+        if (s.name && s.name !== cur.name) {
+          try { localStorage.setItem(STORE_KEY, JSON.stringify(s)) } catch { /* name is cosmetic */ }
+          for (const fn of listeners) fn(s)
+        }
+        return
+      }
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(s)) } catch { /* still applies */ }
+      await applyPalette(s)
+      for (const fn of listeners) fn(s)
+    }
+
+    // The engine file is the source of truth; localStorage is the instant
+    // cache. Divergence means another device chose — follow it.
+    async function syncFromServer() {
+      try {
+        const res = await fetch(SERVER_PATH, { cache: 'no-store' })
+        if (!res.ok) return
+        const v = await res.json()
+        if (v && validState(v)) {
+          await converge(v) // engine has a choice: it wins
+        } else {
+          // Migration: the engine file starts empty while this device may
+          // already carry a choice — promote it to the source of truth once.
+          const local = stored()
+          if (local.palette !== DEFAULT.palette) pushToServer(local)
+        }
+      } catch { /* engine unreachable — the cached palette keeps rendering */ }
+    }
+
+    // A pick's PUT in flight — stale GETs (the 5s poll, a forced
+    // visibilitychange pass) must not converge an OLDER engine state over
+    // it. Cleared when the PUT settles; the host also writes the choice
+    // before its name fetch now, so the window is closed at both ends.
+    let landing = null
+    function pushToServer(state) {
+      landing = fetch(SERVER_PATH, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ palette: state.palette, accent: state.accent }),
+      }).catch(() => { /* offline: local stays, converges on a later poll */ })
+        .finally(() => { landing = null })
+    }
+
+    // ── row styles ─────────────────────────────────────────────────────────
     const css = {
       row: 'arxaAc_row',
       rowText: 'arxaAc_rowText',
       title: 'arxaAc_title',
       desc: 'arxaAc_desc',
+      cards: 'arxaAc_cards',
+      card: 'arxaAc_card',
+      selCard: 'arxaAc_selCard',
+      cardName: 'arxaAc_cardName',
+      strip: 'arxaAc_strip',
+      chip: 'arxaAc_chip',
+      chipSel: 'arxaAc_chipSel',
+      phCard: 'arxaAc_phCard',
+      phStrip: 'arxaAc_phStrip',
+      inputRow: 'arxaAc_inputRow',
+      input: 'arxaAc_input',
+      err: 'arxaAc_err',
+      note: 'arxaAc_note',
       swatches: 'arxaAc_swatches',
-      swatch: 'arxaAc_swatch',
       selected: 'arxaAc_selected',
+      btn: 'arxaAc_btn',
       fontPill: 'arxaAc_fontPill',
       fontPreview: 'arxaAc_fontPreview',
     }
@@ -225,19 +450,55 @@ window.__ModuleLoader__.load({
       '.arxaAc_desc{color:var(--dsw-alias-label-secondary,#8a8f98);' +
       'font-size:12px;line-height:18px}' +
       '.arxaAc_swatches{align-items:center;gap:12px;display:flex}' +
-      '.arxaAc_swatch{width:24px;height:24px;border-radius:50%;' +
-      'border:none;cursor:pointer;padding:0;' +
-      'outline:2px solid transparent;outline-offset:2px}' +
-      '.arxaAc_swatch:hover{outline-color:var(--dsw-alias-border-l2)}' +
-      '.arxaAc_selected{outline-color:var(--dsw-alias-label-primary)}' +
-      '.arxaAc_fontPill{width:auto;height:28px;border-radius:14px;' +
-      'font-size:12px;color:var(--dsw-alias-label-primary);' +
-      'background:var(--dsw-alias-bg-layer-2);padding:0 12px;' +
-      'font-family:var(--ds-font-family-code)}' +
+      '.arxaAc_selected{color:var(--dsw-alias-label-primary);' +
+      'background:var(--dsw-alias-button-ghost-active-fill);' +
+      'box-shadow:inset 0 0 0 1px var(--dsw-alias-button-ghost-active-border)}' +
+      '.arxaAc_btn{height:28px;padding:0 14px;border:none;border-radius:14px;' +
+      'font-size:13px;line-height:20px;cursor:pointer;' +
+      'color:var(--dsw-alias-label-primary-foreground);' +
+      'background:var(--dsw-alias-button-primary-fill)}' +
+      '.arxaAc_btn:hover{background:var(--dsw-alias-button-primary-hover)}' +
+      '.arxaAc_btn:active{background:var(--dsw-alias-interactive-bg-active)}' +
+      '.arxaAc_cards{display:flex;flex-direction:column;gap:8px;padding:0 0 14px}' +
+      '.arxaAc_card{display:flex;flex-direction:column;gap:6px;border:1px solid ' +
+      'var(--dsw-alias-border-l2);border-radius:8px;padding:10px 12px;cursor:pointer;' +
+      'background:transparent;text-align:left}' +
+      '.arxaAc_card:hover{border-color:var(--dsw-alias-label-secondary,#8a8f98)}' +
+      '.arxaAc_selCard{border-color:var(--dsw-alias-label-primary)}' +
+      '.arxaAc_cardName{color:var(--dsw-alias-label-primary);font-size:13px;' +
+      'line-height:18px;font-weight:500}' +
+      '.arxaAc_strip{display:flex;gap:0;border-radius:4px;overflow:hidden;' +
+      'height:24px}' +
+      '.arxaAc_chip{flex:1;border:none;cursor:pointer;padding:0;height:100%;' +
+      'outline:2px solid transparent;outline-offset:-2px}' +
+      '.arxaAc_chip:hover{outline-color:var(--dsw-alias-label-primary)}' +
+      '.arxaAc_chipSel{outline-color:var(--dsw-alias-label-primary)}' +
+      '.arxaAc_phCard{border-style:dashed;cursor:pointer}' +
+      '.arxaAc_phCard:hover{border-color:var(--dsw-alias-label-secondary,#8a8f98)}' +
+      '.arxaAc_phStrip{display:flex;align-items:center;justify-content:center;height:24px;' +
+      'border:1px dashed var(--dsw-alias-border-l2);border-radius:4px;color:' +
+      'var(--dsw-alias-label-secondary,#8a8f98);font-size:11px}' +
+      '.arxaAc_inputRow{display:flex;gap:8px;padding:0 0 6px}' +
+      '.arxaAc_input{flex:1;min-width:0;height:28px;border:1px solid ' +
+      'var(--dsw-alias-border-l2);border-radius:6px;background:transparent;' +
+      'color:var(--dsw-alias-label-primary);font-size:12px;padding:0 10px}' +
+      '.arxaAc_input:focus{outline:none;border-color:var(--dsw-alias-label-primary)}' +
+      '.arxaAc_err{color:var(--dsw-alias-state-error-primary);font-size:12px;' +
+      'line-height:18px;padding:0 0 6px}' +
+      '.arxaAc_note{color:var(--dsw-alias-label-secondary,#8a8f98);font-size:11px;' +
+      'line-height:16px;padding:0 0 14px}' +
+      // Pills + buttons speak the MEASURED dsh recipes (dist CSS
+      // _pill_e3ygd_1 / _active_e3ygd_23 / _primary_cfgyt_38) — same UI
+      // language as the app, never a hand-rolled look (2026-09-12).
+      '.arxaAc_fontPill{height:24px;padding:0 8px;border:none;' +
+      'border-radius:12px;font-size:12px;line-height:18px;cursor:pointer;' +
+      'color:var(--dsw-alias-label-secondary);' +
+      'background:var(--dsw-alias-bg-layer-2)}' +
+      '.arxaAc_fontPill:hover{background:var(--dsw-alias-interactive-bg-hover)}' +
       '.arxaAc_fontPreview{font-size:13px;line-height:20px;' +
       'padding:0 0 14px;color:var(--dsw-alias-label-primary);' +
       'white-space:pre;overflow-x:auto;font-family:var(--arxa-editor-font,Menlo,monospace)}'
-    const tagId = 'arxa-theme-accent/AccentRow.css'
+    const tagId = 'arxa-theme-accent/PaletteRow.css'
     if (typeof document !== 'undefined'
       && document.querySelector('style[data-plugin-css=' + JSON.stringify(tagId) + ']') === null) {
       const tag = document.createElement('style')
@@ -248,7 +509,7 @@ window.__ModuleLoader__.load({
       // Fira Code (SIL OFL, vendored variable woff2 by the artifact-viewer
       // vendor route) — SECONDARY path: the FontFace-API preload above is
       // the primary (macOS 26 app webviews never re-render text that laid
-      // out before a lazy @font-face resolves). latin-ext covers pl/fr.
+      // out before a lazy @font-face resolves).
       const face = document.createElement('style')
       face.dataset.plugin = 'arxa-theme-accent'
       face.dataset.pluginCss = 'arxa-theme-accent/EditorFont.css'
@@ -260,20 +521,22 @@ window.__ModuleLoader__.load({
         'src:url(' + FONT_SRC + "fira-code-latin-ext.woff2) format('woff2');}"
       document.head.appendChild(face)
     }
-    //#endregion
 
-    function AccentRow() {
-      const [accent, setAccent] = React.useState(stored)
-      // Cross-tab AND cross-device: another window picked a swatch - follow
-      // it live (storage event covers other tabs; converge() covers the
-      // engine-pulled value landing in this tab).
+    function PaletteRow() {
+      const [state, setState] = React.useState(stored)
+      const [input, setInput] = React.useState('')
+      const [err, setErr] = React.useState('')
+      const [note, setNote] = React.useState('')
+      const inputRef = React.useRef(null)
+      // Cross-tab AND cross-device: another window picked — follow it live.
       React.useEffect(() => {
         const onStorage = (e) => {
-          if (e.key === STORE_KEY && SWATCHES.includes(e.newValue)) {
-            setAccent(e.newValue)
+          if (e.key === STORE_KEY) {
+            const s = validState(JSON.parse(e.newValue || 'null')) || stored()
+            setState(s); applyPalette(s)
           }
         }
-        const onConverge = (hex) => setAccent(hex)
+        const onConverge = (s) => { setState(s); setErr('') }
         window.addEventListener('storage', onStorage)
         listeners.add(onConverge)
         return () => {
@@ -281,35 +544,113 @@ window.__ModuleLoader__.load({
           listeners.delete(onConverge)
         }
       }, [])
-      const pick = (hex) => {
-        try { localStorage.setItem(STORE_KEY, hex) } catch { /* still applies locally */ }
-        applyAccent(hex)
-        setAccent(hex)
-        pushToServer(hex)
+      // The contrast readout: solved live for the CURRENT palette (engine +
+      // solve + ratios; APCA advisory). Recomputed on every state change.
+      React.useEffect(() => {
+        let live = true
+        setNote('…')
+        engine().then((E) => {
+          if (!live) return
+          const anchor = state.accent || autoAccent(state.palette, E)
+          const r = solveStudio(state.palette, anchor, E)
+          const bits = [
+            'marks ' + r.ratios.light.toFixed(1) + ':' + r.ratios.dark.toFixed(1) + ':1',
+            'APCA ' + E.apcaLc(r.accentDark, '#2c2c2c').toFixed(0) + ' Lc',
+          ]
+          setNote((r.moved ? 'accent adjusted for contrast · ' : 'contrast AA · ')
+            + bits.join(' · ')
+            + (r.unsolved.length ? ' · below AA: ' + r.unsolved.join(', ') : ''))
+        }).catch(() => live && setNote('contrast engine offline'))
+        return () => { live = false }
+      }, [state])
+      const pick = (palette, name, accentOverride) => {
+        const s = validState({ palette, accent: accentOverride, name })
+        if (!s) return
+        try { localStorage.setItem(STORE_KEY, JSON.stringify(s)) } catch { /* still applies locally */ }
+        setState(s); setErr('')
+        applyPalette(s)
+        pushToServer(s)
       }
-      return h('div', { className: css.row },
-        h('div', { className: css.rowText },
-          h('div', { className: css.title }, 'Accent'),
-          h('div', { className: css.desc },
-            'Theme accent color. Tints across the app follow your choice.')),
-        h('div', { className: css.swatches, role: 'radiogroup', 'aria-label': 'Accent color' },
-          SWATCHES.map((hex) => h('button', {
-            key: hex,
+      const addCustom = () => {
+        const hexes = parsePaletteInput(input)
+        if (!hexes) {
+          setErr('Paste a coolors URL or 2–10 hex codes (e.g. 1a1423-b75d69).')
+          return
+        }
+        setErr('')
+        setInput('')
+        pick(hexes.join('-'), null, null)
+      }
+      const cards = PRESETS.slice()
+      const isPreset = PRESETS.some((p) => p.palette === state.palette)
+      // The 4th slot is ALWAYS present: a real card while a custom palette
+      // is active, a dashed PLACEHOLDER otherwise — the seat a paste lands
+      // in must be visible before anything is pasted (operator, 2026-09-11).
+      if (!isPreset) cards.push({ id: 'custom', name: state.name || 'Custom', palette: state.palette })
+      else cards.push({ id: 'custom', placeholder: true, name: 'Custom' })
+      const focusInput = () => { if (inputRef.current) inputRef.current.focus() }
+      return h('div', null,
+        h('div', { className: css.row },
+          h('div', { className: css.rowText },
+            h('div', { className: css.title }, 'Palette'),
+            h('div', { className: css.desc },
+              'Color palette of the studio. Tap a strip for the palette, tap a swatch to set its accent.'))),
+        h('div', { className: css.cards },
+          cards.map((card) => card.placeholder
+            ? h('div', {
+                key: card.id,
+                role: 'button',
+                tabIndex: 0,
+                'aria-label': 'Add a custom palette',
+                className: css.card + ' ' + css.phCard,
+                onClick: focusInput,
+                onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); focusInput() } },
+              },
+                h('div', { className: css.cardName }, card.name),
+                h('div', { className: css.phStrip }, 'paste a coolors URL below'))
+            : h('div', {
+                key: card.id,
+                role: 'radio',
+                'aria-checked': state.palette === card.palette,
+                tabIndex: 0,
+                className: css.card + (state.palette === card.palette ? ' ' + css.selCard : ''),
+                onClick: () => pick(card.palette, card.name, null),
+                onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(card.palette, card.name, null) } },
+              },
+                h('div', { className: css.cardName }, card.name),
+                h('div', { className: css.strip, role: 'group', 'aria-label': card.name + ' swatches' },
+                  paletteHexes(card.palette).map((hx) => h('button', {
+                    key: hx,
+                    type: 'button',
+                    title: '#' + hx,
+                    'aria-pressed': (state.accent || '') === '#' + hx,
+                    className: css.chip + ((state.accent || '') === '#' + hx ? ' ' + css.chipSel : ''),
+                    style: { background: '#' + hx },
+                    onClick: (e) => { e.stopPropagation(); pick(card.palette, card.name, '#' + hx) },
+                  })))))),
+        h('div', { className: css.inputRow },
+          h('input', {
+            ref: inputRef,
+            className: css.input,
+            type: 'text',
+            value: input,
+            placeholder: 'coolors.co/palette/… or 2–10 hex codes',
+            'aria-label': 'Custom palette',
+            onChange: (e) => setInput(e.target.value),
+            onKeyDown: (e) => { if (e.key === 'Enter') addCustom() },
+          }),
+          h('button', {
             type: 'button',
-            role: 'radio',
-            'aria-checked': accent === hex,
-            'aria-label': 'Accent ' + hex,
-            title: hex,
-            className: css.swatch + (accent === hex ? ' ' + css.selected : ''),
-            style: { background: hex },
-            onClick: () => pick(hex),
-          }))))
+            className: css.btn,
+            onClick: addCustom,
+          }, 'Add')),
+        err !== '' && h('div', { className: css.err, role: 'alert' }, err),
+        h('div', { className: css.note }, note))
     }
 
     // Live sample rendered under the Editor font row. The settings modal
     // unmounts the artifact viewer, so a font pick has no on-screen editor
-    // to compare against — this preview IS that feedback: ligature pairs
-    // fuse in Fira, stay plain in the default stack, instantly on click.
+    // to compare against — this preview IS that feedback.
     const FONT_PREVIEW = 'a => b >= c != d |> 0OoIl1 :: -> =>'
     const fontStackFor = (id) => (id === 'fira' ? FIRA_EDITOR_STACK : DEFAULT_EDITOR_STACK)
 
@@ -343,7 +684,7 @@ window.__ModuleLoader__.load({
               role: 'radio',
               'aria-checked': font === f.id,
               title: f.id === 'fira' ? 'Fira Code' : 'Default monospace',
-              className: css.swatch + ' ' + css.fontPill + (font === f.id ? ' ' + css.selected : ''),
+              className: css.fontPill + (font === f.id ? ' ' + css.selected : ''),
               style: f.id === 'fira' ? { fontFamily: "'Fira Code Variable', monospace" } : undefined,
               onClick: () => pick(f.id),
             }, f.label)))),
@@ -355,21 +696,20 @@ window.__ModuleLoader__.load({
     }
 
     function apply(ctx) {
-      // Every page, not just Settings: restore the stored accent on load and
-      // track other windows even while the row is unmounted.
-      applyAccent(stored())
+      // Every page, not just Settings: solve + paint the stored palette on
+      // load and track other windows even while the row is unmounted.
+      applyPalette(stored())
       window.addEventListener('storage', (e) => {
-        if (e.key === STORE_KEY && SWATCHES.includes(e.newValue)) {
-          applyAccent(e.newValue)
+        if (e.key === STORE_KEY) {
+          const s = validState(JSON.parse(e.newValue || 'null'))
+          if (s) applyPalette(s)
         }
         if (e.key === FONT_STORE_KEY) applyFont(e.newValue || 'default')
       })
       applyFont((() => {
         try { return localStorage.getItem(FONT_STORE_KEY) || 'default' } catch { return 'default' }
       })())
-      // The preload must start at page load, not at first editor paint —
-      // see preloadEditorFont(). Swapping the stored font later (clicks)
-      // re-applies instantly: the faces are already in the document set.
+      // The preload must start at page load, not at first editor paint.
       preloadEditorFont()
       // Cross-device sync: resolve the engine's choice immediately (the
       // cached paint above avoids a flash), then keep converging on the poll
@@ -379,16 +719,15 @@ window.__ModuleLoader__.load({
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden) syncFromServer()
       })
-      // Personalisation tab (0.2.5): both rows moved from
-      // settings.general.item to settings.personalisation.item (the slot the
-      // arxa-personalisation section declares/renders); orders restart at
-      // 0/10 with the prism Background group at 20 behind them.
+      // Personalisation tab: both rows live in settings.personalisation.item
+      // (the slot the arxa-personalisation section declares); orders 0/10
+      // with the prism Background group at 20 behind them.
       ctx.slots.inject('settings.personalisation.item', () =>
         ctx.slots.register({
           name: 'settings.personalisation.item',
           id: 'arxa-theme-accent',
           order: 0,
-        }, AccentRow))
+        }, PaletteRow))
       ctx.slots.inject('settings.personalisation.item', () =>
         ctx.slots.register({
           name: 'settings.personalisation.item',

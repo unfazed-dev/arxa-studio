@@ -1520,6 +1520,33 @@
 			const label = typeof named === "string" && named && !named.startsWith("tree.dock.") ? named : ws.charAt(0).toUpperCase() + ws.slice(1);
 			orgStore.selectRow({ orgId, rowId: ws, kind: "dock", label });
 		};
+		/** Is THIS stock workspace row the selected row? (operator-reported
+		 * 2026-09-10: "notes is not being synced in the sidebar".)
+		 *
+		 * buildEmit skips workspace docks, so `notes` — the one dock with no
+		 * containers, which the host reports as workspace:true — never becomes
+		 * an OrgContainerRow and never got the mark that row draws for itself.
+		 * The same is true of every DEEPER workspace row (notes/<sub>,
+		 * meetings/scheduler, a project container). ARXA_SELECT_WS has always
+		 * set selectedRowId for them; only the drawing was missing, which is
+		 * why the dashboard followed the click and the tree did not.
+		 *
+		 * Read straight off the store like ARXA_WS_HIDDEN does: the tree
+		 * re-renders on every store emit, so no subscription of its own. */
+		const ARXA_WS_SELECTED = (workspaceId) => {
+			const { orgId, ws } = wsParts(workspaceId);
+			const sel = orgStore.get().selectedRowId;
+			return !!sel && sel.orgId === orgId && (sel.rowId ?? "") === ws;
+		};
+		/** Dashboard-row mark (2026-09-11): the five DOCK rows carry a
+		 * dashboard (ARXA_SELECT_WS tags kind:"dock" for exactly a top-level
+		 * ws — the same shape decides here, so glyph and click can never
+		 * disagree). Deeper workspaces and project containers open the
+		 * guide, not a dashboard, and keep their folders. */
+		const ARXA_WS_DASH = (workspaceId) => {
+			const { ws } = wsParts(workspaceId);
+			return ws !== "" && !ws.includes("/");
+		};
 		/** The PER-ROW + affordance, gated by the same rule as the dock CTA.
 		 * `projectRowRefused` was wired into ctaReady when tracks landed, but
 		 * every tree row carries its own + button inside the stock bundle and
@@ -1630,9 +1657,9 @@
 		 * (open / close / trash); docks and projects are fixed containers:
 		 * collapse only. Click = collapse/expand ALL children; switching
 		 * orgs is implicit through any action inside one, or explicit via
-		 * the org menu. Docks/projects use the stock folder glyph
-		 * (open/closed by expansion) — the exact folder icon the docks
-		 * always had; the org row gets the organisation glyph. */
+		 * the org menu. Docks carry the dashboard glyph (2026-09-11: their
+		 * click opens a dashboard, so their mark says so); projects keep the
+		 * stock folder glyph; the org row gets the organisation glyph. */
 		/** Organisation glyph (D82 hoisted from the org row): the building
 		 * mark every org surface shares — the tree row AND the trash
 		 * section's org group read as "organisation" through it. */
@@ -1651,6 +1678,28 @@
 					(0, react_jsx_runtime.jsx)("rect", { x: "2.5", y: "1.5", width: "8", height: "13", rx: "1" }),
 					(0, react_jsx_runtime.jsx)("path", { d: "M10.5 6h3v8.5" }),
 					(0, react_jsx_runtime.jsx)("path", { d: "M5 4.5h3M5 7.5h3M5 10.5h3" })
+				]
+			});
+		}
+		/** Dashboard glyph (2026-09-11): the 2×2 tile mark of a row whose
+		 * click opens a dashboard — the five docks. OrgGlyph's stroke style
+		 * verbatim so the tree reads as one family. */
+		function DashGlyph({ size }) {
+			return (0, react_jsx_runtime.jsxs)("svg", {
+				width: size ?? 15,
+				height: size ?? 15,
+				viewBox: "0 0 16 16",
+				fill: "none",
+				stroke: "currentColor",
+				strokeWidth: 1.3,
+				strokeLinecap: "round",
+				strokeLinejoin: "round",
+				"aria-hidden": "true",
+				children: [
+					(0, react_jsx_runtime.jsx)("rect", { x: "1.5", y: "1.5", width: "5.5", height: "5.5", rx: "1" }),
+					(0, react_jsx_runtime.jsx)("rect", { x: "9", y: "1.5", width: "5.5", height: "5.5", rx: "1" }),
+					(0, react_jsx_runtime.jsx)("rect", { x: "1.5", y: "9", width: "5.5", height: "5.5", rx: "1" }),
+					(0, react_jsx_runtime.jsx)("rect", { x: "9", y: "9", width: "5.5", height: "5.5", rx: "1" })
 				]
 			});
 		}
@@ -1753,7 +1802,11 @@
 			// .github/ — generated files visible in the sidebar, not just on
 			// GitHub). Project rows hide nothing: their tree is real content.
 			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsxs)("div", {
-				className: clsx(Rows_module_css_default.projectRow, menuOpen && Rows_module_css_default.menuOpen),
+				// The selected mark is the unified soft-accent fill (2026-09-12,
+				// operator): the settings-nav recipe on
+				// --dsw-specific-sidebar-nav-item-active — same style as every
+				// other active row in arxa, replacing the old accent bar + text.
+				className: clsx(Rows_module_css_default.projectRow, isSelected && Rows_module_css_default.selected, menuOpen && Rows_module_css_default.menuOpen),
 				role: "treeitem",
 				"aria-expanded": open,
 				"aria-current": isSelected ? "true" : void 0,
@@ -1773,17 +1826,17 @@
 				style: {
 					marginLeft: (offset ?? 4 + d.depth * 14) + "px", cursor: "pointer", borderRadius: 6,
 					marginTop: isOrg ? 4 : 0,
-					// The selected row is the accent one. Weight and a 2px inset
-					// marker carry it as well as colour does, so it still reads for
-					// anyone who cannot see the hue.
-					fontWeight: isSelected ? 600 : isOrg ? 600 : void 0,
-					color: isSelected ? "var(--dsw-alias-state-business-primary)" : void 0,
-					boxShadow: isSelected ? "inset 2px 0 0 var(--dsw-alias-state-business-primary)" : void 0,
+					fontWeight: isOrg ? 600 : void 0,
 				},
 				children: [
 					(0, react_jsx_runtime.jsx)("span", {
-						className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder),
-						children: isOrg ? (0, react_jsx_runtime.jsx)(OrgGlyph, {}) : open ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {})
+						// Selected ⇒ accent glyph (operator, 2026-09-11): the row
+						// text already carries the accent inline, but the slot's own
+						// tertiary color would win over inheritance — the stock
+						// folderActive rule is what repaints it. The one mark the
+						// selected row draws is also the one that must not grey out.
+						className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder, isSelected && Rows_module_css_default.folderActive),
+						children: isOrg ? (0, react_jsx_runtime.jsx)(OrgGlyph, {}) : d.kind === "dock" ? (0, react_jsx_runtime.jsx)(DashGlyph, {}) : open ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {})
 					}),
 					(0, react_jsx_runtime.jsx)("span", {
 						className: clsx(Rows_module_css_default.slot, Rows_module_css_default.chevron),

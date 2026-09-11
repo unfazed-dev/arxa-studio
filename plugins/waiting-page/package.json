@@ -1,6 +1,6 @@
 {
   "name": "arxa-waiting-page",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "arxa desktop lifecycle for browser surfaces: server-held single-tab presence (desktop-first: browser tabs park while the shell runs), the branded waiting/parked pages, and the Settings > General 'Open in browser' override CTA (browser half via dsh.client, same discovery as the design panel).",
   "type": "module",

@@ -1,8 +1,8 @@
 {
   "name": "arxa-theme-accent",
-  "version": "0.2.5",
+  "version": "0.3.6",
   "private": true,
-  "description": "Settings > Personalisation accent swatches (3 fixed choices) + the Editor font row (both moved from General in 0.2.5 when the Personalisation tab arrived). Overrides the dsh --dsw-static-deepseek-* accent scale with color-mix tints of the chosen hex, inline on <body> so it wins over both the :root and dark-theme token blocks. Persisted in localStorage, synced across tabs/windows via the storage event.",
+  "description": "Settings > Personalisation palette row (0.3.0, grilled 2026-09-11): three built-in coolors palettes — Mystic Evening (default), Earthy Green, Light Steel — plus one custom slot (paste a coolors URL or 2-10 hexes; lens-verified coolors bounds). The chosen accent re-derives the dsh accent ramps (--dsw-static-deepseek/blue-*) as color-mix tints inline on <body>, plus the 19-stop neutral-bluish wash (ink stops 15%, surfaces 10% — text reads palette-hued, operator 2026-09-12); every palette is computed against WCAG 2.2 AA pairs by lib/contrast.js (ported from arxa palette_contrast.dart, locked 2026-09-11; APCA advisory) served at /__arxa/theme-accent/contrast.js so host and client share ONE copy. Solve adjusts the derived accent only — swatches are anchors; surfaces never move. Engine file theme-palette.json is the cross-device source of truth (5s poll); best-effort <h1> name fetch; Editor font row unchanged.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

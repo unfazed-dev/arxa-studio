@@ -120,7 +120,29 @@ export function readValues({ dshHome, sessions, projections }, dshSessionId) {
     if (session && projections && typeof projections.cachedSnapshot === 'function') {
       const snap = projections.cachedSnapshot(session)
       if (snap && snap.values && Object.keys(snap.values).length > 0) {
-        return { live: true, createdAt: null, cwd: null, asOfSeq: typeof snap.asOfSeq === 'number' ? snap.asOfSeq : -1, values: snap.values }
+        // The live checkpoint is a VIEW, not the record: dsh's viewCheckpoint only
+        // serves projections registered in this engine that declare a wire view
+        // (dsh-session-projection/lib/index.js viewCheckpoint). Returning it alone
+        // erased any figure the durable row holds and the live view does not —
+        // on 2026-09-11 a real GLM 5.3 turn reported turns/steps/llmMs/ttftMs
+        // exactly and tokens: null, while the record on disk held
+        // uncachedInputTokens 14627 / outputTokens 277.
+        //
+        // So merge per key, live winning wherever it actually served one. A key the
+        // live view served is authoritative; a key it never served is not evidence
+        // of absence, and absence is what turns a real figure into a null.
+        // ponytail: whole-record merge, no per-key freshness compare — the durable
+        // row only ever fills gaps, so a stale value can never displace a live one.
+        const durable = readCachedValues(dshHome, dshSessionId)
+        const values = durable && durable.values ? { ...durable.values, ...snap.values } : { ...snap.values }
+        // NOT done here: reading the raw cell with projections.stateOf(session, key)
+        // to reach tokenUsage mid-session, before dsh flushes. It looked right —
+        // stateOf skips the `wire` requirement that hides tokenUsage from the
+        // checkpoint — but on a live engine it yielded nothing, and the reason was
+        // not established. Unproven code does not ship. The consequence is bounded
+        // and stated: an ACTIVE session reports tokens: null until dsh writes the
+        // cache, and every other figure is live throughout.
+        return { live: true, createdAt: null, cwd: null, asOfSeq: typeof snap.asOfSeq === 'number' ? snap.asOfSeq : -1, values }
       }
     }
   } catch { /* live read is best-effort; the disk row is the durable answer */ }

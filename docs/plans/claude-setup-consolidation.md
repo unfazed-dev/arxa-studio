@@ -1,0 +1,30 @@
+# Claude setup consolidation — Mac mirrors the Omarchy box
+
+Date: 2026-09-09. Detour before org-row-dashboard step 4. Advisor (consult-mode) skipped: session budget already over (28/20 in the earlier turns); decisions were taken by /grill-me interview instead.
+
+## Decisions (grill-me, all confirmed)
+
+1. **ruflo / claude-flow removed system-wide** on the Mac: global `ruflo` command, `~/.claude-flow`, `~/.claude/{helpers,commands,agents,daemon,daemon.log,scripts,teams,memory.db,memory_notes.txt,proven-config.json,.proven-config-version}`, the 30 local claude-flow skill folders, the hooks + env in `settings.json`, the ruflo block in `CLAUDE.md`, `~/CLAUDE.md`, and the 15 untracked per-repo `.claude-flow/` folders (all repos, both SSDs).
+2. **Headroom** on the Mac exactly like the box: pyenv 0.24.0 out, pipx `headroom-ai[code]` 0.37.0 in, `install apply` persistent-service (LaunchAgent) on 127.0.0.1:8787, cache mode, backend anthropic, target `claude` only, memory + code-aware + learn. `claude()` / `headroom()` functions ported from the box `~/.bashrc` into `~/.zshrc`. VS Code extension sessions will show `HR ○ no-proj` (same as the box).
+3. **Global prompt** `~/.claude/CLAUDE.md`: the box's 34-line prompt, machine facts adapted (LaunchAgent, `~/.zshrc`, `zsh -ic`). Mac MANDATORY block, behavioural rules, advisor protocol, `rules/` folder all dropped.
+4. **Skills** `~/.claude/skills` on the Mac: emptied, then the 42 non-Linux skills copied from the box as real folders + 13 arxa symlinks → 55 entries. `~/.agents/*` untouched (codex/gemini/opencode use it). Box skills unchanged (44); arxa skills Mac-only.
+5. **Plugins** on both machines: superpowers, rust-analyzer-lsp, context-mode, ponytail. Mac drops caveman, frontend-design, understand-anything, swift-lsp, flutter-crew (source folder left alone). Box gains context-mode + ponytail. context-mode routing blocks in project CLAUDE.md files stay.
+6. **settings.json** identical on both except paths and `autoMode.environment`: env owned by `headroom install`; statusLine new script padding 0; modelSettings fable high / opus xhigh; `model: claude-fable-5-1[1m]`; tui fullscreen; autoMemoryEnabled false; agentPushNotifEnabled true; permissions.defaultMode auto (no allow list); Omarchy palette active on both (activation key verified against docs at execution).
+7. **Status line**: one portable script (bash 3.2 + BSD/GNU date branch) byte-identical on both machines, AUD, HR segment on 8787.
+8. **Box pass**: plugins, theme, model key, kill stray proxy on 8788, shared status line. Prompt and skills unchanged.
+9. **Backups**: one tarball per machine under `~/.claude/backups/` with sha256 sidecar; Mac tarball excludes transcript/cache dirs; the 15 `.claude-flow` folders are listed in a manifest, not archived.
+10. Plan file uncommitted. This session keeps the old config until restarted. Step-3 dashboard work untouched.
+
+## Execution log
+
+### 2026-09-09/10 — executed
+
+**Backups** (sha256 sidecars next to each): Mac `~/.claude/backups/claude-setup-20260909-232414.tgz` (193 MB, excludes projects/sessions/caches) + `.claude-flow-manifest.txt` (15 paths); box `~/.claude/backups/claude-setup-20260909-232414.tgz` (8 KB). Restore: `cd ~ && tar -xzf <tgz>` (Mac also restores `~/CLAUDE.md`, `~/.zshrc`, `~/.claude-flow`).
+
+**Box** (`unfazed@192.168.20.18`): stray ad-hoc proxy on 8788 killed; `context-mode` 1.0.169 + `ponytail` installed → 4 plugins; `theme: custom:omarchy`, `model: claude-fable-5-1[1m]`, `permissions.defaultMode: auto`; shared status line deployed (sha256 `32c86b52…`). Smoke: `claude -p` PONG through the proxy (requests 1659→1661), status line green/yellow. Found later: the 8787 proxy stopped answering `/health` (10/10 probes >5 s, process busy at 11 % CPU, 1.4 GB, still logging a live request) → `systemctl --user restart headroom-default`, healthy in 6 s, 1.6 ms probes. That restart cut any in-flight box request.
+
+**Mac**: ruflo/claude-flow removed everywhere (global `ruflo`, `~/.claude-flow`, `~/CLAUDE.md`, `~/.claude/{helpers,commands,agents,daemon,scripts,teams,memory.db,…}`, 30 claude-flow skill folders, hooks/env in settings, 15 per-repo `.claude-flow/`). Headroom: pyenv 0.24.0 out; pipx `headroom-ai[proxy,code]` 0.37.0 on Python 3.13 (`[code]` alone lacks fastapi → proxy dies; Homebrew 3.14 venv failed to build). `install apply` kept rolling back ("did not become ready") although the run script was healthy in 4 s by hand and via a hand-bootstrapped LaunchAgent; the user finished the apply themselves. Final: LaunchAgent `com.headroom.default` running, healthy, `--learn` in manifest, settings env owned by headroom. Plugins: 5 uninstalled (caveman, frontend-design, understand-anything, swift-lsp, flutter-crew) + their marketplaces; context-mode updated 1.0.18→1.0.169. Prompt = box prompt with macOS/zsh/launchd facts (35 lines). Skills: 42 real copies from the box + 13 arxa symlinks = 55. Theme file copied, `custom:omarchy` active. `claude()`/`headroom()` functions appended to `~/.zshrc`. Copied settings carried a box-path `hooks.SessionStart` (context-mode cache-heal) → key dropped; the plugin re-registers it locally. Smoke: `zsh -ic claude -p` PONG via proxy (7→8), status line `HR ●` with project header, `HR ○ no-proj` without, 4 plugins, 55 skills, 0 ruflo mentions, no hooks key.
+
+**Not done / notes**: Mac `.claude-flow` folders are gone, not archived (decision 9). Status line HR probe cap is 0.3 s; a proxy mid-heavy-request shows `HR ✗ down` until it frees up (seen on the box). This session's old-config hooks errored until the restart, as expected.
+
+**2026-09-10 yellow-HR follow-up**: Mac session showed `HR ○ no-proj` while the box was green. Cause: the VS Code integrated terminal's zsh (pid 5737) was started 11:47 on 09-09, before the `claude()` function was appended to `~/.zshrc` at 23:55, so `claude --resume` at 00:06 ran the binary directly with no `x-headroom-cwd` header. A fresh `zsh -ic 'claude …'` attaches both headers (verified with `set -x`). Fix: new terminal (or `source ~/.zshrc`) and relaunch. Not a config defect.

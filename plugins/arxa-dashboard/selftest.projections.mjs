@@ -7,8 +7,8 @@
  */
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync } from 'node:fs'
 import { tmpdir, homedir } from 'node:os'
-import { join } from 'node:path'
-import { cacheFileFor, metricsFromValues, readCachedMetrics, readMetrics , activityFromEvents, summaryFromValues } from './lib/projections.js'
+import { dirname, join } from 'node:path'
+import { cacheFileFor, metricsFromValues, readCachedMetrics, readMetrics , activityFromEvents, summaryFromValues, readValues } from './lib/projections.js'
 
 let failures = 0
 const check = (label, ok, extra = '') => {
@@ -98,5 +98,37 @@ if (existsSync(realDir)) {
   check('summaryFromValues: facts only — turn count, goal, todo counts + last done / next open; no transcript', sm.turnCount === 2 && sm.goal === 'Ship it' && sm.todos.done === 1 && sm.todos.open === 1 && sm.todos.lastDone === 'one' && sm.todos.nextOpen === 'two' && !('turns' in sm), JSON.stringify(sm))
   check('summaryFromValues: absent units ⇒ null goal / null todos', summaryFromValues({}).goal === null && summaryFromValues({}).todos === null && summaryFromValues({}).turnCount === 0)
 }
+{
+  // Defect (2026-09-11): the operator ran a real GLM 5.3 turn in the shipping app.
+  // Its own status bar read "Input 14.6K tok · Output 277 tok"; the dashboard read
+  // tokens: null. sessionStats (turns/steps/llmMs/ttftMs) all matched exactly.
+  //
+  // Cause: readValues returns the LIVE checkpoint the moment it is non-empty, and
+  // dsh's viewCheckpoint only serves projections registered in THIS engine with a
+  // wire view. tokenUsage was not among them, while the durable record on disk
+  // carried the real totals. Live must not silently lose a figure the durable row
+  // has — the two are merged per key, live winning where it actually served one.
+  const home = mkdtempSync(join(tmpdir(), 'arxa-proj-merge-'))
+  const id = 'arxa-merge-probe'
+  const file = cacheFileFor(home, id)
+  mkdirSync(dirname(file), { recursive: true })
+  writeFileSync(file, JSON.stringify({ record: { rows: {
+    tokenUsage: { seq: 9, val: { totals: { uncachedInputTokens: 14627, outputTokens: 277, cacheReadTokens: 0, cacheWriteTokens: 0 } } },
+    sessionStats: { seq: 9, val: { turns: 1, steps: 1, llmMs: 7402, toolMs: 0, ttftMs: 5722, decodeMs: 1680 } },
+  } } }))
+  // A live engine that serves sessionStats but has no tokenUsage projection.
+  const projections = { cachedSnapshot: () => ({ asOfSeq: 300, values: { sessionStats: { turns: 1, steps: 1, llmMs: 7402, toolMs: 0, ttftMs: 5722, decodeMs: 1680 } } }) }
+  const env = { dshHome: home, sessions: { get: () => ({ id }) }, projections }
+  const v = readValues(env, id)
+  const m = metricsFromValues(v.values)
+  check('defect (2026-09-11): a live checkpoint that omits tokenUsage no longer erases the durable token totals — 14627 + 277 is reported, and the live sessionStats still wins',
+    v.live === true && m.tokens !== null && m.tokens.uncachedInput === 14627 && m.tokens.output === 277 && m.tokens.total === 14904 && m.stats.llmMs === 7402,
+    JSON.stringify({ live: v.live, tokens: m.tokens, llmMs: m.stats && m.stats.llmMs }))
+  // …and a live view that DOES serve a key must not be overwritten by a stale disk row.
+  const fresh = { cachedSnapshot: () => ({ asOfSeq: 400, values: { sessionStats: { turns: 5, steps: 5, llmMs: 999, toolMs: 0, ttftMs: 1, decodeMs: 1 } } }) }
+  const m2 = metricsFromValues(readValues({ ...env, projections: fresh }, id).values)
+  check('defect (2026-09-11): the durable row never overwrites a key the live checkpoint actually served', m2.stats.turns === 5 && m2.stats.llmMs === 999, JSON.stringify(m2.stats))
+}
+
 console.log(failures === 0 ? 'ALL PASS' : `${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)

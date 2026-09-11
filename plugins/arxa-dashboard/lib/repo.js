@@ -86,12 +86,30 @@ export function previousWindow(run, repos, since) {
   return commits
 }
 
+/** Lines added/removed across `repos` within `since` — the churn fill beside
+ * the charts. No commits in the window ⇒ null, never {0,0}: zero would claim
+ * we looked and found nothing. numstat prints `-	-	` for binary files; skipped. */
+export function churnOf(run, repos, since) {
+  let added = 0; let removed = 0; let seen = false
+  for (const r of repos) {
+    const out = run(['log', '--numstat', '--pretty=format:', ...(since ? ['--since=' + since] : []), ...spec(r)], r.path)
+    if (!out) continue
+    for (const line of out.split('\n')) {
+      const m = line.match(/^(\d+)\t(\d+)\t/)
+      if (!m) continue
+      seen = true
+      added += Number(m[1]); removed += Number(m[2])
+    }
+  }
+  return seen ? { added, removed } : null
+}
+
 export function activityOf(run, repos, { since = RANGES[90], today } = {}) {
   const counts = dayCounts(run, repos, since)
   const days = [...counts.entries()].map(([day, count]) => ({ day, count })).sort((a, b) => (a.day < b.day ? -1 : 1))
   let commits = 0
   for (const c of counts.values()) commits += c
-  return { since, days, commits, prevCommits: previousWindow(run, repos, since), ...streaks(counts, today), weeks: weekly(counts, 13, today) }
+  return { since, days, commits, prevCommits: previousWindow(run, repos, since), churn: churnOf(run, repos, since), ...streaks(counts, today), weeks: weekly(counts, 13, today) }
 }
 
 const uniq = (s) => (s ? s.split('\n').filter(Boolean) : [])

@@ -32,6 +32,7 @@
  */
 import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -40,6 +41,40 @@ export const inject = ['webServer']
 
 const here = dirname(fileURLToPath(import.meta.url))
 const OVERRIDE_TTL_MS = 30_000
+
+// Palette-following logo (the remnant sweep, 2026-09-11): the brand SVG's
+// cyan stops are swapped for the chosen palette's accent family. Default =
+// Mystic Evening SOLVED (#C56975/#391A1E/#BC757D), exactly what the app
+// paints out of the box. Reads $ARXA_HOME/theme-palette.json — the
+// theme-accent store contract (default ~/.arxa); any failure keeps the
+// default, never throws. ponytail: a custom palette's derived stops use a
+// plain sRGB blend (the engine's oklab solve is client-only); close enough
+// on a 72px pulsing boot mark.
+const LOGO_DEFAULTS = ['#C56975', '#391A1E', '#BC757D'] // top, bottom, glyph
+function tintLogo(raw) {
+  let [top, bottom, glyph] = LOGO_DEFAULTS
+  try {
+    const s = JSON.parse(readFileSync(
+      join(process.env.ARXA_HOME || join(homedir(), '.arxa'), 'theme-palette.json'), 'utf8'))
+    const acc = String(s.accent || '').replace('#', '')
+    if (/^[0-9a-fA-F]{6}$/.test(acc)) {
+      top = '#' + acc.toUpperCase()
+      const blend = (pct, toward) => {
+        const n = parseInt(top.slice(1), 16)
+        const t = parseInt(toward.slice(1), 16)
+        return '#' + [16, 8, 0].map((sh) => Math.round(
+          ((n >> sh & 255) * (100 - pct) + (t >> sh & 255) * pct) / 100)
+          .toString(16).padStart(2, '0')).join('')
+      }
+      bottom = blend(42, '#000000') // the 800-position formula
+      glyph = blend(78, '#FFFFFF') // the 400-position formula
+    }
+  } catch { /* no palette yet — Mystic defaults */ }
+  return raw
+    .replaceAll('#0EBAE4', top)
+    .replaceAll('#08336F', bottom)
+    .replaceAll('#0EE4E0', glyph)
+}
 
 export function apply(ctx, config = {}) {
   const intervalMs = config.intervalMs ?? 2000
@@ -185,7 +220,7 @@ export function apply(ctx, config = {}) {
   // ---- page-side injection -------------------------------------------------
   let logo = ''
   try {
-    logo = readFileSync(join(here, '..', 'arxa-brand-logo.svg'), 'utf8')
+    logo = tintLogo(readFileSync(join(here, '..', 'arxa-brand-logo.svg'), 'utf8'))
   } catch {
     // Logo is cosmetic — behaviors still work without it.
   }

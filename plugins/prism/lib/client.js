@@ -600,9 +600,11 @@ window.__ModuleLoader__.load({
 
     function seedNow() {
       let rgb = null
-      try { rgb = hexToRgb(localStorage.getItem('arxa.themeAccent')) } catch { /* storage blocked */ }
+      // 0.3.0: the accent lives in the palette state {palette, accent} (the
+      // painted token below carries the SOLVED accent — prefer it).
+      try { rgb = hexToRgb(JSON.parse(localStorage.getItem('arxa.themePalette') || 'null')?.accent) } catch { /* storage blocked */ }
       if (!rgb) rgb = hexToRgb(getComputedStyle(document.body).getPropertyValue('--dsw-static-deepseek-500'))
-      if (!rgb) rgb = [14, 186, 228] // stock deepseek blue — pre-theme-accent paint
+      if (!rgb) rgb = [197, 105, 117] // Mystic Evening solved dark — pre-theme-accent paint
       return rgbToHsl(rgb[0], rgb[1], rgb[2])
     }
 
@@ -882,8 +884,8 @@ window.__ModuleLoader__.load({
         const size = sq.scale * gridSq
         layers.push(
           'linear-gradient(var(--arxa-prism-g' + pre + sq.gx + 'x' + sq.gy + ',135deg),' +
-          'var(--arxa-prism-a' + pre + sq.gx + 'x' + sq.gy + ',#0EBAE4) 50%,' +
-          'var(--arxa-prism-b' + pre + sq.gx + 'x' + sq.gy + ',#0ED6E4) 50%' +
+          'var(--arxa-prism-a' + pre + sq.gx + 'x' + sq.gy + ',#C56975) 50%,' +
+          'var(--arxa-prism-b' + pre + sq.gx + 'x' + sq.gy + ',#BC757D) 50%' +
           ') ' + sq.gx * gridSq + 'px ' + sq.gy * gridSq + 'px / ' + size + 'px ' + size + 'px no-repeat')
       }
       for (const sq of squares.values()) {

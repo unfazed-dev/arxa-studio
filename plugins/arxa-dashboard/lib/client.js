@@ -61,6 +61,12 @@ window.__ModuleLoader__.load({
       ".aXa_db_numVal{font-size:20px;font-weight:600;line-height:24px;color:var(--dsw-alias-label-primary)}",
       ".aXa_db_numKey{font-size:11px;color:var(--dsw-alias-label-tertiary)}",
       ".aXa_db_chart{display:block;margin-top:10px;margin-bottom:2px;max-width:100%;height:auto;overflow:visible}",
+      ".aXa_db_chartRow{display:flex;gap:14px;margin-top:10px;min-width:0;align-items:stretch}",
+      ".aXa_db_chartCol{display:flex;flex-direction:column;min-width:0}",
+      ".aXa_db_chartCol .aXa_db_chart{margin-top:0}",
+      ".aXa_db_wdWrap{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:flex-end}",
+      ".aXa_db_wd{width:100%;height:auto;max-height:143px;margin-top:0}",
+      ".aXa_db_wdLabel{fill:var(--dsw-alias-label-tertiary);font-size:9px}",
       ".aXa_db_cell{fill:var(--dsw-alias-state-business-primary)}",
       ".aXa_db_cellZero{fill:var(--dsw-alias-label-primary);fill-opacity:.1}",
       ".aXa_db_bar{fill:var(--dsw-alias-state-business-primary);fill-opacity:.7}",
@@ -97,14 +103,16 @@ window.__ModuleLoader__.load({
       ".aXa_db_summaryFoot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;font-size:12px;color:var(--dsw-alias-label-tertiary)}",
 
       // ---- step 4.5 (§14): the reference restyle ------------------------
-      // NAV PILLS (Q3) — the org and its five fixed docks. Active pill is the
-      // reference's black pill: label-primary fill, inverted text. NOT the
-      // accent — cyan is spoken for by "live".
+      // NAV PILLS (Q3) — the org and its five fixed docks. Active pill rides
+      // the ONE active-row style (operator, 2026-09-12): the settings-nav /
+      // sidebar soft-accent fill on --dsw-specific-sidebar-nav-item-active —
+      // the palette wash tints it, text stays label-primary. The old inverted
+      // black pill (label-primary fill + inverted text) read un-themed.
       ".aXa_db_nav{display:flex;gap:6px;padding:0 0 14px;align-items:center}",
       ".aXa_db_navPill{flex:none;font:inherit;font-size:12.5px;line-height:18px;padding:5px 12px;border-radius:999px;border:.5px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-interactive-bg);color:var(--dsw-alias-label-secondary);cursor:pointer;white-space:nowrap;transition:background-color .12s var(--ds-ease-in-out),color .12s var(--ds-ease-in-out)}",
       ".aXa_db_navPill:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}",
-      ".aXa_db_navPillOn{background:var(--dsw-alias-label-primary);border-color:transparent;color:var(--dsw-alias-label-primary-inverted)}",
-      ".aXa_db_navPillOn:hover{background:var(--dsw-alias-label-primary);color:var(--dsw-alias-label-primary-inverted)}",
+      ".aXa_db_navPillOn{background:var(--dsw-specific-sidebar-nav-item-active);border-color:transparent;color:var(--dsw-alias-label-primary)}",
+      ".aXa_db_navPillOn:hover{background:var(--dsw-specific-sidebar-nav-item-active);color:var(--dsw-alias-label-primary)}",
 
       // THE RAIL (operator addition) — one primitive, three consumers: the
       // pill overflow, the session hand, and any card whose content outgrows
@@ -197,7 +205,7 @@ window.__ModuleLoader__.load({
       ".aXa_db_repoVal{color:var(--dsw-alias-label-secondary);flex:none;font-variant-numeric:tabular-nums}",
       ".aXa_db_ci{width:8px;height:8px;border-radius:50%;flex:none;background:var(--dsw-alias-label-tertiary)}",
       ".aXa_db_ciGreen{background:var(--dsw-alias-state-business-primary)}",
-      ".aXa_db_ciRed{background:var(--dsw-alias-label-primary)}",
+      ".aXa_db_ciRed{background:var(--dsw-alias-state-error-primary)}",
       ".aXa_db_ciPending{background:var(--dsw-alias-label-secondary);animation:aXa_db_pulse 1.4s var(--ds-ease-in-out) infinite}",
       "@keyframes aXa_db_pulse{50%{opacity:.35}}",
 
@@ -326,6 +334,11 @@ window.__ModuleLoader__.load({
       'activity.longest': 'Longest streak',
       'activity.commits': 'Commits',
       'activity.days': '{n} days',
+      'activity.active': 'Active days',
+      'activity.wd.mon': 'M', 'activity.wd.tue': 'T', 'activity.wd.wed': 'W', 'activity.wd.thu': 'T', 'activity.wd.fri': 'F', 'activity.wd.sat': 'S', 'activity.wd.sun': 'S',
+      'activity.wdCell': '{day} · {n} commits',
+      'activity.busiest': 'Busiest: {day} · {n}',
+      'activity.churn': '+{a} −{r} lines',
       'activity.none': 'No commits in this range.',
       'activity.cell': '{day} · {n} commits',
       'activity.week': 'Week of {day} · {n} commits',
@@ -454,6 +467,11 @@ window.__ModuleLoader__.load({
       'activity.longest': 'Najdłuższa seria',
       'activity.commits': 'Commity',
       'activity.days': '{n} dni',
+      'activity.active': 'Dni aktywne',
+      'activity.wd.mon': 'P', 'activity.wd.tue': 'W', 'activity.wd.wed': 'Ś', 'activity.wd.thu': 'C', 'activity.wd.fri': 'P', 'activity.wd.sat': 'S', 'activity.wd.sun': 'N',
+      'activity.wdCell': '{day} · {n} commitów',
+      'activity.busiest': 'Najwięcej: {day} · {n}',
+      'activity.churn': '+{a} −{r} linii',
       'activity.none': 'Brak commitów w tym zakresie.',
       'activity.cell': '{day} · {n} commitów',
       'activity.week': 'Tydzień od {day} · {n} commitów',
@@ -582,6 +600,11 @@ window.__ModuleLoader__.load({
       'activity.longest': 'Plus longue série',
       'activity.commits': 'Commits',
       'activity.days': '{n} jours',
+      'activity.active': 'Jours actifs',
+      'activity.wd.mon': 'L', 'activity.wd.tue': 'M', 'activity.wd.wed': 'M', 'activity.wd.thu': 'J', 'activity.wd.fri': 'V', 'activity.wd.sat': 'S', 'activity.wd.sun': 'D',
+      'activity.wdCell': '{day} · {n} commits',
+      'activity.busiest': 'Record : {day} · {n}',
+      'activity.churn': '+{a} −{r} lignes',
       'activity.none': 'Aucun commit sur cette période.',
       'activity.cell': '{day} · {n} commits',
       'activity.week': 'Semaine du {day} · {n} commits',
@@ -881,12 +904,33 @@ window.__ModuleLoader__.load({
         title: t('activity.vsPrev', { n: a.since || '' }),
         'data-arxa-dashboard-delta': String(pct),
       }, (pct > 0 ? '▲ ' : pct < 0 ? '▼ ' : '· ') + Math.abs(pct) + '%')
+      // The fill beside the charts (operator, 2026-09-11): two fixed-169px SVGs
+      // left a dead band in a span-5 card. Weekday totals ride the SAME days[]
+      // the heatmap drew — no new fetch, no invented points.
+      const wdTotals = new Array(7).fill(0)
+      for (const d of a.days || []) wdTotals[(new Date(d.day + 'T00:00:00').getDay() + 6) % 7] += d.count
+      const WD = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+      const wdMax = Math.max(1, ...wdTotals)
+      const best = wdTotals.indexOf(Math.max(...wdTotals))
+      const wdBar = (k) => { const n = wdTotals[WD.indexOf(k)]; const bh = Math.max(4, Math.round(98 * n / wdMax)); return h('rect', { key: k, x: WD.indexOf(k) * 22 + 6, y: 108 - bh, width: 12, height: bh, rx: 2, className: 'aXa_db_cell', fillOpacity: n === 0 ? 0.12 : WD.indexOf(k) === best ? 1 : 0.55 }, h('title', null, t('activity.wdCell', { day: t('activity.wd.' + k), n }))) }
+      const strip = a.commits ? h('svg', { className: 'aXa_db_chart aXa_db_wd', viewBox: '0 0 154 120', preserveAspectRatio: 'xMidYMax meet', role: 'img', 'data-arxa-dashboard-weekday': WD[best] },
+        WD.map(wdBar),
+        WD.map((k) => h('text', { key: 'l' + k, x: WD.indexOf(k) * 22 + 12, y: 118, textAnchor: 'middle', className: 'aXa_db_wdLabel' }, t('activity.wd.' + k)))) : null
+      const activeDays = (a.days || []).length
+      const rangeN = parseInt(a.since, 10)
+      const activeVal = Number.isFinite(rangeN) && rangeN > 0 ? activeDays + ' / ' + rangeN : String(activeDays)
+      const fmtK = (n) => n >= 1000 ? (Math.round(n / 100) / 10) + 'k' : fmtNum(n)
       const num = (key, val) => h('div', { className: 'aXa_db_num' }, h('div', { className: 'aXa_db_numVal' }, val), h('div', { className: 'aXa_db_numKey' }, t(key)))
       return h(React.Fragment, null,
-        h('div', { className: 'aXa_db_nums' }, num('activity.current', t('activity.days', { n: a.current })), num('activity.longest', t('activity.days', { n: a.longest })), num('activity.commits', delta ? h(React.Fragment, null, fmtNum(a.commits), ' ', delta) : fmtNum(a.commits))),
-        h('svg', { className: 'aXa_db_chart', viewBox: '0 0 169 91', width: 169, height: 91, role: 'img', 'data-arxa-dashboard-heatmap': '' }, cells),
-        weeks.length ? h('svg', { className: 'aXa_db_chart', viewBox: '0 0 169 40', width: 169, height: 40, role: 'img', 'data-arxa-dashboard-bars': '' }, bars) : null,
+        h('div', { className: 'aXa_db_nums' }, num('activity.current', t('activity.days', { n: a.current })), num('activity.longest', t('activity.days', { n: a.longest })), num('activity.commits', delta ? h(React.Fragment, null, fmtNum(a.commits), ' ', delta) : fmtNum(a.commits)), num('activity.active', activeVal)),
+        h('div', { className: 'aXa_db_chartRow' },
+          h('div', { className: 'aXa_db_chartCol' },
+            h('svg', { className: 'aXa_db_chart', viewBox: '0 0 169 91', width: 169, height: 91, role: 'img', 'data-arxa-dashboard-heatmap': '' }, cells),
+            weeks.length ? h('svg', { className: 'aXa_db_chart', viewBox: '0 0 169 40', width: 169, height: 40, role: 'img', 'data-arxa-dashboard-bars': '' }, bars) : null),
+          strip ? h('div', { className: 'aXa_db_wdWrap' }, strip,
+            h('div', { className: 'aXa_db_meta', 'data-arxa-dashboard-busiest': WD[best] }, t('activity.busiest', { day: t('activity.wd.' + WD[best]), n: wdTotals[best] }))) : null),
         a.commits === 0 ? h('div', { className: 'aXa_db_muted' }, t('activity.none')) : null,
+        a.churn ? h('div', { className: 'aXa_db_meta', 'data-arxa-dashboard-churn': '' }, t('activity.churn', { a: fmtK(a.churn.added), r: fmtK(a.churn.removed) })) : null,
       )
     }
     /** Delivery (step 5, D4/D7) — GitHub through github-link, per-user and

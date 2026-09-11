@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runGit } from '../git-workspace/lib/run.js'
-import { activityOf, dayCounts, reposFor, repositoryOf, sinceFor, streaks, timesOf, weekly } from './lib/repo.js'
+import { activityOf, churnOf, dayCounts, reposFor, repositoryOf, sinceFor, streaks, timesOf, weekly } from './lib/repo.js'
 
 let failures = 0
 const check = (label, ok, extra = '') => {
@@ -69,7 +69,11 @@ const w = weekly(orgCounts, 13, today)
 check('weekly: 13 buckets, this week holds today..6 days back, older commits land earlier', w.length === 13 && w[12] === 5 && w[11] === 1 && w.slice(0, 11).every((n) => n === 0), JSON.stringify(w))
 
 const act = activityOf(run, orgRepos, { since: '90 days', today })
+check('churnOf: sums numstat added/removed in range, binary -/- rows skipped (a stubbed git, so the parse is what is under test)',
+  (() => { const c = churnOf(() => '10\t5\ta.js\n-\t-\timg.png\n3\t1\tb.js', [{ path: '/x', pathspec: null, name: 'x' }], '90 days'); return c && c.added === 13 && c.removed === 6 })(),
+  JSON.stringify(churnOf(() => '10\t5\ta.js\n-\t-\timg.png\n3\t1\tb.js', [{ path: '/x', pathspec: null, name: 'x' }], '90 days')))
 check('activityOf: days ascending, commits, streaks, weeks', act.commits === 6 && act.days.length === 5 && act.days[0].day < act.days[4].day && act.current === 4 && act.weeks.length === 13, JSON.stringify(act))
+check('activityOf carries churn off the real runner (added > 0 — the fixture commits all add lines)', act.churn && act.churn.added > 0 && act.churn.removed >= 0, JSON.stringify(act.churn))
 check('activityOf: 30-day window drops the 10-day-old? no — keeps it; all-time = null since', activityOf(run, orgRepos, { since: '5 days', today }).commits === 5 && activityOf(run, orgRepos, { since: null, today }).commits === 6)
 
 const rp = repositoryOf(run, reposFor(projRow))
@@ -85,6 +89,8 @@ const empty = mkdtempSync(join(tmpdir(), 'arxa-dash-empty-'))
 runGit(['init', '-q', '-b', 'main'], { cwd: empty })
 const eRow = { kind: 'project', name: 'e', path: empty, orgPath: empty }
 const ea = activityOf(run, reposFor(eRow)); const er = repositoryOf(run, reposFor(eRow))
+check('churnOf: a repo with no commits in the window answers null, never {added:0,removed:0}',
+  churnOf(run, [{ path: empty, pathspec: null, name: 'e' }], '90 days') === null)
 check('empty repo: zeros and null, never a throw', ea.commits === 0 && ea.current === 0 && ea.days.length === 0 && er.files === 0 && er.lastCommit === null && er.branches === 0, JSON.stringify({ ea, er }))
 const na = activityOf(run, [{ path: join(empty, 'nope'), pathspec: null, name: 'x' }])
 check('missing path: zeros, never a throw', na.commits === 0)

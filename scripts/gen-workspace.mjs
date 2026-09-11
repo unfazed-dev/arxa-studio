@@ -163,7 +163,55 @@ out = out.replace(SESSION_NODE_FIELDS, SESSION_NODE_FIELDS + '\n' + T(4) + 'dshS
 
 const ROW_TOGGLE = 'onClick: onToggle,'
 if (!out.includes(ROW_TOGGLE) || out.indexOf(ROW_TOGGLE) !== out.lastIndexOf(ROW_TOGGLE)) throw new Error('row toggle anchor missing/dup — stock shape moved?')
-out = out.replace(ROW_TOGGLE, 'onClick: () => { onToggle(); ARXA_SELECT_WS(row.workspaceId); },')
+out = out.replace(ROW_TOGGLE, 'onClick: () => { onToggle(); ARXA_SELECT_WS(row.workspaceId); },' +
+  // Selecting a workspace dock (notes) or any deeper workspace row must mark
+  // the tree row (operator-reported 2026-09-10). The MARK is now the unified
+  // soft-accent fill (see the ROW_ACTIVE_CSS delta, 2026-09-12) — the old
+  // inline accent bar + accent text were the second of the two highlight
+  // styles; aria-current/data markers ride along as the functional identity.
+  '\n' + T(4) + '"aria-current": ARXA_WS_SELECTED(row.workspaceId) ? "true" : void 0,' +
+  '\n' + T(4) + '"data-arxa-row-selected": ARXA_WS_SELECTED(row.workspaceId) ? "" : void 0,')
+
+// 6h. the ACTIVE ROW is one style everywhere (operator, 2026-09-12): the
+//     settings-nav recipe — a soft accent fill from
+//     --dsw-specific-sidebar-nav-item-active (rides the palette wash, so it
+//     IS the soft accent colour in every theme), text untouched, no bar.
+//     Stock shipped TWO styles: session rows selected == hover gray
+//     (interactive-bg-hover), workspace rows an inline accent bar + accent
+//     text. Both collapse onto the nav token below; hover stays hover.
+const ROW_HOVER_SELECTED = '.aXa_wsr_projectRow:hover,.aXa_wsr_sessionRow:hover,.aXa_wsr_sessionRow.aXa_wsr_selected{background:var(--dsw-alias-interactive-bg-hover)}'
+if (out.indexOf(ROW_HOVER_SELECTED) === -1) throw new Error('gen-workspace: row hover/selected css anchor missing — stock shape moved?')
+out = out.replace(ROW_HOVER_SELECTED,
+  '.aXa_wsr_projectRow:hover,.aXa_wsr_sessionRow:hover{background:var(--dsw-alias-interactive-bg-hover)}' +
+  '.aXa_wsr_projectRow.aXa_wsr_selected,.aXa_wsr_sessionRow.aXa_wsr_selected{background:var(--dsw-specific-sidebar-nav-item-active)}')
+const SEARCH_HOVER_SELECTED = '.aXa_wsr_searchResultRow:hover,.aXa_wsr_searchResultRow.aXa_wsr_selected{background:var(--dsw-alias-interactive-bg-hover)}'
+if (out.indexOf(SEARCH_HOVER_SELECTED) === -1) throw new Error('gen-workspace: search hover/selected css anchor missing — stock shape moved?')
+out = out.replace(SEARCH_HOVER_SELECTED,
+  '.aXa_wsr_searchResultRow:hover{background:var(--dsw-alias-interactive-bg-hover)}' +
+  '.aXa_wsr_searchResultRow.aXa_wsr_selected{background:var(--dsw-specific-sidebar-nav-item-active)}')
+// the workspace row itself carries the selected class (stock left the row
+// unmarked; the fill needs the hook).
+const ROW_CLASS_PLAIN = 'className: clsx(Rows_module_css_default.projectRow, menuOpen && Rows_module_css_default.menuOpen),'
+if (out.indexOf(ROW_CLASS_PLAIN) === -1 || out.indexOf(ROW_CLASS_PLAIN) !== out.lastIndexOf(ROW_CLASS_PLAIN)) throw new Error('gen-workspace: projectRow className anchor missing/dup — stock shape moved?')
+out = out.replace(ROW_CLASS_PLAIN, 'className: clsx(Rows_module_css_default.projectRow, (active || ARXA_WS_SELECTED(row.workspaceId)) && Rows_module_css_default.selected, menuOpen && Rows_module_css_default.menuOpen),')
+
+// 6g. dashboard rows wear the dashboard glyph (2026-09-11): a TOP-LEVEL
+//     workspace is a dock (ARXA_SELECT_WS tags it kind:"dock", org-row
+//     dashboard D3) — the same shape picks the glyph. Deeper workspaces
+//     (notes/<sub>, meetings/scheduler, project containers) open the guide,
+//     not a dashboard, and keep folders.
+const ROW_ICON = 'children: row.expanded ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {})'
+if (!out.includes(ROW_ICON) || out.indexOf(ROW_ICON) !== out.lastIndexOf(ROW_ICON)) throw new Error('row icon anchor missing/dup — stock shape moved?')
+out = out.replace(ROW_ICON, 'children: ARXA_WS_DASH(row.workspaceId) ? (0, react_jsx_runtime.jsx)(DashGlyph, {}) : ' + ROW_ICON.slice('children: '.length))
+
+// 6g-bis. the selected row's ICON is accent too (operator, 2026-09-11).
+//     Stock `active` = group.expanded && containsCurrent — a dsh SESSION
+//     notion, so selecting a dock row (no session open) left its glyph
+//     tertiary while the row text went accent. OR our selection in; the
+//     slot's own tertiary color beats inheritance, folderActive repaints it.
+const ROW_ICON_ACTIVE = 'className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder, active && Rows_module_css_default.folderActive),'
+if (!out.includes(ROW_ICON_ACTIVE) || out.indexOf(ROW_ICON_ACTIVE) !== out.lastIndexOf(ROW_ICON_ACTIVE)) throw new Error('row icon active anchor missing/dup — stock shape moved?')
+out = out.replace(ROW_ICON_ACTIVE, 'className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder, (active || ARXA_WS_SELECTED(row.workspaceId)) && Rows_module_css_default.folderActive),')
 
 // 6c-bis. the per-row + affordance obeys the track rule (98f2e93). The dock
 //     CTA has been gated by projectRowRefused since tracks landed, but each

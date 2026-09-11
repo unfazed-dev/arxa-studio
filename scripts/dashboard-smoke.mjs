@@ -19,7 +19,7 @@
  *   node scripts/dashboard-smoke.mjs
  */
 import { spawn, spawnSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import http from 'node:http'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
@@ -59,11 +59,69 @@ rmSync(join(orgPath, '.arxa', 'worktrees'), { recursive: true, force: true })
   for (const b of (list.stdout || '').split('\n').map((x) => x.trim()).filter(Boolean)) spawnSync('git', ['-C', orgPath, 'branch', '-D', b], { encoding: 'utf8' })
   void wt
 }
+// The Engine card had only ever rendered "not set up": no project on this machine
+// has ever run the FSM (plan §15 step 6), so tier 4 was the one tier whose live
+// path nothing exercised. The scratch org's first project gets bytes the ENGINE
+// ITSELF wrote — plugins/arxa-dashboard/engine-authored.fixture.json, whose `_how`
+// names the pipeline_fsm.dart / deploy.dart calls that produced them. Written into
+// the COPY only: the operator's own org is never touched by this smoke.
+const engineSeed = (() => {
+  const projects = join(orgPath, 'projects')
+  const first = existsSync(projects) ? readdirSync(projects, { withFileTypes: true }).find((d) => d.isDirectory()) : null
+  if (!first) return null
+  const { files } = JSON.parse(readFileSync(new URL('../plugins/arxa-dashboard/engine-authored.fixture.json', import.meta.url), 'utf8'))
+  for (const rel of Object.keys(files)) {
+    const out = join(projects, first.name, rel)
+    mkdirSync(dirname(out), { recursive: true })
+    writeFileSync(out, JSON.stringify(files[rel], null, 2) + '\n')
+  }
+  return first.name
+})()
+
 const orgManifest = JSON.parse(readFileSync(join(orgPath, 'org.json'), 'utf8'))
 // Recents = the org registry (org-model-v2 Phase A). Same shape as ~/.arxa/organisation.json.
 const env = { ARXA_HOME: home }
 mkdirSync(dirname(rootFilePath(env)), { recursive: true })
 writeFileSync(rootFilePath(env), JSON.stringify({ orgs: [orgPath], names: { [basename(orgPath).toLowerCase()]: orgPath } }, null, 2))
+
+// ARXA_DASHBOARD_SMOKE_TURN=1 adds the REAL-TURN leg: the scratch engine gets a
+// model and the flow drives an actual conversation turn, so the token / model-time
+// half of the dashboard is read back from figures a real model produced rather
+// than from a session that never ran. Default OFF — the ordinary smoke must never
+// spend money or need a network.
+//
+// The key is NOT read out of the operator's credential store: they hand it in for
+// the run (ZAI_API_KEY=… ARXA_DASHBOARD_SMOKE_TURN=1 node scripts/dashboard-smoke.mjs)
+// and it reaches the child's env only — never the scratch home, never a log.
+const turn = process.env.ARXA_DASHBOARD_SMOKE_TURN === '1'
+if (turn && !process.env.ZAI_API_KEY) {
+  throw new Error('ARXA_DASHBOARD_SMOKE_TURN=1 needs ZAI_API_KEY in the environment (the run supplies it; the smoke never reads the credential store)')
+}
+if (turn) {
+  // GLM 5.3 at max — the model nominated for test traffic.
+  mkdirSync(join(home, 'dsh'), { recursive: true })
+  writeFileSync(join(home, 'dsh', 'settings.yaml'), [
+    'llm-pi-ai:',
+    '  providers:',
+    '    zai:',
+    '      apiKeyEnv: ZAI_API_KEY',
+    '      baseURL: https://api.z.ai/api/coding/paas/v4',
+    '      models:',
+    '        - id: glm-5.3',
+    '          name: GLM-5.3',
+    '          contextWindow: 1000000',
+    '          maxTokens: 131072',
+    '          reasoningEfforts:',
+    '            low: low',
+    '            high: high',
+    '            max: max',
+    'agent-default-model:',
+    '  provider: zai',
+    '  model: glm-5.3',
+    '  reasoningEffort: max',
+    '',
+  ].join('\n'))
+}
 
 const child = spawn(process.execPath, [join(studio, 'bin', 'arxa-studio.mjs'), '--no-open'], {
   env: {
@@ -73,7 +131,7 @@ const child = spawn(process.execPath, [join(studio, 'bin', 'arxa-studio.mjs'), '
     // ARXA_DASHBOARD_SMOKE_REAL_HOME=1 keeps the real HOME (forensics: what the
     // engine reads under ~ — the TCC media-library prompt hunt, 2026-09-09).
     HOME: process.env.ARXA_DASHBOARD_SMOKE_REAL_HOME === '1' ? process.env.HOME : home,
-    ZAI_API_KEY: undefined,
+    ZAI_API_KEY: turn ? process.env.ZAI_API_KEY : undefined,
     ANTHROPIC_API_KEY: undefined,
     OPENAI_API_KEY: undefined,
     ...Object.fromEntries(Object.keys(process.env).filter((key) => key.startsWith('DSH_')).map((key) => [key, undefined])),
@@ -415,12 +473,82 @@ const handScrollScript = () => `(async () => {${PRELUDE}
 
 // Clicking a nav pill must move the whole selection — the dashboard, the
 // sidebar highlight and the New Session CTA target — in one click.
+// The Engine card, RENDERED. The host verb is asserted separately; this proves
+// the body draws the seeded phase rather than the not-set-up line it has shown on
+// every run so far — the card hook's VALUE is the state the body is in.
+const engineCardScript = () => `(async () => {${PRELUDE}
+  const root = await until(() => document.querySelector('[data-arxa-dashboard-root]'), 20000);
+  if (!root) return 'no-dashboard-root';
+  const hook = await until(() => {
+    const el = document.querySelector('[data-arxa-dashboard-engine]');
+    const v = el && el.getAttribute('data-arxa-dashboard-engine');
+    return v && v !== 'not-set-up' && v !== 'not-applicable' ? el : null;
+  }, 20000);
+  if (!hook) {
+    const el = document.querySelector('[data-arxa-dashboard-engine]');
+    return 'engine-card-not-populated:' + (el ? el.getAttribute('data-arxa-dashboard-engine') : 'no-hook');
+  }
+  const card = hook.closest('[data-arxa-dashboard-group="engine"]') || hook.parentElement;
+  // The card sits last in the bento: at 1512x900 the shot cropped it away and the
+  // evidence proved nothing a reader could see. Bring it into frame before capture.
+  card.scrollIntoView({ block: 'center' });
+  await sleep(700);
+  const projRows = [...card.querySelectorAll('[data-arxa-dashboard-engine-row]')];
+  const text = (card.innerText || '').replace(/\\s+/g, ' ');
+  const facts = {
+    phase: hook.getAttribute('data-arxa-dashboard-engine'),
+    rows: projRows.map((r) => r.getAttribute('data-arxa-dashboard-engine-row')),
+    // The three head figures: phase, projects with engine state, shipped.
+    nums: [...card.querySelectorAll('.aXa_db_numVal')].map((n) => n.textContent.trim()),
+    text: text.slice(0, 160),
+    // An em dash where a real figure belongs means the body fell back.
+    dashes: (text.match(/\\u2014/g) || []).length,
+  };
+  return facts.phase === 'design' && facts.rows.length === 1 && facts.rows[0] === 'design'
+    && facts.nums.length === 3 && facts.nums[1] === '1' && facts.nums[2] === '1'
+    && /3\\/7/.test(text) && /8/.test(text) ? true : JSON.stringify(facts);
+})()`
+
+// The Activity card fill (operator, 2026-09-11): the weekday strip sits BESIDE
+// the fixed-width charts, not under them — the dead band in the span-5 card.
+const activityFillScript = () => `(async () => {${PRELUDE}
+  const root = await until(() => rootOf('org'), 15000);
+  if (!root) return 'no-org-dashboard:' + String((document.querySelector('[data-arxa-dashboard-root]') || {}).getAttribute ? document.querySelector('[data-arxa-dashboard-root]').getAttribute('data-arxa-dashboard-root') : null);
+  const strip = await until(() => root.querySelector('[data-arxa-dashboard-weekday]'), 15000);
+  if (!strip) return 'no-weekday-strip';
+  const churn = await until(() => root.querySelector('[data-arxa-dashboard-churn]'), 15000);
+  if (!churn) return 'no-churn-line';
+  const heat = root.querySelector('[data-arxa-dashboard-heatmap]');
+  const row = strip.closest('.aXa_db_chartRow');
+  const busiest = root.querySelector('[data-arxa-dashboard-busiest]');
+  const facts = { bars: strip.querySelectorAll('rect').length, labels: strip.querySelectorAll('text').length,
+    weekday: strip.getAttribute('data-arxa-dashboard-weekday'),
+    busiest: busiest ? busiest.getAttribute('data-arxa-dashboard-busiest') : null,
+    busiestText: busiest ? busiest.textContent.trim().slice(0, 30) : null,
+    churn: churn.textContent.trim(), beside: !!(row && row.contains(heat)),
+    overflow: strip.scrollWidth > strip.clientWidth + 2 };
+  return facts.bars === 7 && facts.labels === 7 && facts.weekday && facts.busiest
+    && facts.churn.includes('+') && facts.beside === true && !facts.overflow ? true : JSON.stringify(facts);
+})()`
+
 const navPillScript = () => `(async () => {${PRELUDE}
   const root = await until(() => document.querySelector('[data-arxa-dashboard-root]'), 20000);
   if (!root) return 'no-dashboard-root';
   const pills = await until(() => { const p = [...document.querySelectorAll('[data-arxa-dashboard-nav] .aXa_db_navPill')]; return p.length > 1 ? p : null }, 10000);
   if (!pills) return 'no-nav-pills';
   const before = { kind: root.getAttribute('data-arxa-dashboard-root'), sel: (window.__ARXA_SIDEBAR__.selectedWorkspace() || {}).rowId ?? null, on: pills.filter((p) => p.className.includes('navPillOn')).length };
+  // Walk EVERY dock pill, not just the first one that is off. Picking only the
+  // first hid a defect for a whole build: notes is the one dock the host
+  // reports as workspace true, so buildEmit skips it and it renders as the
+  // STOCK folder row instead of an OrgContainerRow. Testing Projects alone
+  // never touched that path (operator-reported, 2026-09-10).
+  const unmarked = [];
+  for (const p of pills.slice(1)) {
+    p.click();
+    await sleep(700);
+    const n = document.querySelectorAll('[data-arxa-row-selected]').length;
+    if (n !== 1) unmarked.push(p.textContent.trim() + '=' + n);
+  }
   const target = pills.find((p) => !p.className.includes('navPillOn'));
   target.click();
   await sleep(900);
@@ -439,16 +567,108 @@ const navPillScript = () => `(async () => {${PRELUDE}
   facts.markedRows = marked.map((r) => r.textContent.trim().split('\\n')[0].slice(0, 24));
   facts.markedIsTarget = marked.length === 1 && marked[0].textContent.trim().startsWith(facts.label);
   facts.markedAccent = marked.length === 1 ? getComputedStyle(marked[0]).color : null;
+  // §19 (operator, 2026-09-11): the selected row's ICON is accent too. The
+  // slot paints its own tertiary color (inheritance would not reach it), so
+  // assert the computed color of the glyph span itself matches the row.
+  facts.markedIconAccent = marked.length === 1 && marked[0].querySelector('.aXa_wsr_folder') ? getComputedStyle(marked[0].querySelector('.aXa_wsr_folder')).color : null;
   facts.markedAria = marked.length === 1 ? marked[0].getAttribute('aria-current') : null;
   const accent = getComputedStyle(document.documentElement).getPropertyValue('--dsw-alias-state-business-primary').trim();
   facts.accentToken = accent;
+  facts.unmarked = unmarked;
   return facts.seams && facts.kind === 'dock' && facts.sel === facts.label.toLowerCase() && facts.on.length === 1 && facts.on[0] === facts.label
-    && facts.markedIsTarget && facts.markedAria === 'true' ? true : JSON.stringify(facts);
+    && facts.markedIsTarget && facts.markedAria === 'true' && facts.markedIconAccent === facts.markedAccent && facts.markedAccent !== '' && unmarked.length === 0 ? true : JSON.stringify(facts);
 })()`
 
 // Click a category row of the (already expanded) org, then optionally the
 // first session card (→ summary panel) and its Open button (→ bound: the
 // dashboard root leaves the page).
+/** Opt-in: walk the operator's own path to a conversation and spend a real turn.
+  *
+  * Defect (2026-09-11): the first cut of this leg passed while NOTHING was sent —
+  * both scratch transcripts held only setup events, no message of any kind. It
+  * had believed two worthless signals: "the box no longer holds my text" (a React
+  * re-render clears it just as well as a send does) and "document.body.innerText
+  * grew by 8 characters" (a clock tick does that). So it now proves the turn from
+  * the DOM the way the transcript would: the prompt must APPEAR in the composer
+  * first, then leave it as a user message that is actually on screen, and the
+  * answer must be a NEW message element — never a text-length delta. Every exit
+  * carries the facts that explain it, and the host's figures remain the judge. */
+const realTurnScript = () => `(async () => {${PRELUDE}
+  const org = await until(() => rows()[0], 5000);
+  if (!org) return 'no-org-row';
+  await until(() => document.querySelector('[data-arxa-dashboard-root]'), 15000);
+  if (org.getAttribute('aria-expanded') !== 'true') org.click();
+  const selWs = () => { const b = window.__ARXA_SIDEBAR__; const w = b && b.selectedWorkspace && b.selectedWorkspace(); return w ? w.rowId : null };
+  const cands = await until(() => { const c = rows().filter((r) => r !== org && r.textContent.trim().startsWith('Notes')); return c.length ? c : null }, 20000);
+  if (!cands) return 'no-notes-row';
+  let cat = null;
+  for (const c of cands) { c.click(); await until(() => selWs() === 'notes', 1500); if (selWs() === 'notes') { cat = c; break } }
+  if (!cat) return 'no-top-level-notes';
+  const root = await until(() => rootOf('dock'), 10000);
+  if (!root) return 'no-dashboard-root';
+  const card = await until(() => root.querySelector('[data-arxa-dashboard-session]'), 15000);
+  if (!card) return 'no-session-card';
+  card.click();
+  const open = await until(() => root.querySelector('[data-arxa-dashboard-open]'), 10000);
+  if (!open) return 'no-open-button';
+  open.click();
+  // The conversation replaces the dashboard. dsh names its own regions, so take
+  // the composer from ITS slot — the tallest-visible-box heuristic happily found
+  // the sidebar's composer card instead, which is how the first cut sent nothing.
+  const composer = await until(() => document.querySelector('[data-slot^="conversation.composer"], [data-slot^="conversation.input"]'), 25000);
+  if (!composer) return 'no-conversation-composer:' + JSON.stringify({ slots: [...document.querySelectorAll('[data-slot]')].map((el) => el.getAttribute('data-slot')).slice(0, 25) });
+  const shell = composer.closest('[data-slot^="conversation"]') || document.body;
+  const box = await until(() => [...shell.querySelectorAll('textarea, [contenteditable="true"]')].find((el) => el.offsetParent !== null), 15000)
+    || [...document.querySelectorAll('textarea, [contenteditable="true"]')].find((el) => el.offsetParent !== null);
+  if (!box) return 'no-composer-input';
+  // Which model the turn will actually spend — the leg claims GLM 5.3, so say so.
+  const modelSlot = document.querySelector('[data-slot="conversation.input.model"]');
+  const model = modelSlot ? modelSlot.textContent.trim().slice(0, 60) : null;
+  // Read the whole composer region, not just the queried node: execCommand lands
+  // the text in whichever node actually holds the caret, which is often a child
+  // of the node the query returned. Reading only that node said "nothing typed" while the
+  // text was plainly there, and the fallback then typed it a SECOND time — the
+  // 2026-09-11 dry run posted "…PONGReply with exactly one word: PONG".
+  const typed = () => ((box.tagName === 'TEXTAREA' ? box.value : '') + ' ' + (composer.innerText || '')).trim();
+  const msgs = () => document.querySelectorAll('[data-slot^="conversation.chat"] [data-message-id], [data-message-id], [data-slot^="conversation.chat.turn"]');
+  const before = msgs().length;
+  const prompt = 'Reply with exactly one word: PONG';
+  box.focus();
+  // execCommand('insertText') raises the real beforeinput/input pair a controlled
+  // React composer listens for; assigning .value/.textContent does not.
+  const inserted = document.execCommand('insertText', false, prompt);
+  await sleep(250);
+  if (!typed().includes('PONG')) {
+    if (box.tagName === 'TEXTAREA') {
+      Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set.call(box, prompt);
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    } else {
+      box.textContent = prompt;
+      box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: prompt }));
+    }
+  }
+  await sleep(400);
+  // The prompt must be IN the composer before sending means anything.
+  if (!typed().includes('PONG')) return 'prompt-never-reached-composer:' + JSON.stringify({ inserted, model, tag: box.tagName, slot: composer.getAttribute('data-slot') });
+  const sendBtn = () => [...shell.querySelectorAll('button')].find((b) => b.offsetParent !== null && !b.disabled
+    && /send|submit|wyślij|envoyer/i.test((b.getAttribute('aria-label') || '') + ' ' + (b.getAttribute('title') || '') + ' ' + b.textContent));
+  const btn = sendBtn();
+  if (btn) btn.click();
+  else box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+  // Sent = the prompt is on screen as a message, not merely gone from the box.
+  const posted = await until(() => msgs().length > before || /Reply with exactly one word/.test(shell.innerText), 20000);
+  if (!posted) return 'prompt-never-posted:' + JSON.stringify({ model, sawButton: !!btn, stillTyped: typed().slice(0, 40), messages: msgs().length });
+  // The answer must be a NEW message element — a text-length delta proves nothing.
+  const afterUser = msgs().length;
+  const answered = await until(() => msgs().length > afterUser, 240000);
+  if (!answered) return 'no-answer:' + JSON.stringify({ model, messages: msgs().length, tail: shell.innerText.slice(-200) });
+  // Settle: stop when the message count holds still.
+  let last = -1;
+  for (let i = 0; i < 40 && last !== msgs().length; i++) { last = msgs().length; await sleep(1500); }
+  await sleep(1000);
+  return true;
+})()`
+
 const rowScript = (categoryLabel, mode) => `(async () => {${PRELUDE}
   const org = await until(() => rows()[0], 5000);
   if (!org) return 'no-org-row';
@@ -478,7 +698,11 @@ const rowScript = (categoryLabel, mode) => `(async () => {${PRELUDE}
     facts.repoFacts = root.querySelectorAll('[data-arxa-dashboard-repo] .aXa_db_factKey').length;
     facts.times = !!root.querySelector('[data-arxa-dashboard-times]');
     facts.range = root.querySelector('[data-arxa-dashboard-range]') ? root.querySelector('[data-arxa-dashboard-range]').getAttribute('data-arxa-dashboard-range') : null;
-    return facts.marked && facts.groups === 6 && facts.cta && facts.name !== '' && facts.cells === 91 && facts.repoFacts >= 4 && facts.times && facts.range === '90' ? true : JSON.stringify(facts);
+    // §19 (2026-09-11): with the org expanded the DOCK rows are on screen and
+    // must wear the dashboard glyph (2×2 tiles ⇒ 4 rects) where folders
+    // (0 rects) used to be — the click opens a dashboard, the mark says so.
+    facts.dashGlyphs = [...document.querySelectorAll('.aXa_wsr_folder svg')].filter((s) => s.querySelectorAll('rect').length === 4).length;
+    return facts.marked && facts.groups === 6 && facts.cta && facts.name !== '' && facts.cells === 91 && facts.repoFacts >= 4 && facts.times && facts.range === '90' && facts.dashGlyphs >= 3 ? true : JSON.stringify(facts);
   }
   const card = await until(() => root.querySelector('[data-arxa-dashboard-session]'), 15000);
   if (!card) return 'no-session-card:' + JSON.stringify(facts);
@@ -559,6 +783,7 @@ async function main() {
   ok('row.stats org → kind org, real path', orgRow.ok === true && orgRow.result.kind === 'org' && orgRow.result.path === orgPath && orgRow.result.exists === true, JSON.stringify(orgRow))
   const oa = orgRow.result.activity || {}; const orp = orgRow.result.repository || {}
   ok('row.stats org → step-3 figures: activity days/streak/weeks, repository files/branches/lastCommit, created/updated', Array.isArray(oa.days) && oa.weeks && oa.weeks.length === 13 && typeof oa.current === 'number' && typeof orp.files === 'number' && orp.files > 0 && orp.lastCommit && typeof orp.lastCommit.subject === 'string' && typeof orgRow.result.createdAt === 'string' && typeof orgRow.result.updatedAt === 'string', JSON.stringify({ oa: { ...oa, days: (oa.days || []).length }, orp }))
+  ok('row.stats activity → churn sums real numstat in range (added > 0); an empty window would be null, never 0/0', oa.churn && oa.churn.added > 0 && oa.churn.removed >= 0, JSON.stringify(oa.churn))
   const r30 = await dash('row.stats', { orgId: orgManifest.id, rowId: '', range: 30 })
   ok('row.stats honours range (30 → since "30 days")', r30.ok === true && r30.result.activity && r30.result.activity.since === '30 days', JSON.stringify(r30.result && r30.result.activity && r30.result.activity.since))
   const cat = await dash('row.stats', { orgId: orgManifest.id, rowId: 'notes' })
@@ -568,10 +793,25 @@ async function main() {
   const nope = await dash('row.stats', { orgId: 'not-an-org', rowId: '' })
   ok('row.stats refuses an unknown org', nope.ok === false && nope.error === 'org-not-found', JSON.stringify(nope))
 
+  // Tier 4 (step 6, D5) on bytes the ENGINE wrote — plan §17. Every earlier run
+  // read `not-set-up` off this verb, which proves the empty branch and nothing
+  // else; the seeded project makes the populated branch the one under test.
+  const eng = await dash('row.engine', { orgId: orgManifest.id, rowId: '' })
+  const er = eng.result || {}
+  const ep = (er.projects || [])[0] || {}
+  ok('row.engine org → the FSM state reads back as the engine left it: design 3/7, gate ready, dirty, 1 rejection, 1 shipped, 8 screens',
+    engineSeed !== null && er.phase === 'design' && er.withEngine === 1 && er.scanned >= 2 && er.shipped === 1
+    && ep.step === 3 && ep.steps === 7 && ep.status === 'ready' && ep.dirty === true && ep.rejections === 1 && ep.approved === false
+    && ep.screens === 8 && ep.flows === 2 && ep.halted === 0 && Array.isArray(ep.targets) && ep.targets.join(',') === 'macos,web',
+    JSON.stringify({ seed: engineSeed, roll: { phase: er.phase, withEngine: er.withEngine, scanned: er.scanned, shipped: er.shipped }, ep }))
+  const engCat = await dash('row.engine', { orgId: orgManifest.id, rowId: 'notes' })
+  ok('row.engine on a category row states not-applicable rather than vanishing (a hidden card leaves a hole in the bento)',
+    engCat.result?.reason === 'not-applicable', JSON.stringify(engCat))
+
   // 3. the page, through the lens
   mkdirSync(evidence, { recursive: true })
   const cookieArgs = auth.cookies.map((c) => '--cookie=' + c)
-  const shot = (name, script, width = 1512, height = 900) => {
+  const shot = (name, script, width = 1512, height = 900, timeoutMs = 90_000) => {
     const out = join(evidence, name)
     mkdirSync(dirname(out), { recursive: true })
     const args = ['lens', 'check', auth.authority, out, String(width), String(height), '1500', '--expect=' + script, ...cookieArgs]
@@ -580,7 +820,19 @@ async function main() {
     // loading inside the 7 s claim expiry — parks and closes itself
     // ("Inspected target navigated or closed"). A shell-UA tab only beats,
     // never claims, so consecutive lens runs render the studio every time.
-    const r = spawnSync(lens, args, { encoding: 'utf8', timeout: 90_000, env: { ...process.env, ARXA_LENS_UA: process.env.ARXA_LENS_UA || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36 ArxaShell/1.0' } })
+    const spawnLens = () => spawnSync(lens, args, { encoding: 'utf8', timeout: timeoutMs, env: { ...process.env, ARXA_LENS_UA: process.env.ARXA_LENS_UA || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36 ArxaShell/1.0' } })
+    let r = spawnLens()
+    // `arxa` is a SIBLING repo that is often being edited while this runs, and the
+    // lens re-AOT-compiles it per invocation. On 2026-09-11 a run died at
+    // bento-1280 — passes 30 of 36, after the real-turn key was already in play —
+    // because arxa_dial.dart was half-saved at that instant. That is a toolchain
+    // state, not a dashboard signal, so ride it out once rather than burning the
+    // whole run (and the operator's turn) on someone else's unsaved file.
+    if (/AOT compilation failed|Generating AOT kernel dill failed/.test((r.stdout || '') + (r.stderr || ''))) {
+      console.log('note  arxa failed to AOT-compile (sibling repo mid-edit) — waiting 20s and retrying ' + name + ' once')
+      spawnSync(process.execPath, ['-e', 'setTimeout(() => process.exit(0), 20000)'])
+      r = spawnLens()
+    }
     const text = (r.stdout || '') + (r.stderr || '')
     // The live studio never settles (the hero's flowing background; see
     // docs/plans/git-card-on-local-only-orgs.md "A live app never settles"),
@@ -594,7 +846,13 @@ async function main() {
     try { writeFileSync(join(home, basename(out).replace(/\.png$/, '.lens.log')), text + (r.error ? '\n[spawn error] ' + r.error.message : '') + '\n[status] ' + r.status) } catch {}
     return { pass, unstable, text, out }
   }
-  const lensFails = (r) => r.text.split('\n').filter((l) => /FAILED|expect not|selector not|console\/page|got /.test(l)).join(' | ').slice(0, 900)
+  const lensFails = (r) => (/AOT compilation failed|Generating AOT kernel dill failed/.test(r.text)
+    // Say it plainly: this is the arxa toolchain, not the dashboard.
+    ? 'arxa does not compile — the lens could not run (sibling repo mid-edit; retried once). ' + (r.text.split('\n').find((l) => /^lib\/.*Error:/.test(l)) || '')
+    // A script that throws inside the page exits 255 with none of those words in
+    // it, so the filter below matched nothing and the FAIL line came out BLANK —
+    // an hour of the 2026-09-11 engine leg went on that. Name the exception.
+    : r.text.split('\n').filter((l) => /FAILED|expect not|selector not|console\/page|got |CdpException|SyntaxError|Unhandled exception/.test(l)).join(' | ')).slice(0, 900)
   const lensLabel = (r) => basename(r.out) + (r.unstable ? ', settle-unstable accepted' : '')
 
   // 3b. before any real session exists: sample cards + tab gate
@@ -680,7 +938,48 @@ async function main() {
   const filterShot = shot(join('bento', 'filter-1512.png'), filterScript())
   ok('lens: a state chip filters the carousel and clears on a second click, the head keeps counting everything, and the arrows walk the cards inside one tab stop (' + lensLabel(filterShot) + ')', filterShot.pass, lensFails(filterShot))
   const navShot = shot('nav-pill-1512.png', navPillScript())
-  ok('lens: a nav pill moves the dashboard, the CTA target AND the sidebar tree — exactly one row marked, in the accent, with aria-current (' + lensLabel(navShot) + ')', navShot.pass, lensFails(navShot))
+  ok('lens: EVERY dock pill moves the dashboard, the CTA target AND the sidebar tree — exactly one row marked, in the accent, with aria-current (' + lensLabel(navShot) + ')', navShot.pass, lensFails(navShot))
+  const engineShot = shot('engine-card-1512.png', engineCardScript(), 1512, 1000)
+  ok('lens: the Engine card DRAWS the engine-authored run — phase design, 3/7, one project row, 1 with engine state, 1 shipped, 8 screens — not the not-set-up line (' + lensLabel(engineShot) + ')', engineShot.pass, lensFails(engineShot))
+  const fillShot = shot('activity-fill-1512.png', activityFillScript(), 1512, 900)
+  ok('lens: the Activity card fills its dead band — 7 weekday bars BESIDE the heatmap (one row), a Busiest caption, an active-days figure and a real +/− churn line (' + lensLabel(fillShot) + ')', fillShot.pass, lensFails(fillShot))
+
+  // 6e. The REAL-TURN leg (opt-in). Everything above reads a session that never
+  // ran: turns 0, tokens null, llmMs 0. Those are honest values, but they never
+  // prove the token / model-time half of the card is wired to anything. This
+  // drives an actual turn on GLM 5.3 (max) through the composer the operator
+  // uses, then reads the same figures back off the host.
+  if (turn) {
+    // A real turn outruns the 90 s the other passes need.
+    const turnShot = shot('real-turn-1512.png', realTurnScript(), 1512, 900, 300_000)
+    // Deliberately narrow: this proves the prompt was POSTED and the transcript
+    // came back with something. An auth failure also draws a bubble, so whether
+    // the turn was any good is the host figures' call, immediately below.
+    ok('lens: the prompt reaches the conversation composer, posts as a message, and the transcript answers it (' + lensLabel(turnShot) + ')', turnShot.pass, lensFails(turnShot))
+    const after = await dash('row.sessions', { orgId: orgManifest.id, rowId: 'notes' })
+    const row = (after.result?.rows || [])[0]
+    // dsh flushes the projection cache asynchronously, so the token totals land a
+    // beat after the turn ends — on 2026-09-11 this read `tokens: null` while the
+    // record on disk already held 7755 in / 35 out. Wait on the condition, not on
+    // a guessed delay, and cap it so a genuinely missing figure still fails.
+    let r = {}
+    for (let i = 0; i < 20; i++) {
+      r = (await dash('session.summary', { orgId: orgManifest.id, sessionId: row?.id })).result || {}
+      if (r.tokens && typeof r.tokens.total === 'number' && r.tokens.total > 0) break
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+    }
+    const stats = r.stats || {}
+    // Tokens are deliberately NOT asserted here. tokenUsage has no wire view, so a
+    // scratch engine only surfaces it once dsh flushes the projection cache, which
+    // it does not do inside one smoke. Asserting it would make this leg flaky and
+    // teach nothing. The token path is proven on the INSTALLED app instead
+    // (docs/plans/org-row-dashboard.md §16.4): the operator's own status bar read
+    // "Input 14.6K tok · Output 277 tok" and the dashboard answered 14627 / 277.
+    ok('a real turn moves the card: turns ≥ 1, real model time, and a prompt timestamp — figures a model actually produced, never the sample generator',
+      stats.turns >= 1 && stats.llmMs > 0 && typeof r.lastPromptAt === 'number',
+      JSON.stringify({ turns: stats.turns, llmMs: stats.llmMs, toolMs: stats.toolMs, tokens: r.tokens, lastPromptAt: r.lastPromptAt }).slice(0, 400))
+    console.log('note  real turn: turns=' + stats.turns + ' llmMs=' + stats.llmMs + ' tokens=' + JSON.stringify(r.tokens) + (r.tokens ? '' : ' (unflushed — asserted on the installed app)'))
+  }
 
   const boot2 = shot('boot-after-open-1512.png', bootScript('org', null))
   ok('lens: a later boot (open session on record, fresh storage) lands on a dashboard, not the session (' + lensLabel(boot2) + ')', boot2.pass, lensFails(boot2))

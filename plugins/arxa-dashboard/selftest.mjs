@@ -18,6 +18,7 @@ const client = readFileSync(join(here, 'lib', 'client.js'), 'utf8')
 const pkg = JSON.parse(readFileSync(join(here, 'package.json'), 'utf8'))
 const snippet = readFileSync(join(root, 'plugins', 'arxa-sidebar', 'lib', 'workspace-region.snippet.txt'), 'utf8')
 const sidebarClient = readFileSync(join(root, 'plugins', 'arxa-sidebar', 'lib', 'client.js'), 'utf8')
+const gen = readFileSync(join(root, 'scripts', 'gen-workspace.mjs'), 'utf8')
 const patch = readFileSync(join(root, 'profile', 'cordis.patch.yml'), 'utf8')
 const launcher = readFileSync(join(root, 'bin', 'arxa-studio.mjs'), 'utf8')
 
@@ -215,12 +216,27 @@ check('client (step 4.5, revised twice): the card face is name, chips and the to
   client.includes("className: 'aXa_db_bankName'") && client.includes("className: 'aXa_db_bankChips'") && client.includes("className: 'aXa_db_bankFig'")
   && !/stripe|sessionbars|scaleOf/.test(client)
   && client.includes("fact('facts.model'") && client.includes("fact('facts.tool'") && client.includes("fact('facts.wall'") && client.includes("fact('facts.focus'"))
-check('seam (step 4.5): the sidebar tree MARKS the selected row with the accent — selectedRowId existed since D2 and nothing read it, so navigation left every row unselected',
+check('seam (step 4.5): the sidebar tree MARKS the selected row — selectedRowId existed since D2 and nothing read it, so navigation left every row unselected (the mark is the unified soft-accent fill since 2026-09-12)',
   snippet.includes('const selfRowId = isOrg ? "" : d.kind === "dock" ? d.slug : "projects/" + d.slug;')
   && snippet.includes('sel.orgId === d.orgId && (sel.rowId ?? "") === selfRowId')
   && snippet.includes('"data-arxa-row-selected": isSelected ? "" : void 0,') && snippet.includes('"aria-current": isSelected ? "true" : void 0,')
-  && snippet.includes('color: isSelected ? "var(--dsw-alias-state-business-primary)" : void 0,')
+  && snippet.includes('isSelected && Rows_module_css_default.selected')
   && sidebarClient.includes('data-arxa-row-selected'))
+// Operator-reported 2026-09-10: "notes is not being synced in the sidebar".
+// Root cause — buildEmit skips workspace docks (`if (d.workspace) continue`),
+// so `notes` (the ONE dock the host reports as workspace:true, because it has
+// no containers) renders as the STOCK ProjectRowItem row, not an
+// OrgContainerRow. The mark above lives only on OrgContainerRow, so selecting
+// Notes moved the dashboard and left the tree untouched. The stock row needs
+// its own mark, spliced by the generator the same way its click already is.
+check('defect (2026-09-10): the STOCK workspace row carries the selection mark too — a workspace dock (notes) and every deeper workspace row are NOT OrgContainerRows',
+  snippet.includes('const ARXA_WS_SELECTED = (workspaceId) => {')
+  && /ARXA_WS_SELECTED[\s\S]{0,400}sel\.orgId === orgId && \(sel\.rowId \?\? ""\) === ws/.test(snippet)
+  && gen.includes('ARXA_WS_SELECTED(row.workspaceId)')
+  && sidebarClient.includes('"data-arxa-row-selected": ARXA_WS_SELECTED(row.workspaceId) ? "" : void 0,'))
+check('defect (2026-09-10): the two marks are the SAME mark — one accent, one attribute pair, so a marked stock row is indistinguishable from a marked container row',
+  (sidebarClient.match(/data-arxa-row-selected/g) || []).length === 2
+  && (sidebarClient.match(/var\(--dsw-alias-state-business-primary\)/g) || []).length >= 2)
 check('client (step 4.5): motion is the house grammar, every move is killed under prefers-reduced-motion, and nothing rides a timeline the shipping WebKit might not have',
   client.includes('@media (prefers-reduced-motion:reduce){.aXa_db_bentoCard,.aXa_db_navPill,.aXa_db_bank,.aXa_db_panel{animation:none;transition:none}.aXa_db_bentoCard:hover,.aXa_db_bank:hover{transform:none}}')
   && client.includes('.aXa_db_bento>:nth-child(2){animation-delay:30ms}') && !/requestAnimationFrame|setInterval\(/.test(client)
@@ -258,6 +274,27 @@ check('step 7: every interactive chip carries a tooltip naming what clicking doe
   client.includes("title: t('sessions.filterNote')"))
 check('step 7: the new keys exist in all three dictionaries',
   ['sessions.filterNote', 'sessions.noneInState'].every((k) => (client.match(new RegExp("'" + k.replace(/\./g, '\\.') + "':", 'g')) || []).length === 3))
+
+// ---- theme consolidation (operator, 2026-09-12) -----------------------------
+// Pixel-measured in the operator's screenshot: the ONE solid-black element on
+// the dashboard was the active nav pill — the TEXT-INK token painted as a
+// fill (label-primary #181818 + inverted white text), which reads un-themed
+// next to the palette-washed app. It now wears the unified active-row style
+// (settings-nav/sidebar soft-accent fill); the CI failure dot uses the real
+// error token. Bento TEXT was measured token-identical to dsh's own rows —
+// no text rule may change here.
+check('theme: the active nav pill is the unified soft-accent fill, never the inverted ink pill',
+  client.includes(".aXa_db_navPillOn{background:var(--dsw-specific-sidebar-nav-item-active);border-color:transparent;color:var(--dsw-alias-label-primary)}")
+  && client.includes(".aXa_db_navPillOn:hover{background:var(--dsw-specific-sidebar-nav-item-active);color:var(--dsw-alias-label-primary)}")
+  && !client.includes("background:var(--dsw-alias-label-primary);border-color:transparent"))
+check('theme: the CI failure dot is the error token, not the text ink',
+  client.includes(".aXa_db_ciRed{background:var(--dsw-alias-state-error-primary)}")
+  && !client.includes(".aXa_db_ciRed{background:var(--dsw-alias-label-primary)}"))
+// The one remaining inverted pair is the accent-filled chip (filter chips +
+// delta chip ride the accent = selected/live language, same as stock dsh
+// pressed controls). If another label-ink FILL creeps in, this count moves.
+check('theme: label-primary-inverted survives ONLY on the accent-filled chip',
+  (client.match(/label-primary-inverted/g) || []).length === 1)
 
 console.log(failures === 0 ? 'ALL PASS' : `${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)

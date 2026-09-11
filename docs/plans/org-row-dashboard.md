@@ -1296,3 +1296,431 @@ below) · installed check `node scripts/installed-check.mjs`.
   boot-after-open passes included) · installed check ALL PASS.
 - Disk at pack time: 4.0 GB free — the §14 tar failure did not recur (the
   operator had swept `~/.arxa/engine`; it holds only live payloads).
+
+### Defect — "notes is not being synced in the sidebar" (operator, 2026-09-10)
+
+**Symptom.** Selecting Notes moved the dashboard but left the sidebar tree
+unmarked. Projects, Meetings, Account and Communications all marked correctly,
+so it looked like a Notes-specific data problem.
+
+**It was not a data problem.** The host reports the docks like this
+(read live off the operator's TERRA):
+
+| dock | workspace | containers |
+|---|---|---|
+| projects | false | null |
+| **notes** | **true** | **[]** |
+| meetings | false | scheduler, notes |
+| account | false | receipts, invoices, subscriptions, profile |
+| communications | false | emails, messages, comments |
+
+`notes` is the only dock with no containers, so it is the only one the host
+reports as `workspace: true`. `buildEmit` skips exactly those:
+
+```js
+for (const d of tree.docks) {
+  if (d.workspace) continue;      // ← notes never becomes an OrgContainerRow
+```
+
+With no emit entry, `ARXA_IS_CONTAINER_GROUP` is false and the row renders as
+the **stock `ProjectRowItem`**. The selection mark added in step 4.5 lives only
+on `OrgContainerRow` (`data-arxa-row-selected` appeared exactly ONCE in the
+generated client, inside that component). `ARXA_SELECT_WS` had always been
+setting `selectedRowId` for notes — which is why the dashboard followed the
+click. Only the drawing was missing.
+
+The same held for every DEEPER workspace row: `notes/<sub>`,
+`meetings/scheduler`, a project container.
+
+**Fix.** One helper + one generator splice, mirroring the click splice that was
+already there:
+
+- `ARXA_WS_SELECTED(workspaceId)` in the snippet, reading `selectedRowId`
+  straight off the store the way `ARXA_WS_HIDDEN` reads collapse state (the
+  tree re-renders on every store emit, so it needs no subscription).
+- `scripts/gen-workspace.mjs` extends the `ROW_TOGGLE` splice to add
+  `aria-current`, `data-arxa-row-selected` and the same accent + weight + 2px
+  inset marker to the stock row.
+
+A double mark is structurally impossible: `ARXA_CONTAINER_ROWS` and the stock
+`ProjectRowItem` are the two arms of one ternary on `ARXA_IS_CONTAINER_GROUP`.
+
+**Why the gate missed it.** `navPillScript` clicked
+`pills.find((p) => !p.className.includes('navPillOn'))` — on boot that is
+always **Projects**, a container dock. The one dock rendered by the other code
+path was never selected by any test. The pass now walks EVERY pill and asserts
+exactly one marked row for each.
+
+**Verification status.** Failing pin written first (it failed), then the fix
+(it passes); `node scripts/ci.mjs` **ALL GREEN**. The lens half is **not yet
+run**: `arxa` cannot compile right now — `arxa/lib/gate_design_palettes.dart`
+imports `design_palette_index.dart`, which does not exist yet — in-progress
+palette work in the sibling repo, untracked and unrelated to this change. The
+every-pill assertion is committed to the smoke and must be run once `arxa`
+builds again.
+
+### Install stall — first boot under launchd (2026-09-10)
+
+Verified after the Notes fix. Two facts worth keeping:
+
+- **Disk.** `~/.arxa/engine/` had eleven extractions (7.0 GB, 2.6 GB free). Ten
+  removed, only the live one kept → 9.1 GB free. Each install adds ~650 MB;
+  the launcher never prunes. `$TMPDIR/arxa-*` still needs a hand (the
+  classifier blocks the sweep).
+- **First boot after an install stalls.** The LaunchAgent spawned dsh while the
+  642 MB payload was still landing: main thread blocked in `uv_fs_open` →
+  `open()`, 0 % CPU, 1.0 s of CPU consumed in 13 minutes, last file opened
+  `~/.arxa/dsh/.credentials.yaml`. Reproduced twice. NOT the ad-hoc signature
+  and NOT TCC (no TCC activity in the log at all) — the same payload booted
+  clean from a terminal, and the same LaunchAgent booted clean once the
+  extraction was already on disk. `installed-check.mjs` already waits for the
+  engine; the wait just has to outlast a cold extraction.
+
+`node scripts/installed-check.mjs` → **ALL PASS** against the real registry:
+`delivery: 2 linked repo(s), ci=green, rate=50`, `engine: not-set-up`, and the
+sidebar marking exactly one row.
+
+## §16 Live-wiring audit (2026-09-10)
+
+Read-only audit of the INSTALLED engine against independently computed truth,
+not against the smoke's fixtures.
+
+| card | live? | evidence |
+|---|---|---|
+| Activity / Repository | **yes, exact** | dashboard says files 39, branches 3, commits 13; `git ls-files`/`branch`/`log` over the same 2-repo set (TERRA + projects/Peter) says **39 / 3 / 13**. `days` carries the real per-day counts (09-08: 4, 09-09: 9), `weeks` the real 13-week histogram, `current`/`longest` = 2/2. |
+| Delivery | **yes, live GitHub** | login `unfazed-dev`, repos TERRA + Peter, 4 workflow runs each, 2 ok / 2 failed, `rate` 50, real `lastAt`, `lastConclusion: success`. |
+| Engine | **yes, correctly empty** | `not-set-up` — no project on this machine has `pipeline/state/`. Category rows answer `not-applicable`. |
+| Sessions | **yes** | one real registry row, `focusMs: null` (never focused — absent, not zero). |
+| Tokens / model time | **NOT exercised** | the only real session has `turns: 0`, `tokens: null`, `llmMs: 0`. Honest values, but nothing proves the figures are wired to anything a model produced. |
+
+### Findings that are not defects of this feature
+
+- **Only TERRA is an org.** `~/.arxa/organisation.json` → `orgs: ["/Volumes/developer_ssd/TERRA"]`. MIMI
+  (`/Volumes/business_ssd/MIMI/MIMI`) is not registered, so no dashboard has ever
+  rendered against it. Left alone — the operator's registry is theirs.
+- **The live registry carries smoke litter.** `names` holds ~12 entries under
+  `/tmp/arxa-d90-smoke/…` and `/tmp/org-purge-smoke-…`, and `workspace.json` holds
+  10 worktrees under `/private/tmp/arxa-d90-smoke/…`. Earlier smokes wrote into the
+  REAL home. This smoke does not (scratch `ARXA_HOME` + copied org), but the
+  leftovers are still on record.
+- `prevCommits: 0` on a 90-day range is a **real** zero: git can answer "no commits
+  in that window" truthfully for a repo whose history starts 2026-09-08. Not a
+  null-vs-zero violation.
+
+### §16.1 The real-turn leg
+
+`ARXA_DASHBOARD_SMOKE_TURN=1` (default OFF) seeds the scratch home with
+**GLM 5.3 at `reasoningEffort: max`** (`provider: zai` via `dsh-llm-pi-ai`), then
+drives the operator's own path — org row → Notes → session card → Open → type into
+the composer → send → wait the answer out — and reads the figures back off the host:
+
+    turns ≥ 1  ∧  llmMs > 0  ∧  tokens.total > 0  ∧  lastPromptAt is a number
+
+The key is never read out of the credential store by the script: the run supplies
+`ZAI_API_KEY`, and it reaches the child engine's env only — never the scratch home,
+never a log. Ordinary runs still strip every provider key, so the default smoke
+costs nothing and needs no network.
+
+### §16.2 The real-turn leg false-greened once (2026-09-11)
+
+First run with a real key: the lens leg said the conversation "answers", the host
+said `turns 0, llmMs 0, tokens null, lastPromptAt null`. The host was right — both
+scratch transcripts held only setup events (`permission/preset`, `sandbox/mode`,
+`approval/policy`, `session/title`). **No message of any kind was ever sent.**
+
+Root cause: two worthless signals.
+
+1. *"the box no longer holds my text"* — a React re-render clears a composer just
+   as well as a send does.
+2. *"document.body.innerText grew by 8 characters"* — a clock tick does that.
+
+Compounded by the target: the leg picked "the tallest visible editable box", which
+is the SIDEBAR's composer card, not the conversation's.
+
+Fixed by proving the turn the way the transcript would: take the composer from
+dsh's own slot (`conversation.composer` / `conversation.input`), require the prompt
+to APPEAR in it, require it to POST as a message, and require the answer to be a
+NEW message element — never a text-length delta. Every exit carries facts.
+
+A dry run with a deliberately bad key then proved the driver end to end:
+
+    request/header  { provider: "zai", model: "glm-5.3", reasoningEffort: "max" }
+    turn/end        { error: 401 "token expired or incorrect", code: AUTH }
+
+— so **GLM 5.3 at max really is the model the turn spends** (evidence, not
+assumption), and the flow reaches the provider. The host then read back
+`turns: 1`, `lastPromptAt: 1789049922964`, with `llmMs 0 / tokens null` because the
+call 401'd. That is the correct shape for a failed call.
+
+That dry run also caught a second defect: the prompt posted **doubled**
+(`…PONGReply with exactly one word: PONG`) because the "did my text land?" check
+read only the queried node while `execCommand` had inserted into its child, so the
+fallback typed it again. The check now reads the whole composer region. Re-verified:
+`PROMPT SENT: 'Reply with exactly one word: PONG'` — once.
+
+Still outstanding: one run with a valid key, to see `llmMs > 0` and a real token count.
+
+### §16.3 The lens depends on a repo nobody here controls (2026-09-11)
+
+A real-key run died at `bento-1280` — pass 30 of 36, with the operator's key
+already in play — and the failure had nothing to do with the bento:
+
+    lib/arxa_dial.dart:563:7: Error: The non-abstract class 'SupabaseDialStore'
+      is missing implementations for: DialStore.readOverlay, DialStore.writeOverlay
+    Error: AOT compilation failed
+
+`arxa` is a SIBLING repo, it is edited while this smoke runs, and `arxa lens`
+re-AOT-compiles it on every invocation. Passes 1–29 compiled fine; a file was
+saved half-written between two shots. Minutes later `arxa lens --help` compiled
+again — the breakage was purely transient.
+
+Handled, not worked around: a shot whose output carries `AOT compilation failed`
+waits 20 s and runs once more, and if it still fails the message says
+*"arxa does not compile — the lens could not run (sibling repo mid-edit)"*
+instead of blaming the card. A toolchain state must never read as a dashboard defect.
+
+### §16.4 tokens: null was a real defect (2026-09-11)
+
+The operator ran a real GLM 5.3 turn in the SHIPPING app and sent the screenshot.
+Its own status bar: `1 turns · 1 steps | LLM 7.4s | TTFT avg 5.7s | Input 14.6K tok
+· Output 277 tok`. The dashboard, for that same session, said:
+
+    turns 1, steps 1, llmMs 7402, ttftMs 5722   ← exact
+    tokens: null                                 ← wrong
+
+**Root cause.** `readValues` returned the live checkpoint the moment it was
+non-empty. That checkpoint is a VIEW: `viewCheckpoint` (dsh-session-projection)
+skips every projection whose `wire` is undefined, and `tokenUsage` is one. The
+durable record on disk held `uncachedInputTokens 14627 / outputTokens 277` and was
+never consulted. Live winning was right; live winning *by erasure* was not — a key
+the live view never served is not evidence of absence, and absence is exactly what
+turns a real figure into a null.
+
+**Fix.** Merge per key: durable row first, live values over the top. Live still
+wins wherever it actually served a key; it can no longer delete one it didn't.
+Verified on the installed app against the screenshot — `total: 14904` (= "Usage
+14.9K tok"), and `createdAt`/`cwd` stopped being null for the same reason.
+
+**Not fixed, stated instead.** Mid-session, before dsh flushes the cache, tokens
+are still null: `stateOf` looked like the way to read the raw cell, but on a live
+engine it yielded nothing and the reason was not established, so it was removed
+rather than shipped unproven. The smoke's turn leg therefore asserts turns, model
+time and prompt timestamp — the token path is proven on the installed app above.
+
+Full smoke with a real turn: **38 OK, exit 0**, `turns=1 llmMs=5320`.
+
+---
+
+## §17 The Engine card, on bytes the engine wrote (2026-09-11)
+
+§16's audit table graded Engine **"yes, correctly empty"**. That grade was as far
+as the evidence went: no project on this machine has ever run the FSM, so every
+run of every gate had exercised exactly one branch — `not-set-up` — and the
+populated branch, the whole point of tier 4, had never rendered once. Its 29
+selftests all ran on JSON the selftest itself invented, which proves the reader
+and says nothing about the *contract*.
+
+### The contract, checked against the engine's own output
+
+The FSM was driven for real out of `arxa/lib/pipeline_fsm.dart` — `initPipeline`
+(targets macos+web) → `recordPhaseStatus(intake, pass)` → `advance` →
+`recordPhaseStatus(prototype, fail)` then `(pass)` → `approvePrototype` →
+`advance` → design pass → `advance` → scaffold pass → `advance` →
+`reviewVerdict(reject)` → `markDirty`. The ledger came from
+`arxa deploy --self-test` (`deploy.dart _recordLedger`) and structure.json is
+the engine repo's real `mobile_flutter/design/structure.json`.
+
+Result: **the file contract holds, field for field.** `phase design`, `step 3/7`,
+gate `ready`, `attempts 1`, `dirty true`, `rejections 1`, `approved false`,
+`targets [macos, web]`, real `updatedAt`, `screens 8`, `flows 2`, `shipped 1`,
+`halted 0`. Three things worth writing down:
+
+- **`initPipeline` writes `default.state.json`, not `run.state.json`.** The
+  reader's precedence (run first, then default — gates.dart `StateReader`) was
+  right, but the file the FSM actually creates is the *fallback* one. A reader
+  that had only ever been tested on `run.state.json` would report nothing on a
+  real project.
+- **`halted: 0` here is a real zero** — the ledger exists and has no halted row.
+  A project with no ledger still reports null. The rule holds on real bytes.
+- The state carries `schema`, `approvalTokens`, `humanApproved`, `createdAt` and
+  `designHash`; none of them reach the card. Pinned as a check, so a future
+  reader that starts passing the state through fails here.
+
+Those bytes now live in `plugins/arxa-dashboard/engine-authored.fixture.json`
+(its `_how` names the calls that produced each file) and have **one** consumer
+shape: `selftest.engine.mjs` reads them through the fake filesystem (29 → 35
+checks), and `scripts/dashboard-smoke.mjs` writes the same three files into the
+scratch org's first project. One source, so the reader and the card can never be
+proven against different evidence.
+
+### What the card actually draws
+
+`designs/org-dashboard/evidence/engine-card-1512.png` — the first time this card
+has rendered anything but the not-set-up line: **Design** / Phase · **1**
+Projects with runs · **1** Shipped, the project row `Peter — Design · 3/7 ·
+8 screens · 28m ago`, and beneath it *"1 more scanned, none of them has run the
+engine"* — the org root, honestly counted, not silently dropped.
+
+Smoke: **39 OK, exit 0** (was 36) — `row.engine` on the org row, `row.engine` on
+a category row (`not-applicable`), and the rendered card.
+
+### Two defects met on the way
+
+- **A lens script that throws reported a BLANK reason.** `Identifier 'rows' has
+  already been declared` — PRELUDE owns `rows`, and the new script redeclared it
+  in the same scope. The lens exited 255 with `CdpException` in the transcript,
+  but `lensFails` only matched `expect not truthy` / `selector not found` /
+  `console/page error`, so the FAIL line printed the label and nothing else.
+  `lensFails` now names `CdpException`/`SyntaxError`/`Unhandled exception` too.
+- **Green evidence that showed nothing.** The card is last in the bento; at
+  1512×900 the shot cropped it off entirely while the assertion passed against
+  the DOM. The shot now scrolls the card into frame and captures at 1512×1000 —
+  a PNG that proves the assertion to a human, which is the only reason it exists.
+
+### Not done, stated
+
+The seed is written into the smoke's **copy** of the org, never the operator's.
+Nothing here makes a real project run the engine — when one finally does, this
+leg is what says the card will be right about it. `ponytail:` the fixture is
+pinned bytes rather than a live Dart run, because a selftest that needs the Dart
+SDK stops being runnable in CI; re-pin when `pipeline_fsm.dart` changes shape.
+
+---
+
+## §18 The Activity card's dead band, filled (2026-09-11, operator)
+
+The operator's screenshot: the span-5 Activity card held two FIXED-width SVGs
+(heatmap 169×91, weekly line 169×40) left-aligned in a ~420px body — a dead band
+right of the charts, plus stretch space below (the bento row sizes to its tallest
+sibling). Proposed a menu, operator took the recommendation as-is:
+
+| fill | cost | honest shape |
+|---|---|---|
+| **Weekday strip** — Mon–Sun bars off the SAME `days[]` the heatmap drew, Busiest caption | none — pure client transform | zero-count weekday draws a stub, never a gap |
+| **Active days** — `days.length / range` | none | `all` range prints bare count |
+| **Churn** — `+{a} −{r} lines` from `log --numstat` | one git call per repo | no commits in window ⇒ null, never 0/0; binary `-/-` rows skipped |
+
+`churnOf` in `lib/repo.js`; strip + figure + churn line in `ActivityBody`
+(`aXa_db_chartRow` puts the strip BESIDE the chart column, not under it — that
+was the point). 11 new keys × en/pl/fr. Not proposed, stated: turns/focus (the
+Sessions card owns them), engine/delivery figures (their own cards).
+
+Evidence `evidence/activity-fill-1512.png`: 4 figure row, strip beside the
+heatmap, `Busiest: W · 9`, `+356 −10 lines`. Some stretch space remains under
+the strip when a sibling row is taller — the churn line pins to the bottom
+(`margin-top:auto`), the rest breathes. Smoke **41 OK, exit 0**; repo selftest
++3 churn checks (stubbed-git parse, null-on-empty, real-runner payload).
+
+**The disk filled during this work.** `scripts/ci.mjs` went 5-FAIL with ENOSPC
+(disk 100%, 139 Mi free) in plugins this change never touched; dashboard
+selftests and the full smoke ran clean before the wall. The TMPDIR sweep is the
+operator's (classifier-blocked twice this session). The installed engine was NOT
+restarted on a full disk — plugins load from the working tree, so a restart
+after the sweep is all it takes.
+
+## §19 Sidebar rows that open a dashboard wear its mark (2026-09-11, operator)
+
+Operator ask: tree rows **with a dashboard** show a dashboard icon, not the
+folder. Which rows those are was never a new decision — `ARXA_SELECT_WS` tags
+`kind:"dock"` for exactly a TOP-LEVEL ws (`notes/…`, `projects/<slug>` stay
+leaf picks → guide, not a dashboard) — so the glyph reuses that shape:
+
+- `ARXA_WS_DASH(ws)` = `ws !== "" && !ws.includes("/")` — one predicate, two
+  icon sites, so the mark and the click can never disagree.
+- `DashGlyph` — 2×2 tile SVG in `OrgGlyph`'s stroke style (15px, 1.3 stroke,
+  currentColor), org rows keep `OrgGlyph`, project rows keep folders.
+- Sites: `OrgContainerRow` (`d.kind === "dock"`) + the stock workspace row
+  (gen-workspace splice 6g on the unique stock folder-icon anchor).
+
+Sources are the generator + snippet (`scripts/gen-workspace.mjs`,
+`workspace-region.snippet.txt`); `lib/client.js` regenerated — the drift gate
+in the sidebar selftest enforces byte-parity, and a new check pins the
+predicate + both sites. The smoke's org-row leg now counts 4-rect glyph SVGs
+in the expanded tree (`dashGlyphs >= 3`). Smoke **41 OK, exit 0** ×2; CI
+ALL GREEN.
+
+**Ship path (corrects §18's closing line):** working-tree plugin bytes reach
+the installed app ONLY via `node bin/arxa-engine-sync.mjs` (content-hash sync
+into `~/.arxa/engine/<hash>/arxa-studio`, deletes the `.arxa-seeded` marker)
+followed by a sidecar bounce — a restart alone re-seeds the STALE packed
+payload. Shipped as `arxa-sidebar: 057983466c25 → b6dd4e7d6ff5`, sidecar
+bootstrapped, installed-check **ALL PASS** (fresh evidence
+`installed-bento-1512.png`). Reopen an open window to reload the webview.
+
+**Rider (same day, operator): selected icons in the accent too.** The row
+text went accent on selection but the icon slot paints its own tertiary
+(`.aXa_wsr_slot`), and stock `active` = `group.expanded && containsCurrent` —
+a dsh SESSION notion, so a selected dock with no open session stayed grey.
+Two gates now: `OrgContainerRow` adds `isSelected && folderActive`; the stock
+row OR-extends the stock rule with `ARXA_WS_SELECTED(row.workspaceId)`
+(gen-workspace 6g-bis). The nav-pill smoke leg asserts the selected row's
+glyph span computes to the same color as the row.
+
+**Rider (2026-09-12, operator): ONE active-row style — the settings-nav
+soft-accent fill.** "The way cordis highlights active rows must be a soft
+accent color, unified across arxa; the sidebar currently has 2 styles." The
+reference was measured live (lens probe on the settings modal): dsh's nav
+cell paints `.active { background: var(--dsw-specific-sidebar-nav-item-active) }`
+— text untouched, r12, no bar — and that token resolves through the
+palette-washed neutral-bluish ladder, so it IS the soft accent in every
+theme. The sidebar shipped TWO marks: workspace/org rows an inline accent
+bar + accent text + bold (ROW_TOGGLE splice), session rows selected ==
+hover gray (`interactive-bg-hover`). Both collapsed onto the nav token:
+selected rows (project, session, search, freestyle — the freestyle rows
+already carried the `selected` class and inherit the fill) paint
+`--dsw-specific-sidebar-nav-item-active`; hover stays hover; the old inline
+bar/color/weight are gone (org headers keep their 600). The stock row
+gained the `selected` class (generator delta 6h: `(active ||
+ARXA_WS_SELECTED(...)) && selected`); the snippet's org row gained
+`isSelected && selected`. `data-arxa-row-selected`/`aria-current` stay as
+the functional identity, and the accent glyph rider above still applies.
+installed-check's lens now gates the fill itself: the marked row must
+compute a NON-transparent background with NO box-shadow (`markedFill ===
+'filled'` — 'transparent' or 'old-bar' fails). Selftest pins on both
+sides (sidebar + dashboard). Shipped as `arxa-sidebar: 813dc2078fb0 →
+fccc90323be1`, bounced, installed-check **ALL PASS** ("marks exactly one
+row with the unified soft-accent fill"); cropped-screenshot vision
+confirms the TERRA row wears the soft tinted fill, reference-style.
+
+### Rider (2026-09-12, operator): the dashboard joins the theme — no ink-black fills
+
+**Report:** "fonts in the dashboard bento boxes are black instead of the
+theme font color, the same for the nav bar on top must also match the
+theme." Systematic-debugging run, measured before touching anything:
+
+- **Bento TEXT is token-identical to dsh's own UI.** Live lens probe
+  (installed app, sage palette #84A98C): `.aXa_db_numVal` ink = resolved
+  `--dsw-alias-label-primary` = oklab(0.2257) — the SAME token and value
+  the sidebar rows paint. The palette wash reaches the dashboard (tokens
+  measured identical at sidebar node and bento node). dsh's own workspace
+  bundle paints row titles with the same label-primary tier. There is no
+  font-color defect to fix in the cards — the ink is the app's ink.
+- **The genuinely un-themed element was the ACTIVE NAV PILL.** Pixel
+  measurement of the operator's screenshot: pill fill = rgb(24,24,24)
+  (#181818 = the TEXT-INK token painted as a fill) with inverted white
+  text — the one solid-black surface on the page, next to an app whose
+  active rows all wear the soft palette tint. `.aXa_db_ciRed` had the
+  same disease (a CI-failure dot painted with the text ink — black, and
+  semantically wrong).
+- **Palette archaeology (why the screenshot looked neutral):** the
+  engine's stored palette is sage, the screenshot's accent was slate —
+  the operator had switched palettes; under a low-chroma accent the 10%
+  ink wash is invisible, which is the wash working as designed
+  (scope A: labels keep their lightness ladder).
+
+**Fix:** `.aXa_db_navPillOn(:hover)` → the ONE active-row style —
+`background:var(--dsw-specific-sidebar-nav-item-active)`, text
+`label-primary` (settings-nav/sidebar recipe, rides the palette wash).
+`.aXa_db_ciRed` → `var(--dsw-alias-state-error-primary)`. The
+accent-filled filter/delta chip keeps `label-primary-inverted` (accent =
+selected/live, the stock dsh pressed-control language) — pinned as the
+ONLY surviving inverted pair. Selftest: three new theme pins.
+installed-check: new `pillOnL` fact — the active pill's computed oklab
+lightness must read > 0.5 (the tint ≈ 0.92; the old black pill ≈ 0.23),
+gating the pass. Shipped `arxa-dashboard: 0fa2fe63bf80 → 5a0fd0deff53`,
+bounced.
+
+**Not done (offered):** making app-wide text VISIBLY palette-hued (a
+stronger ink-stop wash in theme-accent's NEUTRAL_MIX) is a one-knob
+change to a scope-A-locked ladder — offered to the operator, not taken
+unilaterally.

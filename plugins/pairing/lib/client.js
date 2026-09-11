@@ -110,7 +110,8 @@ window.__ModuleLoader__.load({
       let last = ''
       const report = () => {
         let accent = null
-        try { accent = localStorage.getItem('arxa.themeAccent') } catch { /* private mode */ }
+        // 0.3.0: the accent rides the palette state, not a bare hex key.
+        try { accent = JSON.parse(localStorage.getItem('arxa.themePalette') || 'null')?.accent ?? null } catch { /* private mode */ }
         const dark = !!(document.body && document.body.hasAttribute('data-ds-dark-theme'))
         const key = (accent || '') + '|' + dark
         if (key === last) return // observers fire in bursts; only send changes
@@ -128,7 +129,7 @@ window.__ModuleLoader__.load({
         // Other-window changes arrive as storage events (theme-accent's own
         // cross-window sync channel).
         window.addEventListener('storage', (e) => {
-          if (e.key === 'arxa.themeAccent') report()
+          if (e.key === 'arxa.themePalette') report()
         })
       }
       if (document.body) start()

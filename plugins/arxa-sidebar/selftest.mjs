@@ -87,9 +87,9 @@ check('G2 leaf: a LEAF ancestor opens from the mirrored dsh view store',
 // G3 (grilled 2026-09-06): the folder glyph of the row a session binds to
 // lights (stock dsh rule, kept whole by the transform) and the session's own
 // row carries an accent dot.
-check('G3 glyph: the stock folderActive rule survives the transform',
+check('G3 glyph: the stock folderActive rule survives the transform (2026-09-11: OR-extended with the arxa selection, same slot, same rule)',
   client.includes('const active = group.expanded && group.containsCurrent;')
-  && client.includes('active && Rows_module_css_default.folderActive'))
+  && client.includes('(active || ARXA_WS_SELECTED(row.workspaceId)) && Rows_module_css_default.folderActive'))
 // The dot is a REAL row child, LAST in the children array, so it holds one
 // position whether the row shows its timestamp or (on hover) its menu. The
 // first attempt was a background gradient: it paints UNDER the row's content,
@@ -627,6 +627,18 @@ check('trash: auto-opens while anything is trashed; manual toggle wins',
   client.includes('const [manual, setManual] = (0, react.useState)(null);') && client.includes('const open = manual === null ? total > 0 : manual;'))
 check('trash: org glyph shared between tree row and trash org entries (single def)',
   client.includes('function OrgGlyph({ size })') && client.split('function OrgGlyph({ size })').length === 2 && client.includes('entryRow(e, (0, react_jsx_runtime.jsx)(OrgGlyph, {}), () => restoreOrg'))
+// ---- dashboard rows wear the dashboard glyph (2026-09-11, user ask) ----
+// The glyph and the CLICK must agree: ARXA_SELECT_WS tags kind:"dock" for
+// exactly a top-level ws, and ARXA_WS_DASH — read at both icon sites — is
+// the same shape, so no row can wear the mark and open the guide instead.
+check('glyph: DashGlyph defined once; both icon sites gated by ARXA_WS_DASH (dock container rows + stock workspace rows)',
+  client.includes('function DashGlyph({ size })') && client.split('function DashGlyph({ size })').length === 2
+  && client.includes('d.kind === "dock" ? (0, react_jsx_runtime.jsx)(DashGlyph, {})')
+  && client.includes('children: ARXA_WS_DASH(row.workspaceId) ? (0, react_jsx_runtime.jsx)(DashGlyph, {}) : row.expanded ?')
+  && client.includes('return ws !== "" && !ws.includes("/");'))
+check('glyph: the SELECTED row lights its icon in the accent (slot paints its own tertiary, so folderActive must gate on selection) — both row kinds',
+  client.includes('isSelected && Rows_module_css_default.folderActive')
+  && client.includes('(active || ARXA_WS_SELECTED(row.workspaceId)) && Rows_module_css_default.folderActive'))
 // ---- D83: trash lives under the last org row; icons keep their spacing ----
 check('trash: rides the grouped tree tail via ARXA_TRASH_AFTER_ORGS (no bottom mount)',
   client.includes('const ARXA_TRASH_AFTER_ORGS = () => orgT ? (0, react_jsx_runtime.jsx)(TrashSection, { t: orgT, key: "arxa-trash" }) : null;') && client.includes('}), ARXA_ARCHIVES_AFTER_ORGS(), ARXA_TRASH_AFTER_ORGS()]') && !client.includes('TrashSection, { t: props.t }'))
@@ -661,6 +673,22 @@ check('trash: restore/delete icon buttons are gapped (flex span, 12px user-tuned
 // ---- D84: the trash reads exactly like the tree above it ----
 check('trash: header row IS an org row (projectRow class, treeitem, 600 weight, no kebab)',
   client.includes('style: { marginLeft: 4, marginTop: 4, borderRadius: 6, cursor: "pointer", fontWeight: 600 }') && client.includes('"aria-expanded": open,') && client.includes('className: Rows_module_css_default.title, children: t("trash.section")') && !client.includes('borderRadius: 8, padding: "0 6px"'))
+// ---- one active-row style everywhere (operator, 2026-09-12) ----
+// The settings-nav recipe: soft accent fill on
+// --dsw-specific-sidebar-nav-item-active (rides the palette wash), text
+// untouched. Stock shipped two styles — session rows selected == hover
+// gray, workspace rows an inline accent bar + accent text. Both gone.
+check('rows: the ACTIVE row is the settings-nav soft-accent fill, one style (project+session)',
+  client.includes('.aXa_wsr_projectRow.aXa_wsr_selected,.aXa_wsr_sessionRow.aXa_wsr_selected{background:var(--dsw-specific-sidebar-nav-item-active)}')
+  && client.includes('.aXa_wsr_projectRow:hover,.aXa_wsr_sessionRow:hover{background:var(--dsw-alias-interactive-bg-hover)}'))
+check('rows: search results selected carry the same fill (hover stays hover)',
+  client.includes('.aXa_wsr_searchResultRow.aXa_wsr_selected{background:var(--dsw-specific-sidebar-nav-item-active)}'))
+check('rows: the workspace row itself carries the selected class (stock left it unmarked)',
+  client.includes('(active || ARXA_WS_SELECTED(row.workspaceId)) && Rows_module_css_default.selected'))
+check('rows: the org row carries it too (snippet side)',
+  client.includes('isSelected && Rows_module_css_default.selected'))
+check('rows: the old accent-bar style is GONE (inline bar + accent text + forced weight)',
+  !client.includes('inset 2px 0 0') && !client.includes('color: isSelected ? "var(--dsw-alias-state-business-primary)" : void 0'))
 // Five now, not three: the Freestyle Archives and Trash headers were rebuilt on
 // this same org header row, so they carry the same count span. The pin still
 // catches a count rendered any OTHER way — a pill, a different size.

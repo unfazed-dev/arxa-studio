@@ -209,6 +209,16 @@ const script = `(async () => {${PRELUDE}
     noVerticalText: bankCards.every((c) => [...c.querySelectorAll('*')].every((el) => !/^(vertical|sideways)-/.test(getComputedStyle(el).writingMode))),
     // The sidebar tree must carry the selection mark.
     markedRows: document.querySelectorAll('[data-arxa-row-selected]').length,
+    // Theme consolidation (operator, 2026-09-12): the active nav pill wears
+    // the unified soft-accent fill — oklab L must read LIGHT (the tint is
+    // ~0.92; the old inverted ink pill sat at ~0.23). A dark fill here means
+    // a stale payload or a regression back to the black pill.
+    pillOnL: (() => { const el = root.querySelector('.aXa_db_navPillOn'); if (!el) return 'none'; const c = getComputedStyle(el).backgroundColor; const m = /oklab\(([\d.]+) /.exec(c); return m ? Number(m[1]) : c })(),
+    // One active-row STYLE (operator, 2026-09-12): the marked row paints the
+    // unified soft-accent fill (settings-nav recipe on
+    // --dsw-specific-sidebar-nav-item-active) — a transparent background or
+    // the old inline accent bar means a stale payload or a regression.
+    markedFill: (() => { const el = document.querySelector('[data-arxa-row-selected]'); if (!el) return 'no-row'; const cs = getComputedStyle(el); return cs.backgroundColor === 'rgba(0, 0, 0, 0)' ? 'transparent' : (cs.boxShadow !== 'none' ? 'old-bar' : 'filled') })(),
     // The bottom bars are gone (operator, 2026-09-10) — nothing may draw over
     // the card's bottom edge on the shipping engine either.
     noStripe: !root.querySelector('[data-arxa-dashboard-sessionbars]'),
@@ -219,13 +229,23 @@ const script = `(async () => {${PRELUDE}
     engine: (root.querySelector('[data-arxa-dashboard-engine]') || {}).getAttribute ? root.querySelector('[data-arxa-dashboard-engine]').getAttribute('data-arxa-dashboard-engine') : null,
     // Step 7: the counts are the filter, and they are buttons with a pressed state.
     filters: root.querySelectorAll('[data-arxa-dashboard-filter][aria-pressed]').length,
+    // §18: the Activity fill. A restart alone re-seeds the STALE sidecar payload
+    // (engine-sync is the step that ships plugin bytes) and this check
+    // false-greened on exactly that for a whole afternoon — so the fill's own
+    // hooks are asserted here, not just the old seams.
+    weekday: !!root.querySelector('[data-arxa-dashboard-weekday]'),
+    churn: !!root.querySelector('[data-arxa-dashboard-churn]'),
+    active: [...root.querySelectorAll('.aXa_db_numKey')].some((k) => /Active days|Dni aktywne|Jours actifs/.test(k.textContent || '')),
     overflow: root.scrollWidth > root.clientWidth + 2,
   };
   await sleep(400);
   return facts.seams && facts.navPills >= 2 && facts.cards === 6 && facts.holes.length === 0
     && facts.handOverscroll === 'contain' && facts.handSnap.includes('x')
     && facts.noOverlap && facts.noVerticalText && facts.noStripe && facts.markedRows === 1
+    && facts.markedFill === 'filled'
+    && (typeof facts.pillOnL === 'number' ? facts.pillOnL > 0.5 : false)
     && typeof facts.delivery === 'string' && typeof facts.engine === 'string' && facts.filters >= 1
+    && facts.weekday && facts.churn && facts.active
     && facts.time && !facts.overflow ? true : JSON.stringify(facts);
 })()`
 
@@ -234,7 +254,7 @@ const args = ['lens', 'check', session.url, out, '1512', '900', '2500', '--expec
 const r = spawnSync('arxa', args, { encoding: 'utf8', timeout: 180_000, env: { ...process.env, ARXA_LENS_UA: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36 ArxaShell/1.0' } })
 const text = (r.stdout || '') + (r.stderr || '')
 const unstable = /did not settle|settle/i.test(text) && !/expect not truthy|console|page error/i.test(text)
-ok('lens on the INSTALLED app: both new seams are published, the pills render, the bento fills every row, the carousel keeps its cards separate, upright and bar-free, Delivery and Engine each state a real status, the counts are pressable filters, and the sidebar marks exactly one row' + (unstable ? ' (settle-unstable accepted)' : ''),
+ok('lens on the INSTALLED app: both new seams are published, the pills render, the bento fills every row, the carousel keeps its cards separate, upright and bar-free, Delivery and Engine each state a real status, the counts are pressable filters, the sidebar marks exactly one row with the unified soft-accent fill, and the active nav pill wears the same light soft-accent fill' + (unstable ? ' (settle-unstable accepted)' : ''),
   r.status === 0 || unstable, text.split('\n').filter((l) => /FAILED|expect not|console|got /.test(l)).join(' | ').slice(0, 700))
 console.log('evidence ' + out)
 

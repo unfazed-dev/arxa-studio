@@ -1,0 +1,297 @@
+{
+  "_note": "Bytes the arxa ENGINE wrote, not bytes this repo invented. See docs/plans/org-row-dashboard.md §17. Re-pin by re-running the FSM.",
+  "_how": {
+    "pipeline/state/default.state.json": "arxa/lib/pipeline_fsm.dart driven for real: initPipeline(targets macos,web) → recordPhaseStatus(intake,pass) → advance → recordPhaseStatus(prototype,fail then pass) → approvePrototype → advance → recordPhaseStatus(design,pass) → advance → recordPhaseStatus(scaffold,pass) → advance → reviewVerdict(reject) → markDirty",
+    "pipeline/state/deploy-ledger.json": "arxa deploy --self-test (arxa/lib/deploy.dart _recordLedger)",
+    "design/structure.json": "the engine repo's own mobile_flutter/design/structure.json, verbatim"
+  },
+  "files": {
+    "pipeline/state/default.state.json": {
+      "phase": "design",
+      "targets": [
+        "macos",
+        "web"
+      ],
+      "approvalTokens": {
+        "prototype": "operator"
+      },
+      "designHash": "",
+      "kitSha": "",
+      "schema": 4,
+      "createdAt": "2026-09-10T22:24:52.533315Z",
+      "dirty": true,
+      "phaseStatus": {
+        "intake": {
+          "status": "passed",
+          "ts": "2026-09-10T22:24:52.546273Z",
+          "attempts": 1
+        },
+        "prototype": {
+          "status": "passed",
+          "ts": "2026-09-10T22:24:52.548787Z",
+          "attempts": 2
+        },
+        "design": {
+          "status": "ready",
+          "ts": "2026-09-10T22:24:52.550239Z",
+          "attempts": 1
+        },
+        "scaffold": {
+          "status": "passed",
+          "ts": "2026-09-10T22:24:52.551212Z",
+          "attempts": 1
+        },
+        "review": {
+          "status": "ready",
+          "ts": null,
+          "attempts": 0
+        },
+        "build": {
+          "status": "blocked",
+          "ts": null,
+          "attempts": 0
+        },
+        "deploy": {
+          "status": "blocked",
+          "ts": null,
+          "attempts": 0
+        }
+      },
+      "humanApproved": {
+        "prototype": true
+      },
+      "review": {
+        "approved": false,
+        "rejections": 1
+      },
+      "updatedAt": "2026-09-10T22:24:52.552976Z"
+    },
+    "pipeline/state/deploy-ledger.json": {
+      "attempts": [
+        {
+          "target": "vercel",
+          "version": "1.2.3",
+          "account": "totem-labs",
+          "approver": "ops@totem",
+          "timestamp": "2026-09-10T22:25:24Z",
+          "artefact_id": "https://app.vercel.app",
+          "status": "shipped"
+        }
+      ]
+    },
+    "design/structure.json": {
+      "$schema": "arxa/structure@2",
+      "registry": "registry.json",
+      "shellRoots": {
+        "pairing_shell": "/",
+        "studio_shell": "/studio",
+        "approvals_shell": "/approvals",
+        "settings_shell": "/settings",
+        "code_shell": "/code"
+      },
+      "screens": [
+        {
+          "id": "pairing.scan",
+          "shell": "pairing",
+          "comp": "PairingScan",
+          "shellDir": "pairing_shell",
+          "surface": "pairing_shell_pairing_scan_view",
+          "viewmodel": "ui/views/pairing_shell/pairing_scan/pairing_scan_viewmodel.js",
+          "deps": [
+            "services/facades/pairing_facade.js"
+          ],
+          "surfaceKey": "pairing_scan"
+        },
+        {
+          "id": "pairing.connecting",
+          "shell": "pairing",
+          "comp": "PairingConnecting",
+          "shellDir": "pairing_shell",
+          "surface": "pairing_shell_connecting_view",
+          "viewmodel": "ui/views/pairing_shell/connecting/connecting_viewmodel.js",
+          "deps": [
+            "services/facades/pairing_facade.js"
+          ],
+          "surfaceKey": "connecting"
+        },
+        {
+          "id": "pairing.push_permission",
+          "shell": "pairing",
+          "comp": "PairingPushPermission",
+          "shellDir": "pairing_shell",
+          "surface": "pairing_shell_push_permission_view",
+          "viewmodel": "ui/views/pairing_shell/push_permission/push_permission_viewmodel.js",
+          "deps": [
+            "services/facades/push_facade.js"
+          ],
+          "surfaceKey": "push_permission"
+        },
+        {
+          "id": "studio.session",
+          "shell": "studio",
+          "comp": "StudioSession",
+          "shellDir": "studio_shell",
+          "surface": "studio_shell_studio_session_view",
+          "viewmodel": "ui/views/studio_shell/studio_session/studio_session_viewmodel.js",
+          "deps": [
+            "services/facades/transport_facade.js"
+          ],
+          "surfaceKey": "studio_session"
+        },
+        {
+          "id": "approvals.list",
+          "shell": "approvals",
+          "comp": "ApprovalsList",
+          "shellDir": "approvals_shell",
+          "surface": "approvals_shell_approvals_view",
+          "viewmodel": "ui/views/approvals_shell/approvals/approvals_viewmodel.js",
+          "deps": [
+            "services/facades/approvals_facade.js"
+          ],
+          "surfaceKey": "approvals"
+        },
+        {
+          "id": "settings.home",
+          "shell": "settings",
+          "comp": "SettingsHome",
+          "shellDir": "settings_shell",
+          "surface": "settings_shell_settings_view",
+          "viewmodel": "ui/views/settings_shell/settings/settings_viewmodel.js",
+          "deps": [
+            "services/facades/settings_facade.js"
+          ],
+          "surfaceKey": "settings"
+        },
+        {
+          "id": "code.sessions",
+          "shell": "code",
+          "comp": "CodeSessions",
+          "shellDir": "code_shell",
+          "surface": "code_shell_sessions_view",
+          "viewmodel": "ui/views/code_shell/sessions/sessions_viewmodel.js",
+          "deps": [
+            "services/facades/conversation_facade.js"
+          ],
+          "surfaceKey": "sessions"
+        },
+        {
+          "id": "code.conversation",
+          "shell": "code",
+          "comp": "CodeConversation",
+          "shellDir": "code_shell",
+          "surface": "code_shell_conversation_view",
+          "viewmodel": "ui/views/code_shell/conversation/conversation_viewmodel.js",
+          "deps": [
+            "services/facades/conversation_facade.js",
+            "services/facades/approvals_facade.js"
+          ],
+          "surfaceKey": "conversation"
+        }
+      ],
+      "flows": [
+        {
+          "id": "pairing",
+          "edges": [
+            {
+              "from": "pairing.scan",
+              "to": "pairing.connecting",
+              "trigger": "ticket scanned or entered"
+            },
+            {
+              "from": "pairing.connecting",
+              "to": "pairing.push_permission",
+              "trigger": "connected — first pair"
+            },
+            {
+              "from": "pairing.push_permission",
+              "to": "studio.session",
+              "trigger": "permission answered"
+            },
+            {
+              "from": "studio.session",
+              "to": "settings.home",
+              "trigger": "settings"
+            },
+            {
+              "from": "settings.home",
+              "to": "pairing.scan",
+              "trigger": "unpair"
+            },
+            {
+              "from": "approvals.list",
+              "to": "studio.session",
+              "trigger": "approval handled"
+            }
+          ]
+        },
+        {
+          "id": "code",
+          "edges": [
+            {
+              "from": "studio.session",
+              "to": "code.sessions",
+              "trigger": "code"
+            },
+            {
+              "from": "code.sessions",
+              "to": "code.conversation",
+              "trigger": "session tapped"
+            },
+            {
+              "from": "code.conversation",
+              "to": "code.sessions",
+              "trigger": "back"
+            },
+            {
+              "from": "code.conversation",
+              "to": "approvals.list",
+              "trigger": "all approvals"
+            },
+            {
+              "from": "approvals.list",
+              "to": "code.conversation",
+              "trigger": "approval handled in session"
+            }
+          ]
+        }
+      ],
+      "theme": {
+        "default": "terracotta",
+        "swatches": [
+          {
+            "name": "canvas"
+          },
+          {
+            "name": "ink"
+          },
+          {
+            "name": "terracotta"
+          },
+          {
+            "name": "charcoal"
+          },
+          {
+            "name": "connected"
+          },
+          {
+            "name": "blocked"
+          },
+          {
+            "name": "bubble"
+          }
+        ]
+      },
+      "fonts": {
+        "default": "ui-sans",
+        "families": [
+          {
+            "id": "ui-sans"
+          },
+          {
+            "id": "display-serif"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -7,8 +7,12 @@
 //     `--dsw-static-blue-*` and `--dsw-static-deepseek-*` palettes, which
 //     the bundle defines on `body` / `body[data-ds-dark-theme]` (NOT :root
 //     — a bare :root override is shadowed by inheritance). This stylesheet
-//     redefines both ramps to the default brand blue on the same selectors; appended to
-//     <head> after the bundle CSS, so it wins by source order.
+//     redefines both ramps on the same selectors, appended to <head> after
+//     the bundle CSS so it wins by source order. Since the palette
+//     personalisation (0.3.1) the DEFAULT it paints is Mystic Evening's
+//     SOLVED accent pair (dark #C56975 / light #BC757D — engine-solved,
+//     WCAG AA) — the legacy cyan is gone; theme-accent's inline palette
+//     paint beats this sheet the moment a choice exists.
 //  2. Wordmark: the sidebar brand button renders BrandWordmark — a single
 //     decorative aria-hidden SVG (dsh-client-ui-primitives). Hide the SVG,
 //     paint "arxa" via ::before. Class names are hash-prefixed
@@ -27,50 +31,51 @@ window.__ModuleLoader__.load({
 
     const MOSS = `
 body, body[data-ds-dark-theme] {
-  --dsw-static-blue-50: color-mix(in oklab, #0EBAE4 8%, white);
-  --dsw-static-blue-75: color-mix(in oklab, #0EBAE4 12%, white);
-  --dsw-static-blue-100: color-mix(in oklab, #0EBAE4 15%, white);
-  --dsw-static-blue-300: color-mix(in oklab, #0EBAE4 40%, white);
-  --dsw-static-blue-400: color-mix(in oklab, #0EBAE4 78%, white);
-  --dsw-static-blue-450: color-mix(in oklab, #0EBAE4 90%, white);
-  --dsw-static-blue-500: #0EBAE4;
-  --dsw-static-blue-600: color-mix(in oklab, #0EBAE4 72%, black);
-  --dsw-static-blue-800: color-mix(in oklab, #0EBAE4 42%, black);
-  --dsw-static-blue-900: color-mix(in oklab, #0EBAE4 30%, black);
-  --dsw-static-blue-950: color-mix(in oklab, #0EBAE4 24%, black);
-  --dsw-static-deepseek-50: color-mix(in oklab, #0EBAE4 8%, white);
-  --dsw-static-deepseek-100: color-mix(in oklab, #0EBAE4 15%, white);
-  --dsw-static-deepseek-200: color-mix(in oklab, #0EBAE4 24%, white);
-  --dsw-static-deepseek-300: color-mix(in oklab, #0EBAE4 40%, white);
-  --dsw-static-deepseek-400: color-mix(in oklab, #0EBAE4 78%, white);
-  --dsw-static-deepseek-450: color-mix(in oklab, #0EBAE4 90%, white);
-  --dsw-static-deepseek-500: #0EBAE4;
-  --dsw-static-deepseek-600: color-mix(in oklab, #0EBAE4 72%, black);
-  --dsw-static-deepseek-800: color-mix(in oklab, #0EBAE4 42%, black);
-  --dsw-static-deepseek-900: color-mix(in oklab, #0EBAE4 30%, black);
+  --dsw-static-blue-50: color-mix(in oklab, #C56975 8%, white);
+  --dsw-static-blue-50p: color-mix(in oklab, #C56975 9%, white);
+  --dsw-static-blue-75: color-mix(in oklab, #C56975 12%, white);
+  --dsw-static-blue-100: color-mix(in oklab, #C56975 15%, white);
+  --dsw-static-blue-300: color-mix(in oklab, #C56975 40%, white);
+  --dsw-static-blue-400: #BC757D;
+  --dsw-static-blue-450: color-mix(in oklab, #C56975 90%, white);
+  --dsw-static-blue-500: #C56975;
+  --dsw-static-blue-600: color-mix(in oklab, #C56975 72%, black);
+  --dsw-static-blue-800: color-mix(in oklab, #C56975 42%, black);
+  --dsw-static-blue-900: color-mix(in oklab, #C56975 30%, black);
+  --dsw-static-blue-950: color-mix(in oklab, #C56975 24%, black);
+  --dsw-static-deepseek-50: color-mix(in oklab, #C56975 8%, white);
+  --dsw-static-deepseek-100: color-mix(in oklab, #C56975 15%, white);
+  --dsw-static-deepseek-200: color-mix(in oklab, #C56975 24%, white);
+  --dsw-static-deepseek-300: color-mix(in oklab, #C56975 40%, white);
+  --dsw-static-deepseek-400: #BC757D;
+  --dsw-static-deepseek-450: color-mix(in oklab, #C56975 90%, white);
+  --dsw-static-deepseek-500: #C56975;
+  --dsw-static-deepseek-600: color-mix(in oklab, #C56975 72%, black);
+  --dsw-static-deepseek-800: color-mix(in oklab, #C56975 42%, black);
+  --dsw-static-deepseek-900: color-mix(in oklab, #C56975 30%, black);
   /* The page's ambient cast: every background alias resolves through the
      neutral-BLUISH ramp (bg-base in dark = bluish-1000 rgb(15,17,21)), which
      reads as a blue haze behind the hero text. Same values, cast flipped to
      moss — green is the max channel, luminance kept. */
-  --dsw-static-neutral-bluish-00: color-mix(in oklab, #0EBAE4 10%, rgb(254, 254, 254));
-  --dsw-static-neutral-bluish-50: color-mix(in oklab, #0EBAE4 10%, rgb(250, 250, 250));
-  --dsw-static-neutral-bluish-60: color-mix(in oklab, #0EBAE4 10%, rgb(245, 245, 245));
-  --dsw-static-neutral-bluish-75: color-mix(in oklab, #0EBAE4 10%, rgb(241, 241, 241));
-  --dsw-static-neutral-bluish-100: color-mix(in oklab, #0EBAE4 10%, rgb(238, 238, 238));
-  --dsw-static-neutral-bluish-150: color-mix(in oklab, #0EBAE4 10%, rgb(236, 236, 236));
-  --dsw-static-neutral-bluish-200: color-mix(in oklab, #0EBAE4 10%, rgb(230, 230, 230));
-  --dsw-static-neutral-bluish-300: color-mix(in oklab, #0EBAE4 10%, rgb(209, 209, 209));
-  --dsw-static-neutral-bluish-400: color-mix(in oklab, #0EBAE4 10%, rgb(177, 177, 177));
-  --dsw-static-neutral-bluish-500: color-mix(in oklab, #0EBAE4 10%, rgb(156, 156, 156));
-  --dsw-static-neutral-bluish-600: color-mix(in oklab, #0EBAE4 10%, rgb(132, 132, 132));
-  --dsw-static-neutral-bluish-700: color-mix(in oklab, #0EBAE4 10%, rgb(100, 100, 100));
-  --dsw-static-neutral-bluish-750: color-mix(in oklab, #0EBAE4 10%, rgb(68, 68, 68));
-  --dsw-static-neutral-bluish-800: color-mix(in oklab, #0EBAE4 10%, rgb(53, 53, 53));
-  --dsw-static-neutral-bluish-850: color-mix(in oklab, #0EBAE4 10%, rgb(44, 44, 44));
-  --dsw-static-neutral-bluish-875: color-mix(in oklab, #0EBAE4 10%, rgb(35, 35, 35));
-  --dsw-static-neutral-bluish-900: color-mix(in oklab, #0EBAE4 10%, rgb(27, 27, 27));
-  --dsw-static-neutral-bluish-950: color-mix(in oklab, #0EBAE4 10%, rgb(21, 21, 21));
-  --dsw-static-neutral-bluish-1000: color-mix(in oklab, #0EBAE4 10%, rgb(16, 16, 16));
+  --dsw-static-neutral-bluish-00: color-mix(in oklab, #C56975 10%, rgb(254, 254, 254));
+  --dsw-static-neutral-bluish-50: color-mix(in oklab, #C56975 10%, rgb(250, 250, 250));
+  --dsw-static-neutral-bluish-60: color-mix(in oklab, #C56975 10%, rgb(245, 245, 245));
+  --dsw-static-neutral-bluish-75: color-mix(in oklab, #C56975 10%, rgb(241, 241, 241));
+  --dsw-static-neutral-bluish-100: color-mix(in oklab, #C56975 10%, rgb(238, 238, 238));
+  --dsw-static-neutral-bluish-150: color-mix(in oklab, #C56975 10%, rgb(236, 236, 236));
+  --dsw-static-neutral-bluish-200: color-mix(in oklab, #C56975 10%, rgb(230, 230, 230));
+  --dsw-static-neutral-bluish-300: color-mix(in oklab, #C56975 10%, rgb(209, 209, 209));
+  --dsw-static-neutral-bluish-400: color-mix(in oklab, #C56975 10%, rgb(177, 177, 177));
+  --dsw-static-neutral-bluish-500: color-mix(in oklab, #C56975 10%, rgb(156, 156, 156));
+  --dsw-static-neutral-bluish-600: color-mix(in oklab, #C56975 10%, rgb(132, 132, 132));
+  --dsw-static-neutral-bluish-700: color-mix(in oklab, #C56975 10%, rgb(100, 100, 100));
+  --dsw-static-neutral-bluish-750: color-mix(in oklab, #C56975 10%, rgb(68, 68, 68));
+  --dsw-static-neutral-bluish-800: color-mix(in oklab, #C56975 10%, rgb(53, 53, 53));
+  --dsw-static-neutral-bluish-850: color-mix(in oklab, #C56975 10%, rgb(44, 44, 44));
+  --dsw-static-neutral-bluish-875: color-mix(in oklab, #C56975 10%, rgb(35, 35, 35));
+  --dsw-static-neutral-bluish-900: color-mix(in oklab, #C56975 10%, rgb(27, 27, 27));
+  --dsw-static-neutral-bluish-950: color-mix(in oklab, #C56975 10%, rgb(21, 21, 21));
+  --dsw-static-neutral-bluish-1000: color-mix(in oklab, #C56975 10%, rgb(16, 16, 16));
 }
 /* dsh 0.1.1-rc.2 restructured the sidebar brand button from ONE element
    holding a single SVG into FOUR nested ones:
@@ -106,9 +111,15 @@ body, body[data-ds-dark-theme] {
      margin-left stacked on top of it (6px gap + 6.72px margin = ~13px) and
      read as a broken word space. rc.7 painted these into an inline box where
      no gap applied, which is why the margin was needed then and is wrong now. */
-  color: var(--dsw-static-deepseek-400, color-mix(in oklab, #0EBAE4 78%, white));
+  color: var(--dsw-static-deepseek-400, #BC757D);
 }
 [class*="_previewBadge"] { display: none !important; }
+/* The last stale cyan: native focus rings default to the platform blue
+   (the settings modal autofocuses its X — every shot showed it). Tint them
+   to the accent; the business-primary alias is contrast-SOLVED for exactly
+   this non-text use (SC 1.4.11 rings/marks, one of the palette contract's
+   eight pairs). Color only — width/offset stay native. */
+:focus-visible { outline-color: var(--dsw-alias-state-business-primary); }
 /* Hero lockup: the fishHitbox span wraps the brand.mark slot (FishLogo
    fallback). Hide the fallback svg and paint the arxa glyph in its place —
    the same accent-tinted mask treatment as the sidebar marks, so it follows
@@ -118,26 +129,49 @@ body, body[data-ds-dark-theme] {
   content: "";
   display: block;
   width: 30px; height: 30px;
-  background: var(--dsw-static-deepseek-450, #0EBAE4);
+  background: var(--dsw-static-deepseek-450, #C56975);
   -webkit-mask: var(--arxa-brand-mark-white) center / contain no-repeat;
           mask: var(--arxa-brand-mark-white) center / contain no-repeat;
 }
 /* HeroGlow: the blurred backdrop ellipse behind the composer is a hardcoded
    figma blue (#6187D8 @ .08) on the SVG, not a token. CSS fill beats the
    presentation attribute. Same for the reference chips' #6187d838 wash. */
-[class*="_heroGlow"] ellipse { fill: var(--dsw-static-deepseek-450, #0EBAE4); }
-[class*="_refChip"] { background: color-mix(in srgb, var(--dsw-static-deepseek-450, #0EBAE4) 22%, transparent) !important; }
+[class*="_heroGlow"] ellipse { fill: var(--dsw-static-deepseek-450, #C56975); }
+[class*="_refChip"] { background: color-mix(in srgb, var(--dsw-static-deepseek-450, #C56975) 22%, transparent) !important; }
 `
 
     // Real brand mark (desktop/arxa-brand-logo.svg), inlined so the tab icon
-    // matches the app icon and the waiting page.
-    const FAVICON = 'data:image/svg+xml,' + encodeURIComponent(
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none">'
-      + '<path d="M391.437 195.736C445.636 104.088 578.25 104.088 632.448 195.736L922.178 685.662C977.368 778.988 910.095 896.926 801.672 896.926H222.214C113.791 896.926 46.518 778.988 101.708 685.662L391.437 195.736Z" fill="url(#g)"/>'
-      + '<path d="M381.907 718.494L314.406 832.413H272.492C208.932 832.413 165.181 775.677 173.312 718.491L381.907 718.494ZM850.647 718.502C858.771 775.684 815.022 832.413 751.466 832.413H439.174L506.675 718.496L850.647 718.502ZM797.076 613.222L569.057 613.218L683.065 420.814L797.076 613.222ZM425.948 277.272C464.679 211.908 559.279 211.907 598.01 277.271L620.681 315.531L444.29 613.215L226.887 613.212L425.948 277.272Z" fill="#0EE4E0"/>'
-      + '<defs><linearGradient id="g" x1="511.943" y1="127" x2="511.943" y2="896.926" gradientUnits="userSpaceOnUse">'
-      + '<stop stop-color="#0EBAE4"/><stop offset="1" stop-color="#08336F"/>'
-      + '</linearGradient></defs></svg>')
+    // matches the app. Palette-fed (the remnant sweep, 2026-09-11): rebuilt
+    // from the LIVE painted ramp — theme-accent sets the stops inline on
+    // <body>, so top=500, bottom=800, glyph=400 speak the app's own accent
+    // language. Defaults = Mystic Evening SOLVED (engine-verified).
+    // ponytail: same-tab picks refresh on tab refocus / next storage event,
+    // not instantly — good enough for a tab icon.
+    const FAVICON_DEFAULTS = ['#C56975', '#391A1E', '#BC757D'] // top, bottom, glyph
+    function faviconSvg(top, bottom, glyph) {
+      return 'data:image/svg+xml,' + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none">'
+        + '<path d="M391.437 195.736C445.636 104.088 578.25 104.088 632.448 195.736L922.178 685.662C977.368 778.988 910.095 896.926 801.672 896.926H222.214C113.791 896.926 46.518 778.988 101.708 685.662L391.437 195.736Z" fill="url(#g)"/>'
+        + '<path d="M381.907 718.494L314.406 832.413H272.492C208.932 832.413 165.181 775.677 173.312 718.491L381.907 718.494ZM850.647 718.502C858.771 775.684 815.022 832.413 751.466 832.413H439.174L506.675 718.496L850.647 718.502ZM797.076 613.222L569.057 613.218L683.065 420.814L797.076 613.222ZM425.948 277.272C464.679 211.908 559.279 211.907 598.01 277.271L620.681 315.531L444.29 613.215L226.887 613.212L425.948 277.272Z" fill="' + glyph + '"/>'
+        + '<defs><linearGradient id="g" x1="511.943" y1="127" x2="511.943" y2="896.926" gradientUnits="userSpaceOnUse">'
+        + '<stop stop-color="' + top + '"/><stop offset="1" stop-color="' + bottom + '"/>'
+        + '</linearGradient></defs></svg>')
+    }
+    // The 500 stop is always a PLAIN hex (paintRamps and the MOSS default
+    // both set it so), read straight off the computed style; the derived
+    // stops are COMPUTED with the ONE engine (import — same module the
+    // host serves) using the ramp's own formulas (400 = 78% white,
+    // 800 = 42% black over the 500 anchor). A CSSOM var() probe does NOT
+    // substitute in WKWebView-class engines (lens-proven), so probing is
+    // out; these formulas are exactly what the ramp paints.
+    function refreshFavicon(icon) {
+      const cs = getComputedStyle(document.body)
+      const top = (cs.getPropertyValue('--dsw-static-deepseek-500').trim().match(/^#[0-9a-fA-F]{6}$/) || [])[0] || FAVICON_DEFAULTS[0]
+      icon.href = faviconSvg(top, FAVICON_DEFAULTS[1], FAVICON_DEFAULTS[2])
+      import('/__arxa/theme-accent/contrast.js').then((E) => {
+        icon.href = faviconSvg(top, E.mixOklab(top, 42, '#000000'), E.mixOklab(top, 78, '#FFFFFF'))
+      }).catch(() => { /* engine unreachable — the defaults stay */ })
+    }
 
     // Monochrome variant for the collapsed rail: glyph path only, solid
     // white — the badge fill would read as a blank triangle at rail size.
@@ -158,7 +192,7 @@ body, body[data-ds-dark-theme] {
         className: 'arxa-brand-slot-mark',
         style: {
           display: 'inline-block', width: size, height: size, flex: '0 0 auto',
-          background: 'var(--dsw-static-deepseek-450, #0EBAE4)',
+          background: 'var(--dsw-static-deepseek-450, #C56975)',
           WebkitMask: 'var(--arxa-brand-mark-white) center / contain no-repeat',
           mask: 'var(--arxa-brand-mark-white) center / contain no-repeat',
         },
@@ -167,7 +201,7 @@ body, body[data-ds-dark-theme] {
     function ArxaBrandName () {
       return h('span', { className: 'arxa-brand-slot-name', style: { display: 'inline-flex', gap: 6, alignItems: 'baseline' } },
         h('span', { style: { font: '700 21px/1 ui-sans-serif, system-ui, sans-serif', letterSpacing: '0.03em', color: 'var(--dsw-alias-label-primary, #e8e8e8)' } }, 'arxa'),
-        h('span', { style: { font: '400 21px/1 ui-sans-serif, system-ui, sans-serif', letterSpacing: '0.03em', color: 'var(--dsw-static-deepseek-400, color-mix(in oklab, #0EBAE4 78%, white))' } }, 'studio'))
+        h('span', { style: { font: '400 21px/1 ui-sans-serif, system-ui, sans-serif', letterSpacing: '0.03em', color: 'var(--dsw-static-deepseek-400, #BC757D)' } }, 'studio'))
     }
 
     function apply(ctx) {
@@ -207,7 +241,16 @@ body, body[data-ds-dark-theme] {
         document.head.appendChild(icon)
       }
       icon.type = 'image/svg+xml'
-      icon.href = FAVICON
+      // Palette-following favicon: refresh when another tab picks (storage)
+      // and on refocus (covers same-tab picks made while hidden).
+      const refreshIcon = () => refreshFavicon(icon)
+      refreshIcon()
+      window.addEventListener('storage', (e) => {
+        if (e.key === 'arxa.themePalette') refreshIcon()
+      })
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) refreshIcon()
+      })
 
       // Hero headline ("Into the Unknown") comes from a locale dictionary
       // whose namespace+locale is already registered — register() throws on
