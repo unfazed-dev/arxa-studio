@@ -1035,6 +1035,85 @@ try {
   }
 
 
+  // ---- D115 closeout (2026-09-12): explicit repo repair for repo-less projects
+  // A hand-created project (valid project.json, no .git) refused sessions with
+  // the org-snapshot wording and NOTHING ever attached a repo — initProjectRepo
+  // ran only from newProject. prepareProjectRepo is the explicit door (ruling 2:
+  // offer, never silently attach while opening or starting a session).
+  console.log('prepareProjectRepo (D115 closeout):')
+  {
+    const rRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-repo-repair-'))
+    const env = { ...process.env, ARXA_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-home-repair-')) }
+    try {
+      const svcR = createOrgLifecycle({ workspaceRoot: rRoot, env })
+      const orgR = svcR.createOrg('Repair Org')
+      await svcR.openOrg(orgR.path)
+      // hand-made project: valid project.json, user content, a check.sh the
+      // operator wrote themselves (must survive byte-identical), NO .git.
+      const projR = path.join(orgR.path, 'projects', 'handmade')
+      fs.mkdirSync(path.join(projR, '01-intake', 'application'), { recursive: true })
+      fs.writeFileSync(path.join(projR, 'project.json'), JSON.stringify({ id: 'handmade-1', name: 'Handmade', createdAt: new Date().toISOString() }, null, 2) + '\n')
+      fs.writeFileSync(path.join(projR, 'README.md'), 'user content\n')
+      fs.writeFileSync(path.join(projR, 'check.sh'), '#!/bin/sh\n# my own probe\nexit 0\n')
+      const readmeBefore = fs.readFileSync(path.join(projR, 'README.md'))
+      const checkBefore = fs.readFileSync(path.join(projR, 'check.sh'))
+      // a second repo-less project stays untouched (the tree face's false case)
+      const projB = path.join(orgR.path, 'projects', 'barebones')
+      fs.mkdirSync(projB, { recursive: true })
+      fs.writeFileSync(path.join(projB, 'project.json'), JSON.stringify({ id: 'barebones-1', name: 'Barebones' }, null, 2) + '\n')
+      // local-only org (D91): the repair must inherit the answer
+      const omPath = path.join(orgR.path, 'org.json')
+      const omR = JSON.parse(fs.readFileSync(omPath, 'utf8'))
+      omR.localOnly = true
+      fs.writeFileSync(omPath, JSON.stringify(omR, null, 2) + '\n')
+      // before repair: the tree face tells the client which projects lack a repo
+      const treeBefore = svcR.orgTree(orgR.path)
+      ok(treeBefore.projects.find((p) => p.slug === 'handmade')?.hasRepo === false, 'repair: the tree face reports the hand-made project repo-less')
+
+      ok(typeof svcR.current.prepareProjectRepo === 'function', 'repair: prepareProjectRepo exists on the open lifecycle')
+      const out = await svcR.current.prepareProjectRepo('handmade')
+      ok(out?.ok === true && out.repoPath === projR && out.head === true, 'repair: answers { ok, repoPath, head }')
+      ok(runGit(['symbolic-ref', '--short', 'HEAD'], { cwd: projR, env }).trim() === 'main', 'repair: branch is main')
+      ok(runGit(['rev-list', '--count', 'HEAD'], { cwd: projR, env }).trim() === '1', 'repair: exactly one initial commit')
+      const treeFiles = runGit(['ls-tree', '-r', '--name-only', 'HEAD'], { cwd: projR, env })
+      ok(treeFiles.includes('README.md') && treeFiles.includes('project.json') && treeFiles.includes('check.sh')
+        && treeFiles.includes('.github/pull_request_template.md'),
+        'repair: existing contents + missing frame + manifest land in the ONE commit')
+      ok(Array.isArray(out.frame?.written) && out.frame.written.includes('.github/pull_request_template.md') && out.frame.kept.includes('check.sh'),
+        'repair: the frame result reports written vs kept (missing created, custom kept)')
+      ok(fs.readFileSync(path.join(projR, 'README.md')).equals(readmeBefore), 'repair: user file byte-identical after repair')
+      ok(fs.readFileSync(path.join(projR, 'check.sh')).equals(checkBefore), 'repair: a human-customized frame file is never overwritten')
+      const pjCommitted = JSON.parse(runGit(['show', 'HEAD:project.json'], { cwd: projR, env }))
+      ok(pjCommitted.localOnly === true, 'repair: localOnly inherited from the org and committed (D91)')
+
+      // existing usable repo = idempotent no-op
+      const headBefore = runGit(['rev-parse', 'HEAD'], { cwd: projR, env })
+      const again = await svcR.current.prepareProjectRepo('handmade')
+      ok(again?.ok === true && again.head === true && again.frame === null, 'repair: an existing repo is an idempotent no-op (frame null)')
+      ok(runGit(['rev-parse', 'HEAD'], { cwd: projR, env }) === headBefore, 'repair: the no-op adds no commit')
+
+      // refusals: unknown slug, empty slug, symlinked project folder
+      await throwsAsync(() => svcR.current.prepareProjectRepo('nope'),
+        (e) => assert.ok(String(e.message).startsWith('unknown-project')), 'repair: an unknown project refuses')
+      await throwsAsync(() => svcR.current.prepareProjectRepo(''),
+        (e) => assert.ok(String(e.message).startsWith('unknown-project')), 'repair: an empty slug refuses')
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-repair-outside-'))
+      fs.writeFileSync(path.join(outside, 'project.json'), JSON.stringify({ id: 'sneaky-1', name: 'Sneaky' }))
+      fs.symlinkSync(outside, path.join(orgR.path, 'projects', 'sneaky'))
+      await throwsAsync(() => svcR.current.prepareProjectRepo('sneaky'),
+        (e) => assert.ok(String(e.message).startsWith('unknown-project')), 'repair: a symlinked project refuses (never scanned, never attached)')
+
+      // after repair: the tree face reports a repo; the untouched one still does not
+      const treeAfter = svcR.orgTree(orgR.path)
+      ok(treeAfter.projects.find((p) => p.slug === 'handmade')?.hasRepo === true, 'repair: the tree face reports the repaired project as a repo')
+      ok(treeAfter.projects.find((p) => p.slug === 'barebones')?.hasRepo === false, 'repair: the untouched project stays repo-less')
+      ok(!fs.existsSync(path.join(projB, '.git')), 'repair: the untouched project gained no .git (no silent attach)')
+      svcR.closeOrg()
+    } finally {
+      fs.rmSync(rRoot, { recursive: true, force: true })
+    }
+  }
+
   // D94 (2026-09-01): the sidebar tree lists every dot-entry except the
   // two internal state dirs — generated files (.github/, .gitignore) must
   // be visible in the sidebar, not only on GitHub. Source-pinned here

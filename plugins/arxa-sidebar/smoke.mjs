@@ -11,7 +11,7 @@
  *   for BOTH orgs read-only → trash surface + restore / restore-all.
  * Exit 0 = every assertion held.
  */
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -333,6 +333,50 @@ s = await state()
 check('rows-c: trash empty after restore-all', s.trash.length === 0 && s.trashCount === 0, JSON.stringify(s.trash))
 r = await act('workspace.new-session', { orgId: rc.id })
 check('rows-c: missing workspace is loud', r.ok === false && r.error === 'workspace-required', JSON.stringify(r))
+
+// ---------------------------------------------------------------------------
+// D115 closeout (2026-09-12): the repo-less project flow, repaired. A
+// hand-created project (project.json, no .git) refuses sessions with the
+// org-snapshot wording; project.repair-repo attaches the repo with ONE
+// initial commit, and the retried create's branch + worktree belong to the
+// PROJECT repo. Ruling 2: the repair is EXPLICIT — nothing attaches before
+// the action is called.
+{
+  r = await act('org.create', { name: 'Repo Repair Co', link: false })
+  check('repair: org created', r.ok === true, r.error)
+  s = await state()
+  const rr = s.orgs.find((o) => o.name === 'Repo Repair Co')
+  check('repair: org open', !!rr && rr.open === true, JSON.stringify(s.orgs.map((o) => o.name)))
+  const hm = path.join(rr.path, 'projects', 'handmade')
+  mkdirSync(path.join(hm, '01-intake', 'application'), { recursive: true })
+  writeFileSync(path.join(hm, 'project.json'), JSON.stringify({ id: 'hm-1', name: 'Handmade' }, null, 2) + '\n')
+  writeFileSync(path.join(hm, 'notes.md'), 'hand content\n')
+  s = await state()
+  const treeHm = ((s.orgs.find((o) => o.id === rr.id) || {}).tree?.projects || []).find((p) => p.slug === 'handmade')
+  check('repair: the tree face serves the repo-less project (hasRepo false)', !!treeHm && treeHm.hasRepo === false, JSON.stringify(treeHm))
+  r = await act('workspace.new-session', { orgId: rr.id, workspace: 'projects/handmade/01-intake/application' })
+  check('repair: the repo-less project refuses with initial-snapshot-pending',
+    r.ok === false && String(r.error).startsWith('initial-snapshot-pending'), JSON.stringify(r))
+  r = await act('project.repair-repo', { orgId: rr.id, projectSlug: 'handmade' })
+  check('repair: project.repair-repo ok (repo attached, HEAD landed)',
+    r.ok === true && r.result?.head === true && gitws.hasHead(hm) === true, JSON.stringify(r))
+  check('repair: exactly one initial commit, on main',
+    gitws.runGit(['rev-list', '--count', 'HEAD'], { cwd: hm }).trim() === '1'
+    && gitws.runGit(['symbolic-ref', '--short', 'HEAD'], { cwd: hm }).trim() === 'main')
+  check('repair: localOnly inherited from the local-only org (D91) and committed',
+    gitws.runGit(['show', 'HEAD:project.json'], { cwd: hm }).includes('"localOnly": true'))
+  r = await act('workspace.new-session', { orgId: rr.id, workspace: 'projects/handmade/01-intake/application' })
+  check('repair: the retried create succeeds for the project',
+    r.ok === true && r.result?.project === 'handmade', JSON.stringify(r))
+  check('repair: the session branch AND worktree belong to the project repo',
+    r.ok === true
+    && r.result.branch === 'arxa/' + r.result.id
+    && gitws.runGit(['rev-parse', '--verify', r.result.branch], { cwd: hm, allowFail: true }) !== null
+    && r.result.worktree.endsWith('/.arxa/worktrees/' + r.result.id),
+    JSON.stringify(r.result))
+  check('repair: the user file rides the initial commit',
+    gitws.runGit(['show', 'HEAD:notes.md'], { cwd: hm }).trim() === 'hand content')
+}
 
 // ---- github gate (org-model-v2 W3: D69 gate half) — fake github above
 r = await act('github.status', {})

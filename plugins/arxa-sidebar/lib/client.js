@@ -2166,7 +2166,7 @@ window.__ModuleLoader__.load({
 									})
 								]
 							}, group.key);
-						}), ARXA_ARCHIVES_AFTER_ORGS(), ARXA_TRASH_AFTER_ORGS()]
+						}), ARXA_REPO_REPAIR_AFTER_ORGS(), ARXA_ARCHIVES_AFTER_ORGS(), ARXA_TRASH_AFTER_ORGS()]
 					}),
 					(0, react_jsx_runtime.jsx)("span", { className: WorkspaceBrowser_module_css_default.fade })
 				]
@@ -3283,6 +3283,10 @@ window.__ModuleLoader__.load({
 					};
 				},
 				refresh,
+				/** D115 closeout: public emit — the repo-repair offer arms OUTSIDE a
+				* store method (a refused create), so it needs the same re-render
+				* poke every state change gets. No payload, never a state writer. */
+				emit,
 				mutate(action, arg) {
 					if (action === "session.open" && arg && typeof arg.sessionId === "string") {
 						cancelFreestyleOpen();
@@ -4341,6 +4345,12 @@ window.__ModuleLoader__.load({
 				+ ".aXa_emptyChip{background:none;border:0;padding:2px 6px;border-radius:6px;font:inherit;font-size:12px;line-height:18px;color:var(--dsw-alias-label-caption);cursor:pointer;white-space:nowrap}"
 				+ ".aXa_emptyChip:hover{color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-bg-layer-2)}"
 				+ ".aXa_agentWrap{position:relative;display:inline-flex}"
+				/* D115 closeout: the repo-repair offer row (tree tail). Same
+				 * notice grammar as the shell ctaNotice — error token, layer-1
+				 * surface — with the action button pushed to the right edge. */
+				+ ".aXa_repoRepair{display:flex;align-items:center;gap:8px;margin:-2px 2px 8px;padding:5px 8px;border-radius:8px;border:1px solid var(--dsw-alias-state-error-primary);color:var(--dsw-alias-state-error-primary);background:var(--dsw-alias-bg-layer-1);font-size:11.5px;line-height:15px}"
+				+ ".aXa_repoRepair>span{flex:1;min-width:0;word-break:break-word}"
+				+ ".aXa_repoRepair>button{flex:none;margin:0}"
 				+ ".aXa_agentChip[aria-expanded=true]{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-2)}"
 				+ ".aXa_agentMenu{position:absolute;top:100%;right:0;z-index:40;min-width:260px;display:flex;flex-direction:column;gap:2px;margin-top:4px;padding:4px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);box-shadow:0 8px 24px rgba(0,0,0,.18)}"
 				+ ".aXa_agentRow{display:flex;align-items:center;gap:6px;padding:3px 6px;border-radius:6px;font-size:12px;line-height:18px;white-space:nowrap}"
@@ -4522,6 +4532,75 @@ window.__ModuleLoader__.load({
 		 * the terminal tier), and the destructive door stays the last row.
 		 * Same grouped-mode-only rule as the trash. */
 		const ARXA_ARCHIVES_AFTER_ORGS = () => orgT ? (0, react_jsx_runtime.jsx)(ArchivesSection, { t: orgT, key: "arxa-archives" }) : null;
+		/** D115 closeout (2026-09-12): the EXPLICIT repo-repair offer. A
+		 * hand-created project (project.json, no .git) refuses sessions with
+		 * the org-snapshot wording and nothing ever attached a repo. The
+		 * offer renders in the tree tail whenever the SELECTED row routes
+		 * into a repo-less project (the tree face carries hasRepo) or a
+		 * session create was just refused for one — "Initialize Git
+		 * repository" per ruling 2; never a silent attach on open or create.
+		 * A successful repair retries the refused create exactly once; the
+		 * retry's own failure only notices (never re-arms — no loop). */
+		let arxaRepoRepairRetry = null; // { orgId, workspace } — the refused create
+		const ARXA_REPO_REPAIR_AFTER_ORGS = () => {
+			if (!orgT) return null;
+			const s = orgStore.get();
+			// armed by a refused create (covers a repo with no HEAD too)
+			let target = null;
+			if (arxaRepoRepairRetry) {
+				const slug = String(arxaRepoRepairRetry.workspace || "").split("/")[1];
+				const o = (s.orgs || []).find((x) => x && x.id === arxaRepoRepairRetry.orgId);
+				const p = o && slug ? ((o.tree && o.tree.projects) || []).find((q) => q.slug === slug) : null;
+				if (p) target = { orgId: arxaRepoRepairRetry.orgId, projectSlug: slug, retry: arxaRepoRepairRetry.workspace };
+			}
+			// otherwise: the selected row routes into a repo-less project
+			if (!target) {
+				const sel = s.selectedRowId;
+				if (sel && typeof sel.rowId === "string" && sel.rowId.indexOf("projects/") === 0) {
+					const slug = sel.rowId.split("/")[1];
+					const o = (s.orgs || []).find((x) => x && x.id === sel.orgId);
+					const p = o ? ((o.tree && o.tree.projects) || []).find((q) => q.slug === slug) : null;
+					if (p && p.hasRepo === false) target = { orgId: sel.orgId, projectSlug: slug };
+				}
+			}
+			if (!target) return null;
+			const run = () => {
+				const retryWs = target.retry;
+				const retryOrg = target.orgId;
+				orgStore.mutate("project.repair-repo", { orgId: retryOrg, projectSlug: target.projectSlug }).then(() => {
+					arxaRepoRepairRetry = null;
+					if (!retryWs) return;
+					// retry the refused create EXACTLY once — a second refusal
+					// lands in the notice, never back here (no repair loop)
+					return orgStore.mutate("workspace.new-session", { orgId: retryOrg, workspace: retryWs }).then((row) => {
+						if (!row || typeof row.id !== "string") return;
+						return orgStore.mutate("session.open", { orgId: retryOrg, sessionId: row.id }).then(() => { try { orgStore.revealSession(row.id) } catch { /* presentation */ } return arxaOpenConversation(row.id); });
+					});
+				}).catch((e) => { window.dispatchEvent(new CustomEvent("arxa-sidebar-notice", { detail: { code: String((e && e.message) || e || "unknown") } })); });
+			};
+			return (0, react_jsx_runtime.jsxs)("div", {
+				key: "arxa-repo-repair",
+				className: "aXa_repoRepair",
+				"data-arxa-repo-repair": target.projectSlug,
+				children: [
+					(0, react_jsx_runtime.jsx)("span", { children: orgT("newSession.repoNeeded") }),
+					(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, { variant: "outline", onClick: run, children: orgT("newSession.initRepo") })
+				]
+			});
+		};
+		/** The row-+ create's failure hand-off (gen splice): D111 made the
+		 * SHELL door's refusal visible; this gives the row door the same —
+		 * the message rides the shared notice event, and an
+		 * initial-snapshot-pending refusal for a projects/ workspace arms the
+		 * repair offer above with the exact create to retry once. */
+		const ARXA_WS_CREATE_FAILED = (err, orgId, workspace) => {
+			const msg = String((err && err.message) || err || "unknown");
+			window.dispatchEvent(new CustomEvent("arxa-sidebar-notice", { detail: { code: msg } }));
+			if (msg.indexOf("initial-snapshot-pending") === 0 && String(workspace || "").indexOf("projects/") === 0) {
+				arxaRepoRepairRetry = { orgId, workspace };
+				try { orgStore.emit() } catch { /* tree re-renders on the next poll */ }
+			}
+		};
 		/** T4 v2: the separate tail Files section is GONE (user direction —
 		 * files belong inside the tree under the owning row). ArxaDirRows +
 		 * ARXA_LEAF_FILES render inline instead; the tree-read route and the
@@ -6402,6 +6481,8 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			"newSession.needsTrack": "Pick the application or website inside this stage — sessions belong to one of them",
 			"files.openHint": "Open this organisation to browse its files",
 			"newSession.snapshotPending": "Preparing git snapshot — sessions unlock when it lands",
+			"newSession.repoNeeded": "This project has no git repository — sessions branch from its first snapshot.",
+			"newSession.initRepo": "Initialize Git repository",
 			"tree.dock.projects": "Projects",
 			"agents.jobs.empty": "No background jobs",
 			"agents.jobs.emptyHint": "Background jobs appear here once one is started. Open the panel for details.",
@@ -6685,6 +6766,8 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			"newSession.needsTrack": "Wybierz aplikację lub witrynę w tym etapie — sesje należą do jednej z nich",
 			"files.openHint": "Otwórz tę organizację, aby przeglądać jej pliki",
 			"newSession.snapshotPending": "Przygotowywanie migawki git — sesje odblokują się, gdy będzie gotowa",
+			"newSession.repoNeeded": "Ten projekt nie ma repozytorium git — sesje rozgałęziają się od jego pierwszej migawki.",
+			"newSession.initRepo": "Zainicjuj repozytorium Git",
 			"tree.dock.projects": "Projekty",
 			"agents.jobs.empty": "Brak zadań w tle",
 			"agents.jobs.emptyHint": "Zadania w tle pojawią się tutaj po uruchomieniu. Otwórz panel, aby zobaczyć szczegóły.",
@@ -6968,6 +7051,8 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 			"newSession.needsTrack": "Choisissez l’application ou le site web dans cette étape — une session appartient à l’un des deux",
 			"files.openHint": "Ouvrez cette organisation pour parcourir ses fichiers",
 			"newSession.snapshotPending": "Préparation de l’instantané git — les sessions se débloqueront quand il sera prêt",
+			"newSession.repoNeeded": "Ce projet n’a pas de dépôt git — les sessions se branchent sur son premier instantané.",
+			"newSession.initRepo": "Initialiser le dépôt Git",
 			"tree.dock.projects": "Projets",
 			"agents.jobs.empty": "Aucune tâche en arrière-plan",
 			"agents.jobs.emptyHint": "Les tâches en arrière-plan apparaîtront ici une fois lancées. Ouvrez le panneau pour les détails.",
@@ -7985,10 +8070,14 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 					// alone left the composer dead — the row landed in the tree but the
 					// conversation never opened until a second, manual open. Same chain
 					// as the `open` lever below: session.open → reveal → conversation focus.
+					// D115 closeout: a refusal is no longer swallowed — it rides the notice
+					// event (D111 grammar) and, for initial-snapshot-pending under a
+					// project, arms the tree-tail "Initialize Git repository" offer with
+					// the exact create to retry once after repair.
 					if (i > 0 && i < s.length - 1) orgStore.mutate("workspace.new-session", { orgId: s.slice(0, i), workspace: s.slice(i + 1) }).then((row) => {
 						if (!row || typeof row.id !== "string") return;
 						return orgStore.mutate("session.open", { orgId: s.slice(0, i), sessionId: row.id }).then(() => { try { orgStore.revealSession(row.id) } catch { /* presentation */ } return arxaOpenConversation(row.id); });
-					}).catch(() => {});
+					}).catch((e) => ARXA_WS_CREATE_FAILED(e, s.slice(0, i), s.slice(i + 1)));
 				},
 				open: (sessionId) => {
 					const orgId = orgOfSession(sessionId);

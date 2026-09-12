@@ -1167,6 +1167,69 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           if (!hit) throw new Error('unknown-project: ' + projectSlug)
           return softDelete(resolved, hit.path, { env })
         },
+        /** D115 closeout (2026-09-12): EXPLICIT repo repair for a
+        * hand-created project — a folder with a valid project.json but no
+        * .git. Sessions route to the PROJECT repo (D98/D99) and refuse with
+        * the org-snapshot wording, and until now nothing ever attached one
+        * (initProjectRepo ran only from newProject). Program ruling 2: this
+        * is the offered door ("Initialize Git repository" in the notice
+        * surface) — never a silent attach on open or session start.
+        *
+        * One call, one initial commit: the inherited localOnly answer, the
+        * missing frame files, and the existing contents land TOGETHER, so
+        * the tree a session branches from is born whole. An existing repo
+        * is an idempotent no-op.
+        *
+        * @returns {{ ok: true, repoPath: string, head: boolean, frame: object|null }} */
+        async prepareProjectRepo(projectSlug) {
+          const slug = typeof projectSlug === 'string' ? projectSlug.trim() : ''
+          // Only a SCANNED project of THIS open org resolves — the same
+          // lookup trashProject uses (project.json present, orgId bound).
+          const hit = slug === '' ? null : [...scanWorkspace(resolved).projects.values()]
+            .find((p) => p.orgId === opened.manifest.id && p.slug === slug)
+          if (!hit) throw new Error('unknown-project: ' + slug)
+          const repoPath = path.resolve(hit.path)
+          // Root confinement + path identity (same constraint class the
+          // routing layer enforces): resolve and realpath before mutation,
+          // refuse reserved state dirs and anything that is or escapes
+          // through a symlink. The scan only yields real subdirectories of
+          // projects/, so these are belt-and-braces — cheap, and they hold
+          // the line if the scan's rules ever loosen.
+          const base = path.basename(repoPath)
+          if (base === '.git' || base === '.arxa') {
+            throw new Error('repo-repair-refused: ' + slug + ' is a reserved state directory')
+          }
+          try {
+            if (fs.lstatSync(repoPath).isSymbolicLink()) {
+              throw new Error('repo-repair-refused: ' + slug + ' is a symlink')
+            }
+            const orgReal = fs.realpathSync(resolved)
+            const real = fs.realpathSync(repoPath)
+            if (!real.startsWith(orgReal + path.sep)) {
+              throw new Error('repo-repair-refused: ' + slug + ' escapes the organisation through a symlink')
+            }
+          } catch (err) {
+            if (String(err?.message ?? err).startsWith('repo-repair-refused')) throw err
+            throw new Error('repo-repair-refused: ' + slug + ' is not reachable')
+          }
+          // Existing usable repo → no-op (repair is for the repo-less only).
+          if (isRepo(repoPath, env)) {
+            return { ok: true, repoPath, head: hasHead(repoPath, env), frame: null }
+          }
+          // D91 inheritance rides the SAME single commit: annotate before
+          // init so the local-only answer is part of the first snapshot.
+          try {
+            if (Boolean(readManifest(orgManifestPath(resolved)).localOnly)) {
+              annotateProjectManifest(repoPath, { localOnly: true })
+            }
+          } catch { /* unreadable org manifest — inherit the connected default */ }
+          // Missing frame files ONLY (writeFrameFiles never clobbers a
+          // human edit), then ONE initProjectRepo so the existing contents
+          // and the fresh frame land in a single initial commit.
+          const frame = writeFrameFiles(repoPath, 'project')
+          initProjectRepo(repoPath, env)
+          return { ok: true, repoPath, head: hasHead(repoPath, env), frame }
+        },
         /** Initial-snapshot face (2025-08 create-org hang): true until the
         * detached first git snapshot lands HEAD. The rows client disables
         * session creation and says why while this is true. */
@@ -2262,6 +2325,10 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
         id, name, slug, path: projectPath,
         // D90: per-project GitHub connection state for menus + markers.
         connected: (() => { try { return !!readManifest(projectManifestPath(projectPath)).repoUrl } catch { return false } })(),
+        // D115 closeout: repo presence per project — the client offers the
+        // explicit "Initialize Git repository" repair for a hand-created
+        // project (false) and never for one that already has a repo.
+        hasRepo: isRepo(projectPath, env),
         containers: [...template.projectContainers],
       }))
     let sessionsByWorkspace = null

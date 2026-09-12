@@ -170,6 +170,39 @@ async function patchProjectManifest(projPath, patch) {
 }
 
 // ============================================================
+// R. project.repair-repo — explicit repair for hand-created projects
+// (D115 closeout, 2026-09-12): a project.json with no .git refuses
+// sessions with the org-snapshot wording; the notice surface's
+// "Initialize Git repository" lands here, and the retried create works.
+// ============================================================
+{
+  const fs = await import('node:fs')
+  const org = await makeOrg('Repair Co')
+  // hand-made project: valid project.json, NO repo (the D115 gap)
+  const hm = path.join(org.path, 'projects', 'handmade')
+  fs.mkdirSync(path.join(hm, '01-intake', 'application'), { recursive: true })
+  fs.writeFileSync(path.join(hm, 'project.json'), JSON.stringify({ id: 'hm-1', name: 'Handmade' }, null, 2) + '\n')
+  const refused = await act('workspace.new-session', { orgId: org.id, workspace: 'projects/handmade/01-intake/application' })
+  check('R: a repo-less project refuses sessions with initial-snapshot-pending',
+    refused.ok === false && String(refused.error).startsWith('initial-snapshot-pending'), JSON.stringify(refused))
+  const sBefore = await call('/__arxa/sidebar/state')
+  const treeProj = ((sBefore.orgs.find((o) => o.id === org.id) || {}).tree?.projects || []).find((p) => p.slug === 'handmade')
+  check('R: the tree face reports the project repo-less (hasRepo false)',
+    !!treeProj && treeProj.hasRepo === false, JSON.stringify(treeProj))
+  const r = await act('project.repair-repo', { orgId: org.id, projectSlug: 'handmade' })
+  check('R: repair answers ok with repoPath + head',
+    r.ok === true && r.result?.ok === true && r.result?.head === true && String(r.result?.repoPath ?? '').endsWith('handmade'), JSON.stringify(r))
+  const retry = await act('workspace.new-session', { orgId: org.id, workspace: 'projects/handmade/01-intake/application' })
+  check('R: the retried session creation succeeds against the project repo',
+    retry.ok === true && retry.result?.project === 'handmade' && retry.result?.branch === 'arxa/' + retry.result?.id, JSON.stringify(retry))
+  const r2 = await act('project.repair-repo', { orgId: org.id, projectSlug: 'handmade' })
+  check('R: repair is idempotent (existing repo no-op, frame null)',
+    r2.ok === true && r2.result?.frame === null && r2.result?.head === true, JSON.stringify(r2))
+  const bad = await act('project.repair-repo', { orgId: org.id, projectSlug: 'ghost' })
+  check('R: an unknown project refuses loudly', bad.ok === false && String(bad.error).startsWith('unknown-project'), JSON.stringify(bad))
+}
+
+// ============================================================
 // T. org.trash offline — no dsh engine in ctx (no sessionPersistence):
 // the quiesce step skips, it never blocks an offline host, and the trash
 // row renders the display name (Bug B task, 2026-09-12).

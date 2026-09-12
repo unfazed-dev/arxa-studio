@@ -292,7 +292,10 @@ const TREE_TAIL = [
 if (!out.includes(TREE_TAIL) || out.indexOf(TREE_TAIL) !== out.lastIndexOf(TREE_TAIL)) throw new Error('tree tail anchor missing/dup — stock shape moved?')
 out = out.replace(TREE_TAIL, [
 	T(7) + '}, group.key);',
-	T(6) + '}), ARXA_ARCHIVES_AFTER_ORGS(), ARXA_TRASH_AFTER_ORGS()]',
+	// D115 closeout (2026-09-12): the repo-repair offer rides the tail FIRST —
+	// the tree's actionable surface for a repo-less project, above the
+	// archives/trash lifecycle rows; it disappears once hasRepo flips true.
+	T(6) + '}), ARXA_REPO_REPAIR_AFTER_ORGS(), ARXA_ARCHIVES_AFTER_ORGS(), ARXA_TRASH_AFTER_ORGS()]',
 	T(5) + '}),',
 	T(5) + '(0, react_jsx_runtime.jsx)("span", { className: WorkspaceBrowser_module_css_default.fade })',
 ].join('\n'))
@@ -429,10 +432,14 @@ const ourApply = [
   T(5) + '// alone left the composer dead — the row landed in the tree but the',
   T(5) + '// conversation never opened until a second, manual open. Same chain',
   T(5) + '// as the `open` lever below: session.open → reveal → conversation focus.',
+  T(5) + '// D115 closeout: a refusal is no longer swallowed — it rides the notice',
+  T(5) + '// event (D111 grammar) and, for initial-snapshot-pending under a',
+  T(5) + '// project, arms the tree-tail "Initialize Git repository" offer with',
+  T(5) + '// the exact create to retry once after repair.',
   T(5) + 'if (i > 0 && i < s.length - 1) orgStore.mutate("workspace.new-session", { orgId: s.slice(0, i), workspace: s.slice(i + 1) }).then((row) => {',
   T(6) + 'if (!row || typeof row.id !== "string") return;',
   T(6) + 'return orgStore.mutate("session.open", { orgId: s.slice(0, i), sessionId: row.id }).then(() => { try { orgStore.revealSession(row.id) } catch { /* presentation */ } return arxaOpenConversation(row.id); });',
-  T(5) + '}).catch(() => {});',
+  T(5) + '}).catch((e) => ARXA_WS_CREATE_FAILED(e, s.slice(0, i), s.slice(i + 1)));',
   T(4) + '},',
   T(4) + 'open: (sessionId) => {',
   T(5) + 'const orgId = orgOfSession(sessionId);',

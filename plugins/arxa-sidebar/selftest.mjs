@@ -207,6 +207,26 @@ check('D111 shell: the wording lives in the SHELL\'s own "sidebar" namespace (en
   && client.includes('"session.new.err.mainRed": "main jest czerwony')
   && client.includes('"session.new.err.mainRed": "main est au rouge')
   && /ctx\.locale\.register\(NS, \{\n\t*zh,\n\t*en,\n\t*pl,\n\t*fr\n\t*\}\), "ui-sidebar: dictionaries"/.test(client))
+// ---- D115 closeout (2026-09-12): repo repair is EXPLICIT, never silent -----
+// A hand-created project (project.json, no .git) refused sessions with the
+// org-snapshot wording and nothing attached a repo. The tree tail now offers
+// "Initialize Git repository" (ruling 2: offer, never silently attach), and a
+// successful repair retries the refused create exactly once.
+check('repair: Initialize Git repository offered from the notice surface; success retries the refused create once',
+  client.includes('"newSession.initRepo": "Initialize Git repository"')
+  && client.includes('"newSession.repoNeeded"')
+  && client.includes('"data-arxa-repo-repair"')
+  && client.includes('mutate("project.repair-repo"')
+  && client.includes('arxaRepoRepairRetry = null')
+  && client.includes('// retry the refused create EXACTLY once'))
+check('repair: the row-+ refusal is visible and arms the offer (the silent catch is gone)',
+  client.includes('.catch((e) => ARXA_WS_CREATE_FAILED(e, s.slice(0, i), s.slice(i + 1)));')
+  && !/workspace\.new-session", \{ orgId: s\.slice\(0, i\)[\s\S]{0,600}\}\)\.catch\(\(\) => \{\}\);/.test(client))
+check('repair: the offer rides the tree tail above archives and trash',
+  client.includes('ARXA_REPO_REPAIR_AFTER_ORGS(), ARXA_ARCHIVES_AFTER_ORGS(), ARXA_TRASH_AFTER_ORGS()'))
+check('repair: the offer wording exists in pl and fr too (en fallback covers zh)',
+  client.includes('"newSession.initRepo": "Zainicjuj repozytorium Git"')
+  && client.includes('"newSession.initRepo": "Initialiser le dépôt Git"'))
 check('D111 shell: the notice is styled with tokens only — no hex, no invented alias',
   /aXa_sb_ctaNotice\{[^}]*var\(--dsw-alias-state-error-primary\)[^}]*\}/.test(client)
   && !/aXa_sb_ctaNotice\{[^}]*#[0-9a-fA-F]{3,8}/.test(client))
@@ -641,7 +661,7 @@ check('glyph: the SELECTED row lights its icon in the accent (slot paints its ow
   && client.includes('(active || ARXA_WS_SELECTED(row.workspaceId)) && Rows_module_css_default.folderActive'))
 // ---- D83: trash lives under the last org row; icons keep their spacing ----
 check('trash: rides the grouped tree tail via ARXA_TRASH_AFTER_ORGS (no bottom mount)',
-  client.includes('const ARXA_TRASH_AFTER_ORGS = () => orgT ? (0, react_jsx_runtime.jsx)(TrashSection, { t: orgT, key: "arxa-trash" }) : null;') && client.includes('}), ARXA_ARCHIVES_AFTER_ORGS(), ARXA_TRASH_AFTER_ORGS()]') && !client.includes('TrashSection, { t: props.t }'))
+  client.includes('const ARXA_TRASH_AFTER_ORGS = () => orgT ? (0, react_jsx_runtime.jsx)(TrashSection, { t: orgT, key: "arxa-trash" }) : null;') && client.includes('}), ARXA_REPO_REPAIR_AFTER_ORGS(), ARXA_ARCHIVES_AFTER_ORGS(), ARXA_TRASH_AFTER_ORGS()]') && !client.includes('TrashSection, { t: props.t }'))
 // ---- T4 v2 (2026-09-01, user direction): files live INSIDE the tree under the owning row ----
 check('files: NO separate tail section — ArxaFilesSection/ARXA_FILES_AFTER_ORGS are gone',
   !client.includes('ARXA_FILES_AFTER_ORGS') && !client.includes('ArxaFilesSection'))

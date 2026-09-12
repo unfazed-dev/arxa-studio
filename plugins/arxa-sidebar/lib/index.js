@@ -1563,6 +1563,19 @@ export function apply(ctx, opts = {}) {
             'org.disconnect': async () => l.disconnectGithub(orgByRef(arg?.orgId).path, { removeRepos: arg?.removeRepos === true }),
             'project.connect': async () => l.connectProject(orgByRef(arg?.orgId).path, String(arg?.projectSlug ?? '')),
             'project.disconnect': async () => l.disconnectProjectGithub(orgByRef(arg?.orgId).path, String(arg?.projectSlug ?? ''), { removeRepos: arg?.removeRepos === true }),
+            /** D115 closeout (2026-09-12): the notice surface's explicit
+             * "Initialize Git repository" door — a hand-created project
+             * (project.json, no .git) becomes a repo with ONE initial commit
+             * (contents + frame + inherited localOnly); an existing repo is
+             * an idempotent no-op. Ruling 2: this is the ONLY path that
+             * attaches a repo to a project besides project.create. */
+            'project.repair-repo': async () => {
+              const cur = await ensureOpen(arg?.orgId)
+              if (typeof arg?.projectSlug !== 'string' || arg.projectSlug.trim() === '') {
+                throw new Error('project-slug-required')
+              }
+              return cur.prepareProjectRepo(arg.projectSlug.trim())
+            },
             'org.open': async () => {
               const ref = arg?.orgId ?? arg
               try {
