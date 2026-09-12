@@ -295,6 +295,24 @@ check('the red run left the worktree unchanged (porcelain + HEAD identical)',
 rmSync(path.join(gateWt, 'check.sh'))
 
 // ============================================================
+section('6c. The delivery strip — the record survives with no remote')
+// ============================================================
+/* AXS-005: card.ledger.summary feeds the condensed strip under the card
+ * frame summary. On this local-only org the integrate path has recorded a
+ * real row for session 2, so the strip surfaces the LATEST stage with no URL
+ * to link — exactly the bounded local view's case. Session 1 has no record
+ * at all (the local commit path records nothing), which must answer null
+ * rather than invent a stage. */
+r = await act('card.ledger.summary', { sessionId: sid2 })
+check('card.ledger.summary: a local-only session surfaces its latest stage, clean, with no URL',
+  r.ok === true && r.result?.lastStage === 'integrated' && r.result?.result === 'clean'
+    && r.result?.url === null,
+  JSON.stringify(r.result))
+r = await act('card.ledger.summary', { sessionId: sid })
+check('...and a session with no record answers null, never an invented stage',
+  r.ok === true && r.result === null, JSON.stringify(r))
+
+// ============================================================
 /* Sections 7-8 are the SHARED table (Decision 5) — the same assertions the
  * GitHub-linked smoke runs, imported rather than copied. Everything in it is
  * plain local git through the card's own route, so it holds identically in

@@ -475,7 +475,9 @@ export function apply(ctx) {
             const existing = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
             if (Array.isArray(existing) && existing.length > 0) return { ok: true, existing: true, pr: { number: existing[0].number, url: existing[0].html_url } }
             const pr = await g.prCreate(manifest.repoOwner, manifest.repoName, { title, body, head: s.branch, base: 'main' })
-            await noteStage(repoPath, sid, { stage: 'review', author: actor, collaborator, detail: 'PR #' + pr.number + ' opened' }, { next: 'a human reviewer' })
+            // AXS-005: the PR link is recorded WITH the stage — the strip links
+            // what GitHub itself handed back, and never refetches for it.
+            await noteStage(repoPath, sid, { stage: 'review', author: actor, collaborator, detail: 'PR #' + pr.number + ' opened', target: 'PR #' + pr.number, url: pr.html_url ?? null }, { next: 'a human reviewer' })
             return { ok: true, pr: { number: pr.number, url: pr.html_url } }
           }
 
@@ -563,11 +565,20 @@ export function apply(ctx) {
             try { return (await import('node:os')).userInfo().username } catch { return 'local' }
           }
 
-          const noteStage = async (repoPath, sid, entry, { next } = {}) => {
+          const noteStage = async (repoPath, sid, entry, { next, target, url } = {}) => {
             const gw = await importGitWorkspace()
             let ledger
             try {
-              ledger = gw.recordStage(repoPath, sid, entry)
+              // `next`/`target`/`url` ride the ENTRY so recordStage persists
+              // them with the row (AXS-005) — the strip reads the record, and
+              // a fact that is only rendered is not in the record. Merged one
+              // key at a time: a plain spread of the options would overwrite
+              // an entry-supplied `target` with a caller's `undefined`.
+              const row = { ...entry }
+              if (next !== undefined) row.next = next
+              if (target !== undefined) row.target = target
+              if (url !== undefined) row.url = url
+              ledger = gw.recordStage(repoPath, sid, row)
             } catch {
               return { recorded: false } // unknown session — never fail the caller's action
             }
@@ -982,6 +993,7 @@ export function apply(ctx) {
                 if (seen[seen.length - 1]?.result !== checks.state) {
                   await noteStage(repoPath, sid, {
                     stage: 'checks', author: 'github-actions[bot]', result: checks.state, sha: pr.head?.sha ?? null,
+                    target: 'PR #' + pr.number, url: pr.html_url ?? null,
                   }, { next: checks.state === 'green' ? 'merge when reviewed' : 'fix the failing check' })
                 }
               }
@@ -1022,6 +1034,22 @@ export function apply(ctx) {
                 fingerprint: gateFingerprint(gw, s.worktree),
               })
               return { green: gate.green, kind: gate.kind, configured: gate.configured, output }
+            },
+            /** AXS-005 (github-conversations carried ledger strip): the
+              * condensed delivery record for the strip under the card's frame
+              * summary. A PURE READ of the session's registry row through the
+              * resolved seat repo — the same resolution every other ledger
+              * reader uses, so a project session's record is found in the
+              * project repo. Never touches GitHub: the PR URL is only ever
+              * one a stage already recorded, and `ledgerSummary` refuses any
+              * URL that is not a github.com HTTPS link. */
+            'card.ledger.summary': async () => {
+              const gw = await importGitWorkspace()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (!sid) throw new Error('card.ledger.summary serves session seats')
+              const s = await sessionFor(gw, sid)
+              if (!s) throw new Error('session-not-found: ' + sid)
+              return gw.ledgerSummary(gw.readLedger(sessionRepoPath(s, sid), sid))
             },
             /** Bring main into the session's worktree (grilled 2026-09-03).
               * The MANUAL half — nothing calls this on its own. A conflict is

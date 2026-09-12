@@ -235,5 +235,24 @@ check('checks: every row string in all three dictionaries',
     'git.checks.running', 'git.checks.output', 'git.checks.failed']
     .every((k) => (clientSrc.split("'" + k + "':").length - 1) === 3))
 
+// ---- AXS-005: the condensed delivery ledger strip --------------------------
+// The full ledger table stays on the PR; the card renders only the latest
+// stage, its result, the next owner and the target, read from the registry
+// record through the strip's own action — never a refetch or a re-render of
+// the table.
+check('ledger: host serves card.ledger.summary as a pure read of the record',
+  hostSrc().includes("'card.ledger.summary': async () => {")
+  && hostSrc().includes('gw.ledgerSummary(gw.readLedger('))
+check('ledger: the strip loads through its own action and renders for session seats with a record',
+  clientSrc.includes("post('card.ledger.summary'")
+  && clientSrc.includes('sessionSeat && ledger'))
+check('ledger: only a trusted github.com URL opens out; everything else gets the bounded local view',
+  clientSrc.includes("startsWith('https://github.com/')")
+  && clientSrc.includes('ledgerOpen && ledger && !ledgerUrl'))
+check('ledger: strip strings in all three dictionaries',
+  ['git.ledger.summary', 'git.ledger.next', 'git.ledger.open', 'git.ledger.view',
+    'git.ledger.stage', 'git.ledger.result', 'git.ledger.nextOwner', 'git.ledger.target']
+    .every((k) => (clientSrc.split("'" + k + "':").length - 1) === 3))
+
 console.log(failures === 0 ? '\narxa-git-card selftest: ALL GREEN' : `\narxa-git-card selftest: ${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)

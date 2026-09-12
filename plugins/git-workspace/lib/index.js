@@ -87,7 +87,7 @@ export {
 } from './sessions.js'
 export {
   STAGES, sessionTrailers, agentCollaborator, EFFORT_UNSPECIFIED, readLedger, recordStage, renderLedger, withLedger, stageTime, readableTime,
-  rowAuthor, stageComment,
+  rowAuthor, stageComment, ledgerSummary,
 } from './ledger.js'
 export {
   listWorktreeDirs,

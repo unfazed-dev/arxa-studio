@@ -129,6 +129,17 @@ window.__ModuleLoader__.load({
       'git.checks.run': 'Run checks',
       'git.checks.output': 'Checks output',
       'git.checks.failed': 'Checks failed: {reason}',
+      // AXS-005: the condensed delivery strip. The full ledger table stays on
+      // the PR; the card carries the latest stage only, read from the registry
+      // record — so a local-only session keeps the same facts with no remote.
+      'git.ledger.summary': 'delivery · {detail}',
+      'git.ledger.next': 'next: {next}',
+      'git.ledger.open': 'Open the pull request',
+      'git.ledger.view': 'Delivery record',
+      'git.ledger.stage': 'stage',
+      'git.ledger.result': 'result',
+      'git.ledger.nextOwner': 'next',
+      'git.ledger.target': 'target',
       // G4 (grilled 2026-09-06): the four moves that are hard to walk back ask
       // first. Commit and Create PR already pause for text; Cancel CI is undone
       // by re-running.
@@ -236,6 +247,17 @@ window.__ModuleLoader__.load({
       'git.checks.run': 'Uruchom testy',
       'git.checks.output': 'Wyniki testów',
       'git.checks.failed': 'Testy nie powiodły się: {reason}',
+      // AXS-005: skrócony pasek dostawy. Pełna tabela pozostaje w PR; karta
+      // niesie tylko ostatni etap, odczytany z rejestru — sesja tylko lokalna
+      // zachowuje te same fakty bez zdalnego repozytorium.
+      'git.ledger.summary': 'dostawa · {detail}',
+      'git.ledger.next': 'następny: {next}',
+      'git.ledger.open': 'Otwórz pull request',
+      'git.ledger.view': 'Rejestr dostawy',
+      'git.ledger.stage': 'etap',
+      'git.ledger.result': 'wynik',
+      'git.ledger.nextOwner': 'następny',
+      'git.ledger.target': 'cel',
       'git.confirm.integrate.title': 'Scalić main do tej sesji?',
       'git.confirm.integrate.body': 'Scala bieżący main do drzewa roboczego tej sesji. Konflikt zatrzyma scalanie w połowie — dokończysz je z karty, zanim cokolwiek innego wejdzie.',
       'git.confirm.integrate.ok': 'Scal main',
@@ -339,6 +361,17 @@ window.__ModuleLoader__.load({
       'git.checks.run': 'Lancer les vérifications',
       'git.checks.output': 'Résultats des vérifications',
       'git.checks.failed': 'Échec des vérifications : {reason}',
+      // AXS-005 : bandeau de livraison condensé. Le tableau complet reste dans la
+      // PR ; la carte ne porte que la dernière étape, lue dans le registre — une
+      // session locale garde donc les mêmes faits sans dépôt distant.
+      'git.ledger.summary': 'livraison · {detail}',
+      'git.ledger.next': 'suite : {next}',
+      'git.ledger.open': 'Ouvrir la pull request',
+      'git.ledger.view': 'Relevé de livraison',
+      'git.ledger.stage': 'étape',
+      'git.ledger.result': 'résultat',
+      'git.ledger.nextOwner': 'suite',
+      'git.ledger.target': 'cible',
       'git.confirm.integrate.title': 'Intégrer main dans cette session ?',
       'git.confirm.integrate.body': 'Fusionne le main actuel dans l’arbre de travail de cette session. Un conflit arrête la fusion à mi-chemin — vous la terminez depuis la carte avant que quoi que ce soit d’autre puisse arriver.',
       'git.confirm.integrate.ok': 'Intégrer main',
@@ -399,6 +432,11 @@ window.__ModuleLoader__.load({
       // Decision 3: the local Checks row's disclosure — red output stays open
       // until the reader closes it, but never leaks across a session switch.
       const [checksOpen, setChecksOpen] = React.useState(false)
+      // AXS-005: the delivery strip's data and its bounded local view. Same rule
+      // as checksOpen: the disclosure never leaks across a session switch, and
+      // `void 0` (never loaded) is distinct from `null` (no record).
+      const [ledger, setLedger] = React.useState(void 0)
+      const [ledgerOpen, setLedgerOpen] = React.useState(false)
       // G4: the move waiting on a yes — { key, title, body, ok, run } | null.
       const [confirm, setConfirm] = React.useState(null)
       // G6: the device-flow conversation — null | { starting } | { userCode, verificationUri }.
@@ -442,7 +480,17 @@ window.__ModuleLoader__.load({
         catch (e) { if (alive.current) setPr({ ok: false, reason: reasonOf(e) }) }
       }, [post, seatSession])
 
-      React.useEffect(() => { setSeatSession(sessionId || null); setPr(void 0); setMintChip(null); setChecksOpen(false); load() }, [sessionId, load])
+      // AXS-005: the condensed delivery record — latest stage, its result, the
+      // next owner, the target, and the PR URL when one was recorded. A read of
+      // the registry row, so it needs no GitHub at all; a failure hides the strip
+      // rather than spamming a toast on a poll.
+      const loadLedger = React.useCallback(async () => {
+        if (!seatSession) { setLedger(null); return }
+        try { const r = await post('card.ledger.summary', { sessionId: seatSession }); if (alive.current) setLedger(r) }
+        catch { if (alive.current) setLedger(null) }
+      }, [post, seatSession])
+
+      React.useEffect(() => { setSeatSession(sessionId || null); setPr(void 0); setLedger(void 0); setLedgerOpen(false); setMintChip(null); setChecksOpen(false); load() }, [sessionId, load])
       React.useEffect(() => {
         const on = () => { load(); if (!collapsed) loadPr() }
         window.addEventListener('arxa-git-card-refresh', on)
@@ -466,6 +514,16 @@ window.__ModuleLoader__.load({
         const id = window.setInterval(() => { if (busy === null) loadPr() }, 30000)
         return () => window.clearInterval(id)
       }, [collapsed, hasPr, loadPr, busy])
+      // The strip refreshes like the PR read does: once on expand, then on a
+      // poll. Stages change exactly when the card's own actions run, so the 30s
+      // poll (plus the refresh button) is plenty — and it is a local registry
+      // read, not GitHub traffic.
+      React.useEffect(() => {
+        if (!seatSession || collapsed) return
+        if (ledger === void 0) loadLedger()
+        const id = window.setInterval(() => { if (busy === null) loadLedger() }, 30000)
+        return () => window.clearInterval(id)
+      }, [seatSession, collapsed, ledger, busy, loadLedger])
 
       if (absent || status === null) return null
 
@@ -755,7 +813,7 @@ window.__ModuleLoader__.load({
         h('span', { className: S.preview }, detail),
         h('div', { className: S.actions },
           [
-            action('refresh', t('git.refresh'), Icon('IconRefreshOutline16', 'IconRefreshOutline16', 14), { onClick: () => { load(); if (pr !== void 0) loadPr() } }),
+            action('refresh', t('git.refresh'), Icon('IconRefreshOutline16', 'IconRefreshOutline16', 14), { onClick: () => { load(); if (pr !== void 0) loadPr(); loadLedger() } }),
             // G6: the one door that works while the grant is dead. Waking the
             // runner needs GitHub too, so it stays out of the way until then.
             relinkRequired ? relinkAction() : null,
@@ -874,6 +932,42 @@ window.__ModuleLoader__.load({
               'aria-label': t('git.checks.output'),
               style: { flex: 1, minWidth: 0, margin: 0, padding: '4px 8px', fontSize: 11, lineHeight: '16px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '30vh', overflow: 'auto', color: 'var(--dsw-alias-label-secondary)' },
             }, redOut)))
+        }
+      }
+      // 5. Delivery ledger (AXS-005) — the condensed strip under the card frame
+      // summary: latest stage, its result, who picks the work up next and where
+      // it is going. The FULL table stays on the PR. A trusted github.com URL
+      // recorded with a stage opens out; a session with no PR gets the same
+      // facts in the bounded local view below — the record is a registry fact
+      // and survives without the remote. React escapes every text child, so
+      // recorded strings (stage names, authors, URLs) render as text, never
+      // markup.
+      if (sessionSeat && ledger) {
+        const ledgerBits = [
+          String(ledger.lastStage ?? '—'),
+          ledger.result ? String(ledger.result) : null,
+          ledger.nextOwner ? t('git.ledger.next', { next: ledger.nextOwner }) : null,
+        ].filter(Boolean)
+        // Belt behind the host's own gate: the strip can only open a URL that is
+        // a github.com HTTPS link, whatever the registry row says.
+        const ledgerUrl = typeof ledger.url === 'string' && ledger.url.startsWith('https://github.com/') ? ledger.url : null
+        rows.push(h('li', { key: 'ledger', className: S.row },
+          h('span', { className: S.preview }, t('git.ledger.summary', { detail: ledgerBits.join(' · ') })),
+          h('div', { className: S.actions },
+            ledgerUrl
+              ? action('ledger-open', t('git.ledger.open'), Icon('IconRightUpOutline16', 'IconBrowseOutline16', 14), { onClick: () => window.open(ledgerUrl, '_blank', 'noopener') })
+              : action('ledger-view', t('git.ledger.view'), Icon('IconChevronDownOutline14', 'IconChevronDownOutline14', 14), { onClick: () => setLedgerOpen((v) => !v) }))))
+        if (ledgerOpen && ledger && !ledgerUrl) {
+          rows.push(h('li', { key: 'ledger-view', className: S.row },
+            h('pre', {
+              'aria-label': t('git.ledger.view'),
+              style: { flex: 1, minWidth: 0, margin: 0, padding: '4px 8px', fontSize: 11, lineHeight: '16px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '30vh', overflow: 'auto', color: 'var(--dsw-alias-label-secondary)' },
+            }, [
+              t('git.ledger.stage') + ': ' + String(ledger.lastStage ?? '—'),
+              t('git.ledger.result') + ': ' + String(ledger.result ?? '—'),
+              t('git.ledger.nextOwner') + ': ' + String(ledger.nextOwner ?? '—'),
+              ledger.target ? t('git.ledger.target') + ': ' + String(ledger.target) : null,
+            ].filter(Boolean).join('\n'))))
         }
       }
 

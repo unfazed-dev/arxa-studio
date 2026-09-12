@@ -141,6 +141,13 @@ export function recordStage(repoPath, id, entry, env = process.env) {
     result: entry?.result ? String(entry.result) : 'ok',
     sha: entry?.sha ? String(entry.sha).slice(0, 7) : null,
     detail: entry?.detail ? String(entry.detail) : null,
+    // The condensed strip's fields (AXS-005): who picks the work up next,
+    // where it is going, and the PR link when one exists — recorded WITH the
+    // stage so the summary never has to guess from context. Rows written
+    // before these fields existed simply lack them, and read as null below.
+    next: entry?.next ? String(entry.next) : null,
+    target: entry?.target ? String(entry.target) : null,
+    url: entry?.url ? String(entry.url) : null,
     at: entry?.at ?? t.at,
     atUtc: t.atUtc,
     atLocal: t.atLocal,
@@ -234,6 +241,46 @@ export function renderLedger(ledger, { sessionId, container, next } = {}) {
   if (rows.length === 0) out.push('| _no stages recorded yet_ |  |  |  |  |  |  |  |')
   out.push('', `**Next:** ${next ?? 'awaiting review'}`)
   return out.join('\n')
+}
+
+/** A URL the strip may link out to: only a github.com HTTPS link. The card
+ * never turns registry content into a clickable URL to somewhere else, and
+ * never refetches to find one — if GitHub did not hand this exact URL to
+ * arxa when a stage was recorded, there is no link. */
+const TRUSTED_URL_RE = /^https:\/\/github\.com\/\S+$/
+
+/**
+ * The condensed projection the git card's delivery strip renders (AXS-005):
+ * the LATEST stage, its result, who picks the work up next and where it is
+ * going — plus the PR URL when one was recorded, whichever stage recorded it
+ * (a merged session's last row is the merge, but the link out is still the
+ * PR). The full table stays wherever it is published; this never duplicates
+ * or refetches it.
+ *
+ * Pure: takes RECORDED rows, touches nothing. Rows written before `next`,
+ * `target` and `url` existed (everything before 2026-09-13) read as null for
+ * the missing fields rather than guessed — the same rule `rowAuthor` applies
+ * to the pre-rename `actor`.
+ *
+ * `null` for an empty ledger: "no stages recorded yet" is not a stage, and
+ * the strip hides rather than claim one.
+ */
+export function ledgerSummary(ledger) {
+  const rows = Array.isArray(ledger) ? ledger : []
+  const last = rows[rows.length - 1]
+  if (!last) return null
+  let url = null
+  for (let i = rows.length - 1; i >= 0 && url === null; i--) {
+    const u = rows[i]?.url
+    if (typeof u === 'string' && TRUSTED_URL_RE.test(u)) url = u
+  }
+  return {
+    lastStage: last.stage ?? null,
+    result: last.result ?? null,
+    nextOwner: last.next ?? null,
+    target: last.target ?? null,
+    url,
+  }
 }
 
 const LEDGER_START = '<!-- arxa:ledger -->'

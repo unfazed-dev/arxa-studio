@@ -556,6 +556,70 @@ async function patchProjectManifest(projPath, patch) {
     JSON.stringify(gw.readLedger(prow.repoPath, psid).map((e) => e.stage)))
 }
 
+// ============================================================
+// H. card.ledger.summary — the condensed delivery strip's engine (AXS-005).
+// A READ of the registry record only: no refetch, no GitHub call, and a URL
+// only when a trusted github.com link was already recorded with a stage.
+// ============================================================
+{
+  // No ledger yet: null, never an invented stage.
+  const org = await makeOrg('Ledger Sum Co')
+  const sid = await makeSession(org)
+  let r = await act('card.ledger.summary', {})
+  check('card.ledger.summary: refuses without a session seat',
+    r.ok === false && /serves session seats/.test(r.error), JSON.stringify(r))
+  r = await act('card.ledger.summary', { sessionId: sid })
+  check('card.ledger.summary: a session with no ledger answers null',
+    r.ok === true && r.result === null, JSON.stringify(r))
+
+  // LOCAL session, no URL anywhere: the strip's facts come from the recorded
+  // rows alone. The row below is the one the red-gate park writes
+  // (card.commit's prflow path): result red, next owner NAMED.
+  const repoPath = gw.parkedSessions(org.path).find((x) => x.id === sid).repoPath
+  gw.recordStage(repoPath, sid, {
+    stage: 'gate', author: 'unfazed-dev', result: 'red', sha: 'abc1234',
+    detail: 'parked — nothing is lost, the collapsed commit stays on the branch',
+    next: 'unfazed-dev — fix the gate and re-commit',
+  })
+  r = await act('card.ledger.summary', { sessionId: sid })
+  check('local session: the strip names the latest stage, its result and the next owner, with no URL',
+    r.ok === true && r.result.lastStage === 'gate' && r.result.result === 'red'
+      && r.result.nextOwner === 'unfazed-dev — fix the gate and re-commit' && r.result.url === null,
+    JSON.stringify(r.result))
+
+  // LINKED session: the PR URL is recorded WITH the review stage by openPr,
+  // and the summary links exactly that — never a refetch.
+  const org2 = await makeOrg('Ledger Link Co')
+  const sid2 = await makeSession(org2)
+  await patchManifest(org2.path, { repoOwner: 'acme', repoName: 'widgets', localOnly: false })
+  Object.assign(fakeGh, {
+    prListForHead: async () => [],
+    prCreate: async (o, n, a) => ({ number: 9, html_url: 'https://github.com/acme/widgets/pull/9', ...a }),
+    prUpdate: async () => ({ number: 9 }),
+    prComment: async () => ({ id: 1 }),
+    status: async () => ({ login: 'evan-dev' }),
+  })
+  r = await act('card.pr.create', { sessionId: sid2, title: 'feat(x): the thing', problem: 'P', fix: 'F' })
+  let s = await act('card.ledger.summary', { sessionId: sid2 })
+  check('linked session: the strip carries the PR URL recorded at review, with its target',
+    r.ok === true && s.ok === true && s.result.lastStage === 'review'
+      && s.result.nextOwner === 'a human reviewer' && s.result.target === 'PR #9'
+      && s.result.url === 'https://github.com/acme/widgets/pull/9',
+    JSON.stringify({ pr: r.result?.pr, summary: s.result }))
+
+  // MERGED: the latest stage/result/next come from the merged row; the URL
+  // still comes from the row that recorded it.
+  fakeGh.prListForHead = async () => [{ number: 9, state: 'open', html_url: 'https://github.com/acme/widgets/pull/9', head: { sha: 'deadbeef' }, title: 'feat(x): the thing' }]
+  fakeGh.prChecks = async () => ({ state: 'green', asleep: false, runs: [] })
+  fakeGh.prMerge = async () => ({ merged: true, sha: 'merged-sha-9' })
+  r = await act('card.pr.merge', { sessionId: sid2 })
+  s = await act('card.ledger.summary', { sessionId: sid2 })
+  check('merged: latest stage/result/next from the merged row, URL from the row that recorded it',
+    r.ok === true && r.result.ok === true && s.result.lastStage === 'merged' && s.result.result === 'ok'
+      && s.result.nextOwner === 'archive the session' && s.result.url === 'https://github.com/acme/widgets/pull/9',
+    JSON.stringify(s.result))
+}
+
 console.log(failures === 0 ? '\narxa-git-card selftest.actions: ALL GREEN' : `\narxa-git-card selftest.actions: ${failures} FAILURE(S)`)
 rmSync(sandbox, { recursive: true, force: true })
 process.exit(failures === 0 ? 0 : 1)

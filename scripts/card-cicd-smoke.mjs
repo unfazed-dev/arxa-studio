@@ -438,6 +438,13 @@ try {
   check('version.mint — the action that row leads to — answers rather than throwing',
     minted !== undefined && minted.ok !== undefined, JSON.stringify(minted).slice(0, 240))
 
+  // ---- 13b. the delivery strip the card renders under its frame summary ----
+  const strip = val(await act('card.ledger.summary', { sessionId: sid })); live('card.ledger.summary')
+  check('card.ledger.summary carries the merged row and the PR link GitHub itself recorded',
+    strip?.lastStage === 'merged' && strip?.result === 'ok' && strip?.nextOwner === 'archive the session'
+      && typeof strip?.url === 'string' && strip.url.startsWith('https://github.com/'),
+    JSON.stringify(strip))
+
   console.log('\n--- what to look at on GitHub ---')
   if (projectMode) console.log('org repo : https://github.com/' + owner + '/' + ORG_NAME.replace(/ /g, '-') + '   (the org\'s own repo)')
   console.log('repo     : ' + seatUrl + (projectMode ? '   (the PROJECT repo — its own, not the org\'s)' : ''))

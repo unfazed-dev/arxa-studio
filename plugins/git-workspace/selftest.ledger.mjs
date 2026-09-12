@@ -10,7 +10,7 @@ import path from 'node:path'
 import {
   initOrgRepo, openSession, wipCommit,
   sessionTrailers, agentCollaborator, readLedger, recordStage, renderLedger, withLedger, STAGES,
-  stageComment, rowAuthor,
+  stageComment, rowAuthor, ledgerSummary,
   stageTime, readableTime,
 } from './lib/index.js'
 
@@ -158,6 +158,49 @@ ok('ledger: the PR-body fence replaces in place and never duplicates', () => {
 
 ok('ledger: STAGES names the whole life of a session, in order', () => {
   assert.deepEqual([...STAGES], ['opened', 'integrated', 'committed', 'pushed', 'checks', 'gate', 'review', 'merged', 'archived', 'cleaned'])
+})
+
+ok('summary: new rows persist next, target and url; none of it is guessed', () => {
+  const org = path.join(tmp, 'Summary')
+  fs.mkdirSync(path.join(org, 'notes'), { recursive: true })
+  fs.writeFileSync(path.join(org, 'org.json'), '{"name":"Summary"}\n')
+  initOrgRepo(org)
+  wipCommit(org, { message: 'seed' })
+  const id = 'Summary/notes/note-wt-260913-001'
+  openSession(org, { id, workspace: 'notes' })
+
+  assert.equal(ledgerSummary(readLedger(org, id)), null, 'no ledger is null — never an invented stage')
+  recordStage(org, id, { stage: 'review', author: 'unfazed-dev', next: 'a human reviewer', target: 'PR #12', url: 'https://github.com/acme/widgets/pull/12' })
+  recordStage(org, id, { stage: 'merged', author: 'unfazed-dev', result: 'ok', next: 'archive the session' })
+  const rows = readLedger(org, id)
+  assert.equal(rows[0].next, 'a human reviewer', 'next is persisted WITH the row, not rendered from context')
+  assert.equal(rows[0].target, 'PR #12')
+  assert.equal(rows[0].url, 'https://github.com/acme/widgets/pull/12')
+  const s = ledgerSummary(rows)
+  assert.deepEqual(s, {
+    lastStage: 'merged', result: 'ok', nextOwner: 'archive the session', target: null,
+    // The PR URL outlives the row that recorded it: a merged session's last
+    // row is the merge, but the link out is still the PR.
+    url: 'https://github.com/acme/widgets/pull/12',
+  })
+})
+
+ok('summary: old rows read without next/target/url, and only a trusted github.com URL links', () => {
+  // Every row recorded before 2026-09-13 lacks all three fields. They read
+  // as null — the strip shows what was recorded, never a guess for a field
+  // that did not exist (the same rule rowAuthor applies to `actor`).
+  assert.deepEqual(
+    ledgerSummary([{ stage: 'committed', actor: 'Evan', result: 'ok', at: '2026-09-03T10:00:00Z' }]),
+    { lastStage: 'committed', result: 'ok', nextOwner: null, target: null, url: null },
+  )
+  assert.equal(ledgerSummary([]), null, 'an empty ledger is still null')
+  assert.equal(ledgerSummary(null), null, 'and so is a missing one')
+  // The card must never turn registry content into a clickable URL to
+  // somewhere else, and never refetches to find one.
+  assert.equal(ledgerSummary([{ stage: 'review', url: 'http://github.com/a/b/pull/1' }]).url, null, 'not https')
+  assert.equal(ledgerSummary([{ stage: 'review', url: 'https://evil.example/pr' }]).url, null, 'not github.com')
+  assert.equal(ledgerSummary([{ stage: 'review', url: 'https://github.com/a/b/pull/1 x' }]).url, null, 'no embedded space')
+  assert.equal(ledgerSummary([{ stage: 'review', url: 42 }]).url, null, 'not even a string')
 })
 
 console.log(`\nledger selftest: ${passed} checks passed`)
