@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from "node:module"
 const require = createRequire(import.meta.url)
-import { sweepSessionsUnder, sweepDeadTmpSessions, rememberPurgedOrg, sweepPurgedOrgs, sweepWorkspacesUnder } from './lib/session-sweep.js'
+import { sweepSessionsUnder, sweepDeadTmpSessions, rememberPurgedOrg, sweepPurgedOrgs, sweepWorkspacesUnder, quiesceSessionsUnder } from './lib/session-sweep.js'
 
 const dir = mkdtempSync(join(tmpdir(), 'arxa-sweep-'))
 const root = join(dir, 'sessions')
@@ -74,5 +74,57 @@ try {
   assert.deepEqual(await sweepWorkspacesUnder(reg, '/vol/RESTO'), { removed: ['w1', 'w3'] })
   assert.deepEqual(deleted, ['w1', 'w3'], 'prefix trap kept, exact + nested removed')
   assert.deepEqual(await sweepWorkspacesUnder(null, '/vol/RESTO'), { removed: [], skipped: 'registry-unavailable' })
+
+  // ---- quiesceSessionsUnder (Bug B: stop live sessions before org trash) --
+  // Two live inside, one live outside, one live prefix-trap, one under but
+  // already stopped. The agentControl fake mirrors the real face contract:
+  // stop the ids asked, classify ids with nothing live as alreadyStopped.
+  mk('p-quiesce', 'q-in-1', { id: 'q-in-1', cwd: '/vol/RESTO/.arxa/worktrees/q1' })
+  mk('p-quiesce', 'q-in-2', { id: 'q-in-2', cwd: '/vol/RESTO' })
+  mk('p-quiesce', 'q-out', { id: 'q-out', cwd: '/vol/TOPO' })
+  mk('p-quiesce', 'q-pre', { id: 'q-pre', cwd: '/vol/RESTOX/notes' }) // prefix trap
+  mk('p-quiesce', 'q-gone', { id: 'q-gone', cwd: '/vol/RESTO/notes' }) // under, already stopped
+  const liveStore = { get: (id) => (id === 'q-gone' ? undefined : { id }) }
+  const control = {
+    asked: null,
+    async stopAgentIds(ids) {
+      control.asked = [...ids].sort()
+      const stopped = []
+      const alreadyStopped = []
+      for (const id of ids) (liveStore.get(id) ? stopped : alreadyStopped).push(id)
+      return { ok: true, stopped, alreadyStopped }
+    },
+  }
+  const qr = await quiesceSessionsUnder({ sessions: liveStore, sessionPersistence: fake, agentControl: control }, '/vol/RESTO')
+  assert.deepEqual(qr.stopped.slice().sort(), ['q-in-1', 'q-in-2'])
+  assert.deepEqual(qr.alreadyStopped, ['q-gone'])
+  assert.deepEqual(control.asked, ['q-gone', 'q-in-1', 'q-in-2'], 'outside + prefix-trap sessions are never asked to stop')
+
+  // Fails closed: a stop that reports failure throws naming ONLY session ids.
+  const bad = { stopAgentIds: async () => ({ ok: false, reason: 'stop-failed', failed: ['q-in-1'] }) }
+  await assert.rejects(
+    () => quiesceSessionsUnder({ sessions: liveStore, sessionPersistence: fake, agentControl: bad }, '/vol/RESTO'),
+    (e) => { assert.match(e.message, /^session-stop-failed: q-in-1$/); assert.ok(!e.message.includes('/'), 'no paths in the error'); return true },
+  )
+  // No agent control while sessions sit under the org: still fails closed.
+  await assert.rejects(
+    () => quiesceSessionsUnder({ sessions: liveStore, sessionPersistence: fake, agentControl: null }, '/vol/RESTO'),
+    /session-stop-unavailable: q-gone q-in-1 q-in-2/,
+  )
+  // A face that never answers is cut off by the bound (trash must not hang).
+  await assert.rejects(
+    () => quiesceSessionsUnder({ sessions: liveStore, sessionPersistence: fake, agentControl: { stopAgentIds: () => new Promise(() => {}) } }, '/vol/RESTO', { timeoutMs: 20 }),
+    /session-stop-timeout: q-gone q-in-1 q-in-2/,
+  )
+  // A live row with no persisted dir is still found (a session born seconds ago).
+  const freshStore = { list: () => [{ id: 'q-fresh', cwd: '/vol/RESTO/dock' }], get: (id) => (id === 'q-fresh' ? { id } : undefined) }
+  const control2 = { stopAgentIds: async (ids) => ({ ok: true, stopped: ids, alreadyStopped: [] }) }
+  const qr2 = await quiesceSessionsUnder({ sessions: freshStore, sessionPersistence: fake, agentControl: control2 }, '/vol/RESTO')
+  assert.deepEqual(qr2.stopped.slice().sort(), ['q-fresh', 'q-gone', 'q-in-1', 'q-in-2'])
+  // No persistence (an offline host): skip, never block the trash.
+  assert.deepEqual(await quiesceSessionsUnder({ agentControl: control }, '/vol/RESTO'), { stopped: [], alreadyStopped: [], skipped: 'persistence-unavailable' })
+  // Nothing under the org: nothing to stop, no agentControl needed.
+  assert.deepEqual(await quiesceSessionsUnder({ sessions: liveStore, sessionPersistence: fake, agentControl: null }, '/vol/EMPTY'), { stopped: [], alreadyStopped: [] })
+
   console.log('arxa-sidebar selftest.session-sweep: ALL GREEN')
 } finally { rmSync(dir, { recursive: true, force: true }) }

@@ -116,7 +116,24 @@ export function createDshBridge(faces = {}) {
     }
   }
 
-  return { spawn, attach, retitle, list, archive, hasUserMessage }
+  /**
+   * Bug B (2026-09-12, docs/plans/org-trash-unreachable.md): bounded stop of
+   * live dsh agents before org trash. → {ok:true,stopped,alreadyStopped} |
+   * {ok:false,reason,failed?} — session ids only, never paths.
+   */
+  async function stopAgentIds(ids, opts) {
+    if (typeof f.stopAgentIds !== 'function') return { ok: false, reason: 'dsh-unavailable' }
+    try {
+      const out = await f.stopAgentIds(ids, opts)
+      return out && typeof out === 'object' && typeof out.ok === 'boolean'
+        ? out
+        : { ok: false, reason: 'dsh-unavailable' }
+    } catch (err) {
+      return { ok: false, reason: 'dsh-unavailable', error: String(err?.message ?? err) }
+    }
+  }
+
+  return { spawn, attach, retitle, list, archive, hasUserMessage, stopAgentIds }
 }
 
 /**

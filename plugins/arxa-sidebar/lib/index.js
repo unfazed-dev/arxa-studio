@@ -244,6 +244,14 @@ export function apply(ctx, opts = {}) {
     try {
       const sessions = ctx.sessions
       if (!sessions || typeof sessions.create !== 'function') return {}
+      // Bug B (2026-09-12, docs/plans/org-trash-unreachable.md): retain the
+      // AgentHandle beside every ctx.agents.create. The agents store has NO
+      // stop-by-id — the handle's dispose() IS the public stop (it cancels
+      // the loop, waits for idle, then detaches agent+session) — and
+      // discarding it made every arxa-spawned session unstoppable until
+      // process exit, so trashing an org left live writers behind (the husk
+      // that blocks restore). sessionId → handle.
+      const agentHandles = new Map()
       // Q1 (2026-09-03): pin a dsh session's header title to the arxa registry
       // name. Untouched, dsh generates a title from the first few words of the
       // opening message, so the header disagreed with both the sidebar row and
@@ -389,6 +397,7 @@ export function apply(ctx, opts = {}) {
                 ...(setup === undefined ? {} : { setup })
               })
               const id = (handle && handle.session && handle.session.id) || (handle && handle.id) || wanted
+              if (handle && typeof handle.dispose === 'function') agentHandles.set(id, handle)
               try {
                 let a = 'n/a'
                 try { if (ctx.agents && typeof ctx.agents.get === 'function') a = !!ctx.agents.get(id) } catch { a = 'err' }
@@ -519,6 +528,46 @@ export function apply(ctx, opts = {}) {
         faces.archive = async (ids) => {
           for (const id of ids) await registry.archiveSession(id)
         }
+      }
+      // Bug B: the narrow agent-control face org trash consumes. ONE total
+      // budget across the whole batch — trash must never hang. A retained
+      // handle stops through its dispose(); an agent live WITHOUT a handle
+      // (resumed by dsh itself, not spawned by arxa) is stopped best-effort
+      // through its own machine: cancel the loop, wait for idle. Anything
+      // not live in this process is already stopped, never an error — it
+      // stays resumable from persistence.
+      faces.stopAgentIds = async (ids, { timeoutMs = 5000 } = {}) => {
+        const stopped = []
+        const alreadyStopped = []
+        const failed = []
+        const deadline = Date.now() + timeoutMs
+        const agentGet = (id) => {
+          try { return typeof ctx.agents?.get === 'function' ? ctx.agents.get(id) : undefined } catch { return undefined }
+        }
+        const timed = (p, ms) => {
+          let timer
+          const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('stop-timeout')), ms) })
+          return Promise.race([p, timeout]).finally(() => clearTimeout(timer))
+        }
+        for (const id of Array.isArray(ids) ? ids : []) {
+          if (typeof id !== 'string' || id === '') continue
+          const handle = agentHandles.get(id)
+          const agent = handle ? handle.agent : agentGet(id)
+          if (!handle && !agent) { alreadyStopped.push(id); continue }
+          const left = deadline - Date.now()
+          if (left <= 0) { failed.push(id); continue }
+          try {
+            await timed(
+              handle ? handle.dispose() : (async () => { agent.cancel({ kind: 'disposed' }); await agent.whenIdle() })(),
+              left,
+            )
+            if (handle) agentHandles.delete(id)
+            stopped.push(id)
+          } catch { failed.push(id) }
+        }
+        return failed.length === 0
+          ? { ok: true, stopped, alreadyStopped }
+          : { ok: false, reason: 'stop-failed', stopped, alreadyStopped, failed }
       }
       return faces
     } catch {
@@ -764,7 +813,7 @@ export function apply(ctx, opts = {}) {
       const list = JSON.parse(fs.readFileSync(path.join(shell.arxaHome(), 'org-trash.json'), 'utf8'))
       return list
         .filter((e) => fs.existsSync(path.join(e.scope, '.arxa', 'trash', e.entryId)))
-        .map((e) => ({ entryId: e.entryId, name: e.name || e.entryId }))
+        .map((e) => ({ entryId: e.entryId, name: e.displayName || e.name || e.entryId }))
     } catch {
       return [] // no index yet, or unreadable — an empty trash, never a throw
     }
@@ -1700,7 +1749,36 @@ export function apply(ctx, opts = {}) {
               }
               return l.renameProject(cur.path, arg.projectSlug, arg.name)
             },
-            'org.trash': () => l.trashOrg(orgByRef(arg?.orgId).path),
+            // Bug B (2026-09-12, docs/plans/org-trash-unreachable.md): stop
+            // the live dsh sessions whose cwd sits under the org BEFORE the
+            // folder moves — closeOrg() leaves them live, and their layer
+            // recreates the org's leading directories after the move (the
+            // husk that blocks restore). Fails CLOSED: a session not
+            // stopped inside the bound throws, the route answers the
+            // standard {ok:false,error}, and the org stays exactly where it
+            // was — folder, recents, GitHub and trash index untouched.
+            // Sessions stopped before a later failure stay stopped; they
+            // are resumable from persistence (history is never deleted).
+            'org.trash': async () => {
+              const org = orgByRef(arg?.orgId)
+              const { quiesceSessionsUnder } = await import(new URL('./session-sweep.js', import.meta.url).href)
+              const budget = Number.parseInt(process.env.ARXA_SESSION_STOP_BUDGET_MS ?? '', 10)
+              const q = await quiesceSessionsUnder(
+                {
+                  sessions: ctx.sessions,
+                  sessionPersistence: typeof ctx.get === 'function' ? ctx.get('sessionPersistence') : null,
+                  agentControl: getBridge(),
+                },
+                org.path,
+                {
+                  timeoutMs: Number.isFinite(budget) && budget > 0 ? budget : 5000,
+                  log: (m) => console.log('[arxa-sidebar] ' + m),
+                },
+              )
+              const out = await l.trashOrg(org.path, { displayName: org.name })
+              if ((q.stopped?.length ?? 0) + (q.alreadyStopped?.length ?? 0) > 0) out.sessions = q
+              return out
+            },
             'orgtrash.restore': () => l.restoreOrg(arg?.entryId),
             'orgtrash.purge': async () => {
               if (typeof arg?.entryId !== 'string' || arg.entryId.trim() === '') throw new Error('entry-id-required')

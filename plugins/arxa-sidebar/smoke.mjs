@@ -370,11 +370,12 @@ check('gh: the admitted org exists and is open', s.orgs.some((o) => o.name === '
   const back = await act('orgtrash.restore', { entryId: entry?.entryId })
   check('zero-org: restore works with no lifecycle at all', back.ok === true, JSON.stringify(back))
   const after = await state()
-  // The trash row carries the FOLDER name (path.basename) while the org row
-  // carries its display name — "Admitted-Co" vs "Admitted Co" — so identity is
-  // checked against the restored path, not the label.
+  // Bug B task (2026-09-12): the trash row now renders the display name (it
+  // used to carry the folder slug — "Admitted-Co" vs "Admitted Co"), so the
+  // trash row and the org row agree on the label; identity is still checked
+  // against the restored path, whose basename is the folder slug.
   check('zero-org: the restored org is live again, and it is the one we restored',
-    after.orgs.length === 1 && String(back.result?.restoredPath || '').endsWith(entry?.name),
+    after.orgs.length === 1 && after.orgs[0].name === entry?.name && after.orgs[0].path === back.result?.restoredPath,
     JSON.stringify({ want: entry?.name, restoredPath: back.result?.restoredPath, got: after.orgs.map((o) => o.name) }))
   check('zero-org: the restored entry left the trash',
     !(after.orgTrash || []).some((e) => e.entryId === entry?.entryId), JSON.stringify(after.orgTrash))

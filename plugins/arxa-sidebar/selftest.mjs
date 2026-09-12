@@ -291,7 +291,7 @@ check('Q6: opening/resuming a session reveals its row — ancestors expanded (ne
   check('Q3 host: resumeSession(id, { dropIfEmpty }) drops ONLY on a positive "no user message" verdict (dsh doubt keeps the row) and archives the dsh side first',
     lifecycle.includes('async resumeSession(id, opts = {})') && lifecycle.includes('if (probe.ok && probe.value === false) {') && lifecycle.includes('await dshBridge.archive([row.dshSessionId])') && lifecycle.includes('dropSession(resolved, id, env)'))
   check('Q3 bridge: hasUserMessage is a throw-proof fifth face — non-boolean/throw/missing all read as dsh-unavailable',
-    bridge.includes('async function hasUserMessage(id)') && bridge.includes("if (typeof out === 'boolean') return { ok: true, value: out }") && bridge.includes("out.ok === true && typeof out.value === 'boolean'") && bridge.includes('return { spawn, attach, retitle, list, archive, hasUserMessage }'))
+    bridge.includes('async function hasUserMessage(id)') && bridge.includes("if (typeof out === 'boolean') return { ok: true, value: out }") && bridge.includes("out.ok === true && typeof out.value === 'boolean'") && bridge.includes('return { spawn, attach, retitle, list, archive, hasUserMessage, stopAgentIds }'))
   check('Q3 host face: live Session.events first, on-disk zstd log fallback, never a silent "empty"',
     hostSrc.includes('faces.hasUserMessage = async (id) =>') && hostSrc.includes("e.type === 'user/message'") && hostSrc.includes('readLogHasUserMessage(id)') && hostSrc.includes("'dsh-log-missing: '") && hostSrc.includes("dropIfEmpty: arg?.dropIfEmpty === true"))
 
@@ -610,7 +610,7 @@ check('purge: the trash row dispatches the confirmation event',
 check('trash: org group + delete-forever + project group (localized en + zh)',
   client.includes('"trash.orgSection": "Organisations"') && client.includes('"trash.orgSection": "Organizacje"') && client.includes('"trash.projectSection": "Projects"') && client.includes('"trash.projectSection": "Projekty"') && client.includes('"trash.projectSection": "Projets"') && client.includes('"trash.deleteForever": "Delete forever"') && client.includes('"trash.deleteForever": "Usuń na zawsze"') && client.includes('"trash.deleteForever": "Supprimer définitivement"'))
 check('routes: org trash/restore/purge wired to the service faces',
-  hostSrc().includes("'org.trash'") && hostSrc().includes('l.trashOrg(orgByRef(arg?.orgId).path)') && hostSrc().includes("'orgtrash.restore'") && hostSrc().includes('l.restoreOrg(arg?.entryId)') && hostSrc().includes('l.purgeOrgTrash(arg.entryId)') && hostSrc().includes('cur.purgeTrash(arg.entryId)'))
+  hostSrc().includes("'org.trash'") && hostSrc().includes('quiesceSessionsUnder(') && hostSrc().includes('l.trashOrg(org.path, { displayName: org.name })') && hostSrc().includes("'orgtrash.restore'") && hostSrc().includes('l.restoreOrg(arg?.entryId)') && hostSrc().includes('l.purgeOrgTrash(arg.entryId)') && hostSrc().includes('cur.purgeTrash(arg.entryId)'))
 
 // ---- D82: org-menu Move to Trash + design-system trash surface ----
 check('menus: org menu REGAINS Move to Trash (danger) dispatching org.trash',

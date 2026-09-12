@@ -787,7 +787,12 @@ try {
       }
       // trash the ORG itself through the real API (writes the index)
       const trashed = await svcT.trashOrg(orgT.path)
-      ok(svcT.listOrgTrash().some((e) => e.entryId === trashed.entryId && e.name === 'Trash-Me'), 'D81: trashed org listed in the org-trash index')
+      ok(svcT.listOrgTrash().some((e) => e.entryId === trashed.entryId && e.name === 'Trash Me'), 'D81: trashed org listed in the org-trash index')
+      // 2026-09-12 (Bug B task, Step 5): the index keeps the folder SLUG
+      // (purge/restore derive paths from it) and stores the display name;
+      // the trash row renders the display name, not the slug.
+      const idxT = JSON.parse(fs.readFileSync(path.join(env.ARXA_HOME, 'org-trash.json'), 'utf8')).find((e) => e.entryId === trashed.entryId)
+      ok(idxT.name === 'Trash-Me' && idxT.displayName === 'Trash Me', 'trash: index keeps the slug and stores the manifest display name')
 
       // 2026-09-07: a localOnly org goes to the trash as-is — no publish, no
       // 15s grace. (Regression: trashOrg read the folder instead of org.json.)
@@ -839,7 +844,9 @@ try {
       ok(resR.deletedRepos.includes('octocat/Race-Case'), 'D89: the raced org purge deletes its GitHub repo')
       // restore path: trash another org and restore it back
       const org2 = svcT.createOrg('Restore Me')
-      const t2e = await svcT.trashOrg(org2.path)
+      const t2e = await svcT.trashOrg(org2.path, { displayName: 'Restore Me (renamed)' })
+      const idx2 = JSON.parse(fs.readFileSync(path.join(env.ARXA_HOME, 'org-trash.json'), 'utf8')).find((e) => e.entryId === t2e.entryId)
+      ok(idx2.name === 'Restore-Me' && idx2.displayName === 'Restore Me (renamed)', 'trash: an explicit displayName overrides the manifest name; the slug stays for restore')
       const res2 = svcT.restoreOrg(t2e.entryId)
       ok(fs.existsSync(res2.restoredPath) && path.basename(res2.restoredPath) === 'Restore-Me', 'D81: restore puts the trashed org back at its origin')
       if (svcT.current) svcT.closeOrg()

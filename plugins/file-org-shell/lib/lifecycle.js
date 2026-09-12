@@ -2097,7 +2097,7 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
    * while the detached heal had already created the GitHub repo — the
    * later purge found no repos and deleted nothing). Bounded grace: a
    * broken snapshot must never hang the trash verb. */
-  async function trashOrg(orgPath) {
+  async function trashOrg(orgPath, { displayName } = {}) {
     const resolved = path.resolve(orgPath)
     if (!fs.existsSync(orgManifestPath(resolved))) throw new Error('unknown-org: ' + resolved)
     const bounded = (p, ms) => Promise.race([p, new Promise((r) => setTimeout(r, ms))])
@@ -2117,21 +2117,36 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
       }
     }
     if (current && current.path === resolved) closeOrg()
+    // Identity survives the move (Bug B task, 2026-09-12): the display name
+    // lives in org.json, which the move takes away from the index's reader.
+    // Read it BEFORE softDelete; the entry keeps the folder SLUG in `name`
+    // (purge/restore derive paths from it) and adds `displayName` for rows.
+    const manifest = (() => { try { return readManifest(orgManifestPath(resolved)) } catch { return null } })()
+    const shown = typeof displayName === 'string' && displayName.trim() !== ''
+      ? displayName.trim()
+      : (typeof manifest?.name === 'string' && manifest.name.trim() !== '' ? manifest.name : null)
     const scope = path.dirname(resolved)
     const entry = softDelete(scope, resolved, { env })
     const list = readOrgTrashIndex()
-    list.push({ entryId: entry.entryId, scope, name: path.basename(resolved), deletedAt: new Date().toISOString() })
+    list.push({
+      entryId: entry.entryId, scope, name: path.basename(resolved),
+      ...(shown === null ? {} : { displayName: shown }),
+      deletedAt: new Date().toISOString(),
+    })
     writeOrgTrashIndex(list)
     try { removeRecent(resolved) } catch { /* recents are advisory */ }
     return { ...entry, scope }
   }
 
-  /** Org-scope trash listing: index entries whose folder still exists. */
+  /** Org-scope trash listing: index entries whose folder still exists.
+   * `name` renders the display name when the entry has one (the org row and
+   * the trash row must agree — Bug B task, 2026-09-12); restore and purge
+   * key off entryId / the index's own slug, never off this row. */
   function listOrgTrash() {
     return readOrgTrashIndex()
       .map((e) => {
         const entryPath = path.join(e.scope, '.arxa', 'trash', e.entryId)
-        return fs.existsSync(entryPath) ? { entryId: e.entryId, entryPath, name: e.name, scope: e.scope } : null
+        return fs.existsSync(entryPath) ? { entryId: e.entryId, entryPath, name: e.displayName ?? e.name, scope: e.scope } : null
       })
       .filter(Boolean)
   }

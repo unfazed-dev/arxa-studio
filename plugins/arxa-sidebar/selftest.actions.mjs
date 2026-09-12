@@ -170,6 +170,21 @@ async function patchProjectManifest(projPath, patch) {
 }
 
 // ============================================================
+// T. org.trash offline — no dsh engine in ctx (no sessionPersistence):
+// the quiesce step skips, it never blocks an offline host, and the trash
+// row renders the display name (Bug B task, 2026-09-12).
+// ============================================================
+{
+  const org = await makeOrg('Trash Offline Co')
+  const r = await act('org.trash', { orgId: org.id })
+  check('T: offline trash proceeds (quiesce skipped)',
+    r.ok === true && typeof r.result?.entryPath === 'string', JSON.stringify(r).slice(0, 300))
+  const s = await call('/__arxa/sidebar/state')
+  const row = (s.orgTrash || []).find((e) => e.name === 'Trash Offline Co')
+  check('T: trash row renders the display name', !!row, JSON.stringify(s.orgTrash))
+}
+
+// ============================================================
 console.log(failures === 0 ? '\narxa-sidebar selftest.actions: ALL GREEN' : `\narxa-sidebar selftest.actions: ${failures} FAILURE(S)`)
 rmSync(sandbox, { recursive: true, force: true })
 process.exit(failures === 0 ? 0 : 1)

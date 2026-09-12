@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { join, resolve, sep } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 
 /**
  * @param persistence JsonlSessionPersistence-shaped (root, compression, listProjectDirs, listSessionDirs, readFirstZstdLine)
@@ -42,6 +42,96 @@ export async function sweepSessionsUnder(persistence, orgPath, { log = () => {} 
   }
   log('session sweep under ' + base + ': removed ' + removed.length + ', kept ' + kept)
   return { removed, kept }
+}
+
+/**
+ * Bug B (docs/plans/org-trash-unreachable.md): trashing an org must FIRST
+ * stop the live dsh sessions whose cwd sits under it — closeOrg() leaves
+ * them live, and their layer recreates the org's leading directories after
+ * the move (the husk that blocks restore). Enumerates persisted session
+ * rows (doubt keeps the row, same doctrine as sweepSessionsUnder) plus
+ * live in-process rows, stops the live ones through the narrow
+ * agent-control face, and NEVER deletes session history: a stopped session
+ * stays resumable from persistence. Fails CLOSED: any session that cannot
+ * be stopped inside the bound throws an error naming ONLY session ids —
+ * the caller leaves the org in place.
+ * @param deps sessions = dsh session store ({ get, list? }); sessionPersistence = dsh persistence; agentControl = bridge ({ stopAgentIds })
+ * @returns {Promise<{ stopped: string[], alreadyStopped: string[], skipped?: string }>}
+ */
+export async function quiesceSessionsUnder({ sessions, sessionPersistence, agentControl }, orgPath, { timeoutMs = 5000, log = () => {} } = {}) {
+  const p = sessionPersistence
+  if (!p || typeof p.listProjectDirs !== 'function' || typeof p.listSessionDirs !== 'function' || typeof p.readFirstZstdLine !== 'function') {
+    return { stopped: [], alreadyStopped: [], skipped: 'persistence-unavailable' }
+  }
+  // Canonical path semantics: the org is where it IS (realpath), and each
+  // cwd compares through its own realpath — macOS /var vs /private/var
+  // would otherwise split one directory in two. A cwd whose tail no longer
+  // exists (the org folder may already be mid-teardown) realpaths its
+  // deepest existing ANCESTOR instead, so the missing tail keeps the
+  // canonical spelling of the part that does exist.
+  const canonical = (dir) => {
+    let p = resolve(dir)
+    const tail = []
+    while (true) {
+      try {
+        const real = realpathSync(p)
+        return tail.length === 0 ? real : join(real, ...tail)
+      } catch { /* walk up */ }
+      const parent = dirname(p)
+      if (parent === p) return resolve(dir)
+      tail.unshift(basename(p))
+      p = parent
+    }
+  }
+  const base = canonical(orgPath)
+  const inside = (cwd) => {
+    if (typeof cwd !== 'string') return false
+    const c = canonical(cwd)
+    return c === base || c.startsWith(base + sep)
+  }
+  const suffix = p.compression === 'zstd' ? '.jsonl.zstd' : '.jsonl'
+  const ids = new Set()
+  for (const project of await p.listProjectDirs()) {
+    for (const dir of await p.listSessionDirs(project)) {
+      let header = null
+      try { header = JSON.parse((await p.readFirstZstdLine(join(dir, 'session' + suffix))) || 'null') } catch { header = null }
+      if (header && typeof header.id === 'string' && inside(header.cwd)) ids.add(header.id)
+    }
+  }
+  // A session born seconds ago can predate its persisted header.
+  let liveRows = []
+  try { liveRows = typeof sessions?.list === 'function' ? sessions.list() : [] } catch { liveRows = [] }
+  for (const s of Array.isArray(liveRows) ? liveRows : []) {
+    const cwd = s?.cwd ?? s?.header?.cwd ?? s?.meta?.cwd
+    if (typeof s?.id === 'string' && inside(cwd)) ids.add(s.id)
+  }
+  if (ids.size === 0) return { stopped: [], alreadyStopped: [] }
+  const wanted = [...ids].sort()
+  if (!agentControl || typeof agentControl.stopAgentIds !== 'function') {
+    throw new Error('session-stop-unavailable: ' + wanted.join(' '))
+  }
+  const bounded = async (promise, ms) => {
+    // No unref: the finally clears the timer on every exit path, and an
+    // unref'd timer never fires in an otherwise-drained loop (the process
+    // exits first) — trash would then hang, not fail closed.
+    let timer
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('session-stop-timeout')), ms)
+    })
+    try { return await Promise.race([promise, timeout]) } finally { clearTimeout(timer) }
+  }
+  let out
+  try {
+    out = await bounded(agentControl.stopAgentIds(wanted, { timeoutMs }), timeoutMs)
+  } catch {
+    throw new Error('session-stop-timeout: ' + wanted.join(' '))
+  }
+  if (!out || out.ok !== true) {
+    const failed = Array.isArray(out?.failed) && out.failed.length > 0 ? out.failed : wanted
+    throw new Error('session-stop-failed: ' + failed.join(' '))
+  }
+  log('quiesced sessions under ' + base + ': stopped ' + out.stopped.length + ', already stopped ' + out.alreadyStopped.length)
+  return { stopped: out.stopped, alreadyStopped: out.alreadyStopped }
 }
 
 /**
