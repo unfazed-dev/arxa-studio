@@ -1,5 +1,11 @@
 # Open work inventory — 2026-09-07
 
+> **Superseded 2026-09-12** by [`open-work-inventory-2026-09-12.md`](open-work-inventory-2026-09-12.md).
+> Every row below was re-verified against current source and tests; several that read as open here
+> closed since (Z.ai capability handoff, the cicd-card live GitHub smoke, the Claude sign-in surface),
+> and the rest were re-evidenced with their owning closeout task. This file is kept as the historical
+> read of 2026-09-07 — do not update it further.
+
 Read of all 185 plan files (arxa-studio 65, arxa 120). Only items that still
 read as open are listed; where a reader's claim was checkable in code it was
 checked (noted as ✔ verified / ✘ still open).

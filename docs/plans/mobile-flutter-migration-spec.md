@@ -1,5 +1,12 @@
 # Mobile Flutter migration spec (Tauri v2 scaffold → Flutter)
 
+> **Status 2026-09-12: parity audit complete.** All twelve §a boxes were verified against current
+> `mobile_flutter` at arxa `5749402b`: `flutter analyze` — *No issues found*; `flutter test` —
+> *All tests passed!* (+104). The boxes stay unchecked below as historical narrative; the evidence
+> mapping and the genuine residuals (Android release signing, CI frame, release automation,
+> physical-device gates) are rows AXS-011/AXS-018/AXS-031 in
+> [`open-work-inventory-2026-09-12.md`](open-work-inventory-2026-09-12.md), owned by Tasks 12/16.
+
 Sources: `arxa-studio/docs/plans/shell-language-decision.md`, `arxa/mobile/` (Tauri scaffold, arxa commit `ca2eff33`),
 `arxa/docs/plans/mobile-pairing-transport.md`, `arxa-studio/docs/plans/mobile-grill-decisions.md`,
 `arxa/docs/plans/arxa-kit-cairn.md` (ADR-0037). Date: 2026-08-29.

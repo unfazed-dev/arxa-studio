@@ -1,5 +1,12 @@
 # Artifact Viewer-Editor Implementation Plan
 
+> **Status 2026-09-12: acceptance tail owned by Task 7.** The five unchecked boxes below (gen-ui
+> Diff card, Lens visual gate, live runbook, version bump) and the vscode-monaco trust-boundary
+> work map to AXS-006 (Task 7) in
+> [`open-work-inventory-2026-09-12.md`](open-work-inventory-2026-09-12.md); phases 4–5 are the
+> deferred row AXS-023. The "`node scripts/ci.mjs` GREEN" box is discharged by the 2026-09-12
+> baseline run (110 suites, ALL GREEN).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the D7 artifact multi-viewer with the D78–D87 editor extension: a per-org, origin-separated viewer for all artifact types whose text family edits like a minimal VS Code inside session worktrees.

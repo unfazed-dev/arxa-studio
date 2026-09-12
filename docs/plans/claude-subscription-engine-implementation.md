@@ -1,5 +1,13 @@
 # Claude Subscription Engine — Implementation Plan
 
+> **Status 2026-09-12: shipped and verified.** The unchecked boxes below are stale tracking, not
+> open work. `plugins/claude-code/` carries the full module set (models, probe, spawn, env, pending,
+> mirror-tools, mirror-gate, bridge, handoff, mcp-bridge, approval, adapter, account, auth-flow,
+> rate-limit, skill-packs, usage) with 21 selftests, all GREEN in the 110-suite `npm test` run of
+> 2026-09-12 (worktree `4d1b924`); the SDK ships in the payload (`scripts/pack-list-check.mjs`:
+> 10 ok). The remaining live gates are external — AXS-016 (Task 16) in
+> [`open-work-inventory-2026-09-12.md`](open-work-inventory-2026-09-12.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Claude models appear in arxa studio's stock model picker as provider `claude-code`, billed to the user's Claude subscription, running the real Claude Code binary inside arxa's own sandbox, approval flow and system prompt — with zero UI/UX change.

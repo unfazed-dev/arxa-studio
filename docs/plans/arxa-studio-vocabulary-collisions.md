@@ -1,5 +1,13 @@
 # Vocabulary collisions — arxa ↔ arxa studio
 
+> **Status 2026-09-12: superseded in part.** V1–V4 landed: `Track` adopted, the gate-count drift
+> fixed, and studio's `versions.js` carries `changes-requested` (`VERSION_STATES`;
+> `selftest.versions: 14/14 passed` on 2026-09-12). V5 (the version-minting ledger shape and the
+> arxa-side `supersededBy`) remains a recommendation awaiting the sibling repo's confirmation —
+> deferred row AXS-032 in
+> [`open-work-inventory-2026-09-12.md`](open-work-inventory-2026-09-12.md); final vocabulary
+> reconciliation is Task 17. The "not yet decided" line below is historical.
+
 Status: **inventory complete, resolutions proposed, not yet decided.**
 Raised as blocking by the owner 2026-09-02, ahead of the version-management work.
 

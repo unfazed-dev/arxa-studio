@@ -1,5 +1,12 @@
 # Project sessions — the physical design (deferred, decision Q3)
 
+> **Superseded 2026-09-12 — the physical step shipped.** Sessions attach to the project repo
+> (`plugins/git-workspace/lib/routing.js`, D98/D99; commits `0df8eb8`, `209e5f7`, `d92a418`) and
+> registries aggregate org + projects (`sessions.js`; `selftest.routing: 19/19 passed` on 2026-09-12).
+> Of the open questions below, only the trash interplay stays live — as AXS-001 (Task 2) in
+> [`open-work-inventory-2026-09-12.md`](open-work-inventory-2026-09-12.md). The "deferred" status
+> line below is historical narrative; the design as written was implemented.
+
 Status: **deferred by decision** (grill Q3, file-org handoff session). What
 shipped is annotation-only: sessions live on the org repo and carry a
 `project` slug in the registry (CONTEXT.md: project session). This note
