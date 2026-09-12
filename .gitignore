@@ -12,3 +12,4 @@ scratchpad/
 # V8 compile cache the launcher writes beside the repo (NODE_COMPILE_CACHE,
 # bin/arxa-studio.mjs) — 10 MB of bytecode, rebuilt on demand, never source.
 .compile-cache/
+.worktrees/
