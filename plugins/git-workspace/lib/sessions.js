@@ -54,7 +54,7 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { ensureGit } from './probe.js'
-import { runGit, STAGE_IDENTITY } from './run.js'
+import { runGit, runGitProbe, STAGE_IDENTITY } from './run.js'
 import { wipCommit, stageBoundarySquash, STAGE_BASE_REF } from './commits.js'
 import { getOrigin, excludeArxaDir } from './repos.js'
 import { projectRepos } from './routing.js'
@@ -603,14 +603,51 @@ export function sessionStageBoundary(repoPath, id, { message, env = process.env,
   // abort cleanly and park — the session branch keeps everything.
   const ff = runGit(['merge', '--ff-only', session.branch], { cwd: repoPath, env, allowFail: true })
   if (ff === null) {
-    const merged = runGit(
-      ['merge', '--no-ff', '-m', `chore(session): merge ${session.name} into main`, '-m', `Arxa-Stage: session ${id}`, session.branch],
-      { cwd: repoPath, env, identity: STAGE_IDENTITY, allowFail: true },
-    )
+    // A no-ff merge that fails WITHOUT leaving a conflict behind is a LAND
+    // RACE — another process is merging into main right now — and its own
+    // dying merge leaves residue in main's index: its result staged, the
+    // other lander's files knocked out of the index with untracked twins on
+    // disk. Measured in the S4 barrier run (cicd-stress.mjs, 2026-09-13):
+    // `A <loser file>`, `D <winner file>` + `?? <winner file>`, after which
+    // every later land refused with "Your local changes would be
+    // overwritten" while the loser was misreported as a merge conflict. So
+    // a non-conflicting failure heals the index and retries: `reset -q`
+    // restores the index from HEAD only (no worktree file is touched), and
+    // the raced merge's untracked twins — bytes IDENTICAL to the incoming
+    // branch's blob, because that merge wrote them — are removed so the
+    // retry merge can write them again. Unknown bytes are never deleted;
+    // the merge fails and parks loudly instead.
+    const midMerge = () =>
+      runGit(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], { cwd: repoPath, env, allowFail: true }) !== null
+    const healRacedIndex = () => {
+      runGit(['reset', '-q'], { cwd: repoPath, env, allowFail: true })
+      const rows = (runGit(['status', '--porcelain'], { cwd: repoPath, env, allowFail: true }) ?? '')
+        .split('\n').filter((l) => l.startsWith('??')).map((l) => l.slice(3))
+      for (const rel of rows) {
+        if (rel.startsWith('"')) continue // quoted paths are not worth guessing at
+        const blob = runGitProbe(['show', `${session.branch}:${rel}`], { cwd: repoPath, env })
+        if (blob.status !== 0) continue
+        let disk = null
+        try { disk = fs.readFileSync(path.join(repoPath, rel), 'utf8') } catch { continue }
+        if (disk === blob.stdout) fs.rmSync(path.join(repoPath, rel))
+      }
+    }
+    let merged = null
+    for (let attempt = 0; merged === null && attempt < 6 && !midMerge(); attempt++) {
+      if (attempt > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25)
+      if (attempt > 0) healRacedIndex()
+      merged = runGit(
+        ['merge', '--no-ff', '-m', `chore(session): merge ${session.name} into main`, '-m', `Arxa-Stage: session ${id}`, session.branch],
+        { cwd: repoPath, env, identity: STAGE_IDENTITY, allowFail: true },
+      )
+    }
     if (merged === null) {
+      const conflicted = midMerge()
       runGit(['merge', '--abort'], { cwd: repoPath, env, allowFail: true })
       parkSession(repoPath, id, 'merge-conflict', env)
-      throw new SessionMergeError(id, 'merge conflict with main')
+      throw new SessionMergeError(id, conflicted
+        ? 'merge conflict with main'
+        : 'main moved mid-merge (lost a land race) — the branch is intact, retry the land')
     }
   }
   // Keep the repo-level stage base (phase 3) on the new main tip so
