@@ -206,6 +206,32 @@ async function reviewFor({ g, gw, owner, name, branch, sid, fresh }) {
   return value
 }
 
+/* ---------------------------------------------------------------------------
+ * The local Checks row (Decision 3, local-only git parity):
+ * `card.gate.run` runs check.sh WITHOUT committing — the same runGate the
+ * Commit boundary already uses (consume, don't duplicate). The last result
+ * is cached per worktree and served on card.status while the worktree
+ * fingerprint still matches: a poll never reruns the script, and any
+ * mutation (committed, staged, unstaged or untracked) leaves gate:null —
+ * "not run" — rather than a green/red claim about bytes that no longer
+ * exist.
+ * ------------------------------------------------------------------------- */
+const GATE_OUTPUT_MAX = 64 * 1024
+const gateCache = new Map() // worktree → last runGate result + fingerprint
+/** HEAD plus staged/unstaged/untracked state as one cheap string: any
+ * worktree mutation changes it, which is the whole staleness contract. */
+const gateFingerprint = (gw, worktree) =>
+  (gw.runGit(['rev-parse', 'HEAD'], { cwd: worktree, allowFail: true }) ?? 'no-head') + '\n'
+  + (gw.runGit(['status', '--porcelain'], { cwd: worktree, allowFail: true }) ?? 'unreadable')
+/** Cap the UI payload to the LAST 64 KiB — a failing gate says why at the
+ * end of its output, so the tail is the part worth carrying, behind an
+ * explicit prefix so the cut is never mistaken for the whole. */
+function capGateOutput(out) {
+  const s = String(out ?? '')
+  return s.length <= GATE_OUTPUT_MAX ? s
+    : '[output truncated — showing the last 64 KiB]\n' + s.slice(-GATE_OUTPUT_MAX)
+}
+
 export function apply(ctx) {
   /** The in-flight device flow, or null. Plugin scope on purpose: the action
    * table below is rebuilt per REQUEST, so a per-table variable would dedupe
@@ -716,8 +742,18 @@ export function apply(ctx) {
                   finish = { can: dry.wouldFinish === true, reason: dry.reason ?? null }
                 } catch (err) { finish = { can: false, reason: String(err?.message ?? err) } }
               }
+              // Decision 3: the last local gate result, served from the
+              // card.gate.run cache only while the fingerprint still
+              // matches. Only measured when a run exists to serve — the
+              // fingerprint git calls never run for a seat that never asked.
+              let gate = null
+              if (sessionRow && health === 'ok' && gateCache.has(repoPath)) {
+                const hit = gateCache.get(repoPath)
+                if (gateFingerprint(gw, repoPath) === hit.fingerprint) gate = hit
+              }
               return {
                 finish,
+                gate,
                 seat: { kind: sid ? 'session' : 'org', sessionId: sessionRow?.id ?? sid, branch },
                 github: { relinkRequired: ghState?.relinkRequired === true },
                 // `health` is what the card must read before any count. When it
@@ -963,6 +999,29 @@ export function apply(ctx) {
             'card.ci.cancel': async () => {
               const { g, owner, name, runId } = await ciTarget()
               return g.cancelRun({ owner, name, runId })
+            },
+            /** Decision 3: the local Checks row's verb — run the gate
+             * WITHOUT committing, so the row can answer "why would Commit
+             * park?" before anyone commits. The same runGate the boundary
+             * uses; nothing is pushed, merged, parked, and no GitHub
+             * Actions run is started — local-only by construction. */
+            'card.gate.run': async () => {
+              const gw = await importGitWorkspace()
+              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+              if (!sid) throw new Error('card.gate.run serves session seats')
+              const s = await sessionFor(gw, sid)
+              if (!s) throw new Error('session-not-found: ' + sid)
+              const gate = gw.runGate(s.worktree)
+              const output = capGateOutput(gate.output)
+              gateCache.set(s.worktree, {
+                state: gate.green ? 'green' : 'red',
+                kind: gate.kind,
+                configured: gate.configured,
+                output,
+                ranAt: Date.now(),
+                fingerprint: gateFingerprint(gw, s.worktree),
+              })
+              return { green: gate.green, kind: gate.kind, configured: gate.configured, output }
             },
             /** Bring main into the session's worktree (grilled 2026-09-03).
               * The MANUAL half — nothing calls this on its own. A conflict is

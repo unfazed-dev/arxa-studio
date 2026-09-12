@@ -202,5 +202,38 @@ check('client: ci locale keys in all three dictionaries',
 
 check('client: en/pl/fr dictionaries registered under NS', ['const en = {', 'const pl = {', 'const fr = {'].every((s) => clientSrc.includes(s)) && clientSrc.includes('ctx.locale.register(NS, { en, pl, fr })'))
 
+// ---- Decision 3 (local-only git parity): the local Checks row -------------
+// The remote Actions row occupies the slot on linked sessions; local-only
+// sessions get THIS row instead — a synchronous local script with a result,
+// not a remote run with an id. These pin the wiring at both ends.
+check('checks: host serves card.gate.run (the no-commit gate verb)',
+  hostSrc().includes("'card.gate.run': async () =>")
+  && hostSrc().includes('gw.runGate(s.worktree)'))
+check('checks: the run is cached per worktree and served only on a fingerprint match',
+  hostSrc().includes('const gateCache = new Map()')
+  && hostSrc().includes('gateFingerprint(gw, repoPath) === hit.fingerprint'))
+check('checks: output capped to the last 64 KiB behind an explicit prefix',
+  hostSrc().includes('const GATE_OUTPUT_MAX = 64 * 1024')
+  && hostSrc().includes('[output truncated — showing the last 64 KiB]'))
+check('checks: the row occupies the Actions slot for local-only sessions only',
+  clientSrc.includes('!(status.linked && !status.localOnly)'))
+check('checks: Run checks rides run() — the busy key de-dupes concurrent clicks',
+  clientSrc.includes("run('gate'") && clientSrc.includes("post('card.gate.run'"))
+check('checks: red output renders in a disclosure, not a toast that scrolls away',
+  clientSrc.includes("gate.state === 'red' && gate.output")
+  && clientSrc.includes('checksOpen && redOut'))
+{
+  // "Must not start GitHub Actions and must not merge or park the session"
+  // (Step 4): slice the handler body and pin what may and may not be in it.
+  const slice = hostSrc().split("'card.gate.run': async () => {")[1].split(/\n {12}'/)[0]
+  check('checks: the verb only runs the gate — no push, PR, merge, park or Actions',
+    slice.includes('gw.runGate(s.worktree)')
+    && !/pushSessionBranch|prMerge|parkSession|workflowRuns|rerunRun|cancelRun/.test(slice))
+}
+check('checks: every row string in all three dictionaries',
+  ['git.checks.run', 'git.checks.none', 'git.checks.green', 'git.checks.red', 'git.checks.light',
+    'git.checks.running', 'git.checks.output', 'git.checks.failed']
+    .every((k) => (clientSrc.split("'" + k + "':").length - 1) === 3))
+
 console.log(failures === 0 ? '\narxa-git-card selftest: ALL GREEN' : `\narxa-git-card selftest: ${failures} FAILURE(S)`)
 process.exit(failures === 0 ? 0 : 1)

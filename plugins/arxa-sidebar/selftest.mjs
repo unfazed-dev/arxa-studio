@@ -1214,6 +1214,25 @@ check('S-orgparity: the host mirrors the org verbs — disconnect (keep/remove),
     gen.includes('const ARXA_DECO_TITLE_LOCAL = ')
     && (gen.match(/"rows\.deco\.local\.modified":/g) || []).length === 3
     && (gen.match(/"rows\.deco\.local\.deleted":/g) || []).length === 3)
+
+  // ---- AXS-003 closeout: the three TOP-LEVEL rows fold the same map ----
+  // The leaf/lister rows shipped above; the Projects dock row, the project
+  // row and the stage rows were the open rollups. foldDirs already carries
+  // every ancestor, so wiring them adds ZERO git work — the same map, read
+  // at three more places.
+  check('deco closeout: Projects + project rows carry the folded mark (OrgContainerRow)',
+    gen.includes('d.slug === "projects" ? "projects"')
+    && gen.includes('ARXA_DECO_FOR(decoTop, "dir")')
+    && gen.includes('ARXA_DECO_BADGE(decoTop, "dir")'))
+  check('deco closeout: container rows subscribe to the map — or the mark paints a poll late',
+    /function OrgContainerRow[\s\S]{0,1400}?ARXA_USE_DECO\(\);/.test(gen))
+  check('deco closeout: stage rows (the stock leaf workspace rows) carry the folded mark',
+    gen.includes('ARXA_WS_DECO_CLASS(row.workspaceId)')
+    && gen.includes('ARXA_DECO_BADGE(wsParts(row.workspaceId).ws, "dir")'))
+  check('deco closeout: the stock leaf rows subscribe too, or a new map repaints nothing',
+    /function ProjectRowItem[\s\S]{0,600}?ARXA_USE_DECO\(\);/.test(gen))
+  check('deco closeout: no new git measurement — session.decorations stays the single fetch',
+    (gen.match(/ORG_POST\("session\.decorations"/g) || []).length === 1)
 }
 
 // ---- D112: a session with no conversation is NAMED, never silent ----

@@ -376,6 +376,118 @@ async function patchProjectManifest(projPath, patch) {
     JSON.stringify(r).slice(0, 300))
 }
 
+// ============================================================
+// G. card.gate.run + card.status.gate — the local Checks row's engine
+//    (Decision 3, local-only git parity): runGate WITHOUT committing,
+//    cached per worktree, voided by any mutation (committed / staged /
+//    unstaged / untracked) without rerunning the script.
+// ============================================================
+{
+  const org = await makeOrg('Gate Co')
+  const sid = await makeSession(org)
+  const row = gw.parkedSessions(org.path).find((x) => x.id === sid)
+  const wt = row.worktree
+  const gateOf = async () => {
+    const r = await act('card.status', { sessionId: sid })
+    return r.ok ? (r.result.gate ?? null) : 'ERR:' + r.error
+  }
+
+  // Loud refusals first.
+  let r = await act('card.gate.run', {})
+  check('card.gate.run: refuses without a session seat',
+    r.ok === false && /serves session seats/.test(r.error), JSON.stringify(r))
+  r = await act('card.gate.run', { sessionId: 'nope-wt-260913-999' })
+  check('card.gate.run: unknown session is session-not-found',
+    r.ok === false && /^session-not-found/.test(r.error), JSON.stringify(r))
+
+  // No cached run yet: gate is null — "not run" is never "green".
+  r = await act('card.status', { sessionId: sid })
+  check('card.status: no gate run yet answers gate:null, not a claim',
+    r.ok === true && r.result.gate === null, JSON.stringify(r.result.gate))
+
+  // GREEN with captured output.
+  writeFileSync(path.join(wt, 'check.sh'), '#!/bin/sh\necho "gate green output"\n')
+  r = await act('card.gate.run', { sessionId: sid })
+  check('card.gate.run: green check.sh returns green/kind/configured + output',
+    r.ok === true && r.result.green === true && r.result.kind === 'check.sh' &&
+    r.result.configured === true && r.result.output.includes('gate green output'),
+    JSON.stringify(r))
+  r = await act('card.status', { sessionId: sid })
+  const g1 = r.result.gate
+  check('card.status: serves the cached run without rerunning (state/kind/output/ranAt/fingerprint)',
+    g1 && g1.state === 'green' && g1.kind === 'check.sh' && g1.configured === true &&
+    g1.output.includes('gate green output') && typeof g1.ranAt === 'number' &&
+    typeof g1.fingerprint === 'string' && g1.fingerprint.length > 0,
+    JSON.stringify(g1))
+
+  // Staleness: each mutation kind voids the cached result. A fresh green
+  // run precedes each so the cache is warm, then the mutation alone must
+  // void it — the whole point is that a historical green never outlives
+  // the bytes it was measured on.
+  await act('card.gate.run', { sessionId: sid })
+  writeFileSync(path.join(wt, 'untracked.txt'), 'x\n')
+  check('stale: an UNTRACKED file voids the cached result', (await gateOf()) === null,
+    JSON.stringify(await gateOf()))
+  await act('card.gate.run', { sessionId: sid })
+  check('rerun recaches while the tree is unchanged', (await gateOf())?.state === 'green')
+  gw.runGit(['add', 'untracked.txt'], { cwd: wt })
+  check('stale: a STAGED change voids the cached result', (await gateOf()) === null,
+    JSON.stringify(await gateOf()))
+  await act('card.gate.run', { sessionId: sid })
+  writeFileSync(path.join(wt, 'untracked.txt'), 'changed\n')
+  check('stale: an UNSTAGED change voids the cached result', (await gateOf()) === null,
+    JSON.stringify(await gateOf()))
+  await act('card.gate.run', { sessionId: sid })
+  gw.runGit(['commit', '-m', 'chore: gate fixture'], { cwd: wt })
+  check('stale: a COMMIT (HEAD move) voids the cached result', (await gateOf()) === null,
+    JSON.stringify(await gateOf()))
+
+  // RED with captured output — the parked-branch mystery this row exists for.
+  writeFileSync(path.join(wt, 'check.sh'), '#!/bin/sh\necho "boom-red-line" >&2\nexit 1\n')
+  r = await act('card.gate.run', { sessionId: sid })
+  check('card.gate.run: red check.sh captures the output, still kind check.sh',
+    r.ok === true && r.result.green === false && r.result.kind === 'check.sh' &&
+    r.result.output.includes('boom-red-line'),
+    JSON.stringify(r).slice(0, 300))
+  r = await act('card.status', { sessionId: sid })
+  check('card.status: the cached red gate carries state red + the same output',
+    r.result.gate?.state === 'red' && r.result.gate?.output.includes('boom-red-line'),
+    JSON.stringify(r.result.gate ?? null).slice(0, 300))
+
+  // The 64 KiB payload cap: a wall of output keeps only the last 64 KiB,
+  // with an explicit prefix saying so.
+  writeFileSync(path.join(wt, 'check.sh'),
+    '#!/bin/sh\ni=0\nwhile [ $i -lt 20000 ]; do echo "line $i filler text"; i=$((i+1)); done\necho "final-line-19999"\nexit 1\n')
+  r = await act('card.gate.run', { sessionId: sid })
+  check('cap: output is the LAST 64 KiB behind an explicit truncation prefix',
+    r.ok === true && /^.{0,80}truncat/i.test(r.result.output) &&
+    r.result.output.length <= 64 * 1024 + 120 &&
+    r.result.output.includes('final-line-19999') && !r.result.output.includes('line 0 filler'),
+    'len=' + r.result?.output?.length + ' head=' + String(r.result?.output).slice(0, 60))
+}
+
+// ============================================================
+// G2. card.gate.run on a worktree with NO check.sh — the light gate
+// ============================================================
+{
+  const org = await makeOrg('Light Gate Co')
+  const sid = await makeSession(org)
+  /* Org scaffolding SHIPS check.sh (the stack probe), so the light path
+   * needs it gone — and the tree clean again, or the light gate reports
+   * the dirt (which is its job) instead of the absent-script state. */
+  const wt2 = gw.parkedSessions(org.path).find((x) => x.id === sid).worktree
+  gw.runGit(['rm', '-q', 'check.sh'], { cwd: wt2 })
+  gw.runGit(['commit', '-m', 'chore: drop check.sh'], { cwd: wt2 })
+  const r = await act('card.gate.run', { sessionId: sid })
+  check('light: an absent check.sh is a configuration state, not an error',
+    r.ok === true && r.result.green === true && r.result.kind === 'light' &&
+    r.result.configured === false, JSON.stringify(r))
+  const s = await act('card.status', { sessionId: sid })
+  check('light: the cached gate reports kind light through card.status',
+    s.result.gate?.kind === 'light' && s.result.gate?.state === 'green',
+    JSON.stringify(s.result.gate ?? null))
+}
+
 // ---- Q14: the PRODUCT posts the stage record, not a driver script ---------
 // Everything above proves the actions work. This proves the ledger they leave
 // behind reaches GitHub: the table lands in the PR BODY (replaced in place,

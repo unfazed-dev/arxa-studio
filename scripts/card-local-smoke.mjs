@@ -267,6 +267,34 @@ check('...and is NOT local-only, so the card shows its PR and CI section',
 writeFileSync(projManifestPath, JSON.stringify(projManifest, null, 2))
 
 // ============================================================
+section('6b. The local Checks row engine — red gate, output shown, worktree untouched')
+// ============================================================
+/* Decision 3 (local-only git parity): card.gate.run is the Checks row's
+ * engine — runGate WITHOUT committing. A red check.sh must surface its
+ * output (the parked-branch mystery is why the row exists) while changing
+ * nothing on disk: no commit, no park, no merge — the session stays
+ * exactly as it was. The leg is SCRATCH: check.sh is written into this
+ * sandbox session's worktree and removed before the shared table runs. */
+const gateWt = sess.worktree
+writeFileSync(path.join(gateWt, 'check.sh'), '#!/bin/sh\necho "smoke: red on purpose" >&2\nexit 1\n')
+const gateBeforePorcelain = git(['status', '--porcelain'], gateWt)
+const gateBeforeHead = git(['rev-parse', 'HEAD'], gateWt)
+r = await act('card.gate.run', { sessionId: sid })
+check('card.gate.run runs a red check.sh and captures the output',
+  r.ok === true && r.result?.green === false && r.result?.kind === 'check.sh' &&
+  r.result?.output?.includes('smoke: red on purpose'), JSON.stringify(r).slice(0, 300))
+r = await act('card.status', { sessionId: sid })
+check('card.status serves the cached red gate with its output',
+  r.ok === true && r.result?.gate?.state === 'red' &&
+  r.result?.gate?.output?.includes('smoke: red on purpose'),
+  JSON.stringify(r.result?.gate ?? null).slice(0, 300))
+check('the red run left the worktree unchanged (porcelain + HEAD identical)',
+  git(['status', '--porcelain'], gateWt) === gateBeforePorcelain &&
+  git(['rev-parse', 'HEAD'], gateWt) === gateBeforeHead,
+  JSON.stringify({ porcelain: git(['status', '--porcelain'], gateWt), head: git(['rev-parse', 'HEAD'], gateWt) }))
+rmSync(path.join(gateWt, 'check.sh'))
+
+// ============================================================
 /* Sections 7-8 are the SHARED table (Decision 5) — the same assertions the
  * GitHub-linked smoke runs, imported rather than copied. Everything in it is
  * plain local git through the card's own route, so it holds identically in

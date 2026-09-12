@@ -119,6 +119,16 @@ window.__ModuleLoader__.load({
       'git.mint': 'Mint a version',
       'git.minted': 'Minted {chip}',
       'git.mintFailed': 'Mint failed: {reason}',
+      // Decision 3 (local-only git parity): the local Checks row — the twin of
+      // the Actions section on linked seats, for the seat that has no remote.
+      'git.checks.none': 'checks not run yet',
+      'git.checks.running': 'running checks…',
+      'git.checks.green': 'green',
+      'git.checks.red': 'red',
+      'git.checks.light': 'light checks',
+      'git.checks.run': 'Run checks',
+      'git.checks.output': 'Checks output',
+      'git.checks.failed': 'Checks failed: {reason}',
       // G4 (grilled 2026-09-06): the four moves that are hard to walk back ask
       // first. Commit and Create PR already pause for text; Cancel CI is undone
       // by re-running.
@@ -217,6 +227,15 @@ window.__ModuleLoader__.load({
       'git.mint': 'Wybij wersję',
       'git.minted': 'Wybito {chip}',
       'git.mintFailed': 'Wybicie nie powiodło się: {reason}',
+      // TODO native review (conformance decision 4): machine-drafted.
+      'git.checks.none': 'testy jeszcze nie uruchomiono',
+      'git.checks.running': 'uruchamianie testów…',
+      'git.checks.green': 'zielone',
+      'git.checks.red': 'czerwone',
+      'git.checks.light': 'testy lekkie',
+      'git.checks.run': 'Uruchom testy',
+      'git.checks.output': 'Wyniki testów',
+      'git.checks.failed': 'Testy nie powiodły się: {reason}',
       'git.confirm.integrate.title': 'Scalić main do tej sesji?',
       'git.confirm.integrate.body': 'Scala bieżący main do drzewa roboczego tej sesji. Konflikt zatrzyma scalanie w połowie — dokończysz je z karty, zanim cokolwiek innego wejdzie.',
       'git.confirm.integrate.ok': 'Scal main',
@@ -311,6 +330,15 @@ window.__ModuleLoader__.load({
       'git.mint': 'Frapper une version',
       'git.minted': 'Version {chip} frappée',
       'git.mintFailed': 'Échec de la frappe : {reason}',
+      // TODO native review (conformance decision 4): machine-drafted.
+      'git.checks.none': 'vérifications pas encore lancées',
+      'git.checks.running': 'lancement des vérifications…',
+      'git.checks.green': 'vertes',
+      'git.checks.red': 'rouges',
+      'git.checks.light': 'vérifications légères',
+      'git.checks.run': 'Lancer les vérifications',
+      'git.checks.output': 'Résultats des vérifications',
+      'git.checks.failed': 'Échec des vérifications : {reason}',
       'git.confirm.integrate.title': 'Intégrer main dans cette session ?',
       'git.confirm.integrate.body': 'Fusionne le main actuel dans l’arbre de travail de cette session. Un conflit arrête la fusion à mi-chemin — vous la terminez depuis la carte avant que quoi que ce soit d’autre puisse arriver.',
       'git.confirm.integrate.ok': 'Intégrer main',
@@ -368,6 +396,9 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = React.useState(null)
       const [seatSession, setSeatSession] = React.useState(sessionId || null)
       const [mintChip, setMintChip] = React.useState(null)
+      // Decision 3: the local Checks row's disclosure — red output stays open
+      // until the reader closes it, but never leaks across a session switch.
+      const [checksOpen, setChecksOpen] = React.useState(false)
       // G4: the move waiting on a yes — { key, title, body, ok, run } | null.
       const [confirm, setConfirm] = React.useState(null)
       // G6: the device-flow conversation — null | { starting } | { userCode, verificationUri }.
@@ -411,7 +442,7 @@ window.__ModuleLoader__.load({
         catch (e) { if (alive.current) setPr({ ok: false, reason: reasonOf(e) }) }
       }, [post, seatSession])
 
-      React.useEffect(() => { setSeatSession(sessionId || null); setPr(void 0); setMintChip(null); load() }, [sessionId, load])
+      React.useEffect(() => { setSeatSession(sessionId || null); setPr(void 0); setMintChip(null); setChecksOpen(false); load() }, [sessionId, load])
       React.useEffect(() => {
         const on = () => { load(); if (!collapsed) loadPr() }
         window.addEventListener('arxa-git-card-refresh', on)
@@ -624,6 +655,20 @@ window.__ModuleLoader__.load({
           } catch (e) { notify('error', t('git.finishFailed', { reason: reasonOf(e) })) }
         })
       }
+      /** Decision 3: the local Checks row's verb — runGate WITHOUT committing,
+       * so the row answers "why would Commit park?" before anyone commits.
+       * No GitHub anywhere: this starts no Actions run, merges nothing, parks
+       * nothing. `run()` owns the busy key, so a second click while the script
+       * is live is a disabled button, not a second process. */
+      const runChecks = async () => {
+        await run('gate', async () => {
+          try {
+            await post('card.gate.run', seatArg())
+            if (!alive.current) return
+            load()
+          } catch (e) { notify('error', t('git.checks.failed', { reason: reasonOf(e) })) }
+        })
+      }
       /** G6: the device flow, the sidebar's relink verbatim — card.github.link
        * LONG-POLLS until GitHub confirms, while card.github.device is polled
        * meanwhile for the one-time code to show. Both ride the card's own route:
@@ -800,6 +845,36 @@ window.__ModuleLoader__.load({
                     ? action('mint', t('git.mint'), Icon('IconGoalOutline16', 'IconPlusOutline16', 14), { onClick: ask('mint', mint) })
                     : action('pr-create', t('git.pr.create'), Icon('IconSendOutline16', 'IconPlusOutline16', 14), { disabled: pr === void 0, onClick: () => setEditing({ kind: 'pr', text: '' }) }),
               ])))
+      }
+      // 4. Checks — the local-only twin of the Approve row (Decision 3). It
+      // shares the SLOT, not the shape: that row is a remote run with an id,
+      // history and cancellation; this one is a synchronous local script with
+      // a last result. `status.gate` is the cached card.gate.run outcome, and
+      // it is null whenever the worktree moved under it (stale ≠ green).
+      if (status.seat && status.seat.kind === 'session' && !(status.linked && !status.localOnly)) {
+        const gate = status.gate || null
+        const gateKind = !gate ? null : gate.kind === 'light' ? t('git.checks.light') : gate.kind
+        const gateState = !gate ? null : t(gate.state === 'green' ? 'git.checks.green' : 'git.checks.red')
+        const gateText = busy === 'gate' ? t('git.checks.running')
+          : !gate ? t('git.checks.none')
+            : [gateKind, gateState].filter(Boolean).join(' · ')
+        // Red output stays on the card in a disclosure — the toast this row
+        // replaces scrolled the reason away, which is why nobody knew why the
+        // branch parked.
+        const redOut = gate && gate.state === 'red' && gate.output ? gate.output : null
+        rows.push(h('li', { key: 'checks', className: S.row },
+          h('span', { className: S.preview }, gateText),
+          h('div', { className: S.actions }, [
+            redOut ? action('checks-output', t('git.checks.output'), Icon('IconChevronDownOutline14', 'IconChevronDownOutline14', 14), { onClick: () => setChecksOpen((v) => !v) }) : null,
+            action('checks-run', t('git.checks.run'), Icon('IconPlayOutline16', 'IconTriangleRightFill14', 14), { onClick: runChecks }),
+          ])))
+        if (checksOpen && redOut) {
+          rows.push(h('li', { key: 'checks-output', className: S.row },
+            h('pre', {
+              'aria-label': t('git.checks.output'),
+              style: { flex: 1, minWidth: 0, margin: 0, padding: '4px 8px', fontSize: 11, lineHeight: '16px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '30vh', overflow: 'auto', color: 'var(--dsw-alias-label-secondary)' },
+            }, redOut)))
+        }
       }
 
       const confirmModal = confirm === null ? null : h(P.Modal, {

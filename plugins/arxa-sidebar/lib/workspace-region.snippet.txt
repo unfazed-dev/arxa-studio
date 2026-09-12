@@ -1427,6 +1427,15 @@
 		// dropped by the CSSOM, which once left every leaf at the stock 8px).
 		const wsIndent = (ws) => 18 + 12 * (ws.split("/").length - 1);
 		const ARXA_WS_INDENT = (workspaceId) => wsIndent(wsParts(workspaceId).ws) + "px";
+		/** AXS-003 closeout: the folded dir mark for a stock LEAF workspace row
+		 * — a stage container ('projects/<slug>/01-discovery') or any other
+		 * leaf folder. Same map, same letters as the leaf/lister rows; null
+		 * when nothing under it changed. Returns the class pair so the
+		 * generated row can slot it straight into clsx(). */
+		const ARXA_WS_DECO_CLASS = (workspaceId) => {
+			const letter = ARXA_DECO_FOR(wsParts(workspaceId).ws, "dir");
+			return letter ? "aXa_decoText aXa_deco_" + letter : null;
+		};
 		const ARXA_WS_HIDDEN = (workspaceId) => leafHidden(workspaceId);
 		// Container rows render INSIDE their own pseudo group (v2 collapse
 		// fix: never inside a leaf group — a collapsed container hides its
@@ -1817,6 +1826,15 @@
 			// D97: last sync outcome for THIS row — null (never synced this
 			// session) | { busy: true } | { key, detail, bad }.
 			const [syncState, setSyncState] = (0, react.useState)(null);
+			// AXS-003 closeout: subscribe to the deco map — without this the
+			// top-level mark waits for the next poll to paint.
+			ARXA_USE_DECO();
+			/* AXS-003 closeout: the Projects dock row and each project row are
+			 * the top of the tree — they fold the SAME map the leaf rows read
+			 * (foldDirs already rolls every ancestor up), so wiring them adds
+			 * zero git work. Org rows never decorate: the org is not a folder
+			 * in any session's diff. */
+			const decoTop = !isOrg && d.kind === "dock" && d.slug === "projects" ? "projects" : d.kind === "project" ? "projects/" + d.slug : null;
 			// D80: BOTH row kinds carry a menu; D80 scope fix: ONLY org + project
 			// rows — fixed docks (Meetings/Account/…) and containers are
 			// infrastructure, never renamable. D82: every row gets a proper
@@ -1923,8 +1941,11 @@
 					}),
 					(0, react_jsx_runtime.jsx)("span", {
 						className: Rows_module_css_default.projectText,
-						children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: d.label })
+						children: (0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.title, decoTop && ARXA_DECO_FOR(decoTop, "dir") && "aXa_decoText", decoTop && ARXA_DECO_FOR(decoTop, "dir") && ("aXa_deco_" + ARXA_DECO_FOR(decoTop, "dir"))), children: d.label })
 					}),
+					// AXS-003 closeout: the folded mark on the Projects /
+					// project rows — the same badge the leaf rows carry.
+					decoTop ? ARXA_DECO_BADGE(decoTop, "dir") : null,
 					// D91: connected marker — GitHub mark ONLY on rows with a repo
 					// behind them (org + project rows). Local-only rows carry NO mark.
 					(isOrg || d.kind === "project") && d.connected === true ? (0, react_jsx_runtime.jsx)("span", {

@@ -213,6 +213,46 @@ const ROW_ICON_ACTIVE = 'className: clsx(Rows_module_css_default.slot, Rows_modu
 if (!out.includes(ROW_ICON_ACTIVE) || out.indexOf(ROW_ICON_ACTIVE) !== out.lastIndexOf(ROW_ICON_ACTIVE)) throw new Error('row icon active anchor missing/dup — stock shape moved?')
 out = out.replace(ROW_ICON_ACTIVE, 'className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder, (active || ARXA_WS_SELECTED(row.workspaceId)) && Rows_module_css_default.folderActive),')
 
+// 6i. (AXS-003 closeout, 2026-09-13) the stock leaf workspace row — a stage
+//     container ('projects/<slug>/01-discovery'), a track, or any leaf
+//     folder — carries the folded dir mark from the region's ONE deco map:
+//     the same letters the leaf/lister rows below it already read, wired at
+//     zero additional git cost. The title takes the text classes and the
+//     badge rides after the name, exactly like ArxaDirRows' dirRow.
+//     The hook first: without the subscription a new map repaints nothing.
+const ROW_ITEM_STATE = [
+  T(3) + 'const [menuOpen, setMenuOpen] = (0, react.useState)(false);',
+  T(3) + 'const workspaceMenuItems = [{',
+].join('\n')
+if (!out.includes(ROW_ITEM_STATE) || out.indexOf(ROW_ITEM_STATE) !== out.lastIndexOf(ROW_ITEM_STATE)) throw new Error('gen-workspace: ProjectRowItem state anchor missing or duplicated')
+out = out.replace(ROW_ITEM_STATE, [
+  T(3) + 'const [menuOpen, setMenuOpen] = (0, react.useState)(false);',
+  T(3) + '// AXS-003 closeout: subscribe to the deco map, like every decorated row.',
+  T(3) + 'ARXA_USE_DECO();',
+  T(3) + 'const workspaceMenuItems = [{',
+].join('\n'))
+const ROW_ITEM_TITLE = [
+  T(5) + '(0, react_jsx_runtime.jsx)("span", {',
+  T(6) + 'className: Rows_module_css_default.projectText,',
+  T(6) + 'children: (0, react_jsx_runtime.jsx)("span", {',
+  T(7) + 'className: Rows_module_css_default.title,',
+  T(7) + 'children: label',
+  T(6) + '})',
+  T(5) + '}),',
+].join('\n')
+if (!out.includes(ROW_ITEM_TITLE) || out.indexOf(ROW_ITEM_TITLE) !== out.lastIndexOf(ROW_ITEM_TITLE)) throw new Error('gen-workspace: ProjectRowItem title anchor missing or duplicated')
+out = out.replace(ROW_ITEM_TITLE, [
+  T(5) + '(0, react_jsx_runtime.jsx)("span", {',
+  T(6) + 'className: Rows_module_css_default.projectText,',
+  T(6) + 'children: (0, react_jsx_runtime.jsx)("span", {',
+  T(7) + '// AXS-003 closeout: the folded dir mark on a leaf workspace row.',
+  T(7) + 'className: clsx(Rows_module_css_default.title, ARXA_WS_DECO_CLASS(row.workspaceId)),',
+  T(7) + 'children: label',
+  T(6) + '})',
+  T(5) + '}),',
+  T(5) + 'ARXA_DECO_BADGE(wsParts(row.workspaceId).ws, "dir"),',
+].join('\n'))
+
 // 6c-bis. the per-row + affordance obeys the track rule (98f2e93). The dock
 //     CTA has been gated by projectRowRefused since tracks landed, but each
 //     tree row carries its OWN + inside the stock bundle, and that one still
