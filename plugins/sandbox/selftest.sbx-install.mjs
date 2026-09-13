@@ -100,10 +100,27 @@ await ok('an unsupported platform is refused, not guessed', () => {
   assert.match(p.reason, /win32|platform/i)
 })
 
-await ok('the SHIPPED pin table fails closed while checksums are unmeasured', () => {
-  // The real SBX_PIN ships sha256: null entries (unmeasured until Task 16's
-  // authorized gate) — planning must REFUSE rather than download unverified.
+await ok('the SHIPPED pin table is measured: v0.42.1 feed names, sha256 per key, darwin universal', () => {
+  // Task 16 (2026-09-14) measured the official feed
+  // (github.com/docker/sbx-releases tag v0.42.1): the darwin artifact is a
+  // single universal DockerSandboxes-darwin.tar.gz (both arch keys share it);
+  // the darwin sha256 below was cross-checked by hashing the streamed bytes,
+  // the linux ones are the release API's server-computed digests.
+  assert.equal(SBX_PIN.version, '0.42.1')
+  for (const key of ['darwin-arm64', 'darwin-amd64', 'linux-arm64', 'linux-amd64']) {
+    assert.match(typeof SBX_PIN.artifacts[key].sha256, /string/, `${key} pin is measured`)
+    assert.match(SBX_PIN.artifacts[key].sha256, /^[0-9a-f]{64}$/, `${key} pin is a sha256`)
+    assert.match(SBX_PIN.artifacts[key].file, /^DockerSandboxes-(darwin|linux-(amd64|arm64))\.tar\.gz$/, `${key} file matches the official feed shape`)
+  }
+  assert.equal(SBX_PIN.artifacts['darwin-arm64'].file, SBX_PIN.artifacts['darwin-amd64'].file, 'darwin is one universal artifact')
   const p = planSbxInstall({ pin: SBX_PIN, platform: 'darwin', arch: 'arm64' })
+  assert.equal(p.supported, true)
+  assert.equal(p.version, '0.42.1')
+})
+
+await ok('an unmeasured pin STILL fails closed — the invariant survives the fill', () => {
+  const unmeasured = { version: '0.42.1', base: SBX_PIN.base, artifacts: { 'darwin-arm64': { file: 'x.tar.gz', sha256: null } } }
+  const p = planSbxInstall({ pin: unmeasured, platform: 'darwin', arch: 'arm64' })
   assert.equal(p.supported, false)
   assert.match(p.reason, /pin|checksum|verif/i)
 })

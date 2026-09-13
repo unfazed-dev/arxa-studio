@@ -1,4 +1,6 @@
-viewport@boot: [1280,813,true]
+(node:73868) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+viewport@boot: [1280,813,false]
 theme rides the Appearance-row path (real setTheme clicks)
 -- surface: langstrip
 MISSING: no diagnostic squiggles for langstrip.ts
@@ -9,4 +11,5 @@ FILTERED (pre-existing, justified in scripts/evidence-gate.mjs):
   exception: Error: web app: missing #root
     at http://arxa.studio.localhost:7897/assets/index-Df-65__b.js:109:69
   log: Failed to load resource: the server responded with a status of 404 (Not Found) [http://arxa.studio.localhost:7897/favicon.ico]
+  log: Failed to load resource: net::ERR_CONNECTION_REFUSED [http://127.0.0.1:4319/__dial/events]
 EVIDENCE OK @1280 — langstrip — zero unfiltered console/page errors

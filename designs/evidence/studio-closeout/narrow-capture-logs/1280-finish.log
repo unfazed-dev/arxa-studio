@@ -1,12 +1,41 @@
-viewport@boot: [1280,813,true]
+viewport@boot: [1280,813,false]
+internal testing notice dismissed (Continue)
 theme rides the Appearance-row path (real setTheme clicks)
 -- surface: finish
   org: already open
   notes: clicked
   plus: cta: clicked
-FAILURE STATE: the + created no registry row in 45s — see pair log
+  fresh session: T8CLOSE/notes/note-wt-260914-001
+  opened via: row
+  composer: activated
+  markers: {"noConvo":null,"openErr":null}
+  bind: {"b":{"orgId":"t8close-scratch","sessionId":"T8CLOSE/notes/note-wt-260914-001"},"cta":false,"sel":{"orgId":"t8close-scratch","rowId":"","kind":"org","label":"T8CLOSE"}}
+  pane: {"ta":false,"send":false,"hero":true,"loading":false}
+  tail: json
+.github
+Projects
+Notes
+.gitkeep
+note-wt-260914-001
+now
+Meetings
+Account
+Communications
+Archives
+Trash
+Settings
+Flowing High
+arxa
+Describe what you want to build... / commands, @ files or sessions
+Workspace Write
+GLM-5.3
+Max
+Details
+Click a tool row in the message flow to view its details
+design
+FAILURE STATE: the git dock never mounted — the conversation binds and the composer activates, but the conversation.input.dock slot never renders on fresh boots (product defect, all widths; see pair log + ledger)
 shot: /Volumes/business_ssd/arxa_digital_solutions/.worktrees/arxa-studio-closeout/designs/evidence/studio-closeout/1280/finish-failed-light-1280.png
 shot: /Volumes/business_ssd/arxa_digital_solutions/.worktrees/arxa-studio-closeout/designs/evidence/studio-closeout/1280/finish-failed-dark-1280.png
 FILTERED (pre-existing, justified in scripts/evidence-gate.mjs):
-  log: Failed to load resource: the server responded with a status of 404 (Not Found) [http://arxa.studio.localhost:7897/__arxa/artifacts/tree?dir=projects%2Fprep
+  log: Failed to load resource: net::ERR_CONNECTION_REFUSED [http://127.0.0.1:4319/__dial/events]
 EVIDENCE OK @1280 — finish — zero unfiltered console/page errors

@@ -6,7 +6,8 @@
 import { strict as assert } from 'node:assert'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { ClaudeCodeAdapter } from './lib/adapter.js'
 import { MANIFEST_REL, PACKS_DIRNAME, packName, resolveSkillPacks } from './lib/skill-packs.js'
 
@@ -54,6 +55,16 @@ try {
   assert.deepEqual(resolveSkillPacks({ env: { ARXA_HOME: join(root, 'empty') }, log: () => {} }), [],
     'no roots, no packs, no throw')
   ok('an install with no packs resolves to nothing')
+
+  // G5 (Task 16, Step 3): the DEFAULT bundled skill-pack set stays EMPTY —
+  // the studio ships no packs inside the app bundle; the resolver's third
+  // root is ready for the first that does. Asserted against the REAL app
+  // root (the repo root, the same `studioRoot` index.mjs passes), with an
+  // empty ARXA_HOME so only the bundled root can contribute.
+  const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
+  assert.deepEqual(resolveSkillPacks({ env: { ARXA_HOME: join(root, 'empty') }, appRoot, log: () => {} }), [],
+    'the shipped bundle contributes zero packs — the bundled set stays empty by policy')
+  ok('the real app root bundles no skill packs (G5 policy)')
 
   // The turn option: absent entirely when there are no packs (never `plugins: []`,
   // which is a different statement to the SDK than "not configured").

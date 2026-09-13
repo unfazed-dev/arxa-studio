@@ -37,22 +37,22 @@ export function defaultStateRoot () {
 }
 
 /**
- * The shipped pin. Version + artifact names follow the official feed
- * (github.com/docker/sbx-releases); the sha256 values are UNSET until
- * measured — planning against an unset pin refuses rather than trusting an
- * unverified download. Task 16's authorized gate fills them from the
- * release's official checksums.
- * ponytail: single tar.gz-per-platform assumption; adjust file names/sha
- * when the real asset shape is measured at the gate.
+ * The shipped pin. Version + artifact names + sha256 values measured from
+ * the official feed (github.com/docker/sbx-releases tag v0.42.1) on
+ * 2026-09-14 (Task 16): darwin ships ONE universal tar.gz (both arch keys
+ * share it); its sha256 was cross-checked by hashing the streamed bytes,
+ * the linux ones are the release API's server-computed digests. Planning
+ * against an unset sha256 still refuses (fail-closed) — selftest.sbx-install
+ * pins both facts.
  */
 export const SBX_PIN = {
   version: '0.42.1',
   base: 'https://github.com/docker/sbx-releases/releases/download',
   artifacts: {
-    'darwin-arm64': { file: 'sbx_0.42.1_darwin_arm64.tar.gz', sha256: null },
-    'darwin-amd64': { file: 'sbx_0.42.1_darwin_amd64.tar.gz', sha256: null },
-    'linux-arm64': { file: 'sbx_0.42.1_linux_arm64.tar.gz', sha256: null },
-    'linux-amd64': { file: 'sbx_0.42.1_linux_amd64.tar.gz', sha256: null }
+    'darwin-arm64': { file: 'DockerSandboxes-darwin.tar.gz', sha256: '3c5738c489fbeac8f6c85533101c7229f4ce39106f823afde66d70469b758df1' },
+    'darwin-amd64': { file: 'DockerSandboxes-darwin.tar.gz', sha256: '3c5738c489fbeac8f6c85533101c7229f4ce39106f823afde66d70469b758df1' },
+    'linux-arm64': { file: 'DockerSandboxes-linux-arm64.tar.gz', sha256: '285b36cdb46ce65f792f006869698f2664fcde8adc1e8524357f150f9368dd4c' },
+    'linux-amd64': { file: 'DockerSandboxes-linux-amd64.tar.gz', sha256: 'fe46facba420d1cb8b1dad57d5b182d6df9dadd46c324c2ca3ef574fb7eada6f' }
   }
 }
 
