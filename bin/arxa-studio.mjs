@@ -125,6 +125,17 @@ const bundles = headless
   ? ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-headless']
   : ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app']
 
+// WORKSPACE PROVIDER CLI (task 13 steps 7–8): `provider verify`, `workspace
+// export|import`, `diagnose` dispatch BEFORE normal studio boot — no dsh
+// spawn, no pnpm, no profile writes. The four spellings are the ONLY ones;
+// anything else falls through to the studio boot below.
+if ((args[0] === 'provider' && args[1] === 'verify') ||
+    (args[0] === 'workspace' && (args[1] === 'export' || args[1] === 'import')) ||
+    args[0] === 'diagnose') {
+  const { run: runProviderCli } = await import(pathToFileURL(join(here, 'arxa-studio-provider.mjs')).href)
+  process.exit(await runProviderCli(args))
+}
+
 // ---- dsh home ----------------------------------------------------------------
 const designPanelDir = resolve(here, '..', 'plugins', 'design-panel')
 const brandDir = resolve(here, '..', 'plugins', 'brand')
@@ -182,6 +193,10 @@ const prismDir = resolve(here, '..', 'plugins', 'prism')
 // Personalisation settings tab: the 4th settings section owning the
 // look-and-feel rows (accent/editor-font/Background retarget there).
 const personalisationDir = resolve(here, '..', 'plugins', 'personalisation')
+// Workspace provider (task 13): Wire v1 contract + local/generic-rest
+// providers + conformance kit. Host service row in the patch; browser half
+// via package.json dsh.client — same by-name shape as the rows above.
+const workspaceProviderDir = resolve(here, '..', 'plugins', 'workspace-provider')
 mkdirSync(profileDir, { recursive: true })
 /**
  * The profile's plugin set — ONE list, two consumers.
@@ -216,6 +231,7 @@ const PROFILE_PLUGINS = [
   ['arxa-prism', prismDir],
   ['arxa-personalisation', personalisationDir],
   ['arxa-provider-status', providerStatusDir],
+  ['arxa-workspace-provider', workspaceProviderDir],
 ]
 writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
   name: 'dsh-profile-arxa',
@@ -406,7 +422,7 @@ engineLog('dsh bin resolved: ' + dshBin)
 // The design panel, brand and gen-ui plugins resolve by package name (their
 // browser halves are discovered through package.json dsh.client, which a
 // file-path entry never reaches).
-const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa-mcp-apps', 'arxa-waiting-page', 'arxa-theme-accent', 'arxa-pairing', 'arxa-sidebar', 'arxa-git-card', 'arxa-dashboard', 'arxa-artifact-viewer', 'arxa-frame', 'arxa-locale', 'arxa-prism', 'arxa-provider-status', 'arxa-freestyle']
+const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa-mcp-apps', 'arxa-waiting-page', 'arxa-theme-accent', 'arxa-pairing', 'arxa-sidebar', 'arxa-git-card', 'arxa-dashboard', 'arxa-artifact-viewer', 'arxa-frame', 'arxa-locale', 'arxa-prism', 'arxa-provider-status', 'arxa-freestyle', 'arxa-workspace-provider']
 // ALWAYS install, never skip on presence: these are file: dependencies, and
 // pnpm copies them into .pnpm at add-time. A plain `pnpm install` sees the
 // lockfile entry unchanged and keeps the OLD copy — measured 2026-08-25: the

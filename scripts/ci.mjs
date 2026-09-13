@@ -81,6 +81,11 @@ suites.push([root, 'bin', 'selftest.loopback-patch.mjs'])
 // workspace-write; existing ones migrate only on marker proof. Pinned pure
 // AND end-to-end through a real --materialise-only boot.
 suites.push([root, 'bin', 'selftest.launcher-settings.mjs'])
+// The workspace-provider CLI (task 13 steps 7–8): canonical spellings,
+// dispatch-before-boot, redacted diagnose, nonzero exit on red rows. bin/ is
+// outside the plugins/*/selftest sweep, so it is wired by hand like the rows
+// above.
+suites.push([root, 'bin', 'selftest.provider-cli.mjs'])
 
 console.log('arxa-studio CI — ' + suites.length + ' suites')
 let failed = 0

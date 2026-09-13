@@ -2,14 +2,29 @@
   "name": "arxa-workspace-provider",
   "version": "0.1.0",
   "private": true,
-  "description": "WorkspaceProvider Wire v1: frozen routes, verbs, headers, media types, envelopes, bounds, and config guards (task 13 part A). Providers, REST adapter, and conformance kit land in part B.",
+  "description": "WorkspaceProvider Wire v1 (task 13): frozen contract + codecs (part A); local provider, generic-REST adapter, adaptive polling, conformance kit, export/import bundles, and the CLI service row (part B). Local-first: the default provider needs no network, account, database, or environment variable.",
   "type": "module",
-  "main": "lib/contract.js",
+  "main": "lib/index.js",
   "exports": {
-    ".": "./lib/contract.js",
+    ".": "./lib/index.js",
     "./contract": "./lib/contract.js",
     "./errors": "./lib/errors.js",
     "./wire": "./lib/wire.js",
+    "./capabilities": "./lib/capabilities.js",
+    "./local": "./lib/local.js",
+    "./generic-rest": "./lib/generic-rest.js",
+    "./polling": "./lib/polling.js",
+    "./export-bundle": "./lib/export-bundle.js",
+    "./conformance": "./lib/conformance.js",
+    "./client": "./lib/client.js",
     "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime"
+      ],
+      "platform": "web"
+    }
   }
 }

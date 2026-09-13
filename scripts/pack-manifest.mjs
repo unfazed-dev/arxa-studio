@@ -45,7 +45,7 @@ export function hostTriple (platform = process.platform, arch = process.arch) {
  * purpose: bin/ also holds dev-only scripts (arxa-explore, isolation-check,
  * arxa-engine-sync) that must NOT ship in the sidecar.
  */
-export const BIN_FILES = ['arxa-studio.mjs', 'loopback-localhost-patch.mjs', 'materialise-preset.mjs', 'seed-settings.mjs']
+export const BIN_FILES = ['arxa-studio.mjs', 'arxa-studio-provider.mjs', 'loopback-localhost-patch.mjs', 'materialise-preset.mjs', 'seed-settings.mjs']
 
 /** The launcher — the one entry the Mach-O payload execs. */
 export const BIN_ENTRY = 'arxa-studio.mjs'

@@ -468,6 +468,21 @@
   - id: arxa-desktop-session
     name: __ARXA_STUDIO_PLUGINS__/desktop-session/lib/index.js
 
+# arxa-specific: the workspace-data-plane provider service (task 13, docs/
+# plans/agency-backend-provider-abstraction.md). Host half registers a
+# read-only status channel over Connection RPC (provider + redacted config
+# shape + local capabilities); the library surface (frozen Wire v1 contract,
+# local + generic-rest providers, conformance kit, export/import bundles) is
+# first-party-import only — D32: no third-party JavaScript ever executes
+# inside the app, config cannot name executable code. Local-first: with no
+# config the service answers for the local provider — no network, account,
+# database, or environment variable. By PACKAGE NAME — browser half
+# (window.__arxaWorkspaceProvider.info()) discovered through package.json
+# dsh.client, same as the rows above.
+- insert:
+  - id: arxa-workspace-provider
+    name: arxa-workspace-provider
+
 # Session list at boot (2026-09-07 boot trace). dsh's list summarizes every
 # cold session; for logs under coldBlankProbeMaxBytes (default 1024) it
 # decompresses and replays the log to learn whether the session is blank.

@@ -13,6 +13,11 @@ import { strict as assert } from 'node:assert'
 import * as contract from './lib/contract.js'
 import { WorkspaceError } from './lib/errors.js'
 import * as wire from './lib/wire.js'
+// Part B pins (checkpoint obligations): the token/session RESPONSE envelope and
+// the X-Arxa-Cursor-Next consume semantics. Part A pinned the REQUEST side
+// (routes, headers, codecs); these two sections pin the response decodes the
+// adapters build on. Same freeze rule: any change here is a wire change.
+import { consumeListPage, decodeIntrospection, decodeSessionEnvelope } from './lib/generic-rest.js'
 
 let n = 0; const ok = (s) => { n++; console.log('  ok ' + s) }
 const throwsCode = (code, fn) => {
@@ -297,6 +302,91 @@ const TOKEN = 'opaque-secret-token-do-not-print-in-real-life'
   let why = ''; try { contract.assertProviderConfig({ provider: 'local', adapter: './x.mjs' }) } catch (e) { why = e.message }
   assert.match(why, /executable code/i)
   ok('config guard: 3 fixed providers only; adapter keys/paths/module strings rejected')
+}
+
+// ---------------------------------------------- 13. token/session RESPONSE envelope (D34)
+// POST /auth/issue and /auth/refresh answer with ONE shape: an opaque token
+// plus a session block. Pin it here — routes were pinned in part A; the
+// response decode was not. The token is an opaque string the adapter stores
+// and sends, never inspects; the session identifies the signer's user.
+{
+  const good = decodeSessionEnvelope(JSON.stringify({
+    token: 'opq_ab_3', session: { id: 'sess-1', expiresAt: 1893456000 },
+  }), {})
+  assert.deepEqual(good, { token: 'opq_ab_3', session: { id: 'sess-1', expiresAt: 1893456000 } })
+  // expiresAt is optional; unknown top-level keys are dropped (decode is exact,
+  // forward-compat means tolerating extras server-side, not leaking them on)
+  assert.deepEqual(
+    decodeSessionEnvelope(JSON.stringify({ token: 't', session: { id: 's' }, extra: 1 }), {}),
+    { token: 't', session: { id: 's' } })
+  // malformed bodies are typed invalid_request, never a parse crash
+  throwsCode('invalid_request', () => decodeSessionEnvelope('{"broken"', {}))
+  throwsCode('invalid_request', () => decodeSessionEnvelope('null', {}))
+  // token: required, non-empty string
+  throwsCode('invalid_request', () => decodeSessionEnvelope(JSON.stringify({ session: { id: 's' } }), {}))
+  throwsCode('invalid_request', () => decodeSessionEnvelope(JSON.stringify({ token: '', session: { id: 's' } }), {}))
+  throwsCode('invalid_request', () => decodeSessionEnvelope(JSON.stringify({ token: 7, session: { id: 's' } }), {}))
+  // session: required object with non-empty string id; expiresAt if present is a number
+  throwsCode('invalid_request', () => decodeSessionEnvelope(JSON.stringify({ token: 't' }), {}))
+  throwsCode('invalid_request', () => decodeSessionEnvelope(JSON.stringify({ token: 't', session: {} }), {}))
+  throwsCode('invalid_request', () => decodeSessionEnvelope(JSON.stringify({ token: 't', session: { id: '' } }), {}))
+  throwsCode('invalid_request', () => decodeSessionEnvelope(JSON.stringify({ token: 't', session: { id: 's', expiresAt: 'soon' } }), {}))
+  // secrecy: a rejected envelope never echoes the (hostile) body back
+  const hostile = 'opq-hostile-token-value'
+  let leaked = null
+  try { decodeSessionEnvelope(JSON.stringify({ token: hostile, session: 'x' }), {}) } catch (e) { leaked = e }
+  assert.ok(leaked && !leaked.message.includes(hostile), 'envelope decode errors never echo the body')
+  // introspection answers {active} + session only when active
+  assert.deepEqual(decodeIntrospection(JSON.stringify({ active: true, session: { id: 's' } }), {}),
+    { active: true, session: { id: 's' } })
+  assert.deepEqual(decodeIntrospection(JSON.stringify({ active: false, session: { id: 's' } }), {}),
+    { active: false })
+  throwsCode('invalid_request', () => decodeIntrospection(JSON.stringify({ active: 'yes' }), {}))
+  throwsCode('invalid_request', () => decodeIntrospection(JSON.stringify({ active: true }), {}))
+  ok('auth response envelope: {token, session:{id, expiresAt?}} exact decode; introspection {active[, session]}; malformed typed; no echo')
+}
+
+// ---------------------------------------------- 14. X-Arxa-Cursor-Next consume semantics
+// JSONL list pages keep the body PURE records; the resume cursor rides the
+// X-Arxa-Cursor-Next response header. Consume rule (pinned): a present,
+// non-empty header is the next request's `cursor` VERBATIM (opaque — the
+// adapter never inspects inside it); an absent OR EMPTY header ends the
+// stream; a garbage cursor value is invalid_request; a cursor in the body is
+// ignored (it is not part of the contract).
+{
+  const body = wire.encodeJsonl([{ id: 'a' }, { id: 'b' }])
+  // present header → returned verbatim, body stays pure records
+  const page = consumeListPage({ 'x-arxa-cursor-next': wire.encodeCursor({ offset: 2 }) }, body)
+  assert.deepEqual(page.records, [{ id: 'a' }, { id: 'b' }])
+  assert.equal(typeof page.nextCursor, 'string')
+  // absent header = end of stream
+  assert.equal(consumeListPage({}, body).nextCursor, null)
+  // empty-string header = end of stream too (a server may send an empty value)
+  assert.equal(consumeListPage({ 'X-Arxa-Cursor-Next': '' }, body).nextCursor, null)
+  // header lookup is case-insensitive (HTTP/1.1 title case, HTTP/2 lowercase)
+  assert.equal(consumeListPage({ 'X-ARXA-CURSOR-NEXT': wire.encodeCursor({ offset: 9 }) }, body)
+    .nextCursor, consumeListPage({ 'x-arxa-cursor-next': wire.encodeCursor({ offset: 9 }) }, body).nextCursor)
+  // the cursor must DECODE as a Wire v1 cursor — garbage is invalid_request
+  throwsCode('invalid_request', () => consumeListPage({ 'x-arxa-cursor-next': '%%garbage%%' }, body))
+  throwsCode('invalid_request', () => consumeListPage({ 'x-arxa-cursor-next': wire.encodeCursor({ v: 2 }) }, body))
+  // a cursor riding the BODY is ignored — never consumed
+  const sneaky = wire.encodeJsonl([{ id: 'a', cursor: wire.encodeCursor({ offset: 5 }) }])
+  assert.equal(consumeListPage({}, sneaky).nextCursor, null)
+  // and the loop: nextCursor feeds the next buildRequest cursor param verbatim,
+  // stopping at null — two pages then end
+  const pages = []
+  let cursor = undefined
+  for (let i = 0; i < 3; i++) {
+    const req = contract.buildRequest('listRecords', { orgId: 'o', collection: 'tickets', cursor }, {})
+    const hdr = pages.length < 2 ? { 'x-arxa-cursor-next': wire.encodeCursor({ offset: (pages.length + 1) * 2 }) } : {}
+    const p = consumeListPage(hdr, wire.encodeJsonl([{ id: 'r' + pages.length }]))
+    pages.push({ url: req.url, n: p.records.length })
+    if (p.nextCursor === null) break
+    cursor = p.nextCursor
+  }
+  assert.equal(pages.length, 3, 'the loop stops exactly at the header-less page')
+  assert.ok(!pages[0].url.includes('cursor=') && pages[1].url.includes('cursor=') && pages[2].url.includes('cursor='))
+  ok('cursor-next consume: header verbatim, absent/empty = end, garbage rejected, body cursor ignored, loop terminates')
 }
 
 console.log(`workspace-provider contract freeze: ${n} checks green`)
