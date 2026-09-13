@@ -539,17 +539,23 @@ console.log('arxa sbx selftest (Step 5: clone/start/Git retrieval)')
 }
 
 // ---- 6. live detection + the honest skip of the real gate --------------------
-// The live row is READ-ONLY measurement (version, daemon status, ls). The
-// real lifecycle leg — create/fetch/rm against the operator's signed-in sbx
-// — belongs to Task 16's authorized external gate and NEVER runs here;
-// ARXA_A5_REAL_SMOKE is the sentinel that would select it, and without
-// operator authorization it is skipped honestly.
+// The live probe measures version, daemon status and ls — but `sbx ls`
+// auto-starts a stopped daemon (measured), a real state mutation, so the
+// WHOLE probe sits behind ARXA_A5_REAL_SMOKE like the lifecycle leg; without
+// it the default path runs ZERO real sbx commands and skips honestly. The
+// injected rows in §1 keep the version/parse-shape coverage. The real
+// lifecycle leg — create/fetch/rm against the operator's signed-in sbx —
+// belongs to Task 16's authorized external gate and NEVER runs here.
 
 {
-  const live = await sbxStatus()
-  console.log(`  live sbx detection: cli=${live.cli ?? 'absent'} v=${live.version ?? '?'} daemon=${live.daemon} authed=${live.authed}`)
-  console.log(`    reason: ${live.reason}`)
-  if (live.updateAvailable) console.log(`    update available: v${live.updateAvailable} (surfaced, never auto-applied)`)
+  if (process.env.ARXA_A5_REAL_SMOKE === '1') {
+    const live = await sbxStatus()
+    console.log(`  live sbx detection: cli=${live.cli ?? 'absent'} v=${live.version ?? '?'} daemon=${live.daemon} authed=${live.authed}`)
+    console.log(`    reason: ${live.reason}`)
+    if (live.updateAvailable) console.log(`    update available: v${live.updateAvailable} (surfaced, never auto-applied)`)
+  } else {
+    skip('live sbx detection', 'ARXA_A5_REAL_SMOKE unset — the probe runs real sbx commands (sbx ls auto-starts a stopped daemon), so the default path stays injected-only')
+  }
 
   await ok('the A5 surface is exported from the plugin entry', () => {
     const pkg = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'package.json'), 'utf8'))

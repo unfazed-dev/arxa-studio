@@ -88,7 +88,8 @@ const UNAUTH_RE = /401|unauthorized|no valid user session/i
  * noise), daemon health (`sbx daemon status` prints "Status: stopped" with
  * exit 0 — the TEXT is the truth, not the code) and sign-in (`sbx ls`
  * 401s until the one-time browser login). Pure probing; never installs,
- * never signs in, never starts the daemon itself.
+ * never signs in — the one measured side effect: `sbx ls` auto-starts a
+ * stopped daemon.
  *
  * @param {object} [deps] - injection seam (tests): `{ which, runner }`.
  * @returns {Promise<{ installed: boolean, cli: string | undefined,
