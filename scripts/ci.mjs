@@ -93,6 +93,13 @@ suites.push([root, 'bin', 'selftest.launcher-settings.mjs'])
 // outside the plugins/*/selftest sweep, so it is wired by hand like the rows
 // above.
 suites.push([root, 'bin', 'selftest.provider-cli.mjs'])
+// The Supabase provider's disposable-harness smoke (task 14). This OFFLINE
+// leg runs the injected protocol fake — the full conformance kit with
+// RLS/IDOR, the hostile idor/leak reds, and the local → Supabase → local
+// migration equivalence, zero ports. The REAL disposable local-Supabase
+// stack leg needs the Docker daemon and lives in the dedicated CI job
+// (.github/workflows/ci.yml → supabase-conformance), never in npm test.
+suites.push([root, 'scripts', 'workspace-provider-supabase-smoke.mjs'])
 
 console.log('arxa-studio CI — ' + suites.length + ' suites')
 let failed = 0

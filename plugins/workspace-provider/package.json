@@ -13,6 +13,7 @@
     "./capabilities": "./lib/capabilities.js",
     "./local": "./lib/local.js",
     "./generic-rest": "./lib/generic-rest.js",
+    "./supabase": "./lib/supabase.js",
     "./polling": "./lib/polling.js",
     "./export-bundle": "./lib/export-bundle.js",
     "./conformance": "./lib/conformance.js",

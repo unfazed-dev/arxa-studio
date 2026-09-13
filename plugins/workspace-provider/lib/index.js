@@ -17,10 +17,24 @@ import { join, resolve } from 'node:path'
 
 import { assertProviderConfig } from './contract.js'
 import { normalizeCapabilities, LOCAL_CAPABILITIES } from './capabilities.js'
+import { SUPABASE_CAPABILITIES, SIGN_IN } from './supabase.js'
 
 // One path segment only (dsh-client-connection CHANNEL_PATTERN), same law as
 // '/arxa-provider-status'. Must equal the channel in lib/client.js.
 export const RPC_CHANNEL = '/arxa-workspace-provider'
+
+/**
+ * Truthful capability badges per configured provider (task 14 step 5):
+ * local is full (in-process realtime), supabase is the adapter's static
+ * declaration (realtime ABSENT → polling degradation, email-form sign-in),
+ * generic-rest needs a live fetch so the panel gets `null` — never a guess.
+ */
+export function capabilitiesFor (backend = {}) {
+  if (backend.provider === 'supabase')
+    return { ...normalizeCapabilities(SUPABASE_CAPABILITIES), signIn: { ...SIGN_IN } }
+  if (backend.provider === 'generic-rest') return null
+  return { ...normalizeCapabilities(LOCAL_CAPABILITIES) }
+}
 
 /** Redacted workspaceBackend shape — keys only; values never cross the wire. */
 export function configShape (backend = {}) {
@@ -51,13 +65,11 @@ export default {
       if (endpoint !== 'info') throw new Error('unknown endpoint: ' + endpoint)
       let backend
       try { backend = readBackendConfig() } catch { backend = {} }
-      const caps = backend.provider === 'generic-rest'
-        ? null // remote caps need a live fetch; the panel asks the host CLI/diagnose for those
-        : LOCAL_CAPABILITIES
+      const caps = capabilitiesFor(backend)
       return {
         provider: backend.provider ?? 'local',
         config: configShape(backend),
-        ...(caps ? { capabilities: normalizeCapabilities(caps) } : {}),
+        ...(caps ? { capabilities: caps } : {}),
       }
     }))
   },

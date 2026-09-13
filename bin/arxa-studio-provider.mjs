@@ -24,6 +24,7 @@ const pluginDir = join(here, '..', 'plugins', 'workspace-provider')
 const { assertProviderConfig } = await import(join(pluginDir, 'lib', 'contract.js'))
 const { LocalWorkspaceProvider } = await import(join(pluginDir, 'lib', 'local.js'))
 const { GenericRestWorkspaceProvider } = await import(join(pluginDir, 'lib', 'generic-rest.js'))
+const { SupabaseWorkspaceProvider } = await import(join(pluginDir, 'lib', 'supabase.js'))
 const { runConformance } = await import(join(pluginDir, 'lib', 'conformance.js'))
 const { exportBundle, importBundle } = await import(join(pluginDir, 'lib', 'export-bundle.js'))
 const { invalidRequest } = await import(join(pluginDir, 'lib', 'errors.js'))
@@ -143,11 +144,18 @@ function buildProvider (backend) {
       fetch,
     })
   }
-  // A D32-sanctioned but unimplemented name (supabase, task 14) must never
+  if (backend.provider === 'supabase') {
+    // plan §5 env overrides (the user's OWN project; never an Arxa-owned one)
+    const url = process.env.ARXA_SUPABASE_URL?.trim() || backend.supabase?.url
+    const anonKey = process.env.ARXA_SUPABASE_ANON_KEY?.trim() || backend.supabase?.anonKey
+    return new SupabaseWorkspaceProvider({ url, anonKey, credentialStore: credentialStore(), fetch })
+  }
+  // A D32-sanctioned name without an adapter in this build must never
   // silently become the local store — a verify tool may not certify the
-  // wrong backend (task 13 review, Important 2).
+  // wrong backend (task 13 review, Important 2). The frozen set is fully
+  // implemented today; the guard stays for any future name.
   if (backend.provider && backend.provider !== 'local')
-    throw invalidRequest(`the "${backend.provider}" adapter is not implemented in this build (implemented: local, generic-rest)`)
+    throw invalidRequest(`the "${backend.provider}" adapter is not implemented in this build (implemented: local, supabase, generic-rest)`)
   const root = backend.local?.root ? resolveTilde(backend.local.root) : undefined
   return new LocalWorkspaceProvider(root ? { root } : {})
 }
@@ -171,7 +179,9 @@ async function providerVerify (args) {
     console.log(t('verifyFailed'))
     return 1
   }
-  const isLocal = !(provider instanceof GenericRestWorkspaceProvider)
+  // Only the local provider may claim the single-user exemption — a network
+  // provider (generic-rest, supabase) must answer cross-org isolation.
+  const isLocal = provider instanceof LocalWorkspaceProvider
   const report = await runConformance(provider, isLocal ? { localExempt: true } : {})
   for (const s of report.sections) {
     const template = s.status === 'green' ? 'rowGreen' : s.status === 'n/a' ? 'rowNa' : 'rowRed'
@@ -221,7 +231,8 @@ async function diagnose (args) {
   lines.push(t('configShape', { shape }))
   try {
     const provider = buildProvider(backend)
-    report = await runConformance(provider, backend.provider === 'local' || !backend.provider ? { localExempt: true } : {})
+    const isLocal = backend.provider === 'local' || !backend.provider
+    report = await runConformance(provider, isLocal ? { localExempt: true } : {})
   } catch (e) {
     // The named backend cannot be built; the diagnostic still runs (versions,
     // config shape, log tail) but nothing gets certified green.

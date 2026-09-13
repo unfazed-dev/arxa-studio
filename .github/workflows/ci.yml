@@ -56,6 +56,42 @@ jobs:
             exit 1
           fi
 
+  supabase-conformance:
+    # The REAL disposable local-Supabase leg of the workspace-provider smoke
+    # (task 14): a scratch-copy stack on pinned reserved ports (54921/54922),
+    # the shipped migrations applied to an empty stack and applied twice, two
+    # users / two orgs, raw authenticated RLS/IDOR replay, the FULL
+    # conformance kit (cross-org isolation GREEN required) and the
+    # local → Supabase → local migration with hash-equal portable data, then
+    # migration reversal on the disposable database. The smoke script stops
+    # and wipes its stack on success, failure, and signal; it never touches
+    # the operator's own supabase state. The ordinary `npm test` covers the
+    # same checks offline through the injected protocol fake; this job exists
+    # to exercise the real stack (Docker daemon required — skip loudly, same
+    # convention as the linux lane below).
+    runs-on: [self-hosted, macOS, ARM64, arxa]
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Docker available
+        id: docker
+        run: |
+          if docker info >/dev/null 2>&1; then echo "up=yes" >> "$GITHUB_OUTPUT"
+          else echo "up=no" >> "$GITHUB_OUTPUT"; echo "::warning::Docker is not running — the Supabase conformance leg did not execute"; fi
+
+      - name: Supabase CLI at the pinned version
+        if: steps.docker.outputs.up == 'yes'
+        run: |
+          command -v supabase >/dev/null || { echo "::error::supabase CLI not installed on the runner"; exit 1; }
+          v=$(supabase --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          [ "$v" = "2.67.1" ] || { echo "::error::supabase CLI $v ≠ pinned 2.67.1 — update the pin deliberately, in lockstep with scripts/workspace-provider-supabase-smoke.mjs"; exit 1; }
+
+      - name: Disposable local-Supabase conformance (real stack)
+        if: steps.docker.outputs.up == 'yes'
+        run: node scripts/workspace-provider-supabase-smoke.mjs --real
+
   linux:
     # The Linux lane (docs/plans/linux-omarchy-port.md D11). Same self-hosted mac,
     # but the work happens inside the Arch image the dev loop uses, so a
