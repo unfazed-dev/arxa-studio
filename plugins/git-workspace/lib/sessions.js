@@ -62,6 +62,7 @@ import { projectRepos } from './routing.js'
 // project-secrets' keyring reuse; no cycle — devcontainer.js reaches only
 // frame.js on this side (never sessions.js).
 import { unrecoveredContainerCommits } from '../../sandbox/lib/devcontainer.js'
+import { unrecoveredSandboxCommits } from '../../sandbox/lib/sbx.js'
 
 /**
  * Branch namespace. Grilled 2026-09-03 (Q2/Q3): a session's identity IS its
@@ -759,6 +760,12 @@ export function dropSession(repoPath, id, env = process.env) {
   const container = unrecoveredContainerCommits(repoPath, id)
   if (container.unrecovered > 0) {
     throw new Error(`session "${id}" (${session.branch}) cannot be dropped — container-work-unrecovered: bring the container commits back to ${container.recoveryRef} first`)
+  }
+
+  // Task 11 (A5): the microVM twin of the guard above.
+  const sandbox = unrecoveredSandboxCommits(repoPath, id)
+  if (sandbox.unrecovered > 0) {
+    throw new Error(`session "${id}" (${session.branch}) cannot be dropped — sandbox-work-unrecovered: bring the sandbox commits back to ${sandbox.recoveryRef} first`)
   }
   if (session.worktree && fs.existsSync(session.worktree)) {
     runGit(['worktree', 'remove', '--force', session.worktree], { cwd: repoPath, env, allowFail: true })

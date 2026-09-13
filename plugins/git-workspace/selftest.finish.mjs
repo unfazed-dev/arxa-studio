@@ -397,4 +397,51 @@ ok('pressure: 30 sessions, 15 merged, sweepMerged finishes exactly 15 in under 5
   })
 }
 
+// ---- 8. Task 11 (A5): sandbox-work teardown guard -----------------------------
+// A session that ran in a Docker Sandbox may hold commits ONLY in the
+// microVM clone. Same guard, same seam as the A4 container row: teardown
+// must REFUSE until every sandbox commit is reachable from the host
+// recovery ref refs/sandboxes/<name>/<branch> — and change nothing when it
+// refuses.
+{
+  const id = 'sandbx1'
+  const s = openSession(proj, { id, orgPath: proj, project: null, workspace: '' })
+  fs.writeFileSync(path.join(s.worktree, 'microvm.txt'), 'sandbox work\n')
+  runGit(['add', '.'], { cwd: s.worktree })
+  runGit(['commit', '-m', 'feat: microvm work'], { cwd: s.worktree })
+  sessionStageBoundary(proj, id, { message: 'feat: microvm work' })
+  const tip = branchTip(proj, s.branch).sha
+
+  // A live sandbox registry row (what createSandbox wrote) whose head is
+  // not yet under the recovery ref.
+  const regDir = path.join(proj, '.arxa', 'sandboxes')
+  fs.mkdirSync(regDir, { recursive: true })
+  const row = {
+    sessionId: id, branch: s.branch, head: tip,
+    recoveryRef: `refs/sandboxes/arxa-sbx-${id}/${s.branch}`,
+    name: `arxa-sbx-${id}`, remote: `sandbox-arxa-sbx-${id}`, recovered: false,
+  }
+  fs.writeFileSync(path.join(regDir, `${id}.json`), JSON.stringify(row))
+
+  ok('finishSession refuses sandbox-work-unrecovered and changes nothing', () => {
+    assert.throws(
+      () => finishSession(proj, id),
+      (e) => e instanceof FinishRefusedError && e.reason === 'sandbox-work-unrecovered',
+    )
+    assert.ok(runGit(['branch', '--list', s.branch], { cwd: proj }) !== '', 'the branch survives the refusal')
+    assert.ok(listSessions(proj).some((x) => x.id === id), 'the registry row survives the refusal')
+  })
+
+  ok('dropSession refuses sandbox-work-unrecovered too', () => {
+    assert.throws(() => dropSession(proj, id), /sandbox-work-unrecovered/)
+    assert.ok(runGit(['branch', '--list', s.branch], { cwd: proj }) !== '')
+  })
+
+  ok('once the recovery ref holds the head, the sandbox session finishes', () => {
+    runGit(['update-ref', row.recoveryRef, tip], { cwd: proj })
+    const fin = finishSession(proj, id)
+    assert.ok(fin.finished)
+  })
+}
+
 console.log(`# ${passed} passed`)

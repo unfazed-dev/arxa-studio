@@ -93,11 +93,14 @@ export function resolveEffectiveTier ({ configured, platform, runners = {} }) {
       ceiling = Math.max(ceiling, 4)
       reason = (runners.sbx
         ? 'sbx is installed but not signed in — the one-time browser sign-in is the only step arxa cannot automate (§23a)'
-        : 'sbx (Docker Sandboxes) is not installed on this machine') + '; Docker is present, so degrading to A4 (the hardened-container tier), the best this machine can enforce'
+        // Task 11 (A5): the measured sbx detail (a stopped daemon is NOT
+        // "sbx is not installed") replaces the generic line, mirroring
+        // dockerReason — sbxStatus() feeds this.
+        : (runners.sbxReason ?? 'sbx (Docker Sandboxes) is not installed on this machine')) + '; Docker is present, so degrading to A4 (the hardened-container tier), the best this machine can enforce'
     } else {
       reason = runners.sbx
         ? 'sbx is installed but not signed in — the one-time browser sign-in is the only step arxa cannot automate (§23a); degrading to the highest tier this machine can enforce'
-        : 'sbx (Docker Sandboxes) is not installed on this machine; degrading to the highest tier this machine can enforce'
+        : (runners.sbxReason ?? 'sbx (Docker Sandboxes) is not installed on this machine') + '; degrading to the highest tier this machine can enforce'
     }
   }
 

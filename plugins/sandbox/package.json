@@ -8,6 +8,8 @@
   "exports": {
     ".": "./lib/index.js",
     "./devcontainer": "./lib/devcontainer.js",
-    "./project-database": "./lib/project-database.js"
+    "./project-database": "./lib/project-database.js",
+    "./sbx": "./lib/sbx.js",
+    "./sbx-install": "./lib/sbx-install.js"
   }
 }

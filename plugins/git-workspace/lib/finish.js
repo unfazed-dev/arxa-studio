@@ -21,6 +21,7 @@ import fs from 'node:fs'
 import { runGit } from './run.js'
 import { listSessions, archiveSession, annotateSession, sessionRepoFor, SESSION_BASE_PREFIX, SESSION_BRANCH_PREFIX } from './sessions.js'
 import { unrecoveredContainerCommits } from '../../sandbox/lib/devcontainer.js'
+import { unrecoveredSandboxCommits } from '../../sandbox/lib/sbx.js'
 
 /** Finish refused: the session branch is not (yet) merged into main. */
 export class FinishRefusedError extends Error {
@@ -105,6 +106,15 @@ export function finishSession(repoPath, id, { env = process.env, dryRun = false 
   if (container.unrecovered > 0) {
     if (dryRun) return { finished: false, dryRun: true, id, branch, reason: 'container-work-unrecovered' }
     throw new FinishRefusedError(id, branch, 'container-work-unrecovered')
+  }
+
+  // Task 11 (A5): same guard, same seam — a session that ran in a Docker
+  // Sandbox may hold commits only in the microVM clone. Refuse until every
+  // sandbox commit is reachable from refs/sandboxes/<name>/<branch>.
+  const sandbox = unrecoveredSandboxCommits(repoPath, id)
+  if (sandbox.unrecovered > 0) {
+    if (dryRun) return { finished: false, dryRun: true, id, branch, reason: 'sandbox-work-unrecovered' }
+    throw new FinishRefusedError(id, branch, 'sandbox-work-unrecovered')
   }
 
   if (session.state !== 'archived' && fs.existsSync(session.worktree) && !isWorktreeClean(session.worktree, env)) {
