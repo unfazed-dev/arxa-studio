@@ -67,9 +67,87 @@ window.__ModuleLoader__.load({
     const DEFAULT_EDITOR_STACK = '"SF Mono", ui-monospace, "JetBrains Mono", Consolas, "Liberation Mono", Menlo, monospace'
     const FIRA_EDITOR_STACK = "'Fira Code Variable', 'Fira Code', " + DEFAULT_EDITOR_STACK
     const FONTS = [
-      { id: 'default', label: 'Default', stack: DEFAULT_EDITOR_STACK },
+      // Fira Code is a product (font) name — untranslated; Default's label
+      // rides the dictionary (labelKey; render falls back to `label`).
+      { id: 'default', labelKey: 'font.default', label: 'Default', stack: DEFAULT_EDITOR_STACK },
       { id: 'fira', label: 'Fira Code', stack: FIRA_EDITOR_STACK },
     ]
+
+    // The arxa-locale namespace this plugin owns (task 8's tab-wide pass —
+    // docs/plans/palette-personalisation.md said the en/pl/fr rider covers
+    // the whole tab; this is it for these two rows). en is the source set,
+    // pl/fr carry the same keys (parity gate: plugins/locale/selftest.parity.mjs).
+    // Product terms kept verbatim per CONTEXT.md: coolors (the URL/domain),
+    // Fira Code, AA/APCA (contrast standards), artifact viewer.
+    const NS = 'arxa-theme-accent'
+    const DICT = {
+      en: {
+        'palette.title': 'Palette',
+        'palette.desc': 'Color palette of the studio. Tap a strip for the palette, tap a swatch to set its accent.',
+        'palette.custom': 'Custom',
+        'palette.addAria': 'Add a custom palette',
+        'palette.pasteHint': 'paste a coolors URL below',
+        'palette.swatchesAria': '{name} swatches',
+        'palette.inputPlaceholder': 'coolors.co/palette/… or 2–10 hex codes',
+        'palette.inputAria': 'Custom palette',
+        'palette.add': 'Add',
+        'palette.err': 'Paste a coolors URL or 2–10 hex codes (e.g. 1a1423-b75d69).',
+        'palette.noteMarks': 'marks ',
+        'palette.noteAA': 'contrast AA · ',
+        'palette.noteAdjusted': 'accent adjusted for contrast · ',
+        'palette.noteBelowAA': ' · below AA: ',
+        'palette.noteOffline': 'contrast engine offline',
+        'font.title': 'Editor font',
+        'font.desc': 'Monospace used by the artifact viewer editor. Fira Code adds ligatures.',
+        'font.aria': 'Editor font',
+        'font.default': 'Default',
+        'font.defaultTitle': 'Default monospace',
+      },
+      pl: {
+        'palette.title': 'Paleta',
+        'palette.desc': 'Paleta kolorów studia. Dotknij paska, by wybrać paletę; dotknij próbki, by ustawić akcent.',
+        'palette.custom': 'Własna',
+        'palette.addAria': 'Dodaj własną paletę',
+        'palette.pasteHint': 'wklej poniżej adres coolors',
+        'palette.swatchesAria': 'próbki: {name}',
+        'palette.inputPlaceholder': 'coolors.co/palette/… lub 2–10 kodów hex',
+        'palette.inputAria': 'Własna paleta',
+        'palette.add': 'Dodaj',
+        'palette.err': 'Wklej adres coolors lub 2–10 kodów hex (np. 1a1423-b75d69).',
+        'palette.noteMarks': 'osiąga ',
+        'palette.noteAA': 'kontrast AA · ',
+        'palette.noteAdjusted': 'akcent dostosowany dla kontrastu · ',
+        'palette.noteBelowAA': ' · poniżej AA: ',
+        'palette.noteOffline': 'silnik kontrastu niedostępny',
+        'font.title': 'Czcionka edytora',
+        'font.desc': 'Monospace używany przez edytor artifact viewer. Fira Code dodaje ligatury.',
+        'font.aria': 'Czcionka edytora',
+        'font.default': 'Domyślna',
+        'font.defaultTitle': 'Domyślny monospace',
+      },
+      fr: {
+        'palette.title': 'Palette',
+        'palette.desc': 'Palette de couleurs du studio. Touchez une bande pour choisir la palette, une pastille pour définir l’accent.',
+        'palette.custom': 'Personnalisée',
+        'palette.addAria': 'Ajouter une palette personnalisée',
+        'palette.pasteHint': 'collez une URL coolors ci-dessous',
+        'palette.swatchesAria': 'pastilles de {name}',
+        'palette.inputPlaceholder': 'coolors.co/palette/… ou 2 à 10 codes hex',
+        'palette.inputAria': 'Palette personnalisée',
+        'palette.add': 'Ajouter',
+        'palette.err': 'Collez une URL coolors ou 2 à 10 codes hex (p. ex. 1a1423-b75d69).',
+        'palette.noteMarks': 'atteint ',
+        'palette.noteAA': 'contraste AA · ',
+        'palette.noteAdjusted': 'accent ajusté pour le contraste · ',
+        'palette.noteBelowAA': ' · sous AA : ',
+        'palette.noteOffline': 'moteur de contraste hors ligne',
+        'font.title': 'Police de l’éditeur',
+        'font.desc': 'Monospace utilisée par l’éditeur de l’artifact viewer. Fira Code ajoute des ligatures.',
+        'font.aria': 'Police de l’éditeur',
+        'font.default': 'Par défaut',
+        'font.defaultTitle': 'Monospace par défaut',
+      },
+    }
     function applyFont(id) {
       const body = document.body
       if (!body) {
@@ -522,7 +600,7 @@ window.__ModuleLoader__.load({
       document.head.appendChild(face)
     }
 
-    function PaletteRow() {
+    function PaletteRow({ t }) {
       const [state, setState] = React.useState(stored)
       const [input, setInput] = React.useState('')
       const [err, setErr] = React.useState('')
@@ -554,13 +632,13 @@ window.__ModuleLoader__.load({
           const anchor = state.accent || autoAccent(state.palette, E)
           const r = solveStudio(state.palette, anchor, E)
           const bits = [
-            'marks ' + r.ratios.light.toFixed(1) + ':' + r.ratios.dark.toFixed(1) + ':1',
+            t('palette.noteMarks') + r.ratios.light.toFixed(1) + ':' + r.ratios.dark.toFixed(1) + ':1',
             'APCA ' + E.apcaLc(r.accentDark, '#2c2c2c').toFixed(0) + ' Lc',
           ]
-          setNote((r.moved ? 'accent adjusted for contrast · ' : 'contrast AA · ')
+          setNote((r.moved ? t('palette.noteAdjusted') : t('palette.noteAA'))
             + bits.join(' · ')
-            + (r.unsolved.length ? ' · below AA: ' + r.unsolved.join(', ') : ''))
-        }).catch(() => live && setNote('contrast engine offline'))
+            + (r.unsolved.length ? t('palette.noteBelowAA') + r.unsolved.join(', ') : ''))
+        }).catch(() => live && setNote(t('palette.noteOffline')))
         return () => { live = false }
       }, [state])
       const pick = (palette, name, accentOverride) => {
@@ -574,7 +652,7 @@ window.__ModuleLoader__.load({
       const addCustom = () => {
         const hexes = parsePaletteInput(input)
         if (!hexes) {
-          setErr('Paste a coolors URL or 2–10 hex codes (e.g. 1a1423-b75d69).')
+          setErr(t('palette.err'))
           return
         }
         setErr('')
@@ -586,28 +664,28 @@ window.__ModuleLoader__.load({
       // The 4th slot is ALWAYS present: a real card while a custom palette
       // is active, a dashed PLACEHOLDER otherwise — the seat a paste lands
       // in must be visible before anything is pasted (operator, 2026-09-11).
-      if (!isPreset) cards.push({ id: 'custom', name: state.name || 'Custom', palette: state.palette })
-      else cards.push({ id: 'custom', placeholder: true, name: 'Custom' })
+      if (!isPreset) cards.push({ id: 'custom', name: state.name || t('palette.custom'), palette: state.palette })
+      else cards.push({ id: 'custom', placeholder: true, name: t('palette.custom') })
       const focusInput = () => { if (inputRef.current) inputRef.current.focus() }
       return h('div', null,
         h('div', { className: css.row },
           h('div', { className: css.rowText },
-            h('div', { className: css.title }, 'Palette'),
+            h('div', { className: css.title }, t('palette.title')),
             h('div', { className: css.desc },
-              'Color palette of the studio. Tap a strip for the palette, tap a swatch to set its accent.'))),
+              t('palette.desc')))),
         h('div', { className: css.cards },
           cards.map((card) => card.placeholder
             ? h('div', {
                 key: card.id,
                 role: 'button',
                 tabIndex: 0,
-                'aria-label': 'Add a custom palette',
+                'aria-label': t('palette.addAria'),
                 className: css.card + ' ' + css.phCard,
                 onClick: focusInput,
                 onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); focusInput() } },
               },
                 h('div', { className: css.cardName }, card.name),
-                h('div', { className: css.phStrip }, 'paste a coolors URL below'))
+                h('div', { className: css.phStrip }, t('palette.pasteHint')))
             : h('div', {
                 key: card.id,
                 role: 'radio',
@@ -618,7 +696,7 @@ window.__ModuleLoader__.load({
                 onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(card.palette, card.name, null) } },
               },
                 h('div', { className: css.cardName }, card.name),
-                h('div', { className: css.strip, role: 'group', 'aria-label': card.name + ' swatches' },
+                h('div', { className: css.strip, role: 'group', 'aria-label': t('palette.swatchesAria', { name: card.name }) },
                   paletteHexes(card.palette).map((hx) => h('button', {
                     key: hx,
                     type: 'button',
@@ -634,8 +712,8 @@ window.__ModuleLoader__.load({
             className: css.input,
             type: 'text',
             value: input,
-            placeholder: 'coolors.co/palette/… or 2–10 hex codes',
-            'aria-label': 'Custom palette',
+            placeholder: t('palette.inputPlaceholder'),
+            'aria-label': t('palette.inputAria'),
             onChange: (e) => setInput(e.target.value),
             onKeyDown: (e) => { if (e.key === 'Enter') addCustom() },
           }),
@@ -643,7 +721,7 @@ window.__ModuleLoader__.load({
             type: 'button',
             className: css.btn,
             onClick: addCustom,
-          }, 'Add')),
+          }, t('palette.add'))),
         err !== '' && h('div', { className: css.err, role: 'alert' }, err),
         h('div', { className: css.note }, note))
     }
@@ -654,7 +732,7 @@ window.__ModuleLoader__.load({
     const FONT_PREVIEW = 'a => b >= c != d |> 0OoIl1 :: -> =>'
     const fontStackFor = (id) => (id === 'fira' ? FIRA_EDITOR_STACK : DEFAULT_EDITOR_STACK)
 
-    function EditorFontRow() {
+    function EditorFontRow({ t }) {
       const storedFont = () => {
         try { return localStorage.getItem(FONT_STORE_KEY) || 'default' } catch { return 'default' }
       }
@@ -674,20 +752,20 @@ window.__ModuleLoader__.load({
       return h('div', null,
         h('div', { className: css.row },
           h('div', { className: css.rowText },
-            h('div', { className: css.title }, 'Editor font'),
+            h('div', { className: css.title }, t('font.title')),
             h('div', { className: css.desc },
-              'Monospace used by the artifact viewer editor. Fira Code adds ligatures.')),
-          h('div', { className: css.swatches, role: 'radiogroup', 'aria-label': 'Editor font' },
+              t('font.desc'))),
+          h('div', { className: css.swatches, role: 'radiogroup', 'aria-label': t('font.aria') },
             FONTS.map((f) => h('button', {
               key: f.id,
               type: 'button',
               role: 'radio',
               'aria-checked': font === f.id,
-              title: f.id === 'fira' ? 'Fira Code' : 'Default monospace',
+              title: f.id === 'fira' ? 'Fira Code' : t('font.defaultTitle'),
               className: css.fontPill + (font === f.id ? ' ' + css.selected : ''),
               style: f.id === 'fira' ? { fontFamily: "'Fira Code Variable', monospace" } : undefined,
               onClick: () => pick(f.id),
-            }, f.label)))),
+            }, f.labelKey ? t(f.labelKey) : f.label)))),
         h('div', {
           className: css.fontPreview,
           style: { fontFamily: fontStackFor(font) },
@@ -721,21 +799,27 @@ window.__ModuleLoader__.load({
       })
       // Personalisation tab: both rows live in settings.personalisation.item
       // (the slot the arxa-personalisation section declares); orders 0/10
-      // with the prism Background group at 20 behind them.
+      // with the prism Background group at 20 behind them. The rows' copy
+      // rides the arxa-locale service (task 8): `locale: NS` gives the
+      // components the bound t through composed slot props, the stock
+      // AppearanceRow's own contract.
+      ctx.effect(() => ctx.locale.register(NS, { en: DICT.en, pl: DICT.pl, fr: DICT.fr }), 'arxa-theme-accent: dictionary')
       ctx.slots.inject('settings.personalisation.item', () =>
         ctx.slots.register({
           name: 'settings.personalisation.item',
           id: 'arxa-theme-accent',
           order: 0,
+          locale: NS,
         }, PaletteRow))
       ctx.slots.inject('settings.personalisation.item', () =>
         ctx.slots.register({
           name: 'settings.personalisation.item',
           id: 'arxa-theme-accent-font',
           order: 10,
+          locale: NS,
         }, EditorFontRow))
     }
-    const inject = ['slots']
+    const inject = ['slots', 'locale']
 
     exports.apply = apply
     exports.inject = inject

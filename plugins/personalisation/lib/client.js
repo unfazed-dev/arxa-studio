@@ -35,8 +35,11 @@
 // published contract: reads via theme.getTheme(), writes via
 // theme.setTheme(id)/setFontSize(px), continuous sync via the
 // 'theme/change' event. Both rows are ui-theme's verbatim module CSS
-// recipes + its own icons; labels stay EN like the rest of this tab (the
-// tab-wide en/pl/fr pass covers it).
+// recipes + its own icons. 0.3.0 (task 8): the tab speaks through the
+// arxa-locale service like every other arxa surface — `locale: NS` on the
+// registrations gives the components the bound t (the stock AppearanceRow's
+// own composed-props contract), en is the source set and pl/fr carry the
+// same keys (parity gate: plugins/locale/selftest.parity.mjs).
 window.__ModuleLoader__.load({
   id: 'arxa-personalisation',
   factory: (require) => {
@@ -46,6 +49,45 @@ window.__ModuleLoader__.load({
     const React = require('react')
     const h = React.createElement
     const P = require('@deepseek-ai/dsh-client-ui-primitives')
+
+    // The arxa-locale namespace this plugin owns (task 8's tab-wide pass).
+    // Product terms kept verbatim per CONTEXT.md; 'px' is a unit, untranslated.
+    const NS = 'arxa-personalisation'
+    const DICT = {
+      en: {
+        'section.title': 'Personalisation',
+        'appearance.title': 'Appearance',
+        'appearance.light': 'Light',
+        'appearance.dark': 'Dark',
+        'appearance.system': 'System',
+        'font.title': 'Font size',
+        'font.desc': 'Only affects conversation content',
+        'font.increase': 'Increase font size',
+        'font.decrease': 'Decrease font size',
+      },
+      pl: {
+        'section.title': 'Personalizacja',
+        'appearance.title': 'Wygląd',
+        'appearance.light': 'Jasny',
+        'appearance.dark': 'Ciemny',
+        'appearance.system': 'Systemowy',
+        'font.title': 'Rozmiar czcionki',
+        'font.desc': 'Dotyczy tylko treści rozmowy',
+        'font.increase': 'Zwiększ rozmiar czcionki',
+        'font.decrease': 'Zmniejsz rozmiar czcionki',
+      },
+      fr: {
+        'section.title': 'Personnalisation',
+        'appearance.title': 'Apparence',
+        'appearance.light': 'Clair',
+        'appearance.dark': 'Sombre',
+        'appearance.system': 'Système',
+        'font.title': 'Taille de la police',
+        'font.desc': 'Concerne uniquement le contenu des conversations',
+        'font.increase': 'Augmenter la taille de la police',
+        'font.decrease': 'Réduire la taille de la police',
+      },
+    }
 
     // Artist palette: outer ring, three paint dabs, thumb hole. Mask image —
     // alpha only, painted with background:currentColor so it inherits the
@@ -123,40 +165,40 @@ window.__ModuleLoader__.load({
     // forever; the modal opens long after boot, when it always exists).
     let pluginCtx = null
     const APPEARANCE = [
-      { id: 'light', label: 'Light', Icon: P.IconLightOutline16 },
-      { id: 'dark', label: 'Dark', Icon: P.IconDarkOutline16 },
-      { id: 'system', label: 'System', Icon: P.IconFollowsystemOutline16 },
+      { id: 'light', labelKey: 'appearance.light', Icon: P.IconLightOutline16 },
+      { id: 'dark', labelKey: 'appearance.dark', Icon: P.IconDarkOutline16 },
+      { id: 'system', labelKey: 'appearance.system', Icon: P.IconFollowsystemOutline16 },
     ]
 
-    function AppearanceRow() {
+    function AppearanceRow({ t }) {
       const theme = pluginCtx ? pluginCtx.get('theme') : null
       if (!theme) return null // ui-theme absent — nothing to steer
       const [pref, setPref] = React.useState(() => theme.getTheme().preference)
       React.useEffect(() => pluginCtx.on('theme/change', (snapshot) => setPref(snapshot.preference)), [])
       return h('div', { className: 'arxaPers_appearGroup' },
-        h('div', { className: 'arxaPers_appearTitle' }, 'Appearance'),
+        h('div', { className: 'arxaPers_appearTitle' }, t('appearance.title')),
         h('div', { className: 'arxaPers_cubeRow' },
-          APPEARANCE.map(({ id, label, Icon }) => h('button', {
+          APPEARANCE.map(({ id, labelKey, Icon }) => h('button', {
             key: id,
             type: 'button',
             'aria-pressed': pref === id,
             className: 'arxaPers_cube' + (pref === id ? ' arxaPers_cubeSel' : ''),
             onClick: () => theme.setTheme(id),
-          }, h(Icon, null), label))))
+          }, h(Icon, null), t(labelKey)))))
     }
 
     // The Font size row (moved from General, 0.2.1, THIRD row — below the
     // Palette, above Editor font). Same published service contract as the
     // Appearance row; bounds 12..17 px are the runtime's own law.
-    function FontSizeRow() {
+    function FontSizeRow({ t }) {
       const theme = pluginCtx ? pluginCtx.get('theme') : null
       if (!theme) return null // ui-theme absent — nothing to steer
       const [fontSize, setFontSizeState] = React.useState(() => theme.getTheme().fontSize)
       React.useEffect(() => pluginCtx.on('theme/change', (snapshot) => setFontSizeState(snapshot.fontSize)), [])
       return h('div', { className: 'arxaFs_row' },
         h('div', { className: 'arxaFs_rowText' },
-          h('div', { className: 'arxaFs_title' }, 'Font size'),
-          h('div', { className: 'arxaFs_desc' }, 'Only affects conversation content')),
+          h('div', { className: 'arxaFs_title' }, t('font.title')),
+          h('div', { className: 'arxaFs_desc' }, t('font.desc'))),
         h('div', { className: 'arxaFs_control' },
           h('div', { className: 'arxaFs_stepper' },
             h('span', { className: 'arxaFs_value' }, fontSize),
@@ -164,14 +206,14 @@ window.__ModuleLoader__.load({
               h('button', {
                 type: 'button',
                 className: 'arxaFs_arrow',
-                'aria-label': 'Increase font size',
+                'aria-label': t('font.increase'),
                 disabled: fontSize >= 17,
                 onClick: () => theme.setFontSize(fontSize + 1),
               }, h(P.IconChevronUpOutline14, { size: 9 })),
               h('button', {
                 type: 'button',
                 className: 'arxaFs_arrow',
-                'aria-label': 'Decrease font size',
+                'aria-label': t('font.decrease'),
                 disabled: fontSize <= 12,
                 onClick: () => theme.setFontSize(fontSize - 1),
               }, h(P.IconChevronDownOutline14, { size: 9 })))),
@@ -196,13 +238,21 @@ window.__ModuleLoader__.load({
       // AppearanceRow — it may not exist yet when this plugin applies.
       pluginCtx = ctx
 
+      // The tab's copy rides the arxa-locale service (0.3.0, task 8). The
+      // bound t serves the nav label through the registration's label
+      // function — the stock General section's own pattern (the settings
+      // shell re-resolves section labels when the locale revision moves).
+      ctx.effect(() => ctx.locale.register(NS, { en: DICT.en, pl: DICT.pl, fr: DICT.fr }), 'arxa-personalisation: dictionary')
+      const t = ctx.locale.bind(NS)
+
       ctx.slots.inject('settings.section', () =>
         ctx.slots.register({
           name: 'settings.section',
           id: 'personalisation',
           // Nav position 4: general 0, models 10, plugins 15, agent-presets 20.
           order: 18,
-          label: 'Personalisation',
+          label: () => t('section.title'),
+          locale: NS,
           children: {
             'settings.personalisation.item': { kind: 'list', scope: 'root' },
           },
@@ -215,6 +265,7 @@ window.__ModuleLoader__.load({
           name: 'settings.personalisation.item',
           id: 'appearance',
           order: -10,
+          locale: NS,
         }, AppearanceRow))
       // The move (0.2.1): Font size follows — the THIRD row (order 5, below
       // the Palette row's 0, above Editor font's 10), its General cell
@@ -224,6 +275,7 @@ window.__ModuleLoader__.load({
           name: 'settings.personalisation.item',
           id: 'font-size',
           order: 5,
+          locale: NS,
         }, FontSizeRow))
       ctx.slots.inject('settings.general.item', () =>
         ctx.slots.register({
@@ -243,7 +295,7 @@ window.__ModuleLoader__.load({
           priority: -1,
         }, () => null))
     }
-    const inject = ['slots']
+    const inject = ['slots', 'locale']
 
     exports.apply = apply
     exports.inject = inject
