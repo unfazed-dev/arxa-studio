@@ -1,0 +1,104 @@
+[WARN] using --force I sure hope you know what you are doing
+Progress: resolved 1, reused 0, downloaded 0, added 0
+
+   ╭─────────────────────────────────────────╮
+   │                                         │
+   │   Update available! 11.21.0 → 12.4.1.   │
+   │   Changelog: https://pnpm.io/v/12.4.1   │
+   │    To update, run: pnpm self-update     │
+   │                                         │
+   ╰─────────────────────────────────────────╯
+
+Packages: +24
+++++++++++++++++++++++++
+Packages are hard linked from the content-addressable store to the virtual store.
+  Content-addressable store is at: /Users/unfazed-mac/Library/pnpm/store/v11
+  Virtual store is at:             node_modules/.pnpm
+Progress: resolved 24, reused 24, downloaded 0, added 24, done
+
+dependencies:
++ arxa-artifact-viewer 0.3.5
++ arxa-brand 0.1.1
++ arxa-dashboard 0.1.0
++ arxa-design-panel 0.1.0
++ arxa-file-org-shell 0.1.7
++ arxa-frame 0.1.6
++ arxa-freestyle 0.1.0
++ arxa-gen-ui 0.1.0
++ arxa-git-card 0.1.1
++ arxa-github-link 0.1.5
++ arxa-jobs 0.1.0
++ arxa-locale 0.1.0
++ arxa-mcp-apps 0.1.0
++ arxa-pairing 0.1.0
++ arxa-personalisation 0.2.1
++ arxa-prism 0.8.1
++ arxa-provider-status 0.1.0
++ arxa-sidebar 0.2.9
++ arxa-theme-accent 0.3.6
++ arxa-waiting-page 0.1.1
++ arxa-workspace-provider 0.1.0
+
+Done in 632ms using pnpm v11.21.0
+arxa studio: http://arxa.studio.localhost:7897
+[github-link] WARNING: /usr/bin/security did not answer within 2000ms (no login keychain for this HOME, or securityd is waiting on something) — using the in-memory fallback for this process.
+[github-link] WARNING: no keyring backend available (no Tauri shell bridge, and no usable platform secret store — /usr/bin/security on macOS, secret-tool + a running Secret Service on Linux). The GitHub token will be held IN MEMORY ONLY and lost when this process exits.
+[arxa-boot] sidebar apply
+[arxa-boot] header index armed: 0 headers, list cold at /var/folders/z_/vsddl0v124771l0kwkndsptw0000gn/T/arxa-t8c-narrow-DXjbJK/home/dsh/storages/arxa-session-header-index.json
+[arxa-boot] listSessions single-flight armed
+[github-link] WARNING: /usr/bin/security did not answer within 2000ms (no login keychain for this HOME, or securityd is waiting on something) — using the in-memory fallback for this process.
+[github-link] WARNING: no keyring backend available (no Tauri shell bridge, and no usable platform secret store — /usr/bin/security on macOS, secret-tool + a running Secret Service on Linux). The GitHub token will be held IN MEMORY ONLY and lost when this process exits.
+[arxa-boot] prewarm snapshot+open in 16ms (org none)
+[arxa-boot] desktop-session apply
+dsh web: http://127.0.0.1:7897/?token=REDACTED
+[arxa-boot] state served from prewarm
+[arxa-boot] state first served in 0ms
+[arxa-artifact-viewer] root server serving /var/folders/z_/vsddl0v124771l0kwkndsptw0000gn/T/arxa-t8c-narrow-DXjbJK/org/T8CLOSE at http://org-T8CLOSE.localhost:58184
+[arxa-boot] listSessions #1 2ms index hits=0 misses=0
+[arxa-boot] listSessions #2 3ms index hits=0 misses=0
+[arxa-boot] session list 0 items in 3ms (query 0 records in 2ms)
+[arxa-sidebar] spawned arxa-T8CLOSE-notes-note-wt-260914-001 liveAgent=true
+[arxa-boot] session.open ensureOpen=1ms
+[arxa-sidebar] attach arxa-T8CLOSE-notes-note-wt-260914-001 liveSession=true liveAgent=true
+[arxa-boot] resume T8CLOSE/notes/note-wt-260914-001 head+rows=5 revive=5 attach+retitle=6 list=6
+[arxa-artifact-viewer] trace boot@2026-09-13T19:07:31.779Z painted 17208ms bundle=warm nav=navigate/redir1 fetch=2 resp=4 dcl=38 load=205 client-eval=113 state-req=217 state-res=235 catalog-first=17054 open-call=17183 painted=17208 js=10/11574KB/last@6433/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=session/modelCatalog:182+304,agentPresets/list:232+274,session/modelCatalog:233+271
+[arxa-boot] session.open ensureOpen=1ms
+[arxa-sidebar] attach arxa-T8CLOSE-notes-note-wt-260914-001 liveSession=true liveAgent=true
+[arxa-boot] resume T8CLOSE/notes/note-wt-260914-001 head+rows=4 revive=4 attach+retitle=5 list=5
+[arxa-sidebar] spawned arxa-T8CLOSE-notes-note-wt-260914-002 liveAgent=true
+[arxa-boot] session.open ensureOpen=0ms
+[arxa-sidebar] attach arxa-T8CLOSE-notes-note-wt-260914-002 liveSession=true liveAgent=true
+[arxa-boot] resume T8CLOSE/notes/note-wt-260914-002 head+rows=6 revive=6 attach+retitle=6 list=6
+[arxa-artifact-viewer] trace boot@2026-09-13T19:09:50.827Z painted 10845ms bundle=warm nav=reload/redir0 fetch=6 resp=10 dcl=48 load=175 client-eval=83 state-req=186 state-res=211 catalog-first=228 open-call=10822 painted=10845 js=10/11574KB/last@2014/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=sidebar/action:10654+104,vendor/arxa-monaco.js:1652+97,agentPresets/list:242+96
+[arxa-boot] session.open ensureOpen=0ms
+[arxa-sidebar] attach arxa-T8CLOSE-notes-note-wt-260914-002 liveSession=true liveAgent=true
+[arxa-boot] resume T8CLOSE/notes/note-wt-260914-002 head+rows=6 revive=6 attach+retitle=7 list=7
+[arxa-artifact-viewer] trace boot@2026-09-13T19:12:16.446Z timeout 30081ms bundle=warm nav=reload/redir0 fetch=6 resp=9 dcl=45 load=175 client-eval=81 state-req=187 state-res=206 catalog-first=301 js=10/11574KB/last@2001/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=vendor/arxa-monaco.js:1650+98,agentPresets/list:188+88,agentPresets/list:202+88
+[arxa-artifact-viewer] trace main.dart painted 166ms bundle=warm panel-mounted=3 consumed=3 org:loading=4 token=REDACTED bytes=10 session=17 codeview=17 import=18 open=89
+[arxa-artifact-viewer] lsp: refused (no-project-root)
+[arxa-artifact-viewer] trace main.dart painted 61ms bundle=warm panel-mounted=-2337 consumed=0 org:loading=0 token=REDACTED bytes=14 session=21 codeview=21 import=22 open=32
+[arxa-artifact-viewer] lsp: refused (no-project-root)
+[arxa-artifact-viewer] trace boot@2026-09-13T19:20:28.897Z timeout 30128ms bundle=warm nav=navigate/redir1 fetch=2 resp=4 dcl=50 load=217 client-eval=127 state-req=229 state-res=249 catalog-first=259 js=10/11574KB/last@6423/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=agentPresets/list:245+123,agentPresets/list:271+98,agentPresets/list:230+87
+[arxa-artifact-viewer] trace boot@2026-09-13T19:21:57.776Z timeout 30081ms bundle=warm nav=reload/redir0 fetch=6 resp=10 dcl=47 load=173 client-eval=81 state-req=185 state-res=208 catalog-first=226 js=10/11574KB/last@1984/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=agentPresets/list:242+115,arxa-provider-status/current:247+105,sidebar/state:252+100
+[arxa-artifact-viewer] trace langstrip.ts painted 168ms bundle=warm panel-mounted=3 consumed=3 org:loading=3 token=REDACTED bytes=30 session=37 codeview=38 import=38 open=99
+[arxa-artifact-viewer] trace langstrip.css painted 182ms bundle=warm panel-mounted=-20676 consumed=0 org:loading=0 token=REDACTED bytes=114 session=121 codeview=122 import=122 open=154
+[arxa-artifact-viewer] trace boot@2026-09-13T19:24:51.289Z timeout 30081ms bundle=warm nav=reload/redir0 fetch=6 resp=10 dcl=45 load=174 client-eval=81 state-req=187 state-res=206 catalog-first=209 js=13/11645KB/last@8099/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=BTjLKcQjfZoKx9ofCGRbo-PhOwpI:8451+20328,session/modelCatalog:151+223,session/modelCatalog:202+219
+[arxa-artifact-viewer] trace langstrip.json painted 144ms bundle=warm panel-mounted=-46792 consumed=0 org:loading=0 token=REDACTED bytes=81 session=88 codeview=88 import=89 open=119
+[arxa-artifact-viewer] trace langstrip.html ready:iframe 3049ms bundle=warm panel-mounted=-94732 consumed=0 org:loading=0 token=REDACTED
+[arxa-artifact-viewer] trace boot@2026-09-13T19:26:43.254Z timeout 62751ms bundle=warm nav=navigate/redir1 fetch=2 resp=4 dcl=36 load=202 client-eval=111 state-req=215 state-res=237 catalog-first=241 js=10/11574KB/last@6220/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=session/modelCatalog:179+262,session/modelCatalog:231+235,agentPresets/list:255+160
+[arxa-artifact-viewer] trace boot@2026-09-13T19:28:10.201Z timeout 48377ms bundle=warm nav=navigate/redir1 fetch=2 resp=4 dcl=42 load=210 client-eval=119 state-req=222 state-res=243 catalog-first=255 js=10/11574KB/last@6423/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=agentPresets/list:238+119,agentPresets/list:267+91,lm/listConfigurableProviders:272+82
+[arxa-artifact-viewer] trace main.dart painted 173ms bundle=warm panel-mounted=3 consumed=3 org:loading=4 token=REDACTED bytes=12 session=19 codeview=20 import=20 open=89
+[arxa-artifact-viewer] lsp: refused (no-project-root)
+[arxa-artifact-viewer] trace main.dart painted 67ms bundle=warm panel-mounted=-2464 consumed=0 org:loading=0 token=REDACTED bytes=7 session=16 codeview=17 import=17 open=27
+[arxa-artifact-viewer] lsp: refused (no-project-root)
+[arxa-artifact-viewer] trace boot@2026-09-13T19:30:36.138Z timeout 56751ms bundle=warm nav=reload/redir0 fetch=6 resp=10 dcl=46 load=176 client-eval=81 state-req=189 state-res=214 catalog-first=234 js=10/11574KB/last@1979/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=session/modelCatalog:153+251,session/modelCatalog:205+247,vendor/icons.js:220+165
+[arxa-artifact-viewer] trace boot@2026-09-13T19:32:30.042Z timeout 56733ms bundle=warm nav=reload/redir0 fetch=6 resp=9 dcl=47 load=175 client-eval=82 state-req=187 state-res=207 catalog-first=229 js=10/11574KB/last@1979/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=agentPresets/list:202+127,vendor/icons.js:216+114,agentPresets/list:243+89
+[arxa-artifact-viewer] trace boot@2026-09-13T19:34:05.972Z timeout 85524ms bundle=warm nav=navigate/redir1 fetch=2 resp=3 dcl=35 load=203 client-eval=111 state-req=219 state-res=242 catalog-first=262 js=10/11574KB/last@2023/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=session/modelCatalog:181+239,session/modelCatalog:235+225,vendor/icons.js:247+151
+[arxa-artifact-viewer] trace boot@2026-09-13T19:35:52.955Z timeout 37109ms bundle=warm nav=reload/redir0 fetch=5 resp=8 dcl=41 load=168 client-eval=74 state-req=182 state-res=204 catalog-first=225 js=10/11574KB/last@1977/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=agentPresets/list:201+139,agentPresets/list:239+104,vendor/icons.js:210+78
+[arxa-artifact-viewer] trace boot@2026-09-13T19:36:37.716Z timeout 79480ms bundle=warm nav=reload/redir0 fetch=4 resp=6 dcl=33 load=159 client-eval=64 state-req=175 state-res=201 catalog-first=221 js=10/11574KB/last@1977/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=session/modelCatalog:194+262,session/modelCatalog:135+261,vendor/icons.js:206+174
+[arxa-artifact-viewer] trace boot@2026-09-13T19:38:12.433Z timeout 33437ms bundle=warm nav=reload/redir0 fetch=6 resp=9 dcl=43 load=171 client-eval=78 state-req=186 state-res=209 catalog-first=229 js=10/11574KB/last@1991/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=agentPresets/list:245+110,vendor/arxa-monaco.js:1646+108,dashboard/action:27295+99
+[arxa-artifact-viewer] trace boot@2026-09-13T19:39:06.542Z timeout 39579ms bundle=warm nav=reload/redir0 fetch=6 resp=10 dcl=46 load=176 client-eval=80 state-req=191 state-res=215 catalog-first=236 js=10/11574KB/last@1974/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=session/modelCatalog:153+259,session/modelCatalog:210+247,vendor/icons.js:221+167
+[arxa-artifact-viewer] trace main.dart painted 1501ms bundle=warm panel-mounted=4 consumed=5 org:loading=5 token=REDACTED bytes=1310 session=1322 codeview=1323 import=1323 open=1406
+[arxa-artifact-viewer] trace boot@2026-09-13T19:41:13.005Z timeout 81402ms bundle=warm nav=navigate/redir1 fetch=2 resp=3 dcl=36 load=205 client-eval=112 state-req=221 state-res=244 catalog-first=264 js=10/11574KB/last@2057/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=session/modelCatalog:183+237,session/modelCatalog:234+232,agentPresets/list:279+118
+[arxa-artifact-viewer] trace boot@2026-09-13T19:42:51.640Z timeout 66629ms bundle=warm nav=reload/redir0 fetch=6 resp=10 dcl=47 load=176 client-eval=84 state-req=191 state-res=215 catalog-first=227 js=10/11574KB/last@1978/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=agentPresets/list:207+153,agentPresets/list:192+117,agentPresets/list:245+116
+[arxa-artifact-viewer] trace boot@2026-09-13T19:50:45.820Z timeout 32944ms bundle=warm nav=navigate/redir1 fetch=2 resp=4 dcl=46 load=218 client-eval=124 state-req=234 state-res=262 catalog-first=272 js=10/11574KB/last@2017/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=session/modelCatalog:197+277,session/modelCatalog:259+236,vendor/icons.js:267+193

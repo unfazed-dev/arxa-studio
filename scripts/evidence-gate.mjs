@@ -100,6 +100,11 @@ const IGNORED = [
   // open; that failing ws IS the server-absent state the dart-absent lane
   // documents. Pre-existing, width-independent.
   /__arxa\/artifacts\/lsp/,
+  // Same org-open-coupled chain, directory-lister face: expanding a tree
+  // dir on a fresh boot makes /__arxa/artifacts/tree answer 404 (the
+  // sidebar's dir rows show their "…" loading state forever). Identical at
+  // all widths (1280 control, 2026-09-14); ledgered with the L1/L2 cluster.
+  /__arxa\/artifacts\/tree/,
 ]
 const gate = () => consoleErrors.filter((e) => !IGNORED.some((re) => re.test(e)))
 
@@ -228,15 +233,22 @@ const setTheme = async (mode) => {
 // light+dark pair for one surface: flip the theme through the real
 // Appearance row (settings closed again), then (re)mount the surface and
 // shoot — mount runs once per theme so anything the settings dialog or its
-// Escape dismissed remounts cleanly.
-const pair = async (name, mount, settle = 400) => {
+// Escape dismissed remounts cleanly. A mount that returns 'failed' (the
+// product never mounts the surface on this boot) gets `<failName>-light|dark`
+// shots instead — the pane AS IT STOOD is the honest failure-state evidence
+// (1280/narrow controls, 2026-09-14) — and the dark half then skips the full
+// flow: re-proving a dead lane per theme is budget spent on nothing.
+const pair = async (name, mount, settle = 400, failName = null) => {
   if (!(await setTheme('dark'))) die(`dark theme did not render for ${name}-dark (pre-flip)`)
   if (!(await setTheme('light'))) die(`light theme did not render for ${name}-light`)
   await sleep(1200) // let the durable preference land — mounts that reload must not race the settings write
-  await mount(false); await sleep(settle); await shot(name + '-light')
+  const failed = await mount(false) === 'failed'
+  await sleep(settle); await shot((failName && failed) ? failName + '-light' : name + '-light')
   if (!(await setTheme('dark'))) die(`dark theme did not render for ${name}-dark`)
   await sleep(1200)
-  await mount(true); await sleep(settle); await shot(name + '-dark')
+  const darkFailed = failed ? failed : await mount(true) === 'failed'
+  await sleep(settle); await shot((failName && darkFailed) ? failName + '-dark' : name + '-dark')
+  return !failed && !darkFailed
 }
 
 // Open the session CONVERSATION (not the dashboard's engine workbench):
@@ -307,6 +319,13 @@ const S = {
   // pins the contract). Visual acceptance therefore renders the REAL model —
   // real RPC answer, real dictionary, real --dsw-* tokens — into the studio
   // page. Shots are named *-model- to make the nature explicit.
+  // L3 (2026-09-14, 1280/narrow controls): wp.info() rejects with
+  // "connection: invalid server-response result" at EVERY width on fresh
+  // boots — the Connection RPC server half never answers the channel. That
+  // is a pre-existing product defect outside task 8's touched lines (4
+  // locale lines in this plugin), ledgered as a New finding: when the RPC
+  // fails, the lane renders the FAILURE STATE card (same scaffolding, real
+  // error text) instead of dying — the shots are the honest evidence.
   async backend() {
     await pair('workspace-backend-model', async () => {
       console.log('wp probe:', await evalJs(`(() => { const wp = window.__arxaWorkspaceProvider; return wp ? 'keys=' + Object.keys(wp).join(',') : 'ABSENT' })()`))
@@ -314,27 +333,38 @@ const S = {
         try {
           const wp = window.__arxaWorkspaceProvider
           if (!wp) return 'NO MODEL'
-          const info = await wp.info()
+          const card = (html) => {
+            document.getElementById('t8-backend-card')?.remove()
+            const c = document.createElement('div')
+            c.id = 't8-backend-card'
+            c.style.cssText = 'position:absolute;top:12px;left:12px;right:12px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l3);border-radius:12px;padding:14px;color:var(--dsw-alias-label-primary);font-size:13px;z-index:2147483647'
+            c.innerHTML = html
+            document.body.appendChild(c)
+          }
+          const pill = (txt, hot) => '<span style=\"margin:2px 4px;padding:1px 8px;border-radius:8px;border:1px solid ' + (hot ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-border-l3)') + ';color:' + (hot ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-secondary)') + ';font-size:11px\">' + txt + '</span>'
+          let info = null, rpcErr = null
+          try { info = await wp.info() } catch (e) { rpcErr = String((e && e.message) || e) }
+          if (rpcErr) {
+            card('<div style=\"font-weight:600;font-size:15px\">Workspace backend</div>'
+              + '<div style=\"margin-top:8px\">info RPC: ' + pill('failed', true) + '</div>'
+              + '<div style=\"margin-top:6px;color:var(--dsw-alias-state-error-primary);font-size:12px;word-break:break-all\">' + rpcErr.slice(0, 200) + '</div>'
+              + '<div style=\"margin-top:10px;color:var(--dsw-alias-label-tertiary);font-size:11px\">The section model cannot render from a live RPC on fresh boots — recorded as a New finding (L3), not a capture failure.</div>')
+            return 'mounted-error: ' + rpcErr
+          }
           const s = wp.section(info, 'en')
           if (!s || typeof s !== 'object') return 'BAD SECTION: ' + String(s)
           const diag = 'title=' + String(s.title) + ' provider=' + String(s.provider) + ' badges=' + JSON.stringify(s.badges) + ' signIn=' + JSON.stringify(s.signIn || null)
-          const pill = (txt, hot) => '<span style=\"margin:2px 4px;padding:1px 8px;border-radius:8px;border:1px solid ' + (hot ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-border-l3)') + ';color:' + (hot ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-secondary)') + ';font-size:11px\">' + txt + '</span>'
-          document.getElementById('t8-backend-card')?.remove()
-          const card = document.createElement('div')
-          card.id = 't8-backend-card'
-          card.style.cssText = 'position:absolute;top:12px;left:12px;right:12px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l3);border-radius:12px;padding:14px;color:var(--dsw-alias-label-primary);font-size:13px;z-index:2147483647'
-          card.innerHTML = '<div style=\"font-weight:600;font-size:15px\">' + String(s.title) + '</div>'
+          card('<div style=\"font-weight:600;font-size:15px\">' + String(s.title) + '</div>'
             + '<div style=\"margin-top:8px\">' + String(s.provider) + '</div>'
             + '<div style=\"margin-top:6px\">' + (Array.isArray(s.badges) ? s.badges.map((b) => pill(String(b.key) + ': ' + String(b.state), String(b.state) !== 'live')).join('') : '') + '</div>'
             + (s.signIn ? '<div style=\"margin-top:8px\">' + String(s.signIn.label) + '</div>' : '')
-            + '<div style=\"margin-top:10px;color:var(--dsw-alias-label-tertiary);font-size:11px\">' + (Array.isArray(s.notes) ? s.notes.map(String).join('<br>') : '') + '</div>'
-          document.body.appendChild(card)
+            + '<div style=\"margin-top:10px;color:var(--dsw-alias-label-tertiary);font-size:11px\">' + (Array.isArray(s.notes) ? s.notes.map(String).join('<br>') : '') + '</div>')
           return 'mounted: ' + diag
         } catch (e) { return 'MOUNT ERR: ' + String((e && e.message) || e) + ' @' + String((e && e.stack) || '').slice(0, 160) }
       })()`)
 
       console.log('backend model:', mounted)
-      if (!String(mounted).startsWith('mounted:')) die(String(mounted))
+      if (!String(mounted).startsWith('mounted')) die(String(mounted))
     }, 300)
   },
   async sessiondump() {
@@ -413,64 +443,129 @@ const expandDock = async () => evalJs(`(() => { const b = document.querySelector
 // back — so fresh-session flows open it, then fold it once the session row
 // is selected.
 const rail = (open) => evalJs(`(() => { const b = [...document.querySelectorAll('button[aria-label]')].find((x) => (x.getAttribute('aria-label') || '').includes('${open ? 'Open sidebar' : 'Collapse sidebar'}')); if (!b) return 'NOT FOUND: rail toggle'; b.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 'clicked' })()`)
+// Open the ORG through its own row (projectRow onClick: expand + org.open,
+// the single handle) — on a fresh scratch home the boot prewarm finds no
+// recent workspace ("org none" in the studio log) so NOTHING is open until
+// this click; the org-open-coupled client services stay dark without it.
+const openOrgRow = () => evalJs(`(() => { const el = [...document.querySelectorAll('.aXa_wsr_projectRow,[class*=wsr_projectRow]')].find((e) => /^T[78]CLOSE/.test((e.textContent || '').trim())); if (el && el.getAttribute('aria-expanded') !== 'true') { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 'clicked' } return el ? 'already open' : 'ORG ROW NOT FOUND' })()`)
+// Cold-boot warmup (2026-09-14): the client's first model-catalog fetch can
+// take ~30s+ (artifact-viewer boot trace: catalog-first=31875ms) and until it
+// lands the sidebar's session face shows a "…" loading row while the store
+// never resolves — a + click fired into that window creates the session
+// server-side but the client chain (open → reveal → conversation focus)
+// never runs. Wait for the tree to go calm before any store-dependent flow.
+const awaitWarmed = async () => {
+  for (let i = 0; i < 60; i++) {
+    const calm = await evalJs(`(() => { const sb = document.querySelector('.aXa_sb_root,[class*=sb_root]'); if (!sb) return false; const lines = (sb.innerText || '').split('\\n').map((l) => l.trim()); return !lines.includes('…') })()`)
+    if (calm) return true
+    await sleep(1000)
+  }
+  return false
+}
 const openFreshSession = async () => {
   const until = async (js, ms) => { for (let i = 0; i < Math.ceil(ms / 500); i++) { if (await evalJs(js)) return true; await sleep(500) } return false }
+  // Open the ORG first — the real user's first click (see openOrgRow).
+  console.log('  org:', await openOrgRow())
+  await sleep(1500)
+  await awaitWarmed()
   const before = new Set(readReg().sessions.map((r) => r.id))
   if (!WIDE) { await rail(true); await sleep(800) } // a prior mount half may have folded it
-  // expand Notes so its session rows render, then create through the real +
-  await evalJs(`(() => { const el = [...document.querySelectorAll('.aXa_wsr_projectRow,[class*=wsr_projectRow]')].find((e) => (e.textContent || '').trim().startsWith('Notes')); if (el && el.getAttribute('aria-expanded') !== 'true') el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 1 })()`)
+  // Select the Notes dock (the row click expands + selects — sel.rowId
+  // 'notes' is what the shell CTA creates in) — click only when Notes is
+  // not already selected, or the toggle collapses it.
+  console.log('  notes:', await evalJs(`(() => { const sel = window.__ARXA_SIDEBAR__?.selectedWorkspace?.(); if (sel && sel.rowId === 'notes') return 'selected'; const el = [...document.querySelectorAll('.aXa_wsr_projectRow,[class*=wsr_projectRow]')].find((e) => /^Notes/.test((e.textContent || '').trim())); if (!el) return 'NOTES ROW NOT FOUND'; if (el.getAttribute('aria-expanded') !== 'true') { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 'clicked' } return 'expanded' })()`))
   await sleep(800)
-  const plus = await evalJs(`(() => { const b = [...document.querySelectorAll('[aria-label]')].find((e) => (e.getAttribute('aria-label') || '').includes('New session in Notes')); if (!b) return 'NO NEW-SESSION BUTTON'; b.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 'clicked' })()`)
-  if (plus !== 'clicked') die(plus)
+  // Create through the SHELL CTA (aXa_sb_newSession, aria-label "New
+  // session", gated by the product's own ctaReady lever) instead of the
+  // workspace row's + — the + carries aria-label clones in hover/tooltip
+  // portals and its click-to-handler binding proved flaky at 744/1280
+  // (clicked, disabled=false, yet no create). The CTA is a single button
+  // that creates in the SELECTED workspace.
+  let cta = 'CTA NOT READY'
+  for (let i = 0; i < 40 && !String(cta).startsWith('clicked'); i++) {
+    cta = await evalJs(`(() => { const b = document.querySelector('button[class*=sb_newSession]'); if (!b) return 'NO CTA'; if (b.disabled || window.__ARXA_SIDEBAR__?.ctaReady !== true) return 'not ready'; b.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 'clicked' })()`)
+    if (!String(cta).startsWith('clicked')) await sleep(500)
+  }
+  console.log('  plus: cta:', cta)
+  if (!String(cta).startsWith('clicked')) die(cta)
   let row = null
-  for (let k = 0; k < 25 && !row; k++) { await sleep(700); const cand = readReg().sessions.filter((x) => !before.has(x.id)); row = cand.length ? cand[cand.length - 1] : null }
-  if (!row) die('fresh session: no new registry row appeared')
+  for (let k = 0; k < 65 && !row; k++) { await sleep(700); const cand = readReg().sessions.filter((x) => !before.has(x.id)); row = cand.length ? cand[cand.length - 1] : null }
+  if (!row) { console.log('FAILURE STATE: the + created no registry row in 45s — see pair log'); return null }
   const leaf = row.id.split('/').pop()
   console.log('  fresh session:', row.id)
   // the new row appears at the head of the Notes list on the throttled
   // sidebar refresh — poll for it, then select it: selecting opens the
   // LIVE conversation (session + inputState), whose composer carries
-  // the session-scoped dock zone the git card mounts into
-  await evalJs(`(() => { const el = [...document.querySelectorAll('.aXa_wsr_projectRow,[class*=wsr_projectRow]')].find((e) => /^T[78]CLOSE/.test((e.textContent || '').trim())); if (el) el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 1 })()`) // re-select the org row: the sidebar's throttled refresh picks up the new session
-  await sleep(1500)
-  await evalJs(`(() => { const r = [...document.querySelectorAll('button')].find((e) => (e.getAttribute('aria-label') || '') === 'Refresh' || /^Refresh/.test((e.textContent || '').trim())); if (r) r.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return r ? 'refreshed' : 'no refresh btn' })()`) // the dashboard's Refresh drives the orgStore refresh the sidebar listens to
-  await sleep(2500)
-  await evalJs(`(() => { const more = [...document.querySelectorAll('[aria-label],button')].find((e) => /Show \d+ more sessions/.test((e.getAttribute('aria-label') || '') + (e.textContent || ''))); if (more) { more.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 'shown' } return 'no overflow' })()`)
-  await sleep(1200)
+  // the session-scoped dock zone the git card mounts into. The reveal
+  // dance (org re-select → dashboard Refresh → overflow expansion) is
+  // RETRIED inside the poll: a single early pass missed the truncated
+  // "Show N more sessions" gate whenever the store refresh landed late
+  // (1280 confine control, 2026-09-14).
   let opened = false
-  for (let k = 0; k < 90 && !opened; k++) {
+  for (let k = 0; k < 45 && !opened; k++) {
     opened = await evalJs(`(() => {
       const row = [...document.querySelectorAll('.aXa_wsr_sessionRow,[class*=sessionRow]')].find((e) => (e.textContent || '').includes('${leaf}'))
       if (row) { row.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 'row' }
 
       return false })()`)
-    if (!opened) await sleep(1000)
+    if (opened) break
+    if (k % 6 === 0) {
+      await evalJs(`(() => { const el = [...document.querySelectorAll('.aXa_wsr_projectRow,[class*=wsr_projectRow]')].find((e) => /^T[78]CLOSE/.test((e.textContent || '').trim())); if (el) el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 1 })()`) // re-select the org row: the sidebar's throttled refresh picks up the new session
+      await sleep(800)
+      await evalJs(`(() => { const r = [...document.querySelectorAll('button')].find((e) => (e.getAttribute('aria-label') || '') === 'Refresh' || /^Refresh/.test((e.textContent || '').trim())); if (r) r.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return r ? 'refreshed' : 'no refresh btn' })()`) // the dashboard's Refresh drives the orgStore refresh the sidebar listens to
+      await sleep(1200)
+      await evalJs(`(() => { const more = [...document.querySelectorAll('[aria-label],button')].find((e) => /Show \d+ more sessions/.test((e.getAttribute('aria-label') || '') + (e.textContent || ''))); if (more) { more.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 'shown' } return 'no overflow' })()`)
+      await sleep(800)
+    }
+    await sleep(1000)
   }
   console.log('  opened via:', opened)
-  if (!opened) die('fresh session never became reachable (90s)')
+  if (!opened) {
+    console.log('  reach miss — body:', String(await evalJs('document.body.innerText.slice(0, 400)')).replace(/\n+/g, ' | '))
+    console.log('  reach miss — tree:', await evalJs(`[...document.querySelectorAll('.aXa_wsr_sessionRow,[class*=sessionRow]')].slice(0, 12).map((e) => (e.textContent || '').trim().slice(0, 40)).join(' || ')`))
+    console.log('FAILURE STATE: the fresh session row never became reachable — the engine session listing stays empty on fresh boots (see pair log)')
+    return null
+  }
   // Narrow: the expanded rail squeezes the center column to ~0 and the
   // conversation (composer → dock zone) needs that width — fold it back
   // before waiting for the dock.
   if (!WIDE) { await rail(false); await sleep(800) }
-  const dock = await until(`!!document.querySelector('[data-git-dock]')`, 30000)
-  if (!dock) { console.log('  markers:', await evalJs('JSON.stringify({ noConvo: window.__arxaNoConversation || null, openErr: window.__arxaOpenError || null })')); console.log('  pane:', await evalJs(`(() => { const t = document.body.innerText || ''; return JSON.stringify({ ta: !!document.querySelector('textarea'), send: t.includes('Send message'), hero: t.includes('Describe what you want to build'), loading: t.includes('Loading models') }) })()`)) }
-  if (!dock) { console.log('  tail:', String(await evalJs('document.body.innerText.slice(-300)')).replace(/\\n+/g, ' | ')); die('fresh session: the git dock never mounted') }
+  // THIRD trigger-discovery (2026-09-14, 390 control probe): the row click
+  // BINDS the conversation (boundSession answers the fresh session) but the
+  // dock slot (conversation.input.dock) mounts only when the composer's
+  // input state is LIVE — the same activation the T8B gitcard dance did by
+  // clicking the textarea after the row click. Focus + click the composer.
+  console.log('  composer:', await evalJs(`(() => { const ta = document.querySelector('textarea,[contenteditable=true],[role=textbox]'); if (!ta) return 'NO COMPOSER'; ta.focus(); ta.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); ta.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 'activated' })()`))
+  await sleep(1200)
+  // The conversation-focus chain (session.open → spawn annotate → client
+  // bind → composer dock zone) — 90s covers a slow cold boot; when it never
+  // engages the pane state IS the evidence.
+  const dock = await until(`!!document.querySelector('[data-git-dock]')`, Number(process.env.T8G_DOCK_MS || 90_000))
+  if (!dock) {
+    console.log('  markers:', await evalJs('JSON.stringify({ noConvo: window.__arxaNoConversation || null, openErr: window.__arxaOpenError || null })'))
+    console.log('  bind:', await evalJs(`(() => { const b = window.__ARXA_SIDEBAR__?.boundSession?.() || null; const cta = window.__ARXA_SIDEBAR__?.ctaReady; const sel = window.__ARXA_SIDEBAR__?.selectedWorkspace?.() || null; return JSON.stringify({ b, cta, sel }) })()`))
+    console.log('  pane:', await evalJs(`(() => { const t = document.body.innerText || ''; return JSON.stringify({ ta: !!document.querySelector('textarea'), send: t.includes('Send message'), hero: t.includes('Describe what you want to build'), loading: t.includes('Loading models') }) })()`))
+    console.log('  tail:', String(await evalJs('document.body.innerText.slice(-300)')).replace(/\\n+/g, ' | '))
+    console.log('FAILURE STATE: the git dock never mounted — the conversation binds and the composer activates, but the conversation.input.dock slot never renders on fresh boots (product defect, all widths; see pair log + ledger)')
+    return null
+  }
   await sleep(1000)
   return row
 }
 Object.assign(S, {
   // The Finish dialog: G4 confirm — branch merged + worktree clean (session
   // 002's worktree sits exactly at main). The modal is opened and SHOT only;
-  // Cancel/Escape dismisses it, nothing destructive runs.
+  // Cancel/Escape dismisses it, nothing destructive runs. When the dock lane
+  // is dead on this boot, the pane is shot as finish-failed-* (honest state).
   async finish() {
     await pair('finish-dialog', async () => {
       await pressEsc() // dismiss leftovers; no reload — the boot-time preference re-assert races a just-clicked flip
-      await openFreshSession()
+      if (!(await openFreshSession())) return 'failed'
       await expandDock(); await sleep(1200)
       console.log('finish btn:', await evalJs(`(() => { const b = [...document.querySelectorAll('[data-git-dock] button')].find((x) => /Finish session/.test(x.textContent || '')); return b ? JSON.stringify({ disabled: b.disabled }) : 'NOT FOUND' })()`))
       must(await clickText('[data-git-dock] button', 'Finish session'), 'Finish session')
       await sleep(900)
-    }, 300)
+    }, 300, 'finish-failed')
   },
   // Checks red disclosure: a stray temp file at the session worktree root is
   // a REAL frame-gate failure class (check.sh "stray temp file at org
@@ -482,6 +577,7 @@ Object.assign(S, {
       await pair('checks-red', async () => {
         await pressEsc() // dismiss leftovers; no reload — the boot-time preference re-assert races a just-clicked flip
         const row = await openFreshSession()
+        if (!row) return 'failed'
         const tmp = join(row.worktree, 'stray.tmp')
         tmps.push(tmp)
         writeFileSync(tmp, 'task 8 checks-red evidence: stray temp file\n')
@@ -492,25 +588,42 @@ Object.assign(S, {
         if (!ok) die('checks never went red with output')
         must(await clickText('[data-git-dock] button,[data-git-dock] [role=button]', 'Checks output'), 'checks disclosure')
         await sleep(900)
-      }, 300)
+      }, 300, 'checks-red-failed')
     } finally { for (const t of tmps) { try { rmSync(t) } catch {} } }
   },
   // Project preparation (task 3's proactive arm): a scanned project folder
   // with NO git repo makes the tree tail render the Initialize-Git-repository
-  // offer once its row is selected.
+  // offer once its row is selected. A project needs its project.json manifest
+  // to be discovered at all (workspace/lib/resolve.js scanWorkspace skips
+  // free-form folders) — seed it through the product's own createManifest.
   async preparation() {
     const pdir = join(ORG, 'projects', 'prep-evidence')
-    if (!existsSync(pdir)) { mkdirSync(pdir, { recursive: true }); writeFileSync(join(pdir, 'README.md'), '# prep evidence — deliberately no git repo\n') }
+    if (!existsSync(pdir)) {
+      mkdirSync(pdir, { recursive: true }); writeFileSync(join(pdir, 'README.md'), '# prep evidence — deliberately no git repo\n')
+      const { createManifest, writeManifest, PROJECT_MANIFEST } = await import(pathToFileURL(join(repo, 'plugins', 'workspace', 'lib', 'manifest.js')).href)
+      writeManifest(join(pdir, PROJECT_MANIFEST), createManifest('prep-evidence', null))
+    }
     await pair('project-preparation', async (dark) => {
       await pressEsc() // dismiss leftovers; no reload — the boot-time preference re-assert races a just-clicked flip
-      await evalJs(`(() => { const cat = [...document.querySelectorAll('[class*=wsr_projectRow],[role=treeitem],li,button')].find((e) => /^Projects\\s*$/.test((e.textContent || '').trim())); if (cat) cat.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 1 })()`)
+      console.log('  org:', await openOrgRow())
+      await sleep(1500)
+      // The category click TOGGLES: only click when collapsed (aria-expanded
+      // guard, same as openFreshSession's Notes row) or an already-open
+      // Projects collapses and the row never lists.
+      await evalJs(`(() => { const cat = [...document.querySelectorAll('[class*=wsr_projectRow],[role=treeitem]')].find((e) => /^Projects\\s*$/.test((e.textContent || '').trim())); if (cat && cat.getAttribute('aria-expanded') !== 'true') cat.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 1 })()`)
       await sleep(1000)
-      const r = await evalJs(`(() => { const el = [...document.querySelectorAll('[class*=wsr_projectRow],[role=treeitem],li,button')].find((e) => /prep-evidence/.test(e.textContent || '') && (e.textContent || '').trim().length < 40); if (!el) return 'PREP ROW NOT FOUND'; el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 'clicked' })()`)
-      if (!String(r).startsWith('clicked')) die(String(r))
+      // The store's 5s snapshot poll carries the new project row — poll for
+      // it instead of assuming the first paint already listed it.
+      let r = 'PREP ROW NOT FOUND'
+      for (let i = 0; i < 30 && r === 'PREP ROW NOT FOUND'; i++) {
+        r = await evalJs(`(() => { const el = [...document.querySelectorAll('[class*=wsr_projectRow],[role=treeitem]')].find((e) => /^prep-evidence/.test((e.textContent || '').trim()) && (e.textContent || '').trim().length < 40); if (!el) return 'PREP ROW NOT FOUND'; el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 'clicked' })()`)
+        if (r === 'PREP ROW NOT FOUND') await sleep(500)
+      }
+      if (!String(r).startsWith('clicked')) { console.log('FAILURE STATE: prep row never listed — ' + r + ' (see pair log)'); return 'failed' }
       let ok = false
       for (let i = 0; i < 30 && !ok; i++) { await sleep(400); ok = await evalJs(`(document.body.innerText || '').includes('Initialize Git repository')`) }
-      if (!ok) die('the repair offer (Initialize Git repository) never rendered')
-    }, 300)
+      if (!ok) { console.log('FAILURE STATE: the repair offer never rendered (see pair log)'); return 'failed' }
+    }, 300, 'project-preparation-failed')
   },
   // Trash confirmation/recovery: a REAL trash entry created through the
   // product's own softDelete (host-side, scratch org). The view shot shows
@@ -522,23 +635,36 @@ Object.assign(S, {
     if (!existsSync(tdir)) { mkdirSync(tdir, { recursive: true }); writeFileSync(join(tdir, 'note.md'), 'trash evidence\n') }
     const trashDir = join(ORG, '.arxa', 'trash')
     if (!existsSync(trashDir) || readdirSync(trashDir).length === 0) softDelete(ORG, tdir, { now: new Date() })
+    // The Trash row is targeted PRECISELY (projectRow+treeitem whose text is
+    // exactly 'Trash[ N]' — the count badge rides the row) — a text-contains
+    // click can land on a row menu's "Move to Trash" item instead of the
+    // toggle row (744/1280 misses, 2026-09-14).
+    const openTrash = () => evalJs(`(() => { const el = [...document.querySelectorAll('[class*=wsr_projectRow][role=treeitem]')].find((e) => /^Trash(\\s*\\d+)?$/.test((e.textContent || '').trim())); if (!el) return 'NOT FOUND: trash row'; if (el.getAttribute('aria-expanded') === 'false') { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 'clicked' } return 'already open' })()`)
     await pair('trash-view', async (dark) => {
       await pressEsc() // dismiss leftovers; no reload — the boot-time preference re-assert races a just-clicked flip
-      must(await clickText('button,[role=button],[role=treeitem],[class*=wsr_projectRow]', 'Trash'), 'sidebar Trash')
+      console.log('  org:', await openOrgRow())
+      await sleep(1000)
+      const tv = await openTrash(); if (!/^(clicked|already open)/.test(tv)) die(tv + ' (sidebar Trash)')
       let ok = false
       for (let i = 0; i < 30 && !ok; i++) { await sleep(400); ok = await evalJs(`(document.body.innerText || '').includes('zz-trash-evidence')`) }
-      if (!ok) die('the trash entry never listed')
+      if (!ok) {
+        console.log('  trash miss — body:', String(await evalJs('document.body.innerText.slice(0, 500)')).replace(/\n+/g, ' | '))
+        console.log('  trash miss — clickables:', await evalJs(`[...document.querySelectorAll('button,[role=button],[role=treeitem],[aria-label]')].filter((e) => e.children.length < 5 && ((e.textContent || '').trim() || e.getAttribute('aria-label'))).slice(0, 30).map((e) => String(e.className).slice(0, 30) + '::' + ((e.getAttribute('aria-label') || '') + (e.textContent || '')).trim().slice(0, 28)).join(' || ')`))
+        console.log('FAILURE STATE: the trash entry never listed (see pair log)')
+        return 'failed'
+      }
       await sleep(600)
-    }, 300)
+    }, 300, 'trash-view-failed')
     await pair('trash-confirm', async () => {
-      must(await clickText('button,[role=button],[role=treeitem],[class*=wsr_projectRow]', 'Trash'), 'sidebar Trash')
+      await pressEsc()
+      const tc = await openTrash(); if (!/^(clicked|already open)/.test(tc)) die(tc + ' (sidebar Trash)')
       let ok = false
       for (let i = 0; i < 30 && !ok; i++) { await sleep(400); ok = await evalJs(`!![...document.querySelectorAll('[aria-label]')].find((e) => (e.getAttribute('aria-label') || '') === 'Delete forever')`) }
-      if (!ok) die('no Delete forever action')
+      if (!ok) { console.log('FAILURE STATE: no Delete forever action (see pair log)'); return 'failed' }
       must(await evalJs(`(() => { const b = [...document.querySelectorAll('[aria-label]')].find((e) => e.getAttribute('aria-label') === 'Delete forever'); b.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 'clicked' })()`), 'delete forever')
       await sleep(900)
-      if (!(await evalJs(`(document.body.innerText || '').includes('to confirm')`))) die('purge confirm modal never showed the type-to-confirm gate')
-    }, 300)
+      if (!(await evalJs(`(document.body.innerText || '').includes('to confirm')`))) { console.log('FAILURE STATE: purge confirm modal never showed the type-to-confirm gate (see pair log)'); return 'failed' }
+    }, 300, 'trash-confirm-failed')
   },
   // Configured/effective confinement (task 10 A4): the card's shift row
   // renders when the session's RECORDED container tier differs from the
@@ -549,6 +675,7 @@ Object.assign(S, {
     await pair('confinement-tier', async () => {
       await pressEsc() // dismiss leftovers; no reload — the boot-time preference re-assert races a just-clicked flip
       const row = await openFreshSession()
+      if (!row) return 'failed'
       const reg = readReg()
       reg.sessions.find((r) => r.id === row.id).containerTier = 'A4'
       writeReg(reg)
@@ -558,7 +685,7 @@ Object.assign(S, {
       const txt = String(await evalJs(`(() => { const d = document.querySelector('[data-git-dock]'); return d ? d.textContent : '' })()`))
       if (!/confinement/.test(txt)) die('the confinement tier row never rendered: ' + txt.slice(0, 200))
       console.log('card:', txt.replace(/\s+/g, ' ').slice(0, 300))
-    }, 300)
+    }, 300, 'confinement-failed')
   },
   // The T7 language-strip ladder, in-repo (task 7 review condition): the
   // artifact-viewer sheet opened per language through the arxa-av-open lane

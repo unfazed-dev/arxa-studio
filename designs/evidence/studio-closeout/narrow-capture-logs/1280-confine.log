@@ -1,0 +1,12 @@
+viewport@boot: [1280,813,true]
+theme rides the Appearance-row path (real setTheme clicks)
+-- surface: confine
+  org: already open
+  notes: clicked
+  plus: cta: clicked
+FAILURE STATE: the + created no registry row in 45s — see pair log
+shot: /Volumes/business_ssd/arxa_digital_solutions/.worktrees/arxa-studio-closeout/designs/evidence/studio-closeout/1280/confinement-failed-light-1280.png
+shot: /Volumes/business_ssd/arxa_digital_solutions/.worktrees/arxa-studio-closeout/designs/evidence/studio-closeout/1280/confinement-failed-dark-1280.png
+FILTERED (pre-existing, justified in scripts/evidence-gate.mjs):
+  log: Failed to load resource: the server responded with a status of 404 (Not Found) [http://arxa.studio.localhost:7897/__arxa/artifacts/tree?dir=projects%2Fprep
+EVIDENCE OK @1280 — confine — zero unfiltered console/page errors

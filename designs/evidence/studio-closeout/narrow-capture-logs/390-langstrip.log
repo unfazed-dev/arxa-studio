@@ -5,10 +5,10 @@ theme rides the system-preference path (prefers-color-scheme)
 MISSING: no diagnostic squiggles for langstrip.ts
 MISSING: no diagnostic squiggles for langstrip.css
 MISSING: no diagnostic squiggles for langstrip.json
-html lane: {"host":"org-t8close.localhost:50926","notStudio":true,"sandbox":"allow-scripts"}
+html lane: {"host":"org-t8close.localhost:58184","notStudio":true,"sandbox":"allow-scripts"}
 shot: /Volumes/business_ssd/arxa_digital_solutions/.worktrees/arxa-studio-closeout/designs/evidence/studio-closeout/390/langstrip-html-preview-390.png
+EVIDENCE OK @390 — langstrip — zero unfiltered console/page errors
 FILTERED (pre-existing, justified in scripts/evidence-gate.mjs):
   exception: Error: web app: missing #root
     at http://arxa.studio.localhost:7897/assets/index-Df-65__b.js:109:69
   log: Failed to load resource: the server responded with a status of 404 (Not Found) [http://arxa.studio.localhost:7897/favicon.ico]
-EVIDENCE OK @390 — langstrip — zero unfiltered console/page errors

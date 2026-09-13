@@ -2,16 +2,21 @@ viewport@boot: [390,844,true]
 narrow rail expanded through the fold toggle
 theme rides the system-preference path (prefers-color-scheme)
 -- surface: checksred
+  org: already open
+  notes: clicked
+  plus: cta: clicked
   fresh session: T8CLOSE/notes/note-wt-260914-002
   opened via: row
+  composer: activated
   markers: {"noConvo":null,"openErr":null}
+  bind: {"b":{"orgId":"t8close-scratch","sessionId":"T8CLOSE/notes/note-wt-260914-002"},"cta":true,"sel":{"orgId":"t8close-scratch","rowId":"notes","kind":"dock","label":"Notes"}}
   pane: {"ta":false,"send":false,"hero":true,"loading":false}
-  tail: Flowing High
-arxa
-Describe what you want to build... / commands, @ files or sessions
-GLM-5.3
-Max
-Details
-Click a tool row in the message flow to view its details
-design
-EVIDENCE FAIL: fresh session: the git dock never mounted
+  tail: js' imported from /private/var/folders/z_/vsddl0v124771l0kwkndsptw0000gn/T/arxa-t8c-narrow-DXjbJK/home/dsh/profiles/arxa/node_modules/.pnpm/arxa-git-card@file+..+..+..+..+..+..+..+..+..+..+..+Volumes+business_ssd+arxa_digital_s_b811aac2877b51472626e1aaedae9b39/node_modules/arxa-git-card/lib/index.js
+FAILURE STATE: the git dock never mounted — the conversation binds and the composer activates, but the conversation.input.dock slot never renders on fresh boots (product defect, all widths; see pair log + ledger)
+shot: /Volumes/business_ssd/arxa_digital_solutions/.worktrees/arxa-studio-closeout/designs/evidence/studio-closeout/390/checks-red-failed-light-390.png
+shot: /Volumes/business_ssd/arxa_digital_solutions/.worktrees/arxa-studio-closeout/designs/evidence/studio-closeout/390/checks-red-failed-dark-390.png
+FILTERED (pre-existing, justified in scripts/evidence-gate.mjs):
+  exception: Error: web app: missing #root
+    at http://arxa.studio.localhost:7897/assets/index-Df-65__b.js:109:69
+  log: Failed to load resource: the server responded with a status of 404 (Not Found) [http://arxa.studio.localhost:7897/favicon.ico]
+EVIDENCE OK @390 — checksred — zero unfiltered console/page errors

@@ -1,0 +1,7 @@
+viewport@boot: [1280,813,true]
+theme rides the Appearance-row path (real setTheme clicks)
+-- surface: backend
+wp probe: keys=info,section,namespace
+backend model: mounted-error: connection: invalid server-response result
+shot: /Volumes/business_ssd/arxa_digital_solutions/.worktrees/arxa-studio-closeout/designs/evidence/studio-closeout/1280/workspace-backend-model-light-1280.png
+wp probe: keys=info,section,namespace

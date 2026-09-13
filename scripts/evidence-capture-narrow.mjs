@@ -23,6 +23,7 @@
 //
 //   node scripts/evidence-capture-narrow.mjs        # plain node, no args
 //   ARXA_PORT=7897 node scripts/evidence-capture-narrow.mjs   # default port
+//   node scripts/evidence-capture-narrow.mjs --width 1280 --surface finish   # 1280 control lane
 import { spawn, spawnSync } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -40,7 +41,14 @@ const PORT = process.env.ARXA_PORT || '7897'
 const BOOT_BUDGET_MS = Number(process.env.T8C_BOOT_MS || 120_000)
 const PAIR_BUDGET_MS = Number(process.env.T8C_PAIR_MS || 480_000)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-const WIDTHS = [390, 744]
+// --width W (repeatable, default 390+744 — 1280 runs are the review-mandated
+// controls for surfaces the narrow lane missed) and --surface NAME (repeatable,
+// task or gate key — filters the ladder for diagnosis). Everything the gate
+// needs is per-pair, so any subset runs standalone.
+const args = process.argv.slice(2)
+const flagVals = (name) => args.flatMap((a, i) => (args[i - 1] === name ? [a] : []))
+const WIDTHS = flagVals('--width').map(Number).filter(Boolean).length ? flagVals('--width').map(Number) : [390, 744]
+const onlySurfaces = flagVals('--surface')
 
 // The dispatch's ladder, exact order. `gate` = the surface key in
 // scripts/evidence-gate.mjs's S map; `shots` = the PNG basenames that gate
@@ -126,6 +134,7 @@ const fetch200 = (tokenUrl) => {
   }))
 }
 
+let studioLog = '' // the booted studio's stdout/stderr — printed on any miss so driver/product blame is visible
 const bootStudio = async (home) => {
   // HOME DISCIPLINE (bin/arxa-studio.mjs): the whole studio points at the
   // scratch dir, parent DSH_* identity stripped. PATH drops fvm so the
@@ -140,7 +149,7 @@ const bootStudio = async (home) => {
   }
   studio = spawn(process.execPath, [join(repo, 'bin', 'arxa-studio.mjs'), '--no-open'], { env, stdio: ['ignore', 'pipe', 'pipe'] })
   let log = ''
-  studio.stdout.on('data', (d) => { log += d }); studio.stderr.on('data', (d) => { log += d })
+  studio.stdout.on('data', (d) => { log += d; studioLog += d }); studio.stderr.on('data', (d) => { log += d; studioLog += d })
   const deadline = Date.now() + BOOT_BUDGET_MS
   while (Date.now() < deadline) {
     if (studio.exitCode !== null) throw new Error(`studio exited ${studio.exitCode} before serving — last output: ${log.trim().split('\n').slice(-3).join(' / ')}`)
@@ -230,6 +239,17 @@ const classify = (run) => {
 }
 
 const shotFile = (width, name) => join(EVIDENCE, String(width), `${name}-${width}.png`)
+// Failure-state shot families (gate surfaces that cannot mount shoot the pane
+// as <name>-failed-<theme> instead — the honest evidence for the New
+// findings). Recorded per row; they never flip a row to ok.
+const FAIL_SHOTS = {
+  'finish': ['finish-failed-light', 'finish-failed-dark'],
+  'checks-red-disclosure': ['checks-red-failed-light', 'checks-red-failed-dark'],
+  'project-preparation': ['project-preparation-failed-light', 'project-preparation-failed-dark'],
+  'confinement-configured-effective': ['confinement-failed-light', 'confinement-failed-dark'],
+  'trash-confirm': ['trash-confirm-failed-light', 'trash-confirm-failed-dark'],
+  'trash-recover': ['trash-view-failed-light', 'trash-view-failed-dark'],
+}
 const evaluate = (entry, width, run, known) => {
   const base = { surface: entry.task, width, gate: entry.gate }
   if (!known.has(entry.gate)) {
@@ -238,11 +258,20 @@ const evaluate = (entry, width, run, known) => {
   const cls = classify(run)
   const shots = entry.shots.map((n) => { const f = shotFile(width, n); let ok = false; try { ok = statSync(f).mtimeMs > run.start } catch {} return { shot: `${n}-${width}.png`, ok } })
   let { kind: status, cause, error } = cls // classify() keys the verdict `kind`; rows carry `status`
+  const failShots = (FAIL_SHOTS[entry.task] || []).map((n) => { const f = shotFile(width, n); let ok = false; try { ok = statSync(f).mtimeMs > run.start } catch {} return ok ? `${n}-${width}.png` : null }).filter(Boolean)
+  if (failShots.length) base.failShots = failShots
   if (status === 'ok' && shots.some((s) => !s.ok)) { status = 'missing'; error = 'gate exited clean but an expected PNG is missing or stale'; cause = 'see the pair log' }
+  const failLine = (run.out.match(/FAILURE STATE: (.*)/) || [])[1]
+  if (failLine && status !== 'ok') cause = (cause ? cause + ' — ' : '') + failLine // the surface's own verdict line survives the stale-PNG wording
   // the install-strip lane must have rendered the STRIP (not a mounted editor)
   if (entry.gate === 'viewer-strip' && status === 'ok') {
     const st = (run.out.match(/dart state: (\{[^\n]*\})/) || [])[1] || ''
     if (!/"strip":\s*true/.test(st)) { status = 'missing'; error = 'dart state ' + (st || 'absent from log'); cause = 'the SDK-absent install strip did not render — the viewer mounts the editor and the LSP status/strip path does not engage on fresh scratch boots (identical at 1280; see task-8-report Part B limitations)' }
+  }
+  // backend L3: shots captured as the honest FAILURE-STATE card (wp.info()
+  // rejects at every width on fresh boots) — ok, but the row says so
+  if (entry.gate === 'backend' && status === 'ok' && /mounted-error:/.test(run.out || '')) {
+    cause = 'L3 New finding: wp.info() rejects (connection: invalid server-response) at every width on fresh boots — shots are the failure-state card, not the live section model'
   }
   return { ...base, status, error, cause, shots, consoleFiltered: cls.filtered, gateErrors: cls.errs }
 }
@@ -265,6 +294,7 @@ for (const s of ['SIGINT', 'SIGTERM']) process.on(s, () => { console.error(`\n${
 // ---- main -------------------------------------------------------------------
 const main = async () => {
   const known = gateSurfaces()
+  const ladder = onlySurfaces.length ? LADDER.filter((l) => onlySurfaces.includes(l.task) || onlySurfaces.includes(l.gate)) : LADDER
   console.log(`narrow capture: gate surfaces present in this checkout: ${[...known].join(', ')}`)
   scratch = mkdtempSync(join(tmpdir(), 'arxa-t8c-narrow-'))
   const home = join(scratch, 'home')
@@ -281,12 +311,12 @@ const main = async () => {
     console.log(`studio up: ${ctx.studioUrl} (scratch ${scratch})`)
   } catch (e) {
     console.error('BOOT FAILED: ' + e.message)
-    for (const width of WIDTHS) for (const entry of LADDER) rows.push({ surface: entry.task, width, gate: entry.gate, status: 'hard', error: 'studio boot failed: ' + String(e.message).slice(0, 200), cause: 'environment/boot — see console above', shots: [], consoleFiltered: 0, gateErrors: 0 })
+    for (const width of WIDTHS) for (const entry of ladder) rows.push({ surface: entry.task, width, gate: entry.gate, status: 'hard', error: 'studio boot failed: ' + String(e.message).slice(0, 200), cause: 'environment/boot — see console above', shots: [], consoleFiltered: 0, gateErrors: 0 })
   }
 
   if (ctx) for (const width of WIDTHS) {
     const ran = new Map() // one gate run per (width × gate surface); ladder rows sharing a gate credit its shots
-    for (const entry of LADDER) {
+    for (const entry of ladder) {
       if (!ran.has(entry.gate)) {
         if (!known.has(entry.gate)) { // e.g. workspace-signin: no gate surface exists — recorded row, no browser spent
           console.log(`[${width}] ${entry.gate} — not a surface in this checkout's gate; recording row`)
@@ -303,7 +333,9 @@ const main = async () => {
   }
 
   mkdirSync(EVIDENCE, { recursive: true })
-  writeFileSync(RUNLOG, JSON.stringify({ startedAt: new Date().toISOString(), ladder: LADDER.map((l) => l.task), proven1280: Object.keys(PROVEN_1280), rows }, null, 2) + '\n')
+  if (studioLog) writeFileSync(join(LOGS, 'studio-boot.log'), studioLog.replace(/token=[^&\s"']+/g, 'token=REDACTED'))
+  if (rows.some((r) => r.status !== 'ok')) console.log('\nstudio log tail (full copy: ' + relative(repo, join(LOGS, 'studio-boot.log')) + '):\n' + studioLog.trim().split('\n').slice(-14).join('\n'))
+  writeFileSync(RUNLOG, JSON.stringify({ startedAt: new Date().toISOString(), widths: WIDTHS, ladder: ladder.map((l) => l.task), proven1280: Object.keys(PROVEN_1280), rows }, null, 2) + '\n')
   console.log(`\nstructured rows: ${relative(repo, RUNLOG)} · pair logs: ${relative(repo, LOGS)}/`)
   console.log('\nshot                                             width  result    errs(filtered)')
   console.log('-'.repeat(78))

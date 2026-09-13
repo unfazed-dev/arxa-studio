@@ -4,4 +4,8 @@ theme rides the system-preference path (prefers-color-scheme)
 -- surface: sweep
 shot: /Volumes/business_ssd/arxa_digital_solutions/.worktrees/arxa-studio-closeout/designs/evidence/studio-closeout/390/sweep-modal-light-390.png
 shot: /Volumes/business_ssd/arxa_digital_solutions/.worktrees/arxa-studio-closeout/designs/evidence/studio-closeout/390/sweep-modal-dark-390.png
+FILTERED (pre-existing, justified in scripts/evidence-gate.mjs):
+  exception: Error: web app: missing #root
+    at http://arxa.studio.localhost:7897/assets/index-Df-65__b.js:109:69
+  log: Failed to load resource: the server responded with a status of 404 (Not Found) [http://arxa.studio.localhost:7897/favicon.ico]
 EVIDENCE OK @390 — sweep — zero unfiltered console/page errors

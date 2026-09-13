@@ -2,4 +2,12 @@ viewport@boot: [744,813,true]
 narrow rail expanded through the fold toggle
 theme rides the system-preference path (prefers-color-scheme)
 -- surface: preparation
-EVIDENCE FAIL: PREP ROW NOT FOUND
+  org: already open
+shot: /Volumes/business_ssd/arxa_digital_solutions/.worktrees/arxa-studio-closeout/designs/evidence/studio-closeout/744/project-preparation-light-744.png
+  org: already open
+shot: /Volumes/business_ssd/arxa_digital_solutions/.worktrees/arxa-studio-closeout/designs/evidence/studio-closeout/744/project-preparation-dark-744.png
+FILTERED (pre-existing, justified in scripts/evidence-gate.mjs):
+  exception: Error: web app: missing #root
+    at http://arxa.studio.localhost:7897/assets/index-Df-65__b.js:109:69
+  log: Failed to load resource: the server responded with a status of 404 (Not Found) [http://arxa.studio.localhost:7897/favicon.ico]
+EVIDENCE OK @744 — preparation — zero unfiltered console/page errors
