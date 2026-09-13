@@ -330,6 +330,10 @@ window.__ModuleLoader__.load({
       'insight.sessions.rename': 'Rename',
       'insight.sessions.archive': 'Archive',
       'insight.sessions.empty': 'No sessions in this organisation.',
+      'lsp.none': 'No {lang} language server.',
+      'lsp.hint': 'No {lang} language server — install its SDK ({cmd}) to get one.',
+      'lsp.install': 'Install',
+      'lsp.installing': 'Installing…',
     }
     const pl = {
       'title': 'Artefakty',
@@ -427,6 +431,10 @@ window.__ModuleLoader__.load({
       'insight.sessions.rename': 'Zmień nazwę',
       'insight.sessions.archive': 'Archiwizuj',
       'insight.sessions.empty': 'Brak sesji w tej organizacji.',
+      'lsp.none': 'Brak serwera języka {lang}.',
+      'lsp.hint': 'Brak serwera języka {lang} — zainstaluj jego SDK ({cmd}), aby go uzyskać.',
+      'lsp.install': 'Zainstaluj',
+      'lsp.installing': 'Instalowanie…',
     }
     const fr = {
       'title': 'Artefacts',
@@ -524,6 +532,10 @@ window.__ModuleLoader__.load({
       'insight.sessions.rename': 'Renommer',
       'insight.sessions.archive': 'Archiver',
       'insight.sessions.empty': 'Aucune session dans cette organisation.',
+      'lsp.none': 'Aucun serveur de langage {lang}.',
+      'lsp.hint': 'Aucun serveur de langage {lang} — installez son SDK ({cmd}) pour en obtenir un.',
+      'lsp.install': 'Installer',
+      'lsp.installing': 'Installation…',
     }
 
     // ---- ingress store (the 0px-column race dies here) ----------------------
@@ -708,7 +720,7 @@ window.__ModuleLoader__.load({
      *  `docRef.current` holds the bundle's handle, not a monaco object. Five
      *  call sites in Panel read the live document through it, and keeping the
      *  seam narrow is what stops phases 4-6 from rewriting all of them. */
-    function CodeView({ relPath, absPath, session, rootId, text, editable, docRef, onDirty, diffOriginal }) {
+    function CodeView({ relPath, absPath, session, rootId, text, editable, docRef, onDirty, diffOriginal, t }) {
       const ref = React.useRef(null)
       // The uri the part currently holds, and a counter that ticks when it
       // lands. The mode effect below needs both: what to open, and a signal that
@@ -886,15 +898,15 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'aXa_av_editorWrap aXa_av_monaco' },
         lsp ? h('div', { className: 'aXa_av_lspBar' }, [
           h('span', { key: 't' }, lsp.installable
-            ? 'No ' + (LSP_NAMES[lsp.lang] || lsp.lang) + ' language server.'
-            : 'No ' + (LSP_NAMES[lsp.lang] || lsp.lang) + ' language server — install its SDK (' + lsp.cmd + ') to get one.'),
+            ? t('lsp.none', { lang: LSP_NAMES[lsp.lang] || lsp.lang })
+            : t('lsp.hint', { lang: LSP_NAMES[lsp.lang] || lsp.lang, cmd: lsp.cmd })),
           lsp.installable
             ? h('button', {
               key: 'b',
               type: 'button',
               disabled: !!lsp.busy,
               onClick: installLsp,
-            }, lsp.busy ? 'Installing…' : 'Install')
+            }, lsp.busy ? t('lsp.installing') : t('lsp.install'))
             : null,
           lsp.error ? h('span', { key: 'e', style: { opacity: 0.8 } }, lsp.error) : null,
         ]) : null,
@@ -1878,7 +1890,7 @@ window.__ModuleLoader__.load({
           // 1.5s after the first keystroke), and an unkeyed sibling shifting
           // index is a remount of the live editor.
           surface = h(CodeView, { key: 'surface', relPath: state.relPath, absPath: state.absPath, session: state.wt ?? null, rootId: state.rootId ?? null, text: state.text, editable: canEdit, docRef, onDirty,
-            diffOriginal: showDiff ? (mainText ?? '') : null })
+            diffOriginal: showDiff ? (mainText ?? '') : null, t })
         } else if (lane === 'image') {
           surface = h('div', { className: 'aXa_av_scroll' }, h('div', { className: 'aXa_av_media' }, h('img', { src: state.url, alt: state.relPath })))
         } else if (lane === 'audio') {

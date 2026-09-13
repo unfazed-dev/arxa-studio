@@ -57,7 +57,7 @@ window.__ModuleLoader__.load({
         signInBrowser: 'Logowanie w przeglądarce',
         signInDeviceCode: 'Kod urządzenia',
         verifyHint: 'Uruchom `arxa-studio provider verify`, aby certyfikować ten backend',
-        licenseLine: 'Licencja arxa: oficjalny backend Totem',
+        licenseLine: 'Licencja arxa: oficjalny backend Totemu',
       },
       fr: {
         sectionTitle: 'Backend d’espace de travail',
@@ -70,7 +70,7 @@ window.__ModuleLoader__.load({
         badgeOff: 'désactivé',
         signInEmailForm: 'E-mail et mot de passe',
         signInToken: 'Jeton d’accès',
-        signInBrowser: 'Connexion navigateur',
+        signInBrowser: 'Connexion dans le navigateur',
         signInDeviceCode: 'Code d’appareil',
         verifyHint: 'Lancez `arxa-studio provider verify` pour certifier ce backend',
         licenseLine: 'Licence arxa : backend officiel Totem',

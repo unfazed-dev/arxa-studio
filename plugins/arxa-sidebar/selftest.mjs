@@ -226,7 +226,7 @@ check('repair: the offer rides the tree tail above archives and trash',
   client.includes('ARXA_REPO_REPAIR_AFTER_ORGS(), ARXA_ARCHIVES_AFTER_ORGS(), ARXA_TRASH_AFTER_ORGS()'))
 check('repair: the offer wording exists in pl and fr too (en fallback covers zh)',
   client.includes('"newSession.initRepo": "Zainicjuj repozytorium Git"')
-  && client.includes('"newSession.initRepo": "Initialiser le dépôt Git"'))
+  && client.includes('"newSession.initRepo": "Initialiser le dépôt git"'))
 check('D111 shell: the notice is styled with tokens only — no hex, no invented alias',
   /aXa_sb_ctaNotice\{[^}]*var\(--dsw-alias-state-error-primary\)[^}]*\}/.test(client)
   && !/aXa_sb_ctaNotice\{[^}]*#[0-9a-fA-F]{3,8}/.test(client))
