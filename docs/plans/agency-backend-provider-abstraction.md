@@ -1,6 +1,6 @@
 # Agency Backend Provider Abstraction (BYO Database)
 
-Status: PLAN ONLY — no code or schema changes. Consult-mode advisor skipped (no API key configured); design grounded in primary sources below.
+Status: SUPERSEDED IN PART by grill decisions **D32–D35** (`docs/plans/arxa-studio-grill-decisions.md`, 2026-09-12) — those are the **later authority** wherever this plan and they disagree. The Wire v1 contract is frozen in `plugins/workspace-provider` (task 13); providers and the conformance kit land with it.
 
 **Amended 2026-09-07 — two corrections, still no code.** (a) The plan offered
 `supabase` and `custom` and nothing else, so a user with no database and no
@@ -14,6 +14,14 @@ pluggable; they are removed from the contract (§1) and kept only as a
 description of the official project's own shape (§3). Everything marked `local`
 here is a **design decision, not shipped code** — none of it exists yet.
 
+**Amended 2026-09-13 — D32–D35 recorded (wire-contract freeze).** The four
+rulings below are binding and later than every earlier paragraph:
+
+- **Providers (D32):** the fixed set is `local` (DEFAULT, zero-config), `supabase`, and `generic-rest` (the Wire v1 contract itself, over any conforming backend). There is **no `custom` provider**: a `custom.adapter` key in config and the `ARXA_WORKSPACE_ADAPTER` env override are **invalid** and rejected. A BYO backend integrates by implementing the fixed HTTP/JSONL wire protocol server-side and passing `arxa-studio provider verify`; no third-party JavaScript ever executes inside the app, and nothing is published to npm in this closeout.
+- **Support (D33):** bundle-only. Staff never hold credentials or tokens for customer-run infrastructure; no support-access capability exists in the wire contract. `arxa-studio diagnose` emits the redacted, user-inspectable bundle.
+- **Identity (D34):** token-opaque. The wire contract specifies only the session-token lifecycle — issue, refresh, revoke, introspect. How a user authenticates is entirely the provider's business; `GET /capabilities` declares `signIn.kind: email-form | browser | device-code | token` plus start metadata, and studio renders only the declared flow. Email/password is **not** part of the wire contract.
+- **Realtime fallback (D35):** adaptive polling, as contract constants — **3 s** focused-and-active, **30 s** focused-idle, **120 s** background, plus an **immediate poll after any local write**.
+
 Sources read: `docs/plans/arxa-studio-grill-decisions.md` (D-series locked decisions), `docs/plans/entitlement-backend-runbook.md`, `arxa/deploy/supabase/schema.sql` + `seed.sql`.
 
 ## 0. The one non-negotiable split
@@ -23,7 +31,7 @@ Two planes. They never merge:
 | Plane | What it holds | Backend |
 |---|---|---|
 | **Product-license plane** | arxa entitlements, machines, subscriptions, Stripe billing, activate flow | **ALWAYS the official Totem backend.** Not pluggable, not configurable off. |
-| **Workspace-data plane** | orgs, org_members, tickets, chat, feedback, audit_log, analytics, storage blobs | **Pluggable, three providers:** `local` (DEFAULT — no account, no network, no database), `supabase` (first-class, and the conformance reference), `custom` (a BYO adapter module). |
+| **Workspace-data plane** | orgs, org_members, tickets, chat, feedback, audit_log, analytics, storage blobs | **Pluggable, three providers (D32):** `local` (DEFAULT — no account, no network, no database), `supabase` (first-class, and the conformance reference), `generic-rest` (the Wire v1 contract over any conforming backend). There is no `custom` adapter module. |
 
 A BYO provider replaces only the workspace-data plane. Paying for arxa (studio or agency tier) still means checkout → official `activate` Edge Function → Ed25519-signed token → offline verification in `arxa/lib/entitlement.dart`. A BYO backend cannot mint product tiers. This preserves every payment-gate decision in the grill doc unchanged.
 
@@ -56,7 +64,7 @@ Minimal contract the agency app codes against. All IDs are opaque strings; all m
 
 | Capability | Surface | Degradation when absent |
 |---|---|---|
-| `realtime` | `subscribe(orgId, collection, cb)` | App polls `records.list` on a visible-tab interval; UI drops the "live" badge. No feature is removed. |
+| `realtime` | `subscribe(orgId, collection, cb)` | Adaptive polling (D35, contract constants): 3 s focused-and-active, 30 s focused-idle, 120 s background, immediate poll after any local write; UI drops the "live" badge. No feature is removed. |
 | `storage` | `upload/download/delete/signedUrl(orgId, path)` | Attachments disabled in tickets/chat; text-only flows keep working. |
 | `analytics` | `track(event)` (fire-and-forget) | No-op sink. Nothing user-visible. |
 
@@ -166,10 +174,10 @@ Precedence: env > project config > user config > default.
 // .arxa/studio.json (project) or ~/.arxa/studio.json (user)
 {
   "workspaceBackend": {
-    "provider": "local",               // DEFAULT; or "supabase", or "custom"
-    "local":    { "root": "~/.arxa/workspace" },   // optional; this is the default
-    "supabase": { "url": "…", "anonKey": "…" },
-    "custom":   { "adapter": "./adapters/my-backend.mjs" }  // module implementing WorkspaceProvider
+    "provider": "local",               // DEFAULT; or "supabase", or "generic-rest" — the only three (D32)
+    "local":       { "root": "~/.arxa/workspace" },   // optional; this is the default
+    "supabase":    { "url": "…", "anonKey": "…" },
+    "generic-rest": { "baseUrl": "https://backend.example.test" }  // any backend implementing Wire v1
   },
   "entitlements": {
     "extraPublicKeys": [ { "kid": "acme-2026", "publicKeyPem": "…" } ]
@@ -178,7 +186,9 @@ Precedence: env > project config > user config > default.
 }
 ```
 
-Env overrides: `ARXA_WORKSPACE_PROVIDER`, `ARXA_SUPABASE_URL`, `ARXA_SUPABASE_ANON_KEY`, `ARXA_WORKSPACE_ADAPTER`, `ARXA_ENTITLEMENT_EXTRA_PUBKEYS` (path to JSON). These extend, and never replace, the production verification key — distinct from the existing debug-only `debugPublicKeyOverride`, which stays debug-gated.
+**Config cannot name executable code (D32).** A `custom` provider, an `adapter` key anywhere under `workspaceBackend`, or any module/file-path value is invalid and rejected at load — and the env override `ARXA_WORKSPACE_ADAPTER` is likewise invalid. `local` stays zero-config: no account, no network, no database, no environment variables.
+
+Env overrides: `ARXA_WORKSPACE_PROVIDER` (one of the three fixed names only), `ARXA_SUPABASE_URL`, `ARXA_SUPABASE_ANON_KEY`, `ARXA_ENTITLEMENT_EXTRA_PUBKEYS` (path to JSON). These extend, and never replace, the production verification key — distinct from the existing debug-only `debugPublicKeyOverride`, which stays debug-gated.
 
 **UX**: Settings → "Workspace backend" panel shows provider, capability badges (live/degraded per §1), and a `provider verify` run button. A permanent, non-editable line reads: **"arxa license: Totem official backend"** — so BYO users never form the belief that self-hosting exempts them from the product paywall. Paywall flow on BYO is byte-identical to Supabase-default: gate → checkout → official activate → token cached → offline verify.
 
@@ -190,12 +200,13 @@ Env overrides: `ARXA_WORKSPACE_PROVIDER`, `ARXA_SUPABASE_URL`, `ARXA_SUPABASE_AN
 - Round-trip of the bundle is conformance-kit section 8, so every certified provider is also a certified migration source/target.
 - `local` is a first-class source AND target: "try it offline, move to Supabase later" and "leave Supabase, keep working offline" are the same command with a different `--config`. Nothing about the bundle format is provider-specific.
 
-## 7. Open questions (for the user)
+## 7. Open questions — all settled (D32–D35, 2026-09-13)
 
-All five remain open and all five block the code phase; the 2026-09-07 amendment changed none of them.
+The five questions below were open when this plan was written; the grill
+decisions close all five, and the wire-contract freeze (task 13) encodes them.
 
-1. **Adapter distribution**: are custom adapters local JS modules only (simple, but unsigned code loaded into the app), or do we require a reviewed registry / signature before loading?
-2. **Contract packaging**: publish `WorkspaceProvider` types + conformance kit as a public npm package (invites third-party adapters) or keep in-repo for a first-party-only v1?
-3. **Totem staff support access on BYO**: Supabase adapter has `is_totem_staff` read access for support; on BYO we have none. Accept "no in-band support access, bundle-export on request," or add an optional support-access capability?
-4. **Minimum identity methods**: must every provider support email invite flows, or is "any auth + manual member add by user id" acceptable for v1?
-5. **Realtime degradation interval**: fixed polling default (e.g. 30 s visible-tab) baked into the contract, or provider-hintable via `capabilities()` metadata?
+1. **Adapter distribution** → settled by **D32**: no arbitrary local JS adapters at all. Two first-party adapters ship (`supabase`, `generic-rest`); exotic backends integrate server-side against the wire contract. Signing/review pipelines are moot.
+2. **Contract packaging** → settled by **D32**: in-repo, first-party-only for v1; no public npm package in this closeout.
+3. **Totem staff support access on BYO** → settled by **D33**: accept "no in-band support access"; support is bundle-only via `arxa-studio diagnose`.
+4. **Minimum identity methods** → settled by **D34**: the contract is token-opaque (issue/refresh/revoke/introspect); any auth method is acceptable because providers declare `signIn.kind` and studio renders only the declared flow.
+5. **Realtime degradation interval** → settled by **D35**: adaptive polling baked into the contract as constants — 3 s active / 30 s idle / 120 s background + immediate poll after any local write. Not provider-hintable.
