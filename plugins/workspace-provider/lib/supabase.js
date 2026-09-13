@@ -105,8 +105,11 @@ export class SupabaseWorkspaceProvider {
     if (payload !== undefined)
       headers['content-type'] = bytes !== undefined ? 'application/octet-stream' : 'application/json'
     if (prefer) headers.Prefer = prefer
-    if (body !== undefined && !prefer) headers.Prefer = 'return=minimal'
-    // rpc/table params ride the body; Prefer return=representation is per-call
+    // Prefer is explicit per call, never a blanket default: PostgREST's
+    // insert/PATCH/DELETE default is minimal (no row back) and return=minimal
+    // on an RPC answers 204 with no body — every call that consumes its
+    // response must ask for return=representation. Auth/Storage are not
+    // PostgREST and carry no Prefer at all.
 
     let lastError = null
     for (let attempt = 1; attempt <= this.attempts; attempt++) {
@@ -240,6 +243,7 @@ export class SupabaseWorkspaceProvider {
     if (!ROLES.includes(role)) throw invalidRequest('role must be one of: ' + ROLES.join(', '))
     const row = await this.call('/rest/v1/rpc/add_member', {
       method: 'POST', body: { p_org: orgId, p_email: email, p_role: role },
+      prefer: 'return=representation', // the row is consumed below
     })
     return this.mapMember(row)
   }
@@ -251,11 +255,12 @@ export class SupabaseWorkspaceProvider {
     if (!ROLES.includes(role)) throw invalidRequest('role must be one of: ' + ROLES.join(', '))
     const row = await this.call('/rest/v1/rpc/set_member_role', {
       method: 'POST', body: { p_member: memberId, p_role: role },
+      prefer: 'return=representation', // the row is consumed below
     })
     return this.mapMember(row)
   }
   async removeMember (orgId, memberId) {
-    await this.call('/rest/v1/rpc/remove_member', { method: 'POST', body: { p_member: memberId } })
+    await this.call('/rest/v1/rpc/remove_member', { method: 'POST', body: { p_member: memberId }, prefer: 'return=minimal' }) // nothing is read back
     return { removed: true }
   }
 
@@ -268,6 +273,7 @@ export class SupabaseWorkspaceProvider {
     const out = await this.call('/rest/v1/rpc/put_record', {
       method: 'POST',
       body: { p_org: orgId, p_collection: collection, p_id: id, p_doc: docText, p_expected_etag: etag ?? null },
+      prefer: 'return=representation', // out.id / out.etag are consumed below
     })
     this.writeNotify(orgId, collection)
     return { id: out.id, etag: out.etag }
@@ -285,6 +291,7 @@ export class SupabaseWorkspaceProvider {
     const out = await this.call('/rest/v1/rpc/list_records', {
       method: 'POST',
       body: { p_org: orgId, p_collection: collection, p_offset: offset, p_limit: limit },
+      prefer: 'return=representation', // out.rows / out.more are consumed below
     })
     const records = (out.rows ?? []).map((r) => ({ id: r.id, etag: r.etag, doc: JSON.parse(r.doc) }))
     return { records, nextCursor: out.more === true ? encodeCursor({ offset: offset + limit }) : null }
@@ -298,11 +305,11 @@ export class SupabaseWorkspaceProvider {
 
   // ---------------------------------------------------------- audit (append-only)
   async appendAudit (orgId, event) {
-    await this.call('/rest/v1/audit_log', { method: 'POST', body: { org_id: orgId, payload: event } })
+    await this.call('/rest/v1/audit_log', { method: 'POST', body: { org_id: orgId, payload: event }, prefer: 'return=minimal' }) // fire-and-forget insert
     return { appended: true }
   }
   async readAudit (orgId) {
-    return (await this.call('/rest/v1/rpc/read_audit', { method: 'POST', body: { p_org: orgId } })) ?? []
+    return (await this.call('/rest/v1/rpc/read_audit', { method: 'POST', body: { p_org: orgId }, prefer: 'return=representation' })) ?? []
   }
 
   // ---------------------------------------------------------- storage

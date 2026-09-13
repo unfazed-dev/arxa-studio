@@ -61,6 +61,7 @@ class FakeSupabase {
     this.audit = new Map() // orgId -> [{id, at, actor, payload}]
     this.blobs = new Map() // `${org}|${path}` -> Buffer
     this.auditSeq = 0
+    this.preferLog = [] // [method, path, Prefer] — the wire the adapter speaks
   }
 
   // ---- user seeding + sign-up surface (auto-confirm, like the local stack)
@@ -91,6 +92,7 @@ class FakeSupabase {
     const u = new URL(url)
     const path = u.pathname + (u.search || '')
     this.attempts[u.pathname] = (this.attempts[u.pathname] ?? 0) + 1
+    this.preferLog.push([init.method ?? 'GET', u.pathname, init.headers?.Prefer ?? null])
 
     if (this.mode === 'delay') {
       // The hang timer stays REF'd: AbortSignal.timeout is unref'd by design,
@@ -176,8 +178,13 @@ class FakeSupabase {
   }
 
   async rest (u, init, body, user) {
+    // PostgREST Prefer semantics, enforced server-side so the fake is not
+    // blind to them: inserts/PATCH/DELETE hand the row back ONLY under
+    // return=representation; return=minimal answers 204 with no body.
+    const prefer = String(init.headers?.Prefer ?? '')
+    const wantsRow = prefer.includes('return=representation')
     const rpc = u.pathname.match(/^\/rest\/v1\/rpc\/(\w+)$/)
-    if (rpc) return this.rpc(rpc[1], JSON.parse(body || '{}'), user)
+    if (rpc) return this.rpc(rpc[1], JSON.parse(body || '{}'), user, prefer)
 
     const table = u.pathname.split('/')[3]
     if (table === 'orgs') {
@@ -192,6 +199,7 @@ class FakeSupabase {
           email: this.users.get(user).email, role: 'owner', status: 'active',
           created_at: new Date().toISOString(),
         })
+        if (!wantsRow) return new Response(null, { status: 201 }) // PostgREST's insert default: no row back
         return this.json(201, [this.orgs.get(id)])
       }
       const id = u.searchParams.get('id')?.replace(/^eq\./, '')
@@ -205,12 +213,14 @@ class FakeSupabase {
       if (init.method === 'PATCH') {
         const patch = JSON.parse(body || '{}'); delete patch.id
         Object.assign(org, patch)
+        if (!wantsRow) return new Response(null, { status: 204 })
         return this.json(200, [org])
       }
       if (init.method === 'DELETE') {
         this.orgs.delete(id)
         for (const [mid, m] of [...this.members]) if (m.org_id === id) this.members.delete(mid)
         for (const k of [...this.records.keys()]) if (k.startsWith(id + '|')) this.records.delete(k)
+        if (!wantsRow) return new Response(null, { status: 204 })
         return this.json(200, [org])
       }
     }
@@ -231,6 +241,7 @@ class FakeSupabase {
       if (init.method === 'DELETE') {
         if (!rec || fenced) return this.json(404, { message: 'not found' })
         this.records.delete(key)
+        if (!wantsRow) return new Response(null, { status: 204 })
         return this.json(200, [{ id, etag: rec.etag }])
       }
     }
@@ -241,12 +252,21 @@ class FakeSupabase {
       const rows = this.audit.get(org_id) ?? []
       rows.push({ id: this.auditSeq, at: new Date().toISOString(), actor: user, payload })
       this.audit.set(org_id, rows)
+      if (!wantsRow) return new Response(null, { status: 201 })
       return this.json(201, { appended: true })
     }
     return this.json(404, { message: 'no such table route' })
   }
 
-  async rpc (fn, p, user) {
+  async rpc (fn, p, user, prefer = '') {
+    const res = await this.rpcDo(fn, p, user)
+    // PostgREST: return=minimal on an RPC answers 204 with no body; errors pass through
+    if (/return=minimal/.test(prefer) && res.status >= 200 && res.status < 300)
+      return new Response(null, { status: 204 })
+    return res
+  }
+
+  async rpcDo (fn, p, user) {
     const ROLES4 = ['owner', 'admin', 'billing', 'member']
     if (fn === 'put_record') {
       const { p_org: org, p_collection: collection, p_id: id, p_doc: doc, p_expected_etag: expected } = p
@@ -734,6 +754,44 @@ try {
       assert.equal(h1, h2, 'local → supabase → local is hash-equivalent over portable data')
       ok('migration: local → supabase → local; portable-data hashes equal; members re-invited not copied')
     } finally { rmSync(tmp, { recursive: true, force: true }) }
+  }
+
+  // ---------------------------------------------- 17. Prefer semantics: the wire the adapter actually speaks
+  {
+    // The fake now enforces PostgREST Prefer behavior server-side (204 on
+    // minimal RPCs, no row on writes that did not ask for one), so every
+    // consuming call above passed only because it asked for
+    // return=representation. This row pins the per-call header map itself:
+    // RPCs state representation (except remove_member, which reads nothing →
+    // minimal), table writes state their intent, reads carry none, and
+    // auth/storage — not PostgREST — carry none at all.
+    const RPC_PREFER = {
+      put_record: 'return=representation', list_records: 'return=representation',
+      read_audit: 'return=representation', add_member: 'return=representation',
+      set_member_role: 'return=representation', remove_member: 'return=minimal',
+    }
+    const TABLE_PREFER = {
+      'POST /rest/v1/orgs': 'return=representation',
+      'PATCH /rest/v1/orgs': 'return=representation',
+      'DELETE /rest/v1/orgs': 'return=representation',
+      'DELETE /rest/v1/records': 'return=representation',
+      'POST /rest/v1/audit_log': 'return=minimal',
+    }
+    for (const [method, path, prefer] of fake.preferLog) {
+      if (path.startsWith('/rest/v1/rpc/')) {
+        const fn = path.slice('/rest/v1/rpc/'.length)
+        assert.equal(prefer, RPC_PREFER[fn], `${method} ${path} Prefer must be ${RPC_PREFER[fn]}, got ${prefer}`)
+      } else if (path.startsWith('/rest/v1/')) {
+        const expected = TABLE_PREFER[method + ' ' + path] ?? null
+        assert.equal(prefer, expected, `${method} ${path} Prefer must be ${expected}, got ${prefer}`)
+      } else {
+        assert.equal(prefer, null, `${method} ${path} is not PostgREST and must carry no Prefer header`)
+      }
+    }
+    const seenRpc = new Set(fake.preferLog.filter(([, p]) => p.startsWith('/rest/v1/rpc/')).map(([, p]) => p.slice('/rest/v1/rpc/'.length)))
+    for (const fn of Object.keys(RPC_PREFER))
+      assert.ok(seenRpc.has(fn), 'the suite must exercise rpc ' + fn + ' for its Prefer to be pinned')
+    ok('prefer semantics: every /rest/v1 call states representation/minimal exactly; auth+storage carry none')
   }
 
 } catch (e) {

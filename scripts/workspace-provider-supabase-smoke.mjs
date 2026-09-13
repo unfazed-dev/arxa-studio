@@ -17,11 +17,12 @@
  *     (`supabase migration down --last 1`) and resets only this disposable
  *     database.
  *
- *   default (--fake / no docker): the injected-protocol-fake leg — exactly the
- *     offline selftest.supabase.mjs (no ports, no daemon). The ordinary
- *     offline `npm test` uses this leg; the real stack is exercised by the
- *     dedicated CI job because the Docker daemon is not assumed on dev
- *     machines. The banner says which leg ran — never silently fake.
+ *   default (npm test): ALWAYS the injected-protocol-fake leg — exactly the
+ *     offline selftest.supabase.mjs (no ports, no daemon, no machine-state
+ *     probing: ordinary `npm test` is deterministic on every machine). The
+ *     real stack is opt-in ONLY — --real or ARXA_SUPABASE_REAL_SMOKE=1 (the
+ *     repo's gated-leg convention, cf. ARXA_A5_REAL_SMOKE); the dedicated CI
+ *     job passes --real. The banner says which leg ran — never silently fake.
  *
  * Supabase CLI version is PINNED below; the script detects and refuses
  * (deterministic CI) instead of installing anything.
@@ -45,7 +46,12 @@ const { runConformance } = await import(join(pluginDir, 'lib', 'conformance.js')
 const { exportBundle, importBundle } = await import(join(pluginDir, 'lib', 'export-bundle.js'))
 const { LocalWorkspaceProvider } = await import(join(pluginDir, 'lib', 'local.js'))
 
-const mode = process.argv.includes('--real') ? 'real' : process.argv.includes('--fake') ? 'fake' : 'auto'
+// Deterministic leg selection: the real stack NEVER runs by probing machine
+// state. --fake forces offline; otherwise the real leg needs an explicit
+// opt-in — --real (the CI job's spelling) or ARXA_SUPABASE_REAL_SMOKE=1.
+const mode = process.argv.includes('--fake') ? 'fake'
+  : process.argv.includes('--real') || process.env.ARXA_SUPABASE_REAL_SMOKE === '1' ? 'real'
+  : 'fake'
 
 const fail = (msg) => { console.error('::error::' + msg); process.exit(1) }
 const ok = (s) => console.log('  ok ' + s)
@@ -54,8 +60,7 @@ const sha256 = (b) => createHash('sha256').update(b).digest('hex')
 // ============================================================== the fake leg
 async function fakeLeg () {
   console.log('workspace-provider supabase smoke — FAKE LEG (injected protocol fake, offline, no ports)')
-  if (mode === 'auto')
-    console.log('DAEMON-GATED: the real local-Supabase stack leg requires the Docker daemon; this run exercises the protocol fake. CI job "supabase-conformance" runs the real stack (--real).')
+  console.log('OFFLINE BY DEFAULT: the real local-Supabase stack leg is opt-in (--real / ARXA_SUPABASE_REAL_SMOKE=1); CI job "supabase-conformance" runs it with --real.')
   const r = spawnSync(process.execPath, [join(pluginDir, 'selftest.supabase.mjs')], {
     cwd: root, stdio: 'inherit', timeout: 5 * 60 * 1000,
   })
@@ -85,9 +90,10 @@ const supabase = (args, opts = {}) => {
 }
 
 /** PostgREST/GoTrue call with the anon key and an optional user/service bearer. */
-async function api (url, path, { method = 'GET', body, bearer } = {}) {
+async function api (url, path, { method = 'GET', body, bearer, prefer } = {}) {
   const headers = { apikey: url.anonKey, 'content-type': 'application/json' }
   if (bearer) headers.Authorization = 'Bearer ' + bearer
+  if (prefer) headers.Prefer = prefer
   const res = await fetch(url.url + path, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined })
   const text = await res.text()
   return { status: res.status, body: text ? JSON.parse(text) : null }
@@ -155,7 +161,7 @@ async function realLeg () {
 
   // ---- two orgs (one per user, through the real API as each user)
   const mkOrg = async (user, name) => {
-    const r = await api(url, '/rest/v1/orgs', { method: 'POST', bearer: user.token, body: { name, kind: 'studio' } })
+    const r = await api(url, '/rest/v1/orgs', { method: 'POST', bearer: user.token, prefer: 'return=representation', body: { name, kind: 'studio' } }) // PostgREST's insert default hands back no row
     if (r.status >= 300 || !r.body?.[0]?.id) fail('org create failed for ' + name + ': ' + JSON.stringify(r.body))
     return r.body[0].id
   }
@@ -257,14 +263,8 @@ async function portableHash (p, orgId) {
 // ============================================================== dispatch
 if (mode === 'real') {
   await realLeg().catch((e) => { console.error(e); process.exit(1) })
-} else if (mode === 'fake') {
-  await fakeLeg()
 } else {
-  // auto: real only when the daemon is already up AND the CLI is present at
-  // the pin; otherwise the honest fake leg (npm test runs here, offline).
-  const docker = spawnSync('docker', ['info'], { encoding: 'utf8' })
-  const cli = spawnSync('supabase', ['--version'], { encoding: 'utf8' })
-  const pinned = docker.status === 0 && (cli.stdout ?? '').includes(SUPABASE_CLI_PIN)
-  if (pinned) await realLeg().catch((e) => { console.error(e); process.exit(1) })
-  else await fakeLeg()
+  // fake (default and --fake): deterministically OFFLINE. The real leg runs
+  // only on explicit opt-in above; npm test never spins docker on any machine.
+  await fakeLeg()
 }
