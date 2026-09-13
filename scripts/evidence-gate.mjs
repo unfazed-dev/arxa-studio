@@ -114,6 +114,15 @@ const must = (r, what) => { if (!String(r).startsWith('clicked')) die(`${r} (${w
 const target = await send('Target.createTarget', { url: 'about:blank' })
 sessionId = (await send('Target.attachToTarget', { targetId: target.targetId, flatten: true })).sessionId
 await send('Page.enable'); await send('Runtime.enable'); await send('Log.enable')
+// 390 only: Chrome headless=new clamps every window to 500 CSS px on macOS
+// (reproduced: --window-size=390 → innerWidth 500; Browser.setWindowBounds
+// cannot go below it either), so a REAL 390 window cannot exist headless.
+// The viewport is pinned with a BOOT-TIME device override set BEFORE the
+// first navigation — the page loads at 390 from first paint. That is NOT
+// the emulated-resize-after-load path task 7 proved never mounts the viewer
+// sheet; the artifact-viewer sheet was mount-verified at 390 this way
+// (arxa-av-open → monaco editor) before this became the 390 lane.
+if (Number(width) < 500) await send('Emulation.setDeviceMetricsOverride', { width: Number(width), height: HEIGHTS[width], deviceScaleFactor: 2, mobile: false })
 loadFired = false
 await send('Page.navigate', { url: URL_BASE })
 for (let i = 0; i < 100 && !loadFired; i++) await sleep(200)
@@ -127,8 +136,17 @@ const pressEsc = async () => {
 }
 const openSettings = async () => {
   await pressEsc() // the Settings trigger toggles — always start from closed
-  const o = await clickText('button,[role=button],[aria-label]', 'Settings')
-  must(o, 'open settings')
+  await clickText('button,[role=button],[aria-label]', 'Settings') // wide: the labelled trigger; narrow: textContent can hit a hidden text holder instead
+  const dialogUp = async () => evalJs(`!!document.querySelector('[role=dialog]')`)
+  for (let i = 0; i < 10 && !(await dialogUp()); i++) await sleep(300)
+  if (!(await dialogUp())) {
+    // narrow rail: below the wide breakpoint the sidebar-foot trigger loses
+    // its label (icon-only, no aria-label — a11y finding, ledgered), so the
+    // text match cannot see it — click the hashed *_trigger *_rail button
+    const rail = await evalJs(`(() => { const b = [...document.querySelectorAll('button')].find((e) => /_trigger/.test(String(e.className)) && /_rail/.test(String(e.className))); if (!b) return 'NOT FOUND: rail trigger'; b.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 'clicked' })()`)
+    if (!String(rail).startsWith('clicked')) die(`${rail} (settings trigger @${width})`)
+    for (let i = 0; i < 10 && !(await dialogUp()); i++) await sleep(300)
+  }
   for (let i = 0; i < 20; i++) { await sleep(300); if (await evalJs(`(document.body.innerText||'').includes('Personalisation')`)) return }
   die('settings dialog never showed the Personalisation nav')
 }
@@ -481,6 +499,35 @@ Object.assign(S, {
       if (!/confinement/.test(txt)) die('the confinement tier row never rendered: ' + txt.slice(0, 200))
       console.log('card:', txt.replace(/\s+/g, ' ').slice(0, 300))
     }, 300)
+  },
+  // The T7 language-strip ladder, in-repo (task 7 review condition): the
+  // artifact-viewer sheet opened per language through the arxa-av-open lane
+  // (the wide sidebar is the only click entry; at 390/744 the event is the
+  // path). ts/css/json wait for REAL LSP squiggles on the deterministic
+  // scratch files copied into the scratch org; html is the designed PREVIEW
+  // lane — org-origin sandboxed iframe whose host must differ from the
+  // studio origin. Single-theme shots, matching the T7 ladder naming.
+  async langstrip() {
+    if (!(await setTheme('light'))) die('light theme did not render for langstrip')
+    for (const [lang, relPath, probe] of [
+      ['ts', 'langstrip.ts', `document.querySelectorAll('[class*="squiggly"]').length`],
+      ['css', 'langstrip.css', `document.querySelectorAll('[class*="squiggly"]').length`],
+      ['json', 'langstrip.json', `document.querySelectorAll('[class*="squiggly"]').length`],
+      ['html-preview', 'langstrip.html', `!!document.querySelector('.aXa_av_iframe')`],
+    ]) {
+      await pressEsc()
+      await evalJs(`window.dispatchEvent(new CustomEvent('arxa-av-open', { detail: { relPath: ${JSON.stringify(relPath)} } }))`)
+      let ok = false
+      for (let i = 0; i < 40 && !ok; i++) { await sleep(500); ok = await evalJs(probe) }
+      if (!ok) die('no ' + (lang === 'html-preview' ? 'preview iframe' : 'diagnostic squiggles') + ' for ' + relPath)
+      if (lang === 'html-preview') {
+        const lane = await evalJs(`(() => { const f = document.querySelector('.aXa_av_iframe'); const u = new URL(f.src); return { host: u.host, notStudio: u.host !== location.host, sandbox: f.getAttribute('sandbox') } })()`)
+        console.log('html lane:', JSON.stringify(lane))
+        if (!lane.notStudio) die('html preview iframe left the org origin!')
+      }
+      await sleep(600)
+      await shot('langstrip-' + lang)
+    }
   },
 })
 
