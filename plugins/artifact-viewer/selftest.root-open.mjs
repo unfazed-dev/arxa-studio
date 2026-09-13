@@ -78,6 +78,7 @@ try {
   const events = createEventsRoute({
     watcher: { onChange(fn) { emit = fn; return () => {} } },
     rootIdForPath: () => [slug, 'fs-alias'],
+    verify: () => true,   // alias fan-out is under test, not the token gate
   })
   await events.handle({ method: 'GET', url: '/', on() {} }, { writeHead() {}, write(chunk) { chunks.push(chunk) } })
   emit('notes.md', 123, shared)
@@ -131,6 +132,7 @@ try {
   const filteredEvents = createEventsRoute({
     watcher: { onChange(fn) { filteredEmit = fn; return () => {} } },
     rootIdForPath: (rootPath, requestedId) => rootIdsForPath(env, rootPath, requestedId),
+    verify: () => true,   // alias fan-out is under test, not the token gate
   })
   await filteredEvents.handle({ method: 'GET', url: '/?root=fs-alias', on() {} }, { writeHead() {}, write(chunk) { filteredChunks.push(chunk) } })
   filteredEmit('other.md', 200, globalRoot.path)

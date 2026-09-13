@@ -1103,19 +1103,65 @@ fs.writeFileSync(path2.join(wroot, '.arxa', 'x.db'), 'state')
 await sleep(200)
 assert.equal(events.filter((e) => e.rel.startsWith('.arxa')).length, 0, '.arxa runtime state never pushes')
 
-// SSE route over a real connection
-const sse = createEventsRoute({ watcher: w11 })
+// SSE route over a real connection. Task 7: the stream is TOKEN-GATED — it
+// pushes every file change under the open org, so same-origin code must not
+// get it for free (the D7 wall is "explicit, scoped, short-lived, root-bound",
+// and an unauthenticated push channel is none of those). Deny-default: no
+// verifier, no stream.
+const sseSecret = 'sse-gate-secret'
+// Fixture wiring mirrors index.js: a ?session= lane is changes-read-bound,
+// everything else is tree-read-bound to the verifier's own root (here: the
+// watched root — null means "the open org", resolved by the verifier).
+const sseVerify = async ({ session, rootId, token }) => {
+  if (session) return verifyToken(token, { secret: sseSecret, scope: 'changes-read', worktreeId: session }).ok
+  return verifyToken(token, { secret: sseSecret, scope: 'tree-read', orgPath: rootId ?? wroot }).ok
+}
+const sse = createEventsRoute({ watcher: w11, verify: sseVerify })
 const sseSrv = http.createServer((rq, rs) => { void sse.handle(rq, rs) })
 await new Promise((r2) => sseSrv.listen(0, '127.0.0.1', r2))
 const ssePort = sseSrv.address().port
+const sseStatus = (path) => new Promise((resolve) => {
+  const rq = http.get({ host: '127.0.0.1', port: ssePort, path }, (rs) => { rs.resume(); resolve(rs.statusCode) })
+  rq.on('error', () => resolve(0))
+})
+assert.equal(await sseStatus('/'), 403, 'no token -> 403 (deny-default, Task 7 trust boundary)')
+assert.equal(await sseStatus('/?avt=' + issueToken({ secret: sseSecret, scope: 'read', relPath: 'b.md', orgPath: wroot, ttlSeconds: 30 })), 403,
+  'a per-file read token does not open the push channel')
+assert.equal(await sseStatus('/?avt=' + issueToken({ secret: sseSecret, scope: 'tree-read', orgPath: '/elsewhere', ttlSeconds: 30 })), 403,
+  'a tree-read token for ANOTHER root is refused')
+// deny-default: a route wired with no verifier refuses everyone.
+{
+  const bare = createEventsRoute({ watcher: createOrgWatcher({ intervalMs: 60 }) })
+  const bareSrv = http.createServer((rq, rs) => { void bare.handle(rq, rs) })
+  await new Promise((r2) => bareSrv.listen(0, '127.0.0.1', r2))
+  assert.equal(await new Promise((resolve) => {
+    const rq4 = http.get({ host: '127.0.0.1', port: bareSrv.address().port, path: '/?avt=whatever' }, (rs) => { rs.resume(); resolve(rs.statusCode) })
+    rq4.on('error', () => resolve(0))
+  }), 403, 'a route wired with NO verifier denies (deny-default)')
+  bareSrv.close()
+}
 const sseChunks = []
-const httpReq = http.get({ host: '127.0.0.1', port: ssePort, path: '/' }, (rs) => {
+const sseToken = issueToken({ secret: sseSecret, scope: 'tree-read', orgPath: wroot, ttlSeconds: 30 })
+const httpReq = http.get({ host: '127.0.0.1', port: ssePort, path: '/?avt=' + encodeURIComponent(sseToken) }, (rs) => {
   rs.on('data', (c) => sseChunks.push(c.toString()))
 })
-await until(() => sseChunks.join('').startsWith('retry: 2000'), 'SSE retry frame sent')
+await until(() => sseChunks.join('').startsWith('retry: 2000'), 'SSE retry frame sent (with a tree-read token)')
 fs.writeFileSync(path2.join(wroot, 'b.md'), 'pushed\n')
 await until(() => sseChunks.join('').includes('"relPath":"b.md"'), 'external change pushed over SSE')
 httpReq.destroy()
+// session lane: changes-read class
+{
+  const sessChunks = []
+  const sTok = issueToken({ secret: sseSecret, scope: 'changes-read', worktreeId: 'sess-x', ttlSeconds: 30 })
+  const rq3 = http.get({ host: '127.0.0.1', port: ssePort, path: '/?session=sess-x&avt=' + encodeURIComponent(sTok) }, (rs) => {
+    rs.on('data', (c) => sessChunks.push(c.toString()))
+  })
+  await until(() => sessChunks.join('').startsWith('retry: 2000'), 'session lane opens with a changes-read token')
+  assert.equal(await sseStatus('/?session=sess-x&avt=' + encodeURIComponent(
+    issueToken({ secret: sseSecret, scope: 'tree-read', orgPath: wroot, ttlSeconds: 30 }))), 403,
+    'a tree-read token does not open the session lane')
+  rq3.destroy()
+}
 sseSrv.close()
 off()
 w11.stop()
@@ -1137,7 +1183,9 @@ assert.ok(!clientSrc.includes("|| 'Fira Code'") && !clientSrc.includes('var(--ar
 {
   const wtRoot = fs.mkdtempSync(path2.join(os.tmpdir(), 'arxa-av-wtroot-'))
   const orgW = createOrgWatcher({ intervalMs: 60 })
-  const route = createEventsRoute({ watcher: orgW, resolveSessionRoot: async (id) => id === 'sess-x' ? wtRoot : null })
+  // Permissive verify: this block tests the session->worktree WATCH wiring,
+  // not the token gate (covered above).
+  const route = createEventsRoute({ watcher: orgW, resolveSessionRoot: async (id) => id === 'sess-x' ? wtRoot : null, verify: () => true })
   const srv = http.createServer((rq, rs) => { void route.handle(rq, rs) })
   await new Promise((r2) => srv.listen(0, '127.0.0.1', r2))
   const port = srv.address().port
@@ -1159,4 +1207,123 @@ assert.ok(!clientSrc.includes("|| 'Fira Code'") && !clientSrc.includes('var(--ar
   srv.close()
   orgW.stop()
   console.log('arxa-artifact-viewer selftest: GREEN (worktree-lane events)')
+}
+
+// ---- Task 7 (closeout 2026-09-13): trust boundaries + runtime freezes -------
+{
+  // S2: the extension allowlist. Only PINNED VENDORED BUILT-INS registered in
+  // monaco-build/src/entry.mjs may execute on the studio origin; arbitrary
+  // marketplace and VSIX loading stays disabled until a separately served
+  // origin is designed and reviewed. This is the freeze that holds the
+  // same-origin extension host (see the threat-model table in
+  // docs/plans/artifact-viewer-vscode-monaco.md).
+  const PINNED_EXTENSIONS = [
+    'theme-defaults', 'dart', 'rust', 'typescript-basics', 'javascript', 'json',
+    'html', 'css', 'scss', 'less', 'markdown-basics',
+    'markdown-language-features', 'markdown-math', 'media-preview',
+  ]
+  const imported = [...entrySrc.matchAll(/import '@codingame\/monaco-vscode-([a-z0-9-]+)-default-extension'/g)]
+    .map((mm) => mm[1])
+  assert.deepEqual([...new Set(imported)].sort(), [...PINNED_EXTENSIONS].sort(),
+    'entry.mjs registers exactly the pinned vendored built-ins — nothing else')
+  const mbPkg = JSON.parse(fs.readFileSync(path2.join(mbDir, 'package.json'), 'utf8'))
+  for (const name of PINNED_EXTENSIONS) {
+    assert.equal(mbPkg.dependencies['@codingame/monaco-vscode-' + name + '-default-extension'], '36.2.7',
+      'extension ' + name + ' is exact-pinned in the build manifest')
+  }
+  // No VSIX pipeline, no alternate-domain escape hatch, no runtime extension
+  // registration — all three are how the same-origin rule would silently rot.
+  // The vite check reads COMMENT-STRIPPED source: the config's prose mentions
+  // the vsix plugin while explaining why this build is not one.
+  const viteCode = viteSrc.replace(/\/\/[^\n]*/g, '')
+  assert.ok(!viteCode.includes('vsix'), 'no vsix plugin in the vite build — VSIX loading stays off')
+  // Property-key form, not the word: entry.mjs NARRATES iframeAlternateDomain
+  // (why it stays unset) while never passing it.
+  assert.ok(!/iframeAlternateDomain\s*:/.test(entrySrc), 'iframeAlternateDomain stays unset (the host is same-origin by record, not by accident)')
+  assert.ok(!/registerExtension\s*\(/.test(entrySrc), 'no runtime registerExtension call — the allowlist is the BUILD, not a filter')
+  assert.ok(mbPkg.devDependencies['@codingame/monaco-vscode-rollup-vsix-plugin'] !== undefined
+    && !viteCode.includes('rollup-vsix'), 'the vsix plugin stays an unused devDependency, never wired')
+
+  // S3/S5: the trust probes and the autoSave ruling are pinned in the browser
+  // gate (spike.html runs them); these pins keep the harness honest about it.
+  assert.ok(spikeSrc.includes('out.threat.extHostOrigin === location.origin'),
+    'the browser gate asserts the ext host iframe is the SAME ORIGIN the threat table records')
+  assert.ok(spikeSrc.includes('out.threat.extHostReachesParentDoc === true'),
+    'and that it can reach the parent DOM — the recorded residual, held by the allowlist freeze above')
+  assert.ok(spikeSrc.includes("out.threat.autoSaveProbe.filesAutoSave === 'afterDelay'")
+    && spikeSrc.includes('out.threat.autoSaveProbe.flushedToOverlayMs !== null'),
+    'the browser gate records VS Code\'s afterDelay flush into the IN-MEMORY overlay')
+  assert.ok(!entrySrc.includes("'files.autoSave'"),
+    'the bundle never sets files.autoSave — the tested 1.5s viewer debounce stays the one DISK save owner (ruling 4)')
+  assert.ok(entrySrc.includes('export async function overlayBytes') && entrySrc.includes('export async function configValue'),
+    'the harness probes exist on the bundle (overlay bytes + resolved config)')
+
+  // S3: no cookie is ever set by a viewer surface (threat-table row).
+  assert.equal(r1.headers['set-cookie'], undefined, 'the org origin sets no cookie')
+  assert.equal(vget.headers['set-cookie'], undefined, 'the vendor route sets no cookie')
+
+  // S7: pdf.js and Prettier REMAIN (program ruling 3). No PDF extension
+  // experiment, no allowlist widening, no prettier->LSP swap in this closeout.
+  assert.ok(clientSrc.includes("ext === '.pdf'") && clientSrc.includes('function PdfView'),
+    'the pdf lane stays on the vendored pdf.js (no extension experiment)')
+  assert.ok(clientSrc.includes("'md', 'yaml', 'yml'"),
+    'prettier keeps the lanes no language server covers (markdown/yaml/yml)')
+  assert.ok(!PINNED_EXTENSIONS.some((n) => /pdf|prettier/.test(n)),
+    'neither pdf nor prettier rides the extension allowlist — they are vendor bundles, not VS Code extensions')
+
+  // S5: one save per settled edit. The debounce coalesces a burst of dirty
+  // events into exactly one POST; a later edit gets exactly one more.
+  {
+    const dirtyStart = clientSrc.indexOf('/** Auto-save:')
+    const dirtyEnd = clientSrc.indexOf('React.useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current) }, [])', dirtyStart)
+    assert.ok(dirtyStart >= 0 && dirtyEnd > dirtyStart, 'the onDirty closure is extractable')
+    const onDirtySrc = clientSrc.slice(dirtyStart, dirtyEnd)
+    const makeOnDirty = new Function('setDirty', 'savePhase', 'setSavePhase', 'saveTimer', 'AUTOSAVE_MS',
+      'setTimeout', 'clearTimeout', 'save', onDirtySrc + '\nreturn onDirty')
+    const timers = []
+    const fired = []
+    const fakeSetTimeout = (fn, ms) => { timers.push({ fn, ms, live: true }); return timers.length }
+    const fakeClearTimeout = (id) => { if (timers[id - 1]) timers[id - 1].live = false }
+    const saves = []
+    const onDirty = makeOnDirty(
+      () => {}, 'idle', () => {},
+      { current: null }, 1500, fakeSetTimeout, fakeClearTimeout, () => saves.push(Date.now()))
+    onDirty(); onDirty(); onDirty()   // one burst of typing
+    assert.equal(timers.length, 3, 'each keystroke re-arms the timer')
+    assert.equal(timers.filter((t) => t.live).length, 1, 'the previous timers are cleared — one is live')
+    for (const t of timers) if (t.live) { assert.equal(t.ms, 1500, 'the tested 1.5s debounce'); t.fn() }
+    assert.equal(saves.length, 1, 'a settled edit saves exactly once')
+    onDirty()                         // a later, separate edit
+    for (const t of timers) if (t.live) t.fn()
+    assert.equal(saves.length, 2, 'the next settled edit saves exactly once more')
+  }
+
+  // S8: the gen-ui Diff reconciliation. CONFIRMED: the Diff card receives ONLY
+  // model-authored before/after text (the gen_ui tool's components param — no
+  // host code reads files into it), so the LCS/Myers upgrade is DEFERRED UNTIL
+  // REAL FILE DIFF INPUT. The pins below are the trigger: wiring real file
+  // bytes into gen-ui breaks them and forces the bounded renderer + its
+  // coverage (insertions, deletions, reordering, hunks, large input, unchanged
+  // lines, escaping) instead of a silent upgrade.
+  const genClient = fs.readFileSync(path2.join(root, 'plugins', 'gen-ui', 'lib', 'client.js'), 'utf8')
+  const genHost = fs.readFileSync(path2.join(root, 'plugins', 'gen-ui', 'lib', 'index.js'), 'utf8')
+  assert.match(genClient, /DEFERRED UNTIL REAL FILE DIFF INPUT/,
+    'the gen-ui Diff renderer carries the deferral marker where the positional comparison lives')
+  // existsSync alone is allowed (it resolves the dsh-tools install, not file
+  // content); anything that could READ bytes is the trigger.
+  assert.ok(!/readFileSync|readFile\s*\(|createReadStream|execFile|spawn/.test(genHost),
+    'TRIGGER: gen-ui reads no file bytes today — the moment it does, this pin breaks and the bounded diff renderer must land (docs/plans/artifact-viewer-implementation.md Task 9)')
+  assert.ok(genClient.includes('props.before') && genClient.includes('props.after'),
+    'the Diff data contract stays {path,before,after} either way')
+
+  // The events lane now mints its lane token before opening the stream (the
+  // S3 close): pin the client side of the gate.
+  const evStart = clientSrc.indexOf('// D86 external-change push.')
+  const evEnd = clientSrc.indexOf('const resetForOpen', evStart)
+  const evSrc = clientSrc.slice(evStart, evEnd)
+  assert.ok(evSrc.includes("scope: 'changes-read'") && evSrc.includes("scope: 'tree-read'"),
+    'the events stream is opened with a lane-bound token (changes-read for worktrees, tree-read for roots/org)')
+  assert.match(evSrc, /es\.onerror[\s\S]{0,400}?setTimeout\(connect/,
+    'a failed stream re-mints (the token is short-lived) instead of dying on a stale reconnect URL')
+  console.log('arxa-artifact-viewer selftest: GREEN (Task 7 trust boundaries + runtime freezes)')
 }

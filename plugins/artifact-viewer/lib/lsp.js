@@ -488,9 +488,15 @@ export function createLspBridge ({
       })
       const drop = () => {
         entry.sockets.delete(ws)
-        // The child OUTLIVES its last socket on purpose: reopening a file of
-        // the same language must not pay for a cold rust-analyzer index again.
-        // The org switch is what ends it.
+        // Task 7 (measured live, 2026-09-13): the child must NOT outlive its
+        // last socket. The viewer's remount (D92 sheet) closes its LSP socket
+        // and stops its language client; the next connection joined a child
+        // whose session state died with that socket and answered nothing ever
+        // again — every reopen past the first lost diagnostics permanently. A
+        // fresh spawn costs a cold start; a warm corpse costs the feature.
+        if (entry.sockets.size === 0 && running.get(entry.root + '\0' + entry.lang) === entry) {
+          stopEntry(entry.root + '\0' + entry.lang, entry, 'last-socket-closed')
+        }
       }
       ws.on('close', drop)
       ws.on('error', drop)

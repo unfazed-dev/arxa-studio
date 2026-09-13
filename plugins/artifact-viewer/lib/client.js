@@ -1437,63 +1437,96 @@ window.__ModuleLoader__.load({
       // D86 external-change push. Org lane: the org watcher. Worktree lane:
       // the same route with ?session= (host watches the worktree for this
       // connection). Clean buffer auto-reloads; dirty buffer conflicts.
+      // The stream is TOKEN-GATED (Task 7): mint the lane's class first —
+      // changes-read for a worktree, tree-read for a root or the org — and
+      // open the EventSource only with it. A 403 makes the browser fail the
+      // connection permanently (the SSE spec does not retry non-200s), so
+      // onerror closes and re-mints instead of dying on a stale TTL.
       React.useEffect(() => {
         if (!open || !state.relPath || state.phase !== 'ready') return
         let disposed = false
-        const url = EVENTS_ROUTE + (wtRef.current
-          ? '?session=' + encodeURIComponent(wtRef.current.sessionId)
-          : state.eventRootId ? '?root=' + encodeURIComponent(state.eventRootId) : '')
-        const es = new EventSource(url)
-        es.onmessage = (m) => {
+        let es = null
+        let retry = null
+        const connect = async () => {
+          if (disposed) return
+          let q = ''
           try {
-            const ev = JSON.parse(m.data)
-            if (!matchesArtifactEvent(ev, state.relPath, state.eventRootId)) return
-            if (dirtyRef.current) {
-              externalRef.current = ev.mtimeMs
-              setSavePhase('conflict')
-              setSaveNote('')
+            if (wtRef.current) {
+              const { token } = await fetchTokenRaw({ scope: 'changes-read', worktreeId: wtRef.current.sessionId })
+              q = '?session=' + encodeURIComponent(wtRef.current.sessionId) + '&avt=' + encodeURIComponent(token)
+            } else if (state.eventRootId) {
+              const { token } = await fetchTokenRaw({ scope: 'tree-read', rootId: state.eventRootId })
+              q = '?root=' + encodeURIComponent(state.eventRootId) + '&avt=' + encodeURIComponent(token)
             } else {
-              const request = openRequestRef.current
-              void (async () => {
-                try {
-                  let text
-                  let readMtime = ev.mtimeMs
-                  if (wtRef.current) {
-                    const { token } = await fetchTokenRaw({ scope: 'wt-read', worktreeId: wtRef.current.sessionId, relPath: state.relPath })
-                    const r = await fetch('/__arxa/artifacts/wt?session=' + encodeURIComponent(wtRef.current.sessionId) + '&path=' + encodeURIComponent(state.relPath) + '&avt=' + encodeURIComponent(token))
-                    if (!r.ok) return
-                    readMtime = Number(r.headers.get('x-arxa-mtime-ms')) || ev.mtimeMs
-                    text = await r.text()
-                  } else if (state.rootId) {
-                    const { token } = await fetchToken(state.relPath, null, state.rootId)
-                    const r = await fetch(WT_ROUTE + '?root=' + encodeURIComponent(state.rootId) + '&path=' + encodeURIComponent(state.relPath) + '&avt=' + encodeURIComponent(token))
-                    if (!r.ok) return
-                    readMtime = Number(r.headers.get('x-arxa-mtime-ms')) || ev.mtimeMs
-                    text = await r.text()
-                  } else {
-                    const { token, origin } = await fetchToken(state.relPath, null, null)
-                    const r = await fetch(origin + '/' + encodeURI(state.relPath) + '?avt=' + encodeURIComponent(token))
-                    if (!r.ok) return
-                    text = await r.text()
-                  }
-                  if (disposed || request !== openRequestRef.current) return
-                  // The buffer may have become dirty while token/read awaited.
-                  // Keep those edits and surface the same conflict UI as an
-                  // event that arrived dirty in the first place.
-                  if (dirtyRef.current) {
-                    externalRef.current = readMtime
-                    setSavePhase('conflict')
-                    setSaveNote('')
-                    return
-                  }
-                  mtimeRef.current = readMtime
-                  setState((s) => ({ ...s, text }))
-                } catch { /* transient */ }
-              })()
+              const { token } = await fetchTokenRaw({ scope: 'tree-read' })
+              q = '?avt=' + encodeURIComponent(token)
             }
-          } catch {}
+          } catch {
+            // No authority, no stream: the view still works, only live reload
+            // is missing. Try again rather than block or crash.
+            retry = setTimeout(connect, 5000)
+            return
+          }
+          if (disposed) return
+          es = new EventSource(EVENTS_ROUTE + q)
+          es.onmessage = (m) => {
+            try {
+              const ev = JSON.parse(m.data)
+              if (!matchesArtifactEvent(ev, state.relPath, state.eventRootId)) return
+              if (dirtyRef.current) {
+                externalRef.current = ev.mtimeMs
+                setSavePhase('conflict')
+                setSaveNote('')
+              } else {
+                const request = openRequestRef.current
+                void (async () => {
+                  try {
+                    let text
+                    let readMtime = ev.mtimeMs
+                    if (wtRef.current) {
+                      const { token } = await fetchTokenRaw({ scope: 'wt-read', worktreeId: wtRef.current.sessionId, relPath: state.relPath })
+                      const r = await fetch('/__arxa/artifacts/wt?session=' + encodeURIComponent(wtRef.current.sessionId) + '&path=' + encodeURIComponent(state.relPath) + '&avt=' + encodeURIComponent(token))
+                      if (!r.ok) return
+                      readMtime = Number(r.headers.get('x-arxa-mtime-ms')) || ev.mtimeMs
+                      text = await r.text()
+                    } else if (state.rootId) {
+                      const { token } = await fetchToken(state.relPath, null, state.rootId)
+                      const r = await fetch(WT_ROUTE + '?root=' + encodeURIComponent(state.rootId) + '&path=' + encodeURIComponent(state.relPath) + '&avt=' + encodeURIComponent(token))
+                      if (!r.ok) return
+                      readMtime = Number(r.headers.get('x-arxa-mtime-ms')) || ev.mtimeMs
+                      text = await r.text()
+                    } else {
+                      const { token, origin } = await fetchToken(state.relPath, null, null)
+                      const r = await fetch(origin + '/' + encodeURI(state.relPath) + '?avt=' + encodeURIComponent(token))
+                      if (!r.ok) return
+                      text = await r.text()
+                    }
+                    if (disposed || request !== openRequestRef.current) return
+                    // The buffer may have become dirty while token/read awaited.
+                    // Keep those edits and surface the same conflict UI as an
+                    // event that arrived dirty in the first place.
+                    if (dirtyRef.current) {
+                      externalRef.current = readMtime
+                      setSavePhase('conflict')
+                      setSaveNote('')
+                      return
+                    }
+                    mtimeRef.current = readMtime
+                    setState((s) => ({ ...s, text }))
+                  } catch { /* transient */ }
+                })()
+              }
+            } catch {}
+          }
+          es.onerror = () => {
+            try { es.close() } catch {}
+            // Re-mint, then reconnect: the token that opened this stream has
+            // a short TTL, and EventSource never retries a non-200 itself.
+            if (!disposed) retry = setTimeout(connect, 3000)
+          }
         }
-        return () => { disposed = true; es.close() }
+        void connect()
+        return () => { disposed = true; if (retry) clearTimeout(retry); if (es) { try { es.close() } catch {} } }
       }, [open, state.relPath, state.phase, state.rootId, state.eventRootId])
 
       const resetForOpen = () => {

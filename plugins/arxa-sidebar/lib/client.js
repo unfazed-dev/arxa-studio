@@ -7519,16 +7519,43 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 				// map rebuild, not two hundred.
 				let decoTimer = null;
 				const decoAbort = new AbortController();
-				const events = new EventSource("/__arxa/artifacts/events");
-				events.onmessage = (message) => {
+				// The push stream is token-gated (artifact-viewer Task 7): mint a
+				// tree-read for the open org and open the EventSource with it. A 403
+				// is terminal for EventSource — it never retries a non-200 itself —
+				// so onerror closes and re-mints, the same reconnection contract the
+				// artifact viewer's client keeps for its lane.
+				let events = null;
+				let retryT = null;
+				const connect = async () => {
 					try {
-						const detail = JSON.parse(message.data);
-						if (detail && detail.rootId) window.dispatchEvent(new CustomEvent("arxa-freestyle-tree-refresh", { detail: { rootId: detail.rootId } }));
-					} catch { /* malformed watcher event */ }
-					if (decoTimer) window.clearTimeout(decoTimer);
-					decoTimer = window.setTimeout(() => { decoTimer = null; void freestyleStore.refresh({ signal: decoAbort.signal }); }, 500);
+						const tr = await fetch("/__arxa/artifacts/token", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "tree-read" }) });
+						const tj = await tr.json().catch(() => null);
+						if (!tr.ok || !tj || typeof tj.token !== "string") throw new Error("no tree-read token");
+						events = new EventSource("/__arxa/artifacts/events?avt=" + encodeURIComponent(tj.token));
+					} catch {
+						// No token, no stream: the tree still works, only live
+						// refresh is missing. Try again rather than crash.
+						retryT = window.setTimeout(connect, 5000);
+						return;
+					}
+					events.onmessage = (message) => {
+						try {
+							const detail = JSON.parse(message.data);
+							if (detail && detail.rootId) window.dispatchEvent(new CustomEvent("arxa-freestyle-tree-refresh", { detail: { rootId: detail.rootId } }));
+						} catch { /* malformed watcher event */ }
+						if (decoTimer) window.clearTimeout(decoTimer);
+						decoTimer = window.setTimeout(() => { decoTimer = null; void freestyleStore.refresh({ signal: decoAbort.signal }); }, 500);
+					};
+					events.onerror = () => {
+						try { events.close(); } catch { /* already dead */ }
+						events = null;
+						// The token that opened this stream has a short TTL; a
+						// reconnect needs a fresh one.
+						retryT = window.setTimeout(connect, 3000);
+					};
 				};
-				return () => { if (decoTimer) window.clearTimeout(decoTimer); decoAbort.abort(); events.close(); };
+				void connect();
+				return () => { if (decoTimer) window.clearTimeout(decoTimer); if (retryT) window.clearTimeout(retryT); decoAbort.abort(); if (events) { try { events.close(); } catch { /* already dead */ } } };
 			}, []);
 			// What the header's two new controls actually do. A search box that
 			// filtered nothing and a view menu that reordered nothing would look

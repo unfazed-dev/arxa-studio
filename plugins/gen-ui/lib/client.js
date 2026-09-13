@@ -303,7 +303,18 @@ window.__ModuleLoader__.load({
       const max = Math.max(before.length, after.length)
       // Line-by-line, not a real LCS diff: the payload is small and
       // author-controlled, and a wrong-but-pretty diff is worse than an
-      // obvious one. ponytail: upgrade to LCS if real files land here.
+      // obvious one.
+      // DEFERRED UNTIL REAL FILE DIFF INPUT (closeout 2026-09-13, artifact-
+      // viewer Task 7 / implementation plan Task 9): today this card receives
+      // ONLY model-authored before/after strings from the gen_ui tool's
+      // components param — no host code reads files into it. The moment real
+      // file bytes reach this renderer, replace the positional comparison with
+      // a bounded deterministic Myers/LCS renderer (keep {path,before,after}),
+      // covering insertions, deletions, reordering, hunks/context, large
+      // input, unchanged lines and escaping — and do NOT mount the artifact
+      // viewer's movable singleton into repeated inline cards. The trigger
+      // test lives in plugins/artifact-viewer/selftest.mjs (Task 7 block).
+      // ponytail: upgrade to LCS if real files land here.
       for (let i = 0; i < max; i++) {
         const b = before[i]
         const a = after[i]

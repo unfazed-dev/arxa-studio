@@ -484,6 +484,16 @@ export function apply(ctx, config) {
     })
     const events = createEventsRoute({
       watcher,
+      // Task 7 trust boundary: the push stream is token-gated. A ?session=
+      // lane needs a changes-read token for THAT session; a root/org lane
+      // needs a tree-read token bound to the root's real path, resolved HERE
+      // (the query's root id never becomes a path by itself).
+      verify: async ({ session, rootId, token }) => {
+        if (session) return verifyToken(token, { secret, scope: 'changes-read', worktreeId: session }).ok
+        const target = selectedOpenRoot(process.env, rootId)
+        if (!target) return false
+        return verifyToken(token, { secret, scope: 'tree-read', orgPath: target.path }).ok
+      },
       rootIdForPath: (rootPath, requestedId) => rootIdsForPath(process.env, rootPath, requestedId),
       // Phase 1: the viewer's wt lane live-reloads on agent re-writes — the
       // worktree root resolves under the OPEN org only (unknown → org lane).

@@ -370,6 +370,29 @@ await refuses('a file with no project manifest above it', { exists: () => false 
   else ok('the real login shell PATH resolved (' + real.split(':').length + ' entries)')
 }
 
+// ---- Dart discovery: present, absent, and never a download ------------------
+// The engine finds dart through the login shell's PATH (fvm here). The strip's
+// contract: PRESENT -> the lane just gets a server; ABSENT -> the copy says an
+// SDK is required, and there is NO downloader to press (the server ships
+// inside the Dart/Flutter SDK — an install door could only lie).
+{
+  const shellPath = await readShellPath({})
+  const dartBin = resolveBin('dart', { env: process.env, extraPath: shellPath })
+  if (dartBin === null) {
+    console.log('  NOTE  dart absent on this machine — present-case recorded as skipped, absent-case still proven below')
+  } else {
+    assert.ok(dartBin.endsWith('/dart'), 'dart PRESENT on the login-shell PATH (the resolution the engine uses): ' + dartBin)
+    ok('Dart discovery, present case: resolveBin finds the SDK binary')
+  }
+  assert.equal(
+    resolveBin('dart', { env: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' }, extraPath: '' }),
+    null,
+    'dart ABSENT under the launchd PATH with no shell/toolchain path — exactly what a machine with no Dart looks like to the engine')
+  assert.equal(installArgv('dart', LANG_SERVERS, {}), null, 'no installer row exists for dart')
+  assert.equal(LANG_SERVERS.dart.npm, undefined, 'dart carries no npm marker, so status answers installable:false')
+  ok('Dart discovery, absent case: locate-only, no downloader, strip must say SDK')
+}
+
 // ---- a loose file is not an error -------------------------------------------
 // html, css and json normally have NO manifest above them. projectRootFor
 // answering null there would deny every such file with 'no-project-root'.
@@ -562,6 +585,38 @@ if (!haveRa) {
   ok('LIVE: rooted at the cargo project, not the org above it')
 
   ws.close()
+  // ---- Task 7: the server's lifetime is the LAST SOCKET's lifetime ----------
+  // The wedge this closes (measured live 2026-09-13, langstrip evidence run):
+  // the viewer's remount (D92 sheet) closes its LSP socket and stops its
+  // language client; the bridge kept the child in `running` and the NEXT
+  // connection joined a server whose session state died with the first socket
+  // — tsserver answered nothing ever again. A disconnecting viewer must take
+  // the server with it when it was the last consumer, so the next open gets a
+  // FRESH process and diagnostics land again.
+  {
+    await new Promise((r) => setTimeout(r, 700))
+    const ws2 = new WebSocket(
+      'ws://127.0.0.1:' + port + '/__arxa/artifacts/lsp?lang=rust&path=' + encodeURIComponent('projects/demo/src/main.rs'),
+      ['arxa-lsp', liveToken])
+    const reply2 = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('reconnect did not answer initialize in 20s — the reused server is wedged')), 20_000)
+      ws2.on('message', (data) => {
+        const msg = JSON.parse(data.toString('utf8'))
+        if (msg.id === 1) { clearTimeout(timer); resolve(msg) }
+      })
+      ws2.on('error', (e) => { clearTimeout(timer); reject(e) })
+      ws2.on('open', () => {
+        ws2.send(JSON.stringify({
+          jsonrpc: '2.0', id: 1, method: 'initialize',
+          params: { processId: process.pid, rootUri: null, capabilities: {} },
+        }))
+      })
+    })
+    assert.ok(reply2.result && reply2.result.capabilities, 'the reconnect answered initialize')
+    assert.equal(bridge.stats().spawned, 2, 'the last socket out stopped the server — the reconnect spawned a FRESH one')
+    ok('LIVE: a reconnect after the last socket left gets a fresh server, not a wedged corpse')
+    ws2.close()
+  }
   bridge.stopAll('selftest-done')
   await new Promise((r) => server.close(r))
   assert.equal(bridge.running.size, 0); ok('LIVE: the real child is reaped')

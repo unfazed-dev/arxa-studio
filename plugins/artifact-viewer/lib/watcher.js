@@ -69,10 +69,34 @@ export function createOrgWatcher({ intervalMs = 250 } = {}) {
   }
 }
 
-export function createEventsRoute({ watcher, resolveSessionRoot, rootIdForPath = () => null }) {
+/** SSE push route (D86).
+ *
+ *  Task 7 trust boundary: the stream is TOKEN-GATED. It pushes every file
+ *  change under the open org — relPath, mtime — so handing it to any
+ *  same-origin caller would be an ambient capability the extension/webview
+ *  frames (same-origin, see the threat-model table) could subscribe to for
+ *  free. `verify({ session, rootId, token })` decides the lane: a ?session=
+ *  stream needs a changes-read token bound to that session, a root/org stream
+ *  needs a tree-read token bound to that root's path (the verifier resolves
+ *  the id — the caller's id never becomes a path). NULL verify denies
+ *  everyone: deny-default, same posture as the org server.
+ *
+ *  The token is checked at CONNECT time only: an open connection keeps its
+ *  authority for its lifetime (connection-scoped, like the org read), and the
+ *  client re-mints on reconnect because the TTL is short. */
+export function createEventsRoute({ watcher, resolveSessionRoot, rootIdForPath = () => null, verify = null }) {
   return {
     async handle(req, res) {
       if (req.method !== 'GET') { res.writeHead(405, { 'content-type': 'text/plain' }); return res.end('GET only') }
+      let query = null
+      try { query = new URL(req.url, 'http://x').searchParams } catch {}
+      const session = query ? query.get('session') : null
+      const rootId = query ? query.get('root') : null
+      const avt = query ? query.get('avt') : null
+      if (!verify || !await verify({ session, rootId, token: avt })) {
+        res.writeHead(403, { 'content-type': 'text/plain', 'cache-control': 'no-store' })
+        return res.end('missing or invalid token')
+      }
       res.writeHead(200, {
         'content-type': 'text/event-stream',
         'cache-control': 'no-store',

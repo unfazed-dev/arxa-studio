@@ -16,8 +16,12 @@ assert.equal(matchesArtifactEvent({ relPath: 'other.md', rootId: 'org-a' }, 'not
 assert.equal(matchesArtifactEvent({ relPath: 'notes.md', rootId: null }, 'notes.md', null), true,
   'session worktree streams retain their rootless event contract')
 
-assert.match(client, /state\.eventRootId \? '\?root=' \+ encodeURIComponent\(state\.eventRootId\)/,
+assert.match(client, /'\?root=' \+ encodeURIComponent\(state\.eventRootId\)/,
   'org and direct-root viewers request a root-filtered stream')
+assert.match(client, /scope: 'tree-read', rootId: state\.eventRootId/,
+  'the root-filtered stream is opened with a tree-read token minted for that root')
+assert.match(client, /scope: 'changes-read', worktreeId: wtRef\.current\.sessionId/,
+  'the worktree stream is opened with a changes-read token for that session')
 assert.match(client, /fetchRoot\(rootId\)/,
   'artifact opens resolve the event root identity with their metadata')
 console.log('GREEN artifact-viewer event root isolation')

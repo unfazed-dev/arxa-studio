@@ -7,7 +7,7 @@ import * as monaco from 'monaco-editor'
 import editorWorkerUrl from './editor.worker.js?worker&url'
 import extHostWorkerUrl from './extensionHost.worker.js?worker&url'
 import textmateWorkerUrl from './textmate.worker.js?worker&url'
-import { initialize, getService, IEditorService, ICommandService, INotificationService, IEditorGroupsService } from '@codingame/monaco-vscode-api'
+import { initialize, getService, IEditorService, ICommandService, INotificationService, IEditorGroupsService, IConfigurationService } from '@codingame/monaco-vscode-api'
 import { setUnexpectedErrorHandler } from '@codingame/monaco-vscode-api/monaco'
 import getConfigurationServiceOverride, { updateUserConfiguration } from '@codingame/monaco-vscode-configuration-service-override'
 import getThemeServiceOverride from '@codingame/monaco-vscode-theme-service-override'
@@ -548,6 +548,28 @@ export async function updateFile (uriPath, text) {
   loaded.set(uriPath, text)
 }
 
+/** The overlay filesystem's current bytes for one registered uri.
+ *
+ *  Harness probe, not used by the viewer (same status as editorPartInfo): the
+ *  autoSave-ownership check reads this to prove VS Code never flushes typed
+ *  bytes into the provider on its own — only the client's 1.5s debounce ever
+ *  writes, and it writes through POST /__arxa/artifacts/write, not here. */
+export async function overlayBytes (uriPath) {
+  await start()
+  const e = open.get(uriPath)
+  if (e === void 0) return new Uint8Array()
+  return e.file.read()
+}
+
+/** One resolved configuration value, for the harness. Probe-only: the
+ *  autoSave-ownership check reads `files.autoSave` to record what VS Code
+ *  itself believes, next to the behaviour probe that watches the provider. */
+export async function configValue (key) {
+  await start()
+  const cfg = await getService(IConfigurationService)
+  return cfg.getValue(key)
+}
+
 /** Open VS Code's diff editor: `uriPath` against `originalText`.
  *
  *  The original side gets its OWN uri (`<path>.arxa-main`) rather than being a
@@ -667,6 +689,30 @@ async function connectLanguageServerNow (lang, { url, token, relPath, uriPath, s
       // refuses to start unless it is told where a compiler is, and only the
       // host knows where arxa put one.
       initializationOptions: init ?? undefined,
+      // The vscode-css-language-server stalls without this: it ASKS for its
+      // configuration (workspace/configuration, section "css") before it will
+      // lint, and the embedded workbench has no settings store to answer from
+      // — measured live (2026-09-13): didOpen went out, the pull-diagnostic
+      // request hung, no markers ever landed. Answering with the section's
+      // documented defaults unsticks it: `{}` alone crashes the css linter
+      // (`Cannot read properties of null (reading 'validProperties')` — it
+      // assumes `lint` exists), so css-family sections get `{ validate: true,
+      // lint: {} }`. Every other request passes through untouched.
+      middleware: {
+        workspace: {
+          configuration: (params, token, next) => {
+            const defaults = (items) => items.map((item) =>
+              (item && /(^|\.)(css|scss|less)$/.test(String(item.section)) ? { validate: true, lint: {} } : {}))
+            try {
+              const r = next(params, token)
+              if (r && typeof r.then === 'function') {
+                return r.then((v) => (Array.isArray(v) && v.length === params.items.length && v.every((x) => x != null) ? v : defaults(params.items)))
+              }
+              return Array.isArray(r) && r.length === params.items.length && r.every((x) => x != null) ? r : defaults(params.items)
+            } catch { return defaults(params.items) }
+          },
+        },
+      },
       // The server decides its own root (the host resolved the project
       // directory); the client must not fight it with a second opinion.
       workspaceFolder: undefined,

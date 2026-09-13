@@ -328,6 +328,7 @@ async function callTree(route, url) {
   const route = createEventsRoute({
     watcher,
     rootIdForPath: (rootPath) => rootPath === rootOpenPath ? idOpen : null,
+    verify: () => true,   // alias fan-out is under test, not the token gate
   })
   const chunks = []
   const req = { method: 'GET', url: '/', on() {} }

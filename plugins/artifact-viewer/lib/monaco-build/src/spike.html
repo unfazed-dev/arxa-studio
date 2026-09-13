@@ -522,6 +522,16 @@
     await settle(3000)
     flow.md2Top = onTop()
     flow.md2Pane = (await m.editorPartInfo()).paneId
+    // Threat-model row: the WEBVIEW iframe's own posture while a preview is
+    // live (the ext host iframe is inventoried later — by then the webviews
+    // have been closed by dispose, so this is the only moment to measure one).
+    flow.webviewFrames = [...document.querySelectorAll('iframe')].map((f) => {
+      let origin = 'CROSS-ORIGIN'
+      try { origin = f.contentWindow.location.origin } catch { /* unreadable */ }
+      let csp = ''
+      try { csp = (f.contentDocument.querySelector('meta[http-equiv="Content-Security-Policy"]')?.content || '').slice(0, 120) } catch {}
+      return { src: (f.getAttribute('src') || '').slice(0, 60) || (f.srcdoc ? 'SRCDOC' : ''), origin, sandbox: f.getAttribute('sandbox'), csp }
+    })
     out.step = 'flow-diff'
     // Narrower than VS Code's 900px inline breakpoint, with the product's own
     // call (no side-by-side override): the bundle's settings must still give
@@ -551,6 +561,62 @@
     flow.dartPane = (await m.editorPartInfo()).paneId
     sampling = false
     flow.stray = stray.slice(0, 10)
+
+    // ---- the TRUST-BOUNDARY probes (Task 7 threat model) ------------------
+    // Every row of the threat-model table in docs/plans/artifact-viewer-vscode-
+    // monaco.md is MEASURED here, not narrated: what each executing frame is,
+    // what it can reach, and what the page itself holds. These are the probes
+    // that make "extension/webview execution receives no ambient studio
+    // cookies, credentials, host bridges or mutation token" a recorded fact
+    // (or a recorded hole) instead of a hope.
+    out.step = 'threat'
+    const threat = {}
+    out.threat = threat
+    threat.frames = [...document.querySelectorAll('iframe')].map((f) => {
+      let origin = 'CROSS-ORIGIN'
+      try { origin = f.contentWindow.location.origin } catch { /* unreadable = cross-origin */ }
+      return {
+        src: (f.getAttribute('src') || (f.srcdoc ? 'SRCDOC:' + String(f.srcdoc).slice(0, 40) : '')).slice(0, 80),
+        origin,
+        sandbox: f.getAttribute('sandbox'),
+      }
+    })
+    const extHost = [...document.querySelectorAll('iframe')]
+      .find((f) => (f.getAttribute('src') || '').includes('webWorkerExtensionHostIframe'))
+    threat.extHostOrigin = extHost ? (() => { try { return extHost.contentWindow.location.origin } catch { return 'CROSS-ORIGIN' } })() : 'NONE'
+    // Same-origin frames can walk straight back into the parent document —
+    // that IS the trust boundary of the extension host today. Measured, not
+    // assumed: if this ever reads false, the boundary moved and the threat
+    // table must move with it.
+    threat.extHostReachesParentDoc = extHost ? (() => { try { return extHost.contentWindow.parent.document === document } catch { return false } })() : null
+    threat.topIsSelf = window.top === window
+    threat.cookie = document.cookie
+    threat.localStorageKeys = Object.keys(localStorage).slice(0, 40)
+    // The autoSave-ownership probe (Task 7 step 5): with the client's save
+    // loop ABSENT from this page, the ONLY thing that could flush typed bytes
+    // into the overlay filesystem is VS Code itself. files.autoSave defaults
+    // to 'off' and the bundle never writes it — typed bytes staying out of
+    // the provider proves no competing save path exists behind the debounce.
+    threat.autoSaveProbe = await (async () => {
+      const P = '/spike/autosave-probe.ts'
+      const a = await m.openFile(host, P, 'const a = 1\n', { editable: true })
+      a.editor.focus()
+      a.editor.trigger('arxa-probe', 'type', { text: 'TYPED' })
+      let flushMs = null
+      const t0 = performance.now()
+      for (let i = 0; i < 28 && flushMs === null; i++) {
+        await settle(250)
+        const bytes = new TextDecoder().decode(await m.overlayBytes(P))
+        if (bytes.includes('TYPED')) flushMs = Math.round(performance.now() - t0)
+      }
+      const overlay = new TextDecoder().decode(await m.overlayBytes(P))
+      const typedKept = a.getText().includes('TYPED')
+      a.dispose()
+      return {
+        typedKept, overlay, flushedToOverlayMs: flushMs,
+        filesAutoSave: await m.configValue('files.autoSave'),
+      }
+    })()
   } catch (e) { out.partErr = String(e && e.message || e) }
   out.step = 'done'
 
@@ -705,7 +771,33 @@
       // the user's edits away. Measured: no dialog, edits kept.
       'out.dirtyBefore === true',
       'out.dialogs === 0',
-      "out.afterConflict.startsWith('EDITED')"
+      "out.afterConflict.startsWith('EDITED')",
+      // ---- the TRUST-BOUNDARY assertions (Task 7 threat model) -----------
+      // These pin the MEASURED posture so a silent change trips the gate and
+      // forces the threat-model table in docs/plans/artifact-viewer-vscode-
+      // monaco.md to be re-derived, not discovered. The ext host iframe is
+      // SAME-ORIGIN and CAN reach the parent document — that is the recorded
+      // boundary, held by the build-pinned extension allowlist (selftest.mjs),
+      // not by an origin wall.
+      "out.threat.extHostOrigin === location.origin",
+      'out.threat.extHostReachesParentDoc === true',
+      'out.threat.frames.every((f) => f.sandbox && f.sandbox.includes("allow-scripts"))',
+      'out.threat.cookie === ""',
+      'out.threat.localStorageKeys.length === 0',
+      'out.threat.topIsSelf === true',
+      // The autoSave ruling (program ruling 4): monaco-vscode-api defaults
+      // files.autoSave to afterDelay and flushes the model into the IN-MEMORY
+      // overlay ~1s after a keystroke. That is not a disk save — the worktree
+      // write stays single-owner through the viewer's tested 1.5s debounce
+      // (selftest.client-save-race.mjs). If this row ever changes, the ruling
+      // must be re-derived, not absorbed.
+      "out.threat.autoSaveProbe.filesAutoSave === 'afterDelay'",
+      'out.threat.autoSaveProbe.flushedToOverlayMs !== null',
+      'out.threat.autoSaveProbe.typedKept === true',
+      // Webviews execute in a same-origin iframe with a strict default-src
+      // 'none' CSP whose script-src is pinned to VS Code's own bootstrap hash.
+      'out.flow.webviewFrames.length >= 1',
+      "out.flow.webviewFrames.every((f) => f.sandbox && f.csp.includes(\"default-src 'none'\"))"
   ]) {
     let ok = false
     try { ok = !!new Function('out', 'return (' + src + ')')(out) } catch (e) { ok = false }
@@ -738,6 +830,6 @@
   }, null, 1)
   if (location.search.includes('dump')) document.body.appendChild(dump)
   try {
-    await fetch('report', { method: 'POST', body: JSON.stringify({ step: out.step, fail: out.fail, t: out.t, flow: out.flow, typedSeen: out.typedSeen, remountKeeps: out.remountKeeps, remountText: out.remountText, diffInsBg: out.diffInsBg, diffDelBg: out.diffDelBg, lspObserved: out.lspObserved, partErr: out.partErr, error: out.error }) })
+    await fetch('report', { method: 'POST', body: JSON.stringify({ step: out.step, fail: out.fail, t: out.t, flow: out.flow, typedSeen: out.typedSeen, remountKeeps: out.remountKeeps, remountText: out.remountText, diffInsBg: out.diffInsBg, diffDelBg: out.diffDelBg, lspObserved: out.lspObserved, threat: out.threat, webviewFrames: (out.flow && out.flow.webviewFrames) || [], partErr: out.partErr, error: out.error }) })
   } catch { /* the harness may not be listening */ }
 </script>

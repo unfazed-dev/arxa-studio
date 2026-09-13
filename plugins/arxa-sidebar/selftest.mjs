@@ -1209,7 +1209,7 @@ check('S-orgparity: the host mirrors the org verbs — disconnect (keep/remove),
   // refresh cannot stand in for it.
   check('D117: a file changing under the sidebar repaints the Freestyle map',
     gen.includes('decoTimer = window.setTimeout(() => { decoTimer = null; void freestyleStore.refresh({ signal: decoAbort.signal }); }, 500);')
-    && gen.includes('return () => { if (decoTimer) window.clearTimeout(decoTimer); decoAbort.abort(); events.close(); };'))
+    && gen.includes('return () => { if (decoTimer) window.clearTimeout(decoTimer); if (retryT) window.clearTimeout(retryT); decoAbort.abort(); if (events) { try { events.close(); } catch { /* already dead */ } } };'))
   check('D117: a Freestyle badge never claims "in this session" — it has no session',
     gen.includes('const ARXA_DECO_TITLE_LOCAL = ')
     && (gen.match(/"rows\.deco\.local\.modified":/g) || []).length === 3

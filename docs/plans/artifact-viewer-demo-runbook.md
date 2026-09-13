@@ -63,6 +63,59 @@ and a narrow-viewport sheet (D92).
       `designs/artifact-viewer/evidence/lens/`: conversation-agent-live-1280.png
       (live agent + docked column), sheet-744.png, sheet-390.png,
       session-open-1280.png, and T6-GATES.md (gate table).
+- [ ] Closeout evidence (2026-09-13, Task 7) archived under
+      `designs/evidence/studio-closeout/{390,744,1280}/` — the artifact-viewer
+      subset of the evidence tree. See §7.
+
+## 7. Closeout runtime verification (Task 7, 2026-09-13)
+
+Scratch `ARXA_HOME` + scratch org only — never the operator's real state.
+
+- [x] **Boot**: `ARXA_HOME=<scratch> ARXA_PORT=7897 node bin/arxa-studio.mjs`;
+      boot log shows `[arxa-artifact-viewer] root server serving <org>`.
+- [x] **Install door (person-pressed, never automatic)**: the four npm
+      rows (`typescript-language-server`, `vscode-langservers-extracted`
+      for html/css/json) installed into the scratch home;
+      `/__arxa/artifacts/lsp/status` answered `available:true` for all four
+      (live query, 2026-09-13).
+- [x] **Language strip on screen** (evidence 2026-09-13, headless Chrome + CDP):
+      deterministic-diagnostic scratch files — `.ts` (`const n: number = "no"`),
+      `.css` (`.a { colr: red; }`), `.json` (`{"a": 1,}`) — each opened in the
+      viewer shows its squiggle, zero console/page errors on viewer surfaces:
+      `1280/langstrip-{ts,css,json}-1280.png`.
+      `.html` is the PREVIEW lane by design (implementation plan: org-origin
+      `<iframe sandbox="allow-scripts">`, never the studio origin) — a
+      squiggle-on-screen row cannot exist for it; evidence is the rendered
+      lane plus its origin property (`1280/langstrip-html-preview-1280.png`,
+      measured `host org-<slug>.localhost ≠ studio host`), and
+      `lsp/status` `available:true`. vscode-html-language-server publishes no
+      diagnostics for any of the classic error inputs by default (measured at
+      the bridge) — see the ledger.
+      **Narrow rungs (744/390) are BLOCKED for headless evidence, not skipped
+      by choice**: the sheet does not mount on emulated resize (the T6-era
+      known issue resurfaced) and the wide-only sidebar is the only headless
+      file entry — a narrow-mode artifact open has no reachable entry point
+      for a driver. 744 keeps `744/dart-absent-strip-744.png`. Follow-up: see
+      the ledger (sheet/emulated-resize entry gap).
+- [x] **Dart discovery**: present case — dart on PATH, `main.dart` opens the
+      editor, language service, NO strip (`1280/dart-present-service-1280.png`).
+      Absent case — boot with `ARXA_LSP_DART=/nonexistent`: the strip reads
+      *"install its SDK"*, and there is NO download button
+      (`1280/dart-absent-strip-1280.png`, plus the 744 shot above).
+- [x] **Autosave ownership**: a typed burst settles to exactly ONE
+      "Saved · WIP committed" note (measured live: one note transition at
+      ~1 s after the poll began; steady state after — no second save):
+      `1280/autosave-one-per-settled-edit-1280.png`. `files.autoSave` is
+      recorded as afterDelay-into-memory in the vscode-monaco plan's threat
+      model — the worktree write stays the debounce's alone
+      (selftest.client-save-race.mjs + the debounce-coalescing pin).
+- [x] **Browser gate rerun**: `node check.mjs` and `node check.mjs --webkit`
+      GREEN in `lib/monaco-build/` (the threat-model probes ride the spike).
+- Runtime fix that this run surfaced and closed: a language server kept alive
+  after its last socket left wedged permanently (tsserver answered nothing on
+  every reopen past the first — diagnostics died at the first remount). Server
+  lifetime is now last-socket-scoped (`lib/lsp.js`, selftest.lsp.mjs LIVE
+  reconnect block).
 
 ## Known follow-ups
 

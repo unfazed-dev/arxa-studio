@@ -862,9 +862,79 @@ spike (`dialogs === 0`, `afterConflict` still starts with the edit).
 | **Kept, with a reason** | `pdf.js` (VS Code ships no PDF viewer), `prettier.js` (markdown/yaml have no server), `icons.js` + Fira Code (the studio's own chrome), the `<img>`/`<audio>`/`<video>` lanes (streaming beats an in-memory copy) |
 | **Open for the user** | whether markdown/yaml formatting is worth keeping a 2.1 MB bundle for — see the table in 7.3 |
 
-## Carried unknowns (from the grill, still open)
+## Carried unknowns — CLOSED by the closeout trust-boundary work (2026-09-13)
 
-- `tomoki1207.pdf` under the webworker extension host — test before retiring pdf.js.
-- `files.autoSave` under monaco-vscode-api — verify; fallback is the debounce.
-- Dart server discovery on PATH — no download path exists.
-- **New (0.2):** the extension-host iframe is same-origin with the studio.
+The four unknowns this section carried are now measured facts; the threat
+model below is the record. Live probes: `src/spike.html` (the `threat` step),
+asserted by `check.mjs` on every build, Chrome AND WebKit.
+
+### Threat model (Task 7)
+
+Every row records MEASURED behavior, the thing that holds it, and the residual
+if any. The invariant: **extension/webview execution receives no ambient studio
+cookies, credentials, host bridges or mutation token; file access stays
+explicit, scoped, short-lived and root-bound.**
+
+| Capability | Current behavior (measured) | Held by | Residual |
+|---|---|---|---|
+| **Extension-host iframe origin** | `webWorkerExtensionHostIframe-*.html` served by OUR vendor route ⇒ **same-origin with the studio** (`extHostOrigin === location.origin`, spike `threat` step). `iframeAlternateDomain` unset — no resolvable loopback wildcard exists. | Recorded by spike assertion; frozen by the pinned-extension allowlist (selftest.mjs Task 7 block: entry.mjs imports exactly the 14 vendored built-ins, each exact-pinned `36.2.7` in the build manifest; no vsix plugin wired; no runtime `registerExtension`). | Extension CODE shares the studio origin. Accepted, because nothing third-party can register: marketplace/VSIX loading stays off until a separately served origin is designed and reviewed. |
+| **Sandbox attributes** | Ext host iframe: `sandbox="allow-scripts allow-same-origin"` (VS Code's own bootstrap — `allow-same-origin` is required so the frame can spawn its same-origin worker). Webview content iframe: `allow-scripts allow-same-origin allow-forms allow-pointer-lock allow-downloads`. | Spike asserts every executing frame carries `allow-scripts` — an UNSANDBOXED frame trips the gate. | `allow-same-origin` on both frames: same residual as the row above. |
+| **CSP** | No CSP on the studio origin itself (0.2). Ext host frame ships VS Code's bootstrap CSP (`default-src 'none'; child-src 'self' data: blob:; script-src 'self' 'unsafe-eval' 'sha256-…'`). Webview frame ships `default-src 'none'` with `script-src` pinned to VS Code's own bootstrap hash. | Spike asserts every webview frame's CSP contains `default-src 'none'`. | The outer page (dsh shell) is not ours to lock; recorded, not closed. |
+| **Cookies** | None set by any viewer surface (org origin, vendor route, all APIs — asserted `set-cookie` absent). `document.cookie` is `''` in the harness. Nothing ambient to inherit. | selftest.mjs pins on response headers; spike pins the empty jar. | Studio cookies (if the shell ever sets any) are same-origin readable by extension code — same residual as row 1. |
+| **localStorage** | VS Code writes **zero** keys (`localStorageKeys: []` — the storage service override is in-memory). The viewer writes only `arxa.av.prettier` and the layout store's width key — preferences, never tokens or file bytes. | Spike asserts the empty key list. | Same-origin code could read/write the studio's localStorage — preferences only, no credentials exist there. |
+| **Parent DOM access** | The ext host frame CAN walk into the parent document (`extHostReachesParentDoc: true`) — direct consequence of `allow-same-origin`. | Spike pins the measurement so the boundary moving in EITHER direction forces a re-derivation. | The whole trust question collapses into row 1: provenance of the code that runs there. |
+| **Fetch reach** | Same-origin code can POST `/__arxa/artifacts/token` and mint read/write tokens (ambient same-origin authority — no CSRF-style check exists or is meaningful for a loopback single-user app). The org read lane, `wt`, `tree`, `main-version`, `write` all still demand THEIR token per request — the mint route is the one ambient door, usable only by code already trusted on the origin. | The allowlist freeze is the control (row 1). The **events** push route no longer trusts origin alone: since 2026-09-13 it requires a lane token (`changes-read` for `?session=`, `tree-read` for a root/org stream) and denies by default — an unauthenticated channel listing every file change under the org was a real ambient capability, now closed (selftest.mjs Task 11 block). The gate's first cut broke the SIDEBAR's own live tree/decoration stream (it had opened the same route with no token since D117) — the freestyle region now mints its own tree-read token and re-mints on error (selftest.freestyle.mjs pins, drift-gated). | `/__arxa/artifacts/roots` still lists root ids/names to same-origin callers — metadata only, accepted. |
+| **Token exposure** | Write/mutation tokens live in client closures, never localStorage/URLs; LSP tokens ride `Sec-WebSocket-Protocol` and are never echoed (selftest.lsp.mjs); read/wt/tree tokens ride short URLs with TTL ≤ 120 s, HMAC-bound to org+relPath. The events token is connect-time only (connection-scoped authority, like the org read). | tokens.js class tests; lsp selftest (`ws.protocol === 'arxa-lsp'` only). | — |
+| **Navigation** | The viewer never navigates the top window (`topIsSelf` true; artifacts render in lanes/iframes). Media/webview frames load vendor-route or org-origin URLs only. | Spike assertion. | — |
+| **Extension code provenance** | Build-time static imports of `@codingame/monaco-vscode-*-default-extension` at exact `36.2.7`, registered in `monaco-build/src/entry.mjs`. No marketplace, no VSIX, no runtime registration, no network at pack time. | selftest.mjs Task 7 allowlist freeze (verified RED with a smuggled `tomoki1207-pdf` import — the test caught it only after the name matcher accepted digits; fixed and re-verified). | Adding an extension = a code change that fails the allowlist test on purpose. |
+
+### Runtime verification records (Task 7)
+
+- **`files.autoSave` (was: "verify; fallback is the debounce")** — measured:
+  monaco-vscode-api defaults it to **`afterDelay`** and VS Code flushes the
+  model into the **in-memory overlay** ~1.0–1.3 s after a keystroke (Chrome
+  1009 ms / WebKit 1255 ms, spike `autoSaveProbe`). That is NOT a disk save:
+  the overlay is memory, and the worktree write stays single-owner — the
+  tested **1.5 s viewer debounce → POST /write → WIP commit** path
+  (selftest.client-save-race.mjs; the new debounce-coalescing test proves one
+  save per settled edit). Ruling 4 therefore holds with the probe on record:
+  ownership unchanged. The bundle never writes `files.autoSave`
+  (selftest pin), and the spike asserts the flush exists — if either changes,
+  the ruling must be re-derived.
+- **Dart discovery (was: "no download path exists")** — present case: dart
+  resolves via the login-shell PATH (fvm) and the lane just gets a server;
+  absent case (launchd PATH, no toolchain): `resolveBin` → null, the strip
+  says *"No Dart language server — install its SDK (`dart`) to get one."*
+  and there is no Install button (`installable:false`, no `npm` row —
+  locate-only by design). selftest.lsp.mjs pins both cases; the client copy is
+  pinned in selftest.mjs.
+- **pdf.js / Prettier (ruling 3)** — both REMAIN, pinned: the pdf lane stays
+  on the vendored bundle (no PDF extension experiment; neither name appears in
+  the extension allowlist), prettier keeps `md/yaml/yml` — the lanes no
+  language server covers — as a lazy vendor bundle behind the viewer-level
+  toggle.
+- **gen-ui Diff (implementation plan Task 9's open box)** — confirmed: the
+  card still receives ONLY model-authored `before/after` strings (the `gen_ui`
+  tool's `components` param; the host reads no file bytes). Marked **DEFERRED
+  UNTIL REAL FILE DIFF INPUT** in `plugins/gen-ui/lib/client.js`, with a
+  trigger test in selftest.mjs (any file-reading API in gen-ui's host breaks
+  the pin) so the bounded Myers/LCS renderer lands WITH its coverage the
+  moment real input does — not silently.
+- **`tomoki1207.pdf` under the extension host** — moot for this closeout: the
+  PDF extension is not in the allowlist (ruling 3), so it never runs.
+- **Live evidence run (2026-09-13, scratch org, headless Chrome + CDP)** —
+  squiggles on screen at 1280 for `.ts`/`.css`/`.json`
+  (`designs/evidence/studio-closeout/1280/`), the css one proving the
+  workspace/configuration middleware unsticks the css linter on a real open;
+  `.html` shows its designed PREVIEW lane (org-origin sandboxed iframe —
+  measured `host ≠ studio origin`); dart present/absent and the
+  one-save-per-settled-edit autosave note captured the same day. Narrow rungs:
+  the sheet does not mount on emulated resize and the wide-only sidebar is the
+  only headless file entry — a narrow-mode artifact open has no reachable
+  entry point for a driver (744 keeps the dart strip shot). Both recorded in
+  the closeout ledger. The run also surfaced and closed a real runtime wedge:
+  a language server kept alive past its last socket answered nothing ever
+  again (every reopen past the first lost tsserver diagnostics permanently) —
+  server lifetime is now last-socket-scoped (`lib/lsp.js`, LIVE reconnect
+  block in selftest.lsp.mjs: the reconnect must answer initialize with a
+  FRESH spawn, `spawned === 2`).
