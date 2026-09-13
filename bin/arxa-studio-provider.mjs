@@ -26,6 +26,7 @@ const { LocalWorkspaceProvider } = await import(join(pluginDir, 'lib', 'local.js
 const { GenericRestWorkspaceProvider } = await import(join(pluginDir, 'lib', 'generic-rest.js'))
 const { runConformance } = await import(join(pluginDir, 'lib', 'conformance.js'))
 const { exportBundle, importBundle } = await import(join(pluginDir, 'lib', 'export-bundle.js'))
+const { invalidRequest } = await import(join(pluginDir, 'lib', 'errors.js'))
 
 // ---- locale (en/pl/fr through the arxa-locale world; env-selected in a CLI) --
 const STRINGS = {
@@ -142,8 +143,11 @@ function buildProvider (backend) {
       fetch,
     })
   }
-  // local (the default) and supabase-not-yet (task 14) both fall back to the
-  // local store — local-first parity: nothing about the CLI needs a backend.
+  // A D32-sanctioned but unimplemented name (supabase, task 14) must never
+  // silently become the local store — a verify tool may not certify the
+  // wrong backend (task 13 review, Important 2).
+  if (backend.provider && backend.provider !== 'local')
+    throw invalidRequest(`the "${backend.provider}" adapter is not implemented in this build (implemented: local, generic-rest)`)
   const root = backend.local?.root ? resolveTilde(backend.local.root) : undefined
   return new LocalWorkspaceProvider(root ? { root } : {})
 }
@@ -156,9 +160,18 @@ const flag = (args, name) => {
 // ---- commands ---------------------------------------------------------------
 async function providerVerify (args) {
   const backend = loadBackend(args)
-  const provider = buildProvider(backend)
-  const isLocal = !(provider instanceof GenericRestWorkspaceProvider)
   console.log(t('verifyTitle'))
+  let provider
+  try {
+    provider = buildProvider(backend)
+  } catch (e) {
+    // A configured-but-unimplemented backend gets a red row and a failing
+    // exit — verify never certifies the wrong backend green.
+    console.log(t('rowRed', { id: 'provider', detail: e.message }))
+    console.log(t('verifyFailed'))
+    return 1
+  }
+  const isLocal = !(provider instanceof GenericRestWorkspaceProvider)
   const report = await runConformance(provider, isLocal ? { localExempt: true } : {})
   for (const s of report.sections) {
     const template = s.status === 'green' ? 'rowGreen' : s.status === 'n/a' ? 'rowNa' : 'rowRed'
@@ -197,8 +210,7 @@ const redactLine = (line) => line
 
 async function diagnose (args) {
   const backend = loadBackend(args)
-  const provider = buildProvider(backend)
-  const report = await runConformance(provider, backend.provider === 'local' || !backend.provider ? { localExempt: true } : {})
+  let report = null
   const lines = [t('diagnoseTitle')]
   const pkg = JSON.parse(readFileSync(join(pluginDir, 'package.json'), 'utf8'))
   const node = process.version
@@ -207,10 +219,20 @@ async function diagnose (args) {
   const sections = Object.keys(backend).filter((k) => k !== 'provider')
   const shape = `provider: ${backend.provider ?? 'local'}` + (sections.length ? `, sections: ${sections.join(', ')}` : '')
   lines.push(t('configShape', { shape }))
-  lines.push(t('verifyTitle'))
-  for (const s of report.sections) {
-    const template = s.status === 'green' ? 'rowGreen' : s.status === 'n/a' ? 'rowNa' : 'rowRed'
-    for (const d of s.details.length ? s.details : ['']) lines.push(t(template, { id: s.id, detail: d }))
+  try {
+    const provider = buildProvider(backend)
+    report = await runConformance(provider, backend.provider === 'local' || !backend.provider ? { localExempt: true } : {})
+  } catch (e) {
+    // The named backend cannot be built; the diagnostic still runs (versions,
+    // config shape, log tail) but nothing gets certified green.
+    lines.push(t('rowRed', { id: 'provider', detail: e.message }))
+  }
+  if (report) {
+    lines.push(t('verifyTitle'))
+    for (const s of report.sections) {
+      const template = s.status === 'green' ? 'rowGreen' : s.status === 'n/a' ? 'rowNa' : 'rowRed'
+      for (const d of s.details.length ? s.details : ['']) lines.push(t(template, { id: s.id, detail: d }))
+    }
   }
   const logFile = join(arxaHome(), 'dsh', 'engine.log')
   if (existsSync(logFile)) {
@@ -223,7 +245,7 @@ async function diagnose (args) {
   const text = lines.join('\n')
   const out = flag(args, '--out')
   if (out) { writeFileSync(resolve(out), text + '\n'); console.log(out) } else console.log(text)
-  return report.ok ? 0 : 1
+  return report?.ok ? 0 : 1
 }
 
 // ---- entry ------------------------------------------------------------------

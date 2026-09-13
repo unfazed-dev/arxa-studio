@@ -455,6 +455,15 @@ const fiveLibs = [
   ['git-workspace', resolve(here, '..', 'plugins', 'git-workspace')],
   ['account-mirror', resolve(here, '..', 'plugins', 'account-mirror')],
   ['cairn-rail', resolve(here, '..', 'plugins', 'cairn-rail')],
+  // git-workspace/lib/sessions.js imports ../../sandbox/lib/{devcontainer,sbx}.js
+  // (task 10 A4), and sandbox/lib/devcontainer.js imports
+  // ../../github-link/lib/keyring.js — the same flat-resolution rule as the
+  // five above, by DIRECTORY name (the plugin's package name is
+  // arxa-github-link; only the dir name resolves relatively). Without these
+  // two rows every boot dies ERR_MODULE_NOT_FOUND (T11 regression, found in
+  // the task 13 review; gated by scripts/engine-boot-smoke.mjs in npm test).
+  ['sandbox', resolve(here, '..', 'plugins', 'sandbox')],
+  ['github-link', githubLinkDir],
   // arxa-approvals probes 'arxa-push-doorbell' bare, then the relative
   // ../../push-doorbell/lib/index.js — both shapes need these two flat.
   ['arxa-approvals', approvalsDir],

@@ -120,8 +120,14 @@ export class GenericRestWorkspaceProvider {
     const spec = buildRequest(name, params, { requestId: randomUUID(), token })
     const url = this.baseUrl + spec.url
     const payload = bytes ?? (body !== undefined ? JSON.stringify(body) : undefined)
-    if (payload !== undefined && Buffer.byteLength(payload) > BOUNDS.MAX_RECORD_BYTES)
-      throw invalidRequest('body exceeds the Wire v1 byte bound')
+    // Bytes (blob) payloads ride MAX_BLOB_BYTES; JSON bodies ride
+    // MAX_RECORD_BYTES. One bound for both rejected every legal >1 MiB blob
+    // client-side (task 13 review, Important 1).
+    if (payload !== undefined) {
+      const isBytes = op.req === MEDIA.BYTES
+      if (Buffer.byteLength(payload) > (isBytes ? BOUNDS.MAX_BLOB_BYTES : BOUNDS.MAX_RECORD_BYTES))
+        throw invalidRequest(isBytes ? 'blob exceeds the Wire v1 blob byte bound' : 'body exceeds the Wire v1 byte bound')
+    }
 
     let lastError = null
     for (let attempt = 1; attempt <= this.attempts; attempt++) {

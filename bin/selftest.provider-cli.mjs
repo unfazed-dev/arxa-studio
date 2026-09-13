@@ -154,6 +154,29 @@ try {
     assert.ok(existsSync(join(here, '..', 'plugins', 'workspace-provider', 'lib', 'index.js')), 'host half exists')
     ok('runtime + package inclusion: profile dep, cordis row, host/client halves')
   }
+  // ---------------------------------------------- 9. an unimplemented provider name never certifies local (review Important 2)
+  {
+    // supabase is D32-sanctioned (PROVIDERS includes it) but unimplemented in
+    // this build — the CLI must refuse the silent local substitution.
+    const cfg = join(scratch, 'supabase.json')
+    writeFileSync(cfg, JSON.stringify({ workspaceBackend: { provider: 'supabase', supabase: { url: 'https://x.test', anonKey: 'k' } } }))
+
+    const v = run('arxa-studio.mjs', ['provider', 'verify', '--config', cfg])
+    assert.notEqual(v.status, 0, 'verify exits nonzero for an unimplemented provider')
+    assert.ok(v.stdout.split('\n').some((l) => /^RED/.test(l) && /supabase/.test(l)), 'a RED row names the unimplemented adapter')
+    assert.ok(!v.stdout.includes('all sections green'), 'the wrong backend is never certified green')
+
+    const e = run('arxa-studio.mjs', ['workspace', 'export', '--org', org.id, '--out', join(scratch, 'never-written'), '--config', cfg])
+    assert.notEqual(e.status, 0, 'export refuses to silently substitute local')
+    assert.ok((e.stderr + e.stdout).includes('not implemented'), 'the refusal names the adapter')
+
+    const d = run('arxa-studio.mjs', ['diagnose', '--config', cfg])
+    assert.notEqual(d.status, 0, 'diagnose exits nonzero')
+    for (const needle of ['provider: supabase', 'RED', 'not implemented'])
+      assert.ok(d.stdout.includes(needle), 'diagnose carries ' + needle)
+    ok('supabase config: verify RED + nonzero, export refuses, diagnose reports without certifying')
+  }
+
 } finally {
   rmSync(scratch, { recursive: true, force: true })
   rmSync(other, { recursive: true, force: true })

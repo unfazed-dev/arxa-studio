@@ -428,6 +428,23 @@ try {
     assert.ok(rawCode?.startsWith('refused'), 'no audit mutation route exists server-side')
     ok('audit immutability: raw wire mutation attempts are refused')
   }
+
+  // ---------------------------------------------- 9. blobs are bounded by MAX_BLOB_BYTES (review Important 1)
+  {
+    const org = await A.createOrg({ name: 'blob-bound-org', kind: 'studio' })
+    const big = Buffer.alloc(2 * 1024 * 1024, 7) // 2 MiB: contract-legal blob, oversize as a record
+    const put = await A.putBlob(org.id, 'big/blob.bin', big)
+    assert.equal(put.bytes, big.length, 'a 2 MiB blob must reach the wire, not die client-side on the 1 MiB record bound')
+    assert.equal(put.sha256, sha256(big), 'the client hash covers the whole blob')
+    const back = await A.getBlob(org.id, 'big/blob.bin')
+    assert.ok(back.equals(big), 'round-trip preserves every byte')
+    // The record bound itself still bites: a >1 MiB JSON body stays invalid_request.
+    let code = null
+    try { await A.putRecord(org.id, 'tickets', 'too-big', { pad: 'x'.repeat(BOUNDS.MAX_RECORD_BYTES) }) } catch (e) { code = e.code }
+    assert.equal(code, 'invalid_request', 'a >1 MiB JSON record is still rejected by MAX_RECORD_BYTES')
+    ok('blob byte bound is MAX_BLOB_BYTES (2 MiB accepted); the 1 MiB bound still guards JSON bodies')
+  }
+
 } finally {
   await fx.close()
 }

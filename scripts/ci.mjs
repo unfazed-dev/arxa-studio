@@ -69,6 +69,13 @@ suites.push([root, 'scripts', 'dsh-contract-check.mjs'])
 // before binding its port, two minutes of build and an install later. This
 // scans what the launcher actually loads and compares (2026-09-02 regression).
 suites.push([root, 'scripts', 'pack-list-check.mjs'])
+// The packed-boot gate. pack-list-check.mjs above scans bin/ vs BIN_FILES —
+// it cannot see a PLUGIN importing another plugin's lib (git-workspace →
+// sandbox, the T11 regression: web boot died ERR_MODULE_NOT_FOUND with every
+// scanner green). This smoke boots the real engine end-to-end against a
+// scratch home — live but fully local (loopback port, no credentials, no
+// model calls, ~15s), so ANY import the launcher loads must actually resolve.
+suites.push([root, 'scripts', 'engine-boot-smoke.mjs'])
 
 // bin/ is outside the plugins/*/selftest.mjs sweep, so this is wired by hand.
 // arxa-engine-sync decides what reaches a user's desktop payload, and both of its
