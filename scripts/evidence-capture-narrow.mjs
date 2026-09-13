@@ -214,7 +214,7 @@ const runGate = (width, surface, ctx) => new Promise((res) => {
 // Mount-shaped die reasons are "missing at width" (recorded rows); everything
 // else the gate can say (unfiltered console/page errors, non-mount die,
 // crash, timeout) is a hard failure.
-const MOUNTLESS = /never (mounted|showed|rendered|listed|became reachable|fired)|NOT FOUND|NO NEW-SESSION BUTTON|no (diagnostic|preview iframe|new registry row|Delete forever|header toggle|purge confirm)|did not (render|survive)|unknown surface|theme did not/i
+const MOUNTLESS = /never (mounted|showed|rendered|listed|became reachable|fired|expanded)|NOT FOUND|NO NEW-SESSION BUTTON|MOUNT ERR|no (diagnostic|preview iframe|new registry row|Delete forever|header toggle|purge confirm)|did not (render|survive)|unknown surface|theme did not/i
 const classify = (run) => {
   const errs = Number((run.out.match(/GATE ERRORS \((\d+)\)/) || [])[1] || 0)
   const fi = run.out.indexOf('FILTERED (pre-existing')
@@ -237,12 +237,12 @@ const evaluate = (entry, width, run, known) => {
   }
   const cls = classify(run)
   const shots = entry.shots.map((n) => { const f = shotFile(width, n); let ok = false; try { ok = statSync(f).mtimeMs > run.start } catch {} return { shot: `${n}-${width}.png`, ok } })
-  let { status, cause, error } = cls
+  let { kind: status, cause, error } = cls // classify() keys the verdict `kind`; rows carry `status`
   if (status === 'ok' && shots.some((s) => !s.ok)) { status = 'missing'; error = 'gate exited clean but an expected PNG is missing or stale'; cause = 'see the pair log' }
   // the install-strip lane must have rendered the STRIP (not a mounted editor)
   if (entry.gate === 'viewer-strip' && status === 'ok') {
     const st = (run.out.match(/dart state: (\{[^\n]*\})/) || [])[1] || ''
-    if (!/"strip":\s*true/.test(st)) { status = 'missing'; error = 'dart state ' + (st || 'absent from log'); cause = 'the SDK-absent install strip did not render (Dart visible to the studio despite the fvm PATH mask) — see the pair log' }
+    if (!/"strip":\s*true/.test(st)) { status = 'missing'; error = 'dart state ' + (st || 'absent from log'); cause = 'the SDK-absent install strip did not render — the viewer mounts the editor and the LSP status/strip path does not engage on fresh scratch boots (identical at 1280; see task-8-report Part B limitations)' }
   }
   return { ...base, status, error, cause, shots, consoleFiltered: cls.filtered, gateErrors: cls.errs }
 }

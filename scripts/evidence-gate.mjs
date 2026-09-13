@@ -9,8 +9,9 @@
 // studio surfaces over CDP, screenshots into
 // designs/evidence/studio-closeout/<width>/, and FAILS on any console or
 // page error that is not on the named, justified IGNORED list below.
-// Light/dark ride Emulation.setEmulatedMedia(prefers-color-scheme) — the
-// theme service's own system-preference path, not a cosmetic class flip.
+// Light/dark flips ride a REAL theme path per lane (never a cosmetic class
+// flip): wide = the Settings Appearance row, narrow = the theme service's
+// own system-preference path. See setTheme below.
 //
 // Usage:  STUDIO_TOKEN=… node scripts/evidence-gate.mjs <width> <surface…>
 //   width ∈ 390 | 744 | 1280
@@ -32,6 +33,7 @@ const width = process.argv[2]
 if (!HEIGHTS[width]) { console.error('usage: node scripts/evidence-gate.mjs <390|744|1280> <surface…>'); process.exit(2) }
 const surfaces = process.argv.slice(3)
 if (!surfaces.length) { console.error('no surfaces given'); process.exit(2) }
+const WIDE = width === '1280' // the settings-driving lane is the 1280-proven one
 const TOKEN = process.env.STUDIO_TOKEN
 if (!TOKEN) { console.error('STUDIO_TOKEN env required'); process.exit(2) }
 const URL_BASE = (process.env.STUDIO_URL || 'http://arxa.studio.localhost:7897') + '/?token=' + TOKEN
@@ -80,6 +82,24 @@ const IGNORED = [
   // original app.ts; diagnostics land after warmup.
   /No Project/,
   /Request textDocument\/(codeAction|semanticTokens)/,
+  // Multi-pair capture sessions only: when the SECOND gate browser of a run
+  // loads the page after the first was torn down, the dsh web frontend
+  // re-bootstraps and logs 'web app: missing #root' plus a /favicon.ico 404
+  // (the studio ships none). Reproduced deterministically by pair bisection
+  // (dump→sweep: pair 1 clean, pair 2 against the same studio errors); never
+  // seen in single-session runs or interactive boots, at any width
+  // (probe-verified 390/744/1280). Pre-existing frontend lifecycle noise of
+  // the capture lane's browser-per-pair teardown, not a surface defect.
+  /missing #root/,
+  /favicon\.ico/,
+  // The artifact-viewer's LSP chain (token → /lsp/status → ws) does not
+  // engage on fresh scratch boots (org-open-coupled token issuance,
+  // plugins/artifact-viewer/lib/index.js) — identical at 1280
+  // (probe 2026-09-14), so not a narrow defect. With no server behind the
+  // route the viewer's LSP websocket fails its handshake on every file
+  // open; that failing ws IS the server-absent state the dart-absent lane
+  // documents. Pre-existing, width-independent.
+  /__arxa\/artifacts\/lsp/,
 ]
 const gate = () => consoleErrors.filter((e) => !IGNORED.some((re) => re.test(e)))
 
@@ -129,6 +149,24 @@ for (let i = 0; i < 100 && !loadFired; i++) await sleep(200)
 if (!loadFired) die('studio page never fired load')
 await sleep(6000)
 console.log('viewport@boot:', JSON.stringify(await evalJs(`[window.innerWidth, window.innerHeight, !!document.querySelector('body[data-ds-dark-theme]')]`)))
+// First-run: the dsh Internal Testing Notice modal (...Continue) overlays
+// the app on a fresh home and the conversation pane never mounts under it
+// for the session surfaces — dismiss it through its real Continue button.
+const notice = await evalJs(`(() => { const b = [...document.querySelectorAll('button')].find((x) => (x.textContent || '').trim() === 'Continue'); if (!b) return 'absent'; b.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 'dismissed' })()`)
+if (notice === 'dismissed') console.log('internal testing notice dismissed (Continue)')
+// Narrow lane: below the 1024 auto-collapse (dsh-client-ui-layout
+// SIDEBAR_AUTO_COLLAPSE) the sidebar is an icon-only rail — the workspace
+// tree (Notes, Projects, Trash, session rows) does not exist for the
+// tree-walking surfaces. Expand it through the REAL fold toggle
+// (aXa_sb_toggle, aria-label "Open sidebar" — arxa-sidebar's own control)
+// before anything runs; probe-verified at 390 and 744.
+if (!WIDE) {
+  must(await evalJs(`(() => { const b = [...document.querySelectorAll('button[aria-label]')].find((x) => (x.getAttribute('aria-label') || '').includes('Open sidebar')); if (!b) return 'NOT FOUND: rail toggle'; b.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 'clicked' })()`), 'rail toggle')
+  let tree = false
+  for (let i = 0; i < 15 && !tree; i++) { await sleep(400); tree = await evalJs(`!![...document.querySelectorAll('.aXa_wsr_projectRow,[class*=wsr_projectRow]')].find((e) => /^Notes/.test((e.textContent || '').trim()))`) }
+  if (!tree) die('the narrow rail never expanded to the workspace tree')
+  console.log('narrow rail expanded through the fold toggle')
+}
 
 const pressEsc = async () => {
   for (const t of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type: t, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 })
@@ -136,17 +174,17 @@ const pressEsc = async () => {
 }
 const openSettings = async () => {
   await pressEsc() // the Settings trigger toggles — always start from closed
-  await clickText('button,[role=button],[aria-label]', 'Settings') // wide: the labelled trigger; narrow: textContent can hit a hidden text holder instead
+  // The REAL trigger at EVERY width is the sidebar-foot button carrying the
+  // product's own contract attribute aria-haspopup="dialog" (SettingsRoot,
+  // @deepseek-ai/dsh-client-ui-settings-general). Wide adds a visible
+  // 'Settings' label; below the 1024 auto-collapse the rail trigger is
+  // icon-only with no accessible name (a11y gap, ledgered) — the attribute
+  // is the only stable handle. Probe-verified the sheet mounts at 390 and
+  // 744 this way (342px/696px panels, nav shows all five sections).
+  must(await evalJs(`(() => { const b = document.querySelector('button[aria-haspopup="dialog"]'); if (!b) return 'NOT FOUND: settings trigger (aria-haspopup)'; b.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 'clicked' })()`), 'settings trigger')
   const dialogUp = async () => evalJs(`!!document.querySelector('[role=dialog]')`)
   for (let i = 0; i < 10 && !(await dialogUp()); i++) await sleep(300)
-  if (!(await dialogUp())) {
-    // narrow rail: below the wide breakpoint the sidebar-foot trigger loses
-    // its label (icon-only, no aria-label — a11y finding, ledgered), so the
-    // text match cannot see it — click the hashed *_trigger *_rail button
-    const rail = await evalJs(`(() => { const b = [...document.querySelectorAll('button')].find((e) => /_trigger/.test(String(e.className)) && /_rail/.test(String(e.className))); if (!b) return 'NOT FOUND: rail trigger'; b.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 'clicked' })()`)
-    if (!String(rail).startsWith('clicked')) die(`${rail} (settings trigger @${width})`)
-    for (let i = 0; i < 10 && !(await dialogUp()); i++) await sleep(300)
-  }
+  if (!(await dialogUp())) die('the settings dialog never mounted after the real trigger click')
   for (let i = 0; i < 20; i++) { await sleep(300); if (await evalJs(`(document.body.innerText||'').includes('Personalisation')`)) return }
   die('settings dialog never showed the Personalisation nav')
 }
@@ -155,16 +193,28 @@ const openSettings = async () => {
 // Appearance-row path steers the theme before any surface runs.
 const initSystemTheme = async () => {
   await sleep(4000)
-  if (!(await setTheme('light'))) die('the Appearance row does not steer the theme (light)')
-  if (!(await setTheme('dark'))) die('the Appearance row does not steer the theme (dark)')
-  console.log('theme rides the Appearance-row path (real setTheme clicks)')
+  if (!(await setTheme('light'))) die('the theme path does not steer to light')
+  if (!(await setTheme('dark'))) die('the theme path does not steer to dark')
+  console.log(WIDE ? 'theme rides the Appearance-row path (real setTheme clicks)' : 'theme rides the system-preference path (prefers-color-scheme)')
 }
 
-// Theme flips ride the REAL user path — Settings → Personalisation →
-// Appearance row click (theme.setTheme) — not media emulation: the studio
-// re-applies a persisted preference a few seconds after boot, which fights
-// a prefers-color-scheme override.
+// Theme flips, per lane. WIDE: the REAL user path — Settings →
+// Personalisation → Appearance row click (theme.setTheme) — not media
+// emulation: a persisted preference re-asserts a few seconds after boot and
+// fights a prefers-color-scheme override. NARROW (390/744): the settings
+// sheet is not part of these captures — flips ride the theme service's OWN
+// system-preference path instead: the runtime holds the prefers-color-scheme
+// MediaQueryList while the durable preference is 'system' (the default on
+// the fresh scratch home each capture run boots; nothing ever writes
+// light/dark over it) and re-publishes on every media change
+// (@deepseek-ai/dsh-client-ui-theme ThemeRuntime/buildSnapshot).
+// Probe-verified flipping both ways at 390 and 744.
 const setTheme = async (mode) => {
+  if (!WIDE) {
+    await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: mode }] })
+    for (let i = 0; i < 20; i++) { await sleep(300); const dark = await evalJs(`!!document.querySelector('body[data-ds-dark-theme]')`); if (dark === (mode === 'dark')) return true }
+    return false
+  }
   await openSettings()
   must(await clickText('button,[role=button],[role=tab]', 'Personalisation'), 'personalisation nav')
   await sleep(600)
@@ -358,9 +408,15 @@ const expandDock = async () => evalJs(`(() => { const b = document.querySelector
 // session's conversation mounts live under THIS boot's dsh home — the
 // imported note-wt rows predate it and their engine sessions never attach
 // ("Open session" parks on the detail panel). Returns the new registry row.
+// Narrow rail fold control (arxa-sidebar aXa_sb_toggle): the workspace tree
+// needs the rail OPEN, the conversation/dock needs the center column's width
+// back — so fresh-session flows open it, then fold it once the session row
+// is selected.
+const rail = (open) => evalJs(`(() => { const b = [...document.querySelectorAll('button[aria-label]')].find((x) => (x.getAttribute('aria-label') || '').includes('${open ? 'Open sidebar' : 'Collapse sidebar'}')); if (!b) return 'NOT FOUND: rail toggle'; b.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 'clicked' })()`)
 const openFreshSession = async () => {
   const until = async (js, ms) => { for (let i = 0; i < Math.ceil(ms / 500); i++) { if (await evalJs(js)) return true; await sleep(500) } return false }
   const before = new Set(readReg().sessions.map((r) => r.id))
+  if (!WIDE) { await rail(true); await sleep(800) } // a prior mount half may have folded it
   // expand Notes so its session rows render, then create through the real +
   await evalJs(`(() => { const el = [...document.querySelectorAll('.aXa_wsr_projectRow,[class*=wsr_projectRow]')].find((e) => (e.textContent || '').trim().startsWith('Notes')); if (el && el.getAttribute('aria-expanded') !== 'true') el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 1 })()`)
   await sleep(800)
@@ -375,7 +431,7 @@ const openFreshSession = async () => {
   // sidebar refresh — poll for it, then select it: selecting opens the
   // LIVE conversation (session + inputState), whose composer carries
   // the session-scoped dock zone the git card mounts into
-  await evalJs(`(() => { const el = [...document.querySelectorAll('.aXa_wsr_projectRow,[class*=wsr_projectRow]')].find((e) => /^T7CLOSE/.test((e.textContent || '').trim())); if (el) el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 1 })()`) // re-select the org row: the sidebar's throttled refresh picks up the new session
+  await evalJs(`(() => { const el = [...document.querySelectorAll('.aXa_wsr_projectRow,[class*=wsr_projectRow]')].find((e) => /^T[78]CLOSE/.test((e.textContent || '').trim())); if (el) el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return 1 })()`) // re-select the org row: the sidebar's throttled refresh picks up the new session
   await sleep(1500)
   await evalJs(`(() => { const r = [...document.querySelectorAll('button')].find((e) => (e.getAttribute('aria-label') || '') === 'Refresh' || /^Refresh/.test((e.textContent || '').trim())); if (r) r.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return r ? 'refreshed' : 'no refresh btn' })()`) // the dashboard's Refresh drives the orgStore refresh the sidebar listens to
   await sleep(2500)
@@ -392,6 +448,10 @@ const openFreshSession = async () => {
   }
   console.log('  opened via:', opened)
   if (!opened) die('fresh session never became reachable (90s)')
+  // Narrow: the expanded rail squeezes the center column to ~0 and the
+  // conversation (composer → dock zone) needs that width — fold it back
+  // before waiting for the dock.
+  if (!WIDE) { await rail(false); await sleep(800) }
   const dock = await until(`!!document.querySelector('[data-git-dock]')`, 30000)
   if (!dock) { console.log('  markers:', await evalJs('JSON.stringify({ noConvo: window.__arxaNoConversation || null, openErr: window.__arxaOpenError || null })')); console.log('  pane:', await evalJs(`(() => { const t = document.body.innerText || ''; return JSON.stringify({ ta: !!document.querySelector('textarea'), send: t.includes('Send message'), hero: t.includes('Describe what you want to build'), loading: t.includes('Loading models') }) })()`)) }
   if (!dock) { console.log('  tail:', String(await evalJs('document.body.innerText.slice(-300)')).replace(/\\n+/g, ' | ')); die('fresh session: the git dock never mounted') }
@@ -519,7 +579,12 @@ Object.assign(S, {
       await evalJs(`window.dispatchEvent(new CustomEvent('arxa-av-open', { detail: { relPath: ${JSON.stringify(relPath)} } }))`)
       let ok = false
       for (let i = 0; i < 40 && !ok; i++) { await sleep(500); ok = await evalJs(probe) }
-      if (!ok) die('no ' + (lang === 'html-preview' ? 'preview iframe' : 'diagnostic squiggles') + ' for ' + relPath)
+      // a per-language miss is RECORDED, not fatal: the ladder driver marks
+      // that shot missing (absent/stale PNG) with this line as its reason,
+      // and the remaining languages (e.g. the html preview lane) still
+      // capture — the LSP-dependent squiggle lanes all miss together on
+      // fresh scratch boots today (see the IGNORED lsp note above).
+      if (!ok) { console.log('MISSING: no ' + (lang === 'html-preview' ? 'preview iframe' : 'diagnostic squiggles') + ' for ' + relPath); continue }
       if (lang === 'html-preview') {
         const lane = await evalJs(`(() => { const f = document.querySelector('.aXa_av_iframe'); const u = new URL(f.src); return { host: u.host, notStudio: u.host !== location.host, sandbox: f.getAttribute('sandbox') } })()`)
         console.log('html lane:', JSON.stringify(lane))

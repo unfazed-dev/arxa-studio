@@ -1,0 +1,544 @@
+{
+  "startedAt": "2026-09-13T15:34:53.990Z",
+  "ladder": [
+    "finish",
+    "sweep-modal",
+    "checks-red-disclosure",
+    "project-preparation",
+    "trash-confirm",
+    "trash-recover",
+    "viewer-install-strip",
+    "confinement-configured-effective",
+    "workspace-backend-local",
+    "workspace-signin",
+    "personalisation-tab",
+    "viewer-langstrip",
+    "viewer-dart-absent"
+  ],
+  "proven1280": [
+    "personalisation-tab",
+    "sweep-modal",
+    "viewer-langstrip",
+    "viewer-dart-absent"
+  ],
+  "rows": [
+    {
+      "surface": "finish",
+      "width": 390,
+      "gate": "finish",
+      "status": "missing",
+      "error": "fresh session: the git dock never mounted",
+      "cause": "surface did not mount/render at this width — recorded, not a failure (dispatch semantics)",
+      "shots": [
+        {
+          "shot": "finish-dialog-light-390.png",
+          "ok": false
+        },
+        {
+          "shot": "finish-dialog-dark-390.png",
+          "ok": false
+        }
+      ],
+      "consoleFiltered": 0,
+      "gateErrors": 0
+    },
+    {
+      "surface": "sweep-modal",
+      "width": 390,
+      "gate": "sweep",
+      "status": "ok",
+      "error": null,
+      "cause": null,
+      "shots": [
+        {
+          "shot": "sweep-modal-light-390.png",
+          "ok": true
+        },
+        {
+          "shot": "sweep-modal-dark-390.png",
+          "ok": true
+        }
+      ],
+      "consoleFiltered": 0,
+      "gateErrors": 0
+    },
+    {
+      "surface": "checks-red-disclosure",
+      "width": 390,
+      "gate": "checksred",
+      "status": "missing",
+      "error": "fresh session: the git dock never mounted",
+      "cause": "surface did not mount/render at this width — recorded, not a failure (dispatch semantics)",
+      "shots": [
+        {
+          "shot": "checks-red-light-390.png",
+          "ok": false
+        },
+        {
+          "shot": "checks-red-dark-390.png",
+          "ok": false
+        }
+      ],
+      "consoleFiltered": 0,
+      "gateErrors": 0
+    },
+    {
+      "surface": "project-preparation",
+      "width": 390,
+      "gate": "preparation",
+      "status": "missing",
+      "error": "the repair offer (Initialize Git repository) never rendered",
+      "cause": "surface did not mount/render at this width — recorded, not a failure (dispatch semantics)",
+      "shots": [
+        {
+          "shot": "project-preparation-light-390.png",
+          "ok": false
+        },
+        {
+          "shot": "project-preparation-dark-390.png",
+          "ok": false
+        }
+      ],
+      "consoleFiltered": 0,
+      "gateErrors": 0
+    },
+    {
+      "surface": "trash-confirm",
+      "width": 390,
+      "gate": "trash",
+      "status": "hard",
+      "error": "pair exceeded the 480s budget",
+      "cause": "hung surface or flow — see the pair log",
+      "shots": [
+        {
+          "shot": "trash-confirm-light-390.png",
+          "ok": false
+        },
+        {
+          "shot": "trash-confirm-dark-390.png",
+          "ok": false
+        }
+      ],
+      "consoleFiltered": 0,
+      "gateErrors": 0
+    },
+    {
+      "surface": "trash-recover",
+      "width": 390,
+      "gate": "trash",
+      "status": "hard",
+      "error": "pair exceeded the 480s budget",
+      "cause": "hung surface or flow — see the pair log",
+      "shots": [
+        {
+          "shot": "trash-view-light-390.png",
+          "ok": true
+        },
+        {
+          "shot": "trash-view-dark-390.png",
+          "ok": false
+        }
+      ],
+      "consoleFiltered": 0,
+      "gateErrors": 0
+    },
+    {
+      "surface": "viewer-install-strip",
+      "width": 390,
+      "gate": "viewer-strip",
+      "status": "missing",
+      "error": "dart state {\"strip\":false,\"editor\":true}",
+      "cause": "the SDK-absent install strip did not render — the viewer mounts the editor and the LSP status/strip path does not engage on fresh scratch boots (identical at 1280; see task-8-report Part B limitations)",
+      "shots": [
+        {
+          "shot": "viewer-install-strip-light-390.png",
+          "ok": true
+        },
+        {
+          "shot": "viewer-install-strip-dark-390.png",
+          "ok": true
+        }
+      ],
+      "consoleFiltered": 3,
+      "gateErrors": 0
+    },
+    {
+      "surface": "confinement-configured-effective",
+      "width": 390,
+      "gate": "confine",
+      "status": "missing",
+      "error": "fresh session: the git dock never mounted",
+      "cause": "surface did not mount/render at this width — recorded, not a failure (dispatch semantics)",
+      "shots": [
+        {
+          "shot": "confinement-tier-light-390.png",
+          "ok": false
+        },
+        {
+          "shot": "confinement-tier-dark-390.png",
+          "ok": false
+        }
+      ],
+      "consoleFiltered": 0,
+      "gateErrors": 0
+    },
+    {
+      "surface": "workspace-backend-local",
+      "width": 390,
+      "gate": "backend",
+      "status": "missing",
+      "error": "MOUNT ERR: connection: invalid server-response result @TypeError: connection: invalid server-response result",
+      "cause": "surface did not mount/render at this width — recorded, not a failure (dispatch semantics)",
+      "shots": [
+        {
+          "shot": "workspace-backend-model-light-390.png",
+          "ok": false
+        },
+        {
+          "shot": "workspace-backend-model-dark-390.png",
+          "ok": false
+        }
+      ],
+      "consoleFiltered": 0,
+      "gateErrors": 0
+    },
+    {
+      "surface": "workspace-signin",
+      "width": 390,
+      "gate": "signin",
+      "status": "missing",
+      "error": "no surface \"signin\" in scripts/evidence-gate.mjs",
+      "cause": "workspace sign-in has no mounted studio UI — the backend renders as a settings-section model and signIn requires a configured remote provider, unreachable on a credential-free scratch boot",
+      "shots": [],
+      "consoleFiltered": 0,
+      "gateErrors": 0
+    },
+    {
+      "surface": "personalisation-tab",
+      "width": 390,
+      "gate": "personalisation",
+      "status": "ok",
+      "error": null,
+      "cause": null,
+      "shots": [
+        {
+          "shot": "personalisation-tab-light-390.png",
+          "ok": true
+        },
+        {
+          "shot": "personalisation-tab-dark-390.png",
+          "ok": true
+        }
+      ],
+      "consoleFiltered": 2,
+      "gateErrors": 0
+    },
+    {
+      "surface": "viewer-langstrip",
+      "width": 390,
+      "gate": "langstrip",
+      "status": "missing",
+      "error": "gate exited clean but an expected PNG is missing or stale",
+      "cause": "see the pair log",
+      "shots": [
+        {
+          "shot": "langstrip-ts-390.png",
+          "ok": false
+        },
+        {
+          "shot": "langstrip-css-390.png",
+          "ok": false
+        },
+        {
+          "shot": "langstrip-json-390.png",
+          "ok": false
+        },
+        {
+          "shot": "langstrip-html-preview-390.png",
+          "ok": true
+        }
+      ],
+      "consoleFiltered": 2,
+      "gateErrors": 0
+    },
+    {
+      "surface": "viewer-dart-absent",
+      "width": 390,
+      "gate": "viewer-strip",
+      "status": "missing",
+      "error": "dart state {\"strip\":false,\"editor\":true}",
+      "cause": "the SDK-absent install strip did not render — the viewer mounts the editor and the LSP status/strip path does not engage on fresh scratch boots (identical at 1280; see task-8-report Part B limitations)",
+      "shots": [
+        {
+          "shot": "viewer-install-strip-light-390.png",
+          "ok": true
+        },
+        {
+          "shot": "viewer-install-strip-dark-390.png",
+          "ok": true
+        }
+      ],
+      "consoleFiltered": 3,
+      "gateErrors": 0
+    },
+    {
+      "surface": "finish",
+      "width": 744,
+      "gate": "finish",
+      "status": "missing",
+      "error": "fresh session: the git dock never mounted",
+      "cause": "surface did not mount/render at this width — recorded, not a failure (dispatch semantics)",
+      "shots": [
+        {
+          "shot": "finish-dialog-light-744.png",
+          "ok": false
+        },
+        {
+          "shot": "finish-dialog-dark-744.png",
+          "ok": false
+        }
+      ],
+      "consoleFiltered": 0,
+      "gateErrors": 0
+    },
+    {
+      "surface": "sweep-modal",
+      "width": 744,
+      "gate": "sweep",
+      "status": "ok",
+      "error": null,
+      "cause": null,
+      "shots": [
+        {
+          "shot": "sweep-modal-light-744.png",
+          "ok": true
+        },
+        {
+          "shot": "sweep-modal-dark-744.png",
+          "ok": true
+        }
+      ],
+      "consoleFiltered": 0,
+      "gateErrors": 0
+    },
+    {
+      "surface": "checks-red-disclosure",
+      "width": 744,
+      "gate": "checksred",
+      "status": "missing",
+      "error": "fresh session: the git dock never mounted",
+      "cause": "surface did not mount/render at this width — recorded, not a failure (dispatch semantics)",
+      "shots": [
+        {
+          "shot": "checks-red-light-744.png",
+          "ok": false
+        },
+        {
+          "shot": "checks-red-dark-744.png",
+          "ok": false
+        }
+      ],
+      "consoleFiltered": 0,
+      "gateErrors": 0
+    },
+    {
+      "surface": "project-preparation",
+      "width": 744,
+      "gate": "preparation",
+      "status": "missing",
+      "error": "PREP ROW NOT FOUND",
+      "cause": "surface did not mount/render at this width — recorded, not a failure (dispatch semantics)",
+      "shots": [
+        {
+          "shot": "project-preparation-light-744.png",
+          "ok": false
+        },
+        {
+          "shot": "project-preparation-dark-744.png",
+          "ok": false
+        }
+      ],
+      "consoleFiltered": 0,
+      "gateErrors": 0
+    },
+    {
+      "surface": "trash-confirm",
+      "width": 744,
+      "gate": "trash",
+      "status": "missing",
+      "error": "the trash entry never listed",
+      "cause": "surface did not mount/render at this width — recorded, not a failure (dispatch semantics)",
+      "shots": [
+        {
+          "shot": "trash-confirm-light-744.png",
+          "ok": false
+        },
+        {
+          "shot": "trash-confirm-dark-744.png",
+          "ok": false
+        }
+      ],
+      "consoleFiltered": 0,
+      "gateErrors": 0
+    },
+    {
+      "surface": "trash-recover",
+      "width": 744,
+      "gate": "trash",
+      "status": "missing",
+      "error": "the trash entry never listed",
+      "cause": "surface did not mount/render at this width — recorded, not a failure (dispatch semantics)",
+      "shots": [
+        {
+          "shot": "trash-view-light-744.png",
+          "ok": false
+        },
+        {
+          "shot": "trash-view-dark-744.png",
+          "ok": false
+        }
+      ],
+      "consoleFiltered": 0,
+      "gateErrors": 0
+    },
+    {
+      "surface": "viewer-install-strip",
+      "width": 744,
+      "gate": "viewer-strip",
+      "status": "missing",
+      "error": "dart state {\"strip\":false,\"editor\":true}",
+      "cause": "the SDK-absent install strip did not render — the viewer mounts the editor and the LSP status/strip path does not engage on fresh scratch boots (identical at 1280; see task-8-report Part B limitations)",
+      "shots": [
+        {
+          "shot": "viewer-install-strip-light-744.png",
+          "ok": true
+        },
+        {
+          "shot": "viewer-install-strip-dark-744.png",
+          "ok": true
+        }
+      ],
+      "consoleFiltered": 3,
+      "gateErrors": 0
+    },
+    {
+      "surface": "confinement-configured-effective",
+      "width": 744,
+      "gate": "confine",
+      "status": "missing",
+      "error": "fresh session never became reachable (90s)",
+      "cause": "surface did not mount/render at this width — recorded, not a failure (dispatch semantics)",
+      "shots": [
+        {
+          "shot": "confinement-tier-light-744.png",
+          "ok": false
+        },
+        {
+          "shot": "confinement-tier-dark-744.png",
+          "ok": false
+        }
+      ],
+      "consoleFiltered": 0,
+      "gateErrors": 0
+    },
+    {
+      "surface": "workspace-backend-local",
+      "width": 744,
+      "gate": "backend",
+      "status": "missing",
+      "error": "MOUNT ERR: connection: invalid server-response result @TypeError: connection: invalid server-response result",
+      "cause": "surface did not mount/render at this width — recorded, not a failure (dispatch semantics)",
+      "shots": [
+        {
+          "shot": "workspace-backend-model-light-744.png",
+          "ok": false
+        },
+        {
+          "shot": "workspace-backend-model-dark-744.png",
+          "ok": false
+        }
+      ],
+      "consoleFiltered": 0,
+      "gateErrors": 0
+    },
+    {
+      "surface": "workspace-signin",
+      "width": 744,
+      "gate": "signin",
+      "status": "missing",
+      "error": "no surface \"signin\" in scripts/evidence-gate.mjs",
+      "cause": "workspace sign-in has no mounted studio UI — the backend renders as a settings-section model and signIn requires a configured remote provider, unreachable on a credential-free scratch boot",
+      "shots": [],
+      "consoleFiltered": 0,
+      "gateErrors": 0
+    },
+    {
+      "surface": "personalisation-tab",
+      "width": 744,
+      "gate": "personalisation",
+      "status": "ok",
+      "error": null,
+      "cause": null,
+      "shots": [
+        {
+          "shot": "personalisation-tab-light-744.png",
+          "ok": true
+        },
+        {
+          "shot": "personalisation-tab-dark-744.png",
+          "ok": true
+        }
+      ],
+      "consoleFiltered": 0,
+      "gateErrors": 0
+    },
+    {
+      "surface": "viewer-langstrip",
+      "width": 744,
+      "gate": "langstrip",
+      "status": "missing",
+      "error": "gate exited clean but an expected PNG is missing or stale",
+      "cause": "see the pair log",
+      "shots": [
+        {
+          "shot": "langstrip-ts-744.png",
+          "ok": false
+        },
+        {
+          "shot": "langstrip-css-744.png",
+          "ok": false
+        },
+        {
+          "shot": "langstrip-json-744.png",
+          "ok": false
+        },
+        {
+          "shot": "langstrip-html-preview-744.png",
+          "ok": false
+        }
+      ],
+      "consoleFiltered": 2,
+      "gateErrors": 0
+    },
+    {
+      "surface": "viewer-dart-absent",
+      "width": 744,
+      "gate": "viewer-strip",
+      "status": "missing",
+      "error": "dart state {\"strip\":false,\"editor\":true}",
+      "cause": "the SDK-absent install strip did not render — the viewer mounts the editor and the LSP status/strip path does not engage on fresh scratch boots (identical at 1280; see task-8-report Part B limitations)",
+      "shots": [
+        {
+          "shot": "viewer-install-strip-light-744.png",
+          "ok": true
+        },
+        {
+          "shot": "viewer-install-strip-dark-744.png",
+          "ok": true
+        }
+      ],
+      "consoleFiltered": 3,
+      "gateErrors": 0
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+viewport@boot: [744,813,true]
+narrow rail expanded through the fold toggle
+theme rides the system-preference path (prefers-color-scheme)
+-- surface: confine
+  fresh session: T8CLOSE/notes/note-wt-260914-006
+  opened via: false
+EVIDENCE FAIL: fresh session never became reachable (90s)

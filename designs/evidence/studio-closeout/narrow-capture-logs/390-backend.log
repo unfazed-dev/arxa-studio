@@ -1,0 +1,9 @@
+viewport@boot: [390,844,true]
+narrow rail expanded through the fold toggle
+theme rides the system-preference path (prefers-color-scheme)
+-- surface: backend
+wp probe: keys=info,section,namespace
+backend model: MOUNT ERR: connection: invalid server-response result @TypeError: connection: invalid server-response result
+    at parseConnectionResponse (http://arxa.studio.localhost:7897/plugins/??@deepseek-ai/dsh-typert-regist
+EVIDENCE FAIL: MOUNT ERR: connection: invalid server-response result @TypeError: connection: invalid server-response result
+    at parseConnectionResponse (http://arxa.studio.localhost:7897/plugins/??@deepseek-ai/dsh-typert-regist
