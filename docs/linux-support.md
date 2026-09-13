@@ -54,6 +54,11 @@ curl -fsSL https://raw.githubusercontent.com/unfazed-dev/arxa-releases/main/inst
 ARXA_STUDIO_APPIMAGE=./Arxa-Studio-0.1.1-aarch64-unknown-linux-gnu.AppImage sh install.sh
 ```
 
+macOS has the same-shaped twin (`install-macos.sh`, source of truth
+`../arxa/desktop/scripts/install-macos.sh` + its offline focused test); the
+user-facing distribution summary for this repo's sibling lives at
+`../arxa/docs/linux-support.md`.
+
 Proven 2026-09-08 as root in a fresh `ubuntu:22.04` container (apt path, local
 image, launcher entry, `--appimage-version`, uninstall). Plan and decisions:
 `docs/plans/linux-install-script.md`. The preview release

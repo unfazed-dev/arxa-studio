@@ -528,6 +528,10 @@ bwrap probe is skipped. Nothing arch-specific broke.
   have not yet run on the runner — the first release tag and the first
   `desktop/**` PR are their first live pass.
 - `arxa/desktop` has no `.desktop`-file or icon story beyond the PKGBUILD entry.
+  *(Stale — corrected 2026-09-14, closeout evidence pass: `desktop/scripts/install.sh`
+  writes the per-user `.desktop` entry + extracted icon under `~/.local/share`
+  and `--uninstall` removes both; the PKGBUILD ships its own `arxa-studio.desktop`.
+  The line predates the install script's landing.)*
 
 ## 2026-09-08 — the missing composer, and the deploy trap that hid it
 
