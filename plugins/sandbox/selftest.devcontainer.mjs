@@ -48,6 +48,7 @@ import {
   fetchContainerCommits,
   prepareSecretMount,
   startContainer,
+  sweepStaleSecretDirs,
   stopContainer
 } from './lib/devcontainer.js'
 import { allocatePortBlock, startProjectDatabase } from './lib/project-database.js'
@@ -262,6 +263,12 @@ const hybridRunner = (repo, branch, overrides = []) => {
   }
 }
 
+/** The smoke's runner choice: the REAL leg must reach real docker (the
+ * default runner); the degraded leg runs the hybrid double. */
+const smokeRunnerFor = (real, repo, branch) => real
+  ? { run: undefined } // undefined → deps.runner ?? defaultRunner = REAL docker
+  : hybridRunner(repo, branch)
+
 const realRepo = (name) => {
   const { dir, git } = scratchRepo(name)
   git('init', '-b', 'main')
@@ -337,6 +344,14 @@ let lifecycle
       assert.ok(existsSync(handle.registryPath), 'the registry row lands under .arxa')
     })
 
+    await ok('startContainer is idempotent: a re-start returns the live handle from the registry row', async () => {
+      runner.dockerCalls.length = 0
+      const again = await startContainer({ repoPath: dir, branch: 'arxa/s-1', sessionId: 'arxa/org/ws/1-s', target: 'node' }, { runner: runner.run })
+      assert.equal(again.container, handle.container, 'the same container')
+      assert.equal(again.volume, handle.volume, 'the same volume')
+      assert.equal(runner.dockerCalls.length, 0, 'a re-start builds nothing, clones nothing, starts nothing')
+    })
+
     await ok('execContainer passes argv through, structured and bounded', async () => {
       runner.dockerCalls.length = 0
       const r = await execContainer(handle, ['node', '--version'], { runner: runner.run })
@@ -370,6 +385,23 @@ let lifecycle
       ])
       await assert.rejects(() => stopContainer(handle, { runner: bad.run }), /refus|unrecover/i)
       assert.ok(existsSync(handle.registryPath), 'the registry row survives the refusal')
+    })
+
+    await ok('stopContainer keeps the registry row when the daemon is down (rm fails)', async () => {
+      // First make the work RECOVERED (a good fetch), so the only failure
+      // left in this row is the docker rm itself.
+      const good = hybridRunner(dir, 'HEAD')
+      const f = await fetchContainerCommits(handle, { runner: good.run })
+      assert.equal(f.reachable, true, 'precondition: the work is recovered')
+      // This machine's normal state: every docker call fails with a
+      // connection error. Teardown must REFUSE — deleting the row here would
+      // disarm unrecoveredContainerCommits and let the branch be dropped
+      // while container-only commits sit in an orphaned volume.
+      const down = hybridRunner(dir, 'HEAD', [
+        [(rest, argv) => argv[0] === 'docker', () => ({ code: 1, stdout: '', stderr: 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock' })]
+      ])
+      await assert.rejects(() => stopContainer(handle, { runner: down.run }), /refus/i)
+      assert.ok(existsSync(handle.registryPath), 'the registry row survives the failed teardown — recovery stays armed')
     })
 
     await ok('stopContainer tears down once the work is recovered, and is idempotent', async () => {
@@ -500,6 +532,21 @@ const CANARY = 'sk-live-CANARY-9f8e7d6c5b4a'
     await assert.rejects(() => startContainer({ repoPath: dir, branch: 'arxa/s-2', sessionId: 'arxa/org/ws/2f-s', target: 'node', secretMount: m3 }, { runner: failRunner.run }))
     assert.ok(!existsSync(m3.source), 'no plaintext survives a failed start')
   })
+
+  await ok('the boot sweep removes stale plaintext dirs a killed process left behind', () => {
+    const fakeTmp = mkdtempSync(join(tmpdir(), 'arxa-sweeptest-'))
+    const stale = join(fakeTmp, 'arxa-secret-leftbykill')
+    mkdirSync(stale, { recursive: true })
+    writeFileSync(join(stale, 'arxa-env'), 'API_TOKEN=leftover\n')
+    mkdirSync(join(fakeTmp, 'unrelated-dir'))
+    writeFileSync(join(fakeTmp, 'unrelated-file'), 'x')
+    const swept = sweepStaleSecretDirs({ tmpdir: () => fakeTmp })
+    assert.equal(swept, 1)
+    assert.ok(!existsSync(stale), 'the stale plaintext dir is gone')
+    assert.ok(existsSync(join(fakeTmp, 'unrelated-dir')), 'only arxa-secret-* is touched')
+    assert.ok(existsSync(join(fakeTmp, 'unrelated-file')))
+    rmSync(fakeTmp, { recursive: true, force: true })
+  })
 }
 
 // ---- 8. Step 6: the disposable-container smoke -------------------------------
@@ -514,6 +561,14 @@ console.log('arxa devcontainer selftest (Step 6: disposable-container smoke)')
   const live = detectDocker()
   const real = live.available && process.env.ARXA_A4_REAL_SMOKE === '1'
   console.log(`  smoke path: ${real ? 'REAL containers' : 'DEGRADED (injected runner)'}${real ? '' : ' — ' + live.reason}`)
+  if (!real && process.env.ARXA_A4_REAL_SMOKE === '1') {
+    console.log(`  ARXA_A4_REAL_SMOKE=1 requested — the real leg is SKIPPED: ${live.reason}`)
+  }
+
+  await ok('ARXA_A4_REAL_SMOKE genuinely selects the real runner, never a double', () => {
+    assert.equal(smokeRunnerFor(true, scratch, 'x').run, undefined, 'the real leg reaches real docker (the default runner)')
+    assert.equal(typeof smokeRunnerFor(false, scratch, 'x').run, 'function', 'the degraded leg runs the hybrid double')
+  })
 
   // Sentinels OUTSIDE the namespaced scratch: the run must not touch them.
   const sentinelA = join(tmpdir(), `arxa-a4-sentinel-a-${process.pid}`)
@@ -536,7 +591,7 @@ console.log('arxa devcontainer selftest (Step 6: disposable-container smoke)')
   branchOf(nodeProj, 'smoke-node-s')
   branchOf(flutterProj, 'smoke-flutter-s')
 
-  const runnerFor = (repo, branch) => hybridRunner(repo, branch)
+  const runnerFor = (repo, branch) => smokeRunnerFor(real, repo, branch)
   const nodeRunner = runnerFor(nodeProj.dir, 'arxa/smoke-node-s')
   const flutterRunner = runnerFor(flutterProj.dir, 'arxa/smoke-flutter-s')
 

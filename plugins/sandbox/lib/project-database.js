@@ -27,6 +27,7 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
+import { detectDocker } from './devcontainer.js'
 import { whichOnPath } from './index.js'
 
 /** The size of one project's port block: api, db, studio, email, storage. */
@@ -158,7 +159,10 @@ function openLocalFloor (repoPath) {
  *   ports?: object, local?: object }>}
  */
 export async function ensureProjectDatabase ({ projectId, repoPath, registryPath = DEFAULT_REGISTRY_PATH }, deps = {}) {
-  const docker = deps.docker ?? { available: true, reason: 'injected' }
+  // Detect, never assume (S3 §2): supabase is detected by default below, and
+  // docker must be too — the no-deps path degrades to the sqlite floor here,
+  // it does not throw through a fabricated available:true.
+  const docker = deps.docker ?? detectDocker()
   const supabase = deps.supabase ?? detectSupabase()
   const runner = deps.runner ?? (async () => { throw new Error('project-database: no runner — this path needs Docker and the supabase CLI') })
   if (!docker.available) {
@@ -186,8 +190,12 @@ export async function ensureProjectDatabase ({ projectId, repoPath, registryPath
  */
 export async function startProjectDatabase ({ projectId, repoPath, registryPath = DEFAULT_REGISTRY_PATH }, deps = {}) {
   const runner = deps.runner
-  const reg = readRegistryJson(String(registryPath))
+  // Allocate FIRST, read after: allocatePortBlock persists this project's
+  // row, so the read below sees it. Reading first throws on a brand-new
+  // project id (row not yet written) and a stale in-memory copy would
+  // clobber rows allocated in between on the final whole-file write.
   const { base, ports } = await allocatePortBlock({ projectId, registryPath }, deps)
+  const reg = readRegistryJson(String(registryPath))
   for (const [other, row] of Object.entries(reg.projects)) {
     if (other !== projectId && row.active === true) {
       await runner(['supabase', 'stop', '--project-id', other], { cwd: repoPath })

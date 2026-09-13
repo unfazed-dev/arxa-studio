@@ -24,6 +24,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { detectDocker } from './lib/devcontainer.js'
 import {
   allocatePortBlock,
   detectSupabase,
@@ -152,6 +153,21 @@ await ok('detectSupabase finds the CLI and never installs', () => {
     assert.match(r.reason, /supabase/i)
   })
 
+  await ok('with no injected docker dep the machine is DETECTED, never assumed', async () => {
+    const docker = detectDocker()
+    const r = await ensureProjectDatabase({ projectId: 'detectproj', repoPath: scratchDir('detect'), registryPath: join(scratch, 'detect-ports.json') }, {
+      supabase: { available: true, cli: '/x/supabase' },
+      runner: supabaseDouble().run,
+      canBind: async () => true
+    })
+    if (!docker.available) {
+      assert.equal(r.tier, 'file', 'measured-absent docker degrades to the sqlite floor')
+      assert.equal(r.reason, docker.reason, 'the degrade carries the measured reason')
+    } else {
+      assert.equal(r.tier, 'supabase-local', 'measured-present docker provisions')
+    }
+  })
+
   await ok('the floor database is usable (a table survives a statement)', async () => {
     const r2 = await ensureProjectDatabase({ projectId: 'floorproj', repoPath: scratchDir('floor3'), registryPath: join(scratch, 'floor3-ports.json') }, {
       docker: { available: false, reason: 'daemon down' },
@@ -210,6 +226,21 @@ await ok('detectSupabase finds the CLI and never installs', () => {
     assert.equal(r.started, true)
     const after = JSON.parse(readFileSync(registry, 'utf8'))
     assert.equal(after.projects.supaproj.active, true, 'ours is the one active stack')
+  })
+
+  await ok('start of a brand-new project id (no pre-allocation) works and clobbers nothing', async () => {
+    const registry = join(scratch, 'fresh-ports.json')
+    await allocatePortBlock({ projectId: 'neighborproj', registryPath: registry }, { canBind: async () => true })
+    const calls = []
+    const r = await startProjectDatabase({ projectId: 'freshproj', repoPath: scratchDir('fresh'), registryPath: registry }, {
+      runner: supabaseDouble(calls).run,
+      canBind: async () => true
+    })
+    assert.equal(r.started, true)
+    const after = JSON.parse(readFileSync(registry, 'utf8'))
+    assert.equal(after.projects.freshproj.base, 54331, 'the fresh project row is allocated AND persisted')
+    assert.equal(after.projects.freshproj.active, true)
+    assert.equal(after.projects.neighborproj.base, 54321, 'a row persisted during the call survives — no stale whole-file clobber')
   })
 
   await ok('stop marks the stack inactive', async () => {

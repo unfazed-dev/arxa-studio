@@ -26,7 +26,7 @@
 // `.git`/`.arxa` are refused as generation targets, and a pre-existing
 // `.devcontainer` symlink pointing outside the repo is a refused escape.
 
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { execFile, spawnSync } from 'node:child_process'
@@ -247,6 +247,30 @@ export async function prepareSecretMount ({ orgId, projectId, envSopsPath }, dep
   }
 }
 
+/**
+ * The boot sweep for §7's "every exit path": a SIGINT/SIGKILL between
+ * prepareSecretMount and any cleanup leaves plaintext under tmpdir. At boot
+ * no lifecycle is live yet, so every arxa-secret-* dir there is stale.
+ * @param {object} [deps] - injection seam (tests): `{ tmpdir, rmSync }`.
+ * @returns {number} how many stale dirs were removed.
+ */
+export function sweepStaleSecretDirs (deps = {}) {
+  const tmp = (deps.tmpdir ?? tmpdir)()
+  const rm = deps.rmSync ?? rmSync
+  if (!existsSync(tmp)) return 0
+  let swept = 0
+  for (const name of readdirSync(tmp)) {
+    if (!name.startsWith('arxa-secret-')) continue
+    rm(join(tmp, name), { recursive: true, force: true })
+    swept++
+  }
+  return swept
+}
+
+// ponytail: the boot sweep would also delete the live secret dir of a second
+// concurrently-running arxa process; per-session locks if that ever matters.
+try { sweepStaleSecretDirs() } catch { /* a boot sweep must never break boot */ }
+
 // ---- the lifecycle (Step 3) -------------------------------------------------
 //
 // SAFETY INVARIANTS (binding):
@@ -287,6 +311,12 @@ export async function startContainer ({ repoPath, branch, sessionId, target, sec
   if (existsSync(gitPath) && statSync(gitPath).isFile()) {
     throw new Error(`devcontainer: refusing ${repo} — a host worktree's pointer-style .git cannot back a container; pass the owning repository`)
   }
+
+  // Idempotent start (Step 3): an existing session's registry row IS the
+  // live handle — a re-start returns it instead of cloning into the
+  // session's own non-empty volume and colliding on the container name.
+  const existing = readContainerRegistry(repo, sessionId)
+  if (existing !== null) return existing
 
   const headR = await runner(['git', '-C', repo, 'rev-parse', '--verify', branch])
   if (headR.code !== 0) throw new Error(`devcontainer: branch '${branch}' not found in ${repo}`)
@@ -396,6 +426,15 @@ export async function fetchContainerCommits (handle, deps = {}) {
   return { containerHead, recoveryRef: handle.recoveryRef, reachable }
 }
 
+/** Is the named docker object verifiably absent? inspect exit 0 = it still
+ * exists; "No such" = gone; a daemon/connection error = UNVERIFIED, which
+ * counts as still-present (the conservative answer keeps the guard armed). */
+async function objectGone (runner, inspectArgv) {
+  const r = await runner(inspectArgv)
+  if (r.code === 0) return false
+  return ((r.stderr || '') + (r.stdout || '')).toLowerCase().includes('no such')
+}
+
 /**
  * Stop the container, remove its volume and its registry row — but only
  * after every container commit is reachable from the host recovery ref.
@@ -421,8 +460,20 @@ export async function stopContainer (handle, deps = {}) {
   if (reach.code !== 0) {
     throw new Error(`devcontainer: refusing teardown — container commits (${containerHead.slice(0, 12)}) are not reachable from ${row.recoveryRef}; run fetchContainerCommits and inspect before discarding session work`)
   }
-  await runner(['docker', 'rm', '-f', row.container])
-  await runner(['docker', 'volume', 'rm', row.volume])
+  // A failed rm is a REFUSAL, not a shrug: deleting the registry row while
+  // the container/volume may still exist would disarm
+  // unrecoveredContainerCommits and let the branch be dropped with
+  // container-only commits stranded in an orphaned volume. The row stays so
+  // recovery stays armed; only an rm that succeeded (or a verified absence)
+  // proceeds.
+  const rmContainer = await runner(['docker', 'rm', '-f', row.container])
+  if (rmContainer.code !== 0 && !(await objectGone(runner, ['docker', 'container', 'inspect', row.container]))) {
+    throw new Error(`devcontainer: refusing teardown bookkeeping — docker rm of ${row.container} failed (${rmContainer.stderr.trim().slice(0, 200)}) and its absence cannot be verified; the registry row stays so recovery stays armed`)
+  }
+  const rmVolume = await runner(['docker', 'volume', 'rm', row.volume])
+  if (rmVolume.code !== 0 && !(await objectGone(runner, ['docker', 'volume', 'inspect', row.volume]))) {
+    throw new Error(`devcontainer: refusing teardown bookkeeping — docker volume rm of ${row.volume} failed (${rmVolume.stderr.trim().slice(0, 200)}) and its absence cannot be verified; the registry row stays so recovery stays armed`)
+  }
   if (row.secretDir) rmSync(row.secretDir, { recursive: true, force: true })
   rmSync(registryPathFor(repo, handle.sessionId), { force: true })
   return { stopped: true }
