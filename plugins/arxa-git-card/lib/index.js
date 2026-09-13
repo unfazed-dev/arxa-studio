@@ -232,6 +232,32 @@ function capGateOutput(out) {
     : '[output truncated — showing the last 64 KiB]\n' + s.slice(-GATE_OUTPUT_MAX)
 }
 
+// Task 10 (A4): the card's confinement measurement, cached 30s — card.status
+// polls and must not probe Docker on every beat. DETECT, never install (S3);
+// the daemon detail rides to resolveEffectiveTier as dockerReason so a
+// degrade says the measured truth ('daemon unreachable'), not a generic
+// 'not present'.
+let confinementRunnersCache = { at: 0, runners: null }
+let devcontainerCache = null
+async function measuredConfinementRunners () {
+  if (confinementRunnersCache.runners !== null && Date.now() - confinementRunnersCache.at < 30000) return confinementRunnersCache.runners
+  let runners
+  try {
+    devcontainerCache ??= await import(new URL('../../sandbox/lib/devcontainer.js', import.meta.url).href)
+    const docker = devcontainerCache.detectDocker()
+    runners = {
+      seatbelt: (await import('node:fs')).existsSync('/usr/bin/sandbox-exec'),
+      docker: docker.available,
+      ...(docker.available ? {} : { dockerReason: docker.reason })
+    }
+  } catch {
+    // The sandbox plugin itself unreachable is a state to report, not crash on.
+    runners = { seatbelt: false, docker: false, dockerReason: 'the arxa sandbox plugin could not be loaded — confinement unmeasured' }
+  }
+  confinementRunnersCache = { at: Date.now(), runners }
+  return runners
+}
+
 export function apply(ctx) {
   /** The in-flight device flow, or null. Plugin scope on purpose: the action
    * table below is rebuilt per REQUEST, so a per-table variable would dedupe
@@ -795,6 +821,29 @@ export function apply(ctx) {
                 // kind all along — only this call never passed it).
                 frame: { wired: seatManifest.frameWired === true ? 'ok' : (seatManifest.frameWired ?? null), protection: seatManifest.frameProtection ?? null, runner: seatManifest.frameRunner ?? null, files: (() => { try { return gw.frameStatus(seatRepoPath, seatKind, { includeCiYml: true }) } catch { return null } })() },
                 main: { checks: mainChecks?.state ?? null },
+                // Task 10 (A4): the card shows the EFFECTIVE tier, not the
+                // configured one, whenever they differ (S3 corollary). No
+                // second settings taxonomy: `configured` is the provisioned
+                // default; `effective` is the session's recorded container
+                // tier when A4 engaged, else the measured resolver answer.
+                // `container.unrecovered` is §24e's "unfetched work exists"
+                // surface — the teardown refusal's visible half.
+                confinement: await (async () => {
+                  const { DEFAULT_CONFIGURED_TIER } = await import(new URL('../../sandbox/lib/provision.js', import.meta.url).href)
+                  const { resolveEffectiveTier } = await import(new URL('../../sandbox/lib/effective-tier.js', import.meta.url).href)
+                  const resolved = sessionRow?.containerTier === 'A4'
+                    ? { effective: 'A4', reason: 'the session branch is isolated in a hardened container (A4, automatic when Docker is present — S3)' }
+                    : resolveEffectiveTier({ configured: DEFAULT_CONFIGURED_TIER, platform: process.platform, runners: await measuredConfinementRunners() })
+                  return { configured: DEFAULT_CONFIGURED_TIER, effective: resolved.effective, reason: resolved.reason }
+                })(),
+                container: sessionRow
+                  ? (() => {
+                      try {
+                        const c = devcontainerCache?.unrecoveredContainerCommits(sessionRepoPath(sessionRow, sid), sessionRow.id)
+                        return { tier: sessionRow.containerTier ?? null, unrecovered: c ? c.unrecovered : null }
+                      } catch { return { tier: sessionRow.containerTier ?? null, unrecovered: null } }
+                    })()
+                  : null,
               }
             },
             /** Q6: EVIDENCE ONLY — the session model drafts the subject. */

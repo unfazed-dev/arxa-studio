@@ -466,7 +466,7 @@ ok('frame: ci.yml runs frame-check on session branches as well as main (Q7)', ()
   const y = ciYml()
   assert.ok(y.includes("branches: [main, 'arxa/**']"), 'session branches are watched')
   assert.ok(y.includes('pull_request:'), 'the PR trigger survives — the review path is unchanged')
-  assert.equal(FRAME_VERSION, 6, 'the stamp version bumped so existing published repos heal to the current frame (v5 added pinned SDK + --enforce-lockfile; v6 adds the B1/B2 integrity gates and the base-branch CI gate)')
+  assert.equal(FRAME_VERSION, 7, 'the stamp version bumped so existing published repos heal to the current frame (v5 pinned SDK; v6 B1/B2 integrity gates; v7 adds the A4 devcontainer files — Task 10)')
 })
 
 ok('frame: protection + settings payloads (Q3/Q8)', () => {
@@ -529,7 +529,7 @@ ok('frame: B1 — script-free, lockfile-pinned installs reach every project targ
   assert.ok(/command -v osv-scanner/.test(sh), '…guarded on the scanner being installed')
   assert.ok(/osv-scanner[^\n]*\n[^\n]*note: osv-scanner not installed|not installed[^\n]*osv-scanner|osv-scanner[^\n]*(skip|note)/i.test(sh)
     || /echo "note: osv-scanner[^\n]*skip/i.test(sh), 'an honest unavailable note, never a red, when it is absent')
-  assert.equal(FRAME_VERSION, 6, 'the stamp bumped so existing published repos heal to the B1/B2 checks')
+  assert.equal(FRAME_VERSION, 7, 'the stamp bumped so existing published repos heal to the current frame (v7 adds the A4 devcontainer files — Task 10)')
 })
 
 ok('frame: B2 — the base-branch diff policy gate and the plaintext-.env red', () => {

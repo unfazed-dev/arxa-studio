@@ -43,15 +43,29 @@ import path from 'node:path'
  * plaintext .env (§7's ranked failure #1), and ci.yml now runs the BASE
  * branch's copy of check.sh against PR heads so the gate is never
  * self-modifying. */
-export const FRAME_VERSION = 6
+/* v7 (2026-09-13, Task 10 — docs/plans/arxa-isolation-levels.md L1/§4):
+ * the A4 devcontainer files ship into every project frame:
+ * .devcontainer/devcontainer.json + a target-aware Dockerfile (node |
+ * flutter | plain). Stamping gains a JSON style — strict JSON cannot carry
+ * a `#` comment, so devcontainer.json stamps its version+hash as a leading
+ * `"_arxaFrame"` key instead. The files are declarative and
+ * Docker-independent; only the lifecycle degrades without Docker. */
+export const FRAME_VERSION = 7
 
 const STAMP_RE = /^# arxa-frame: v(\d+) ([0-9a-f]{16})$/m
 const STAMP_LINE_RE = /^# arxa-frame: v\d+ [0-9a-f]{16}\n/m
+const JSON_STAMP_RE = /^  "_arxaFrame": "v(\d+) ([0-9a-f]{16})",$/m
+const JSON_STAMP_LINE_RE = /^  "_arxaFrame": "v\d+ [0-9a-f]{16}",\n/m
 
 const digest = (body) => crypto.createHash('sha256').update(body).digest('hex').slice(0, 16)
 
-/** Stamp generated content: after the shebang when there is one, else on top. */
-export function stampContent(content) {
+/** Stamp generated content: after the shebang when there is one, else on top.
+ * A `json` style file stamps as a leading `"_arxaFrame"` key instead — strict
+ * JSON has no comments. */
+export function stampContent(content, style = 'sh') {
+  if (style === 'json') {
+    return content.replace(/^\{\n/, `{\n  "_arxaFrame": "v${FRAME_VERSION} ${digest(content)}",\n`)
+  }
   const line = `# arxa-frame: v${FRAME_VERSION} ${digest(content)}\n`
   if (!content.startsWith('#!')) return line + content
   const nl = content.indexOf('\n') + 1
@@ -60,11 +74,11 @@ export function stampContent(content) {
 
 /** `{ version, hash }` for a stamped file, else null. */
 export function readStamp(text) {
-  const m = STAMP_RE.exec(text)
+  const m = STAMP_RE.exec(text) || JSON_STAMP_RE.exec(text)
   return m ? { version: Number(m[1]), hash: m[2] } : null
 }
 
-const unstamp = (text) => text.replace(STAMP_LINE_RE, '')
+const unstamp = (text) => text.replace(STAMP_LINE_RE, '').replace(JSON_STAMP_LINE_RE, '')
 
 /**
  * How a frame file on disk relates to what the generator would write now.
@@ -355,6 +369,74 @@ export function freestyleCheckSh() {
   return checkShHead() + '\n' + body + '\n' + subjectCheckSh() + '\n'
 }
 
+// ---- A4 devcontainer files (Task 10, docs/plans/arxa-isolation-levels.md
+// L1/§4-§7) — the declarative half of Docker project isolation ----------------
+
+/** The scaffold targets a devcontainer can be generated for. */
+export const DEVCONTAINER_TARGETS = ['node', 'flutter', 'plain']
+
+/**
+ * The L1 hardening runArgs (§4) — the ONE source of truth. devcontainer.json
+ * serialises them for the @devcontainers/cli and IDEs; arxa's own container
+ * lifecycle (plugins/sandbox/lib/devcontainer.js) passes the same list to
+ * `docker run`, so the spec and the runner can never drift.
+ * `--network none` is the explicit network decision (§4): egress stays OFF
+ * until a phase split exists; the model channel caveat (§13's ceiling)
+ * applies to every egress tier regardless.
+ */
+export function devcontainerRunArgs() {
+  return [
+    '--read-only', '--tmpfs', '/tmp', '--cap-drop=ALL',
+    '--security-opt', 'no-new-privileges', '--memory=4g', '--cpus=2',
+    '--pids-limit=512', '--network', 'none',
+  ]
+}
+
+/**
+ * The resolved devcontainer.json for one target — the exact config the
+ * @devcontainers/cli would resolve: a build over the sibling Dockerfile plus
+ * the L1 runArgs. containerEnv is EMPTY by construction: §7 forbids any
+ * secret reaching the image or the config; secrets travel only as a
+ * file-based secret mounted at /run/secrets by the lifecycle, never baked in.
+ */
+export function devcontainerJson(target) {
+  if (!DEVCONTAINER_TARGETS.includes(target)) {
+    throw new TypeError(`devcontainer: unknown target '${target}' — expected one of ${DEVCONTAINER_TARGETS.join('|')}`)
+  }
+  return JSON.stringify({
+    name: `arxa ${target} dev container`,
+    build: { dockerfile: 'Dockerfile', context: '..' },
+    runArgs: devcontainerRunArgs(),
+    containerEnv: {},
+  }, null, 2) + '\n'
+}
+
+/** The shared non-root setup: git + ca-certificates (the recovery loop needs
+ * git INSIDE the container to commit and bundle), a non-root user (L1), and
+ * /work as the workspace. */
+/** The target-aware Dockerfile. Images are tag-pinned and carry NO env
+ * values and NO build args — §7's forbidden list, closed by construction.
+ * The flutter image ships its own git; the debian bases get it via apt. */
+export function devcontainerDockerfile(target) {
+  if (!DEVCONTAINER_TARGETS.includes(target)) {
+    throw new TypeError(`devcontainer: unknown target '${target}' — expected one of ${DEVCONTAINER_TARGETS.join('|')}`)
+  }
+  const from = {
+    node: 'FROM node:24-bookworm-slim',
+    flutter: 'FROM ghcr.io/cirruslabs/flutter:stable',
+    plain: 'FROM debian:bookworm-slim',
+  }[target]
+  const lines = [
+    from,
+    '# generated by arxa studio (plugins/git-workspace/lib/frame.js) — Task 10 A4',
+  ]
+  if (target !== 'flutter') {
+    lines.push('RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \\\n && rm -rf /var/lib/apt/lists/*')
+  }
+  lines.push('RUN useradd -m arxa 2>/dev/null || true', 'USER arxa', 'WORKDIR /work', '')
+  return lines.join('\n')
+}
+
 /** ci.yml — canon: self-hosted labels, concurrency+cancel, timeout always. */
 export function ciYml() {
   return [
@@ -464,7 +546,7 @@ export function settingsPayload() {
  * it gets the PR template too, same as org/project, since publishing is what
  * makes the GitHub-hosted-repo conventions apply.
  */
-function frameFiles(kind, includeCiYml) {
+function frameFiles(kind, includeCiYml, devcontainer) {
   let checkContent
   if (kind === 'org') checkContent = orgCheckSh()
   else if (kind === 'project') checkContent = projectCheckSh()
@@ -474,6 +556,13 @@ function frameFiles(kind, includeCiYml) {
   const files = [{ rel: 'check.sh', content: checkContent, mode: 0o755, stamped: true }]
   if (kind !== 'freestyle' || includeCiYml) files.push({ rel: path.join('.github', 'pull_request_template.md'), content: prTemplate(), mode: 0o644, stamped: false })
   if (includeCiYml) files.push({ rel: path.join('.github', 'workflows', 'ci.yml'), content: ciYml(), mode: 0o644, stamped: true })
+  // A4 (Task 10): the devcontainer files are a PROJECT frame concern — the
+  // container tiers isolate project sessions, never the org shell.
+  if (devcontainer) {
+    if (kind !== 'project') throw new TypeError('devcontainer files are a project-frame concern — pass kind \'project\'')
+    files.push({ rel: path.join('.devcontainer', 'devcontainer.json'), content: devcontainerJson(devcontainer), mode: 0o644, stamped: true, stampStyle: 'json' })
+    files.push({ rel: path.join('.devcontainer', 'Dockerfile'), content: devcontainerDockerfile(devcontainer), mode: 0o644, stamped: true })
+  }
   return files
 }
 
@@ -481,9 +570,9 @@ function frameFiles(kind, includeCiYml) {
  * Report each frame file's state without touching disk — the card's source for
  * "this repo's frame is out of date". Only stamped files can be judged.
  */
-export function frameStatus(repoPath, kind = 'org', { includeCiYml = false } = {}) {
+export function frameStatus(repoPath, kind = 'org', { includeCiYml = false, devcontainer } = {}) {
   const out = {}
-  for (const f of frameFiles(kind, includeCiYml)) {
+  for (const f of frameFiles(kind, includeCiYml, devcontainer)) {
     if (!f.stamped) continue
     out[f.rel] = frameFileState(path.join(repoPath, f.rel))
   }
@@ -497,16 +586,16 @@ export function frameStatus(repoPath, kind = 'org', { includeCiYml = false } = {
  * overwritten — `force` is the only way past that, and it is a data-losing
  * operation the caller must ask for explicitly.
  */
-export function writeFrameFiles(repoPath, kind = 'org', { includeCiYml = false, upgrade = false, force = false } = {}) {
+export function writeFrameFiles(repoPath, kind = 'org', { includeCiYml = false, upgrade = false, force = false, devcontainer } = {}) {
   const written = []; const kept = []; const upgraded = []; const conflicted = []
   const put = (abs, f) => {
-    const body = f.stamped ? stampContent(f.content) : f.content
+    const body = f.stamped ? stampContent(f.content, f.stampStyle) : f.content
     fs.mkdirSync(path.dirname(abs), { recursive: true })
     fs.writeFileSync(abs, body, { mode: f.mode })
     // writeFileSync mode is masked by umask — chmod explicitly.
     fs.chmodSync(abs, f.mode)
   }
-  for (const f of frameFiles(kind, includeCiYml)) {
+  for (const f of frameFiles(kind, includeCiYml, devcontainer)) {
     const abs = path.join(repoPath, f.rel)
     const state = f.stamped ? frameFileState(abs) : (fs.existsSync(abs) ? 'current' : 'missing')
     if (state === 'missing') { put(abs, f); written.push(f.rel); continue }

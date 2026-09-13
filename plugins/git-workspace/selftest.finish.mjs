@@ -24,7 +24,7 @@ import path from 'node:path'
 import { runGit } from './lib/run.js'
 import { initProjectRepo } from './lib/repos.js'
 import {
-  openSession, sessionStageBoundary, archiveSession, annotateSession, listSessions,
+  openSession, sessionStageBoundary, archiveSession, annotateSession, listSessions, dropSession,
   SESSION_BASE_PREFIX, GATE_CHECK_SCRIPT,
 } from './lib/sessions.js'
 import { behindMain, branchTip, isMergedIntoMain, finishSession, sweepMerged, FinishRefusedError } from './lib/finish.js'
@@ -340,5 +340,61 @@ ok('pressure: 30 sessions, 15 merged, sweepMerged finishes exactly 15 in under 5
     archiveSession(proj, id)
   }
 })
+
+// ---- 7. Task 10 (A4): container-work teardown guard --------------------------
+// A session that ran in a Docker container may hold commits ONLY in the
+// container volume. Teardown (finishSession's branch deletion, dropSession's
+// forced drop) must REFUSE until every container commit is reachable from
+// the host recovery ref — and must change nothing when it refuses.
+{
+  const id = 'contained1'
+  const s = openSession(proj, { id, orgPath: proj, project: null, workspace: '' })
+  fs.writeFileSync(path.join(s.worktree, 'c.txt'), 'container work\n')
+  runGit(['add', '.'], { cwd: s.worktree })
+  runGit(['commit', '-m', 'feat: contained work'], { cwd: s.worktree })
+  sessionStageBoundary(proj, id, { message: 'feat: contained work' })
+  const tip = branchTip(proj, s.branch).sha
+
+  // A live container registry row (what startContainer wrote) whose head is
+  // not yet under the recovery ref.
+  const regDir = path.join(proj, '.arxa', 'containers')
+  fs.mkdirSync(regDir, { recursive: true })
+  const row = {
+    sessionId: id, branch: s.branch, head: tip,
+    recoveryRef: `refs/arxa/container-recovery/${id}`,
+    container: `arxa-a4-${id}`, volume: `arxa-a4-${id}-work`, recovered: false,
+  }
+  fs.writeFileSync(path.join(regDir, `${id}.json`), JSON.stringify(row))
+
+  ok('finishSession refuses container-work-unrecovered and changes nothing', () => {
+    assert.throws(
+      () => finishSession(proj, id),
+      (e) => e instanceof FinishRefusedError && e.reason === 'container-work-unrecovered',
+    )
+    assert.ok(runGit(['branch', '--list', s.branch], { cwd: proj }) !== '', 'the branch survives the refusal')
+    assert.ok(listSessions(proj).some((x) => x.id === id), 'the registry row survives the refusal')
+  })
+
+  ok('dropSession refuses container-work-unrecovered too', () => {
+    assert.throws(() => dropSession(proj, id), /container-work-unrecovered/)
+    assert.ok(runGit(['branch', '--list', s.branch], { cwd: proj }) !== '')
+  })
+
+  ok('once the recovery ref holds the head, finish proceeds', () => {
+    runGit(['update-ref', row.recoveryRef, tip], { cwd: proj })
+    const fin = finishSession(proj, id)
+    assert.ok(fin.finished)
+  })
+
+  ok('a session with NO container row finishes exactly as before', () => {
+    const id2 = 'plain1'
+    const s2 = openSession(proj, { id: id2, orgPath: proj, project: null, workspace: '' })
+    fs.writeFileSync(path.join(s2.worktree, 'p.txt'), 'plain\n')
+    runGit(['add', '.'], { cwd: s2.worktree })
+    runGit(['commit', '-m', 'feat: plain'], { cwd: s2.worktree })
+    sessionStageBoundary(proj, id2, { message: 'feat: plain' })
+    assert.ok(finishSession(proj, id2).finished)
+  })
+}
 
 console.log(`# ${passed} passed`)

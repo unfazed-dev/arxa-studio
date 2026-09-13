@@ -121,6 +121,34 @@ import { acquireShellLock } from './shell-lock.js'
 import { createDshBridge, joinDshLive } from './dsh-bridge.js'
 import { createGithubBridge, annotateProjectManifest, annotateOrgManifest } from './github-bridge.js'
 
+/**
+ * The A4 sandbox bridge (Task 10): one `start({ repoPath, branch,
+ * sessionId })` face returning `{ ok, tier?, container?, reason? }`. The
+ * default is the REAL Docker lifecycle (detect, never install), with the
+ * machine's Docker state measured once per lifecycle (a session-create must
+ * not shell out to probe per row) and cached — a started daemon mid-run is
+ * picked up by the next org open. Absent/partial faces degrade to the loud
+ * 'sandbox-unavailable' stub, exactly like the dsh and github bridges.
+ */
+export function createSandboxBridge(faces = {}) {
+  if (typeof faces.start === 'function') return { start: faces.start }
+  let dockerMemo
+  return {
+    async start (spec) {
+      try {
+        const dc = await import('../../sandbox/lib/devcontainer.js')
+        dockerMemo ??= dc.detectDocker()
+        if (!dockerMemo.available) return { ok: false, reason: dockerMemo.reason }
+        dc.ensureDevcontainer(spec.repoPath, undefined, { docker: dockerMemo })
+        const handle = await dc.startContainer(spec)
+        return { ok: true, tier: 'A4', container: handle.container }
+      } catch (err) {
+        return { ok: false, reason: String(err?.message ?? err) }
+      }
+    },
+  }
+}
+
 /** Step names carried by OrgOpenError.step, in execution order. */
 export const STEPS = Object.freeze([
   'shell-lock',
@@ -170,7 +198,7 @@ function ensureRuntimeExcluded(orgPath, env) {
  *
  * @param {{ workspaceRoot: string, env?: NodeJS.ProcessEnv, rails?: object }} opts
  */
-export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {}, dsh, github } = {}) {
+export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {}, dsh, github, sandbox } = {}) {
   if (typeof workspaceRoot !== 'string' || workspaceRoot === '') {
     throw new TypeError('createOrgLifecycle: workspaceRoot (string) is required')
   }
@@ -184,6 +212,11 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
   // publishing never blocks or fails local project creation (CLAUDE.md
   // boundary: local-first, no cloud dependency for core function).
   const githubBridge = createGithubBridge(github)
+  // sandbox bridge (Task 10, A4): Docker project isolation at session start.
+  // Injectable `start` face; the default DETECTS Docker (never installs) and
+  // degrades honestly — an unreachable daemon never breaks a session, it
+  // annotates the row with the truthful reason (S3).
+  const sandboxBridge = createSandboxBridge(sandbox)
 
   /** Registry-row snapshots of sessions parked in the org trash (2026-09-05
    *  archives grill). A trashed session's row is gone but its branch still
@@ -1440,12 +1473,24 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
           const spawned = await dshBridge.spawn({ cwd: session.worktree, name: session.name, id: session.id })
           dshLive = await dshBridge.list()
           syncWipWatchPaths() // session set changed — re-watch
+          // Task 10 (A4): automatic-if-Docker-is-present. The bridge clones
+          // the exact session branch into a private volume and starts the
+          // hardened container; results return through the host recovery
+          // ref, and finishSession refuses teardown while any container
+          // commit is unrecovered (lib/finish.js). Never a session-fatal
+          // step: degradation annotates (S3).
+          const container = await sandboxBridge.start({ repoPath, branch: session.branch, sessionId: session.id })
           return annotateSession(
             repoPath,
             session.id,
-            spawned.ok
-              ? { dshSessionId: spawned.id, dshStatus: null }
-              : { dshSessionId: null, dshStatus: spawned.reason ?? 'dsh-unavailable' },
+            {
+              ...(spawned.ok
+                ? { dshSessionId: spawned.id, dshStatus: null }
+                : { dshSessionId: null, dshStatus: spawned.reason ?? 'dsh-unavailable' }),
+              ...(container.ok
+                ? { containerTier: container.tier ?? 'A4', containerStatus: null }
+                : { containerTier: null, containerStatus: container.reason ?? 'sandbox-unavailable' }),
+            },
             env,
           )
         },

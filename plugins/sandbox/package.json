@@ -6,6 +6,8 @@
   "description": "The arxa SandboxProvider (S1): dsh's LocalSandboxProvider with the runtime-resolved Flutter/Dart toolchain caches added to workspace-write's writable roots.",
   "main": "lib/index.js",
   "exports": {
-    ".": "./lib/index.js"
+    ".": "./lib/index.js",
+    "./devcontainer": "./lib/devcontainer.js",
+    "./project-database": "./lib/project-database.js"
   }
 }

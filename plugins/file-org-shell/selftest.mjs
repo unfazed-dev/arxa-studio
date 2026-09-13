@@ -1123,6 +1123,33 @@ try {
     ok(wtApiSrc.includes("if (name === '.git' || name === '.arxa' || (rootId && name === '.gitkeep')) continue"), 'D94: org tree hides only .git/ and .arxa/; Freestyle also hides its placeholder')
     ok(!wtApiSrc.includes("if (name.startsWith('.')) continue"), 'D94: the blanket dotfile filter is gone')
   }
+  // ---- Task 10 (A4): Docker project isolation at session start ----------
+  // The bridge mirrors the dsh/github bridges: injectable faces, a real
+  // default (detect Docker, never install), honest degradation — a missing
+  // daemon NEVER breaks a session, it annotates.
+  {
+    const starts = []
+    const svcA4 = createOrgLifecycle({
+      workspaceRoot: root, env,
+      sandbox: { start: (spec) => { starts.push(spec); return { ok: true, tier: 'A4', container: 'arxa-a4-x' } } },
+    })
+    await svcA4.openOrg(orgB.path)
+    const a4Row = await svcA4.current.newSession('contained', 'notes')
+    ok(starts.length === 1, 'A4: the container bridge ran once for the new session')
+    ok(starts[0].branch === a4Row.branch && starts[0].sessionId === a4Row.id, 'A4: the bridge gets the exact session branch + id')
+    ok(typeof starts[0].repoPath === 'string' && starts[0].repoPath.length > 0, 'A4: the bridge gets the owning repo path')
+    ok(a4Row.containerTier === 'A4', 'A4: the session row records the container tier')
+
+    const svcDeg = createOrgLifecycle({
+      workspaceRoot: root, env,
+      sandbox: { start: () => ({ ok: false, reason: 'Docker is installed but its daemon is not reachable' }) },
+    })
+    await svcDeg.openOrg(orgB.path)
+    const degRow = await svcDeg.current.newSession('degraded', 'notes')
+    ok(degRow.containerTier !== 'A4', 'degrade: no container tier is claimed')
+    ok(/daemon/.test(String(degRow.containerStatus)), 'degrade: the row carries the truthful reason')
+    svcA4.closeOrg(); svcDeg.closeOrg()
+  }
   console.log(`\nfile-org-shell selftest: ${passed} checks passed`)
 } finally {
   fs.rmSync(root, { recursive: true, force: true })

@@ -58,6 +58,10 @@ import { runGit, runGitProbe, STAGE_IDENTITY } from './run.js'
 import { wipCommit, stageBoundarySquash, STAGE_BASE_REF } from './commits.js'
 import { getOrigin, excludeArxaDir } from './repos.js'
 import { projectRepos } from './routing.js'
+// Task 10 (A4): the container-work teardown guard. Cross-plugin like
+// project-secrets' keyring reuse; no cycle — devcontainer.js reaches only
+// frame.js on this side (never sessions.js).
+import { unrecoveredContainerCommits } from '../../sandbox/lib/devcontainer.js'
 
 /**
  * Branch namespace. Grilled 2026-09-03 (Q2/Q3): a session's identity IS its
@@ -749,6 +753,13 @@ export function dropSession(repoPath, id, env = process.env) {
   const registry = readRegistry(repoPath, env)
   const session = registry.sessions.find((s) => s.id === id)
   if (!session) return { id, dropped: false }
+  // Task 10 (A4): the forced drop deletes the branch — the only other
+  // handle on container-only commits besides the recovery ref. Same gate as
+  // finishSession: refuse while container work is unrecovered.
+  const container = unrecoveredContainerCommits(repoPath, id)
+  if (container.unrecovered > 0) {
+    throw new Error(`session "${id}" (${session.branch}) cannot be dropped — container-work-unrecovered: bring the container commits back to ${container.recoveryRef} first`)
+  }
   if (session.worktree && fs.existsSync(session.worktree)) {
     runGit(['worktree', 'remove', '--force', session.worktree], { cwd: repoPath, env, allowFail: true })
   }

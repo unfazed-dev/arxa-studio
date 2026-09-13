@@ -101,6 +101,8 @@ window.__ModuleLoader__.load({
       'git.statusFailed': 'Git status failed: {reason}',
       'git.title.subject': 'PR title',
       'git.localOnly': 'local-only',
+      'git.tier.shift': 'confinement {configured} → {effective}',
+      'git.containerUnfetched': 'container work unfetched',
       'git.frame.wired': 'frame wired',
       'git.frame.missing': 'frame missing',
       'git.runner.online': 'runner online',
@@ -219,6 +221,8 @@ window.__ModuleLoader__.load({
       'git.title.subject': 'Tytuł PR',
       // TODO native review (conformance decision 4): machine-drafted.
       'git.localOnly': 'tylko lokalnie',
+      'git.tier.shift': 'izolacja {configured} → {effective}',
+      'git.containerUnfetched': 'niepobrana praca kontenera',
       'git.frame.wired': 'rama podłączona',
       'git.frame.missing': 'brak ramy',
       'git.runner.online': 'runner online',
@@ -333,6 +337,8 @@ window.__ModuleLoader__.load({
       'git.title.subject': 'Titre de la PR',
       // TODO native review (conformance decision 4): machine-drafted.
       'git.localOnly': 'local uniquement',
+      'git.tier.shift': 'confinement {configured} → {effective}',
+      'git.containerUnfetched': 'travail du conteneur non récupéré',
       'git.frame.wired': 'cadre câblé',
       'git.frame.missing': 'cadre manquant',
       'git.runner.online': 'runner en ligne',
@@ -565,6 +571,15 @@ window.__ModuleLoader__.load({
       // status row (relinkAction). A recovery you can only read was the bug.
       if (relinkRequired) detailParts.push(t('git.relinkNeeded'))
       if (status.localOnly) detailParts.push(t('git.localOnly'))
+      // Task 10 (A4): show the EFFECTIVE tier whenever it differs from the
+      // configured one (S3 corollary), and §24e's "unfetched work exists" when
+      // container commits are not yet under the host recovery ref.
+      const confinement = status.confinement || {}
+      const containerInfo = status.container || {}
+      if (confinement.configured && confinement.effective && confinement.configured !== confinement.effective) {
+        detailParts.push(t('git.tier.shift', { configured: confinement.configured, effective: confinement.effective }))
+      }
+      if (containerInfo.unrecovered > 0) detailParts.push(t('git.containerUnfetched'))
       if (frame.wired) detailParts.push(t(frame.wired === 'ok' ? 'git.frame.wired' : 'git.frame.missing'))
       // host says 'ok' (manifest.frameRunner) or 'online' (live probe) — both are up
       if (frame.runner) detailParts.push(t(frame.runner === 'ok' || frame.runner === 'online' ? 'git.runner.online' : frame.runner === 'asleep' ? 'git.runner.asleep' : 'git.runner.unknown'))

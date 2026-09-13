@@ -40,6 +40,16 @@ check('seam: card host serves POST /__arxa/git-card/action and dispatches every 
 check('card: card.status carries github.relinkRequired (host half)',
   hostSrc().includes('relinkRequired: ghState?.relinkRequired === true') && hostSrc().includes('g.status()'))
 
+// Task 10 (A4): the card reports the EFFECTIVE confinement, not the
+// configured one, whenever they differ (S3 corollary), and surfaces
+// unfetched container work (§24e: "worth surfacing in the card as
+// 'unfetched work exists'"). No second settings taxonomy: configured stays
+// the provisioned default, effective is measured + the session's recorded
+// container tier.
+check('card: card.status carries confinement configured/effective (host half)',
+  hostSrc().includes('confinement:') && hostSrc().includes('resolveEffectiveTier') && hostSrc().includes('DEFAULT_CONFIGURED_TIER'))
+check('card: card.status carries the container tier + unfetched-work guard (host half)',
+  hostSrc().includes('unrecoveredContainerCommits') && hostSrc().includes('containerTier'))
 check('card: engine exposes the six card actions (S3)', ['card.status', 'card.commit.draft', 'card.commit', 'card.push', 'card.pr.create', 'card.pr.status'].every((a) => hostSrc().includes("'" + a + "'")))
 check('card: commit validates the conventional-subject law (Q7)', hostSrc().includes('subject-not-conventional') && hostSrc().includes('SUBJECT_RE.test(subject)'))
 check('card: draft returns evidence only — the engine never drafts (Q6)', hostSrc().includes('card.commit.draft') && hostSrc().includes('EVIDENCE ONLY'))
@@ -51,6 +61,9 @@ check('card: session-branch push is PR-purpose only (D73 relaxation)', hostSrc()
 import { execFileSync } from 'node:child_process'
 const clientPath = join(here, 'lib', 'client.js')
 const clientSrc = readFileSync(clientPath, 'utf8')
+
+check('card: the detail line shows the tier shift and unfetched container work (client half)',
+  clientSrc.includes('git.tier.shift') && clientSrc.includes('git.containerUnfetched'))
 const pkg = JSON.parse(readFileSync(join(here, 'package.json'), 'utf8'))
 let drift = ''
 try { execFileSync(process.execPath, [join(here, '..', '..', 'scripts', 'gen-git-card.mjs'), '--check'], { stdio: ['ignore', 'pipe', 'pipe'] }) }

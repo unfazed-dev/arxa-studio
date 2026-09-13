@@ -20,6 +20,7 @@
 import fs from 'node:fs'
 import { runGit } from './run.js'
 import { listSessions, archiveSession, annotateSession, sessionRepoFor, SESSION_BASE_PREFIX, SESSION_BRANCH_PREFIX } from './sessions.js'
+import { unrecoveredContainerCommits } from '../../sandbox/lib/devcontainer.js'
 
 /** Finish refused: the session branch is not (yet) merged into main. */
 export class FinishRefusedError extends Error {
@@ -93,6 +94,17 @@ export function finishSession(repoPath, id, { env = process.env, dryRun = false 
   if (!merged) {
     if (dryRun) return { finished: false, dryRun: true, id, branch, reason: 'not-merged' }
     throw new FinishRefusedError(id, branch, 'not-merged')
+  }
+
+  // Task 10 (A4): a session that ran in a container may hold commits that
+  // exist ONLY in the container volume. Deleting the branch here would
+  // orphan them permanently — refuse until every container commit is
+  // reachable from the host recovery ref (fetchContainerCommits lands it).
+  // Pure read; a refusal changes nothing.
+  const container = unrecoveredContainerCommits(repoPath, id)
+  if (container.unrecovered > 0) {
+    if (dryRun) return { finished: false, dryRun: true, id, branch, reason: 'container-work-unrecovered' }
+    throw new FinishRefusedError(id, branch, 'container-work-unrecovered')
   }
 
   if (session.state !== 'archived' && fs.existsSync(session.worktree) && !isWorktreeClean(session.worktree, env)) {

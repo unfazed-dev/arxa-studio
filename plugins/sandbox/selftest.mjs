@@ -282,6 +282,18 @@ const world = (paths, links = {}) => ({
   assert.ok(/docker/i.test(a4NoDocker.reason), 'arxa detects Docker, never assumes (S3)')
   ok('tier: inherited A5/A4 degrade to the best available tier, never stall')
 
+  // Task 10 (A4 becomes real): the runner's Docker DETAIL reaches the
+  // degrade reason (an installed CLI with a dead daemon is not "Docker is
+  // not present"), and a missing A5 falls back to A4 when Docker is the
+  // best tier the machine can actually run (S3 #4 — highest available).
+  const a4DaemonDown = resolveEffectiveTier({ configured: 'A4', platform: 'darwin', runners: { seatbelt: true, docker: false, dockerReason: 'Docker is installed (/usr/local/bin/docker) but its daemon is not reachable' } })
+  assert.equal(a4DaemonDown.effective, 'A3')
+  assert.match(a4DaemonDown.reason, /daemon/, 'the reason carries the measured truth, not a generic absent-Docker line')
+  const a5FallsToA4 = resolveEffectiveTier({ configured: 'A5', platform: 'darwin', runners: { seatbelt: true, docker: true } })
+  assert.equal(a5FallsToA4.effective, 'A4', 'sbx absent + Docker present → the hardened-container tier is the best available')
+  assert.match(a5FallsToA4.reason, /A4|container/i, 'the fallback names the tier it landed on')
+  ok('tier: A4 degrades with the daemon truth and A5 falls back to A4 when Docker is the best available')
+
   // A no-toolchain host still confines: the ladder never depended on Flutter.
   const bare = resolveEffectiveTier({ configured: 'A2', platform: 'darwin', runners: { seatbelt: true } })
   assert.equal(bare.effective, 'A2')

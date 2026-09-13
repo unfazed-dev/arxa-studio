@@ -77,13 +77,23 @@ export function resolveEffectiveTier ({ configured, platform, runners = {} }) {
       ceiling = Math.max(ceiling, 4)
       reason = 'Docker is present — the hardened-container tier is available on this machine'
     } else {
-      reason = 'Docker is not present — arxa detects rather than assumes (S3); degrading to the highest tier this machine can enforce'
+      // The measured detail (a dead daemon is NOT "Docker is not present")
+      // replaces the generic line, because a card that paraphrases the
+      // machine is a broken promise (Task 10: detectDocker() feeds this).
+      reason = runners.dockerReason ?? 'Docker is not present — arxa detects rather than assumes (S3); degrading to the highest tier this machine can enforce'
     }
   }
   if (configured === 'A5') {
     if (runners.sbx && runners.sbxAuthed) {
       ceiling = Math.max(ceiling, 5)
       reason = 'sbx is installed and signed in — the microVM tier is available on this machine'
+    } else if (runners.docker) {
+      // S3 #4: degrade to the highest tier ACTUALLY available — with the
+      // microVM out of reach but Docker running containers, that is A4.
+      ceiling = Math.max(ceiling, 4)
+      reason = (runners.sbx
+        ? 'sbx is installed but not signed in — the one-time browser sign-in is the only step arxa cannot automate (§23a)'
+        : 'sbx (Docker Sandboxes) is not installed on this machine') + '; Docker is present, so degrading to A4 (the hardened-container tier), the best this machine can enforce'
     } else {
       reason = runners.sbx
         ? 'sbx is installed but not signed in — the one-time browser sign-in is the only step arxa cannot automate (§23a); degrading to the highest tier this machine can enforce'
