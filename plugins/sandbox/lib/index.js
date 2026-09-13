@@ -60,6 +60,14 @@
 //   `bwrap` IS extended (`--bind <root> <root>`, appended, order-applied) since
 //   its dialect is unambiguous.
 //
+// A2/A3 (added with the confinement programme, docs/plans/
+// arxa-isolation-levels.md §9b/§20-23): on Seatbelt this provider ALSO
+// appends the org-scoped read-deny (cross-project read isolation for
+// subprocesses) and can append the `(deny network*)` egress form when the
+// instance opts in. The in-process half of A2 lives in lib/filesystem.js —
+// the two fences mirror each other and key on the same org-root derivation
+// (`arxaOrgRootOf`).
+//
 // NEVER HARDCODE A PATH. The Flutter SDK here is an fvm checkout on an external
 // volume; on another machine it is Homebrew, or an unzipped tarball, or absent.
 // Every root below is resolved at runtime from `PATH` + env and dropped when it
@@ -213,17 +221,77 @@ export function sbplString (path) {
 }
 
 /**
- * Append extra writable-root grants to a Seatbelt invocation without rebuilding
- * its profile. The base rung's argv is `[sandbox-exec, "-p", <SBPL>]`
- * (`dsh-sandbox-local:74`); one more trailing allow form wins under SBPL's
- * last-match-wins evaluation, which is the same mechanism the base profile uses
- * to re-allow roots after its own `(deny file-write*)`.
+ * The org root a session worktree belongs to: `<org>` for a worktree at
+ * `<org>/.arxa/worktrees/<id>`, else undefined. This layout is arxa's own
+ * (D98/D99 routing), so deriving it here is not a guess about foreign state —
+ * and when the root does not match it, BOTH fences (this provider's
+ * subprocess read-deny and the arxa FileSystem provider's in-process read
+ * fence) simply do not fire, rather than scoping a deny around a directory
+ * that is not an org root.
+ * @param {string} workspaceRoot - the session's workspace root.
+ * @param {(p: string) => string} [canonical] - path canonicaliser.
+ * @returns {string | undefined} the org root, or undefined outside the layout.
+ */
+export function arxaOrgRootOf (workspaceRoot, canonical = canonicalPath) {
+  const ws = canonical(workspaceRoot)
+  const m = /^(.*)[/\\]\.arxa[/\\]worktrees[/\\][^/\\]+$/u.exec(ws)
+  return m === null ? undefined : m[1]
+}
+
+/**
+ * The A2 read-isolation SBPL forms for a workspace root (§9b, measured):
+ * deny reads under the org root, re-allow the worktree, and re-allow the
+ * org's own `.git` — a session worktree's `.git` file POINTS into
+ * `<org>/.git/worktrees/<id>`, so `git status`/`diff`/`log` (and the host's
+ * auto-commit plumbing) read through there and must keep working. The org
+ * root ITSELF also needs a literal allow: `(subpath X)` covers X and below,
+ * and git's safe-directory ownership check stats every ancestor of the
+ * worktree — measured 2026-09-13, `git status` died with
+ * `fatal: Invalid path '<org>': Operation not permitted` until this form
+ * existed. That allow exposes the org root's ENTRY NAMES (readdir), never
+ * sibling content. Everything outside the org root stays readable, exactly
+ * like the profile's scoped deny.
+ * Empty string when the root is not an arxa session worktree (see
+ * {@link arxaOrgRootOf}) — read isolation is keyed on the org layout, and no
+ * forms is the honest no-op, never a wider deny.
+ * @param {string} workspaceRoot - the session's workspace root.
+ * @param {(p: string) => string} [canonical] - path canonicaliser.
+ * @returns {string} trailing SBPL forms to append, or ''.
+ */
+export function seatbeltReadDenyForms (workspaceRoot, canonical = canonicalPath) {
+  const ws = canonical(workspaceRoot)
+  const orgRoot = arxaOrgRootOf(ws, (p) => p)
+  if (orgRoot === undefined) return ''
+  return [
+    `(deny file-read* (subpath ${sbplString(orgRoot)}))`,
+    `(allow file-read* (literal ${sbplString(orgRoot)}))`,
+    `(allow file-read* (subpath ${sbplString(ws)}))`,
+    `(allow file-read* (subpath ${sbplString(join(orgRoot, '.git'))}))`
+  ].join(' ')
+}
+
+/**
+ * The A3 subprocess-egress SBPL form (§9b, measured: outbound TCP is denied
+ * by this form). NOT appended by default — git push/fetch, npm install and
+ * pub get all need subprocess network, and the phase split (§12a) is not
+ * built — A3 stays an explicit org choice, reported honestly (S3/S4).
+ */
+export const SEATBELT_EGRESS_DENY_FORM = '(deny network*)'
+
+/**
+ * Append extra writable-root grants (and any extra SBPL forms) to a Seatbelt
+ * invocation without rebuilding its profile. The base rung's argv is
+ * `[sandbox-exec, "-p", <SBPL>]` (`dsh-sandbox-local:74`); trailing forms win
+ * under SBPL's last-match-wins evaluation, which is the same mechanism the
+ * base profile uses to re-allow roots after its own `(deny file-write*)`.
  * @param {string[]} argv - `super.runnerArgv('seatbelt', policy)`.
  * @param {string[]} roots - canonical roots to add.
+ * @param {string} [extraForms] - additional trailing SBPL forms (the A2
+ *   read-deny, the A3 egress deny), appended verbatim.
  * @returns {string[]} the extended invocation.
  */
-export function extendSeatbeltArgv (argv, roots) {
-  if (roots.length === 0) return argv
+export function extendSeatbeltArgv (argv, roots, extraForms = '') {
+  if (roots.length === 0 && extraForms === '') return argv
   const flag = argv.length - 2
   if (argv[flag] !== '-p') {
     // Fail loudly rather than silently shipping an unextended profile: an
@@ -237,8 +305,10 @@ export function extendSeatbeltArgv (argv, roots) {
     )
   }
   const forms = roots.map((root) => `(subpath ${sbplString(root)})`).join(' ')
+  const grant = forms === '' ? '' : `(allow file-write* ${forms})`
+  const extension = [grant, extraForms].filter((f) => f !== '').join(' ')
   const extended = [...argv]
-  extended[flag + 1] = `${argv[flag + 1]} (allow file-write* ${forms})`
+  extended[flag + 1] = `${argv[flag + 1]} ${extension}`
   return extended
 }
 
@@ -328,6 +398,13 @@ export default class ArxaSandboxProvider extends LocalSandboxProvider {
   /**
    * `super.runnerArgv` plus this provider's extra grants, in the selected
    * rung's own dialect. Never rebuilds a profile.
+   *
+   * Seatbelt also gains the A2 read-isolation forms (org-scoped read-deny,
+   * re-allowing the worktree and the org's own `.git` plumbing — §9b,
+   * measured) whenever the policy is `workspace-write` and the workspace root
+   * sits in the arxa worktree layout, and the A3 egress deny form only when
+   * the instance was explicitly configured for it (`arxaInternals.egress =
+   * 'deny'`) — never by default, because git/npm/pub need subprocess network.
    * @param {string} runner - the selected rung.
    * @param {object} policy - the resolved per-call file-effect policy.
    * @returns {string[]} the runner invocation.
@@ -335,17 +412,22 @@ export default class ArxaSandboxProvider extends LocalSandboxProvider {
   runnerArgv (runner, policy) {
     const argv = super.runnerArgv(runner, policy)
     const extra = this.extraWritableRoots(policy)
-    if (extra.length === 0) return argv
-    switch (runner) {
-      case 'seatbelt':
-        return extendSeatbeltArgv(argv, extra)
-      case 'bwrap':
-        // bwrap applies mount ops in argument order; a trailing bind is the
-        // same grant the base makes for the workspace root (`:36`).
-        return [...argv, ...extra.flatMap((root) => ['--bind', root, root])]
-      default:
-        // landlock / windows-acl: not extended by guess. See the header note.
-        return argv
+    if (runner !== 'seatbelt') {
+      if (extra.length === 0) return argv
+      // bwrap applies mount ops in argument order; a trailing bind is the
+      // same grant the base makes for the workspace root (`:36`).
+      if (runner === 'bwrap') return [...argv, ...extra.flatMap((root) => ['--bind', root, root])]
+      // landlock / windows-acl: not extended by guess. See the header note.
+      return argv
     }
+    let forms = ''
+    if (policy.mode === 'workspace-write') {
+      forms += seatbeltReadDenyForms(policy.workspaceRoot)
+      if (this.arxaInternals.egress === 'deny') {
+        forms += (forms === '' ? '' : ' ') + SEATBELT_EGRESS_DENY_FORM
+      }
+    }
+    if (extra.length === 0 && forms === '') return argv
+    return extendSeatbeltArgv(argv, extra, forms)
   }
 }

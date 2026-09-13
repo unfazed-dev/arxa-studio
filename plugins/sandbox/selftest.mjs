@@ -229,6 +229,182 @@ const world = (paths, links = {}) => ({
   ok('a legitimate grant beside rejected ones is kept, so the filter is not a blanket refusal')
 }
 
+// ---- 13. tier resolution (S3, docs/plans/arxa-isolation-levels.md §16/§22–23):
+//      the effective tier is resolved per machine at session start, can only
+//      DECREASE from the configured capability, and every decrease carries a
+//      user-readable reason — the card shows the effective tier, never the
+//      configured one, whenever they differ.
+{
+  const { resolveEffectiveTier } = await import('./lib/effective-tier.js')
+
+  // macOS Seatbelt: the full A0–A3 ladder is enforceable in the profile.
+  const darwin = resolveEffectiveTier({ configured: 'A2', platform: 'darwin', runners: { seatbelt: true } })
+  assert.equal(darwin.configured, 'A2')
+  assert.equal(darwin.effective, 'A2')
+  assert.ok(typeof darwin.reason === 'string' && darwin.reason.length > 0, 'a reason is always present')
+  ok('tier: darwin + seatbelt holds A0–A3 (A2 stays A2)')
+
+  // Missing runners: nothing can be enforced — decrease to A0 with a reason.
+  const noRunner = resolveEffectiveTier({ configured: 'A3', platform: 'darwin', runners: {} })
+  assert.equal(noRunner.effective, 'A0', 'no runner → A0')
+  assert.ok(noRunner.reason.length > 0, 'the decrease says why')
+  ok('tier: missing runners decrease to A0 with a readable reason')
+
+  // Linux bwrap carries the egress rung; Landlock cannot deny network (§16).
+  const bwrap = resolveEffectiveTier({ configured: 'A3', platform: 'linux', runners: { bwrap: true } })
+  assert.equal(bwrap.effective, 'A3')
+  const landlock = resolveEffectiveTier({ configured: 'A3', platform: 'linux', runners: { landlock: true } })
+  assert.equal(landlock.effective, 'A2', 'Landlock caps below the egress tier')
+  assert.ok(/network/i.test(landlock.reason), 'the cap names what Landlock cannot do')
+  ok('tier: linux bwrap reaches A3, landlock caps at A2 (no network control)')
+
+  // Windows: the ACL rung is write confinement only, and unsupported when absent.
+  const acl = resolveEffectiveTier({ configured: 'A2', platform: 'win32', runners: { 'windows-acl': true } })
+  assert.equal(acl.effective, 'A1', 'ACL rung holds the write boundary but not read isolation')
+  const noAcl = resolveEffectiveTier({ configured: 'A1', platform: 'win32', runners: {} })
+  assert.equal(noAcl.effective, 'A0')
+  assert.ok(/acl|windows/i.test(noAcl.reason), 'the reason names the unsupported rung')
+  ok('tier: windows ACL is write-only (A1) and A0 when unsupported')
+
+  // Inherited A5 must degrade to the best AVAILABLE local tier, never stall a
+  // session (S3 §23b) — sbx absent, sbx unsigned, and sbx ready are three
+  // different answers.
+  const a5NoSbx = resolveEffectiveTier({ configured: 'A5', platform: 'darwin', runners: { seatbelt: true } })
+  assert.equal(a5NoSbx.effective, 'A3', 'degrades to the best local tier')
+  assert.ok(/sbx|sandbox/i.test(a5NoSbx.reason), 'names the missing microVM runner')
+  const a5Unauthed = resolveEffectiveTier({ configured: 'A5', platform: 'darwin', runners: { seatbelt: true, sbx: true } })
+  assert.equal(a5Unauthed.effective, 'A3')
+  assert.ok(/sign/i.test(a5Unauthed.reason), 'names the one-time sign-in arxa cannot automate (§23a)')
+  const a5Ready = resolveEffectiveTier({ configured: 'A5', platform: 'darwin', runners: { seatbelt: true, sbx: true, sbxAuthed: true } })
+  assert.equal(a5Ready.effective, 'A5')
+  const a4NoDocker = resolveEffectiveTier({ configured: 'A4', platform: 'darwin', runners: { seatbelt: true } })
+  assert.equal(a4NoDocker.effective, 'A3')
+  assert.ok(/docker/i.test(a4NoDocker.reason), 'arxa detects Docker, never assumes (S3)')
+  ok('tier: inherited A5/A4 degrade to the best available tier, never stall')
+
+  // A no-toolchain host still confines: the ladder never depended on Flutter.
+  const bare = resolveEffectiveTier({ configured: 'A2', platform: 'darwin', runners: { seatbelt: true } })
+  assert.equal(bare.effective, 'A2')
+  // The effective tier can only decrease from configured — never widen.
+  const a1 = resolveEffectiveTier({ configured: 'A1', platform: 'darwin', runners: { seatbelt: true, sbx: true, sbxAuthed: true, docker: true } })
+  assert.equal(a1.effective, 'A1', 'a configured A1 is never widened by available runners')
+  // An unknown configured tier resolves to A0 rather than guessing.
+  const bogus = resolveEffectiveTier({ configured: 'A9', platform: 'darwin', runners: { seatbelt: true } })
+  assert.equal(bogus.effective, 'A0')
+  assert.ok(/A9|unknown/i.test(bogus.reason))
+  ok('tier: no-toolchain hosts still hold A2; effective never widens; unknown tiers fall to A0')
+}
+
+// ---- 14. provisioning (S3/S4): A0–A3 confinement + B1–B2 integrity provision
+//      silently at install — no prompts, no choices, no README steps. The plan
+//      this returns is what the launcher seeds and the card reports.
+{
+  const { provisionLocalConfinement } = await import('./lib/provision.js')
+
+  const p = provisionLocalConfinement({ platform: 'darwin' })
+  // Idempotence: provisioning twice plans the identical world.
+  assert.deepEqual(p, provisionLocalConfinement({ platform: 'darwin' }), 'provisioning is idempotent')
+  ok('provision: idempotent — the same machine plans the same confinement twice')
+
+  // Safe preset materialization: new profiles get workspace-write (S1 order —
+  // the provider ships with the flip, never the flip without the provider).
+  assert.equal(p.preset.settingsKey, 'permission.defaultPreset')
+  assert.equal(p.preset.value, 'workspace-write')
+  ok('provision: preset materializes permission.defaultPreset=workspace-write')
+
+  // The in-process fence ships with it (§20): reads confined, reserved paths
+  // rejected on mutation.
+  assert.equal(p.filesystem.provider, 'arxa-filesystem')
+  assert.equal(p.filesystem.readIsolation, 'org-root')
+  assert.deepEqual(p.filesystem.reservedPaths, ['.git', '.arxa'])
+  ok('provision: arxa-filesystem provider with org-root read isolation + reserved paths')
+
+  // A3 stays honest: subprocess egress is a capability, NOT enforced by
+  // default (git push, npm install and pub get all need subprocess network),
+  // and the things it could never cover are named, not implied.
+  assert.equal(p.subprocessEgress.enforced, false)
+  assert.equal(p.subprocessEgress.seatbeltForm, '(deny network*)')
+  for (const outside of ['WebFetch', 'MCP', 'web search', 'model-provider']) {
+    assert.ok(p.subprocessEgress.doesNotCover.some((x) => x.includes(outside)),
+      `the egress claim must name ${outside} as outside its coverage`)
+  }
+  assert.ok(p.subprocessEgress.reason.length > 0)
+  ok('provision: A3 is a reported capability, not a default — and its ceiling is named')
+
+  // No widening: the subprocess provider grants exactly dsh's mode roots plus
+  // the measured toolchain caches, and nothing else is planned.
+  assert.ok(/workspace.*temp.*toolchain|toolchain.*temp.*workspace/i.test(p.subprocessWritableRoots),
+    'the writable-root plan names exactly workspace + temp + measured toolchain roots')
+  ok('provision: no widening beyond workspace/temp/measured toolchain roots')
+
+  // B1/B2 ship unconditionally (S4) — they are not a menu item.
+  assert.ok(p.integrity.install.npm.includes('npm ci --ignore-scripts'))
+  assert.ok(p.integrity.install.dart.includes('--enforce-lockfile'))
+  assert.ok(/osv-scanner/i.test(p.integrity.osv) && /skip/i.test(p.integrity.osv),
+    'OSV scanning reports an honest skip when the scanner is absent')
+  assert.equal(p.integrity.diffPolicy, 'base-branch')
+  ok('provision: B1 lockfile-pinned script-free installs + B2 base-branch diff policy')
+
+  // No manual prerequisite anywhere in the plan (§23: the user does nothing).
+  assert.deepEqual(p.manualSteps, [])
+  ok('provision: zero manual steps — everything derives from the machine')
+}
+
+// ---- 15. the A2/A3 seatbelt extensions: the org-scoped read-deny (§9b,
+//      measured working) and the opt-in egress deny. Both are APPENDED forms
+//      on the same last-match-wins seam as the write grants — never a rebuilt
+//      profile — and both key on the same org-root derivation as the
+//      in-process fence (lib/filesystem.js), so the two fences cannot drift.
+{
+  const { seatbeltReadDenyForms, arxaOrgRootOf, SEATBELT_EGRESS_DENY_FORM } = await import('./lib/index.js')
+
+  const org = '/vol/org-a'
+  const ws = join(org, '.arxa', 'worktrees', 's-123')
+  assert.equal(arxaOrgRootOf(ws), org, 'the org root is derived from the worktree layout')
+  assert.equal(arxaOrgRootOf(join('/vol', 'plain', 'project')), undefined, 'a non-arxa root derives nothing')
+
+  const forms = seatbeltReadDenyForms(ws, (p) => p)
+  assert.equal(forms,
+    `(deny file-read* (subpath "${org}")) ` +
+    `(allow file-read* (literal "${org}")) ` +
+    `(allow file-read* (subpath "${ws}")) ` +
+    `(allow file-read* (subpath "${org}/.git"))`,
+    'deny the org root, re-allow the org entry itself (git ownership check), the worktree, and the org git plumbing')
+  assert.equal(seatbeltReadDenyForms('/vol/plain/project', (p) => p), '',
+    'no org layout → no read-deny forms (the honest no-op, never a wider deny)')
+  assert.ok(!forms.includes('file-write'), 'the read-deny never touches a write rule')
+  ok('read-deny forms: org-scoped deny + worktree/git re-allows, layout-keyed, write rules untouched')
+
+  const stock = new LocalSandboxProvider(new Context(), { runnerCommand: [], runnerFailureSignatures: [], probeTimeoutMs: 5000 })
+  const provider = new ArxaSandboxProvider(new Context(), { runnerCommand: [], runnerFailureSignatures: [], probeTimeoutMs: 5000 })
+  provider.arxaInternals.resolveToolchainRoots = () => []
+  const policy = { mode: 'workspace-write', workspaceRoot: ws }
+
+  const base = stock.runnerArgv('seatbelt', policy)
+  const ours = provider.runnerArgv('seatbelt', policy)
+  assert.ok(ours[2].startsWith(base[2]), 'stock profile still a verbatim prefix')
+  assert.equal(ours[2].slice(base[2].length), ' ' + forms, 'exactly the read-deny forms appended, nothing else')
+  ok('provider: A2 read-deny rides the seatbelt argv when the root is an arxa worktree')
+
+  provider.arxaInternals.egress = 'deny'
+  const egressArgv = provider.runnerArgv('seatbelt', policy)
+  assert.ok(egressArgv[2].endsWith(SEATBELT_EGRESS_DENY_FORM), 'the opt-in egress deny is appended')
+  assert.equal((egressArgv[2].match(/\(deny network\*\)/gu) ?? []).length, 1, 'exactly one egress form')
+  delete provider.arxaInternals.egress
+  const plainPolicy = { mode: 'workspace-write', workspaceRoot: '/vol/plain/project' }
+  assert.deepEqual(
+    provider.runnerArgv('seatbelt', plainPolicy),
+    stock.runnerArgv('seatbelt', plainPolicy),
+    'a non-arxa root and no grants → byte-identical to stock dsh'
+  )
+  assert.deepEqual(
+    provider.runnerArgv('seatbelt', { mode: 'read-only', workspaceRoot: ws }),
+    stock.runnerArgv('seatbelt', { mode: 'read-only', workspaceRoot: ws }),
+    'read-only stays stock — the read-deny is a workspace-write behaviour'
+  )
+  ok('provider: egress deny is opt-in only; plain roots and read-only stay byte-identical to stock')
+}
+
 // ---- LIVE rows: the real machine, skipped (never failed) without a toolchain.
 {
   const flutter = whichOnPath('flutter')

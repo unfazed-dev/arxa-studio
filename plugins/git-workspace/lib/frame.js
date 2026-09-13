@@ -33,7 +33,17 @@ import path from 'node:path'
  * file whose stamp already reads FRAME_VERSION: editing v4's body in place
  * would have upgraded new repos only and left every existing one — RESTO
  * included — silently on the old gate. */
-export const FRAME_VERSION = 5
+/* v6 (2026-09-13, B1/B2 — docs/plans/arxa-isolation-levels.md §15/S4): the
+ * integrity gates ship unconditionally into every project frame.
+ * B1: `npm ci --ignore-scripts` where package-lock.json exists (the Dart half
+ * already enforced its lockfile in v5), OSV scanning when the scanner is
+ * installed (an honest note, never a red, otherwise).
+ * B2: a base-branch diff-policy gate — forbidden paths with CI config first,
+ * gitleaks over the diff when installed — plus a hard red on a TRACKED
+ * plaintext .env (§7's ranked failure #1), and ci.yml now runs the BASE
+ * branch's copy of check.sh against PR heads so the gate is never
+ * self-modifying. */
+export const FRAME_VERSION = 6
 
 const STAMP_RE = /^# arxa-frame: v(\d+) ([0-9a-f]{16})$/m
 const STAMP_LINE_RE = /^# arxa-frame: v\d+ [0-9a-f]{16}\n/m
@@ -197,9 +207,23 @@ export function projectCheckSh() {
     '  d=$(dirname "$marker")',
     '  (',
     '    cd "$d" || exit 1',
+    '    # B1/§7: a TRACKED plaintext .env is the ranked #1 secret failure —',
+    '    # red wherever it appears (root below, targets here). An UNtracked',
+    '    # .env is the legitimate pre-encryption state and stays green.',
+    '    if [ -f .env ] && git ls-files --error-unmatch .env >/dev/null 2>&1; then',
+    '      fail ".env is TRACKED at $d — encrypt to .env.sops (never commit plaintext)"',
+    '    fi',
     '    case "$(basename "$marker")" in',
     '      package.json)',
     '        command -v npm >/dev/null 2>&1 || exit 0',
+    '        # B1: the lockfile is the dependency truth — `ci` refuses a drifted',
+    '        # package-lock.json (lockfile/manifest coherence, enforced by npm',
+    '        # itself), and --ignore-scripts keeps install scripts (Shai-Hulud\'s',
+    '        # vector) from running as this user. Green by absence: no lockfile,',
+    '        # no install step.',
+    '        if [ -f package-lock.json ]; then',
+    '          npm ci --ignore-scripts --silent || fail "npm ci --ignore-scripts ($d)"',
+    '        fi',
     '        grep -q \'"test"\' package.json || exit 0',
     '        npm test --silent || fail "npm test ($d)"',
     '        ;;',
@@ -249,11 +273,50 @@ export function projectCheckSh() {
     '        python3 -m pytest -q || fail "pytest ($d)"',
     '        ;;',
     '    esac',
+    '    # B1: OSV scan of the target\'s lockfile(s), only when the scanner is',
+    '    # installed — arxa studio is distributed software and a gate that reds',
+    '    # for a MISSING OPTIONAL TOOL is one users switch off, so absence is a',
+    '    # printed note, never a failure.',
+    '    if command -v osv-scanner >/dev/null 2>&1; then',
+    '      for lock in package-lock.json pubspec.lock; do',
+    '        [ -f "$lock" ] || continue',
+    '        osv-scanner --lockfile="$lock" >/dev/null 2>&1 || fail "osv-scanner $lock ($d)"',
+    '      done',
+    '    elif [ -f package-lock.json ] || [ -f pubspec.lock ]; then',
+    '      echo "note: osv-scanner not installed — vulnerability scan skipped (B1)"',
+    '    fi',
     '  ) || exit 1',
     'done || exit 1',
     '',
+    '# --- B2: base-branch diff policy (CI PRs only; local runs stay green) -----',
+    '# Fires only where a base ref exists (GitHub sets GITHUB_BASE_REF on PR',
+    '# events). Forbidden paths, CI config FIRST: a PR must not author the',
+    '# workflow that judges it (§15 — otherwise the gate is self-modifying',
+    '# and worth nothing). gitleaks sweeps the diff when installed, with the',
+    '# same honest-absence note as the OSV row. Lockfile/manifest coherence',
+    '# is NOT re-checked textually here: npm ci and pub get --enforce-lockfile',
+    '# already refuse drifted manifests at install time, and a weaker textual',
+    '# check on top would only lie.',
+    'if [ -n "${GITHUB_BASE_REF:-}" ]; then',
+    '  if git rev-parse -q --verify "origin/$GITHUB_BASE_REF" >/dev/null 2>&1; then',
+    '    range="origin/$GITHUB_BASE_REF...HEAD"',
+    '    changed=$(git diff --name-only "$range" -- .github/workflows .git/hooks 2>/dev/null)',
+    '    [ -z "$changed" ] || fail "PR modifies forbidden control paths: $changed"',
+    '    if command -v gitleaks >/dev/null 2>&1; then',
+    '      gitleaks detect --source . --log-opts="$range" --redact >/dev/null 2>&1 \\',
+    '        || fail "gitleaks: secrets detected in the PR diff"',
+    '    else',
+    '      echo "note: gitleaks not installed — diff secret scan skipped (B2)"',
+    '    fi',
+    '  fi',
+    'fi',
+    '',
     '# --- light checks ---------------------------------------------------------',
     '[ ! -e .git/index.lock ] || fail ".git/index.lock present"',
+    '# B1/§7 root-level twin of the per-target guard above.',
+    'if [ -f .env ] && git ls-files --error-unmatch .env >/dev/null 2>&1; then',
+    '  fail ".env is TRACKED at the repo root — encrypt to .env.sops (never commit plaintext)"',
+    'fi',
   ].join('\n')
   return checkShHead() + '\n' + body + '\n' + subjectCheckSh() + '\n'
 }
@@ -321,6 +384,18 @@ export function ciYml() {
     '          fetch-depth: 0',
     '      - name: arxa frame checks',
     '        run: sh check.sh',
+    // B2 (§15): CI must run the BASE branch's copy of check.sh against the
+    // PR head — otherwise the agent (or anyone) edits the gate in the same
+    // PR the gate is supposed to judge, and the gate is self-modifying.
+    // Push events and local runs keep the head copy (nothing judges a push
+    // except the branch owner).
+    '      - name: arxa base-branch frame gate (PRs only)',
+    '        if: github.event_name == \'pull_request\'',
+    '        run: |',
+    '          set -e',
+    '          git fetch -q origin "+$GITHUB_BASE_REF:refs/remotes/origin/$GITHUB_BASE_REF"',
+    '          git show "origin/$GITHUB_BASE_REF:check.sh" > "$RUNNER_TEMP/arxa-base-check.sh"',
+    '          sh "$RUNNER_TEMP/arxa-base-check.sh"',
     '',
   ].join('\n').replace('@@EXPR@@', '$' + '{{ github.ref }}')
 }

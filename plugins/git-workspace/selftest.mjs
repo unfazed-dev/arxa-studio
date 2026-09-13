@@ -466,7 +466,7 @@ ok('frame: ci.yml runs frame-check on session branches as well as main (Q7)', ()
   const y = ciYml()
   assert.ok(y.includes("branches: [main, 'arxa/**']"), 'session branches are watched')
   assert.ok(y.includes('pull_request:'), 'the PR trigger survives — the review path is unchanged')
-  assert.equal(FRAME_VERSION, 5, 'the stamp version bumped so existing published repos heal to the t3ci project checks (v4 widened the branch glob; v5 adds pinned SDK + --enforce-lockfile + --fatal-warnings)')
+  assert.equal(FRAME_VERSION, 6, 'the stamp version bumped so existing published repos heal to the current frame (v5 added pinned SDK + --enforce-lockfile; v6 adds the B1/B2 integrity gates and the base-branch CI gate)')
 })
 
 ok('frame: protection + settings payloads (Q3/Q8)', () => {
@@ -517,6 +517,85 @@ ok('frame: v5 t3ci checks are all GUARDED — absence is never a failure (Q13)',
   assert.ok(sh.includes('[ -n "$pin" ] || command -v "$run" >/dev/null 2>&1 || exit 0'),
     'a target whose toolchain is absent is skipped, not failed')
   assert.ok(sh.includes('root=$(pwd)'), 'the project root is captured before the per-target walk')
+})
+
+ok('frame: B1 — script-free, lockfile-pinned installs reach every project target (v6)', () => {
+  const sh = projectCheckSh()
+  assert.ok(sh.includes('npm ci --ignore-scripts'), 'npm installs are lockfile-pinned AND script-free')
+  assert.ok(/\[ -f package-lock\.json \]/.test(sh), '…only where a lockfile actually exists (green by absence)')
+  assert.ok(sh.includes('--enforce-lockfile'), 'the Dart half keeps enforcing the lockfile')
+  assert.ok(/npm ci --ignore-scripts[^\n]*\|\| fail/.test(sh), 'a failed install is a hard red, not a warning')
+  assert.ok(sh.includes('osv-scanner'), 'OSV scanning ships with the frame')
+  assert.ok(/command -v osv-scanner/.test(sh), '…guarded on the scanner being installed')
+  assert.ok(/osv-scanner[^\n]*\n[^\n]*note: osv-scanner not installed|not installed[^\n]*osv-scanner|osv-scanner[^\n]*(skip|note)/i.test(sh)
+    || /echo "note: osv-scanner[^\n]*skip/i.test(sh), 'an honest unavailable note, never a red, when it is absent')
+  assert.equal(FRAME_VERSION, 6, 'the stamp bumped so existing published repos heal to the B1/B2 checks')
+})
+
+ok('frame: B2 — the base-branch diff policy gate and the plaintext-.env red', () => {
+  const sh = projectCheckSh()
+  assert.ok(sh.includes('GITHUB_BASE_REF'), 'the diff policy fires only where a base ref exists (local stays green)')
+  assert.ok(sh.includes('.github/workflows'), 'CI config is the FIRST forbidden path — the PR never authors the workflow that judges it')
+  assert.ok(sh.includes('gitleaks') && /command -v gitleaks/.test(sh), 'gitleaks sweeps the diff when installed')
+  assert.ok(/ls-files[^\n]*\.env|\.env[^\n]*ls-files/.test(sh), 'a TRACKED plaintext .env is a hard red')
+  assert.ok(/git diff --name-only "\$range" -- \.github\/workflows \.git\/hooks/.test(sh),
+    'the forbidden-path diff is exactly CI config + git hooks, judged against the base-branch range')
+
+  const y = ciYml()
+  assert.ok(y.includes("if: github.event_name == 'pull_request'"), 'the base gate is PR-scoped')
+  assert.ok(y.includes('origin/$GITHUB_BASE_REF:check.sh'), 'CI runs the BASE branch copy of the gate against the PR head — never self-modifying')
+  assert.ok(y.includes('sh check.sh'), 'the standing head-run survives (push events, local parity)')
+})
+
+ok('frame: B1/B2 are green by absence and red on real violations (functional)', () => {
+  const d = path.join(tmp, 'frame-b1b2')
+  fs.mkdirSync(d, { recursive: true })
+  writeFrameFiles(d, 'project')
+  runGit(['init', '-b', 'main'], { cwd: d })
+  fs.writeFileSync(path.join(d, 'README.md'), 'x\n')
+  runGit(['add', '-A'], { cwd: d })
+  runGit(['commit', '-m', 'feat: seed'], { cwd: d })
+  const sh = (env = {}) => {
+    try {
+      execFileSync('sh', ['check.sh'], { cwd: d, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } })
+      return 0
+    } catch (err) { return err.status ?? 1 }
+  }
+  assert.equal(sh(), 0, 'a plain tree with no lockfiles/env/base-ref stays green (B1/B2 absence discipline)')
+
+  // A TRACKED plaintext .env is the §7 ranked failure — red even without a
+  // remote or a base ref.
+  fs.writeFileSync(path.join(d, '.env'), 'A=1\n')
+  runGit(['add', '.env'], { cwd: d })
+  runGit(['commit', '-m', 'chore: add env'], { cwd: d })
+  assert.notEqual(sh(), 0, 'a tracked plaintext .env goes red')
+  runGit(['rm', '-q', '--cached', '.env'], { cwd: d })
+  runGit(['commit', '-m', 'chore: untrack env'], { cwd: d })
+  assert.equal(sh(), 0, 'an UNtracked .env (the .env.sops workflow) stays green')
+
+  // The base-branch diff policy: a PR-shaped range that touches CI config.
+  runGit(['checkout', '-q', '-b', 'pr-1'], { cwd: d })
+  fs.mkdirSync(path.join(d, '.github', 'workflows'), { recursive: true })
+  fs.writeFileSync(path.join(d, '.github', 'workflows', 'evil.yml'), 'on: [push]\n')
+  // Targeted add: `add -A` would re-track the untracked .env sitting on disk
+  // and muddy the row under test.
+  runGit(['add', '.github'], { cwd: d })
+  runGit(['commit', '-m', 'feat: touch ci'], { cwd: d })
+  // Locally (no GITHUB_BASE_REF) the gate stays green — it is a CI-only rule.
+  assert.equal(sh(), 0, 'locally the diff policy is dormant (green by absence)')
+  // With a base ref (the CI shape) the forbidden path goes red. The fake
+  // remote must point at the actual BASE (main), not the PR head, or the
+  // range is empty and the row proves nothing.
+  runGit(['update-ref', 'refs/remotes/origin/main', 'main'], { cwd: d })
+  assert.notEqual(sh({ GITHUB_BASE_REF: 'main' }), 0, 'a PR touching .github/workflows goes red under the base-branch gate')
+  // The same range WITHOUT the forbidden path is green.
+  runGit(['checkout', '-q', 'main'], { cwd: d })
+  runGit(['branch', '-D', 'pr-1'], { cwd: d })
+  runGit(['checkout', '-q', '-b', 'pr-2'], { cwd: d })
+  fs.writeFileSync(path.join(d, 'README.md'), 'y\n')
+  runGit(['add', 'README.md'], { cwd: d })
+  runGit(['commit', '-m', 'docs: safe change'], { cwd: d })
+  assert.equal(sh({ GITHUB_BASE_REF: 'main' }), 0, 'an ordinary PR range stays green under the base-branch gate')
 })
 
 ok('frame: .arxa/ is excluded at git init, before anything can be added', () => {

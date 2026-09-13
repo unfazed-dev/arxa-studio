@@ -77,6 +77,10 @@ suites.push([root, 'scripts', 'pack-list-check.mjs'])
 // entirely. A build tool that reports success while shipping nothing needs a gate.
 suites.push([root, 'bin', 'selftest.engine-sync.mjs'])
 suites.push([root, 'bin', 'selftest.loopback-patch.mjs'])
+// The launcher's permission-preset seeding (S1 step 3): new profiles get
+// workspace-write; existing ones migrate only on marker proof. Pinned pure
+// AND end-to-end through a real --materialise-only boot.
+suites.push([root, 'bin', 'selftest.launcher-settings.mjs'])
 
 console.log('arxa-studio CI — ' + suites.length + ' suites')
 let failed = 0

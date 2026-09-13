@@ -104,6 +104,24 @@
   - id: arxa-sandbox
     name: __ARXA_STUDIO_PLUGINS__/sandbox/lib/index.js
 
+# 6c. The arxa filesystem provider (A2's in-process half, §20,
+#     docs/plans/arxa-isolation-levels.md). dsh's `fs-sandbox` row fences ONLY
+#     the two mutations — there is no read override, so the agent's own file
+#     tools could read a sibling project straight through in every mode.
+#     arxa-filesystem SUBCLASSES SandboxedFileSystem and adds exactly two
+#     things: a read fence mirroring the Seatbelt A2 read-deny (org-scoped;
+#     sibling projects, the .arxa registry and symlink escapes denied) and a
+#     reserved-path rejection on mutation (.git/.arxa control paths — §11's
+#     protected list). The stock write fence, atomic writes and escalation
+#     advertising are inherited verbatim. Same revert shape as row 6b: delete
+#     this row pair and the stock provider is back, package untouched.
+#     Verified by plugins/sandbox/selftest.filesystem.mjs.
+- id: fs-sandbox
+  disabled: true
+- insert:
+  - id: arxa-filesystem
+    name: __ARXA_STUDIO_PLUGINS__/sandbox/lib/filesystem.js
+
 # 7. The design panel (H4, viewer-first): shell.overlay dock iframing a live
 #    `arxa design serve` with the viewport-rung ladder. By PACKAGE NAME —
 #    the browser half is discovered through the package.json dsh.client

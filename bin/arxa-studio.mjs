@@ -24,6 +24,8 @@ import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { homedir } from 'node:os'
 import { materialisePreset } from './materialise-preset.mjs'
+import { seedPermissionPreset, seededPermissionBlock } from './seed-settings.mjs'
+import { provisionLocalConfinement } from '../plugins/sandbox/lib/provision.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const template = join(here, '..', 'profile', 'cordis.patch.yml')
@@ -289,9 +291,7 @@ agent-default-model:
   reasoningEffort: max
 agent-presets:
   default: arxa
-permission:
-  defaultPreset: danger-full-access
-`)
+${seededPermissionBlock(provisionLocalConfinement().preset.value)}`)
 } else {
   // agent-presets.default previously seeded (or hand-set) to one of the
   // shipped preset names now gets rewritten to arxa, once, with a printed
@@ -313,6 +313,15 @@ permission:
       }
     }
   }
+
+  // permission.defaultPreset (S1 step 3, docs/plans/arxa-isolation-levels.md):
+  // migrate ONLY when the launcher-owned marker proves the current value was
+  // generated here; an indistinguishable operator value stays untouched and
+  // gets the visible remediation notice. bin/seed-settings.mjs owns the rules.
+  const seeded = seedPermissionPreset(readFileSync(settingsFile, 'utf8'),
+    { preset: provisionLocalConfinement().preset.value })
+  if (seeded.action === 'migrated') writeFileSync(settingsFile, seeded.text)
+  if (seeded.notice !== undefined) console.log(seeded.notice)
 }
 
 // Seed the credential store from the operator's dsh install, once. A plain
