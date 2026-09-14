@@ -113,8 +113,16 @@ window.__ModuleLoader__.load({
       // shape, truthful capability badges. A remote provider's capabilities
       // need a live backend call — the panel gets those from
       // `arxa-studio provider verify` / diagnose, never here.
+      // rpc.call resolves the dsh result envelope ({ok:true,value} |
+      // {ok:false,error}); info() unwraps it so panel-facing callers (the
+      // section model, the evidence gate) get the BARE record or a rejection
+      // (E3/L3, closeout 2026-09-14).
+      const unwrap = (res) => {
+        if (res && res.ok === true) return res.value
+        throw new Error((res && res.error && res.error.message) || 'workspace provider info failed')
+      }
       window.__arxaWorkspaceProvider = {
-        info: () => ctx.connection.rpc.call(RPC_CHANNEL, 'info', {}),
+        info: () => ctx.connection.rpc.call(RPC_CHANNEL, 'info', {}).then(unwrap),
         section: (info, locale) => section(info, locale),
         namespace: NS,
       }

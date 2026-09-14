@@ -62,14 +62,23 @@ export default {
     // headless boot it stays pending harmlessly — same shape as
     // arxa-provider-status.
     ctx.inject(['connection'], (c) => c.connection.rpc.handle(RPC_CHANNEL, async (endpoint) => {
-      if (endpoint !== 'info') throw new Error('unknown endpoint: ' + endpoint)
+      // The envelope IS the wire contract (E3/L3, closeout 2026-09-14): the
+      // engine hands this return to the browser VERBATIM as the
+      // server-response `result`, and the client accepts only {ok:true,value}
+      // / {ok:false,error:{code,message,details}} — a bare record reads as
+      // "connection: invalid server-response result". Same law as
+      // arxa-provider-status; the error code is from the frozen ERROR_CODES set.
+      if (endpoint !== 'info') return { ok: false, error: { code: 'invalid_request', message: 'unknown endpoint: ' + endpoint, details: {} } }
       let backend
       try { backend = readBackendConfig() } catch { backend = {} }
       const caps = capabilitiesFor(backend)
       return {
-        provider: backend.provider ?? 'local',
-        config: configShape(backend),
-        ...(caps ? { capabilities: caps } : {}),
+        ok: true,
+        value: {
+          provider: backend.provider ?? 'local',
+          config: configShape(backend),
+          ...(caps ? { capabilities: caps } : {}),
+        },
       }
     }))
   },

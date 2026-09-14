@@ -25,7 +25,7 @@ let n = 0
 const ok = (s) => { n++; console.log('  ok ' + s) }
 
 // drive the host RPC handler exactly as the dsh connection would
-async function rpcInfo () {
+async function rpcCall (endpoint = 'info') {
   let handler = null
   const ctx = {
     inject (deps, cb) {
@@ -37,7 +37,22 @@ async function rpcInfo () {
   }
   hostPlugin.apply(ctx)
   assert.equal(typeof handler, 'function', 'the RPC channel was registered')
-  return handler('info')
+  return handler(endpoint)
+}
+
+// The dsh Connection RPC wire law, mirrored from the transport pair so this
+// suite fails if the host half drifts off it again (E3/L3, closeout 2026-09-14):
+// the engine hands the handler's return to the browser VERBATIM as the
+// server-response `result` (dsh-client-connection rpcFetchHandler → fullResponse),
+// and the browser's parseConnectionResponse accepts only {ok:true, value} or
+// {ok:false, error:{code,message,details}} — a bare record reads as
+// "connection: invalid server-response result" and wp.info() rejects.
+const lawfulResult = (result) => {
+  const rec = (v) => typeof v === 'object' && v !== null && !Array.isArray(v)
+  if (!rec(result)) return false
+  if (result.ok === true) return true
+  if (result.ok !== false) return false
+  return typeof result.error?.code === 'string' && typeof result.error?.message === 'string' && rec(result.error?.details)
 }
 
 const scratch = mkdtempSync(join(tmpdir(), 'arxa-ws-settings-'))
@@ -64,8 +79,13 @@ try {
   }
 
   // ---------------------------------------------- 2. the host RPC answers for the panel
+  // E3/L3 (closeout 2026-09-14): the result envelope IS the wire contract —
+  // a bare record made wp.info() reject on every fresh boot.
   {
-    const info = await rpcInfo()
+    const result = await rpcCall('info')
+    assert.ok(lawfulResult(result), 'task 13 step 9 / E3: the info RPC result is a lawful dsh server-response result (ok/value or ok/error), never a bare record')
+    assert.equal(result.ok, true)
+    const info = result.value
     assert.equal(info.provider, 'local', 'zero-config default is local (local-first parity)')
     assert.equal(info.capabilities.realtime, true)
     assert.deepEqual(info.config, configShape({}), 'the config shape rides along, values never do')
@@ -73,12 +93,19 @@ try {
     writeFileSync(join(scratch, 'studio.json'), JSON.stringify({
       workspaceBackend: { provider: 'supabase', supabase: { url: 'https://proj.example.supabase.test', anonKey: 'anon-test' } },
     }))
-    const sbInfo = await rpcInfo()
-    assert.equal(sbInfo.provider, 'supabase')
-    assert.equal(sbInfo.capabilities.realtime, false, 'the badge is degraded, honestly')
-    assert.equal(sbInfo.capabilities.signIn.kind, 'email-form')
-    assert.deepEqual(sbInfo.config.sections, ['supabase'], 'config shape: section keys only')
-    ok('RPC info: zero-config local; supabase config → truthful badges + declared sign-in kind')
+    const sbResult = await rpcCall('info')
+    assert.ok(lawfulResult(sbResult), 'the supabase-configured answer is lawful too')
+    assert.equal(sbResult.value.provider, 'supabase')
+    assert.equal(sbResult.value.capabilities.realtime, false, 'the badge is degraded, honestly')
+    assert.equal(sbResult.value.capabilities.signIn.kind, 'email-form')
+    assert.deepEqual(sbResult.value.config.sections, ['supabase'], 'config shape: section keys only')
+
+    // an unknown endpoint answers INSIDE the envelope (code/message/details),
+    // never a thrown string — the engine turns throws into opaque 500s.
+    const bad = await rpcCall('nope')
+    assert.ok(lawfulResult(bad) && bad.ok === false && /unknown endpoint/.test(bad.error.message),
+      'unknown endpoint: lawful {ok:false, error:{code,message,details}} (code from the frozen ERROR_CODES set)')
+    ok('RPC info: lawful envelope every answer — zero-config local; supabase → truthful badges + declared sign-in; unknown endpoint errors inside the envelope')
   }
 
   // ---------------------------------------------- 3. the browser half registers its dictionary with arxa-locale
@@ -88,6 +115,14 @@ try {
       'client.js registers its dictionary through the arxa-locale service')
     assert.ok(/inject\s*=?\s*\[?['"]connection['"],\s*['"]locale['"]/.test(src)
       || src.includes("['connection', 'locale']"), 'locale is an injected dependency')
+
+    // E3/L3: rpc.call resolves the dsh result envelope; info() must unwrap it
+    // (resolve value, reject on error) — the section model and the evidence
+    // gate consume the BARE record, not the envelope.
+    assert.ok(src.includes('const unwrap = (res) =>'),
+      'client.js declares the envelope unwrap for rpc.call results')
+    assert.ok(/info:\s*\(\)\s*=>\s*ctx\.connection\.rpc\.call\(RPC_CHANNEL,\s*'info',\s*\{\}\)\.then\(unwrap\)/.test(src),
+      'info() unwraps the envelope — panel-facing callers get the bare record or a rejection')
 
     // the three tables: extract, compare key sets, and demand they differ
     const tables = extractLocaleTables(src)
