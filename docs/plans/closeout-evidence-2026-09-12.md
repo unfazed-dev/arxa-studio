@@ -26,7 +26,7 @@ Arxa worktree HEAD: `5930302d` (`closeout-2026-09-12`). All Part A legs ran
 | G5 | Claude signed-in smoke (Step 3) | authenticated | `node scripts/claude-code-smoke.mjs --yes` | studio 8e3bc01 | PREPARED | — | operator authorization + signed-in `claude`. Linux resume/Bash-escape rungs are **N/A on macOS** (recorded, not skipped silently) |
 | G5a | bundled skill-pack set stays empty — policy test | scratch | `node plugins/claude-code/selftest.skill-packs.mjs` | studio 8e3bc01 | DONE | `plugins/claude-code/selftest.skill-packs.mjs` (bundled-root-empty row) | — |
 | G6 | Z.ai live smoke (Step 4) | authenticated | `ZAI_API_KEY=<resolved by operator, never printed> node scripts/zai-live-smoke.mjs` | studio 8e3bc01 | PREPARED | — | authorized credential path; requires a real successful response + intended model/wire params |
-| G7 | Viewer gate (Step 5) | scratch (mostly) | `node scripts/evidence-capture-narrow.mjs --width 1280 --surface finish --surface backend --surface langstrip --surface viewer-strip` (the Part A fresh-boot probe; one studio boot per run, sequential single-Chrome pairs) + per-leg rows in §G7-notes | studio 8e3bc01 | DONE (fresh-boot legs, 2026-09-14; per-leg rows in §G7-notes) | `designs/evidence/studio-closeout-2026-09-12/` | LSP-diagnostics live row = limitation per §Escalated E1 (owner + trigger recorded) |
+| G7 | Viewer gate (Step 5) | scratch (mostly) | `node scripts/evidence-capture-narrow.mjs --width 1280 --surface finish --surface backend --surface langstrip --surface viewer-strip` (the Part A fresh-boot probe; one studio boot per run, sequential single-Chrome pairs) + per-leg rows in §G7-notes | studio 8e3bc01 | DONE (fresh-boot legs, 2026-09-14; per-leg rows in §G7-notes; backend leg re-captured green at `7351ddf` in fix round 1) | `designs/evidence/studio-closeout/` (pair logs + PNGs; probe-launch logs in `studio-closeout-2026-09-12/`) | LSP-diagnostics live row = limitation per §Escalated E1 (owner + trigger recorded) |
 | G8 | Mobile physical gates (Step 6) | physical | per-leg commands in `mobile_flutter/deploy/physical-gates.md` (arxa worktree) | arxa 5930302d | PREPARED (per-leg) | `mobile_flutter/deploy/evidence/closeout-2026-09-12/` (dir created Part A) | devices + credentials; every leg incl. `PHASE=phone` real-APNs doorbell |
 | G9 | Release gates (Step 7) | authenticated | `bash desktop/scripts/sign-and-notarize.sh` (script lives in the ARXA worktree; `bash -n` green Part A) + first live `release-linux` tag + clean-machine installer verify | studio 8e3bc01 | EXTERNAL (owner: operator) | — | explicit authorization (never mark complete without it); keychain profile `arxa-notary` absent (AXS-019) |
 | G10 | Omarchy VM + container lanes (T15) | operator-machine | runbook + assertions in arxa `docs/linux-support.md`; container lane `DISTRO=ubuntu scripts/linux/run-container.sh` | studio 8e3bc01 | EXTERNAL (owner: operator) | — | operator VM + daemon; first `desktop/**` PR runner pass (AXS-043) |
@@ -35,9 +35,9 @@ Arxa worktree HEAD: `5930302d` (`closeout-2026-09-12`). All Part A legs ran
 | G12b | T12 residual Step 8 — `arxa deploy --self-test` | scratch | `arxa deploy --self-test` (arxa worktree `.build/arxa`) | arxa 5930302d | DONE (2026-09-14, exit 0, 12/12 — incl. `deploy halts without approval`) | `mobile_flutter/deploy/evidence/closeout-2026-09-12/g12b-deploy-selftest.log` (arxa worktree) | — |
 | G12c | T12 residual Step 8 — release-automation without publishing | scratch (heavy) | disposable-keystore `flutter build appbundle --release` + `flutter build apk --release`; iOS stops at `fastlane ios doctor` | arxa 5930302d | PREPARED (RAM-discipline deferral, §G12-notes) | §G12-notes | — |
 | G13 | tree-endpoint 404 in IGNORED mask (T8 minor) | scratch (decision) | decision row — keep-with-justification (see §G13-notes) | studio 8e3bc01 | DONE (decision) | this file §G13-notes | — |
-| E1 | Escalated: L1/L2 viewer LSP chain dead on fresh boots | scratch (adjudication) | fresh-boot probe (G7 command, `langstrip`/`viewer-strip` pairs) | studio 8e3bc01 | DONE (adjudicated: REPRODUCED → pre-existing defect, keep rows; §Escalated) | `designs/evidence/studio-closeout-2026-09-12/` | product fix = artifact-viewer owner (external) |
-| E2 | Escalated: conversation dock dead on fresh boots | scratch (adjudication) | fresh-boot probe (G7 command, `finish` pair — FAILURE-STATE row if `[data-git-dock]` never mounts) | studio 8e3bc01 | DONE (adjudicated: REPRODUCED → keep limitation + external rows; §Escalated) | `designs/evidence/studio-closeout-2026-09-12/` | operator's installed studio = daily counter-evidence (RIDE condition); product fix = arxa-git-card + dsh conversation-input owners |
-| E3 | Escalated: L3 `window.__arxaWorkspaceProvider.info()` fails on fresh boots | scratch (adjudication) | fresh-boot probe (G7 command, `backend` pair) | studio 8e3bc01 | DONE (adjudicated: REPRODUCED → keep limitation + external rows; §Escalated) | `designs/evidence/studio-closeout-2026-09-12/` | product fix = workspace-provider owner (external) |
+| E1 | Escalated: L1/L2 viewer LSP chain dead on fresh boots | scratch (adjudication) | fresh-boot probe (G7 command, `langstrip`/`viewer-strip` pairs) | studio 8e3bc01 | DONE (adjudicated: REPRODUCED → pre-existing defect at BASE, keep rows; §Escalated) | `designs/evidence/studio-closeout/` (pair logs + PNGs; probe-launch logs in `studio-closeout-2026-09-12/`) | product fix = artifact-viewer owner (external) |
+| E2 | Escalated: conversation dock dead on fresh boots | scratch (adjudication) | fresh-boot probe (G7 command, `finish` pair — FAILURE-STATE row if `[data-git-dock]` never mounts) | studio 8e3bc01 | DONE (adjudicated: REPRODUCED → T8 RIDE condition honored, keep limitation + external rows; §Escalated) | `designs/evidence/studio-closeout/` (pair logs + PNGs; probe-launch logs in `studio-closeout-2026-09-12/`) | operator's installed studio = daily counter-evidence (RIDE condition); product fix = arxa-git-card + dsh conversation-input owners |
+| E3 | Escalated: L3 `window.__arxaWorkspaceProvider.info()` fails on fresh boots | scratch (adjudication → fix round 1) | fresh-boot probe (G7 command, `backend` pair) + wire probe (one-shot driver, RED→GREEN bytes in task-16 report §Fix round 1) | studio 7351ddf (fix round 1) | DONE (FIXED in-branch, 2026-09-14 — dsh result-envelope law; §Escalated) | `designs/evidence/studio-closeout/` (`narrow-capture-logs/1280-backend.log` + `1280/workspace-backend-model-{light,dark}-1280.png`) | limitation + external rows WITHDRAWN — branch-born (T13), fixed in-branch; wire freeze held (`3597a40` byte-identical) |
 
 ## G3-notes — sbx v0.42.1 feed measurement (2026-09-14)
 
@@ -66,12 +66,13 @@ discarded). Quota effect: none metered.
 
 Fresh-boot probe legs (DONE 2026-09-14 at HEAD `8e3bc01`; one studio boot
 per wrapper run against a `mkdtemp` scratch ARXA_HOME; sequential
-single-Chrome pairs; token-redacted logs):
+single-Chrome pairs; token-redacted logs; the backend leg was re-captured
+green in fix round 1 at `7351ddf`):
 
 | leg | runbook face | result | evidence |
 |---|---|---|---|
 | finish | §Escalated E2 | FAILURE STATE recorded honestly — session creates, opens via row, conversation binds, composer activates; `[data-git-dock]` never mounts | `narrow-capture-logs/1280-finish.log`; `1280/finish-failed-{light,dark}-1280.png` |
-| backend | §Escalated E3 | FAILURE STATE card — provider keys (`info,section,namespace`) present; model errors `connection: invalid server-response result` | `narrow-capture-logs/1280-backend.log`; `1280/workspace-backend-model-{light,dark}-1280.png` |
+| backend | §Escalated E3 | FIXED (fix round 1, `7351ddf`) — `backend model: mounted: title=Workspace backend provider=Local (offline, zero config)`, capability badges live (analytics honestly off), light+dark; failure-state card retired | `narrow-capture-logs/1280-backend.log`; `1280/workspace-backend-model-{light,dark}-1280.png` |
 | langstrip | §Escalated E1 | MISSING — no diagnostic squiggles for ts/css/json, no html preview iframe | `narrow-capture-logs/1280-langstrip.log` |
 | viewer-strip | §Escalated E1 | MISSING product state — `dart state: {"strip":false,"editor":true}` light+dark: the editor mounts, the "install its SDK" strip never renders | `narrow-capture-logs/1280-viewer-strip.log`; `1280/viewer-install-strip-{light,dark}-1280.png` |
 
@@ -128,8 +129,11 @@ alongside the E1 fix.
 All three findings reproduced at HEAD `8e3bc01` on fresh scratch boots,
 2026-09-14. Probe logs: `designs/evidence/studio-closeout-2026-09-12/
 probe-launch.log` (finish + backend legs) and `probe-launch-2.log`
-(viewer-strip + langstrip legs); pair logs `…/studio-closeout/narrow-capture-logs/1280-*.log`;
-structured rows `…/narrow-capture-log.json`.
+(viewer-strip + langstrip legs). The durable per-run evidence is the pair
+logs `…/studio-closeout/narrow-capture-logs/1280-*.log` + the PNGs beside
+them — `narrow-capture-log.json` holds only the LATEST driver run (the
+wrapper overwrites it every invocation; current content = the fix-round
+backend re-capture) and must never be cited as merged history.
 
 - **E1 — L1/L2 viewer LSP chain dead on fresh boots**
   (`plugins/artifact-viewer/lib/index.js:183-191`): **REPRODUCED — keep as
@@ -150,14 +154,36 @@ structured rows `…/narrow-capture-log.json`.
   mounts docks daily (counter-evidence); the branch records honest
   FAILURE-STATE rows instead of closing on stale dock evidence.
 - **E3 — L3 `window.__arxaWorkspaceProvider.info()` fails on fresh boots:
-  REPRODUCED — keep limitation + external row** (owner: workspace-provider
-  owner). Provider keys are present (`info,section,namespace`); the live
-  model errors `connection: invalid server-response result`; failure-state
-  card captured light+dark. T8-innocent (4 locale lines).
-- Fix loop: none of the three is branch-caused (each measured pre-existing at
-  BASE during escalation; the T8 diffs are literals→`t()` only) → documented
-  limitation/external rows per brief deliverable 5's else-branch. No product
-  fix attempted in this task.
+  FIXED in fix round 1 (studio `7351ddf`, 2026-09-14) — limitation + external
+  rows withdrawn.** The Part A "pre-existing at BASE" ruling was WRONG and is
+  retracted: workspace-provider is branch-born (created T13 `72a2a83`/T14
+  `75d090f`; absent from BASE `4d1b924`'s plugin tree), so nothing about it
+  could pre-date BASE. Wire diagnosis (one-shot driver on a fresh scratch
+  boot, RED bytes then GREEN bytes, both in task-16 report §Fix round 1): the
+  engine hands the RPC handler's return VERBATIM to the browser as the
+  server-response `result` (dsh-client-connection `rpcFetchHandler` →
+  `fullResponse`), and the browser's `parseConnectionResponse` accepts only
+  `{ok:true,value}` / `{ok:false,error:{code,message,details}}` — the host
+  half returned a bare `{provider,config,capabilities}` record, so wp.info()
+  rejected with `connection: invalid server-response result`; the same boot's
+  `/arxa-provider-status/current` answered lawfully throughout (transport
+  exculpated). Fix: host half answers inside the envelope (error code from
+  the frozen ERROR_CODES set), browser half unwraps `rpc.call`'s envelope;
+  `selftest.settings.mjs` re-pinned to the envelope law (RED first — the old
+  pin was green only because it bypassed the engine wrapper). Wire freeze
+  held: contract/errors/wire byte-identical to `3597a40`. Evidence:
+  `narrow-capture-logs/1280-backend.log` now reads `backend model: mounted:
+  title=Workspace backend provider=Local (offline, zero config)` with live
+  badges light+dark; full `npm test` 130/130 ALL GREEN.
+- Fix loop per row, as measured — no blanket claim: **E1** is the only
+  pre-existing-at-BASE finding (the failing gate is BASE-identical code:
+  `git show 4d1b924:plugins/artifact-viewer/lib/index.js` carries the
+  `lsp`-scope 403 verbatim; keep limitation row). **E2** rests on the
+  standing T8 RIDE ruling honored — fresh-HEAD probe reproduced + external
+  owner rows + the operator's installed studio as daily counter-evidence (no
+  BASE measurement exists or is claimed for E2). **E3** was branch-born and
+  is FIXED (`7351ddf`). Task 17 must carry each row's own basis, never a
+  blanket "pre-existing" sentence.
 
 ## Prep verification (Step 1)
 

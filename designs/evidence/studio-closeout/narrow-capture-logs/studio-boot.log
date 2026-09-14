@@ -1,5 +1,3 @@
-(node:71628) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
-(Use `pnpm --trace-warnings ...` to show where the warning was created)
 [43m[33m[[39m[49m[43m[30mWARN[39m[49m[43m[33m][39m[49m using --force I sure hope you know what you are doing
 Progress: resolved [96m1[39m, reused [96m0[39m, downloaded [96m0[39m, added [96m0[39m
 [33m[39m
@@ -11,19 +9,9 @@ Progress: resolved [96m1[39m, reused [96m0[39m, downloaded [96m0[39m, adde
    [33m│[39m                                         [33m│[39m
 [33m   ╰─────────────────────────────────────────╯[39m
 [33m[39m
-(node:71628) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
-(Use `pnpm --trace-warnings ...` to show where the warning was created)
-(node:71628) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
-(Use `pnpm --trace-warnings ...` to show where the warning was created)
 Packages: [32m+24[39m
 [32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m
-(node:71628) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
-(Use `pnpm --trace-warnings ...` to show where the warning was created)
-(node:71628) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
-(Use `pnpm --trace-warnings ...` to show where the warning was created)
-(node:71628) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
-(Use `pnpm --trace-warnings ...` to show where the warning was created)
-Packages are cloned from the content-addressable store to the virtual store.
+Packages are hard linked from the content-addressable store to the virtual store.
   Content-addressable store is at: /Users/unfazed-mac/Library/pnpm/store/v11
   Virtual store is at:             node_modules/.pnpm
 Progress: resolved [96m24[39m, reused [96m24[39m, downloaded [96m0[39m, added [96m24[39m, done
@@ -51,26 +39,22 @@ Progress: resolved [96m24[39m, reused [96m24[39m, downloaded [96m0[39m, ad
 [32m+[39m arxa-waiting-page [90m0.1.1[39m
 [32m+[39m arxa-workspace-provider [90m0.1.0[39m
 
-Done in 417ms using pnpm v11.21.0
+Done in 407ms using pnpm v11.21.0
 arxa studio: http://arxa.studio.localhost:7897
-(node:71672) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
-(Use `node --trace-warnings ...` to show where the warning was created)
 [github-link] WARNING: /usr/bin/security did not answer within 2000ms (no login keychain for this HOME, or securityd is waiting on something) — using the in-memory fallback for this process.
 [github-link] WARNING: no keyring backend available (no Tauri shell bridge, and no usable platform secret store — /usr/bin/security on macOS, secret-tool + a running Secret Service on Linux). The GitHub token will be held IN MEMORY ONLY and lost when this process exits.
 [arxa-boot] sidebar apply
-[arxa-boot] header index armed: 0 headers, list cold at /tmp/arxa-t8c-narrow-K0FQSK/home/dsh/storages/arxa-session-header-index.json
+[arxa-boot] header index armed: 0 headers, list cold at /var/folders/z_/vsddl0v124771l0kwkndsptw0000gn/T/arxa-t8c-narrow-ViDJrW/home/dsh/storages/arxa-session-header-index.json
 [arxa-boot] listSessions single-flight armed
 [github-link] WARNING: /usr/bin/security did not answer within 2000ms (no login keychain for this HOME, or securityd is waiting on something) — using the in-memory fallback for this process.
 [github-link] WARNING: no keyring backend available (no Tauri shell bridge, and no usable platform secret store — /usr/bin/security on macOS, secret-tool + a running Secret Service on Linux). The GitHub token will be held IN MEMORY ONLY and lost when this process exits.
 [arxa-boot] prewarm snapshot+open in 28ms (org none)
 [arxa-boot] desktop-session apply
 dsh web: http://127.0.0.1:7897/?token=REDACTED
-[arxa-boot] listSessions #1 1ms index hits=0 misses=0
+[arxa-boot] listSessions #1 0ms index hits=0 misses=0
 [arxa-boot] listSessions #2 0ms index hits=0 misses=0
-[arxa-boot] session list 0 items in 0ms (query 0 records in 1ms)
+[arxa-boot] session list 0 items in 1ms (query 0 records in 0ms)
 [arxa-boot] state served from prewarm
 [arxa-boot] state first served in 0ms
-[arxa-artifact-viewer] root server serving /tmp/arxa-t8c-narrow-K0FQSK/org/T8CLOSE at http://org-T8CLOSE.localhost:63011
-[arxa-artifact-viewer] trace boot@2026-09-13T23:19:05.388Z timeout 32233ms bundle=warm nav=navigate/redir1 fetch=3 resp=6 dcl=47 load=214 client-eval=121 state-req=230 state-res=256 js=10/11574KB/last@2050/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=session/modelCatalog:192+378,agentPresets/list:231+340,agentPresets/list:253+337
-[arxa-sidebar] spawned arxa-T8CLOSE-notes-note-wt-260914-001 liveAgent=true
-[arxa-artifact-viewer] trace boot@2026-09-13T23:19:46.355Z timeout 41528ms bundle=warm nav=reload/redir0 fetch=6 resp=11 dcl=48 load=178 client-eval=83 state-req=193 state-res=218 catalog-first=240 js=10/11574KB/last@1991/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=arxa-provider-status/current:357+220,agentPresets/list:213+108,session/create:240+100
+[arxa-artifact-viewer] root server serving /var/folders/z_/vsddl0v124771l0kwkndsptw0000gn/T/arxa-t8c-narrow-ViDJrW/org/T8CLOSE at http://org-T8CLOSE.localhost:63775
+[arxa-artifact-viewer] trace boot@2026-09-13T23:56:28.666Z timeout 119102ms bundle=warm nav=navigate/redir1 fetch=4 resp=10 dcl=56 load=251 client-eval=147 state-req=271 state-res=308 js=10/11574KB/last@2083/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=session/modelCatalog:226+355,agentPresets/list:301+296,session/modelCatalog:301+293

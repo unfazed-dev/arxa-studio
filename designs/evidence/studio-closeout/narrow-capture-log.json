@@ -1,12 +1,10 @@
 {
-  "startedAt": "2026-09-13T23:21:52.703Z",
+  "startedAt": "2026-09-13T23:59:55.035Z",
   "widths": [
     1280
   ],
   "ladder": [
-    "viewer-install-strip",
-    "viewer-langstrip",
-    "viewer-dart-absent"
+    "workspace-backend-local"
   ],
   "proven1280": [
     "personalisation-tab",
@@ -16,67 +14,19 @@
   ],
   "rows": [
     {
-      "surface": "viewer-install-strip",
+      "surface": "workspace-backend-local",
       "width": 1280,
-      "gate": "viewer-strip",
-      "status": "missing",
-      "error": "dart state {\"strip\":false,\"editor\":true}",
-      "cause": "the SDK-absent install strip did not render — the viewer mounts the editor and the LSP status/strip path does not engage on fresh scratch boots (identical at 1280; see task-8-report Part B limitations)",
+      "gate": "backend",
+      "status": "ok",
+      "error": null,
+      "cause": null,
       "shots": [
         {
-          "shot": "viewer-install-strip-light-1280.png",
+          "shot": "workspace-backend-model-light-1280.png",
           "ok": true
         },
         {
-          "shot": "viewer-install-strip-dark-1280.png",
-          "ok": true
-        }
-      ],
-      "consoleFiltered": 1,
-      "gateErrors": 0
-    },
-    {
-      "surface": "viewer-langstrip",
-      "width": 1280,
-      "gate": "langstrip",
-      "status": "missing",
-      "error": "gate exited clean but an expected PNG is missing or stale",
-      "cause": "see the pair log",
-      "shots": [
-        {
-          "shot": "langstrip-ts-1280.png",
-          "ok": false
-        },
-        {
-          "shot": "langstrip-css-1280.png",
-          "ok": false
-        },
-        {
-          "shot": "langstrip-json-1280.png",
-          "ok": false
-        },
-        {
-          "shot": "langstrip-html-preview-1280.png",
-          "ok": false
-        }
-      ],
-      "consoleFiltered": 3,
-      "gateErrors": 0
-    },
-    {
-      "surface": "viewer-dart-absent",
-      "width": 1280,
-      "gate": "viewer-strip",
-      "status": "missing",
-      "error": "dart state {\"strip\":false,\"editor\":true}",
-      "cause": "the SDK-absent install strip did not render — the viewer mounts the editor and the LSP status/strip path does not engage on fresh scratch boots (identical at 1280; see task-8-report Part B limitations)",
-      "shots": [
-        {
-          "shot": "viewer-install-strip-light-1280.png",
-          "ok": true
-        },
-        {
-          "shot": "viewer-install-strip-dark-1280.png",
+          "shot": "workspace-backend-model-dark-1280.png",
           "ok": true
         }
       ],
