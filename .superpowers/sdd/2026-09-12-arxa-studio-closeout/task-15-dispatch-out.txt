@@ -1,0 +1,9 @@
+⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
+[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
+**Status:** DONE_WITH_CONCERNS
+
+- **Commits:** studio `2c74ab0` `docs: close the linux distribution evidence rows` · arxa `fff96bee` `feat: close macos linux distribution and windows deferral` (no push/tag/release)
+- **Gates:** studio `npm test` 130/130 ALL GREEN · arxa `dart test` ALL PASS + `portable-core-test.sh` 47/47 + installer focused test ALL GREEN + actionlint clean · packed-engine boot smoke OK (240 MB sidecar → 200 HTML, scratch home)
+- **Degradations:** Omarchy VM + Arch/Ubuntu container lanes not run — docker daemon down (not started; operator state), 8 GB VM floor on a memory-pressured 16 GB machine; runbook + assertions prepared in `arxa/docs/linux-support.md` for Task 16; external rows AXS-043/AXS-019 recorded
+- **Concerns:** ① `.github/actionlint.yaml` added though outside the brief's file list (actionlint could not pass without it — disclosed); ② incidents: system volume hit 100% mid-gates (recovered, ~2 GB free now — machine was near-full before me); `./install.sh` briefly repointed the operator's `~/.local/bin/arxa` wrapper at the worktree — restored to the canonical checkout same session; ③ installer-vs-in-app channel divergence documented (fix = src-tauri change, out of scope)
+- **Report:** `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-15-report.md` (ledger appended too)

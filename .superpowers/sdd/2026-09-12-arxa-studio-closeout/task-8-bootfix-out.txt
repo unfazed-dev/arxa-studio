@@ -1,0 +1,11 @@
+⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
+[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
+**Status:** BLOCKED — no in-range regression (per your rule: stopped, no fix/commit; reports appended to `task-8-report.md` + `progress.md`).
+
+**Commit:** none (repo tree untouched; `package-lock.json` dirt pre-existing, untouched).
+
+**"Breaking commit":** none in 78c1654..HEAD — cause is environmental: capture's hardcoded port 7897 has been held since 22:41 AEST by a task-7 leftover studio (PIDs 21189/21291, scratch home `/tmp/arxa-task7/home`); the capture ran 23:12 AEST → `EADDRINUSE` → dsh fatals at profile apply ("failed to apply loader entry webserver", pre-existing at both ends). Repro (a)'s 7891 is the operator's installed studio (PID 92848). The quoted `arxa-conversation/sessionController` line is parallel-apply attribution variance under that collision.
+
+**Tests:** engine-boot-smoke PASS; org-registered boot PASS ×3 at HEAD (full `org.open→new-session→session.open` over the real API) and PASS at 78c1654; occupied-port FATAL reproduced at BOTH ends. No suite added — a fixed-port boot row would be flaky for exactly this reason.
+
+**Concerns:** kill 21189/21291 or run the capture with `ARXA_PORT` on a free port (7891 stays reserved for the installed studio); optional later hardening — pre-flight port check before spawning dsh. Controller's exact attribution (`index 163` loader frame) matched no build on this machine — worth asking which launcher tree they ran.

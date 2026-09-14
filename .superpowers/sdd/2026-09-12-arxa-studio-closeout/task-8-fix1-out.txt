@@ -1,0 +1,17 @@
+⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
+[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
+✅ **Done** — commit `d1771af` `fix: complete the surface evidence ladder with controls` (83 files; PNGs+logs; package-lock excluded; ledger/report updated on disk)
+
+**Per-surface (canonical run, log = 39 rows: 390 3/8/2 · 744 6/7/0 · 1280 5/7/1)**
+- Finish: limitation-with-control ×3 widths — 390 probe chain create✓/row✓/**bind✓**/composer✓/dock-slot✗; 744+1280 create-RPC hang → failure-state shots ×3
+- Checks-red: same shape as finish (dock-dependent)
+- Preparation: **captured @744+1280** (manifest seeded via product's createManifest — row never existed before); @390 limitation-with-control
+- Confinement: limitation-with-control ×3 (dock-dependent)
+- Backend: **failure-state card captured** @390+744 (l+d) + @1280 (light) — wp.info() dead all widths
+- Trash: **captured @744+1280** (view + type-to-confirm modal); @390 both view shots ok, confirm pair wedged (CDP no-timeout, 4×)
+
+**Ledger escalations (progress.md, explicit New finding):** L1/L2 viewer LSP chain (index.js:183-191, 78c1654 evidence unreproducible) + NEW fresh-session dock dead at every width — both tagged whole-branch review + Task 16; L3 wp.info() New finding, unsupported regression claim deleted (report + ledger)
+
+**Tests:** no product code changed → no `npm test` (per mandate); `node --check` green on both scripts; no selftest consumes them
+
+**Concerns:** 1280-backend dark half + 390-trash confirm pair wedge deterministically (ledgered CDP no-timeout, budget-bounded); langstrip@1280 html-preview missed this run (L1 cluster)

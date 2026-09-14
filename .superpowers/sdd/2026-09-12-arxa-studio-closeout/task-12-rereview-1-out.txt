@@ -1,0 +1,9 @@
+[33m⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors[39m
+[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
+**Verdict: ALL-ADDRESSED (5/5)** — report at `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-12-rereview-1.md`
+- Scope clean: exactly `5930302d`, 5 files +126/−8, `--check` clean, trailer present, no tag, worktree clean (`.cache/` only)
+- Important 1: physical-gates.md verified against every criterion; cross-refs (pairhost.rs, env vars, line cites, evidence mirror) all real — no phantom commands
+- Important 2: header names smoke PENDING/Task 16; `release-smoke-2026-09-14` → 0 hits repo-wide; README EOF, dname, Fastfile rename (+0 stale refs) all confirmed
+- Regressed: nothing
+- Suite: analyze 0 issues · contract test 4/4 · actionlint clean · ruby -c OK (all run fresh, one at a time)
+- Remaining: new **Minor** (defer to Task 16) — doc omits the test's 4th phase `PHASE=phone` (real-APNs doorbell leg + `ARXA_DOORBELL_PUSH`/`ARXA_APPROVALS_TEST_SEAM`/`CAIRN_APNS_SANDBOX` + pushd `.p8` env)

@@ -1,0 +1,806 @@
+3597a40 feat: freeze the workspace provider wire contract
+ docs/plans/agency-backend-provider-abstraction.md |  41 +--
+ plugins/workspace-provider/lib/contract.js        | 198 ++++++++++++++
+ plugins/workspace-provider/lib/errors.js          |  16 ++
+ plugins/workspace-provider/lib/wire.js            | 102 ++++++++
+ plugins/workspace-provider/package.json           |  15 ++
+ plugins/workspace-provider/selftest.contract.mjs  | 302 ++++++++++++++++++++++
+ 6 files changed, 659 insertions(+), 15 deletions(-)
+diff --git a/docs/plans/agency-backend-provider-abstraction.md b/docs/plans/agency-backend-provider-abstraction.md
+index a33d4eb..6eb4ef5 100644
+--- a/docs/plans/agency-backend-provider-abstraction.md
++++ b/docs/plans/agency-backend-provider-abstraction.md
+@@ -1,36 +1,44 @@
+ # Agency Backend Provider Abstraction (BYO Database)
+ 
+-Status: PLAN ONLY — no code or schema changes. Consult-mode advisor skipped (no API key configured); design grounded in primary sources below.
++Status: SUPERSEDED IN PART by grill decisions **D32–D35** (`docs/plans/arxa-studio-grill-decisions.md`, 2026-09-12) — those are the **later authority** wherever this plan and they disagree. The Wire v1 contract is frozen in `plugins/workspace-provider` (task 13); providers and the conformance kit land with it.
+ 
+ **Amended 2026-09-07 — two corrections, still no code.** (a) The plan offered
+ `supabase` and `custom` and nothing else, so a user with no database and no
+ adapter module got *nothing* — which the repo's own ownership boundary forbids
+ (`CLAUDE.md`: "every feature that can use a database must have a **local-only
+ fallback with equivalent capability and security** for users without one").
+ `local` is now the DEFAULT provider, specified in §0, §1 and §5. (b) The
+ Supabase table advertised `entitlementIssuer` and `billingWebhooks` as
+ workspace-provider capabilities while §0 says the license plane is not
+ pluggable; they are removed from the contract (§1) and kept only as a
+ description of the official project's own shape (§3). Everything marked `local`
+ here is a **design decision, not shipped code** — none of it exists yet.
+ 
++**Amended 2026-09-13 — D32–D35 recorded (wire-contract freeze).** The four
++rulings below are binding and later than every earlier paragraph:
++
++- **Providers (D32):** the fixed set is `local` (DEFAULT, zero-config), `supabase`, and `generic-rest` (the Wire v1 contract itself, over any conforming backend). There is **no `custom` provider**: a `custom.adapter` key in config and the `ARXA_WORKSPACE_ADAPTER` env override are **invalid** and rejected. A BYO backend integrates by implementing the fixed HTTP/JSONL wire protocol server-side and passing `arxa-studio provider verify`; no third-party JavaScript ever executes inside the app, and nothing is published to npm in this closeout.
++- **Support (D33):** bundle-only. Staff never hold credentials or tokens for customer-run infrastructure; no support-access capability exists in the wire contract. `arxa-studio diagnose` emits the redacted, user-inspectable bundle.
++- **Identity (D34):** token-opaque. The wire contract specifies only the session-token lifecycle — issue, refresh, revoke, introspect. How a user authenticates is entirely the provider's business; `GET /capabilities` declares `signIn.kind: email-form | browser | device-code | token` plus start metadata, and studio renders only the declared flow. Email/password is **not** part of the wire contract.
++- **Realtime fallback (D35):** adaptive polling, as contract constants — **3 s** focused-and-active, **30 s** focused-idle, **120 s** background, plus an **immediate poll after any local write**.
++
+ Sources read: `docs/plans/arxa-studio-grill-decisions.md` (D-series locked decisions), `docs/plans/entitlement-backend-runbook.md`, `arxa/deploy/supabase/schema.sql` + `seed.sql`.
+ 
+ ## 0. The one non-negotiable split
+ 
+ Two planes. They never merge:
+ 
+ | Plane | What it holds | Backend |
+ |---|---|---|
+ | **Product-license plane** | arxa entitlements, machines, subscriptions, Stripe billing, activate flow | **ALWAYS the official Totem backend.** Not pluggable, not configurable off. |
+-| **Workspace-data plane** | orgs, org_members, tickets, chat, feedback, audit_log, analytics, storage blobs | **Pluggable, three providers:** `local` (DEFAULT — no account, no network, no database), `supabase` (first-class, and the conformance reference), `custom` (a BYO adapter module). |
++| **Workspace-data plane** | orgs, org_members, tickets, chat, feedback, audit_log, analytics, storage blobs | **Pluggable, three providers (D32):** `local` (DEFAULT — no account, no network, no database), `supabase` (first-class, and the conformance reference), `generic-rest` (the Wire v1 contract over any conforming backend). There is no `custom` adapter module. |
+ 
+ A BYO provider replaces only the workspace-data plane. Paying for arxa (studio or agency tier) still means checkout → official `activate` Edge Function → Ed25519-signed token → offline verification in `arxa/lib/entitlement.dart`. A BYO backend cannot mint product tiers. This preserves every payment-gate decision in the grill doc unchanged.
+ 
+ ## 1. Provider interface surface (`WorkspaceProvider`)
+ 
+ Minimal contract the agency app codes against. All IDs are opaque strings; all methods async; all errors from a small typed set (`unauthenticated`, `forbidden`, `not_found`, `conflict`, `unavailable`).
+ 
+ ### REQUIRED capabilities
+ 
+ **`auth`** — session lifecycle
+@@ -49,21 +57,21 @@ Minimal contract the agency app codes against. All IDs are opaque strings; all m
+ 
+ **`audit`** — append-only
+ - `append(orgId, event)` only. No update/delete in the interface at all — immutability enforced by interface shape, verified by the conformance kit.
+ 
+ **Server-side authorization (cross-cutting, REQUIRED)** — every capability above must be enforced *by the provider's server*, not by the adapter. The adapter is untrusted client code. Concretely: user A of org X must be unable to read/write org Y's rows even with a hand-crafted request. Supabase does this with RLS; a BYO Postgres+PostgREST or custom API must do the equivalent. This is a conformance-kit gate, not a suggestion. It binds every provider that talks to a network; the `local` provider is exempt by construction (see §1 local table and §4 section 3), and the kit reports that exemption rather than a pass.
+ 
+ ### OPTIONAL capabilities (with mandated degradation)
+ 
+ | Capability | Surface | Degradation when absent |
+ |---|---|---|
+-| `realtime` | `subscribe(orgId, collection, cb)` | App polls `records.list` on a visible-tab interval; UI drops the "live" badge. No feature is removed. |
++| `realtime` | `subscribe(orgId, collection, cb)` | Adaptive polling (D35, contract constants): 3 s focused-and-active, 30 s focused-idle, 120 s background, immediate poll after any local write; UI drops the "live" badge. No feature is removed. |
+ | `storage` | `upload/download/delete/signedUrl(orgId, path)` | Attachments disabled in tickets/chat; text-only flows keep working. |
+ | `analytics` | `track(event)` (fire-and-forget) | No-op sink. Nothing user-visible. |
+ 
+ **Not capabilities, deliberately.** An earlier draft listed `billingWebhooks`
+ and `entitlementIssuer` here. Both contradict §0 — the license plane is "not
+ pluggable, not configurable off" — and listing them in the workspace contract
+ invites an adapter author to implement something no workspace provider may
+ serve. Product billing and product-tier issuance are the official backend's,
+ always. The *optional* BYO issuer for workspace-scoped claims is a separate
+ server endpoint spec (§2), not a `WorkspaceProvider` capability, and it can
+@@ -159,43 +167,46 @@ Ship as `arxa studio provider verify --config <file>` — a runnable suite again
+ Passing = printed report with per-section green, suitable for pasting into a support ticket. The Supabase reference adapter must pass the kit in CI — the kit is the contract's executable form.
+ 
+ ## 5. Config & UX
+ 
+ Precedence: env > project config > user config > default.
+ 
+ ```jsonc
+ // .arxa/studio.json (project) or ~/.arxa/studio.json (user)
+ {
+   "workspaceBackend": {
+-    "provider": "local",               // DEFAULT; or "supabase", or "custom"
+-    "local":    { "root": "~/.arxa/workspace" },   // optional; this is the default
+-    "supabase": { "url": "…", "anonKey": "…" },
+-    "custom":   { "adapter": "./adapters/my-backend.mjs" }  // module implementing WorkspaceProvider
++    "provider": "local",               // DEFAULT; or "supabase", or "generic-rest" — the only three (D32)
++    "local":       { "root": "~/.arxa/workspace" },   // optional; this is the default
++    "supabase":    { "url": "…", "anonKey": "…" },
++    "generic-rest": { "baseUrl": "https://backend.example.test" }  // any backend implementing Wire v1
+   },
+   "entitlements": {
+     "extraPublicKeys": [ { "kid": "acme-2026", "publicKeyPem": "…" } ]
+     // production key is compiled in and cannot be removed here
+   }
+ }
+ ```
+ 
+-Env overrides: `ARXA_WORKSPACE_PROVIDER`, `ARXA_SUPABASE_URL`, `ARXA_SUPABASE_ANON_KEY`, `ARXA_WORKSPACE_ADAPTER`, `ARXA_ENTITLEMENT_EXTRA_PUBKEYS` (path to JSON). These extend, and never replace, the production verification key — distinct from the existing debug-only `debugPublicKeyOverride`, which stays debug-gated.
++**Config cannot name executable code (D32).** A `custom` provider, an `adapter` key anywhere under `workspaceBackend`, or any module/file-path value is invalid and rejected at load — and the env override `ARXA_WORKSPACE_ADAPTER` is likewise invalid. `local` stays zero-config: no account, no network, no database, no environment variables.
++
++Env overrides: `ARXA_WORKSPACE_PROVIDER` (one of the three fixed names only), `ARXA_SUPABASE_URL`, `ARXA_SUPABASE_ANON_KEY`, `ARXA_ENTITLEMENT_EXTRA_PUBKEYS` (path to JSON). These extend, and never replace, the production verification key — distinct from the existing debug-only `debugPublicKeyOverride`, which stays debug-gated.
+ 
+ **UX**: Settings → "Workspace backend" panel shows provider, capability badges (live/degraded per §1), and a `provider verify` run button. A permanent, non-editable line reads: **"arxa license: Totem official backend"** — so BYO users never form the belief that self-hosting exempts them from the product paywall. Paywall flow on BYO is byte-identical to Supabase-default: gate → checkout → official activate → token cached → offline verify.
+ 
+ ## 6. Migration path (export / import)
+ 
+ - `arxa studio workspace export --org <id> --out bundle/` → portable bundle: `manifest.json` (contract version, capability set, collection counts, content hashes), one JSONL file per collection in **contract shape** (not provider row shape), `storage/` blob tree, `members.json` (emails + roles — identities themselves are not portable).
+ - `arxa studio workspace import --config <target> bundle/` → creates org on target, replays records preserving IDs where the target allows (else writes an ID-map file), re-uploads blobs, **re-invites members** (they re-auth on the new provider), imports `audit_log` as read-only historical records with an `imported_from` marker.
+ - Explicitly **not** migrated: entitlements, machines, subscriptions (license plane — nothing to migrate, it never moved), provider auth credentials, realtime subscriptions.
+ - Round-trip of the bundle is conformance-kit section 8, so every certified provider is also a certified migration source/target.
+ - `local` is a first-class source AND target: "try it offline, move to Supabase later" and "leave Supabase, keep working offline" are the same command with a different `--config`. Nothing about the bundle format is provider-specific.
+ 
+-## 7. Open questions (for the user)
++## 7. Open questions — all settled (D32–D35, 2026-09-13)
+ 
+-All five remain open and all five block the code phase; the 2026-09-07 amendment changed none of them.
++The five questions below were open when this plan was written; the grill
++decisions close all five, and the wire-contract freeze (task 13) encodes them.
+ 
+-1. **Adapter distribution**: are custom adapters local JS modules only (simple, but unsigned code loaded into the app), or do we require a reviewed registry / signature before loading?
+-2. **Contract packaging**: publish `WorkspaceProvider` types + conformance kit as a public npm package (invites third-party adapters) or keep in-repo for a first-party-only v1?
+-3. **Totem staff support access on BYO**: Supabase adapter has `is_totem_staff` read access for support; on BYO we have none. Accept "no in-band support access, bundle-export on request," or add an optional support-access capability?
+-4. **Minimum identity methods**: must every provider support email invite flows, or is "any auth + manual member add by user id" acceptable for v1?
+-5. **Realtime degradation interval**: fixed polling default (e.g. 30 s visible-tab) baked into the contract, or provider-hintable via `capabilities()` metadata?
++1. **Adapter distribution** → settled by **D32**: no arbitrary local JS adapters at all. Two first-party adapters ship (`supabase`, `generic-rest`); exotic backends integrate server-side against the wire contract. Signing/review pipelines are moot.
++2. **Contract packaging** → settled by **D32**: in-repo, first-party-only for v1; no public npm package in this closeout.
++3. **Totem staff support access on BYO** → settled by **D33**: accept "no in-band support access"; support is bundle-only via `arxa-studio diagnose`.
++4. **Minimum identity methods** → settled by **D34**: the contract is token-opaque (issue/refresh/revoke/introspect); any auth method is acceptable because providers declare `signIn.kind` and studio renders only the declared flow.
++5. **Realtime degradation interval** → settled by **D35**: adaptive polling baked into the contract as constants — 3 s active / 30 s idle / 120 s background + immediate poll after any local write. Not provider-hintable.
+diff --git a/plugins/workspace-provider/lib/contract.js b/plugins/workspace-provider/lib/contract.js
+new file mode 100644
+index 0000000..e0ae62e
+--- /dev/null
++++ b/plugins/workspace-provider/lib/contract.js
+@@ -0,0 +1,198 @@
++/**
++ * Wire v1 — the frozen workspace-provider protocol (task 13 step 3, D32–D35).
++ *
++ * This module is CONSTANTS plus a pure request builder. It performs no I/O.
++ * The golden suite selftest.contract.mjs pins every value here character for
++ * character: any change is a wire change and requires a new protocol version.
++ * The providers and the generic-REST adapter (part B) implement against this
++ * file; they may not invent routes, verbs, codes, or bounds.
++ */
++import { randomUUID } from 'node:crypto'
++import { invalidRequest } from './errors.js'
++import { decodeCursor } from './wire.js' // cycle is call-time only; both modules finish evaluating first
++
++export const WIRE_VERSION = 1
++export const BASE_PATH = '/arxa-workspace/v1'
++
++export const HEADER = Object.freeze({
++  VERSION: 'X-Arxa-Workspace-Version',
++  REQUEST_ID: 'X-Request-Id',
++  AUTHORIZATION: 'Authorization',
++  NEXT_CURSOR: 'X-Arxa-Cursor-Next', // JSONL list pages: body stays pure records, the resume cursor rides the header
++  ETAG: 'ETag',
++  IF_MATCH: 'If-Match',
++})
++
++export const MEDIA = Object.freeze({
++  JSON: 'application/json', // bounded singletons: orgs, members, records by id, auth envelopes, errors
++  NDJSON: 'application/x-ndjson', // streams: org/member/record/audit/event lists
++  BYTES: 'application/octet-stream', // storage blobs
++})
++
++// D32: the fixed provider set. `custom` does not exist; a BYO backend is a
++// server implementing Wire v1, reached through `generic-rest`.
++export const PROVIDERS = Object.freeze(['local', 'supabase', 'generic-rest'])
++
++export const ROLES = Object.freeze(['owner', 'admin', 'billing', 'member'])
++
++// The fixed §1 collection list (source plan §1 "records"). Providers may not
++// add collections; unknown names are rejected before any I/O.
++export const COLLECTIONS = Object.freeze([
++  'tickets', 'ticket_messages', 'chat_conversations', 'chat_messages',
++  'feedback', 'requirements', 'user_prefs',
++])
++
++// D34: token-opaque identity. The wire carries only the session-token
++// lifecycle; how a user authenticates is the provider's business, declared
++// here and rendered by exactly one studio flow.
++export const SIGN_IN_KINDS = Object.freeze(['email-form', 'browser', 'device-code', 'token'])
++
++export const CAPABILITY_KEYS = Object.freeze(
++  ['auth', 'orgs', 'records', 'audit', 'realtime', 'storage', 'analytics'])
++
++// The complete typed error set. `invalid_request` covers contract violations
++// (bad cursor, oversized body, unknown collection); `unsupported_version` is
++// what a conforming server returns for an unknown X-Arxa-Workspace-Version.
++export const ERROR_CODES = Object.freeze([
++  'unsupported_version', 'invalid_request', 'unauthenticated', 'forbidden',
++  'not_found', 'conflict', 'unavailable',
++])
++
++export const BOUNDS = Object.freeze({
++  DEFAULT_PAGE_LIMIT: 100,
++  MAX_PAGE_LIMIT: 500,
++  MAX_RECORD_BYTES: 1_048_576, // 1 MiB — one JSON document / bounded request body
++  MAX_JSONL_BYTES: 33_554_432, // 32 MiB — one decoded JSONL page or stream
++  MAX_BLOB_BYTES: 1_073_741_824, // 1 GiB — one storage blob
++  REQUEST_TIMEOUT_MS: 15_000,
++  MAX_ATTEMPTS: 3, // bounded retries on the retryable status set below
++  RETRYABLE_STATUSES: Object.freeze([408, 425, 429, 500, 502, 503, 504]),
++})
++
++// D35: adaptive polling when realtime is absent. Contract constants, not
++// provider hints.
++export const POLLING = Object.freeze({
++  ACTIVE_MS: 3000, // focused-and-active (thread/composer open)
++  IDLE_MS: 30000, // focused-idle
++  BACKGROUND_MS: 120000, // app in background
++  IMMEDIATE_AFTER_WRITE: true, // poll immediately after any local write
++})
++
++// req/res media: J = bounded JSON, L = JSONL stream, B = raw bytes.
++// `auth` = requires Authorization: Bearer. `query` = accepted query params.
++// `optional` = a capability a provider may not implement.
++const J = MEDIA.JSON, L = MEDIA.NDJSON, B = MEDIA.BYTES
++export const OPERATIONS = Object.freeze({
++  capabilities:   { method: 'GET',    path: '/capabilities', req: null, res: J, auth: false },
++  // Token lifecycle (D34). issue/refresh/introspect carry their material in
++  // the body; revoke revokes the bearer itself.
++  authIssue:      { method: 'POST',   path: '/auth/issue', req: J, res: J, auth: false },
++  authRefresh:    { method: 'POST',   path: '/auth/refresh', req: J, res: J, auth: false },
++  authRevoke:     { method: 'POST',   path: '/auth/revoke', req: J, res: J, auth: true },
++  authIntrospect: { method: 'POST',   path: '/auth/introspect', req: J, res: J, auth: false },
++  listOrgs:       { method: 'GET',    path: '/orgs', req: null, res: L, auth: true },
++  createOrg:      { method: 'POST',   path: '/orgs', req: J, res: J, auth: true },
++  getOrg:         { method: 'GET',    path: '/orgs/{orgId}', req: null, res: J, auth: true },
++  patchOrg:       { method: 'PATCH',  path: '/orgs/{orgId}', req: J, res: J, auth: true },
++  deleteOrg:      { method: 'DELETE', path: '/orgs/{orgId}', req: null, res: J, auth: true },
++  listMembers:    { method: 'GET',    path: '/orgs/{orgId}/members', req: null, res: L, auth: true },
++  addMember:      { method: 'POST',   path: '/orgs/{orgId}/members', req: J, res: J, auth: true },
++  patchMember:    { method: 'PATCH',  path: '/orgs/{orgId}/members/{memberId}', req: J, res: J, auth: true },
++  removeMember:   { method: 'DELETE', path: '/orgs/{orgId}/members/{memberId}', req: null, res: J, auth: true },
++  listRecords:    { method: 'GET',    path: '/orgs/{orgId}/records/{collection}', req: null, res: L, auth: true, query: Object.freeze(['cursor', 'limit']) },
++  getRecord:      { method: 'GET',    path: '/orgs/{orgId}/records/{collection}/{id}', req: null, res: J, auth: true },
++  putRecord:      { method: 'PUT',    path: '/orgs/{orgId}/records/{collection}/{id}', req: J, res: J, auth: true },
++  deleteRecord:   { method: 'DELETE', path: '/orgs/{orgId}/records/{collection}/{id}', req: null, res: J, auth: true },
++  // Audit: append + read only. There is deliberately no mutation route.
++  appendAudit:    { method: 'POST',   path: '/orgs/{orgId}/audit', req: J, res: J, auth: true },
++  readAudit:      { method: 'GET',    path: '/orgs/{orgId}/audit', req: null, res: L, auth: true },
++  putBlob:        { method: 'PUT',    path: '/orgs/{orgId}/storage/{path}', req: B, res: B, auth: true },
++  getBlob:        { method: 'GET',    path: '/orgs/{orgId}/storage/{path}', req: null, res: B, auth: true },
++  deleteBlob:     { method: 'DELETE', path: '/orgs/{orgId}/storage/{path}', req: null, res: J, auth: true },
++  signedUrl:      { method: 'POST',   path: '/orgs/{orgId}/storage/{path}/signed-url', req: J, res: J, auth: true },
++  events:         { method: 'GET',    path: '/orgs/{orgId}/events', req: null, res: L, auth: true, optional: true, query: Object.freeze(['cursor']) },
++})
++
++// Path segments that must be filled from params. `{path}` is multi-segment
++// (an array or a '/'-joined string) — everything else is a single segment.
++const PATH_PARAMS = /\{(\w+)\}/g
++
++/**
++ * Pure request builder — the only way a Wire v1 request spec exists. Throws
++ * WorkspaceError('invalid_request') for every contract violation (unknown
++ * collection, bad limit, undecodable cursor) BEFORE any request can be sent.
++ */
++export function buildRequest (name, params = {}, context = {}) {
++  const op = OPERATIONS[name]
++  if (!op) throw new Error('unknown operation: ' + name) // programming error, not a wire error
++
++  if (op.path.includes('{collection}')) {
++    if (!COLLECTIONS.includes(params.collection))
++      throw invalidRequest('collection is not part of the fixed Wire v1 collection list')
++  }
++
++  let path = op.path.replace(PATH_PARAMS, (_, key) => {
++    const v = params[key]
++    if (v === undefined) throw invalidRequest('missing path parameter: ' + key)
++    // {path} is multi-segment: an array of segments, or a '/'-joined string.
++    const segs = Array.isArray(v) ? v.map(String)
++      : key === 'path' ? String(v).split('/')
++        : [String(v)]
++    return segs.map((s) => encodeURIComponent(s)).join('/')
++  })
++
++  const query = []
++  if (op.query) {
++    for (const key of op.query) {
++      if (key === 'limit') {
++        const limit = params.limit ?? BOUNDS.DEFAULT_PAGE_LIMIT
++        if (!Number.isInteger(limit) || limit < 1 || limit > BOUNDS.MAX_PAGE_LIMIT)
++          throw invalidRequest('limit must be an integer between 1 and MAX_PAGE_LIMIT')
++        query.push('limit=' + limit)
++      } else if (params[key] !== undefined) {
++        if (key === 'cursor') decodeCursor(params[key]) // undecodable cursor dies HERE, before I/O
++        query.push(key + '=' + encodeURIComponent(params[key]))
++      }
++    }
++  }
++  if (query.length) path += '?' + query.join('&')
++
++  const headers = {
++    [HEADER.VERSION]: String(WIRE_VERSION),
++    [HEADER.REQUEST_ID]: context.requestId ?? randomUUID(),
++  }
++  if (op.auth && context.token !== undefined) headers[HEADER.AUTHORIZATION] = 'Bearer ' + context.token
++  if (params.etag !== undefined) headers[HEADER.IF_MATCH] = params.etag
++
++  return { method: op.method, url: BASE_PATH + path, headers, media: op.res, signal: context.signal }
++}
++
++const looksLikeCode = (v) =>
++  typeof v === 'string' &&
++  (/^\.{0,2}\//.test(v) || /\.(mjs|cjs|js|ts|json)\b/.test(v) ||
++    /\brequire\s*\(/.test(v) || /\bimport\s*\(/.test(v))
++
++/**
++ * D32 guard: config may select one of three fixed providers and set their
++ * endpoints — nothing else. It may never name executable code, so any
++ * adapter key or module/file-path value is rejected at load. An empty config
++ * is valid and means `local` (zero-config, local-first parity).
++ */
++export function assertProviderConfig (config = {}) {
++  const provider = config.provider ?? 'local'
++  if (!PROVIDERS.includes(provider))
++    throw invalidRequest('workspaceBackend.provider must be one of: ' + PROVIDERS.join(', ') + ' — config cannot name executable code')
++  for (const [key, value] of Object.entries(config)) {
++    if (key === 'adapter')
++      throw invalidRequest('workspaceBackend.adapter is invalid — config cannot name executable code (D32)')
++    if (looksLikeCode(value))
++      throw invalidRequest('workspaceBackend.' + key + ' names executable code — invalid under D32')
++    if (value && typeof value === 'object')
++      for (const [k2, v2] of Object.entries(value)) {
++        if (k2 === 'adapter')
++          throw invalidRequest('workspaceBackend adapter key is invalid — config cannot name executable code (D32)')
++        if (looksLikeCode(v2))
++          throw invalidRequest('workspaceBackend.' + key + '.' + k2 + ' names executable code — invalid under D32')
++      }
++  }
++}
+diff --git a/plugins/workspace-provider/lib/errors.js b/plugins/workspace-provider/lib/errors.js
+new file mode 100644
+index 0000000..5727afc
+--- /dev/null
++++ b/plugins/workspace-provider/lib/errors.js
+@@ -0,0 +1,16 @@
++// Workspace wire errors. The typed set is frozen in contract.js ERROR_CODES;
++// every failure crossing the provider boundary surfaces as one of these, so
++// callers branch on `code`, never on message text or HTTP status alone.
++export class WorkspaceError extends Error {
++  constructor (code, message, opts = {}) {
++    super(message, { cause: opts.cause })
++    this.name = 'WorkspaceError'
++    this.code = code
++    this.retryable = opts.retryable === true
++    this.requestId = opts.requestId // echoes the wire envelope's id when present
++    this.status = opts.status // HTTP status when the error came from a response
++    this.serverCode = opts.serverCode // preserved raw code when the server used one we don't know
++  }
++}
++
++export const invalidRequest = (message, opts) => new WorkspaceError('invalid_request', message, opts)
+diff --git a/plugins/workspace-provider/lib/wire.js b/plugins/workspace-provider/lib/wire.js
+new file mode 100644
+index 0000000..d3a5e50
+--- /dev/null
++++ b/plugins/workspace-provider/lib/wire.js
+@@ -0,0 +1,102 @@
++/**
++ * Wire v1 protocol codecs (task 13 step 3). Pure encode/decode over strings
++ * and buffers — no fetch, no sockets. Bounded JSON covers singleton
++ * operations; JSONL covers record/audit/event streams and export bundles.
++ * Every decode failure is a typed WorkspaceError('invalid_request'), never a
++ * raw parse crash, and never a message that echoes the payload.
++ */
++import { BOUNDS, CAPABILITY_KEYS, ERROR_CODES, SIGN_IN_KINDS, WIRE_VERSION } from './contract.js'
++import { WorkspaceError, invalidRequest } from './errors.js'
++
++const byteLen = (s) => Buffer.byteLength(s, 'utf8')
++const REDACTED = '[redacted]'
++
++// ------------------------------------------------------------- cursors
++// Opaque to callers, boring underneath: base64url JSON, version-tagged.
++export function encodeCursor (state) {
++  return Buffer.from(JSON.stringify({ v: WIRE_VERSION, ...state }), 'utf8')
++    .toString('base64url')
++}
++
++export function decodeCursor (cursor) {
++  let parsed
++  try {
++    parsed = JSON.parse(Buffer.from(String(cursor), 'base64url').toString('utf8'))
++  } catch { throw invalidRequest('cursor is not a decodable Wire v1 cursor') }
++  if (!parsed || typeof parsed !== 'object' || parsed.v !== WIRE_VERSION)
++    throw invalidRequest('cursor is not a Wire v1 cursor')
++  return parsed
++}
++
++// --------------------------------------------------------- bounded JSON
++export function encodeJsonBody (value, { maxBytes = BOUNDS.MAX_RECORD_BYTES } = {}) {
++  const text = JSON.stringify(value)
++  if (text === undefined) throw invalidRequest('value is not JSON-encodable')
++  if (byteLen(text) > maxBytes) throw invalidRequest('body exceeds the Wire v1 byte bound')
++  return text
++}
++
++export function decodeJsonBody (text, { maxBytes = BOUNDS.MAX_RECORD_BYTES } = {}) {
++  if (byteLen(text) > maxBytes) throw invalidRequest('body exceeds the Wire v1 byte bound')
++  try { return JSON.parse(text) } catch { throw invalidRequest('body is not valid JSON') }
++}
++
++// ------------------------------------------------------------- JSONL
++export function encodeJsonl (records) {
++  return records.map((r) => JSON.stringify(r)).join('\n') + '\n'
++}
++
++export function decodeJsonl (text, { maxBytes = BOUNDS.MAX_JSONL_BYTES } = {}) {
++  if (byteLen(text) > maxBytes) throw invalidRequest('stream exceeds the Wire v1 byte bound')
++  let lines = text.split('\n')
++  if (lines[lines.length - 1] === '') lines.pop() // trailing newline is legal
++  return lines.map((line) => {
++    if (line.trim() === '') throw invalidRequest('blank line in JSONL stream')
++    try { return JSON.parse(line) } catch { throw invalidRequest('line is not valid JSON') }
++  })
++}
++
++// ------------------------------------------------------------- errors
++// Server messages are surfaced (they carry no secrets by contract) minus any
++// occurrence of the caller's session token, which a hostile or buggy server
++// must never be able to bounce back into a log.
++const redact = (message, token) =>
++  typeof token === 'string' && token.length > 0 && message.includes(token)
++    ? message.split(token).join(REDACTED)
++    : message
++
++export function decodeErrorBody (text, { requestId, token } = {}) {
++  let body
++  try { body = JSON.parse(text) } catch { throw invalidRequest('error body is not valid JSON') }
++  const err = body && body.error
++  if (!err || typeof err !== 'object' || typeof err.code !== 'string')
++    throw invalidRequest('error body is not a Wire v1 envelope')
++
++  const known = ERROR_CODES.includes(err.code)
++  return new WorkspaceError(known ? err.code : 'unavailable', redact(String(err.message ?? 'workspace provider error'), token), {
++    retryable: err.retryable === true,
++    requestId: typeof err.requestId === 'string' ? err.requestId : requestId,
++    serverCode: known ? undefined : err.code,
++  })
++}
++
++// ------------------------------------------------------- capabilities
++// D34 sign-in dispatch: GET /capabilities declares one signIn kind plus its
++// start metadata; studio renders exactly that flow and nothing else.
++export function decodeCapabilities (body) {
++  const caps = body && typeof body === 'object' ? body : null
++  if (!caps) throw invalidRequest('capabilities body is not an object')
++  const { signIn } = caps
++  if (!signIn || typeof signIn !== 'object')
++    throw invalidRequest('capabilities must declare a signIn block')
++  if (!SIGN_IN_KINDS.includes(signIn.kind))
++    throw invalidRequest('signIn.kind is not a Wire v1 sign-in kind')
++  if (!signIn.start || typeof signIn.start !== 'object')
++    throw invalidRequest('signIn.start metadata is required')
++
++  const out = { signIn: { kind: signIn.kind, start: signIn.start } }
++  for (const key of CAPABILITY_KEYS) out[key] = caps[key] === true
++  return out
++}
++
++export const isRetryableStatus = (status) => BOUNDS.RETRYABLE_STATUSES.includes(status)
+diff --git a/plugins/workspace-provider/package.json b/plugins/workspace-provider/package.json
+new file mode 100644
+index 0000000..92014d6
+--- /dev/null
++++ b/plugins/workspace-provider/package.json
+@@ -0,0 +1,15 @@
++{
++  "name": "arxa-workspace-provider",
++  "version": "0.1.0",
++  "private": true,
++  "description": "WorkspaceProvider Wire v1: frozen routes, verbs, headers, media types, envelopes, bounds, and config guards (task 13 part A). Providers, REST adapter, and conformance kit land in part B.",
++  "type": "module",
++  "main": "lib/contract.js",
++  "exports": {
++    ".": "./lib/contract.js",
++    "./contract": "./lib/contract.js",
++    "./errors": "./lib/errors.js",
++    "./wire": "./lib/wire.js",
++    "./package.json": "./package.json"
++  }
++}
+diff --git a/plugins/workspace-provider/selftest.contract.mjs b/plugins/workspace-provider/selftest.contract.mjs
+new file mode 100644
+index 0000000..275300c
+--- /dev/null
++++ b/plugins/workspace-provider/selftest.contract.mjs
+@@ -0,0 +1,302 @@
++/**
++ * Wire v1 FREEZE (task 13 step 2, D32–D35). Golden tests pinning the
++ * workspace-provider protocol exactly: routes, verbs, headers, media types,
++ * envelopes, bounds, pagination, token lifecycle, capability-driven sign-in
++ * dispatch, error taxonomy, abort signals, request IDs, and the rule that
++ * config cannot name executable code.
++ *
++ * Any change to anything asserted here is a wire change and requires a NEW
++ * PROTOCOL VERSION. This file is the contract's executable form; part B
++ * (providers, REST adapter, conformance kit) implements against it.
++ */
++import { strict as assert } from 'node:assert'
++import * as contract from './lib/contract.js'
++import { WorkspaceError } from './lib/errors.js'
++import * as wire from './lib/wire.js'
++
++let n = 0; const ok = (s) => { n++; console.log('  ok ' + s) }
++const throwsCode = (code, fn) => {
++  try { fn() } catch (e) {
++    assert.ok(e instanceof WorkspaceError, 'typed WorkspaceError, got ' + e)
++    assert.equal(e.code, code, `code ${code}, got ${e.code}`)
++    return e
++  }
++  assert.fail('expected WorkspaceError ' + code + ', nothing thrown')
++}
++const TOKEN = 'opaque-secret-token-do-not-print-in-real-life'
++
++// ---------------------------------------------- 1. frozen scalar constants
++{
++  assert.equal(contract.WIRE_VERSION, 1)
++  assert.equal(contract.BASE_PATH, '/arxa-workspace/v1')
++  assert.equal(contract.HEADER.VERSION, 'X-Arxa-Workspace-Version')
++  assert.equal(contract.HEADER.REQUEST_ID, 'X-Request-Id')
++  assert.equal(contract.HEADER.AUTHORIZATION, 'Authorization')
++  assert.equal(contract.HEADER.ETAG, 'ETag')
++  assert.equal(contract.HEADER.IF_MATCH, 'If-Match')
++  assert.equal(contract.HEADER.NEXT_CURSOR, 'X-Arxa-Cursor-Next')
++  assert.equal(contract.MEDIA.JSON, 'application/json')
++  assert.equal(contract.MEDIA.NDJSON, 'application/x-ndjson')
++  assert.equal(contract.MEDIA.BYTES, 'application/octet-stream')
++  assert.deepEqual(contract.PROVIDERS, ['local', 'supabase', 'generic-rest'])
++  assert.deepEqual(contract.ROLES, ['owner', 'admin', 'billing', 'member'])
++  // The fixed §1 collection list — anything else is rejected before I/O.
++  assert.deepEqual(contract.COLLECTIONS, [
++    'tickets', 'ticket_messages', 'chat_conversations', 'chat_messages',
++    'feedback', 'requirements', 'user_prefs',
++  ])
++  assert.deepEqual(contract.SIGN_IN_KINDS, ['email-form', 'browser', 'device-code', 'token'])
++  // Token-opaque identity (D34): auth lifecycle is issue/refresh/revoke/introspect;
++  // email/password is NOT a sign-in kind, NOT a wire concept.
++  assert.ok(!contract.SIGN_IN_KINDS.includes('email+password'))
++  assert.deepEqual(contract.CAPABILITY_KEYS,
++    ['auth', 'orgs', 'records', 'audit', 'realtime', 'storage', 'analytics'])
++  ok('scalars: version, base path, headers, media types, providers, roles, collections, sign-in kinds, capabilities')
++}
++
++// ---------------------------------------------- 2. bounds + polling (D35, D9)
++{
++  assert.deepEqual(contract.BOUNDS, {
++    DEFAULT_PAGE_LIMIT: 100,
++    MAX_PAGE_LIMIT: 500,
++    MAX_RECORD_BYTES: 1_048_576,       // 1 MiB per JSON document / bounded body
++    MAX_JSONL_BYTES: 33_554_432,       // 32 MiB per decoded JSONL page/stream
++    MAX_BLOB_BYTES: 1_073_741_824,     // 1 GiB per storage blob
++    REQUEST_TIMEOUT_MS: 15_000,
++    MAX_ATTEMPTS: 3,
++    RETRYABLE_STATUSES: [408, 425, 429, 500, 502, 503, 504],
++  })
++  assert.deepEqual(contract.POLLING, {
++    ACTIVE_MS: 3000, IDLE_MS: 30000, BACKGROUND_MS: 120000,
++    IMMEDIATE_AFTER_WRITE: true,
++  })
++  ok('bounds: page limits, body/blob/stream caps, timeout, retries, retryable statuses; D35 polling 3s/30s/120s + immediate-after-write')
++}
++
++// ---------------------------------------------- 3. THE route table (verbatim)
++// Every route, verb, media type, auth requirement, query param. This object
++// literal IS the Wire v1 table from the task brief, character for character.
++{
++  const J = 'application/json', L = 'application/x-ndjson', B = 'application/octet-stream'
++  assert.deepEqual(contract.OPERATIONS, {
++    capabilities:  { method: 'GET',    path: '/capabilities', req: null, res: J, auth: false },
++    authIssue:     { method: 'POST',   path: '/auth/issue', req: J, res: J, auth: false },
++    authRefresh:   { method: 'POST',   path: '/auth/refresh', req: J, res: J, auth: false },
++    authRevoke:    { method: 'POST',   path: '/auth/revoke', req: J, res: J, auth: true },
++    authIntrospect:{ method: 'POST',   path: '/auth/introspect', req: J, res: J, auth: false },
++    listOrgs:      { method: 'GET',    path: '/orgs', req: null, res: L, auth: true },
++    createOrg:     { method: 'POST',   path: '/orgs', req: J, res: J, auth: true },
++    getOrg:        { method: 'GET',    path: '/orgs/{orgId}', req: null, res: J, auth: true },
++    patchOrg:      { method: 'PATCH',  path: '/orgs/{orgId}', req: J, res: J, auth: true },
++    deleteOrg:     { method: 'DELETE', path: '/orgs/{orgId}', req: null, res: J, auth: true },
++    listMembers:   { method: 'GET',    path: '/orgs/{orgId}/members', req: null, res: L, auth: true },
++    addMember:     { method: 'POST',   path: '/orgs/{orgId}/members', req: J, res: J, auth: true },
++    patchMember:   { method: 'PATCH',  path: '/orgs/{orgId}/members/{memberId}', req: J, res: J, auth: true },
++    removeMember:  { method: 'DELETE', path: '/orgs/{orgId}/members/{memberId}', req: null, res: J, auth: true },
++    listRecords:   { method: 'GET',    path: '/orgs/{orgId}/records/{collection}', req: null, res: L, auth: true, query: ['cursor', 'limit'] },
++    getRecord:     { method: 'GET',    path: '/orgs/{orgId}/records/{collection}/{id}', req: null, res: J, auth: true },
++    putRecord:     { method: 'PUT',    path: '/orgs/{orgId}/records/{collection}/{id}', req: J, res: J, auth: true },
++    deleteRecord:  { method: 'DELETE', path: '/orgs/{orgId}/records/{collection}/{id}', req: null, res: J, auth: true },
++    appendAudit:   { method: 'POST',   path: '/orgs/{orgId}/audit', req: J, res: J, auth: true },
++    readAudit:     { method: 'GET',    path: '/orgs/{orgId}/audit', req: null, res: L, auth: true },
++    putBlob:       { method: 'PUT',    path: '/orgs/{orgId}/storage/{path}', req: B, res: B, auth: true },
++    getBlob:       { method: 'GET',    path: '/orgs/{orgId}/storage/{path}', req: null, res: B, auth: true },
++    deleteBlob:    { method: 'DELETE', path: '/orgs/{orgId}/storage/{path}', req: null, res: J, auth: true },
++    signedUrl:     { method: 'POST',   path: '/orgs/{orgId}/storage/{path}/signed-url', req: J, res: J, auth: true },
++    events:        { method: 'GET',    path: '/orgs/{orgId}/events', req: null, res: L, auth: true, optional: true, query: ['cursor'] },
++  })
++  // Audit immutability at the route level: NO mutation route on audit exists.
++  const auditRoutes = Object.values(contract.OPERATIONS)
++    .filter((o) => o.path.includes('/audit') && ['PUT', 'PATCH', 'DELETE'].includes(o.method))
++  assert.equal(auditRoutes.length, 0, 'no audit mutation route may exist')
++  ok('OPERATIONS table: 25 routes verbatim; audit has append+read only')
++}
++
++// ---------------------------------------------- 4. request building: headers, ids, abort, token
++{
++  const signal = new AbortController().signal
++  const r = contract.buildRequest('listRecords',
++    { orgId: 'org-1', collection: 'tickets', limit: 25 },
++    { requestId: 'req-abc', token: TOKEN, signal })
++  assert.equal(r.method, 'GET')
++  assert.equal(r.url, '/arxa-workspace/v1/orgs/org-1/records/tickets?limit=25')
++  assert.equal(r.headers[contract.HEADER.VERSION], '1')
++  assert.equal(r.headers[contract.HEADER.REQUEST_ID], 'req-abc')
++  assert.equal(r.headers[contract.HEADER.AUTHORIZATION], 'Bearer ' + TOKEN)
++  assert.equal(r.signal, signal, 'abort signal forwarded untouched')
++  assert.equal(r.media, contract.MEDIA.NDJSON)
++  // Fresh request ID minted when the caller supplies none, and it is a UUID.
++  const a = contract.buildRequest('capabilities', {}, {})
++  const b = contract.buildRequest('capabilities', {}, {})
++  assert.notEqual(a.headers[contract.HEADER.REQUEST_ID], b.headers[contract.HEADER.REQUEST_ID])
++  assert.match(a.headers[contract.HEADER.REQUEST_ID], /^[0-9a-f-]{36}$/)
++  // capabilities carries no bearer token even if one is in context
++  const caps = contract.buildRequest('capabilities', {}, { token: TOKEN })
++  assert.equal(contract.HEADER.AUTHORIZATION in caps.headers, false)
++  // path segments are URI-encoded; blob paths keep their slashes
++  const blob = contract.buildRequest('putBlob', { orgId: 'org 1', path: ['a b', 'c.png'] }, {})
++  assert.equal(blob.url, '/arxa-workspace/v1/orgs/org%201/storage/a%20b/c.png')
++  // ETag optimistic concurrency: PUT carries If-Match when an etag is supplied
++  const put = contract.buildRequest('putRecord',
++    { orgId: 'o', collection: 'feedback', id: 'r1', etag: 'W/"1"' }, {})
++  assert.equal(put.headers[contract.HEADER.IF_MATCH], 'W/"1"')
++  assert.equal(put.media, contract.MEDIA.JSON)
++  ok('buildRequest: version+request-id headers, bearer on auth routes only, fresh UUID ids, abort passthrough, URI encoding, If-Match')
++}
++
++// ---------------------------------------------- 5. reject BEFORE I/O
++{
++  // Unknown collection: throws at build time — no request exists to send.
++  let built = null
++  try { built = contract.buildRequest('listRecords', { orgId: 'o', collection: 'passwords' }, {}) }
++  catch (e) { assert.ok(e instanceof WorkspaceError); assert.equal(e.code, 'invalid_request') }
++  assert.equal(built, null, 'no request spec may escape an unknown collection')
++  // Unknown operation name is a programming error, not a wire error
++  assert.throws(() => contract.buildRequest('dropTable', {}), /unknown operation/)
++  // Unknown version: the typed code exists and decodes (server side of the
++  // contract returns it; client side surfaces it).
++  const e = wire.decodeErrorBody(JSON.stringify({
++    error: { code: 'unsupported_version', message: 'wire version 2 not supported', retryable: false, requestId: 'rq-1' },
++  }), {})
++  assert.ok(e instanceof WorkspaceError)
++  assert.equal(e.code, 'unsupported_version')
++  assert.equal(e.retryable, false)
++  ok('pre-I/O guards: unknown collection rejected at build; unsupported_version is a typed code')
++}
++
++// ---------------------------------------------- 6. pagination
++{
++  // default limit applied when omitted
++  const d = contract.buildRequest('listRecords', { orgId: 'o', collection: 'tickets' }, {})
++  assert.equal(d.url, '/arxa-workspace/v1/orgs/o/records/tickets?limit=100')
++  // over-max, zero, negative, non-integer all rejected before I/O
++  for (const limit of [501, 0, -1, 2.5, 'many'])
++    throwsCode('invalid_request', () => contract.buildRequest('listRecords', { orgId: 'o', collection: 'tickets', limit }, {}))
++  // cursor must decode; a garbage cursor is rejected before I/O
++  throwsCode('invalid_request', () => contract.buildRequest('listRecords', { orgId: 'o', collection: 'tickets', cursor: '%%%not-base64%%%' }, {}))
++  const c = contract.buildRequest('listRecords',
++    { orgId: 'o', collection: 'tickets', cursor: wire.encodeCursor({ offset: 100 }) }, {})
++  assert.match(c.url, /cursor=[^&]+&limit=100$/)
++  ok('pagination: default 100, limit bounds validated pre-I/O, opaque cursor required valid')
++}
++
++// ---------------------------------------------- 7. cursor codec
++{
++  const cur = wire.encodeCursor({ v: 1, offset: 40, collection: 'tickets' })
++  assert.equal(typeof cur, 'string')
++  assert.ok(!cur.includes(' '), 'cursor is URL-safe')
++  assert.deepEqual(wire.decodeCursor(cur), { v: 1, offset: 40, collection: 'tickets' })
++  // malformed / wrong-version cursors are invalid_request, never a crash
++  throwsCode('invalid_request', () => wire.decodeCursor('nonsense'))
++  throwsCode('invalid_request', () => wire.decodeCursor(wire.encodeCursor({ v: 2 })))
++  ok('cursor: base64url JSON round-trip; malformed and v!=1 rejected')
++}
++
++// ---------------------------------------------- 8. JSON + JSONL codecs with bounds
++{
++  const body = wire.encodeJsonBody({ id: 'r1', title: 'x' })
++  assert.deepEqual(wire.decodeJsonBody(body), { id: 'r1', title: 'x' })
++  throwsCode('invalid_request', () => wire.encodeJsonBody({ big: 'x'.repeat(1_048_577) }))
++  throwsCode('invalid_request', () => wire.decodeJsonBody('{"broken"'))
++  // JSONL: one JSON object per line, trailing newline allowed, junk rejected
++  const text = wire.encodeJsonl([{ id: 'a' }, { id: 'b' }])
++  assert.deepEqual(wire.decodeJsonl(text), [{ id: 'a' }, { id: 'b' }])
++  // encodeJsonl's own trailing newline is legal (covered above); ONE blank
++  // line — a double newline mid-stream or at the end — is not a record.
++  assert.ok(text.endsWith('\n') && !text.endsWith('\n\n'), 'encoded stream ends with exactly one newline')
++  throwsCode('invalid_request', () => wire.decodeJsonl(text + '\n'), 'a second trailing newline is a blank line')
++  throwsCode('invalid_request', () => wire.decodeJsonl('{"id":"a"}\nnot-json'))
++  throwsCode('invalid_request', () => wire.decodeJsonl('{"id":"a"}\n\n{"id":"b"}'), 'blank line is not a record')
++  throwsCode('invalid_request', () => wire.decodeJsonl('x'.repeat(33_554_433)))
++  ok('codecs: bounded JSON singleton encode/decode; strict JSONL with byte cap')
++}
++
++// ---------------------------------------------- 9. error taxonomy
++{
++  assert.deepEqual(contract.ERROR_CODES, [
++    'unsupported_version', 'invalid_request', 'unauthenticated', 'forbidden',
++    'not_found', 'conflict', 'unavailable',
++  ])
++  // full envelope, request-id echo and fallback to the caller's id
++  const e1 = wire.decodeErrorBody(
++    JSON.stringify({ error: { code: 'conflict', message: 'etag mismatch', retryable: false, requestId: 'srv-9' } }),
++    { requestId: 'cli-1' })
++  assert.equal(e1.code, 'conflict'); assert.equal(e1.requestId, 'srv-9')
++  const e2 = wire.decodeErrorBody(
++    JSON.stringify({ error: { code: 'unavailable', message: 'overloaded', retryable: true } }),
++    { requestId: 'cli-1' })
++  assert.equal(e2.requestId, 'cli-1', 'envelope requestId absent -> caller request id')
++  assert.equal(e2.retryable, true)
++  // malformed envelope is itself invalid_request, never a raw parse crash
++  throwsCode('invalid_request', () => wire.decodeErrorBody('{"oops":true', {}))
++  throwsCode('invalid_request', () => wire.decodeErrorBody('{"no":"error key"}', {}))
++  // unknown server code maps to unavailable with the server's code preserved
++  const e3 = wire.decodeErrorBody(JSON.stringify({ error: { code: 'teapot', message: 'brewing', retryable: false, requestId: 'r' } }), {})
++  assert.equal(e3.code, 'unavailable'); assert.equal(e3.serverCode, 'teapot')
++  // retryable status set is the frozen set
++  for (const s of [408, 425, 429, 500, 502, 503, 504]) assert.equal(wire.isRetryableStatus(s), true)
++  for (const s of [400, 401, 403, 404, 409, 422]) assert.equal(wire.isRetryableStatus(s), false)
++  ok('errors: 7 typed codes, envelope shape, requestId echo/fallback, unknown->unavailable+serverCode, retryable set')
++}
++
++// ---------------------------------------------- 10. no secrets in messages
++{
++  // Every error our codecs/builders raise is a fixed literal; neither the
++  // bearer token nor hostile payload values may leak into .message.
++  let leaked = null
++  try { contract.buildRequest('listRecords', { orgId: 'o', collection: TOKEN }, {}) } catch (e) { leaked = e }
++  assert.ok(leaked && !leaked.message.includes(TOKEN), 'builder errors never echo values')
++  const hostile = wire.decodeErrorBody(JSON.stringify({
++    error: { code: 'unauthenticated', message: 'bad token ' + TOKEN, retryable: false, requestId: 'r' },
++  }), { token: TOKEN })
++  // The server's message is the SERVER's; our envelope fields stay clean, and
++  // any occurrence of the session token in a surfaced message is redacted.
++  assert.ok(!hostile.message.includes(TOKEN), 'the session token is redacted from surfaced messages')
++  assert.ok(hostile.message.length > 0)
++  ok('secrecy: token never appears in any client-produced or client-surfaced error message')
++}
++
++// ---------------------------------------------- 11. capabilities + sign-in dispatch (D34)
++{
++  const caps = wire.decodeCapabilities({
++    auth: true, orgs: true, records: true, audit: true,
++    realtime: false, storage: true, analytics: false,
++    signIn: { kind: 'browser', start: { url: 'https://backend.example.test/oauth/start' } },
++  })
++  assert.equal(caps.realtime, false); assert.equal(caps.storage, true)
++  assert.equal(caps.signIn.kind, 'browser')
++  assert.deepEqual(caps.signIn.start, { url: 'https://backend.example.test/oauth/start' })
++  // every declared kind is legal
++  for (const kind of contract.SIGN_IN_KINDS)
++    assert.equal(wire.decodeCapabilities({ auth: true, signIn: { kind, start: {} } }).signIn.kind, kind)
++  // an undeclared kind is a contract violation
++  throwsCode('invalid_request', () => wire.decodeCapabilities({ signIn: { kind: 'email+password', start: {} } }))
++  throwsCode('invalid_request', () => wire.decodeCapabilities({ signIn: { kind: 'email-form' } }), 'start metadata is required')
++  throwsCode('invalid_request', () => wire.decodeCapabilities({}), 'signIn block is required')
++  ok('capabilities: booleans + signIn{kind,start}; dispatch renders only the declared kind')
++}
++
++// ---------------------------------------------- 12. config cannot name executable code (D32)
++{
++  // the three fixed providers pass
++  for (const provider of ['local', 'supabase', 'generic-rest'])
++    assert.doesNotThrow(() => contract.assertProviderConfig({
++      provider,
++      local: { root: '~/.arxa/workspace' },
++      supabase: { url: 'https://x.test', anonKey: 'k' },
++      'generic-rest': { baseUrl: 'https://x.test' },
++    }))
++  assert.doesNotThrow(() => contract.assertProviderConfig({}), 'empty config defaults to local (zero-config)')
++  // custom provider, adapter key, module/file-path values, env-style adapter
++  assert.throws(() => contract.assertProviderConfig({ provider: 'custom' }))
++  assert.throws(() => contract.assertProviderConfig({ provider: 'local', custom: { adapter: './adapters/my-backend.mjs' } }))
++  assert.throws(() => contract.assertProviderConfig({ provider: 'local', adapter: './x.mjs' }))
++  assert.throws(() => contract.assertProviderConfig({ provider: 'local', 'generic-rest': { baseUrl: './adapters/local.mjs' } }))
++  assert.throws(() => contract.assertProviderConfig({ provider: 'require("child_process")' }))
++  // and the thrown reason names executable code as the problem
++  let why = ''; try { contract.assertProviderConfig({ provider: 'local', adapter: './x.mjs' }) } catch (e) { why = e.message }
++  assert.match(why, /executable code/i)
++  ok('config guard: 3 fixed providers only; adapter keys/paths/module strings rejected')
++}
++
++console.log(`workspace-provider contract freeze: ${n} checks green`)
+git diff --check:
+(end)

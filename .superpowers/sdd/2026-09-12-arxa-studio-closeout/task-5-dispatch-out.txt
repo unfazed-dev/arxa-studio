@@ -1,0 +1,12 @@
+⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
+[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
+**✅ Task 5**
+
+- **Status:** DONE_WITH_CONCERNS
+- **Commit:** `82296f8` `test: cover main races and auto-commit storms` (+ trailer; `package-lock.json` left untouched)
+- **Tests:** 5× cicd-stress green (50 PASS each) + `npm test` ALL GREEN; focused `selftest.land-race.mjs` RED-on-BASE → green after fix
+- **S4 (race for main):** real child processes + parent barrier, clean + conflict rounds — surfaced a **real product defect** (raced `--no-ff` left its result staged in main's index; every later land refused; mislabeled "merge conflict"). Fixed in `sessions.js` (retry + index-heal; conflict guard pinned unchanged by the focused regression). Negative control (guard disabled in scratch fixture) → 4 FAILs.
+- **S5 (auto-commit storm):** production save coordinator sliced verbatim from `client.js`, real 1.5 s debounce intact, real write API, real second-process decoration poller — no product defect found; negative control (dropped rename) → red.
+- **Concerns:** S4 outcome-class assertions can theoretically flake under pathological lock patterns; raced-out park still carries `parkedReason: 'merge-conflict'` (message honest, row generic); `reset -q` retry unstages user-staged files in the org root (byte-intact; deliberate tradeoff, documented).
+- **New findings:** 2 (severity low) appended to `progress.md` — unlocked registry park writes; write-api `committed:false` while a neighbor commit carried the write.
+- **Report:** `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-5-report.md`

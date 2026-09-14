@@ -1,0 +1,11 @@
+⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
+[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
+✅ **Done** — commit `4cc0380` `fix: bound blob payloads, refuse unimplemented providers, pack sandbox lib` (6 files, +97/−13; lockfile dirt excluded; wire freeze diff vs 3597a40 empty)
+
+🧪 `npm test`: **126 suites ALL GREEN, exit 0** (grew 125→126); boot smoke green standalone (`OK — studio UI answered 200 HTML`, 5s)
+
+- **F1 blobs** — addressed: bytes payloads now bounded by `MAX_BLOB_BYTES`; 2 MiB round-trip test RED→GREEN (rest suite 9 checks)
+- **F2 supabase** — addressed: unimplemented names throw; verify = RED row + exit 1; export/import refuse; diagnose still diagnoses, exits nonzero (CLI suite 10 checks)
+- **F3 boot** — addressed, one row deeper than prescribed: fiveLibs += `sandbox` **and** `github-link` (hop 2: devcontainer.js imports `../../github-link/lib/keyring.js` by dir name — closure statically verified); blind spot closed by wiring the boot smoke into ci.mjs discovery — cheapest genuine catch, end-to-end, caught hop 2 itself
+
+📄 `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-13-report.md` → `## Fix round 1` appended (per-finding change/test/command/excerpts + deferred minors listed)

@@ -1,0 +1,8 @@
+⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
+[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
+**Status:** DONE_WITH_CONCERNS
+
+- **Commit:** `18c52cc` feat: add Docker Sandbox isolation with recoverable teardown (9 files; `package-lock.json` left untouched)
+- **Tests:** focused — sbx 32 green, sbx-install 11 green, finish 18/18, sandbox 34 green; full `npm test` ALL GREEN (both new suites auto-discovered)
+- **Concerns:** (1) `SBX_PIN` ships null checksums — fail-closed by design, install leg blocked until Task 16 measures the official v0.42.1 sha256s/asset names; (2) `sbx ls --json` per-entry field shape is inferred (tolerant `git://` parse) — Task 16 runbook reconciles it against a real listing; (3) A5 lifecycle is interface-only + finish/drop guard — session-start tier selection is the caller's integration, per brief scope. Ledger carries 4 new findings (notably: `sbx ls` auto-starts a stopped daemon — side-effectful read).
+- **Report:** `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-11-report.md` (incl. the exact Task-16 disposable command sequence + expected evidence)

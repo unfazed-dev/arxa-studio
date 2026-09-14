@@ -1,0 +1,8 @@
+⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
+[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
+- **Status:** DONE_WITH_CONCERNS
+- **Commit:** `7334ddb` docs: reconcile the arxa studio closeout inventory (7 files, +133, docs only)
+- **Tests:** `npm test` → exit 0, "arxa-studio CI: ALL GREEN" (110 suites); `flutter analyze` → "No issues found!" exit 0; `flutter test` → "All tests passed!" (+104) exit 0
+- **Inventory:** 51 rows — 14 OPEN (bijective to Tasks 2–15), 8 EXTERNAL (5 gates → Task 16), 10 DEFERRED with triggers, 19 CLOSED with today's evidence; 0 TBD/TODO/maybe
+- **Concerns:** (1) fresh worktrees break `flutter analyze/test` in the SPM plugin-copy step — rsync 3.5.0 can't create `build/ios/SourcePackages/<plugin>`; workaround `mkdir -p build/ios/SourcePackages`; flutter also auto-edits `analysis_options.yaml` + re-pins 5 lock entries — Task 12 Step 1 must expect both (logged as New finding 1); (2) upstream-dsh/sibling-backlog rows are EXTERNAL with no program task by design — reviewer should confirm scoping; (3) pre-existing `package-lock.json` dirt left untouched/uncommitted per brief
+- **Report:** `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-1-report.md`

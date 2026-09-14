@@ -1,0 +1,7 @@
+⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
+[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
+**Status:** DONE — script written, verified (`node --check` + unit checks), committed. No browser/npm-test by me.
+**Commit:** `f5e90d4` `feat: add the narrow-width evidence capture script`
+**Script:** `scripts/evidence-capture-narrow.mjs` — 331 lines
+**Surfaces:** 13 per width (390→744), 11 distinct gate runs/width; reuses `evidence-gate.mjs` per pair (filter list single-sourced — applied by the gate, never copied)
+**Concerns:** ① commit includes the gate's uncommitted T8B narrow-lane diff (+49: 390 device pin, rail trigger, langstrip) — without it the script can't produce real 390 shots; ② workspace-signin = recorded missing row (no gate surface exists); ③ finish/checksred/confine flows runtime-unproven — failure rows will record honestly; ④ fvm PATH-mask drives the dart-absent lane; if Dart resolves elsewhere, row records the dart state.

@@ -1,0 +1,1635 @@
+4e7f552 test: record authenticated and physical closeout evidence
+ .../studio-closeout-2026-09-12/probe-launch-2.log  |  38 +
+ .../studio-closeout-2026-09-12/probe-launch.log    |  40 ++
+ .../1280/finish-failed-dark-1280.png               | Bin 734598 -> 644789 bytes
+ .../1280/finish-failed-light-1280.png              | Bin 679159 -> 605997 bytes
+ .../1280/viewer-install-strip-dark-1280.png        | Bin 407359 -> 448296 bytes
+ .../1280/viewer-install-strip-light-1280.png       | Bin 374969 -> 440369 bytes
+ .../1280/workspace-backend-model-dark-1280.png     | Bin 0 -> 385979 bytes
+ .../1280/workspace-backend-model-light-1280.png    | Bin 375538 -> 379844 bytes
+ .../studio-closeout/narrow-capture-log.json        | 767 +--------------------
+ .../narrow-capture-logs/1280-backend.log           |  10 +-
+ .../narrow-capture-logs/1280-finish.log            |  35 +-
+ .../narrow-capture-logs/1280-langstrip.log         |   5 +-
+ .../narrow-capture-logs/1280-viewer-strip.log      |  11 +-
+ .../narrow-capture-logs/studio-boot.log            | 148 ++--
+ docs/plans/closeout-evidence-2026-09-12.md         | 173 +++++
+ package-lock.json                                  |   2 +
+ plugins/claude-code/selftest.skill-packs.mjs       |  13 +-
+ plugins/sandbox/lib/sbx-install.js                 |  22 +-
+ plugins/sandbox/selftest.sbx-install.mjs           |  23 +-
+ 19 files changed, 410 insertions(+), 877 deletions(-)
+diff --git a/designs/evidence/studio-closeout-2026-09-12/probe-launch-2.log b/designs/evidence/studio-closeout-2026-09-12/probe-launch-2.log
+new file mode 100644
+index 0000000..5c11414
+--- /dev/null
++++ b/designs/evidence/studio-closeout-2026-09-12/probe-launch-2.log
+@@ -0,0 +1,38 @@
++(node:71542) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
++(Use `node --trace-warnings ...` to show where the warning was created)
++narrow capture: gate surfaces present in this checkout: dump, settingsdump, personalisation, backend, sessiondump, sessionopen, gitcard, trashdump, viewer-strip, sweep, finish, checksred, preparation, trash, confine, langstrip
++studio up: http://arxa.studio.localhost:7897 (scratch /tmp/arxa-t8c-narrow-K0FQSK)
++[1280] viewer-strip … exit 0 in 35s
++[1280] langstrip … exit 0 in 134s
++
++studio log tail (full copy: designs/evidence/studio-closeout/narrow-capture-logs/studio-boot.log):
++[github-link] WARNING: /usr/bin/security did not answer within 2000ms (no login keychain for this HOME, or securityd is waiting on something) — using the in-memory fallback for this process.
++[github-link] WARNING: no keyring backend available (no Tauri shell bridge, and no usable platform secret store — /usr/bin/security on macOS, secret-tool + a running Secret Service on Linux). The GitHub token will be held IN MEMORY ONLY and lost when this process exits.
++[arxa-boot] prewarm snapshot+open in 28ms (org none)
++[arxa-boot] desktop-session apply
++dsh web: http://127.0.0.1:7897/?token=REDACTED
++[arxa-boot] listSessions #1 1ms index hits=0 misses=0
++[arxa-boot] listSessions #2 0ms index hits=0 misses=0
++[arxa-boot] session list 0 items in 0ms (query 0 records in 1ms)
++[arxa-boot] state served from prewarm
++[arxa-boot] state first served in 0ms
++[arxa-artifact-viewer] root server serving /tmp/arxa-t8c-narrow-K0FQSK/org/T8CLOSE at http://org-T8CLOSE.localhost:63011
++[arxa-artifact-viewer] trace boot@2026-09-13T23:19:05.388Z timeout 32233ms bundle=warm nav=navigate/redir1 fetch=3 resp=6 dcl=47 load=214 client-eval=121 state-req=230 state-res=256 js=10/11574KB/last@2050/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=session/modelCatalog:192+378,agentPresets/list:231+340,agentPresets/list:253+337
++[arxa-sidebar] spawned arxa-T8CLOSE-notes-note-wt-260914-001 liveAgent=true
++[arxa-artifact-viewer] trace boot@2026-09-13T23:19:46.355Z timeout 41528ms bundle=warm nav=reload/redir0 fetch=6 resp=11 dcl=48 load=178 client-eval=83 state-req=193 state-res=218 catalog-first=240 js=10/11574KB/last@1991/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=arxa-provider-status/current:357+220,agentPresets/list:213+108,session/create:240+100
++
++structured rows: designs/evidence/studio-closeout/narrow-capture-log.json · pair logs: designs/evidence/studio-closeout/narrow-capture-logs/
++
++shot                                             width  result    errs(filtered)
++------------------------------------------------------------------------------
++viewer-install-strip-light-1280.png              1280   missing   1
++viewer-install-strip-dark-1280.png               1280   missing   1
++langstrip-ts-1280.png                            1280   missing   3
++langstrip-css-1280.png                           1280   missing   3
++langstrip-json-1280.png                          1280   missing   3
++langstrip-html-preview-1280.png                  1280   missing   3
++viewer-install-strip-light-1280.png              1280   missing   1
++viewer-install-strip-dark-1280.png               1280   missing   1
++
++0 shot(s) ok · 8 missing-at-width or failed (rows recorded) · 0 hard failure(s)
++no 1280-proven surface hard-failed — exit 0 (missing-at-width rows are recorded evidence, not failures)
+diff --git a/designs/evidence/studio-closeout-2026-09-12/probe-launch.log b/designs/evidence/studio-closeout-2026-09-12/probe-launch.log
+new file mode 100644
+index 0000000..f8b49b1
+--- /dev/null
++++ b/designs/evidence/studio-closeout-2026-09-12/probe-launch.log
+@@ -0,0 +1,40 @@
++narrow capture: gate surfaces present in this checkout: dump, settingsdump, personalisation, backend, sessiondump, sessionopen, gitcard, trashdump, viewer-strip, sweep, finish, checksred, preparation, trash, confine, langstrip
++studio up: http://arxa.studio.localhost:7897 (scratch /var/folders/z_/vsddl0v124771l0kwkndsptw0000gn/T/arxa-t8c-narrow-VODGBu)
++[1280] finish … exit 0 in 227s
++[1280] backend … exit 0 in 83s
++[1280] langstrip … exit 13 in 106s
++[1280] viewer-strip … exit 1 in 12s
++
++studio log tail (full copy: designs/evidence/studio-closeout/narrow-capture-logs/studio-boot.log):
++[arxa-boot] session list 0 items in 0ms (query 0 records in 2ms)
++[arxa-boot] state served from prewarm
++[arxa-boot] state first served in 0ms
++[arxa-artifact-viewer] root server serving /var/folders/z_/vsddl0v124771l0kwkndsptw0000gn/T/arxa-t8c-narrow-VODGBu/org/T8CLOSE at http://org-T8CLOSE.localhost:62488
++[arxa-artifact-viewer] trace boot@2026-09-13T23:11:10.604Z timeout 34541ms bundle=warm nav=navigate/redir1 fetch=7 resp=44 dcl=101 load=293 client-eval=190 state-req=316 state-res=349 js=10/11574KB/last@2136/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=session/modelCatalog:373+424,session/modelCatalog:269+345,vendor/icons.js:354+264
++[arxa-sidebar] spawned arxa-T8CLOSE-notes-note-wt-260914-001 liveAgent=true
++[arxa-boot] session.open ensureOpen=0ms
++[arxa-sidebar] attach arxa-T8CLOSE-notes-note-wt-260914-001 liveSession=true liveAgent=true
++[arxa-boot] resume T8CLOSE/notes/note-wt-260914-001 head+rows=11 revive=11 attach+retitle=12 list=12
++[arxa-boot] session.open ensureOpen=0ms
++[arxa-sidebar] attach arxa-T8CLOSE-notes-note-wt-260914-001 liveSession=true liveAgent=true
++[arxa-boot] resume T8CLOSE/notes/note-wt-260914-001 head+rows=8 revive=8 attach+retitle=9 list=9
++[arxa-artifact-viewer] trace boot@2026-09-13T23:15:03.132Z timeout 73215ms bundle=warm nav=reload/redir0 fetch=8 resp=13 dcl=53 load=189 client-eval=89 state-req=205 state-res=236 catalog-first=255 js=10/11574KB/last@2014/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=agentPresets/list:206+139,agentPresets/list:232+113,session/create:255+111
++[arxa-artifact-viewer] trace boot@2026-09-13T23:16:26.416Z timeout 47845ms bundle=warm nav=reload/redir0 fetch=6 resp=10 dcl=47 load=177 client-eval=82 state-req=192 state-res=220 catalog-first=239 js=10/11574KB/last@2029/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=session/modelCatalog:153+293,session/modelCatalog:213+266,vendor/icons.js:225+201
++
++structured rows: designs/evidence/studio-closeout/narrow-capture-log.json · pair logs: designs/evidence/studio-closeout/narrow-capture-logs/
++
++shot                                             width  result    errs(filtered)
++------------------------------------------------------------------------------
++finish-dialog-light-1280.png                     1280   missing   1
++finish-dialog-dark-1280.png                      1280   missing   1
++workspace-backend-model-light-1280.png           1280   ok        3
++workspace-backend-model-dark-1280.png            1280   ok        3
++langstrip-ts-1280.png                            1280   hard      0
++langstrip-css-1280.png                           1280   hard      0
++langstrip-json-1280.png                          1280   hard      0
++langstrip-html-preview-1280.png                  1280   hard      0
++viewer-install-strip-light-1280.png              1280   missing   0
++viewer-install-strip-dark-1280.png               1280   missing   0
++
++2 shot(s) ok · 8 missing-at-width or failed (rows recorded) · 1 hard failure(s)
++HARD FAIL on 1280-proven surface viewer-langstrip @1280: gate exited 13 without a verdict
+diff --git a/designs/evidence/studio-closeout/1280/finish-failed-dark-1280.png b/designs/evidence/studio-closeout/1280/finish-failed-dark-1280.png
+index 5a3aa92..8423c4a 100644
+Binary files a/designs/evidence/studio-closeout/1280/finish-failed-dark-1280.png and b/designs/evidence/studio-closeout/1280/finish-failed-dark-1280.png differ
+diff --git a/designs/evidence/studio-closeout/1280/finish-failed-light-1280.png b/designs/evidence/studio-closeout/1280/finish-failed-light-1280.png
+index ef7bad9..73ca166 100644
+Binary files a/designs/evidence/studio-closeout/1280/finish-failed-light-1280.png and b/designs/evidence/studio-closeout/1280/finish-failed-light-1280.png differ
+diff --git a/designs/evidence/studio-closeout/1280/viewer-install-strip-dark-1280.png b/designs/evidence/studio-closeout/1280/viewer-install-strip-dark-1280.png
+index 1654f9b..58a00ed 100644
+Binary files a/designs/evidence/studio-closeout/1280/viewer-install-strip-dark-1280.png and b/designs/evidence/studio-closeout/1280/viewer-install-strip-dark-1280.png differ
+diff --git a/designs/evidence/studio-closeout/1280/viewer-install-strip-light-1280.png b/designs/evidence/studio-closeout/1280/viewer-install-strip-light-1280.png
+index 459f9cf..d759044 100644
+Binary files a/designs/evidence/studio-closeout/1280/viewer-install-strip-light-1280.png and b/designs/evidence/studio-closeout/1280/viewer-install-strip-light-1280.png differ
+diff --git a/designs/evidence/studio-closeout/1280/workspace-backend-model-dark-1280.png b/designs/evidence/studio-closeout/1280/workspace-backend-model-dark-1280.png
+new file mode 100644
+index 0000000..da1d382
+Binary files /dev/null and b/designs/evidence/studio-closeout/1280/workspace-backend-model-dark-1280.png differ
+diff --git a/designs/evidence/studio-closeout/1280/workspace-backend-model-light-1280.png b/designs/evidence/studio-closeout/1280/workspace-backend-model-light-1280.png
+index 667117a..000fd53 100644
+Binary files a/designs/evidence/studio-closeout/1280/workspace-backend-model-light-1280.png and b/designs/evidence/studio-closeout/1280/workspace-backend-model-light-1280.png differ
+diff --git a/designs/evidence/studio-closeout/narrow-capture-log.json b/designs/evidence/studio-closeout/narrow-capture-log.json
+index 7295329..cc604eb 100644
+--- a/designs/evidence/studio-closeout/narrow-capture-log.json
++++ b/designs/evidence/studio-closeout/narrow-capture-log.json
+@@ -1,808 +1,47 @@
+ {
+-  "startedAt": "2026-09-13T19:53:48.158Z",
++  "startedAt": "2026-09-13T23:21:52.703Z",
+   "widths": [
+-    390,
+-    744,
+     1280
+   ],
+   "ladder": [
+-    "finish",
+-    "sweep-modal",
+-    "checks-red-disclosure",
+-    "project-preparation",
+-    "trash-confirm",
+-    "trash-recover",
+     "viewer-install-strip",
+-    "confinement-configured-effective",
+-    "workspace-backend-local",
+-    "workspace-signin",
+-    "personalisation-tab",
+     "viewer-langstrip",
+     "viewer-dart-absent"
+   ],
+   "proven1280": [
+     "personalisation-tab",
+     "sweep-modal",
+     "viewer-langstrip",
+     "viewer-dart-absent"
+   ],
+   "rows": [
+-    {
+-      "surface": "finish",
+-      "width": 390,
+-      "gate": "finish",
+-      "failShots": [
+-        "finish-failed-light-390.png",
+-        "finish-failed-dark-390.png"
+-      ],
+-      "status": "missing",
+-      "error": "gate exited clean but an expected PNG is missing or stale",
+-      "cause": "see the pair log — the git dock never mounted — the conversation binds and the composer activates, but the conversation.input.dock slot never renders on fresh boots (product defect, all widths; see pair log + ledger)",
+-      "shots": [
+-        {
+-          "shot": "finish-dialog-light-390.png",
+-          "ok": false
+-        },
+-        {
+-          "shot": "finish-dialog-dark-390.png",
+-          "ok": false
+-        }
+-      ],
+-      "consoleFiltered": 0,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "sweep-modal",
+-      "width": 390,
+-      "gate": "sweep",
+-      "status": "ok",
+-      "error": null,
+-      "cause": null,
+-      "shots": [
+-        {
+-          "shot": "sweep-modal-light-390.png",
+-          "ok": true
+-        },
+-        {
+-          "shot": "sweep-modal-dark-390.png",
+-          "ok": true
+-        }
+-      ],
+-      "consoleFiltered": 2,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "checks-red-disclosure",
+-      "width": 390,
+-      "gate": "checksred",
+-      "failShots": [
+-        "checks-red-failed-light-390.png",
+-        "checks-red-failed-dark-390.png"
+-      ],
+-      "status": "missing",
+-      "error": "gate exited clean but an expected PNG is missing or stale",
+-      "cause": "see the pair log — the git dock never mounted — the conversation binds and the composer activates, but the conversation.input.dock slot never renders on fresh boots (product defect, all widths; see pair log + ledger)",
+-      "shots": [
+-        {
+-          "shot": "checks-red-light-390.png",
+-          "ok": false
+-        },
+-        {
+-          "shot": "checks-red-dark-390.png",
+-          "ok": false
+-        }
+-      ],
+-      "consoleFiltered": 2,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "project-preparation",
+-      "width": 390,
+-      "gate": "preparation",
+-      "failShots": [
+-        "project-preparation-failed-light-390.png",
+-        "project-preparation-failed-dark-390.png"
+-      ],
+-      "status": "missing",
+-      "error": "gate exited clean but an expected PNG is missing or stale",
+-      "cause": "see the pair log — the repair offer never rendered (see pair log)",
+-      "shots": [
+-        {
+-          "shot": "project-preparation-light-390.png",
+-          "ok": false
+-        },
+-        {
+-          "shot": "project-preparation-dark-390.png",
+-          "ok": false
+-        }
+-      ],
+-      "consoleFiltered": 2,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "trash-confirm",
+-      "width": 390,
+-      "gate": "trash",
+-      "status": "hard",
+-      "error": "pair exceeded the 480s budget",
+-      "cause": "hung surface or flow — see the pair log",
+-      "shots": [
+-        {
+-          "shot": "trash-confirm-light-390.png",
+-          "ok": false
+-        },
+-        {
+-          "shot": "trash-confirm-dark-390.png",
+-          "ok": false
+-        }
+-      ],
+-      "consoleFiltered": 0,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "trash-recover",
+-      "width": 390,
+-      "gate": "trash",
+-      "status": "hard",
+-      "error": "pair exceeded the 480s budget",
+-      "cause": "hung surface or flow — see the pair log",
+-      "shots": [
+-        {
+-          "shot": "trash-view-light-390.png",
+-          "ok": true
+-        },
+-        {
+-          "shot": "trash-view-dark-390.png",
+-          "ok": true
+-        }
+-      ],
+-      "consoleFiltered": 0,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "viewer-install-strip",
+-      "width": 390,
+-      "gate": "viewer-strip",
+-      "status": "missing",
+-      "error": "dart state {\"strip\":false,\"editor\":true}",
+-      "cause": "the SDK-absent install strip did not render — the viewer mounts the editor and the LSP status/strip path does not engage on fresh scratch boots (identical at 1280; see task-8-report Part B limitations)",
+-      "shots": [
+-        {
+-          "shot": "viewer-install-strip-light-390.png",
+-          "ok": true
+-        },
+-        {
+-          "shot": "viewer-install-strip-dark-390.png",
+-          "ok": true
+-        }
+-      ],
+-      "consoleFiltered": 3,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "confinement-configured-effective",
+-      "width": 390,
+-      "gate": "confine",
+-      "failShots": [
+-        "confinement-failed-light-390.png",
+-        "confinement-failed-dark-390.png"
+-      ],
+-      "status": "missing",
+-      "error": "gate exited clean but an expected PNG is missing or stale",
+-      "cause": "see the pair log — the + created no registry row in 45s — see pair log",
+-      "shots": [
+-        {
+-          "shot": "confinement-tier-light-390.png",
+-          "ok": false
+-        },
+-        {
+-          "shot": "confinement-tier-dark-390.png",
+-          "ok": false
+-        }
+-      ],
+-      "consoleFiltered": 1,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "workspace-backend-local",
+-      "width": 390,
+-      "gate": "backend",
+-      "status": "ok",
+-      "error": null,
+-      "cause": "L3 New finding: wp.info() rejects (connection: invalid server-response) at every width on fresh boots — shots are the failure-state card, not the live section model",
+-      "shots": [
+-        {
+-          "shot": "workspace-backend-model-light-390.png",
+-          "ok": true
+-        },
+-        {
+-          "shot": "workspace-backend-model-dark-390.png",
+-          "ok": true
+-        }
+-      ],
+-      "consoleFiltered": 2,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "workspace-signin",
+-      "width": 390,
+-      "gate": "signin",
+-      "status": "missing",
+-      "error": "no surface \"signin\" in scripts/evidence-gate.mjs",
+-      "cause": "workspace sign-in has no mounted studio UI — the backend renders as a settings-section model and signIn requires a configured remote provider, unreachable on a credential-free scratch boot",
+-      "shots": [],
+-      "consoleFiltered": 0,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "personalisation-tab",
+-      "width": 390,
+-      "gate": "personalisation",
+-      "status": "ok",
+-      "error": null,
+-      "cause": null,
+-      "shots": [
+-        {
+-          "shot": "personalisation-tab-light-390.png",
+-          "ok": true
+-        },
+-        {
+-          "shot": "personalisation-tab-dark-390.png",
+-          "ok": true
+-        }
+-      ],
+-      "consoleFiltered": 2,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "viewer-langstrip",
+-      "width": 390,
+-      "gate": "langstrip",
+-      "status": "missing",
+-      "error": "gate exited clean but an expected PNG is missing or stale",
+-      "cause": "see the pair log",
+-      "shots": [
+-        {
+-          "shot": "langstrip-ts-390.png",
+-          "ok": false
+-        },
+-        {
+-          "shot": "langstrip-css-390.png",
+-          "ok": false
+-        },
+-        {
+-          "shot": "langstrip-json-390.png",
+-          "ok": false
+-        },
+-        {
+-          "shot": "langstrip-html-preview-390.png",
+-          "ok": true
+-        }
+-      ],
+-      "consoleFiltered": 2,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "viewer-dart-absent",
+-      "width": 390,
+-      "gate": "viewer-strip",
+-      "status": "missing",
+-      "error": "dart state {\"strip\":false,\"editor\":true}",
+-      "cause": "the SDK-absent install strip did not render — the viewer mounts the editor and the LSP status/strip path does not engage on fresh scratch boots (identical at 1280; see task-8-report Part B limitations)",
+-      "shots": [
+-        {
+-          "shot": "viewer-install-strip-light-390.png",
+-          "ok": true
+-        },
+-        {
+-          "shot": "viewer-install-strip-dark-390.png",
+-          "ok": true
+-        }
+-      ],
+-      "consoleFiltered": 3,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "finish",
+-      "width": 744,
+-      "gate": "finish",
+-      "failShots": [
+-        "finish-failed-light-744.png",
+-        "finish-failed-dark-744.png"
+-      ],
+-      "status": "missing",
+-      "error": "gate exited clean but an expected PNG is missing or stale",
+-      "cause": "see the pair log — the + created no registry row in 45s — see pair log",
+-      "shots": [
+-        {
+-          "shot": "finish-dialog-light-744.png",
+-          "ok": false
+-        },
+-        {
+-          "shot": "finish-dialog-dark-744.png",
+-          "ok": false
+-        }
+-      ],
+-      "consoleFiltered": 1,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "sweep-modal",
+-      "width": 744,
+-      "gate": "sweep",
+-      "status": "ok",
+-      "error": null,
+-      "cause": null,
+-      "shots": [
+-        {
+-          "shot": "sweep-modal-light-744.png",
+-          "ok": true
+-        },
+-        {
+-          "shot": "sweep-modal-dark-744.png",
+-          "ok": true
+-        }
+-      ],
+-      "consoleFiltered": 2,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "checks-red-disclosure",
+-      "width": 744,
+-      "gate": "checksred",
+-      "failShots": [
+-        "checks-red-failed-light-744.png",
+-        "checks-red-failed-dark-744.png"
+-      ],
+-      "status": "missing",
+-      "error": "gate exited clean but an expected PNG is missing or stale",
+-      "cause": "see the pair log — the + created no registry row in 45s — see pair log",
+-      "shots": [
+-        {
+-          "shot": "checks-red-light-744.png",
+-          "ok": false
+-        },
+-        {
+-          "shot": "checks-red-dark-744.png",
+-          "ok": false
+-        }
+-      ],
+-      "consoleFiltered": 1,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "project-preparation",
+-      "width": 744,
+-      "gate": "preparation",
+-      "status": "ok",
+-      "error": null,
+-      "cause": null,
+-      "shots": [
+-        {
+-          "shot": "project-preparation-light-744.png",
+-          "ok": true
+-        },
+-        {
+-          "shot": "project-preparation-dark-744.png",
+-          "ok": true
+-        }
+-      ],
+-      "consoleFiltered": 2,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "trash-confirm",
+-      "width": 744,
+-      "gate": "trash",
+-      "status": "ok",
+-      "error": null,
+-      "cause": null,
+-      "shots": [
+-        {
+-          "shot": "trash-confirm-light-744.png",
+-          "ok": true
+-        },
+-        {
+-          "shot": "trash-confirm-dark-744.png",
+-          "ok": true
+-        }
+-      ],
+-      "consoleFiltered": 2,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "trash-recover",
+-      "width": 744,
+-      "gate": "trash",
+-      "status": "ok",
+-      "error": null,
+-      "cause": null,
+-      "shots": [
+-        {
+-          "shot": "trash-view-light-744.png",
+-          "ok": true
+-        },
+-        {
+-          "shot": "trash-view-dark-744.png",
+-          "ok": true
+-        }
+-      ],
+-      "consoleFiltered": 2,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "viewer-install-strip",
+-      "width": 744,
+-      "gate": "viewer-strip",
+-      "status": "missing",
+-      "error": "dart state {\"strip\":false,\"editor\":true}",
+-      "cause": "the SDK-absent install strip did not render — the viewer mounts the editor and the LSP status/strip path does not engage on fresh scratch boots (identical at 1280; see task-8-report Part B limitations)",
+-      "shots": [
+-        {
+-          "shot": "viewer-install-strip-light-744.png",
+-          "ok": true
+-        },
+-        {
+-          "shot": "viewer-install-strip-dark-744.png",
+-          "ok": true
+-        }
+-      ],
+-      "consoleFiltered": 3,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "confinement-configured-effective",
+-      "width": 744,
+-      "gate": "confine",
+-      "failShots": [
+-        "confinement-failed-light-744.png",
+-        "confinement-failed-dark-744.png"
+-      ],
+-      "status": "missing",
+-      "error": "gate exited clean but an expected PNG is missing or stale",
+-      "cause": "see the pair log — the + created no registry row in 45s — see pair log",
+-      "shots": [
+-        {
+-          "shot": "confinement-tier-light-744.png",
+-          "ok": false
+-        },
+-        {
+-          "shot": "confinement-tier-dark-744.png",
+-          "ok": false
+-        }
+-      ],
+-      "consoleFiltered": 3,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "workspace-backend-local",
+-      "width": 744,
+-      "gate": "backend",
+-      "status": "ok",
+-      "error": null,
+-      "cause": "L3 New finding: wp.info() rejects (connection: invalid server-response) at every width on fresh boots — shots are the failure-state card, not the live section model",
+-      "shots": [
+-        {
+-          "shot": "workspace-backend-model-light-744.png",
+-          "ok": true
+-        },
+-        {
+-          "shot": "workspace-backend-model-dark-744.png",
+-          "ok": true
+-        }
+-      ],
+-      "consoleFiltered": 2,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "workspace-signin",
+-      "width": 744,
+-      "gate": "signin",
+-      "status": "missing",
+-      "error": "no surface \"signin\" in scripts/evidence-gate.mjs",
+-      "cause": "workspace sign-in has no mounted studio UI — the backend renders as a settings-section model and signIn requires a configured remote provider, unreachable on a credential-free scratch boot",
+-      "shots": [],
+-      "consoleFiltered": 0,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "personalisation-tab",
+-      "width": 744,
+-      "gate": "personalisation",
+-      "status": "ok",
+-      "error": null,
+-      "cause": null,
+-      "shots": [
+-        {
+-          "shot": "personalisation-tab-light-744.png",
+-          "ok": true
+-        },
+-        {
+-          "shot": "personalisation-tab-dark-744.png",
+-          "ok": true
+-        }
+-      ],
+-      "consoleFiltered": 0,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "viewer-langstrip",
+-      "width": 744,
+-      "gate": "langstrip",
+-      "status": "missing",
+-      "error": "gate exited clean but an expected PNG is missing or stale",
+-      "cause": "see the pair log",
+-      "shots": [
+-        {
+-          "shot": "langstrip-ts-744.png",
+-          "ok": false
+-        },
+-        {
+-          "shot": "langstrip-css-744.png",
+-          "ok": false
+-        },
+-        {
+-          "shot": "langstrip-json-744.png",
+-          "ok": false
+-        },
+-        {
+-          "shot": "langstrip-html-preview-744.png",
+-          "ok": false
+-        }
+-      ],
+-      "consoleFiltered": 2,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "viewer-dart-absent",
+-      "width": 744,
+-      "gate": "viewer-strip",
+-      "status": "missing",
+-      "error": "dart state {\"strip\":false,\"editor\":true}",
+-      "cause": "the SDK-absent install strip did not render — the viewer mounts the editor and the LSP status/strip path does not engage on fresh scratch boots (identical at 1280; see task-8-report Part B limitations)",
+-      "shots": [
+-        {
+-          "shot": "viewer-install-strip-light-744.png",
+-          "ok": true
+-        },
+-        {
+-          "shot": "viewer-install-strip-dark-744.png",
+-          "ok": true
+-        }
+-      ],
+-      "consoleFiltered": 3,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "finish",
+-      "width": 1280,
+-      "gate": "finish",
+-      "failShots": [
+-        "finish-failed-light-1280.png",
+-        "finish-failed-dark-1280.png"
+-      ],
+-      "status": "missing",
+-      "error": "gate exited clean but an expected PNG is missing or stale",
+-      "cause": "see the pair log — the + created no registry row in 45s — see pair log",
+-      "shots": [
+-        {
+-          "shot": "finish-dialog-light-1280.png",
+-          "ok": false
+-        },
+-        {
+-          "shot": "finish-dialog-dark-1280.png",
+-          "ok": false
+-        }
+-      ],
+-      "consoleFiltered": 1,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "sweep-modal",
+-      "width": 1280,
+-      "gate": "sweep",
+-      "status": "ok",
+-      "error": null,
+-      "cause": null,
+-      "shots": [
+-        {
+-          "shot": "sweep-modal-light-1280.png",
+-          "ok": true
+-        },
+-        {
+-          "shot": "sweep-modal-dark-1280.png",
+-          "ok": true
+-        }
+-      ],
+-      "consoleFiltered": 2,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "checks-red-disclosure",
+-      "width": 1280,
+-      "gate": "checksred",
+-      "failShots": [
+-        "checks-red-failed-light-1280.png",
+-        "checks-red-failed-dark-1280.png"
+-      ],
+-      "status": "missing",
+-      "error": "gate exited clean but an expected PNG is missing or stale",
+-      "cause": "see the pair log — the + created no registry row in 45s — see pair log",
+-      "shots": [
+-        {
+-          "shot": "checks-red-light-1280.png",
+-          "ok": false
+-        },
+-        {
+-          "shot": "checks-red-dark-1280.png",
+-          "ok": false
+-        }
+-      ],
+-      "consoleFiltered": 2,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "project-preparation",
+-      "width": 1280,
+-      "gate": "preparation",
+-      "status": "ok",
+-      "error": null,
+-      "cause": null,
+-      "shots": [
+-        {
+-          "shot": "project-preparation-light-1280.png",
+-          "ok": true
+-        },
+-        {
+-          "shot": "project-preparation-dark-1280.png",
+-          "ok": true
+-        }
+-      ],
+-      "consoleFiltered": 2,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "trash-confirm",
+-      "width": 1280,
+-      "gate": "trash",
+-      "status": "ok",
+-      "error": null,
+-      "cause": null,
+-      "shots": [
+-        {
+-          "shot": "trash-confirm-light-1280.png",
+-          "ok": true
+-        },
+-        {
+-          "shot": "trash-confirm-dark-1280.png",
+-          "ok": true
+-        }
+-      ],
+-      "consoleFiltered": 2,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "trash-recover",
+-      "width": 1280,
+-      "gate": "trash",
+-      "status": "ok",
+-      "error": null,
+-      "cause": null,
+-      "shots": [
+-        {
+-          "shot": "trash-view-light-1280.png",
+-          "ok": true
+-        },
+-        {
+-          "shot": "trash-view-dark-1280.png",
+-          "ok": true
+-        }
+-      ],
+-      "consoleFiltered": 2,
+-      "gateErrors": 0
+-    },
+     {
+       "surface": "viewer-install-strip",
+       "width": 1280,
+       "gate": "viewer-strip",
+       "status": "missing",
+       "error": "dart state {\"strip\":false,\"editor\":true}",
+       "cause": "the SDK-absent install strip did not render — the viewer mounts the editor and the LSP status/strip path does not engage on fresh scratch boots (identical at 1280; see task-8-report Part B limitations)",
+       "shots": [
+         {
+           "shot": "viewer-install-strip-light-1280.png",
+           "ok": true
+         },
+         {
+           "shot": "viewer-install-strip-dark-1280.png",
+           "ok": true
+         }
+       ],
+-      "consoleFiltered": 2,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "confinement-configured-effective",
+-      "width": 1280,
+-      "gate": "confine",
+-      "failShots": [
+-        "confinement-failed-light-1280.png",
+-        "confinement-failed-dark-1280.png"
+-      ],
+-      "status": "missing",
+-      "error": "gate exited clean but an expected PNG is missing or stale",
+-      "cause": "see the pair log — the + created no registry row in 45s — see pair log",
+-      "shots": [
+-        {
+-          "shot": "confinement-tier-light-1280.png",
+-          "ok": false
+-        },
+-        {
+-          "shot": "confinement-tier-dark-1280.png",
+-          "ok": false
+-        }
+-      ],
+       "consoleFiltered": 1,
+       "gateErrors": 0
+     },
+-    {
+-      "surface": "workspace-backend-local",
+-      "width": 1280,
+-      "gate": "backend",
+-      "status": "hard",
+-      "error": "pair exceeded the 480s budget",
+-      "cause": "hung surface or flow — see the pair log",
+-      "shots": [
+-        {
+-          "shot": "workspace-backend-model-light-1280.png",
+-          "ok": true
+-        },
+-        {
+-          "shot": "workspace-backend-model-dark-1280.png",
+-          "ok": false
+-        }
+-      ],
+-      "consoleFiltered": 0,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "workspace-signin",
+-      "width": 1280,
+-      "gate": "signin",
+-      "status": "missing",
+-      "error": "no surface \"signin\" in scripts/evidence-gate.mjs",
+-      "cause": "workspace sign-in has no mounted studio UI — the backend renders as a settings-section model and signIn requires a configured remote provider, unreachable on a credential-free scratch boot",
+-      "shots": [],
+-      "consoleFiltered": 0,
+-      "gateErrors": 0
+-    },
+-    {
+-      "surface": "personalisation-tab",
+-      "width": 1280,
+-      "gate": "personalisation",
+-      "status": "ok",
+-      "error": null,
+-      "cause": null,
+-      "shots": [
+-        {
+-          "shot": "personalisation-tab-light-1280.png",
+-          "ok": true
+-        },
+-        {
+-          "shot": "personalisation-tab-dark-1280.png",
+-          "ok": true
+-        }
+-      ],
+-      "consoleFiltered": 0,
+-      "gateErrors": 0
+-    },
+     {
+       "surface": "viewer-langstrip",
+       "width": 1280,
+       "gate": "langstrip",
+       "status": "missing",
+       "error": "gate exited clean but an expected PNG is missing or stale",
+       "cause": "see the pair log",
+       "shots": [
+         {
+           "shot": "langstrip-ts-1280.png",
+@@ -814,35 +53,35 @@
+         },
+         {
+           "shot": "langstrip-json-1280.png",
+           "ok": false
+         },
+         {
+           "shot": "langstrip-html-preview-1280.png",
+           "ok": false
+         }
+       ],
+-      "consoleFiltered": 2,
++      "consoleFiltered": 3,
+       "gateErrors": 0
+     },
+     {
+       "surface": "viewer-dart-absent",
+       "width": 1280,
+       "gate": "viewer-strip",
+       "status": "missing",
+       "error": "dart state {\"strip\":false,\"editor\":true}",
+       "cause": "the SDK-absent install strip did not render — the viewer mounts the editor and the LSP status/strip path does not engage on fresh scratch boots (identical at 1280; see task-8-report Part B limitations)",
+       "shots": [
+         {
+           "shot": "viewer-install-strip-light-1280.png",
+           "ok": true
+         },
+         {
+           "shot": "viewer-install-strip-dark-1280.png",
+           "ok": true
+         }
+       ],
+-      "consoleFiltered": 2,
++      "consoleFiltered": 1,
+       "gateErrors": 0
+     }
+   ]
+ }
+diff --git a/designs/evidence/studio-closeout/narrow-capture-logs/1280-backend.log b/designs/evidence/studio-closeout/narrow-capture-logs/1280-backend.log
+index 59f8b86..457949f 100644
+--- a/designs/evidence/studio-closeout/narrow-capture-logs/1280-backend.log
++++ b/designs/evidence/studio-closeout/narrow-capture-logs/1280-backend.log
+@@ -1,7 +1,15 @@
+-viewport@boot: [1280,813,true]
++viewport@boot: [1280,813,false]
+ theme rides the Appearance-row path (real setTheme clicks)
+ -- surface: backend
+ wp probe: keys=info,section,namespace
+ backend model: mounted-error: connection: invalid server-response result
+ shot: /Volumes/business_ssd/arxa_digital_solutions/.worktrees/arxa-studio-closeout/designs/evidence/studio-closeout/1280/workspace-backend-model-light-1280.png
+ wp probe: keys=info,section,namespace
++backend model: mounted-error: connection: invalid server-response result
++shot: /Volumes/business_ssd/arxa_digital_solutions/.worktrees/arxa-studio-closeout/designs/evidence/studio-closeout/1280/workspace-backend-model-dark-1280.png
++FILTERED (pre-existing, justified in scripts/evidence-gate.mjs):
++  exception: Error: web app: missing #root
++    at http://arxa.studio.localhost:7897/assets/index-Df-65__b.js:109:69
++  log: Failed to load resource: the server responded with a status of 404 (Not Found) [http://arxa.studio.localhost:7897/favicon.ico]
++  log: Failed to load resource: net::ERR_CONNECTION_REFUSED [http://127.0.0.1:4319/__dial/events]
++EVIDENCE OK @1280 — backend — zero unfiltered console/page errors
+diff --git a/designs/evidence/studio-closeout/narrow-capture-logs/1280-finish.log b/designs/evidence/studio-closeout/narrow-capture-logs/1280-finish.log
+index b6ccdc6..d7d1f0b 100644
+--- a/designs/evidence/studio-closeout/narrow-capture-logs/1280-finish.log
++++ b/designs/evidence/studio-closeout/narrow-capture-logs/1280-finish.log
+@@ -1,12 +1,41 @@
+-viewport@boot: [1280,813,true]
++viewport@boot: [1280,813,false]
++internal testing notice dismissed (Continue)
+ theme rides the Appearance-row path (real setTheme clicks)
+ -- surface: finish
+   org: already open
+   notes: clicked
+   plus: cta: clicked
+-FAILURE STATE: the + created no registry row in 45s — see pair log
++  fresh session: T8CLOSE/notes/note-wt-260914-001
++  opened via: row
++  composer: activated
++  markers: {"noConvo":null,"openErr":null}
++  bind: {"b":{"orgId":"t8close-scratch","sessionId":"T8CLOSE/notes/note-wt-260914-001"},"cta":false,"sel":{"orgId":"t8close-scratch","rowId":"","kind":"org","label":"T8CLOSE"}}
++  pane: {"ta":false,"send":false,"hero":true,"loading":false}
++  tail: json
++.github
++Projects
++Notes
++.gitkeep
++note-wt-260914-001
++now
++Meetings
++Account
++Communications
++Archives
++Trash
++Settings
++Flowing High
++arxa
++Describe what you want to build... / commands, @ files or sessions
++Workspace Write
++GLM-5.3
++Max
++Details
++Click a tool row in the message flow to view its details
++design
++FAILURE STATE: the git dock never mounted — the conversation binds and the composer activates, but the conversation.input.dock slot never renders on fresh boots (product defect, all widths; see pair log + ledger)
+ shot: /Volumes/business_ssd/arxa_digital_solutions/.worktrees/arxa-studio-closeout/designs/evidence/studio-closeout/1280/finish-failed-light-1280.png
+ shot: /Volumes/business_ssd/arxa_digital_solutions/.worktrees/arxa-studio-closeout/designs/evidence/studio-closeout/1280/finish-failed-dark-1280.png
+ FILTERED (pre-existing, justified in scripts/evidence-gate.mjs):
+-  log: Failed to load resource: the server responded with a status of 404 (Not Found) [http://arxa.studio.localhost:7897/__arxa/artifacts/tree?dir=projects%2Fprep
++  log: Failed to load resource: net::ERR_CONNECTION_REFUSED [http://127.0.0.1:4319/__dial/events]
+ EVIDENCE OK @1280 — finish — zero unfiltered console/page errors
+diff --git a/designs/evidence/studio-closeout/narrow-capture-logs/1280-langstrip.log b/designs/evidence/studio-closeout/narrow-capture-logs/1280-langstrip.log
+index 91cb02d..7c1e657 100644
+--- a/designs/evidence/studio-closeout/narrow-capture-logs/1280-langstrip.log
++++ b/designs/evidence/studio-closeout/narrow-capture-logs/1280-langstrip.log
+@@ -1,12 +1,15 @@
+-viewport@boot: [1280,813,true]
++(node:73868) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
++(Use `node --trace-warnings ...` to show where the warning was created)
++viewport@boot: [1280,813,false]
+ theme rides the Appearance-row path (real setTheme clicks)
+ -- surface: langstrip
+ MISSING: no diagnostic squiggles for langstrip.ts
+ MISSING: no diagnostic squiggles for langstrip.css
+ MISSING: no diagnostic squiggles for langstrip.json
+ MISSING: no preview iframe for langstrip.html
+ FILTERED (pre-existing, justified in scripts/evidence-gate.mjs):
+   exception: Error: web app: missing #root
+     at http://arxa.studio.localhost:7897/assets/index-Df-65__b.js:109:69
+   log: Failed to load resource: the server responded with a status of 404 (Not Found) [http://arxa.studio.localhost:7897/favicon.ico]
++  log: Failed to load resource: net::ERR_CONNECTION_REFUSED [http://127.0.0.1:4319/__dial/events]
+ EVIDENCE OK @1280 — langstrip — zero unfiltered console/page errors
+diff --git a/designs/evidence/studio-closeout/narrow-capture-logs/1280-viewer-strip.log b/designs/evidence/studio-closeout/narrow-capture-logs/1280-viewer-strip.log
+index 4719c60..1ee40d9 100644
+--- a/designs/evidence/studio-closeout/narrow-capture-logs/1280-viewer-strip.log
++++ b/designs/evidence/studio-closeout/narrow-capture-logs/1280-viewer-strip.log
+@@ -1,12 +1,13 @@
+-viewport@boot: [1280,813,true]
++(node:71926) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
++(Use `node --trace-warnings ...` to show where the warning was created)
++viewport@boot: [1280,813,false]
++internal testing notice dismissed (Continue)
+ theme rides the Appearance-row path (real setTheme clicks)
+ -- surface: viewer-strip
+ dart state: {"strip":false,"editor":true}
+ shot: /Volumes/business_ssd/arxa_digital_solutions/.worktrees/arxa-studio-closeout/designs/evidence/studio-closeout/1280/viewer-install-strip-light-1280.png
+ dart state: {"strip":false,"editor":true}
+ shot: /Volumes/business_ssd/arxa_digital_solutions/.worktrees/arxa-studio-closeout/designs/evidence/studio-closeout/1280/viewer-install-strip-dark-1280.png
+-FILTERED (pre-existing, justified in scripts/evidence-gate.mjs):
+-  exception: Error: web app: missing #root
+-    at http://arxa.studio.localhost:7897/assets/index-Df-65__b.js:109:69
+-  log: Failed to load resource: the server responded with a status of 404 (Not Found) [http://arxa.studio.localhost:7897/favicon.ico]
+ EVIDENCE OK @1280 — viewer-strip — zero unfiltered console/page errors
++FILTERED (pre-existing, justified in scripts/evidence-gate.mjs):
++  log: Failed to load resource: net::ERR_CONNECTION_REFUSED [http://127.0.0.1:4319/__dial/events]
+diff --git a/designs/evidence/studio-closeout/narrow-capture-logs/studio-boot.log b/designs/evidence/studio-closeout/narrow-capture-logs/studio-boot.log
+index cedb372..e72c73b 100644
+--- a/designs/evidence/studio-closeout/narrow-capture-logs/studio-boot.log
++++ b/designs/evidence/studio-closeout/narrow-capture-logs/studio-boot.log
+@@ -1,104 +1,76 @@
+-[WARN] using --force I sure hope you know what you are doing
+-Progress: resolved 1, reused 0, downloaded 0, added 0
+-
+-   ╭─────────────────────────────────────────╮
+-   │                                         │
+-   │   Update available! 11.21.0 → 12.4.1.   │
+-   │   Changelog: https://pnpm.io/v/12.4.1   │
+-   │    To update, run: pnpm self-update     │
+-   │                                         │
+-   ╰─────────────────────────────────────────╯
+-
+-Packages: +24
+-++++++++++++++++++++++++
+-Packages are hard linked from the content-addressable store to the virtual store.
++(node:71628) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
++(Use `pnpm --trace-warnings ...` to show where the warning was created)
++[43m[33m[[39m[49m[43m[30mWARN[39m[49m[43m[33m][39m[49m using --force I sure hope you know what you are doing
++Progress: resolved [96m1[39m, reused [96m0[39m, downloaded [96m0[39m, added [96m0[39m
++[33m[39m
++[33m   ╭─────────────────────────────────────────╮[39m
++   [33m│[39m                                         [33m│[39m
++   [33m│[39m   Update available! [31m11.21.0[39m → [32m12.4.1[39m.   [33m│[39m
++   [33m│[39m   [35mChangelog:[39m https://pnpm.io/v/12.4.1   [33m│[39m
++   [33m│[39m    To update, run: [35mpnpm self-update[39m     [33m│[39m
++   [33m│[39m                                         [33m│[39m
++[33m   ╰─────────────────────────────────────────╯[39m
++[33m[39m
++(node:71628) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
++(Use `pnpm --trace-warnings ...` to show where the warning was created)
++(node:71628) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
++(Use `pnpm --trace-warnings ...` to show where the warning was created)
++Packages: [32m+24[39m
++[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m[32m+[39m
++(node:71628) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
++(Use `pnpm --trace-warnings ...` to show where the warning was created)
++(node:71628) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
++(Use `pnpm --trace-warnings ...` to show where the warning was created)
++(node:71628) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
++(Use `pnpm --trace-warnings ...` to show where the warning was created)
++Packages are cloned from the content-addressable store to the virtual store.
+   Content-addressable store is at: /Users/unfazed-mac/Library/pnpm/store/v11
+   Virtual store is at:             node_modules/.pnpm
+-Progress: resolved 24, reused 24, downloaded 0, added 24, done
++Progress: resolved [96m24[39m, reused [96m24[39m, downloaded [96m0[39m, added [96m24[39m, done
+ 
+-dependencies:
+-+ arxa-artifact-viewer 0.3.5
+-+ arxa-brand 0.1.1
+-+ arxa-dashboard 0.1.0
+-+ arxa-design-panel 0.1.0
+-+ arxa-file-org-shell 0.1.7
+-+ arxa-frame 0.1.6
+-+ arxa-freestyle 0.1.0
+-+ arxa-gen-ui 0.1.0
+-+ arxa-git-card 0.1.1
+-+ arxa-github-link 0.1.5
+-+ arxa-jobs 0.1.0
+-+ arxa-locale 0.1.0
+-+ arxa-mcp-apps 0.1.0
+-+ arxa-pairing 0.1.0
+-+ arxa-personalisation 0.2.1
+-+ arxa-prism 0.8.1
+-+ arxa-provider-status 0.1.0
+-+ arxa-sidebar 0.2.9
+-+ arxa-theme-accent 0.3.6
+-+ arxa-waiting-page 0.1.1
+-+ arxa-workspace-provider 0.1.0
++[96mdependencies:[39m
++[32m+[39m arxa-artifact-viewer [90m0.3.5[39m
++[32m+[39m arxa-brand [90m0.1.1[39m
++[32m+[39m arxa-dashboard [90m0.1.0[39m
++[32m+[39m arxa-design-panel [90m0.1.0[39m
++[32m+[39m arxa-file-org-shell [90m0.1.7[39m
++[32m+[39m arxa-frame [90m0.1.6[39m
++[32m+[39m arxa-freestyle [90m0.1.0[39m
++[32m+[39m arxa-gen-ui [90m0.1.0[39m
++[32m+[39m arxa-git-card [90m0.1.1[39m
++[32m+[39m arxa-github-link [90m0.1.5[39m
++[32m+[39m arxa-jobs [90m0.1.0[39m
++[32m+[39m arxa-locale [90m0.1.0[39m
++[32m+[39m arxa-mcp-apps [90m0.1.0[39m
++[32m+[39m arxa-pairing [90m0.1.0[39m
++[32m+[39m arxa-personalisation [90m0.2.1[39m
++[32m+[39m arxa-prism [90m0.8.1[39m
++[32m+[39m arxa-provider-status [90m0.1.0[39m
++[32m+[39m arxa-sidebar [90m0.2.9[39m
++[32m+[39m arxa-theme-accent [90m0.3.6[39m
++[32m+[39m arxa-waiting-page [90m0.1.1[39m
++[32m+[39m arxa-workspace-provider [90m0.1.0[39m
+ 
+-Done in 632ms using pnpm v11.21.0
++Done in 417ms using pnpm v11.21.0
+ arxa studio: http://arxa.studio.localhost:7897
++(node:71672) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
++(Use `node --trace-warnings ...` to show where the warning was created)
+ [github-link] WARNING: /usr/bin/security did not answer within 2000ms (no login keychain for this HOME, or securityd is waiting on something) — using the in-memory fallback for this process.
+ [github-link] WARNING: no keyring backend available (no Tauri shell bridge, and no usable platform secret store — /usr/bin/security on macOS, secret-tool + a running Secret Service on Linux). The GitHub token will be held IN MEMORY ONLY and lost when this process exits.
+ [arxa-boot] sidebar apply
+-[arxa-boot] header index armed: 0 headers, list cold at /var/folders/z_/vsddl0v124771l0kwkndsptw0000gn/T/arxa-t8c-narrow-DXjbJK/home/dsh/storages/arxa-session-header-index.json
++[arxa-boot] header index armed: 0 headers, list cold at /tmp/arxa-t8c-narrow-K0FQSK/home/dsh/storages/arxa-session-header-index.json
+ [arxa-boot] listSessions single-flight armed
+ [github-link] WARNING: /usr/bin/security did not answer within 2000ms (no login keychain for this HOME, or securityd is waiting on something) — using the in-memory fallback for this process.
+ [github-link] WARNING: no keyring backend available (no Tauri shell bridge, and no usable platform secret store — /usr/bin/security on macOS, secret-tool + a running Secret Service on Linux). The GitHub token will be held IN MEMORY ONLY and lost when this process exits.
+-[arxa-boot] prewarm snapshot+open in 16ms (org none)
++[arxa-boot] prewarm snapshot+open in 28ms (org none)
+ [arxa-boot] desktop-session apply
+ dsh web: http://127.0.0.1:7897/?token=REDACTED
++[arxa-boot] listSessions #1 1ms index hits=0 misses=0
++[arxa-boot] listSessions #2 0ms index hits=0 misses=0
++[arxa-boot] session list 0 items in 0ms (query 0 records in 1ms)
+ [arxa-boot] state served from prewarm
+ [arxa-boot] state first served in 0ms
+-[arxa-artifact-viewer] root server serving /var/folders/z_/vsddl0v124771l0kwkndsptw0000gn/T/arxa-t8c-narrow-DXjbJK/org/T8CLOSE at http://org-T8CLOSE.localhost:58184
+-[arxa-boot] listSessions #1 2ms index hits=0 misses=0
+-[arxa-boot] listSessions #2 3ms index hits=0 misses=0
+-[arxa-boot] session list 0 items in 3ms (query 0 records in 2ms)
++[arxa-artifact-viewer] root server serving /tmp/arxa-t8c-narrow-K0FQSK/org/T8CLOSE at http://org-T8CLOSE.localhost:63011
++[arxa-artifact-viewer] trace boot@2026-09-13T23:19:05.388Z timeout 32233ms bundle=warm nav=navigate/redir1 fetch=3 resp=6 dcl=47 load=214 client-eval=121 state-req=230 state-res=256 js=10/11574KB/last@2050/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=session/modelCatalog:192+378,agentPresets/list:231+340,agentPresets/list:253+337
+ [arxa-sidebar] spawned arxa-T8CLOSE-notes-note-wt-260914-001 liveAgent=true
+-[arxa-boot] session.open ensureOpen=1ms
+-[arxa-sidebar] attach arxa-T8CLOSE-notes-note-wt-260914-001 liveSession=true liveAgent=true
+-[arxa-boot] resume T8CLOSE/notes/note-wt-260914-001 head+rows=5 revive=5 attach+retitle=6 list=6
+-[arxa-artifact-viewer] trace boot@2026-09-13T19:07:31.779Z painted 17208ms bundle=warm nav=navigate/redir1 fetch=2 resp=4 dcl=38 load=205 client-eval=113 state-req=217 state-res=235 catalog-first=17054 open-call=17183 painted=17208 js=10/11574KB/last@6433/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=session/modelCatalog:182+304,agentPresets/list:232+274,session/modelCatalog:233+271
+-[arxa-boot] session.open ensureOpen=1ms
+-[arxa-sidebar] attach arxa-T8CLOSE-notes-note-wt-260914-001 liveSession=true liveAgent=true
+-[arxa-boot] resume T8CLOSE/notes/note-wt-260914-001 head+rows=4 revive=4 attach+retitle=5 list=5
+-[arxa-sidebar] spawned arxa-T8CLOSE-notes-note-wt-260914-002 liveAgent=true
+-[arxa-boot] session.open ensureOpen=0ms
+-[arxa-sidebar] attach arxa-T8CLOSE-notes-note-wt-260914-002 liveSession=true liveAgent=true
+-[arxa-boot] resume T8CLOSE/notes/note-wt-260914-002 head+rows=6 revive=6 attach+retitle=6 list=6
+-[arxa-artifact-viewer] trace boot@2026-09-13T19:09:50.827Z painted 10845ms bundle=warm nav=reload/redir0 fetch=6 resp=10 dcl=48 load=175 client-eval=83 state-req=186 state-res=211 catalog-first=228 open-call=10822 painted=10845 js=10/11574KB/last@2014/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=sidebar/action:10654+104,vendor/arxa-monaco.js:1652+97,agentPresets/list:242+96
+-[arxa-boot] session.open ensureOpen=0ms
+-[arxa-sidebar] attach arxa-T8CLOSE-notes-note-wt-260914-002 liveSession=true liveAgent=true
+-[arxa-boot] resume T8CLOSE/notes/note-wt-260914-002 head+rows=6 revive=6 attach+retitle=7 list=7
+-[arxa-artifact-viewer] trace boot@2026-09-13T19:12:16.446Z timeout 30081ms bundle=warm nav=reload/redir0 fetch=6 resp=9 dcl=45 load=175 client-eval=81 state-req=187 state-res=206 catalog-first=301 js=10/11574KB/last@2001/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=vendor/arxa-monaco.js:1650+98,agentPresets/list:188+88,agentPresets/list:202+88
+-[arxa-artifact-viewer] trace main.dart painted 166ms bundle=warm panel-mounted=3 consumed=3 org:loading=4 token=REDACTED bytes=10 session=17 codeview=17 import=18 open=89
+-[arxa-artifact-viewer] lsp: refused (no-project-root)
+-[arxa-artifact-viewer] trace main.dart painted 61ms bundle=warm panel-mounted=-2337 consumed=0 org:loading=0 token=REDACTED bytes=14 session=21 codeview=21 import=22 open=32
+-[arxa-artifact-viewer] lsp: refused (no-project-root)
+-[arxa-artifact-viewer] trace boot@2026-09-13T19:20:28.897Z timeout 30128ms bundle=warm nav=navigate/redir1 fetch=2 resp=4 dcl=50 load=217 client-eval=127 state-req=229 state-res=249 catalog-first=259 js=10/11574KB/last@6423/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=agentPresets/list:245+123,agentPresets/list:271+98,agentPresets/list:230+87
+-[arxa-artifact-viewer] trace boot@2026-09-13T19:21:57.776Z timeout 30081ms bundle=warm nav=reload/redir0 fetch=6 resp=10 dcl=47 load=173 client-eval=81 state-req=185 state-res=208 catalog-first=226 js=10/11574KB/last@1984/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=agentPresets/list:242+115,arxa-provider-status/current:247+105,sidebar/state:252+100
+-[arxa-artifact-viewer] trace langstrip.ts painted 168ms bundle=warm panel-mounted=3 consumed=3 org:loading=3 token=REDACTED bytes=30 session=37 codeview=38 import=38 open=99
+-[arxa-artifact-viewer] trace langstrip.css painted 182ms bundle=warm panel-mounted=-20676 consumed=0 org:loading=0 token=REDACTED bytes=114 session=121 codeview=122 import=122 open=154
+-[arxa-artifact-viewer] trace boot@2026-09-13T19:24:51.289Z timeout 30081ms bundle=warm nav=reload/redir0 fetch=6 resp=10 dcl=45 load=174 client-eval=81 state-req=187 state-res=206 catalog-first=209 js=13/11645KB/last@8099/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=BTjLKcQjfZoKx9ofCGRbo-PhOwpI:8451+20328,session/modelCatalog:151+223,session/modelCatalog:202+219
+-[arxa-artifact-viewer] trace langstrip.json painted 144ms bundle=warm panel-mounted=-46792 consumed=0 org:loading=0 token=REDACTED bytes=81 session=88 codeview=88 import=89 open=119
+-[arxa-artifact-viewer] trace langstrip.html ready:iframe 3049ms bundle=warm panel-mounted=-94732 consumed=0 org:loading=0 token=REDACTED
+-[arxa-artifact-viewer] trace boot@2026-09-13T19:26:43.254Z timeout 62751ms bundle=warm nav=navigate/redir1 fetch=2 resp=4 dcl=36 load=202 client-eval=111 state-req=215 state-res=237 catalog-first=241 js=10/11574KB/last@6220/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=session/modelCatalog:179+262,session/modelCatalog:231+235,agentPresets/list:255+160
+-[arxa-artifact-viewer] trace boot@2026-09-13T19:28:10.201Z timeout 48377ms bundle=warm nav=navigate/redir1 fetch=2 resp=4 dcl=42 load=210 client-eval=119 state-req=222 state-res=243 catalog-first=255 js=10/11574KB/last@6423/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=agentPresets/list:238+119,agentPresets/list:267+91,lm/listConfigurableProviders:272+82
+-[arxa-artifact-viewer] trace main.dart painted 173ms bundle=warm panel-mounted=3 consumed=3 org:loading=4 token=REDACTED bytes=12 session=19 codeview=20 import=20 open=89
+-[arxa-artifact-viewer] lsp: refused (no-project-root)
+-[arxa-artifact-viewer] trace main.dart painted 67ms bundle=warm panel-mounted=-2464 consumed=0 org:loading=0 token=REDACTED bytes=7 session=16 codeview=17 import=17 open=27
+-[arxa-artifact-viewer] lsp: refused (no-project-root)
+-[arxa-artifact-viewer] trace boot@2026-09-13T19:30:36.138Z timeout 56751ms bundle=warm nav=reload/redir0 fetch=6 resp=10 dcl=46 load=176 client-eval=81 state-req=189 state-res=214 catalog-first=234 js=10/11574KB/last@1979/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=session/modelCatalog:153+251,session/modelCatalog:205+247,vendor/icons.js:220+165
+-[arxa-artifact-viewer] trace boot@2026-09-13T19:32:30.042Z timeout 56733ms bundle=warm nav=reload/redir0 fetch=6 resp=9 dcl=47 load=175 client-eval=82 state-req=187 state-res=207 catalog-first=229 js=10/11574KB/last@1979/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=agentPresets/list:202+127,vendor/icons.js:216+114,agentPresets/list:243+89
+-[arxa-artifact-viewer] trace boot@2026-09-13T19:34:05.972Z timeout 85524ms bundle=warm nav=navigate/redir1 fetch=2 resp=3 dcl=35 load=203 client-eval=111 state-req=219 state-res=242 catalog-first=262 js=10/11574KB/last@2023/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=session/modelCatalog:181+239,session/modelCatalog:235+225,vendor/icons.js:247+151
+-[arxa-artifact-viewer] trace boot@2026-09-13T19:35:52.955Z timeout 37109ms bundle=warm nav=reload/redir0 fetch=5 resp=8 dcl=41 load=168 client-eval=74 state-req=182 state-res=204 catalog-first=225 js=10/11574KB/last@1977/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=agentPresets/list:201+139,agentPresets/list:239+104,vendor/icons.js:210+78
+-[arxa-artifact-viewer] trace boot@2026-09-13T19:36:37.716Z timeout 79480ms bundle=warm nav=reload/redir0 fetch=4 resp=6 dcl=33 load=159 client-eval=64 state-req=175 state-res=201 catalog-first=221 js=10/11574KB/last@1977/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=session/modelCatalog:194+262,session/modelCatalog:135+261,vendor/icons.js:206+174
+-[arxa-artifact-viewer] trace boot@2026-09-13T19:38:12.433Z timeout 33437ms bundle=warm nav=reload/redir0 fetch=6 resp=9 dcl=43 load=171 client-eval=78 state-req=186 state-res=209 catalog-first=229 js=10/11574KB/last@1991/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=agentPresets/list:245+110,vendor/arxa-monaco.js:1646+108,dashboard/action:27295+99
+-[arxa-artifact-viewer] trace boot@2026-09-13T19:39:06.542Z timeout 39579ms bundle=warm nav=reload/redir0 fetch=6 resp=10 dcl=46 load=176 client-eval=80 state-req=191 state-res=215 catalog-first=236 js=10/11574KB/last@1974/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=session/modelCatalog:153+259,session/modelCatalog:210+247,vendor/icons.js:221+167
+-[arxa-artifact-viewer] trace main.dart painted 1501ms bundle=warm panel-mounted=4 consumed=5 org:loading=5 token=REDACTED bytes=1310 session=1322 codeview=1323 import=1323 open=1406
+-[arxa-artifact-viewer] trace boot@2026-09-13T19:41:13.005Z timeout 81402ms bundle=warm nav=navigate/redir1 fetch=2 resp=3 dcl=36 load=205 client-eval=112 state-req=221 state-res=244 catalog-first=264 js=10/11574KB/last@2057/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=session/modelCatalog:183+237,session/modelCatalog:234+232,agentPresets/list:279+118
+-[arxa-artifact-viewer] trace boot@2026-09-13T19:42:51.640Z timeout 66629ms bundle=warm nav=reload/redir0 fetch=6 resp=10 dcl=47 load=176 client-eval=84 state-req=191 state-res=215 catalog-first=227 js=10/11574KB/last@1978/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=agentPresets/list:207+153,agentPresets/list:192+117,agentPresets/list:245+116
+-[arxa-artifact-viewer] trace boot@2026-09-13T19:50:45.820Z timeout 32944ms bundle=warm nav=navigate/redir1 fetch=2 resp=4 dcl=46 load=218 client-eval=124 state-req=234 state-res=262 catalog-first=272 js=10/11574KB/last@2017/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=session/modelCatalog:197+277,session/modelCatalog:259+236,vendor/icons.js:267+193
++[arxa-artifact-viewer] trace boot@2026-09-13T23:19:46.355Z timeout 41528ms bundle=warm nav=reload/redir0 fetch=6 resp=11 dcl=48 load=178 client-eval=83 state-req=193 state-res=218 catalog-first=240 js=10/11574KB/last@1991/top=arxa-monaco.js:10280K,vendor-CCJJTK99.js:723K,index-Df-65__b.js:413K,icons.js:85K slow=arxa-provider-status/current:357+220,agentPresets/list:213+108,session/create:240+100
+diff --git a/docs/plans/closeout-evidence-2026-09-12.md b/docs/plans/closeout-evidence-2026-09-12.md
+new file mode 100644
+index 0000000..e3a3cf1
+--- /dev/null
++++ b/docs/plans/closeout-evidence-2026-09-12.md
+@@ -0,0 +1,173 @@
++# Closeout evidence matrix — 2026-09-12 program (Task 16)
++
++Every acceptance gate the closeout program names, one row per leg. Classes:
++`scratch` (no credentials, no operator state) · `authenticated` (needs an
++account/credential the operator must authorize per-leg) · `physical` (needs a
++device) · `CI-runner` (needs the pushed branch on a runner) ·
++`operator-machine` (needs a daemon/VM only the operator starts).
++
++Results: **DONE** (run, artifact stored) · **PREPARED** (not run —
++authorization or prerequisite pending; command is verbatim-runnable) ·
++**EXTERNAL** (owner outside this branch; prepared command recorded). No
++authenticated/physical leg is ever marked DONE without the operator's
++explicit per-leg authorization (program law).
++
++Studio HEAD at Part A execution: `8e3bc01` (`closeout-2026-09-12`).
++Arxa worktree HEAD: `5930302d` (`closeout-2026-09-12`). All Part A legs ran
++2026-09-14.
++
++| id | gate | class | command (verbatim) | commit | result | artifact | unresolved external prerequisite |
++|---|---|---|---|---|---|---|---|
++| G1 | card-cicd-smoke rerun (T6) | authenticated | `node scripts/card-cicd-smoke.mjs --yes` | studio 8e3bc01 | PREPARED | — | operator authorization; GitHub private-repo Actions minutes restored (quota) |
++| G2 | A4 real Docker container leg (T10) | operator-machine | `ARXA_A4_REAL_SMOKE=1 node plugins/sandbox/selftest.devcontainer.mjs` | studio 8e3bc01 | PREPARED | — | operator starts Docker daemon (never the agent); watch `row.head` reachability mid-fetch (`plugins/sandbox/lib/devcontainer.js:456`) |
++| G3 | A5 real sbx leg (T11) | authenticated + mutating | `ARXA_A5_REAL_SMOKE=1 node plugins/sandbox/selftest.sbx.mjs` (after `sbx login` OAuth device flow; reviewed global deny-all; disposable sandbox lifecycle; recovery ref; cache accounting) | studio 8e3bc01 | EXTERNAL (owner: operator) | — | explicit per-leg authorization — mutates operator sbx state/policy; `sbx ls --json` field-shape reconciliation rides the same authorized session |
++| G3a | sbx v0.42.1 official release-feed measurement (SBX_PIN fill) | scratch | sandboxed fetch of `api.github.com/repos/docker/sbx-releases/releases/tags/v0.42.1` (asset names + server-computed sha256 digests; darwin tar.gz cross-checked by streamed hash) | studio 8e3bc01 | DONE | this file §G3-notes; `plugins/sandbox/lib/sbx-install.js` `SBX_PIN` | — |
++| G4 | Supabase real stack leg (T14) | operator-machine | `node scripts/workspace-provider-supabase-smoke.mjs --real` (CI: `supabase-conformance` job) | studio 8e3bc01 | PREPARED | — | operator starts Docker daemon; pinned CLI 2.67.1; verify `status -o env` key names (`SUPABASE_URL`/`ANON_KEY`/`SERVICE_ROLE_KEY`) on first live run |
++| G5 | Claude signed-in smoke (Step 3) | authenticated | `node scripts/claude-code-smoke.mjs --yes` | studio 8e3bc01 | PREPARED | — | operator authorization + signed-in `claude`. Linux resume/Bash-escape rungs are **N/A on macOS** (recorded, not skipped silently) |
++| G5a | bundled skill-pack set stays empty — policy test | scratch | `node plugins/claude-code/selftest.skill-packs.mjs` | studio 8e3bc01 | DONE | `plugins/claude-code/selftest.skill-packs.mjs` (bundled-root-empty row) | — |
++| G6 | Z.ai live smoke (Step 4) | authenticated | `ZAI_API_KEY=<resolved by operator, never printed> node scripts/zai-live-smoke.mjs` | studio 8e3bc01 | PREPARED | — | authorized credential path; requires a real successful response + intended model/wire params |
++| G7 | Viewer gate (Step 5) | scratch (mostly) | `node scripts/evidence-capture-narrow.mjs --width 1280 --surface finish --surface backend --surface langstrip --surface viewer-strip` (the Part A fresh-boot probe; one studio boot per run, sequential single-Chrome pairs) + per-leg rows in §G7-notes | studio 8e3bc01 | DONE (fresh-boot legs, 2026-09-14; per-leg rows in §G7-notes) | `designs/evidence/studio-closeout-2026-09-12/` | LSP-diagnostics live row = limitation per §Escalated E1 (owner + trigger recorded) |
++| G8 | Mobile physical gates (Step 6) | physical | per-leg commands in `mobile_flutter/deploy/physical-gates.md` (arxa worktree) | arxa 5930302d | PREPARED (per-leg) | `mobile_flutter/deploy/evidence/closeout-2026-09-12/` (dir created Part A) | devices + credentials; every leg incl. `PHASE=phone` real-APNs doorbell |
++| G9 | Release gates (Step 7) | authenticated | `bash desktop/scripts/sign-and-notarize.sh` (script lives in the ARXA worktree; `bash -n` green Part A) + first live `release-linux` tag + clean-machine installer verify | studio 8e3bc01 | EXTERNAL (owner: operator) | — | explicit authorization (never mark complete without it); keychain profile `arxa-notary` absent (AXS-019) |
++| G10 | Omarchy VM + container lanes (T15) | operator-machine | runbook + assertions in arxa `docs/linux-support.md`; container lane `DISTRO=ubuntu scripts/linux/run-container.sh` | studio 8e3bc01 | EXTERNAL (owner: operator) | — | operator VM + daemon; first `desktop/**` PR runner pass (AXS-043) |
++| G11 | First CI green run + branch protection (T12) | CI-runner | operator pushes branch → runner executes `check.sh`; then branch protection per `docs/ci/setup.md` contexts | studio 8e3bc01 | EXTERNAL (owner: operator) | — | operator push; `check.sh gates` area red = pre-existing repo-wide debt (intake/coverage/advertise-digests/approvalTokens — separate owner) |
++| G12 | T12 residual Step 5 — simulator integration smoke | scratch (heavy) | `fvm flutter test integration_test/approvals_e2e_test.dart -d <disposable-sim-id> --dart-define=PHASE=smoke` (see §G12-notes) | arxa 5930302d | PREPARED (RAM-discipline deferral, §G12-notes) | §G12-notes | — |
++| G12b | T12 residual Step 8 — `arxa deploy --self-test` | scratch | `arxa deploy --self-test` (arxa worktree `.build/arxa`) | arxa 5930302d | DONE (2026-09-14, exit 0, 12/12 — incl. `deploy halts without approval`) | `mobile_flutter/deploy/evidence/closeout-2026-09-12/g12b-deploy-selftest.log` (arxa worktree) | — |
++| G12c | T12 residual Step 8 — release-automation without publishing | scratch (heavy) | disposable-keystore `flutter build appbundle --release` + `flutter build apk --release`; iOS stops at `fastlane ios doctor` | arxa 5930302d | PREPARED (RAM-discipline deferral, §G12-notes) | §G12-notes | — |
++| G13 | tree-endpoint 404 in IGNORED mask (T8 minor) | scratch (decision) | decision row — keep-with-justification (see §G13-notes) | studio 8e3bc01 | DONE (decision) | this file §G13-notes | — |
++| E1 | Escalated: L1/L2 viewer LSP chain dead on fresh boots | scratch (adjudication) | fresh-boot probe (G7 command, `langstrip`/`viewer-strip` pairs) | studio 8e3bc01 | DONE (adjudicated: REPRODUCED → pre-existing defect, keep rows; §Escalated) | `designs/evidence/studio-closeout-2026-09-12/` | product fix = artifact-viewer owner (external) |
++| E2 | Escalated: conversation dock dead on fresh boots | scratch (adjudication) | fresh-boot probe (G7 command, `finish` pair — FAILURE-STATE row if `[data-git-dock]` never mounts) | studio 8e3bc01 | DONE (adjudicated: REPRODUCED → keep limitation + external rows; §Escalated) | `designs/evidence/studio-closeout-2026-09-12/` | operator's installed studio = daily counter-evidence (RIDE condition); product fix = arxa-git-card + dsh conversation-input owners |
++| E3 | Escalated: L3 `window.__arxaWorkspaceProvider.info()` fails on fresh boots | scratch (adjudication) | fresh-boot probe (G7 command, `backend` pair) | studio 8e3bc01 | DONE (adjudicated: REPRODUCED → keep limitation + external rows; §Escalated) | `designs/evidence/studio-closeout-2026-09-12/` | product fix = workspace-provider owner (external) |
++
++## G3-notes — sbx v0.42.1 feed measurement (2026-09-14)
++
++Feed EXISTS: `github.com/docker/sbx-releases` tag `v0.42.1`, published
++2026-09-07. 22 assets; no `checksums.txt` asset, but every asset carries a
++server-computed `sha256:` digest in the release API — that is the
++authoritative measurement source (same trust root the provenance/SBOM
++attachments ride). The shipped `SBX_PIN` had assumed Go-style
++`sbx_<ver>_<os>_<arch>.tar.gz` names; the real darwin artifact is a single
++universal `DockerSandboxes-darwin.tar.gz` (no arch suffix). Pins filled
++accordingly (darwin-amd64 and darwin-arm64 share the universal file):
++
++| pin key | file | sha256 |
++|---|---|---|
++| darwin-arm64 | DockerSandboxes-darwin.tar.gz | `3c5738c489fbeac8f6c85533101c7229f4ce39106f823afde66d70469b758df1` |
++| darwin-amd64 | DockerSandboxes-darwin.tar.gz | `3c5738c489fbeac8f6c85533101c7229f4ce39106f823afde66d70469b758df1` |
++| linux-arm64 | DockerSandboxes-linux-arm64.tar.gz | `285b36cdb46ce65f792f006869698f2664fcde8adc1e8524357f150f9368dd4c` |
++| linux-amd64 | DockerSandboxes-linux-amd64.tar.gz | `fe46facba420d1cb8b1dad57d5b182d6df9dadd46c324c2ca3ef574fb7eada6f` |
++
++Network effect: read-only public GitHub fetches (API + one streamed
++darwin-tar.gz hash cross-check); no operator state touched; nothing
++downloaded onto operator paths (hash computed from the stream, bytes
++discarded). Quota effect: none metered.
++
++## G7-notes — viewer gate legs
++
++Fresh-boot probe legs (DONE 2026-09-14 at HEAD `8e3bc01`; one studio boot
++per wrapper run against a `mkdtemp` scratch ARXA_HOME; sequential
++single-Chrome pairs; token-redacted logs):
++
++| leg | runbook face | result | evidence |
++|---|---|---|---|
++| finish | §Escalated E2 | FAILURE STATE recorded honestly — session creates, opens via row, conversation binds, composer activates; `[data-git-dock]` never mounts | `narrow-capture-logs/1280-finish.log`; `1280/finish-failed-{light,dark}-1280.png` |
++| backend | §Escalated E3 | FAILURE STATE card — provider keys (`info,section,namespace`) present; model errors `connection: invalid server-response result` | `narrow-capture-logs/1280-backend.log`; `1280/workspace-backend-model-{light,dark}-1280.png` |
++| langstrip | §Escalated E1 | MISSING — no diagnostic squiggles for ts/css/json, no html preview iframe | `narrow-capture-logs/1280-langstrip.log` |
++| viewer-strip | §Escalated E1 | MISSING product state — `dart state: {"strip":false,"editor":true}` light+dark: the editor mounts, the "install its SDK" strip never renders | `narrow-capture-logs/1280-viewer-strip.log`; `1280/viewer-install-strip-{light,dark}-1280.png` |
++
++Runbook legs beyond the probe:
++
++- HTTP-semantics legs (expired token 403, GET-only artifact origin, conflict
++  refusal, SSE deny-default, tree-read mint) — asserted green by the
++  artifact-viewer selftest suites inside the full `npm test` run (report §Part
++  A); the runbook defines no live demo leg for them.
++- Autosave / diff / dart-present — the 2026-09-13 evidence (demo-runbook §7)
++  stands but is env-coupled: captured on a boot whose LSP servers came through
++  the person-pressed install door, which fresh scratch boots cannot reproduce
++  (the E1 chain). Fresh-boot reproduction = blocked by E1.
++- Person-driven demo legs (§1–§5: dock/drag/maximize/sheet/session-switch) —
++  interactive; the headless sheet-entry gap is documented in §7 → PREPARED
++  (operator demo; no authorization needed, just a person).
++- LSP-diagnostics live row — limitation per §Escalated E1; not closable in
++  this branch (pre-existing at BASE).
++
++## G12-notes — T12 residual legs
++
++G12 and G12c **deferred to PREPARED** under RAM discipline (the brief's
++ruling): two OOM-killed workers hit this machine on 2026-09-14 (an earlier
++capture worker and Task 16 attempt 1), and a booted iOS simulator + Gradle
++daemon are exactly the toolchain class that OOM'd. Rerun on an idle machine —
++commands verbatim. **G12b ran** (light, toolchain-free by design — §17):
++exit 0, 12/12 shapes passed including the `deploy halts without approval`
++invariant; evidence `mobile_flutter/deploy/evidence/closeout-2026-09-12/g12b-deploy-selftest.log`.
++
++| leg | command |
++|---|---|
++| G12 simulator smoke | `xcrun simctl boot "iPhone 16"` (disposable sim) → `cd mobile_flutter && fvm flutter test integration_test/approvals_e2e_test.dart -d "iPhone 16" --dart-define=PHASE=smoke` (scratch engine boot per `mobile_flutter/deploy/physical-gates.md` §0) |
++| G12b deploy self-test | `arxa deploy --self-test` (arxa worktree CLI) |
++| G12c release automation, no publishing | `keytool -genkeypair -v -keystore /tmp/arxa-t16-disposable.jks -alias arxa -keyalg RSA -keysize 2048 -validity 10 -storepass disposable-t16` → wire via scratch signing config → `fvm flutter build appbundle --release` + `fvm flutter build apk --release` → `cd ios && fastlane ios doctor` (STOPS THERE — no submit); keystore destroyed after |
++
++None of the three touches credentials or publishes anything — they stay
++scratch legs whenever they run.
++
++## G13-notes — tree-endpoint 404 mask (decision)
++
++**KEEP, with justification.** The IGNORED entry is path-anchored
++(`/__arxa\/artifacts\/tree/`, `scripts/evidence-gate.mjs:103-107`) and
++documents its own cause: the same org-open-coupled chain as E1 makes
++expanding a tree dir on a fresh boot answer 404. It masks exactly that shape,
++not 404s in general — unfiltered 404s still fail the gate, and today's fresh
++runs never even triggered this mask (the filtered lists show only the dial
++4319 + favicon lines). Tightening it now would fail unrelated surfaces on a
++pre-existing upstream defect owned by E1's follow-up. One-line decision:
++keep — narrow, justified, self-documenting, currently inert; revisit
++alongside the E1 fix.
++
++## Escalated adjudications
++
++All three findings reproduced at HEAD `8e3bc01` on fresh scratch boots,
++2026-09-14. Probe logs: `designs/evidence/studio-closeout-2026-09-12/
++probe-launch.log` (finish + backend legs) and `probe-launch-2.log`
++(viewer-strip + langstrip legs); pair logs `…/studio-closeout/narrow-capture-logs/1280-*.log`;
++structured rows `…/narrow-capture-log.json`.
++
++- **E1 — L1/L2 viewer LSP chain dead on fresh boots**
++  (`plugins/artifact-viewer/lib/index.js:183-191`): **REPRODUCED — keep as
++  pre-existing defect row** (owner: artifact-viewer owner; trigger: any fresh
++  scratch boot — the token→`/lsp/status`→ws chain 403s without the
++  person-pressed install door). No ts/css/json squiggles, no html preview
++  iframe; dart-absent boots mount the editor with no strip
++  (`strip:false, editor:true`, light+dark shots). T8-diff-innocent
++  (established at escalation; identical at HEAD). The committed 2026-09-13
++  §7 evidence stands as richer-env evidence, marked env-coupled in the ledger
++  — the branch does not close on it.
++- **E2 — conversation dock dead on fresh boots: REPRODUCED — keep limitation
++  rows + external row.** The finish leg's fresh session creates, opens via
++  row, binds (`__ARXA_SIDEBAR__.boundSession()` answers the fresh session),
++  activates the composer — and the `conversation.input.dock` slot never
++  renders, so no `[data-git-dock]` and finish/checks-red/confinement cannot
++  mount. The RIDE condition is respected: the operator's installed studio
++  mounts docks daily (counter-evidence); the branch records honest
++  FAILURE-STATE rows instead of closing on stale dock evidence.
++- **E3 — L3 `window.__arxaWorkspaceProvider.info()` fails on fresh boots:
++  REPRODUCED — keep limitation + external row** (owner: workspace-provider
++  owner). Provider keys are present (`info,section,namespace`); the live
++  model errors `connection: invalid server-response result`; failure-state
++  card captured light+dark. T8-innocent (4 locale lines).
++- Fix loop: none of the three is branch-caused (each measured pre-existing at
++  BASE during escalation; the T8 diffs are literals→`t()` only) → documented
++  limitation/external rows per brief deliverable 5's else-branch. No product
++  fix attempted in this task.
++
++## Prep verification (Step 1)
++
++2026-09-14, Part A. Every gate script named in the matrix:
++
++| check | result |
++|---|---|
++| parse | `node --check` green: `scripts/card-cicd-smoke.mjs`, `plugins/sandbox/selftest.{devcontainer,sbx}.mjs`, `scripts/workspace-provider-supabase-smoke.mjs`, `scripts/claude-code-smoke.mjs`, `scripts/zai-live-smoke.mjs`, `scripts/evidence-gate.mjs`, `scripts/evidence-capture-narrow.mjs`. `bash -n` green: `desktop/scripts/sign-and-notarize.sh` (arxa worktree). `approvals_e2e_test.dart` present, line-cites re-verified (see G8). |
++| path fix | the draft G9 row cited `desktop/src-tauri/sign-and-notarize.sh`, which does not exist in the studio tree — the real script is `desktop/scripts/sign-and-notarize.sh` in the arxa worktree; row corrected. |
++| scratch isolation | capture wrapper boots the studio under a `mkdtemp` scratch ARXA_HOME and kills the process tree after; the real-leg smokes gate behind env flags (`ARXA_A4_REAL_SMOKE` / `ARXA_A5_REAL_SMOKE` / `--real` / `--yes`) so their default runs stay fake/safe. |
++| secrets | no hardcoded secret shapes in any script (grep `sk-…`/`AKIA…`/`ghp_…`/`xox…`/`BEGIN PRIVATE KEY`: none); `zai-live-smoke.mjs` reads `ZAI_API_KEY` from env only; notarization rides `--keychain-profile arxa-notary`, never a printed secret. |
++| log redaction | the wrapper redacts `token=` in every persisted log (`evidence-capture-narrow.mjs:217,336`); Part A's nohup probe logs were re-redacted after the redirect bypassed the wrapper's stdout path (ledger row). |
++| quota / network effects | per row: G3a = read-only public GitHub API fetches (§G3-notes); G1 consumes private-repo Actions minutes; G6 makes one metered Z.ai call; physical/CI rows mutate nothing outside their device/runner. |
+diff --git a/package-lock.json b/package-lock.json
+index 8eab21a..05c3d5e 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -3,25 +3,27 @@
+   "version": "0.1.0",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "arxa",
+       "version": "0.1.0",
+       "dependencies": {
+         "@anthropic-ai/claude-agent-sdk": "0.3.259",
+         "@deepseek-ai/dsh": "0.1.2-rc.1",
++        "@deepseek-ai/dsh-agent-presets": "0.1.2-rc.1",
+         "@deepseek-ai/dsh-authorization": "0.1.2-rc.1",
+         "@deepseek-ai/dsh-base": "0.1.2-rc.1",
+         "@deepseek-ai/dsh-headless": "0.1.2-rc.1",
+         "@deepseek-ai/dsh-web-app": "0.1.2-rc.1",
+         "@modelcontextprotocol/sdk": "1.30.0",
++        "ws": "^8.21.3",
+         "zod": "4.4.3"
+       },
+       "bin": {
+         "arxa-studio": "bin/arxa-studio.mjs"
+       },
+       "devDependencies": {
+         "@wdio/cli": "^9.31.5",
+         "js-yaml": "^4.3.1"
+       }
+     },
+diff --git a/plugins/claude-code/selftest.skill-packs.mjs b/plugins/claude-code/selftest.skill-packs.mjs
+index e26ffbe..fe7db3b 100644
+--- a/plugins/claude-code/selftest.skill-packs.mjs
++++ b/plugins/claude-code/selftest.skill-packs.mjs
+@@ -1,19 +1,20 @@
+ // Selftest: skill-pack resolution (phase 2) and the option it puts on a turn.
+ //
+ // What matters here is what a BROKEN pack costs: nothing. A directory with no
+ // manifest, a manifest that is not JSON, a root that does not exist — each is
+ // skipped with a line in the log, never an exception on the turn path.
+ import { strict as assert } from 'node:assert'
+ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+ import { tmpdir } from 'node:os'
+-import { join } from 'node:path'
++import { dirname, join, resolve } from 'node:path'
++import { fileURLToPath } from 'node:url'
+ import { ClaudeCodeAdapter } from './lib/adapter.js'
+ import { MANIFEST_REL, PACKS_DIRNAME, packName, resolveSkillPacks } from './lib/skill-packs.js'
+ 
+ let n = 0
+ const ok = (s) => { n++; console.log(`  ok ${s}`) }
+ 
+ const root = mkdtempSync(join(tmpdir(), 'arxa-skill-packs-'))
+ const pack = (dir, manifest) => {
+   mkdirSync(join(dir, '.claude-plugin'), { recursive: true })
+   writeFileSync(join(dir, MANIFEST_REL), typeof manifest === 'string' ? manifest : JSON.stringify(manifest))
+@@ -48,20 +49,30 @@ try {
+ 
+   const pinned = resolveSkillPacks({ env: { ARXA_HOME: home, ARXA_SKILL_PACKS: `${shadowed}:${join(root, 'gone')}` }, appRoot: app, log: () => {} })
+   assert.deepEqual(pinned.map((p) => p.path), [shadowed, bundledPack],
+     'ARXA_SKILL_PACKS wins the name, a listed path that does not exist is skipped, and it is NOT exclusive — the other roots still contribute')
+   ok('ARXA_SKILL_PACKS pins packs ahead of the standard roots')
+ 
+   assert.deepEqual(resolveSkillPacks({ env: { ARXA_HOME: join(root, 'empty') }, log: () => {} }), [],
+     'no roots, no packs, no throw')
+   ok('an install with no packs resolves to nothing')
+ 
++  // G5 (Task 16, Step 3): the DEFAULT bundled skill-pack set stays EMPTY —
++  // the studio ships no packs inside the app bundle; the resolver's third
++  // root is ready for the first that does. Asserted against the REAL app
++  // root (the repo root, the same `studioRoot` index.mjs passes), with an
++  // empty ARXA_HOME so only the bundled root can contribute.
++  const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
++  assert.deepEqual(resolveSkillPacks({ env: { ARXA_HOME: join(root, 'empty') }, appRoot, log: () => {} }), [],
++    'the shipped bundle contributes zero packs — the bundled set stays empty by policy')
++  ok('the real app root bundles no skill packs (G5 policy)')
++
+   // The turn option: absent entirely when there are no packs (never `plugins: []`,
+   // which is a different statement to the SDK than "not configured").
+   const mk = (skillPacks) => new ClaudeCodeAdapter({
+     query: () => {}, probe: {}, ctx: { sandbox: {} }, binary: '/bin/claude', env: { PATH: '/x' }, version: '1', skillPacks,
+   })
+   const bare = mk(undefined).base({})
+   assert.equal('plugins' in bare, false, 'no packs → the option is not sent')
+   assert.deepEqual(bare.settingSources, [], 'D5 still holds: no filesystem settings')
+   const loaded = mk(packs).base({})
+   assert.deepEqual(loaded.plugins, packs, 'packs ride on every query() the adapter builds')
+diff --git a/plugins/sandbox/lib/sbx-install.js b/plugins/sandbox/lib/sbx-install.js
+index 9dde8a6..ca93d51 100644
+--- a/plugins/sandbox/lib/sbx-install.js
++++ b/plugins/sandbox/lib/sbx-install.js
+@@ -30,36 +30,36 @@ import { join, resolve } from 'node:path'
+ 
+ import { whichOnPath } from './index.js'
+ import { sbxStatus } from './sbx.js'
+ 
+ /** The arxa-managed state root (same convention as bin/arxa-studio.mjs). */
+ export function defaultStateRoot () {
+   return process.env.ARXA_HOME?.trim() ? resolve(process.env.ARXA_HOME) : join(homedir(), '.arxa')
+ }
+ 
+ /**
+- * The shipped pin. Version + artifact names follow the official feed
+- * (github.com/docker/sbx-releases); the sha256 values are UNSET until
+- * measured — planning against an unset pin refuses rather than trusting an
+- * unverified download. Task 16's authorized gate fills them from the
+- * release's official checksums.
+- * ponytail: single tar.gz-per-platform assumption; adjust file names/sha
+- * when the real asset shape is measured at the gate.
++ * The shipped pin. Version + artifact names + sha256 values measured from
++ * the official feed (github.com/docker/sbx-releases tag v0.42.1) on
++ * 2026-09-14 (Task 16): darwin ships ONE universal tar.gz (both arch keys
++ * share it); its sha256 was cross-checked by hashing the streamed bytes,
++ * the linux ones are the release API's server-computed digests. Planning
++ * against an unset sha256 still refuses (fail-closed) — selftest.sbx-install
++ * pins both facts.
+  */
+ export const SBX_PIN = {
+   version: '0.42.1',
+   base: 'https://github.com/docker/sbx-releases/releases/download',
+   artifacts: {
+-    'darwin-arm64': { file: 'sbx_0.42.1_darwin_arm64.tar.gz', sha256: null },
+-    'darwin-amd64': { file: 'sbx_0.42.1_darwin_amd64.tar.gz', sha256: null },
+-    'linux-arm64': { file: 'sbx_0.42.1_linux_arm64.tar.gz', sha256: null },
+-    'linux-amd64': { file: 'sbx_0.42.1_linux_amd64.tar.gz', sha256: null }
++    'darwin-arm64': { file: 'DockerSandboxes-darwin.tar.gz', sha256: '3c5738c489fbeac8f6c85533101c7229f4ce39106f823afde66d70469b758df1' },
++    'darwin-amd64': { file: 'DockerSandboxes-darwin.tar.gz', sha256: '3c5738c489fbeac8f6c85533101c7229f4ce39106f823afde66d70469b758df1' },
++    'linux-arm64': { file: 'DockerSandboxes-linux-arm64.tar.gz', sha256: '285b36cdb46ce65f792f006869698f2664fcde8adc1e8524357f150f9368dd4c' },
++    'linux-amd64': { file: 'DockerSandboxes-linux-amd64.tar.gz', sha256: 'fe46facba420d1cb8b1dad57d5b182d6df9dadd46c324c2ca3ef574fb7eada6f' }
+   }
+ }
+ 
+ /**
+  * Resolve the pinned artifact for one platform+arch. Pure.
+  * @returns {{ supported: true, artifact: { url: string, file: string,
+  *   sha256: string } } | { supported: false, reason: string }}
+  */
+ export function planSbxInstall ({ pin = SBX_PIN, platform = process.platform, arch = process.arch }) {
+   const archKey = arch === 'x64' ? 'amd64' : arch
+diff --git a/plugins/sandbox/selftest.sbx-install.mjs b/plugins/sandbox/selftest.sbx-install.mjs
+index f01e4d6..53b6b4d 100644
+--- a/plugins/sandbox/selftest.sbx-install.mjs
++++ b/plugins/sandbox/selftest.sbx-install.mjs
+@@ -93,24 +93,41 @@ await ok('planSbxInstall resolves the exact pinned artifact per platform+arch',
+   assert.equal(p.artifact.url, 'https://releases.test/sbx/sbx_9.9.9_darwin_arm64.tar.gz')
+   assert.equal(p.artifact.sha256, sha256(ARTIFACT_BYTES))
+ })
+ 
+ await ok('an unsupported platform is refused, not guessed', () => {
+   const p = planSbxInstall({ pin: testPin(), platform: 'win32', arch: 'x64' })
+   assert.equal(p.supported, false)
+   assert.match(p.reason, /win32|platform/i)
+ })
+ 
+-await ok('the SHIPPED pin table fails closed while checksums are unmeasured', () => {
+-  // The real SBX_PIN ships sha256: null entries (unmeasured until Task 16's
+-  // authorized gate) — planning must REFUSE rather than download unverified.
++await ok('the SHIPPED pin table is measured: v0.42.1 feed names, sha256 per key, darwin universal', () => {
++  // Task 16 (2026-09-14) measured the official feed
++  // (github.com/docker/sbx-releases tag v0.42.1): the darwin artifact is a
++  // single universal DockerSandboxes-darwin.tar.gz (both arch keys share it);
++  // the darwin sha256 below was cross-checked by hashing the streamed bytes,
++  // the linux ones are the release API's server-computed digests.
++  assert.equal(SBX_PIN.version, '0.42.1')
++  for (const key of ['darwin-arm64', 'darwin-amd64', 'linux-arm64', 'linux-amd64']) {
++    assert.match(typeof SBX_PIN.artifacts[key].sha256, /string/, `${key} pin is measured`)
++    assert.match(SBX_PIN.artifacts[key].sha256, /^[0-9a-f]{64}$/, `${key} pin is a sha256`)
++    assert.match(SBX_PIN.artifacts[key].file, /^DockerSandboxes-(darwin|linux-(amd64|arm64))\.tar\.gz$/, `${key} file matches the official feed shape`)
++  }
++  assert.equal(SBX_PIN.artifacts['darwin-arm64'].file, SBX_PIN.artifacts['darwin-amd64'].file, 'darwin is one universal artifact')
+   const p = planSbxInstall({ pin: SBX_PIN, platform: 'darwin', arch: 'arm64' })
++  assert.equal(p.supported, true)
++  assert.equal(p.version, '0.42.1')
++})
++
++await ok('an unmeasured pin STILL fails closed — the invariant survives the fill', () => {
++  const unmeasured = { version: '0.42.1', base: SBX_PIN.base, artifacts: { 'darwin-arm64': { file: 'x.tar.gz', sha256: null } } }
++  const p = planSbxInstall({ pin: unmeasured, platform: 'darwin', arch: 'arm64' })
+   assert.equal(p.supported, false)
+   assert.match(p.reason, /pin|checksum|verif/i)
+ })
+ 
+ // ---- 2. install into the arxa-managed state root ------------------------------
+ 
+ await ok('a fresh install downloads, verifies, extracts and stamps into the state root', async () => {
+   const root = mkdtempSync(join(tmpdir(), 'arxa-sbxinstall-'))
+   const { fs, writes } = recordingFs()
+   const dl = []
+(clean if nothing between the --check output and this line)

@@ -1,0 +1,8 @@
+⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
+[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
+✅ **Status:** DONE_WITH_CONCERNS
+📦 **Commit:** `5c2f83a` feat: complete studio locale and visual acceptance (11 files; package-lock left dirty)
+🧪 **Tests:** 8 focused suites + parity all green; `npm test` once → **129 suites ALL GREEN** (incl. new auto-discovered parity suite)
+🔑 **Keys:** personalisation 9 + theme-accent 20, en/pl/fr ×3 with `locale: NS` wiring; RED proven on BASE scratch copy (6 failures = exactly the two tab owners); sandbox = no client dictionary (host-side only)
+⚠️ **Concerns:** fixed inherited `evidence-gate.mjs` undefined `repo` (would crash trash surface at capture); gate driver committed review-verified but not executed here (no-browser mandate); dispatch said 6 PNGs, tree had 7 — all committed; Step 3 PL/FR native review = separate controller dispatches
+📄 **Report:** `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-8-report.md` (ledger appended; 390/744 + viewer ladder left for capture dispatch)

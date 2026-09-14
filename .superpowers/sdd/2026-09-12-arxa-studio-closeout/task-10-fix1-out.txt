@@ -1,0 +1,15 @@
+⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
+[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
+**✅ Status: DONE**
+- **Commit:** `f35389b` fix: harden docker isolation teardown and registry
+- **Tests:** focused selftests green (devcontainer 39+1 skip, project-database 14, sandbox 34) + `npm test` ALL GREEN, **117 suites**, exit 0
+
+**🔍 Per finding**
+1. stopContainer rm refusal — addressed: non-zero rm → `inspect` verify; unverified/exists → refusal, row + secretDir kept
+2. real-smoke flag — addressed (code fix): `smokeRunnerFor(real)` → real default-runner leg; skips + prints reason when daemon down
+3. stale registry read — addressed: `startProjectDatabase` reads registry after `allocatePortBlock`; RED was exactly the reviewer's TypeError
+4. assumed docker — addressed: `deps.docker ?? detectDocker()` (no import cycle)
+5. start idempotency — addressed: existing registry row returned as live handle, zero docker calls
+6. signal-path plaintext — addressed: `sweepStaleSecretDirs()` boot sweep of `arxa-secret-*` (ponytail-marked concurrent-process ceiling)
+
+**📄 Report:** `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-10-report.md` → `## Fix round 1` (repo-excluded, uncommitted by design)

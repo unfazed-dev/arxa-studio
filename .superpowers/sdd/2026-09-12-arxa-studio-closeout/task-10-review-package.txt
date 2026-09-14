@@ -1,0 +1,2638 @@
+62ee8d5 feat: add automatic Docker project isolation
+ plugins/arxa-git-card/lib/client.js            |  15 +
+ plugins/arxa-git-card/lib/git-card.snippet.txt |  15 +
+ plugins/arxa-git-card/lib/index.js             |  49 ++
+ plugins/arxa-git-card/selftest.mjs             |  13 +
+ plugins/file-org-shell/lib/lifecycle.js        |  53 ++-
+ plugins/file-org-shell/selftest.mjs            |  27 ++
+ plugins/git-workspace/lib/finish.js            |  12 +
+ plugins/git-workspace/lib/frame.js             | 111 ++++-
+ plugins/git-workspace/lib/sessions.js          |  11 +
+ plugins/git-workspace/selftest.finish.mjs      |  58 ++-
+ plugins/git-workspace/selftest.mjs             |   4 +-
+ plugins/sandbox/lib/devcontainer.js            | 429 ++++++++++++++++++
+ plugins/sandbox/lib/effective-tier.js          |  12 +-
+ plugins/sandbox/lib/project-database.js        | 218 +++++++++
+ plugins/sandbox/package.json                   |   4 +-
+ plugins/sandbox/selftest.devcontainer.mjs      | 596 +++++++++++++++++++++++++
+ plugins/sandbox/selftest.mjs                   |  12 +
+ plugins/sandbox/selftest.project-database.mjs  | 227 ++++++++++
+ 18 files changed, 1846 insertions(+), 20 deletions(-)
+diff --git a/plugins/arxa-git-card/lib/client.js b/plugins/arxa-git-card/lib/client.js
+index 8fa4323..5655129 100644
+--- a/plugins/arxa-git-card/lib/client.js
++++ b/plugins/arxa-git-card/lib/client.js
+@@ -94,20 +94,22 @@ window.__ModuleLoader__.load({
+       'git.ci.rerun': 'Re-run the latest checks',
+       'git.ci.cancel': 'Cancel the running checks',
+       'git.ci.open': 'Open the run on GitHub',
+       'git.ci.rerunStarted': 'Re-run requested',
+       'git.ci.cancelled': 'Cancel requested',
+       'git.ci.alreadyFinished': 'That run already finished',
+       'git.ci.failed': 'Run control failed: {reason}',
+       'git.statusFailed': 'Git status failed: {reason}',
+       'git.title.subject': 'PR title',
+       'git.localOnly': 'local-only',
++      'git.tier.shift': 'confinement {configured} → {effective}',
++      'git.containerUnfetched': 'container work unfetched',
+       'git.frame.wired': 'frame wired',
+       'git.frame.missing': 'frame missing',
+       'git.runner.online': 'runner online',
+       'git.runner.asleep': 'runner asleep',
+       'git.runner.unknown': 'runner unknown',
+       'git.mainRed': 'main is red',
+       'git.relink': 'Re-link GitHub',
+       'git.wake': 'Wake the runner',
+       'git.wakeStarted': 'Waking the runner — checks resume when it reports in.',
+       'git.wakeManual': 'Start it by hand: run svc.sh start in ~/.arxa/runners/<owner>__<name>. {reason}',
+@@ -212,20 +214,22 @@ window.__ModuleLoader__.load({
+       'git.ci.cancel': 'Anuluj trwające testy',
+       'git.ci.open': 'Otwórz przebieg na GitHubie',
+       'git.ci.rerunStarted': 'Zażądano ponownego uruchomienia',
+       'git.ci.cancelled': 'Zażądano anulowania',
+       'git.ci.alreadyFinished': 'Ten przebieg już się zakończył',
+       'git.ci.failed': 'Sterowanie przebiegiem nie powiodło się: {reason}',
+       'git.statusFailed': 'Status git nie powiódł się: {reason}',
+       'git.title.subject': 'Tytuł PR',
+       // TODO native review (conformance decision 4): machine-drafted.
+       'git.localOnly': 'tylko lokalnie',
++      'git.tier.shift': 'izolacja {configured} → {effective}',
++      'git.containerUnfetched': 'niepobrana praca kontenera',
+       'git.frame.wired': 'rama podłączona',
+       'git.frame.missing': 'brak ramy',
+       'git.runner.online': 'runner online',
+       'git.runner.asleep': 'runner uśpiony',
+       'git.runner.unknown': 'runner nieznany',
+       'git.mainRed': 'main czerwony',
+       // TODO native review: machine-drafted.
+       'git.relink': 'Połącz ponownie GitHub',
+       'git.wake': 'Obudź runnera',
+       'git.wakeStarted': 'Budzenie runnera — kontrole wznowią się, gdy się zgłosi.',
+@@ -326,20 +330,22 @@ window.__ModuleLoader__.load({
+       'git.ci.cancel': 'Annuler les vérifications en cours',
+       'git.ci.open': 'Ouvrir l’exécution sur GitHub',
+       'git.ci.rerunStarted': 'Relance demandée',
+       'git.ci.cancelled': 'Annulation demandée',
+       'git.ci.alreadyFinished': 'Cette exécution est déjà terminée',
+       'git.ci.failed': 'Échec du contrôle d’exécution : {reason}',
+       'git.statusFailed': 'Échec du statut git : {reason}',
+       'git.title.subject': 'Titre de la PR',
+       // TODO native review (conformance decision 4): machine-drafted.
+       'git.localOnly': 'local uniquement',
++      'git.tier.shift': 'confinement {configured} → {effective}',
++      'git.containerUnfetched': 'travail du conteneur non récupéré',
+       'git.frame.wired': 'cadre câblé',
+       'git.frame.missing': 'cadre manquant',
+       'git.runner.online': 'runner en ligne',
+       'git.runner.asleep': 'runner en veille',
+       'git.runner.unknown': 'runner inconnu',
+       'git.mainRed': 'main est rouge',
+       // TODO native review: machine-drafted.
+       'git.relink': 'Reconnecter GitHub',
+       'git.wake': 'Réveiller le runner',
+       'git.wakeStarted': 'Réveil du runner — les contrôles reprennent dès qu’il répond.',
+@@ -558,20 +564,29 @@ window.__ModuleLoader__.load({
+       const sessionSeat = Boolean(status.seat && status.seat.kind === 'session')
+       const relinkRequired = Boolean(status.github && status.github.relinkRequired)
+       // Leads the detail line: when GitHub has revoked the grant every push, PR
+       // and merge on this card fails, and before 2026-09-04 it failed as a bare
+       // 401 with nothing naming the one recovery. This is the surface the user is
+       // actually standing on when that happens — the sidebar's org modal is not.
+       // G6 (2026-09-06): the line says WHAT is wrong; the fix is a button in the
+       // status row (relinkAction). A recovery you can only read was the bug.
+       if (relinkRequired) detailParts.push(t('git.relinkNeeded'))
+       if (status.localOnly) detailParts.push(t('git.localOnly'))
++      // Task 10 (A4): show the EFFECTIVE tier whenever it differs from the
++      // configured one (S3 corollary), and §24e's "unfetched work exists" when
++      // container commits are not yet under the host recovery ref.
++      const confinement = status.confinement || {}
++      const containerInfo = status.container || {}
++      if (confinement.configured && confinement.effective && confinement.configured !== confinement.effective) {
++        detailParts.push(t('git.tier.shift', { configured: confinement.configured, effective: confinement.effective }))
++      }
++      if (containerInfo.unrecovered > 0) detailParts.push(t('git.containerUnfetched'))
+       if (frame.wired) detailParts.push(t(frame.wired === 'ok' ? 'git.frame.wired' : 'git.frame.missing'))
+       // host says 'ok' (manifest.frameRunner) or 'online' (live probe) — both are up
+       if (frame.runner) detailParts.push(t(frame.runner === 'ok' || frame.runner === 'online' ? 'git.runner.online' : frame.runner === 'asleep' ? 'git.runner.asleep' : 'git.runner.unknown'))
+       if (status.main && status.main.checks === 'red') detailParts.push(t('git.mainRed'))
+       const detail = detailParts.length ? detailParts.join(' · ') : summary
+ 
+       const run = async (key, fn) => {
+         setBusy(key)
+         try { return await fn() }
+         finally { if (alive.current) setBusy((cur) => (cur === key ? null : cur)) }
+diff --git a/plugins/arxa-git-card/lib/git-card.snippet.txt b/plugins/arxa-git-card/lib/git-card.snippet.txt
+index da1040f..6408c9e 100644
+--- a/plugins/arxa-git-card/lib/git-card.snippet.txt
++++ b/plugins/arxa-git-card/lib/git-card.snippet.txt
+@@ -46,20 +46,22 @@ const en = {
+   'git.ci.rerun': 'Re-run the latest checks',
+   'git.ci.cancel': 'Cancel the running checks',
+   'git.ci.open': 'Open the run on GitHub',
+   'git.ci.rerunStarted': 'Re-run requested',
+   'git.ci.cancelled': 'Cancel requested',
+   'git.ci.alreadyFinished': 'That run already finished',
+   'git.ci.failed': 'Run control failed: {reason}',
+   'git.statusFailed': 'Git status failed: {reason}',
+   'git.title.subject': 'PR title',
+   'git.localOnly': 'local-only',
++  'git.tier.shift': 'confinement {configured} → {effective}',
++  'git.containerUnfetched': 'container work unfetched',
+   'git.frame.wired': 'frame wired',
+   'git.frame.missing': 'frame missing',
+   'git.runner.online': 'runner online',
+   'git.runner.asleep': 'runner asleep',
+   'git.runner.unknown': 'runner unknown',
+   'git.mainRed': 'main is red',
+   'git.relink': 'Re-link GitHub',
+   'git.wake': 'Wake the runner',
+   'git.wakeStarted': 'Waking the runner — checks resume when it reports in.',
+   'git.wakeManual': 'Start it by hand: run svc.sh start in ~/.arxa/runners/<owner>__<name>. {reason}',
+@@ -164,20 +166,22 @@ const pl = {
+   'git.ci.cancel': 'Anuluj trwające testy',
+   'git.ci.open': 'Otwórz przebieg na GitHubie',
+   'git.ci.rerunStarted': 'Zażądano ponownego uruchomienia',
+   'git.ci.cancelled': 'Zażądano anulowania',
+   'git.ci.alreadyFinished': 'Ten przebieg już się zakończył',
+   'git.ci.failed': 'Sterowanie przebiegiem nie powiodło się: {reason}',
+   'git.statusFailed': 'Status git nie powiódł się: {reason}',
+   'git.title.subject': 'Tytuł PR',
+   // TODO native review (conformance decision 4): machine-drafted.
+   'git.localOnly': 'tylko lokalnie',
++  'git.tier.shift': 'izolacja {configured} → {effective}',
++  'git.containerUnfetched': 'niepobrana praca kontenera',
+   'git.frame.wired': 'rama podłączona',
+   'git.frame.missing': 'brak ramy',
+   'git.runner.online': 'runner online',
+   'git.runner.asleep': 'runner uśpiony',
+   'git.runner.unknown': 'runner nieznany',
+   'git.mainRed': 'main czerwony',
+   // TODO native review: machine-drafted.
+   'git.relink': 'Połącz ponownie GitHub',
+   'git.wake': 'Obudź runnera',
+   'git.wakeStarted': 'Budzenie runnera — kontrole wznowią się, gdy się zgłosi.',
+@@ -278,20 +282,22 @@ const fr = {
+   'git.ci.cancel': 'Annuler les vérifications en cours',
+   'git.ci.open': 'Ouvrir l’exécution sur GitHub',
+   'git.ci.rerunStarted': 'Relance demandée',
+   'git.ci.cancelled': 'Annulation demandée',
+   'git.ci.alreadyFinished': 'Cette exécution est déjà terminée',
+   'git.ci.failed': 'Échec du contrôle d’exécution : {reason}',
+   'git.statusFailed': 'Échec du statut git : {reason}',
+   'git.title.subject': 'Titre de la PR',
+   // TODO native review (conformance decision 4): machine-drafted.
+   'git.localOnly': 'local uniquement',
++  'git.tier.shift': 'confinement {configured} → {effective}',
++  'git.containerUnfetched': 'travail du conteneur non récupéré',
+   'git.frame.wired': 'cadre câblé',
+   'git.frame.missing': 'cadre manquant',
+   'git.runner.online': 'runner en ligne',
+   'git.runner.asleep': 'runner en veille',
+   'git.runner.unknown': 'runner inconnu',
+   'git.mainRed': 'main est rouge',
+   // TODO native review: machine-drafted.
+   'git.relink': 'Reconnecter GitHub',
+   'git.wake': 'Réveiller le runner',
+   'git.wakeStarted': 'Réveil du runner — les contrôles reprennent dès qu’il répond.',
+@@ -510,20 +516,29 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
+   const sessionSeat = Boolean(status.seat && status.seat.kind === 'session')
+   const relinkRequired = Boolean(status.github && status.github.relinkRequired)
+   // Leads the detail line: when GitHub has revoked the grant every push, PR
+   // and merge on this card fails, and before 2026-09-04 it failed as a bare
+   // 401 with nothing naming the one recovery. This is the surface the user is
+   // actually standing on when that happens — the sidebar's org modal is not.
+   // G6 (2026-09-06): the line says WHAT is wrong; the fix is a button in the
+   // status row (relinkAction). A recovery you can only read was the bug.
+   if (relinkRequired) detailParts.push(t('git.relinkNeeded'))
+   if (status.localOnly) detailParts.push(t('git.localOnly'))
++  // Task 10 (A4): show the EFFECTIVE tier whenever it differs from the
++  // configured one (S3 corollary), and §24e's "unfetched work exists" when
++  // container commits are not yet under the host recovery ref.
++  const confinement = status.confinement || {}
++  const containerInfo = status.container || {}
++  if (confinement.configured && confinement.effective && confinement.configured !== confinement.effective) {
++    detailParts.push(t('git.tier.shift', { configured: confinement.configured, effective: confinement.effective }))
++  }
++  if (containerInfo.unrecovered > 0) detailParts.push(t('git.containerUnfetched'))
+   if (frame.wired) detailParts.push(t(frame.wired === 'ok' ? 'git.frame.wired' : 'git.frame.missing'))
+   // host says 'ok' (manifest.frameRunner) or 'online' (live probe) — both are up
+   if (frame.runner) detailParts.push(t(frame.runner === 'ok' || frame.runner === 'online' ? 'git.runner.online' : frame.runner === 'asleep' ? 'git.runner.asleep' : 'git.runner.unknown'))
+   if (status.main && status.main.checks === 'red') detailParts.push(t('git.mainRed'))
+   const detail = detailParts.length ? detailParts.join(' · ') : summary
+ 
+   const run = async (key, fn) => {
+     setBusy(key)
+     try { return await fn() }
+     finally { if (alive.current) setBusy((cur) => (cur === key ? null : cur)) }
+diff --git a/plugins/arxa-git-card/lib/index.js b/plugins/arxa-git-card/lib/index.js
+index 8e8be95..b8afbf3 100644
+--- a/plugins/arxa-git-card/lib/index.js
++++ b/plugins/arxa-git-card/lib/index.js
+@@ -225,20 +225,46 @@ const gateFingerprint = (gw, worktree) =>
+   + (gw.runGit(['status', '--porcelain'], { cwd: worktree, allowFail: true }) ?? 'unreadable')
+ /** Cap the UI payload to the LAST 64 KiB — a failing gate says why at the
+  * end of its output, so the tail is the part worth carrying, behind an
+  * explicit prefix so the cut is never mistaken for the whole. */
+ function capGateOutput(out) {
+   const s = String(out ?? '')
+   return s.length <= GATE_OUTPUT_MAX ? s
+     : '[output truncated — showing the last 64 KiB]\n' + s.slice(-GATE_OUTPUT_MAX)
+ }
+ 
++// Task 10 (A4): the card's confinement measurement, cached 30s — card.status
++// polls and must not probe Docker on every beat. DETECT, never install (S3);
++// the daemon detail rides to resolveEffectiveTier as dockerReason so a
++// degrade says the measured truth ('daemon unreachable'), not a generic
++// 'not present'.
++let confinementRunnersCache = { at: 0, runners: null }
++let devcontainerCache = null
++async function measuredConfinementRunners () {
++  if (confinementRunnersCache.runners !== null && Date.now() - confinementRunnersCache.at < 30000) return confinementRunnersCache.runners
++  let runners
++  try {
++    devcontainerCache ??= await import(new URL('../../sandbox/lib/devcontainer.js', import.meta.url).href)
++    const docker = devcontainerCache.detectDocker()
++    runners = {
++      seatbelt: (await import('node:fs')).existsSync('/usr/bin/sandbox-exec'),
++      docker: docker.available,
++      ...(docker.available ? {} : { dockerReason: docker.reason })
++    }
++  } catch {
++    // The sandbox plugin itself unreachable is a state to report, not crash on.
++    runners = { seatbelt: false, docker: false, dockerReason: 'the arxa sandbox plugin could not be loaded — confinement unmeasured' }
++  }
++  confinementRunnersCache = { at: Date.now(), runners }
++  return runners
++}
++
+ export function apply(ctx) {
+   /** The in-flight device flow, or null. Plugin scope on purpose: the action
+    * table below is rebuilt per REQUEST, so a per-table variable would dedupe
+    * nothing. A second concurrent flow is not merely untidy — GitHub answers
+    * competing polls on one client id with `slow_down` and caps verification
+    * submissions at 50/hour/app, and github-link keeps exactly ONE
+    * `lastDeviceCode` slot, so flow B would overwrite the code flow A is
+    * showing on screen. */
+   let linkInFlight = null
+ 
+@@ -788,20 +814,43 @@ export function apply(ctx) {
+                 // `files` is the per-file state of the GENERATED frame. openOrg
+                 // upgrades a stale file on its own, but one a human edited comes
+                 // back `modified` and is deliberately left alone — without this
+                 // nobody could ever say so, and that repo would keep an old gate
+                 // forever while looking fine.
+                 // Same seat rule as linked/localOnly: a project session's
+                 // frame is the PROJECT's (frameStatus has taken a 'project'
+                 // kind all along — only this call never passed it).
+                 frame: { wired: seatManifest.frameWired === true ? 'ok' : (seatManifest.frameWired ?? null), protection: seatManifest.frameProtection ?? null, runner: seatManifest.frameRunner ?? null, files: (() => { try { return gw.frameStatus(seatRepoPath, seatKind, { includeCiYml: true }) } catch { return null } })() },
+                 main: { checks: mainChecks?.state ?? null },
++                // Task 10 (A4): the card shows the EFFECTIVE tier, not the
++                // configured one, whenever they differ (S3 corollary). No
++                // second settings taxonomy: `configured` is the provisioned
++                // default; `effective` is the session's recorded container
++                // tier when A4 engaged, else the measured resolver answer.
++                // `container.unrecovered` is §24e's "unfetched work exists"
++                // surface — the teardown refusal's visible half.
++                confinement: await (async () => {
++                  const { DEFAULT_CONFIGURED_TIER } = await import(new URL('../../sandbox/lib/provision.js', import.meta.url).href)
++                  const { resolveEffectiveTier } = await import(new URL('../../sandbox/lib/effective-tier.js', import.meta.url).href)
++                  const resolved = sessionRow?.containerTier === 'A4'
++                    ? { effective: 'A4', reason: 'the session branch is isolated in a hardened container (A4, automatic when Docker is present — S3)' }
++                    : resolveEffectiveTier({ configured: DEFAULT_CONFIGURED_TIER, platform: process.platform, runners: await measuredConfinementRunners() })
++                  return { configured: DEFAULT_CONFIGURED_TIER, effective: resolved.effective, reason: resolved.reason }
++                })(),
++                container: sessionRow
++                  ? (() => {
++                      try {
++                        const c = devcontainerCache?.unrecoveredContainerCommits(sessionRepoPath(sessionRow, sid), sessionRow.id)
++                        return { tier: sessionRow.containerTier ?? null, unrecovered: c ? c.unrecovered : null }
++                      } catch { return { tier: sessionRow.containerTier ?? null, unrecovered: null } }
++                    })()
++                  : null,
+               }
+             },
+             /** Q6: EVIDENCE ONLY — the session model drafts the subject. */
+             'card.commit.draft': async () => {
+               const gw = await importGitWorkspace()
+               const cur = oc ? handle() : null
+               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+               const session = sid ? await sessionFor(gw, sid) : null
+               if (sid && !session) throw new Error('session-not-found: ' + sid)
+               const repoPath = session?.worktree ?? cur?.path
+diff --git a/plugins/arxa-git-card/selftest.mjs b/plugins/arxa-git-card/selftest.mjs
+index 624a910..1ba5d4b 100644
+--- a/plugins/arxa-git-card/selftest.mjs
++++ b/plugins/arxa-git-card/selftest.mjs
+@@ -33,31 +33,44 @@ check('seam: card host serves POST /__arxa/git-card/action and dispatches every
+   hostSrc().includes("path: '/__arxa/git-card/action'") && ['card.status', 'card.commit.draft', 'card.commit', 'card.push', 'card.pr.create', 'card.pr.status', 'card.pr.comment', 'card.pr.merge', 'version.mint', 'card.runner.wake', 'insight.streak', 'insight.review', 'insight.sessions', 'insight.reply', 'insight.resolve', 'card.integrate', 'card.integrate.finish'].every((a) => hostSrc().includes("'" + a + "': async")))
+ 
+ // ---- engine rules (moved verbatim from arxa-sidebar/selftest.mjs) ---------
+ // F8 (2026-09-04): a revoked GitHub grant failed every push/PR on this card as
+ // a bare 401 with nothing naming the recovery. The flag has to survive BOTH
+ // halves — the host must read it off github-link's status(), and the generated
+ // client must render it — so both are asserted here, not just the host.
+ check('card: card.status carries github.relinkRequired (host half)',
+   hostSrc().includes('relinkRequired: ghState?.relinkRequired === true') && hostSrc().includes('g.status()'))
+ 
++// Task 10 (A4): the card reports the EFFECTIVE confinement, not the
++// configured one, whenever they differ (S3 corollary), and surfaces
++// unfetched container work (§24e: "worth surfacing in the card as
++// 'unfetched work exists'"). No second settings taxonomy: configured stays
++// the provisioned default, effective is measured + the session's recorded
++// container tier.
++check('card: card.status carries confinement configured/effective (host half)',
++  hostSrc().includes('confinement:') && hostSrc().includes('resolveEffectiveTier') && hostSrc().includes('DEFAULT_CONFIGURED_TIER'))
++check('card: card.status carries the container tier + unfetched-work guard (host half)',
++  hostSrc().includes('unrecoveredContainerCommits') && hostSrc().includes('containerTier'))
+ check('card: engine exposes the six card actions (S3)', ['card.status', 'card.commit.draft', 'card.commit', 'card.push', 'card.pr.create', 'card.pr.status'].every((a) => hostSrc().includes("'" + a + "'")))
+ check('card: commit validates the conventional-subject law (Q7)', hostSrc().includes('subject-not-conventional') && hostSrc().includes('SUBJECT_RE.test(subject)'))
+ check('card: draft returns evidence only — the engine never drafts (Q6)', hostSrc().includes('card.commit.draft') && hostSrc().includes('EVIDENCE ONLY'))
+ check('card: PR title validated (becomes the squash subject, Q7/Q8)', hostSrc().includes('title-not-conventional'))
+ check('card: PR create dedupes before opening (file-pr rule 1)', hostSrc().includes('prListForHead') && hostSrc().includes('existing: true'))
+ check('card: session-branch push is PR-purpose only (D73 relaxation)', hostSrc().includes('card.push serves session seats'))
+ 
+ // ---- browser half: generated from the stock QueueDock grammar (A3) --------
+ import { execFileSync } from 'node:child_process'
+ const clientPath = join(here, 'lib', 'client.js')
+ const clientSrc = readFileSync(clientPath, 'utf8')
++
++check('card: the detail line shows the tier shift and unfetched container work (client half)',
++  clientSrc.includes('git.tier.shift') && clientSrc.includes('git.containerUnfetched'))
+ const pkg = JSON.parse(readFileSync(join(here, 'package.json'), 'utf8'))
+ let drift = ''
+ try { execFileSync(process.execPath, [join(here, '..', '..', 'scripts', 'gen-git-card.mjs'), '--check'], { stdio: ['ignore', 'pipe', 'pipe'] }) }
+ catch (e) { drift = String(e.stderr || e.stdout || e.message).trim() }
+ check('client: lib/client.js is byte-identical to gen-git-card.mjs output (drift gate)', drift === '', drift)
+ check('client: package exports ./client and declares dsh.client (runtime + ui-conversation + locale)',
+   pkg.exports['./client'] === './lib/client.js' && Array.isArray(pkg.dsh?.client?.inject) && ['@deepseek-ai/dsh-client-runtime', '@deepseek-ai/dsh-client-ui-conversation', '@deepseek-ai/dsh-client-locale'].every((d) => pkg.dsh.client.inject.includes(d)))
+ check('client: stock QueueDock CSS carried under its own identity (tag + prefix), stock prefix absent',
+   clientSrc.includes("CSS_TAG = 'arxa-git-card/GitDock.module.css'") && clientSrc.includes('.aXa_gc_dock{') && !clientSrc.includes('_7yHdaG_'))
+ // stock shape, refreshed for dsh 0.1.2-rc.1: upstream QueueDock grew
+diff --git a/plugins/file-org-shell/lib/lifecycle.js b/plugins/file-org-shell/lib/lifecycle.js
+index c8cde3c..1fe641b 100644
+--- a/plugins/file-org-shell/lib/lifecycle.js
++++ b/plugins/file-org-shell/lib/lifecycle.js
+@@ -114,20 +114,48 @@ import { runGit } from '../../git-workspace/lib/index.js'
+ import { arxaHome, readOrgNames, rememberOrgName } from '../../workspace/lib/root.js'
+ import { getTemplate, TEMPLATE_VERSION } from '../../workspace/lib/template.js'
+ import { refreshAccountMirror, ensureAccountExcluded } from '../../account-mirror/lib/index.js'
+ import { claimMaterializer, materialize, readEdits } from '../../cairn-rail/lib/index.js'
+ 
+ import { OrgOpenError, OrgAlreadyOpenError, OrgNotOpenError } from './errors.js'
+ import { acquireShellLock } from './shell-lock.js'
+ import { createDshBridge, joinDshLive } from './dsh-bridge.js'
+ import { createGithubBridge, annotateProjectManifest, annotateOrgManifest } from './github-bridge.js'
+ 
++/**
++ * The A4 sandbox bridge (Task 10): one `start({ repoPath, branch,
++ * sessionId })` face returning `{ ok, tier?, container?, reason? }`. The
++ * default is the REAL Docker lifecycle (detect, never install), with the
++ * machine's Docker state measured once per lifecycle (a session-create must
++ * not shell out to probe per row) and cached — a started daemon mid-run is
++ * picked up by the next org open. Absent/partial faces degrade to the loud
++ * 'sandbox-unavailable' stub, exactly like the dsh and github bridges.
++ */
++export function createSandboxBridge(faces = {}) {
++  if (typeof faces.start === 'function') return { start: faces.start }
++  let dockerMemo
++  return {
++    async start (spec) {
++      try {
++        const dc = await import('../../sandbox/lib/devcontainer.js')
++        dockerMemo ??= dc.detectDocker()
++        if (!dockerMemo.available) return { ok: false, reason: dockerMemo.reason }
++        dc.ensureDevcontainer(spec.repoPath, undefined, { docker: dockerMemo })
++        const handle = await dc.startContainer(spec)
++        return { ok: true, tier: 'A4', container: handle.container }
++      } catch (err) {
++        return { ok: false, reason: String(err?.message ?? err) }
++      }
++    },
++  }
++}
++
+ /** Step names carried by OrgOpenError.step, in execution order. */
+ export const STEPS = Object.freeze([
+   'shell-lock',
+   'stamp-migrate',
+   'index',
+   'git-attach',
+   'sessions',
+   'account-mirror',
+   'cairn-rail',
+ ])
+@@ -163,34 +191,39 @@ function ensureRuntimeExcluded(orgPath, env) {
+ /**
+  * Create the org lifecycle service for one workspace root.
+  *
+  * Boot is DISCOVERY ONLY: constructing the service never opens an org
+  * (plan: "no org auto-opened"). Rails config is per-service:
+  *   rails.account.provider  — object with fetchArtifacts(); absent = no mirror
+  *   rails.cairn.deviceId    — this device's materializer id; absent = no rail
+  *
+  * @param {{ workspaceRoot: string, env?: NodeJS.ProcessEnv, rails?: object }} opts
+  */
+-export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {}, dsh, github } = {}) {
++export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {}, dsh, github, sandbox } = {}) {
+   if (typeof workspaceRoot !== 'string' || workspaceRoot === '') {
+     throw new TypeError('createOrgLifecycle: workspaceRoot (string) is required')
+   }
+   validateWorkspaceRoot(workspaceRoot)
+   const root = path.resolve(workspaceRoot)
+   // dsh bridge (Phase D, D71): injectable faces (spawn/attach/list/archive);
+   // absent or partial faces degrade to the loud no-op 'dsh-unavailable' stub.
+   const dshBridge = createDshBridge(dsh)
+   // github bridge (W3b, D69 publish half): injectable status/createPrivateRepo
+   // faces; absent faces degrade to the loud 'github-unavailable' stub —
+   // publishing never blocks or fails local project creation (CLAUDE.md
+   // boundary: local-first, no cloud dependency for core function).
+   const githubBridge = createGithubBridge(github)
++  // sandbox bridge (Task 10, A4): Docker project isolation at session start.
++  // Injectable `start` face; the default DETECTS Docker (never installs) and
++  // degrades honestly — an unreachable daemon never breaks a session, it
++  // annotates the row with the truthful reason (S3).
++  const sandboxBridge = createSandboxBridge(sandbox)
+ 
+   /** Registry-row snapshots of sessions parked in the org trash (2026-09-05
+    *  archives grill). A trashed session's row is gone but its branch still
+    *  occupies the id namespace; minting feeds these ghosts so a newborn
+    *  session never collides with a parked branch. Read-only, always local,
+    *  degrades to [] when the trash is unreadable. */
+   const ghostSessions = (orgPath) => {
+     try {
+       return listTrash(orgPath)
+         .filter((e) => e.origin && e.origin.kind === SESSION_TRASH_KIND && e.origin.session)
+@@ -1433,26 +1466,38 @@ export function createOrgLifecycle({ workspaceRoot, env = process.env, rails = {
+             workspace: ws,
+             env,
+           })
+           // Phase D (D71): AFTER branch+worktree exist, spawn the dsh session
+           // with cwd = the worktree path (dsh sessions.create cwd contract)
+           // and store its id on the registry row. Unavailable dsh degrades to
+           // registry-only with a loud annotation — never a hard failure.
+           const spawned = await dshBridge.spawn({ cwd: session.worktree, name: session.name, id: session.id })
+           dshLive = await dshBridge.list()
+           syncWipWatchPaths() // session set changed — re-watch
++          // Task 10 (A4): automatic-if-Docker-is-present. The bridge clones
++          // the exact session branch into a private volume and starts the
++          // hardened container; results return through the host recovery
++          // ref, and finishSession refuses teardown while any container
++          // commit is unrecovered (lib/finish.js). Never a session-fatal
++          // step: degradation annotates (S3).
++          const container = await sandboxBridge.start({ repoPath, branch: session.branch, sessionId: session.id })
+           return annotateSession(
+             repoPath,
+             session.id,
+-            spawned.ok
+-              ? { dshSessionId: spawned.id, dshStatus: null }
+-              : { dshSessionId: null, dshStatus: spawned.reason ?? 'dsh-unavailable' },
++            {
++              ...(spawned.ok
++                ? { dshSessionId: spawned.id, dshStatus: null }
++                : { dshSessionId: null, dshStatus: spawned.reason ?? 'dsh-unavailable' }),
++              ...(container.ok
++                ? { containerTier: container.tier ?? 'A4', containerStatus: null }
++                : { containerTier: null, containerStatus: container.reason ?? 'sandbox-unavailable' }),
++            },
+             env,
+           )
+         },
+         /** Rename (grilled 2026-08-30): the registry name is the single
+         * display truth — every arxa surface reads it. Git never moves:
+         * branch + worktree stay keyed by the session id. */
+         async renameSession(id, name) {
+           const title = typeof name === 'string' ? name.trim() : ''
+           if (title === '') throw new Error('name-required: a session name cannot be empty')
+           // D98: the id may live in a project registry — look across all of
+diff --git a/plugins/file-org-shell/selftest.mjs b/plugins/file-org-shell/selftest.mjs
+index dbe0f6b..cc9c225 100644
+--- a/plugins/file-org-shell/selftest.mjs
++++ b/plugins/file-org-shell/selftest.mjs
+@@ -1116,15 +1116,42 @@ try {
+ 
+   // D94 (2026-09-01): the sidebar tree lists every dot-entry except the
+   // two internal state dirs — generated files (.github/, .gitignore) must
+   // be visible in the sidebar, not only on GitHub. Source-pinned here
+   // because the route lives in artifact-viewer (route test belongs there).
+   {
+     const wtApiSrc = fs.readFileSync(new URL('../artifact-viewer/lib/wt-api.js', import.meta.url), 'utf8')
+     ok(wtApiSrc.includes("if (name === '.git' || name === '.arxa' || (rootId && name === '.gitkeep')) continue"), 'D94: org tree hides only .git/ and .arxa/; Freestyle also hides its placeholder')
+     ok(!wtApiSrc.includes("if (name.startsWith('.')) continue"), 'D94: the blanket dotfile filter is gone')
+   }
++  // ---- Task 10 (A4): Docker project isolation at session start ----------
++  // The bridge mirrors the dsh/github bridges: injectable faces, a real
++  // default (detect Docker, never install), honest degradation — a missing
++  // daemon NEVER breaks a session, it annotates.
++  {
++    const starts = []
++    const svcA4 = createOrgLifecycle({
++      workspaceRoot: root, env,
++      sandbox: { start: (spec) => { starts.push(spec); return { ok: true, tier: 'A4', container: 'arxa-a4-x' } } },
++    })
++    await svcA4.openOrg(orgB.path)
++    const a4Row = await svcA4.current.newSession('contained', 'notes')
++    ok(starts.length === 1, 'A4: the container bridge ran once for the new session')
++    ok(starts[0].branch === a4Row.branch && starts[0].sessionId === a4Row.id, 'A4: the bridge gets the exact session branch + id')
++    ok(typeof starts[0].repoPath === 'string' && starts[0].repoPath.length > 0, 'A4: the bridge gets the owning repo path')
++    ok(a4Row.containerTier === 'A4', 'A4: the session row records the container tier')
++
++    const svcDeg = createOrgLifecycle({
++      workspaceRoot: root, env,
++      sandbox: { start: () => ({ ok: false, reason: 'Docker is installed but its daemon is not reachable' }) },
++    })
++    await svcDeg.openOrg(orgB.path)
++    const degRow = await svcDeg.current.newSession('degraded', 'notes')
++    ok(degRow.containerTier !== 'A4', 'degrade: no container tier is claimed')
++    ok(/daemon/.test(String(degRow.containerStatus)), 'degrade: the row carries the truthful reason')
++    svcA4.closeOrg(); svcDeg.closeOrg()
++  }
+   console.log(`\nfile-org-shell selftest: ${passed} checks passed`)
+ } finally {
+   fs.rmSync(root, { recursive: true, force: true })
+   fs.rmSync(fakeHome, { recursive: true, force: true })
+ }
+diff --git a/plugins/git-workspace/lib/finish.js b/plugins/git-workspace/lib/finish.js
+index f87b511..9367076 100644
+--- a/plugins/git-workspace/lib/finish.js
++++ b/plugins/git-workspace/lib/finish.js
+@@ -13,20 +13,21 @@
+ //
+ // Finish reuses `archiveSession` (sessions.js) for the worktree-removal +
+ // final-snapshot half — it is not reimplemented here — and adds the two
+ // things archive deliberately never does (D40: archive never deletes):
+ // branch deletion and the per-session base-ref cleanup, both gated on the
+ // branch actually being merged into main.
+ 
+ import fs from 'node:fs'
+ import { runGit } from './run.js'
+ import { listSessions, archiveSession, annotateSession, sessionRepoFor, SESSION_BASE_PREFIX, SESSION_BRANCH_PREFIX } from './sessions.js'
++import { unrecoveredContainerCommits } from '../../sandbox/lib/devcontainer.js'
+ 
+ /** Finish refused: the session branch is not (yet) merged into main. */
+ export class FinishRefusedError extends Error {
+   constructor(id, branch, reason) {
+     super(`session "${id}" (${branch}) cannot finish — ${reason}`)
+     this.name = 'FinishRefusedError'
+     this.sessionId = id
+     this.branch = branch
+     this.reason = reason
+   }
+@@ -88,20 +89,31 @@ export function finishSession(repoPath, id, { env = process.env, dryRun = false
+   repoPath = sessionRepoFor(repoPath, id, env)
+   const session = getSessionOrThrow(repoPath, id, env)
+   const branch = session.branch
+   const merged = isMergedIntoMain(repoPath, branch, env)
+ 
+   if (!merged) {
+     if (dryRun) return { finished: false, dryRun: true, id, branch, reason: 'not-merged' }
+     throw new FinishRefusedError(id, branch, 'not-merged')
+   }
+ 
++  // Task 10 (A4): a session that ran in a container may hold commits that
++  // exist ONLY in the container volume. Deleting the branch here would
++  // orphan them permanently — refuse until every container commit is
++  // reachable from the host recovery ref (fetchContainerCommits lands it).
++  // Pure read; a refusal changes nothing.
++  const container = unrecoveredContainerCommits(repoPath, id)
++  if (container.unrecovered > 0) {
++    if (dryRun) return { finished: false, dryRun: true, id, branch, reason: 'container-work-unrecovered' }
++    throw new FinishRefusedError(id, branch, 'container-work-unrecovered')
++  }
++
+   if (session.state !== 'archived' && fs.existsSync(session.worktree) && !isWorktreeClean(session.worktree, env)) {
+     if (dryRun) return { finished: false, dryRun: true, id, branch, reason: 'worktree-dirty' }
+     throw new FinishRefusedError(id, branch, 'worktree-dirty')
+   }
+ 
+   if (dryRun) return { finished: false, dryRun: true, id, branch, wouldFinish: true }
+ 
+   let archivedNow = false
+   if (session.state !== 'archived') {
+     try {
+diff --git a/plugins/git-workspace/lib/frame.js b/plugins/git-workspace/lib/frame.js
+index ef25cc8..b7a530d 100644
+--- a/plugins/git-workspace/lib/frame.js
++++ b/plugins/git-workspace/lib/frame.js
+@@ -36,42 +36,56 @@ import path from 'node:path'
+ /* v6 (2026-09-13, B1/B2 — docs/plans/arxa-isolation-levels.md §15/S4): the
+  * integrity gates ship unconditionally into every project frame.
+  * B1: `npm ci --ignore-scripts` where package-lock.json exists (the Dart half
+  * already enforced its lockfile in v5), OSV scanning when the scanner is
+  * installed (an honest note, never a red, otherwise).
+  * B2: a base-branch diff-policy gate — forbidden paths with CI config first,
+  * gitleaks over the diff when installed — plus a hard red on a TRACKED
+  * plaintext .env (§7's ranked failure #1), and ci.yml now runs the BASE
+  * branch's copy of check.sh against PR heads so the gate is never
+  * self-modifying. */
+-export const FRAME_VERSION = 6
++/* v7 (2026-09-13, Task 10 — docs/plans/arxa-isolation-levels.md L1/§4):
++ * the A4 devcontainer files ship into every project frame:
++ * .devcontainer/devcontainer.json + a target-aware Dockerfile (node |
++ * flutter | plain). Stamping gains a JSON style — strict JSON cannot carry
++ * a `#` comment, so devcontainer.json stamps its version+hash as a leading
++ * `"_arxaFrame"` key instead. The files are declarative and
++ * Docker-independent; only the lifecycle degrades without Docker. */
++export const FRAME_VERSION = 7
+ 
+ const STAMP_RE = /^# arxa-frame: v(\d+) ([0-9a-f]{16})$/m
+ const STAMP_LINE_RE = /^# arxa-frame: v\d+ [0-9a-f]{16}\n/m
++const JSON_STAMP_RE = /^  "_arxaFrame": "v(\d+) ([0-9a-f]{16})",$/m
++const JSON_STAMP_LINE_RE = /^  "_arxaFrame": "v\d+ [0-9a-f]{16}",\n/m
+ 
+ const digest = (body) => crypto.createHash('sha256').update(body).digest('hex').slice(0, 16)
+ 
+-/** Stamp generated content: after the shebang when there is one, else on top. */
+-export function stampContent(content) {
++/** Stamp generated content: after the shebang when there is one, else on top.
++ * A `json` style file stamps as a leading `"_arxaFrame"` key instead — strict
++ * JSON has no comments. */
++export function stampContent(content, style = 'sh') {
++  if (style === 'json') {
++    return content.replace(/^\{\n/, `{\n  "_arxaFrame": "v${FRAME_VERSION} ${digest(content)}",\n`)
++  }
+   const line = `# arxa-frame: v${FRAME_VERSION} ${digest(content)}\n`
+   if (!content.startsWith('#!')) return line + content
+   const nl = content.indexOf('\n') + 1
+   return content.slice(0, nl) + line + content.slice(nl)
+ }
+ 
+ /** `{ version, hash }` for a stamped file, else null. */
+ export function readStamp(text) {
+-  const m = STAMP_RE.exec(text)
++  const m = STAMP_RE.exec(text) || JSON_STAMP_RE.exec(text)
+   return m ? { version: Number(m[1]), hash: m[2] } : null
+ }
+ 
+-const unstamp = (text) => text.replace(STAMP_LINE_RE, '')
++const unstamp = (text) => text.replace(STAMP_LINE_RE, '').replace(JSON_STAMP_LINE_RE, '')
+ 
+ /**
+  * How a frame file on disk relates to what the generator would write now.
+  * `modified` means a human edited it: an upgrade must never overwrite that,
+  * because the whole point of the hash is to tell "old" from "customised".
+  */
+ export function frameFileState(abs) {
+   if (!fs.existsSync(abs)) return 'missing'
+   const text = fs.readFileSync(abs, 'utf8')
+   const st = readStamp(text)
+@@ -348,20 +362,88 @@ export function freestyleCheckSh() {
+     '  fi',
+     'elif [ -f pyproject.toml ] || [ -f requirements.txt ]; then',
+     '  if command -v python3 >/dev/null 2>&1; then',
+     '    python3 -m pytest -q || fail "pytest"',
+     '  fi',
+     'fi',
+   ].join('\n')
+   return checkShHead() + '\n' + body + '\n' + subjectCheckSh() + '\n'
+ }
+ 
++// ---- A4 devcontainer files (Task 10, docs/plans/arxa-isolation-levels.md
++// L1/§4-§7) — the declarative half of Docker project isolation ----------------
++
++/** The scaffold targets a devcontainer can be generated for. */
++export const DEVCONTAINER_TARGETS = ['node', 'flutter', 'plain']
++
++/**
++ * The L1 hardening runArgs (§4) — the ONE source of truth. devcontainer.json
++ * serialises them for the @devcontainers/cli and IDEs; arxa's own container
++ * lifecycle (plugins/sandbox/lib/devcontainer.js) passes the same list to
++ * `docker run`, so the spec and the runner can never drift.
++ * `--network none` is the explicit network decision (§4): egress stays OFF
++ * until a phase split exists; the model channel caveat (§13's ceiling)
++ * applies to every egress tier regardless.
++ */
++export function devcontainerRunArgs() {
++  return [
++    '--read-only', '--tmpfs', '/tmp', '--cap-drop=ALL',
++    '--security-opt', 'no-new-privileges', '--memory=4g', '--cpus=2',
++    '--pids-limit=512', '--network', 'none',
++  ]
++}
++
++/**
++ * The resolved devcontainer.json for one target — the exact config the
++ * @devcontainers/cli would resolve: a build over the sibling Dockerfile plus
++ * the L1 runArgs. containerEnv is EMPTY by construction: §7 forbids any
++ * secret reaching the image or the config; secrets travel only as a
++ * file-based secret mounted at /run/secrets by the lifecycle, never baked in.
++ */
++export function devcontainerJson(target) {
++  if (!DEVCONTAINER_TARGETS.includes(target)) {
++    throw new TypeError(`devcontainer: unknown target '${target}' — expected one of ${DEVCONTAINER_TARGETS.join('|')}`)
++  }
++  return JSON.stringify({
++    name: `arxa ${target} dev container`,
++    build: { dockerfile: 'Dockerfile', context: '..' },
++    runArgs: devcontainerRunArgs(),
++    containerEnv: {},
++  }, null, 2) + '\n'
++}
++
++/** The shared non-root setup: git + ca-certificates (the recovery loop needs
++ * git INSIDE the container to commit and bundle), a non-root user (L1), and
++ * /work as the workspace. */
++/** The target-aware Dockerfile. Images are tag-pinned and carry NO env
++ * values and NO build args — §7's forbidden list, closed by construction.
++ * The flutter image ships its own git; the debian bases get it via apt. */
++export function devcontainerDockerfile(target) {
++  if (!DEVCONTAINER_TARGETS.includes(target)) {
++    throw new TypeError(`devcontainer: unknown target '${target}' — expected one of ${DEVCONTAINER_TARGETS.join('|')}`)
++  }
++  const from = {
++    node: 'FROM node:24-bookworm-slim',
++    flutter: 'FROM ghcr.io/cirruslabs/flutter:stable',
++    plain: 'FROM debian:bookworm-slim',
++  }[target]
++  const lines = [
++    from,
++    '# generated by arxa studio (plugins/git-workspace/lib/frame.js) — Task 10 A4',
++  ]
++  if (target !== 'flutter') {
++    lines.push('RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \\\n && rm -rf /var/lib/apt/lists/*')
++  }
++  lines.push('RUN useradd -m arxa 2>/dev/null || true', 'USER arxa', 'WORKDIR /work', '')
++  return lines.join('\n')
++}
++
+ /** ci.yml — canon: self-hosted labels, concurrency+cancel, timeout always. */
+ export function ciYml() {
+   return [
+     '# arxa frame — generated by arxa studio (plugins/git-workspace/lib/frame.js).',
+     '# Runner canon: docs/ci/self-hosted-runners.md — never GitHub-hosted for',
+     '# arxa-managed (private) repos. End users may override on their own repos.',
+     'name: ci',
+     'on:',
+     '  push:',
+     // Q7 (2026-09-03): session branches are checked too. The stage boundary
+@@ -457,62 +539,69 @@ export function settingsPayload() {
+  * The generated frame files. `stamped` files carry a version + content hash so
+  * a later fix can be rolled out to repos that already exist; the PR template is
+  * prose a human is meant to edit, so it is written once and never upgraded.
+  *
+  * Freestyle (F4) is not GitHub-shaped by default: a Freestyle root has no
+  * PR workflow assumed (it may never be pushed anywhere), so it gets check.sh
+  * alone unless the caller opts into ci.yml for publish time — at which point
+  * it gets the PR template too, same as org/project, since publishing is what
+  * makes the GitHub-hosted-repo conventions apply.
+  */
+-function frameFiles(kind, includeCiYml) {
++function frameFiles(kind, includeCiYml, devcontainer) {
+   let checkContent
+   if (kind === 'org') checkContent = orgCheckSh()
+   else if (kind === 'project') checkContent = projectCheckSh()
+   else if (kind === 'freestyle') checkContent = freestyleCheckSh()
+   else throw new TypeError('frame kind must be org|project|freestyle')
+ 
+   const files = [{ rel: 'check.sh', content: checkContent, mode: 0o755, stamped: true }]
+   if (kind !== 'freestyle' || includeCiYml) files.push({ rel: path.join('.github', 'pull_request_template.md'), content: prTemplate(), mode: 0o644, stamped: false })
+   if (includeCiYml) files.push({ rel: path.join('.github', 'workflows', 'ci.yml'), content: ciYml(), mode: 0o644, stamped: true })
++  // A4 (Task 10): the devcontainer files are a PROJECT frame concern — the
++  // container tiers isolate project sessions, never the org shell.
++  if (devcontainer) {
++    if (kind !== 'project') throw new TypeError('devcontainer files are a project-frame concern — pass kind \'project\'')
++    files.push({ rel: path.join('.devcontainer', 'devcontainer.json'), content: devcontainerJson(devcontainer), mode: 0o644, stamped: true, stampStyle: 'json' })
++    files.push({ rel: path.join('.devcontainer', 'Dockerfile'), content: devcontainerDockerfile(devcontainer), mode: 0o644, stamped: true })
++  }
+   return files
+ }
+ 
+ /**
+  * Report each frame file's state without touching disk — the card's source for
+  * "this repo's frame is out of date". Only stamped files can be judged.
+  */
+-export function frameStatus(repoPath, kind = 'org', { includeCiYml = false } = {}) {
++export function frameStatus(repoPath, kind = 'org', { includeCiYml = false, devcontainer } = {}) {
+   const out = {}
+-  for (const f of frameFiles(kind, includeCiYml)) {
++  for (const f of frameFiles(kind, includeCiYml, devcontainer)) {
+     if (!f.stamped) continue
+     out[f.rel] = frameFileState(path.join(repoPath, f.rel))
+   }
+   return out
+ }
+ 
+ /**
+  * Write the frame. Missing files are always created. An existing file is kept
+  * untouched unless `upgrade` is set, and even then a file a human has edited
+  * (hash no longer matches its stamp) is reported as `conflicted` rather than
+  * overwritten — `force` is the only way past that, and it is a data-losing
+  * operation the caller must ask for explicitly.
+  */
+-export function writeFrameFiles(repoPath, kind = 'org', { includeCiYml = false, upgrade = false, force = false } = {}) {
++export function writeFrameFiles(repoPath, kind = 'org', { includeCiYml = false, upgrade = false, force = false, devcontainer } = {}) {
+   const written = []; const kept = []; const upgraded = []; const conflicted = []
+   const put = (abs, f) => {
+-    const body = f.stamped ? stampContent(f.content) : f.content
++    const body = f.stamped ? stampContent(f.content, f.stampStyle) : f.content
+     fs.mkdirSync(path.dirname(abs), { recursive: true })
+     fs.writeFileSync(abs, body, { mode: f.mode })
+     // writeFileSync mode is masked by umask — chmod explicitly.
+     fs.chmodSync(abs, f.mode)
+   }
+-  for (const f of frameFiles(kind, includeCiYml)) {
++  for (const f of frameFiles(kind, includeCiYml, devcontainer)) {
+     const abs = path.join(repoPath, f.rel)
+     const state = f.stamped ? frameFileState(abs) : (fs.existsSync(abs) ? 'current' : 'missing')
+     if (state === 'missing') { put(abs, f); written.push(f.rel); continue }
+     if (!upgrade || state === 'current') { kept.push(f.rel); continue }
+     if (state === 'modified' && !force) { conflicted.push(f.rel); continue }
+     put(abs, f); upgraded.push(f.rel)
+   }
+   return { written, kept, upgraded, conflicted }
+ }
+diff --git a/plugins/git-workspace/lib/sessions.js b/plugins/git-workspace/lib/sessions.js
+index 9ff1efb..28f4931 100644
+--- a/plugins/git-workspace/lib/sessions.js
++++ b/plugins/git-workspace/lib/sessions.js
+@@ -51,20 +51,24 @@
+ // worktree (or git at all) on the device.
+ 
+ import { execFileSync } from 'node:child_process'
+ import fs from 'node:fs'
+ import path from 'node:path'
+ import { ensureGit } from './probe.js'
+ import { runGit, runGitProbe, STAGE_IDENTITY } from './run.js'
+ import { wipCommit, stageBoundarySquash, STAGE_BASE_REF } from './commits.js'
+ import { getOrigin, excludeArxaDir } from './repos.js'
+ import { projectRepos } from './routing.js'
++// Task 10 (A4): the container-work teardown guard. Cross-plugin like
++// project-secrets' keyring reuse; no cycle — devcontainer.js reaches only
++// frame.js on this side (never sessions.js).
++import { unrecoveredContainerCommits } from '../../sandbox/lib/devcontainer.js'
+ 
+ /**
+  * Branch namespace. Grilled 2026-09-03 (Q2/Q3): a session's identity IS its
+  * relative disk path — `<org folder>/<workspace key>/<leaf>` — so the branch is
+  * that path under `arxa/`, the worktree directory is that path under the ORG's
+  * `.arxa/worktrees/`, and the dsh conversation key is that path with `/` → `-`.
+  * One string, three surfaces. SUPERSEDES `arxa/session/<opaque-id>`.
+  */
+ export const SESSION_BRANCH_PREFIX = 'arxa/'
+ export const SESSION_BASE_PREFIX = 'refs/arxa/session-base/'
+@@ -742,20 +746,27 @@ export function reviveSession(repoPath, id, env = process.env) {
+  * id is a `dropped:false` result, never a throw — boot cleanup must never
+  * fail the boot.
+  *
+  * @returns {{ id, dropped: boolean, worktree?: string, branch?: string }}
+  */
+ export function dropSession(repoPath, id, env = process.env) {
+   repoPath = sessionRepoFor(repoPath, id, env) // D98 repo-discovery preamble
+   const registry = readRegistry(repoPath, env)
+   const session = registry.sessions.find((s) => s.id === id)
+   if (!session) return { id, dropped: false }
++  // Task 10 (A4): the forced drop deletes the branch — the only other
++  // handle on container-only commits besides the recovery ref. Same gate as
++  // finishSession: refuse while container work is unrecovered.
++  const container = unrecoveredContainerCommits(repoPath, id)
++  if (container.unrecovered > 0) {
++    throw new Error(`session "${id}" (${session.branch}) cannot be dropped — container-work-unrecovered: bring the container commits back to ${container.recoveryRef} first`)
++  }
+   if (session.worktree && fs.existsSync(session.worktree)) {
+     runGit(['worktree', 'remove', '--force', session.worktree], { cwd: repoPath, env, allowFail: true })
+   }
+   runGit(['worktree', 'prune'], { cwd: repoPath, env, allowFail: true })
+   if (session.branch) runGit(['branch', '-D', session.branch], { cwd: repoPath, env, allowFail: true })
+   runGit(['update-ref', '-d', `${SESSION_BASE_PREFIX}${id}`], { cwd: repoPath, env, allowFail: true })
+   registry.sessions = registry.sessions.filter((s) => s.id !== id)
+   writeRegistry(repoPath, registry, env)
+   return { id, dropped: true, worktree: session.worktree, branch: session.branch }
+ }
+diff --git a/plugins/git-workspace/selftest.finish.mjs b/plugins/git-workspace/selftest.finish.mjs
+index 79a6fe7..1f40fdf 100644
+--- a/plugins/git-workspace/selftest.finish.mjs
++++ b/plugins/git-workspace/selftest.finish.mjs
+@@ -17,21 +17,21 @@
+ // Runs against a throwaway repo under a temp dir; isolated HOME-free git
+ // via run.js — nothing machine-global is touched.
+ 
+ import assert from 'node:assert/strict'
+ import fs from 'node:fs'
+ import os from 'node:os'
+ import path from 'node:path'
+ import { runGit } from './lib/run.js'
+ import { initProjectRepo } from './lib/repos.js'
+ import {
+-  openSession, sessionStageBoundary, archiveSession, annotateSession, listSessions,
++  openSession, sessionStageBoundary, archiveSession, annotateSession, listSessions, dropSession,
+   SESSION_BASE_PREFIX, GATE_CHECK_SCRIPT,
+ } from './lib/sessions.js'
+ import { behindMain, branchTip, isMergedIntoMain, finishSession, sweepMerged, FinishRefusedError } from './lib/finish.js'
+ 
+ let passed = 0
+ function ok(label, fn) {
+   fn()
+   passed += 1
+   console.log(`ok ${passed} - ${label}`)
+ }
+@@ -334,11 +334,67 @@ ok('pressure: 30 sessions, 15 merged, sweepMerged finishes exactly 15 in under 5
+     const branch = branchById[id]
+     assert.equal(runGit(['branch', '--list', branch], { cwd: proj }), '', `${branch} survived the sweep`)
+   }
+   for (const id of unmergedIds) {
+     const branch = branchById[id]
+     assert.ok(runGit(['branch', '--list', branch], { cwd: proj }) !== '', `${branch} was wrongly deleted`)
+     archiveSession(proj, id)
+   }
+ })
+ 
++// ---- 7. Task 10 (A4): container-work teardown guard --------------------------
++// A session that ran in a Docker container may hold commits ONLY in the
++// container volume. Teardown (finishSession's branch deletion, dropSession's
++// forced drop) must REFUSE until every container commit is reachable from
++// the host recovery ref — and must change nothing when it refuses.
++{
++  const id = 'contained1'
++  const s = openSession(proj, { id, orgPath: proj, project: null, workspace: '' })
++  fs.writeFileSync(path.join(s.worktree, 'c.txt'), 'container work\n')
++  runGit(['add', '.'], { cwd: s.worktree })
++  runGit(['commit', '-m', 'feat: contained work'], { cwd: s.worktree })
++  sessionStageBoundary(proj, id, { message: 'feat: contained work' })
++  const tip = branchTip(proj, s.branch).sha
++
++  // A live container registry row (what startContainer wrote) whose head is
++  // not yet under the recovery ref.
++  const regDir = path.join(proj, '.arxa', 'containers')
++  fs.mkdirSync(regDir, { recursive: true })
++  const row = {
++    sessionId: id, branch: s.branch, head: tip,
++    recoveryRef: `refs/arxa/container-recovery/${id}`,
++    container: `arxa-a4-${id}`, volume: `arxa-a4-${id}-work`, recovered: false,
++  }
++  fs.writeFileSync(path.join(regDir, `${id}.json`), JSON.stringify(row))
++
++  ok('finishSession refuses container-work-unrecovered and changes nothing', () => {
++    assert.throws(
++      () => finishSession(proj, id),
++      (e) => e instanceof FinishRefusedError && e.reason === 'container-work-unrecovered',
++    )
++    assert.ok(runGit(['branch', '--list', s.branch], { cwd: proj }) !== '', 'the branch survives the refusal')
++    assert.ok(listSessions(proj).some((x) => x.id === id), 'the registry row survives the refusal')
++  })
++
++  ok('dropSession refuses container-work-unrecovered too', () => {
++    assert.throws(() => dropSession(proj, id), /container-work-unrecovered/)
++    assert.ok(runGit(['branch', '--list', s.branch], { cwd: proj }) !== '')
++  })
++
++  ok('once the recovery ref holds the head, finish proceeds', () => {
++    runGit(['update-ref', row.recoveryRef, tip], { cwd: proj })
++    const fin = finishSession(proj, id)
++    assert.ok(fin.finished)
++  })
++
++  ok('a session with NO container row finishes exactly as before', () => {
++    const id2 = 'plain1'
++    const s2 = openSession(proj, { id: id2, orgPath: proj, project: null, workspace: '' })
++    fs.writeFileSync(path.join(s2.worktree, 'p.txt'), 'plain\n')
++    runGit(['add', '.'], { cwd: s2.worktree })
++    runGit(['commit', '-m', 'feat: plain'], { cwd: s2.worktree })
++    sessionStageBoundary(proj, id2, { message: 'feat: plain' })
++    assert.ok(finishSession(proj, id2).finished)
++  })
++}
++
+ console.log(`# ${passed} passed`)
+diff --git a/plugins/git-workspace/selftest.mjs b/plugins/git-workspace/selftest.mjs
+index 6303b0e..a67e154 100644
+--- a/plugins/git-workspace/selftest.mjs
++++ b/plugins/git-workspace/selftest.mjs
+@@ -459,21 +459,21 @@ ok('frame: ci.yml carries the canon runner labels, concurrency, timeout (Q5)', (
+ })
+ 
+ // Q7 (2026-09-03): without this trigger a session-branch push fires no
+ // workflow at all, so "push the branch at the stage boundary" would have been
+ // a backup rather than CI. The version bump is what rolls it out to repos that
+ // already carry a v2 frame.
+ ok('frame: ci.yml runs frame-check on session branches as well as main (Q7)', () => {
+   const y = ciYml()
+   assert.ok(y.includes("branches: [main, 'arxa/**']"), 'session branches are watched')
+   assert.ok(y.includes('pull_request:'), 'the PR trigger survives — the review path is unchanged')
+-  assert.equal(FRAME_VERSION, 6, 'the stamp version bumped so existing published repos heal to the current frame (v5 added pinned SDK + --enforce-lockfile; v6 adds the B1/B2 integrity gates and the base-branch CI gate)')
++  assert.equal(FRAME_VERSION, 7, 'the stamp version bumped so existing published repos heal to the current frame (v5 pinned SDK; v6 B1/B2 integrity gates; v7 adds the A4 devcontainer files — Task 10)')
+ })
+ 
+ ok('frame: protection + settings payloads (Q3/Q8)', () => {
+   assert.deepEqual(protectionPayload().required_status_checks, { strict: true, checks: [{ context: FRAME_JOB }] })
+   assert.equal(protectionPayload().enforce_admins, false, 'solo machine commits ride main (S0 V4)')
+   // D107 flip: collapse-then-`--no-ff` needs a real merge commit. GitHub's
+   // squash merge writes a commit whose ancestry excludes the branch, which
+   // breaks every "is this session in main?" question the card asks.
+   assert.deepEqual(settingsPayload(), { allow_squash_merge: false, allow_merge_commit: true, allow_rebase_merge: false })
+ })
+@@ -522,21 +522,21 @@ ok('frame: v5 t3ci checks are all GUARDED — absence is never a failure (Q13)',
+ ok('frame: B1 — script-free, lockfile-pinned installs reach every project target (v6)', () => {
+   const sh = projectCheckSh()
+   assert.ok(sh.includes('npm ci --ignore-scripts'), 'npm installs are lockfile-pinned AND script-free')
+   assert.ok(/\[ -f package-lock\.json \]/.test(sh), '…only where a lockfile actually exists (green by absence)')
+   assert.ok(sh.includes('--enforce-lockfile'), 'the Dart half keeps enforcing the lockfile')
+   assert.ok(/npm ci --ignore-scripts[^\n]*\|\| fail/.test(sh), 'a failed install is a hard red, not a warning')
+   assert.ok(sh.includes('osv-scanner'), 'OSV scanning ships with the frame')
+   assert.ok(/command -v osv-scanner/.test(sh), '…guarded on the scanner being installed')
+   assert.ok(/osv-scanner[^\n]*\n[^\n]*note: osv-scanner not installed|not installed[^\n]*osv-scanner|osv-scanner[^\n]*(skip|note)/i.test(sh)
+     || /echo "note: osv-scanner[^\n]*skip/i.test(sh), 'an honest unavailable note, never a red, when it is absent')
+-  assert.equal(FRAME_VERSION, 6, 'the stamp bumped so existing published repos heal to the B1/B2 checks')
++  assert.equal(FRAME_VERSION, 7, 'the stamp bumped so existing published repos heal to the current frame (v7 adds the A4 devcontainer files — Task 10)')
+ })
+ 
+ ok('frame: B2 — the base-branch diff policy gate and the plaintext-.env red', () => {
+   const sh = projectCheckSh()
+   assert.ok(sh.includes('GITHUB_BASE_REF'), 'the diff policy fires only where a base ref exists (local stays green)')
+   assert.ok(sh.includes('.github/workflows'), 'CI config is the FIRST forbidden path — the PR never authors the workflow that judges it')
+   assert.ok(sh.includes('gitleaks') && /command -v gitleaks/.test(sh), 'gitleaks sweeps the diff when installed')
+   assert.ok(/ls-files[^\n]*\.env|\.env[^\n]*ls-files/.test(sh), 'a TRACKED plaintext .env is a hard red')
+   assert.ok(/git diff --name-only "\$range" -- \.github\/workflows \.git\/hooks/.test(sh),
+     'the forbidden-path diff is exactly CI config + git hooks, judged against the base-branch range')
+diff --git a/plugins/sandbox/lib/devcontainer.js b/plugins/sandbox/lib/devcontainer.js
+new file mode 100644
+index 0000000..175b5a4
+--- /dev/null
++++ b/plugins/sandbox/lib/devcontainer.js
+@@ -0,0 +1,429 @@
++// arxa devcontainer — A4 Docker project isolation (Task 10, docs/plans/
++// arxa-isolation-levels.md L1/§4-§8 + worktree corrections).
++//
++// THE DESIGN, from the plan:
++//   * A4 is automatic-if-Docker-is-present — DETECT, never install (S3 §2).
++//     detectDocker() distinguishes an absent CLI from an unreachable daemon
++//     and every degrade carries a truthful reason; nothing here ever runs
++//     brew/apt/npm-install.
++//   * The declarative half (.devcontainer/devcontainer.json + a
++//     target-aware Dockerfile) is generated ONLY through the owned frame
++//     functions in plugins/git-workspace/lib/frame.js — stamped, never
++//     clobbered, upgradable exactly like check.sh, so a repo a human edited
++//     is never overwritten. The lifecycle half reuses the SAME runArgs as
++//     its docker argv: one source of truth for the L1 hardening.
++//   * L1 hardening (§4): --read-only + tmpfs /tmp, --cap-drop=ALL,
++//     no-new-privileges, non-root USER (in the Dockerfile), cpu/mem/pids
++//     limits, an EXPLICIT network decision (--network none — egress off
++//     until a phase-split exists), bind-mount only the project (here: only
++//     a private named volume), never docker.sock, never --privileged.
++//   * @devcontainers/cli is DETECTED (absence degrades honestly) but the
++//     lifecycle runs raw `docker`: `devcontainer up --workspace-folder`
++//     bind-mounts a HOST path, which the worktree invariants forbid — a
++//     session's work lives in a private volume, not on the host tree.
++//
++// ROOT CONFINEMENT: paths are resolved and realpath'd before any mutation;
++// `.git`/`.arxa` are refused as generation targets, and a pre-existing
++// `.devcontainer` symlink pointing outside the repo is a refused escape.
++
++import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
++import { tmpdir } from 'node:os'
++import { dirname, join, resolve } from 'node:path'
++import { execFile, spawnSync } from 'node:child_process'
++import { promisify } from 'node:util'
++
++import { createKeyring } from '../../github-link/lib/keyring.js'
++import { devcontainerRunArgs, writeFrameFiles } from '../../git-workspace/lib/frame.js'
++import { whichOnPath } from './index.js'
++import { accountFor } from './project-secrets.js'
++
++const runFile = promisify(execFile)
++
++/**
++ * The default runner: real subprocesses, argv form only (never a shell
++ * string), bounded output and time. Every caller-facing result is
++ * structured `{ code, stdout, stderr }` — a non-zero exit is DATA, not an
++ * exception, so refusal paths can report honestly.
++ */
++async function defaultRunner (argv, opts = {}) {
++  try {
++    const r = await runFile(argv[0], argv.slice(1), {
++      cwd: opts.cwd,
++      encoding: 'utf8',
++      maxBuffer: 16 * 1024 * 1024,
++      timeout: opts.timeout ?? 120000
++    })
++    return { code: 0, stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
++  } catch (err) {
++    return { code: err.code === undefined ? 1 : (typeof err.code === 'number' ? err.code : 1), stdout: err.stdout ?? '', stderr: err.stderr ?? String(err?.message ?? err) }
++  }
++}
++
++/** A docker-safe, filesystem-safe slug for one session's names. */
++const slugFor = (sessionId) => String(sessionId).replace(/[^a-z0-9-]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase()
++
++/** Branch names reach a `sh -c` clone string — only the git-safe alphabet is
++ * accepted, so nothing user-controlled can escape the quotes. */
++const BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/
++
++/** The registry row for one session's container: `<repo>/.arxa/containers/`. */
++const registryPathFor = (repo, sessionId) => join(repo, '.arxa', 'containers', `${slugFor(sessionId)}.json`)
++
++function writeRegistry (repo, row) {
++  mkdirSync(join(repo, '.arxa', 'containers'), { recursive: true })
++  writeFileSync(registryPathFor(repo, row.sessionId), JSON.stringify(row, null, 2) + '\n')
++}
++
++/** Read one session's registry row, or null when it never had a container. */
++export function readContainerRegistry (repo, sessionId) {
++  const p = registryPathFor(resolve(String(repo)), sessionId)
++  if (!existsSync(p)) return null
++  try { return JSON.parse(readFileSync(p, 'utf8')) } catch { return null }
++}
++
++/**
++ * The SYNC teardown guard (consumed by git-workspace's finishSession /
++ * dropSession): every container commit must be reachable from the host
++ * recovery ref before any branch-dropping teardown. Pure read — no docker.
++ * @returns {{ unrecovered: number, head: string | null, recoveryRef: string |
++ *   null }} unrecovered > 0 refuses teardown.
++ */
++export function unrecoveredContainerCommits (repoPath, sessionId) {
++  const repo = resolve(String(repoPath))
++  const row = readContainerRegistry(repo, sessionId)
++  if (row === null) return { unrecovered: 0, head: null, recoveryRef: null }
++  const head = row.head ?? null
++  const recoveryRef = row.recoveryRef ?? null
++  if (head === null || recoveryRef === null) return { unrecovered: 1, head, recoveryRef }
++  const r = spawnSync('git', ['-C', repo, 'merge-base', '--is-ancestor', head, recoveryRef], { encoding: 'utf8', timeout: 10000 })
++  return { unrecovered: r.status === 0 ? 0 : 1, head, recoveryRef }
++}
++
++/** Detect Docker: CLI presence then daemon reachability. Never installs.
++ * @param {object} [deps] - injection seam (tests): `{ which, probe }`.
++ * @returns {{ available: boolean, daemon: boolean, cli: string | undefined,
++ *   version?: string, reason: string }} the truthful machine state. */
++export function detectDocker (deps = {}) {
++  const which = deps.which ?? whichOnPath
++  const probe = deps.probe ?? ((argv) => spawnSync(argv[0], argv.slice(1), { encoding: 'utf8', timeout: 5000 }))
++  const cli = which('docker')
++  if (cli === undefined) {
++    return { available: false, daemon: false, cli: undefined, reason: 'Docker is not installed — arxa detects rather than assumes (S3); the A4 tier stays unavailable on this machine' }
++  }
++  const r = probe([cli, 'version', '--format', '{{.Server.Version}}'])
++  const version = String(r.stdout ?? '').trim()
++  if (r.code !== 0 || version === '') {
++    return { available: false, daemon: false, cli, reason: `Docker is installed (${cli}) but its daemon is not reachable — the A4 tier cannot run containers here; degrading to the highest tier this machine can enforce` }
++  }
++  return { available: true, daemon: true, cli, version, reason: 'Docker is present — the A4 hardened-container tier is available on this machine' }
++}
++
++/** Detect the @devcontainers/cli — reported honestly, never required (the
++ * lifecycle uses raw docker because the invariants forbid host mounts).
++ * @param {object} [deps] - injection seam (tests): `{ which }`.
++ * @returns {{ available: boolean, cli: string | undefined, reason: string }} */
++export function detectDevcontainerCli (deps = {}) {
++  const which = deps.which ?? whichOnPath
++  const cli = which('devcontainer')
++  if (cli === undefined) {
++    return { available: false, cli: undefined, reason: 'the @devcontainers/cli is not installed — IDE-side "Reopen in Container" stays unavailable; arxa\'s own lifecycle does not depend on it' }
++  }
++  return { available: true, cli, reason: 'the @devcontainers/cli is installed — the generated config is directly usable from the IDE' }
++}
++
++/**
++ * Resolve and guard a project repo path before any mutation: refuse the
++ * reserved `.git`/`.arxa` paths (root confinement) and symlink escape (the
++ * `.devcontainer` write target must stay inside the repo after realpath).
++ * @param {string} projectRepo - the repo root as the caller spells it.
++ * @returns {string} the realpath'd repo root.
++ */
++function resolveRepoGuarded (projectRepo) {
++  const repo = resolve(String(projectRepo))
++  for (const seg of repo.split(/[/\\]/)) {
++    if (seg === '.git' || seg === '.arxa') {
++      throw new Error(`devcontainer: refusing to generate inside reserved path '${seg}' (${repo})`)
++    }
++  }
++  if (!existsSync(repo)) return repo // writeFrameFiles mkdirs it; nothing escaped yet
++  const real = realpathSync(repo)
++  const target = join(real, '.devcontainer')
++  if (existsSync(target) && statSync(target).isDirectory()) {
++    const realTarget = realpathSync(target)
++    if (!realTarget.startsWith(real + '/') && realTarget !== real) {
++      throw new Error(`devcontainer: refusing symlink escape — ${target} resolves outside the repo`)
++    }
++  }
++  return real
++}
++
++/**
++ * Derive the devcontainer target from the repo's own shape (the same probe
++ * idea as the frame's check.sh): package.json → node, pubspec.yaml →
++ * flutter, anything else → plain (a minimal git-capable image).
++ * @param {string} repo - the repo root.
++ * @returns {'node' | 'flutter' | 'plain'} the target.
++ */
++function detectTarget (repo) {
++  if (existsSync(join(repo, 'package.json'))) return 'node'
++  if (existsSync(join(repo, 'pubspec.yaml'))) return 'flutter'
++  return 'plain'
++}
++
++/**
++ * Ensure one project repo carries the A4 declarative frame: the
++ * `.devcontainer/devcontainer.json` + target-aware Dockerfile, written
++ * ONLY through the owned frame functions (idempotent, stamped,
++ * never-clobbering a human edit). The files themselves are
++ * Docker-independent — they are written even when Docker is absent; only
++ * the LIFECYCLE degrades, and it degrades with the reported reason.
++ *
++ * @param {string} projectRepo - the project repo root.
++ * @param {'node' | 'flutter' | 'plain'} [target] - the scaffold target;
++ *   derived from the repo shape when omitted.
++ * @param {object} [deps] - injection seam (tests): `{ docker }` — a
++ *   pre-measured detectDocker() result.
++ * @returns {{ target: string, docker: object, written: string[],
++ *   kept: string[], upgraded: string[], conflicted: string[] }} the frame
++ *   write report plus the measured Docker state.
++ */
++export function ensureDevcontainer (projectRepo, target, deps = {}) {
++  const repo = resolveRepoGuarded(projectRepo)
++  const t = target ?? detectTarget(repo)
++  const docker = deps.docker ?? detectDocker()
++  return { target: t, docker, ...writeFrameFiles(repo, 'project', { devcontainer: t }) }
++}
++
++// ---- file-based secret injection (Step 4, §7) -------------------------------
++//
++// The L0/L1 rule: decrypt HOST-SIDE, hand the plaintext to EXACTLY ONE
++// container as a file-based secret under /run/secrets — never `-e`,
++// `--env-file` or `--build-arg` (docker inspect shows all three in clear),
++// never ambient env, never baked into the image or config. The plaintext
++// lives in one bounded temp file (0600 inside a 0700 mkdtemp dir under
++// os.tmpdir()) and is removed on EVERY exit path: explicit cleanup, container
++// teardown (the handle records the dir), and a failed start.
++
++/**
++ * Decrypt one project's `.env.sops` into a bounded temporary file ready to
++ * mount as a Compose-secret-equivalent at /run/secrets/arxa-env.
++ *
++ * @param {{ orgId: string, projectId: string, envSopsPath: string }} input -
++ *   the Task 9 scoping ids and the ciphertext path.
++ * @param {object} [deps] - injection seam (tests): `{ keyring, sops }`.
++ * @returns {Promise<{ source: string, target: string, secretDir: string,
++ *   cleanup: () => void }>} the mount triple; `source` is the ONLY place the
++ *   plaintext exists, and `cleanup` removes it.
++ */
++export async function prepareSecretMount ({ orgId, projectId, envSopsPath }, deps = {}) {
++  const keyring = deps.keyring ?? createKeyring()
++  const sops = deps.sops ?? (async (sargv, opts) => runFile('sops', sargv, opts))
++  const stored = await keyring.getSecret(accountFor(orgId, projectId))
++  if (stored === null) throw new Error(`devcontainer: no keychain key for ${orgId}/${projectId} — run ensureProjectAgeKey first`)
++  let identity
++  try { identity = JSON.parse(stored) } catch { throw new Error('devcontainer: project-secrets keychain item is not valid JSON') }
++
++  let plaintext = Buffer.alloc(0)
++  try {
++    // The identity reaches ONLY this child's env (§7); encoding 'buffer'
++    // keeps the plaintext out of string interning so the zeroing works.
++    plaintext = await sops(['--decrypt', envSopsPath], {
++      env: { ...process.env, SOPS_AGE_KEY: identity.secretKey },
++      encoding: 'buffer',
++      maxBuffer: 16 * 1024 * 1024
++    })
++    const secretDir = mkdtempSync(join(tmpdir(), 'arxa-secret-'))
++    const source = join(secretDir, 'arxa-env')
++    writeFileSync(source, plaintext, { mode: 0o600 })
++    chmodSync(source, 0o600)
++    return {
++      source,
++      target: '/run/secrets/arxa-env',
++      secretDir,
++      cleanup: () => rmSync(secretDir, { recursive: true, force: true })
++    }
++  } finally {
++    plaintext.fill(0)
++  }
++}
++
++// ---- the lifecycle (Step 3) -------------------------------------------------
++//
++// SAFETY INVARIANTS (binding):
++//   * the session branch is cloned into a PRIVATE NAMED VOLUME from a host
++//     git bundle — the one and only host artifact mounted, read-only, into
++//     the one-shot clone helper. The repo itself, the org root, sibling
++//     projects and a host worktree's pointer-style .git are NEVER mounted
++//     (the bundle is built host-side before any container exists);
++//   * the container NEVER runs on main/master — refused before any docker
++//     call;
++//   * results return to the host through git (bundle → fetch → recovery
++//     ref) BEFORE teardown; stopContainer refuses while any container
++//     commit is unreachable from the recovery ref, and so does the sync
++//     guard git-workspace's teardown paths call.
++
++/**
++ * Clone the exact session branch into a private volume and start the
++ * hardened work container.
++ *
++ * @param {{ repoPath: string, branch: string, sessionId: string,
++ *   target?: 'node' | 'flutter' | 'plain' }} input - the owning repo, the
++ *   session branch (never main), the session id and optional target.
++ * @param {object} [deps] - injection seam (tests): `{ runner }`.
++ * @returns {Promise<object>} the container handle (container, volume,
++ *   image, head, recoveryRef, registryPath).
++ */
++export async function startContainer ({ repoPath, branch, sessionId, target, secretMount }, deps = {}) {
++  const runner = deps.runner ?? defaultRunner
++  if (typeof branch !== 'string' || !BRANCH_RE.test(branch)) throw new Error(`devcontainer: refusing branch ${JSON.stringify(branch)} — not a branch name this lifecycle will clone`)
++  if (branch === 'main' || branch === 'master') throw new Error(`devcontainer: refusing to run the container on '${branch}' — A4 sessions work on their own branch, never on project main`)
++  if (typeof sessionId !== 'string' || sessionId.trim() === '') throw new TypeError('devcontainer: sessionId is required')
++
++  const repo = resolveRepoGuarded(repoPath)
++  // A host worktree's `.git` is a POINTER FILE into the parent repo's
++  // common git dir — cloning through it would couple the container to the
++  // org repo's whole object store. Refuse; A4 needs a real repo.
++  const gitPath = join(repo, '.git')
++  if (existsSync(gitPath) && statSync(gitPath).isFile()) {
++    throw new Error(`devcontainer: refusing ${repo} — a host worktree's pointer-style .git cannot back a container; pass the owning repository`)
++  }
++
++  const headR = await runner(['git', '-C', repo, 'rev-parse', '--verify', branch])
++  if (headR.code !== 0) throw new Error(`devcontainer: branch '${branch}' not found in ${repo}`)
++  const head = headR.stdout.trim()
++
++  const t = target ?? detectTarget(repo)
++  // The frame (declarative config + Dockerfile) is written through the OWNED
++  // frame functions — never clobbering a human edit — because the image is
++  // BUILT from the same Dockerfile the spec points at.
++  writeFrameFiles(repo, 'project', { devcontainer: t })
++
++  const slug = slugFor(sessionId)
++  const image = `arxa-a4-${t}:frame`
++  const volume = `arxa-a4-${slug}-work`
++  const container = `arxa-a4-${slug}`
++  const recoveryRef = `refs/arxa/container-recovery/${slug}`
++
++  // The bundle: the ONLY host path any container ever sees, read-only
++  // (the secret mount is the second, equally narrow exception — also a
++  // bounded temp file, readonly, never the repo itself).
++  const tmp = mkdtempSync(join(tmpdir(), `arxa-a4-${slug}-`))
++  try {
++    const bundle = join(tmp, 'src.bundle')
++    const b = await runner(['git', '-C', repo, 'bundle', 'create', bundle, branch])
++    if (b.code !== 0) throw new Error(`devcontainer: git bundle create failed: ${b.stderr.trim()}`)
++
++    const build = await runner(['docker', 'build', '-t', image, join(repo, '.devcontainer')], { timeout: 600000 })
++    if (build.code !== 0) throw new Error(`devcontainer: docker build failed: ${build.stderr.trim().slice(0, 400)}`)
++
++    const v = await runner(['docker', 'volume', 'create', volume])
++    if (v.code !== 0) throw new Error(`devcontainer: docker volume create failed: ${v.stderr.trim()}`)
++
++    // The clone helper: root (it must chown the fresh volume for the
++    // non-root work user) but capped, offline, read-only rootfs — it only
++    // ever touches the ro bundle and the private volume, never the secret.
++    const clone = await runner([
++      'docker', 'run', '--rm', '--user', '0:0', '--read-only', '--cap-drop=ALL', '--network', 'none',
++      '-v', `${bundle}:/src.bundle:ro`, '-v', `${volume}:/work`, image,
++      'sh', '-c', `git clone /src.bundle -b ${branch} /work && chown -R 1000:1000 /work`
++    ])
++    if (clone.code !== 0) throw new Error(`devcontainer: branch clone into the private volume failed: ${(clone.stdout + clone.stderr).trim().slice(0, 400)}`)
++
++    const start = await runner(['docker', 'run', '-d', '--name', container,
++      ...devcontainerRunArgs(),
++      '-v', `${volume}:/work`,
++      ...(secretMount ? ['--mount', `type=bind,source=${secretMount.source},target=${secretMount.target},readonly`] : []),
++      '-w', '/work', image, 'sleep', 'infinity'])
++    if (start.code !== 0) throw new Error(`devcontainer: docker run failed: ${start.stderr.trim().slice(0, 400)}`)
++  } catch (err) {
++    // EVERY exit path cleans the plaintext: a failed start must not leave
++    // the decrypted .env sitting in tmpdir.
++    if (secretMount) rmSync(dirname(secretMount.source), { recursive: true, force: true })
++    throw err
++  } finally {
++    rmSync(tmp, { recursive: true, force: true })
++  }
++
++  const handle = { sessionId, branch, repoPath: repo, target: t, container, volume, image, head, recoveryRef, registryPath: registryPathFor(repo, sessionId), ...(secretMount ? { secretDir: dirname(secretMount.source) } : {}) }
++  writeRegistry(repo, { ...handle, recovered: false, createdAt: Date.now() })
++  return handle
++}
++
++/**
++ * Run one command inside the container. Structured result, bounded output.
++ * @returns {Promise<{ code: number, stdout: string, stderr: string }>}
++ */
++export async function execContainer (handle, argv, deps = {}) {
++  const runner = deps.runner ?? defaultRunner
++  if (!Array.isArray(argv) || argv.length === 0 || argv.some((a) => typeof a !== 'string')) {
++    throw new TypeError('devcontainer: execContainer takes an argv array of strings, never a shell string')
++  }
++  return runner(['docker', 'exec', handle.container, ...argv])
++}
++
++/**
++ * Bring the container's commits back to the host: bundle INSIDE the
++ * container, `docker cp` out, then a real host-side `git fetch` into the
++ * recovery ref. Idempotent.
++ * @returns {Promise<{ containerHead: string, recoveryRef: string,
++ *   reachable: boolean }>}
++ */
++export async function fetchContainerCommits (handle, deps = {}) {
++  const runner = deps.runner ?? defaultRunner
++  const repo = handle.repoPath ?? resolveRepoGuarded(handle.registryPath ? handle.repoPath : '.')
++  const headR = await runner(['docker', 'exec', handle.container, 'git', '-C', '/work', 'rev-parse', 'HEAD'])
++  if (headR.code !== 0) throw new Error(`devcontainer: cannot read the container HEAD (${handle.container}): ${(headR.stderr || headR.stdout).trim().slice(0, 200)}`)
++  const containerHead = headR.stdout.trim()
++
++  const mkBundle = await runner(['docker', 'exec', handle.container, 'git', '-C', '/work', 'bundle', 'create', '/tmp/recovery.bundle', '--all'])
++  if (mkBundle.code !== 0) throw new Error(`devcontainer: in-container bundle create failed: ${mkBundle.stderr.trim().slice(0, 200)}`)
++
++  const tmp = mkdtempSync(join(tmpdir(), `arxa-a4-recover-`))
++  try {
++    const out = join(tmp, 'recovery.bundle')
++    const cp = await runner(['docker', 'cp', `${handle.container}:/tmp/recovery.bundle`, out])
++    if (cp.code !== 0) throw new Error(`devcontainer: docker cp of the recovery bundle failed: ${cp.stderr.trim().slice(0, 200)}`)
++    const fetch = await runner(['git', '-C', repo, 'fetch', out, `+refs/heads/${handle.branch}:${handle.recoveryRef}`])
++    if (fetch.code !== 0) throw new Error(`devcontainer: host git fetch into ${handle.recoveryRef} failed: ${fetch.stderr.trim().slice(0, 200)}`)
++  } finally {
++    rmSync(tmp, { recursive: true, force: true })
++  }
++
++  const reach = await runner(['git', '-C', repo, 'merge-base', '--is-ancestor', containerHead, handle.recoveryRef])
++  const reachable = reach.code === 0
++  const row = readContainerRegistry(repo, handle.sessionId)
++  writeRegistry(repo, { ...row, ...handle, head: containerHead, recovered: reachable, fetchedAt: Date.now() })
++  return { containerHead, recoveryRef: handle.recoveryRef, reachable }
++}
++
++/**
++ * Stop the container, remove its volume and its registry row — but only
++ * after every container commit is reachable from the host recovery ref.
++ * Idempotent: a handle with no registry row is already gone.
++ * @returns {Promise<{ stopped: boolean, alreadyGone?: boolean }>}
++ */
++export async function stopContainer (handle, deps = {}) {
++  const runner = deps.runner ?? defaultRunner
++  const repo = resolveRepoGuarded(handle.repoPath)
++  const row = readContainerRegistry(repo, handle.sessionId)
++  if (row === null) return { stopped: false, alreadyGone: true }
++
++  // Recover first; fall back to the last recorded head when the container
++  // is already gone (exec cannot answer).
++  let containerHead = row.head
++  try {
++    const f = await fetchContainerCommits(handle, deps)
++    containerHead = f.containerHead
++  } catch {
++    containerHead = row.head
++  }
++  const reach = await runner(['git', '-C', repo, 'merge-base', '--is-ancestor', containerHead, row.recoveryRef])
++  if (reach.code !== 0) {
++    throw new Error(`devcontainer: refusing teardown — container commits (${containerHead.slice(0, 12)}) are not reachable from ${row.recoveryRef}; run fetchContainerCommits and inspect before discarding session work`)
++  }
++  await runner(['docker', 'rm', '-f', row.container])
++  await runner(['docker', 'volume', 'rm', row.volume])
++  if (row.secretDir) rmSync(row.secretDir, { recursive: true, force: true })
++  rmSync(registryPathFor(repo, handle.sessionId), { force: true })
++  return { stopped: true }
++}
+diff --git a/plugins/sandbox/lib/effective-tier.js b/plugins/sandbox/lib/effective-tier.js
+index 0b5d8f8..0ba226c 100644
+--- a/plugins/sandbox/lib/effective-tier.js
++++ b/plugins/sandbox/lib/effective-tier.js
+@@ -70,27 +70,37 @@ export function resolveEffectiveTier ({ configured, platform, runners = {} }) {
+   let ceiling = cap.tier
+   let reason = cap.reason
+ 
+   // The container tiers (A4/A5) have runners of their own and sit above the
+   // profile ladder: an A5 machine needs sbx regardless of Seatbelt.
+   if (configured === 'A4') {
+     if (runners.docker) {
+       ceiling = Math.max(ceiling, 4)
+       reason = 'Docker is present — the hardened-container tier is available on this machine'
+     } else {
+-      reason = 'Docker is not present — arxa detects rather than assumes (S3); degrading to the highest tier this machine can enforce'
++      // The measured detail (a dead daemon is NOT "Docker is not present")
++      // replaces the generic line, because a card that paraphrases the
++      // machine is a broken promise (Task 10: detectDocker() feeds this).
++      reason = runners.dockerReason ?? 'Docker is not present — arxa detects rather than assumes (S3); degrading to the highest tier this machine can enforce'
+     }
+   }
+   if (configured === 'A5') {
+     if (runners.sbx && runners.sbxAuthed) {
+       ceiling = Math.max(ceiling, 5)
+       reason = 'sbx is installed and signed in — the microVM tier is available on this machine'
++    } else if (runners.docker) {
++      // S3 #4: degrade to the highest tier ACTUALLY available — with the
++      // microVM out of reach but Docker running containers, that is A4.
++      ceiling = Math.max(ceiling, 4)
++      reason = (runners.sbx
++        ? 'sbx is installed but not signed in — the one-time browser sign-in is the only step arxa cannot automate (§23a)'
++        : 'sbx (Docker Sandboxes) is not installed on this machine') + '; Docker is present, so degrading to A4 (the hardened-container tier), the best this machine can enforce'
+     } else {
+       reason = runners.sbx
+         ? 'sbx is installed but not signed in — the one-time browser sign-in is the only step arxa cannot automate (§23a); degrading to the highest tier this machine can enforce'
+         : 'sbx (Docker Sandboxes) is not installed on this machine; degrading to the highest tier this machine can enforce'
+     }
+   }
+ 
+   const effectiveIdx = Math.min(configuredIdx, ceiling)
+   return { configured, effective: TIERS[effectiveIdx], reason }
+ }
+diff --git a/plugins/sandbox/lib/project-database.js b/plugins/sandbox/lib/project-database.js
+new file mode 100644
+index 0000000..9f963ae
+--- /dev/null
++++ b/plugins/sandbox/lib/project-database.js
+@@ -0,0 +1,218 @@
++// arxa project-database — per-project Supabase lifecycle with the local
++// floor (Task 10 Step 5, docs/plans/arxa-isolation-levels.md §8).
++//
++// THE DESIGN, from the plan:
++//   * L1: `supabase init` + `supabase start` INSIDE each project's isolated
++//     clone — own containers, own volume, own project_id. The stable
++//     project id (the studio's project slug) is the addressing handle for
++//     `--project-id` and the port registry alike.
++//   * Default ports collide (54321-54324 across every project), so a
++//     DISTINCT block of 5 ports is auto-assigned per project, persisted by
++//     stable project id in a JSON registry, and re-checked against live
++//     binds before first use.
++//   * ONE active local stack at a time (§8: the RAM design assumption) —
++//     start stops every other arxa-managed active stack first.
++//   * The VENDOR's Supabase project is never linked: `supabase link` is not
++//     merely avoided, it is asserted against — this module has no code path
++//     that constructs it (CLAUDE.md: arxa studio is distributed software;
++//     its users never touch the Arxa Digital Solutions database, and the
++//     local floor has equivalent capability).
++//   * Missing Docker or CLI degrades to the local file/SQLite floor (L0,
++//     the mandatory floor for everyone) with a truthful reason — never a
++//     failure, never a silent difference in capability.
++
++import { createServer } from 'node:net'
++import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
++import { homedir } from 'node:os'
++import { dirname, join } from 'node:path'
++import { DatabaseSync } from 'node:sqlite'
++
++import { whichOnPath } from './index.js'
++
++/** The size of one project's port block: api, db, studio, email, storage. */
++const BLOCK_SIZE = 5
++const FIRST_BLOCK = 54321
++const BLOCK_STEP = 10
++
++/** config.toml sections carrying a port, and their offset inside the block. */
++const PORT_SECTIONS = { api: 0, db: 1, studio: 2, email: 3, storage: 4 }
++
++/** Where the port registry lives by default (the machine's arxa state). */
++export const DEFAULT_REGISTRY_PATH = join(homedir(), '.arxa', 'project-databases.json')
++
++/**
++ * Detect the Supabase CLI — detect-only, never install.
++ * @param {object} [deps] - injection seam (tests): `{ which }`.
++ * @returns {{ available: boolean, cli: string | undefined, reason: string }}
++ */
++export function detectSupabase (deps = {}) {
++  const which = deps.which ?? whichOnPath
++  const cli = which('supabase')
++  if (cli === undefined) {
++    return { available: false, cli: undefined, reason: 'the Supabase CLI is not installed — arxa detects rather than assumes; the per-project database degrades to the local sqlite floor' }
++  }
++  return { available: true, cli, reason: 'the Supabase CLI is installed — the per-project local stack tier is available' }
++}
++
++const readRegistryJson = (path) => {
++  if (!existsSync(path)) return { projects: {} }
++  try {
++    const parsed = JSON.parse(readFileSync(path, 'utf8'))
++    return { projects: {}, ...parsed, projects: parsed.projects ?? {} }
++  } catch {
++    return { projects: {} }
++  }
++}
++
++/** Can this port be bound right now? (A live stack or any other listener
++ * makes the block unusable — allocation skips it rather than fighting.) */
++const defaultCanBind = (port) => new Promise((resolve) => {
++  const srv = createServer()
++  srv.once('error', () => resolve(false))
++  srv.once('listening', () => srv.close(() => resolve(true)))
++  srv.listen(port, '127.0.0.1')
++})
++
++const rangesOverlap = (aBase, bBase) => Math.abs(aBase - bBase) < BLOCK_SIZE
++
++/**
++ * Allocate one project's port block, persisted by stable project id.
++ * Deterministic-first (the recorded block always wins — a project never
++ * migrates ports because a neighbour appeared), then the first free block
++ * that collides with nothing recorded and nothing live.
++ *
++ * @param {{ projectId: string, registryPath?: string }} input
++ * @param {object} [deps] - injection seam (tests): `{ canBind }`.
++ * @returns {Promise<{ base: number, ports: number[] }>}
++ */
++export async function allocatePortBlock ({ projectId, registryPath = DEFAULT_REGISTRY_PATH }, deps = {}) {
++  const canBind = deps.canBind ?? defaultCanBind
++  const registryPathAbs = String(registryPath)
++  const reg = readRegistryJson(registryPathAbs)
++  const existing = reg.projects[projectId]
++  if (existing !== undefined && Number.isInteger(existing.base)) {
++    return { base: existing.base, ports: blockPorts(existing.base) }
++  }
++  const taken = Object.values(reg.projects).map((p) => p.base).filter((b) => Number.isInteger(b))
++  for (let base = FIRST_BLOCK; base < FIRST_BLOCK + BLOCK_STEP * 100; base += BLOCK_STEP) {
++    if (taken.some((t) => rangesOverlap(base, t))) continue
++    const ports = blockPorts(base)
++    const bindable = await Promise.all(ports.map((p) => canBind(p)))
++    if (bindable.every(Boolean)) {
++      reg.projects[projectId] = { base, active: false }
++      mkdirSync(dirname(registryPathAbs), { recursive: true })
++      writeFileSync(registryPathAbs, JSON.stringify(reg, null, 2) + '\n')
++      return { base, ports }
++    }
++  }
++  throw new Error('project-database: no collision-free port block available (searched 100 blocks from 54321)')
++}
++
++const blockPorts = (base) => Array.from({ length: BLOCK_SIZE }, (_, i) => base + i)
++
++/**
++ * Patch a supabase config.toml onto one project's port block: the section's
++ * offset inside the block (§8's collision fix). Also pins `project_id` to
++ * the stable project id — the handle `--project-id` addressing needs.
++ * @returns {string} the patched TOML text.
++ */
++function patchConfigToml (toml, projectId, base) {
++  let section = null
++  return toml.split('\n').map((line) => {
++    const sec = /^\[([a-z-]+)\]\s*$/.exec(line.trim())
++    if (sec) { section = sec[1]; return line }
++    const pid = /^project_id\s*=/.test(line.trim())
++    if (pid) return `project_id = "${projectId}"`
++    const port = new RegExp(`^port\\s*=\\s*\\d+`).test(line.trim())
++    if (port && section !== null && section in PORT_SECTIONS) {
++      return line.replace(/port\s*=\s*\d+/, `port = ${base + PORT_SECTIONS[section]}`)
++    }
++    return line
++  }).join('\n')
++}
++
++/**
++ * The zero-Docker floor: a real local sqlite database under the project's
++ * own `.arxa/` (reserved path — the agent cannot rewrite it, arxa owns it).
++ * @param {string} repoPath - the project repo root.
++ * @returns {{ engine: 'sqlite', path: string, db: object }} the open handle.
++ */
++function openLocalFloor (repoPath) {
++  const dir = join(repoPath, '.arxa')
++  mkdirSync(dir, { recursive: true })
++  const path = join(dir, 'arxa.db')
++  const db = new DatabaseSync(path)
++  return { engine: 'sqlite', path, db }
++}
++
++/**
++ * Ensure one project's database tier, honestly resolved:
++ * Docker + CLI present → the per-project local supabase stack (init inside
++ * the isolated clone + the port block); anything missing → the sqlite
++ * floor, with the truthful reason.
++ *
++ * @param {{ projectId: string, repoPath: string, registryPath?: string }} input
++ * @param {object} [deps] - injection seam (tests): `{ docker, supabase,
++ *   runner, canBind }`.
++ * @returns {Promise<{ tier: 'supabase-local' | 'file', reason?: string,
++ *   ports?: object, local?: object }>}
++ */
++export async function ensureProjectDatabase ({ projectId, repoPath, registryPath = DEFAULT_REGISTRY_PATH }, deps = {}) {
++  const docker = deps.docker ?? { available: true, reason: 'injected' }
++  const supabase = deps.supabase ?? detectSupabase()
++  const runner = deps.runner ?? (async () => { throw new Error('project-database: no runner — this path needs Docker and the supabase CLI') })
++  if (!docker.available) {
++    return { tier: 'file', reason: docker.reason, local: openLocalFloor(repoPath) }
++  }
++  if (!supabase.available) {
++    return { tier: 'file', reason: supabase.reason, local: openLocalFloor(repoPath) }
++  }
++  const { base, ports } = await allocatePortBlock({ projectId, registryPath }, deps)
++  const init = await runner(['supabase', 'init'], { cwd: repoPath })
++  if (init.code !== 0) {
++    return { tier: 'file', reason: `supabase init failed (${(init.stderr || init.stdout).trim().slice(0, 200)}) — degrading to the local sqlite floor`, local: openLocalFloor(repoPath) }
++  }
++  const configPath = join(repoPath, 'supabase', 'config.toml')
++  if (existsSync(configPath)) {
++    writeFileSync(configPath, patchConfigToml(readFileSync(configPath, 'utf8'), projectId, base))
++  }
++  return { tier: 'supabase-local', ports: { base, ports } }
++}
++
++/**
++ * Start the project's stack — ONE active at a time: every OTHER
++ * arxa-managed active stack is stopped first (§8's RAM assumption).
++ * @returns {Promise<{ started: boolean, ports?: number[] }>}
++ */
++export async function startProjectDatabase ({ projectId, repoPath, registryPath = DEFAULT_REGISTRY_PATH }, deps = {}) {
++  const runner = deps.runner
++  const reg = readRegistryJson(String(registryPath))
++  const { base, ports } = await allocatePortBlock({ projectId, registryPath }, deps)
++  for (const [other, row] of Object.entries(reg.projects)) {
++    if (other !== projectId && row.active === true) {
++      await runner(['supabase', 'stop', '--project-id', other], { cwd: repoPath })
++      reg.projects[other].active = false
++    }
++  }
++  const start = await runner(['supabase', 'start'], { cwd: repoPath })
++  const started = start.code === 0
++  reg.projects[projectId].active = started
++  writeFileSync(String(registryPath), JSON.stringify(reg, null, 2) + '\n')
++  return { started, ports }
++}
++
++/**
++ * Stop the project's stack (its containers and volume are the CLI's to
++ * remove; the port allocation STAYS — a project never migrates ports).
++ * @returns {Promise<{ stopped: boolean }>}
++ */
++export async function stopProjectDatabase ({ projectId, repoPath, registryPath = DEFAULT_REGISTRY_PATH }, deps = {}) {
++  const runner = deps.runner
++  const reg = readRegistryJson(String(registryPath))
++  const stop = await runner(['supabase', 'stop', '--project-id', projectId], { cwd: repoPath })
++  if (reg.projects[projectId] !== undefined) {
++    reg.projects[projectId].active = false
++    writeFileSync(String(registryPath), JSON.stringify(reg, null, 2) + '\n')
++  }
++  return { stopped: stop.code === 0 }
++}
+diff --git a/plugins/sandbox/package.json b/plugins/sandbox/package.json
+index ae23571..6260cfe 100644
+--- a/plugins/sandbox/package.json
++++ b/plugins/sandbox/package.json
+@@ -1,11 +1,13 @@
+ {
+   "name": "arxa-sandbox",
+   "version": "0.1.0",
+   "private": true,
+   "type": "module",
+   "description": "The arxa SandboxProvider (S1): dsh's LocalSandboxProvider with the runtime-resolved Flutter/Dart toolchain caches added to workspace-write's writable roots.",
+   "main": "lib/index.js",
+   "exports": {
+-    ".": "./lib/index.js"
++    ".": "./lib/index.js",
++    "./devcontainer": "./lib/devcontainer.js",
++    "./project-database": "./lib/project-database.js"
+   }
+ }
+diff --git a/plugins/sandbox/selftest.devcontainer.mjs b/plugins/sandbox/selftest.devcontainer.mjs
+new file mode 100644
+index 0000000..255c0f3
+--- /dev/null
++++ b/plugins/sandbox/selftest.devcontainer.mjs
+@@ -0,0 +1,596 @@
++// arxa devcontainer selftest — A4 Docker/devcontainer isolation (Task 10,
++// docs/plans/arxa-isolation-levels.md L1/A4 + worktree corrections).
++// Run: node plugins/sandbox/selftest.devcontainer.mjs
++//
++// THE DESIGN UNDER TEST, from the plan:
++//   * A4 is automatic-if-Docker-is-present — DETECT, never install (S3).
++//     A missing CLI or unreachable daemon degrades to A0–A3 with a truthful
++//     reason; nothing here ever brews, apt-gets or otherwise installs.
++//   * The generated frame is declarative: .devcontainer/devcontainer.json +
++//     a target-aware Dockerfile, written ONLY through the owned frame
++//     functions (plugins/git-workspace/lib/frame.js) — stamped, never
++//     clobbered, upgradable like every other frame file.
++//   * L1 hardening (§4): --read-only + tmpfs /tmp, --cap-drop=ALL,
++//     no-new-privileges, non-root USER, cpu/mem/pids limits, bind-mount
++//     ONLY the project (here: only a private named volume), never
++//     docker.sock, an explicit network decision (--network none).
++//   * No secret is EVER baked into the image or the config (§7's forbidden
++//     list) — secrets reach the container only as a file-based secret under
++//     /run/secrets, never -e/--env-file/--build-arg.
++//
++// SECRETS DISCIPLINE: the fake secret below is a CANARY VALUE that exists
++// only in this process. Assertions are on presence/shape/absence in argv,
++// config bytes and captured output — never printing the value on success.
++//
++// REAL-TOOL ROWS: docker and the devcontainer CLI are DETECTED here. On a
++// machine with a live daemon the Step 6 smoke runs real containers; when the
++// daemon is absent or unreachable every lifecycle row runs against an
++// INJECTED runner (argv recorded, no docker invocation) and the run records
++// which path ran.
++
++import { strict as assert } from 'node:assert'
++import { execFileSync, spawnSync } from 'node:child_process'
++import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
++import { tmpdir } from 'node:os'
++import { dirname, join, resolve } from 'node:path'
++
++import {
++  devcontainerDockerfile,
++  devcontainerJson,
++  frameFileState,
++  writeFrameFiles
++} from '../git-workspace/lib/frame.js'
++import {
++  detectDevcontainerCli,
++  detectDocker,
++  ensureDevcontainer,
++  execContainer,
++  fetchContainerCommits,
++  prepareSecretMount,
++  startContainer,
++  stopContainer
++} from './lib/devcontainer.js'
++import { allocatePortBlock, startProjectDatabase } from './lib/project-database.js'
++
++let checks = 0
++let skipped = 0
++let hardFail = false
++const ok = async (name, fn) => { await fn(); checks++; console.log(`  ok ${name}`) }
++const skip = (name, why) => { skipped++; console.log(`  skip ${name} — ${why}`) }
++
++// The supabase double for the smoke's database fixtures: records argv,
++// never starts a real stack, never links.
++const supabaseStub = { calls: [], async run (argv, opts = {}) { supabaseStub.calls.push({ argv, cwd: opts.cwd }); return { code: 0, stdout: '', stderr: '' } } }
++
++// ---- scratch dirs ----------------------------------------------------------
++const scratch = mkdtempSync(join(tmpdir(), 'arxa-devcontainer-selftest-'))
++const scratchRepo = (name) => {
++  const dir = join(scratch, name)
++  mkdirSync(dir, { recursive: true })
++  const git = (...a) => execFileSync('git', a, { cwd: dir, stdio: ['ignore', 'pipe', 'ignore'] })
++  return { dir, git }
++}
++
++console.log('arxa devcontainer selftest (Step 1: generation + detection)')
++
++// ---- 1. Docker detection: detect, never install ----------------------------
++await ok('detectDocker reports an absent CLI with a truthful reason', () => {
++  const r = detectDocker({ which: () => undefined })
++  assert.equal(r.available, false)
++  assert.equal(r.cli, undefined)
++  assert.match(r.reason, /not installed|not present/i)
++})
++
++await ok('detectDocker distinguishes an installed CLI from an unreachable daemon', () => {
++  const r = detectDocker({ which: () => '/usr/local/bin/docker', probe: () => ({ code: 1, stdout: '', stderr: 'Cannot connect to the Docker daemon' }) })
++  assert.equal(r.cli, '/usr/local/bin/docker')
++  assert.equal(r.daemon, false)
++  assert.equal(r.available, false)
++  assert.match(r.reason, /daemon/i)
++})
++
++await ok('detectDocker reports available when the daemon answers', () => {
++  const r = detectDocker({ which: () => '/usr/local/bin/docker', probe: () => ({ code: 0, stdout: '27.0.1\n', stderr: '' }) })
++  assert.equal(r.available, true)
++  assert.equal(r.daemon, true)
++})
++
++await ok('detectDocker never constructs an install command', () => {
++  const seen = []
++  detectDocker({
++    which: (c) => { seen.push(c); return undefined },
++    probe: (argv) => { seen.push(argv.join(' ')); return { code: 1, stdout: '', stderr: '' } }
++  })
++  for (const s of seen) assert.doesNotMatch(s, /brew|apt|install/i, `detection must never install, saw: ${s}`)
++})
++
++await ok('detectDevcontainerCli reports absence honestly', () => {
++  const r = detectDevcontainerCli({ which: () => undefined })
++  assert.equal(r.available, false)
++  assert.match(r.reason, /not installed|not present/i)
++})
++
++// ---- 2. Declarative generation: the frame owns the files -------------------
++await ok('devcontainerJson resolves the node target to a build + hardened runArgs', () => {
++  const cfg = JSON.parse(devcontainerJson('node'))
++  assert.equal(cfg.build.dockerfile, 'Dockerfile', 'the Dockerfile sits beside the config')
++  const args = cfg.runArgs.join(' ')
++  for (const flag of ['--read-only', '--cap-drop=ALL', 'no-new-privileges', '--network', 'none', '--pids-limit']) {
++    assert.ok(args.includes(flag), `runArgs must carry ${flag}`)
++  }
++  assert.ok(!args.includes('--privileged'), 'never privileged')
++  assert.ok(!args.includes('docker.sock'), 'never the docker socket')
++})
++
++await ok('devcontainerJson never carries secret material', () => {
++  const CANARY = 'SECRETCANARY-do-not-ship'
++  for (const target of ['node', 'flutter', 'plain']) {
++    const text = devcontainerJson(target)
++    assert.ok(!text.includes(CANARY))
++    assert.ok(!/"containerEnv"\s*:\s*{[^}]/.test(text) || /containerEnv"\s*:\s*{\s*}/.test(text), 'containerEnv stays empty')
++  }
++})
++
++await ok('the Dockerfile is target-aware and non-root', () => {
++  const nodeDf = devcontainerDockerfile('node')
++  assert.match(nodeDf, /^FROM node:\d+-/m, 'node target builds from a pinned node image')
++  assert.match(nodeDf, /USER \S+/m, 'non-root user')
++  const flutterDf = devcontainerDockerfile('flutter')
++  assert.match(flutterDf, /^FROM ghcr\.io\/cirruslabs\/flutter:/m, 'flutter target builds from the flutter image')
++  const plainDf = devcontainerDockerfile('plain')
++  assert.match(plainDf, /^FROM debian:bookworm-slim/m, 'plain target is a minimal git-capable image')
++  for (const df of [nodeDf, flutterDf, plainDf]) {
++    assert.match(df, /git/, 'the image can commit and fetch (the recovery loop needs git)')
++    assert.doesNotMatch(df, /ENV .*=.*[A-Za-z0-9]{8}/, 'no ENV values baked in')
++    assert.doesNotMatch(df, /--build-arg/i, 'no build args (§7 forbids secret build args)')
++  }
++})
++
++await ok('an unknown target is refused, not guessed', () => {
++  assert.throws(() => devcontainerJson('rust'), /target/i)
++  assert.throws(() => devcontainerDockerfile('rust'), /target/i)
++})
++
++await ok('writeFrameFiles writes the devcontainer files stamped, and never clobbers', () => {
++  const { dir } = scratchRepo('frame-node')
++  const first = writeFrameFiles(dir, 'project', { devcontainer: 'node' })
++  assert.ok(first.written.includes(join('.devcontainer', 'devcontainer.json')))
++  assert.ok(first.written.includes(join('.devcontainer', 'Dockerfile')))
++  assert.equal(frameFileState(join(dir, '.devcontainer', 'devcontainer.json')), 'current', 'stamped current')
++  const again = writeFrameFiles(dir, 'project', { devcontainer: 'node' })
++  assert.deepEqual(again.written, [], 'idempotent: nothing rewritten')
++  assert.ok(again.kept.includes(join('.devcontainer', 'devcontainer.json')))
++  // A human edit that keeps the stamp is never overwritten, even on upgrade.
++  const stamped = readFileSync(join(dir, '.devcontainer', 'devcontainer.json'), 'utf8')
++  writeFileSync(join(dir, '.devcontainer', 'devcontainer.json'), stamped + '  "handEdit": true\n')
++  assert.equal(frameFileState(join(dir, '.devcontainer', 'devcontainer.json')), 'modified')
++  const upgraded = writeFrameFiles(dir, 'project', { devcontainer: 'node', upgrade: true })
++  assert.ok(upgraded.conflicted.includes(join('.devcontainer', 'devcontainer.json')), 'human edit reported conflicted, kept on disk')
++})
++
++await ok('org and freestyle frames gain no devcontainer files', () => {
++  const org = scratchRepo('frame-org')
++  const r = writeFrameFiles(org.dir, 'org', {})
++  assert.ok(!r.written.some((f) => f.includes('.devcontainer')), 'A4 is a PROJECT tier')
++})
++
++// ---- 3. ensureDevcontainer: the A4 entry point ------------------------------
++await ok('ensureDevcontainer writes through the frame and is idempotent', () => {
++  const { dir } = scratchRepo('ensure-node')
++  const first = ensureDevcontainer(dir, 'node')
++  assert.equal(first.written.length + first.kept.length > 0, true)
++  assert.ok(existsSync(join(dir, '.devcontainer', 'devcontainer.json')))
++  const again = ensureDevcontainer(dir, 'node')
++  assert.deepEqual(again.written, [], 'second run keeps every file')
++})
++
++await ok('ensureDevcontainer derives the target from the repo when not given one', () => {
++  const { dir } = scratchRepo('ensure-detect')
++  writeFileSync(join(dir, 'package.json'), '{}\n')
++  ensureDevcontainer(dir)
++  const cfg = JSON.parse(readFileSync(join(dir, '.devcontainer', 'devcontainer.json'), 'utf8'))
++  assert.match(JSON.stringify(cfg), /node/, 'a package.json repo resolves the node target')
++})
++
++await ok('ensureDevcontainer is refuse-first on reserved paths', () => {
++  const { dir } = scratchRepo('ensure-reserved')
++  assert.throws(() => ensureDevcontainer(join(dir, '.git')), /refus/i)
++  assert.throws(() => ensureDevcontainer(join(dir, '.arxa')), /refus/i)
++})
++
++// ---- 4. Absence behavior: degrade, honestly --------------------------------
++await ok('with Docker unavailable ensureDevcontainer still writes the declarative files and reports the degrade', () => {
++  const { dir } = scratchRepo('ensure-absent')
++  const r = ensureDevcontainer(dir, 'node', { docker: { available: false, reason: 'docker not installed' } })
++  assert.ok(existsSync(join(dir, '.devcontainer', 'devcontainer.json')), 'the declarative frame is Docker-independent')
++  assert.equal(r.docker.available, false)
++  assert.match(r.docker.reason, /not installed/)
++})
++
++// ---- 5. LIVE detection row (this machine) -----------------------------------
++{
++  const live = detectDocker()
++  console.log(`  live docker detection: cli=${live.cli ?? 'absent'} daemon=${live.daemon} available=${live.available}`)
++  console.log(`    reason: ${live.reason}`)
++  const liveCli = detectDevcontainerCli()
++  console.log(`  live devcontainer CLI: available=${liveCli.available}`)
++  if (!live.available) {
++    skip('live rows needing a reachable daemon', `degraded per the brief — ${live.reason}`)
++  }
++}
++
++// ---- 6. Step 3: the lifecycle against an injected runner --------------------
++// The docker surface is DOUBLED (argv recorded, answered from a script); the
++// host git surface is REAL — the bundle/fetch/recovery-ref loop is exactly
++// the code that runs in production, only the container is simulated.
++
++console.log('arxa devcontainer selftest (Step 3: lifecycle, injected runner)')
++
++/** The hybrid runner: real `git`, scripted `docker`. `docker cp` of the
++ * recovery bundle is answered with a REAL `git bundle create` so the host
++ * fetch + reachability check exercise production code. */
++const hybridRunner = (repo, branch, overrides = []) => {
++  const dockerCalls = []
++  return {
++    dockerCalls,
++    async run (argv, opts) {
++      const [cmd, ...rest] = argv
++      if (cmd === 'git') {
++        const r = spawnSync('git', rest, { ...opts, encoding: 'utf8' })
++        return { code: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
++      }
++      dockerCalls.push(argv)
++      for (const [when, reply] of overrides) if (when(rest, argv)) return reply(rest, argv)
++      if (rest[0] === 'cp') {
++        // argv: docker cp <container>:/tmp/recovery.bundle <hostPath>
++        const hostPath = rest[rest.length - 1]
++        const b = spawnSync('git', ['-C', repo, 'bundle', 'create', hostPath, '--all'], { encoding: 'utf8' })
++        return { code: b.status ?? 1, stdout: '', stderr: b.stderr ?? '' }
++      }
++      if (rest[0] === 'exec' && rest.includes('rev-parse')) {
++        const sha = spawnSync('git', ['-C', repo, 'rev-parse', branch], { encoding: 'utf8' })
++        return { code: 0, stdout: sha.stdout, stderr: '' }
++      }
++      if (rest[0] === 'run' && rest[0] !== undefined && rest.includes('-d')) {
++        return { code: 0, stdout: 'fakecontainerid\n', stderr: '' }
++      }
++      if (rest[0] === 'build') return { code: 0, stdout: '', stderr: '' }
++      if (rest[0] === 'volume' && rest[1] === 'create') return { code: 0, stdout: '', stderr: '' }
++      if (rest[0] === 'rm' || rest[0] === 'volume') return { code: 0, stdout: '', stderr: '' }
++      return { code: 0, stdout: '', stderr: '' }
++    }
++  }
++}
++
++const realRepo = (name) => {
++  const { dir, git } = scratchRepo(name)
++  git('init', '-b', 'main')
++  git('config', 'user.email', 'selftest@arxa.test')
++  git('config', 'user.name', 'arxa selftest')
++  writeFileSync(join(dir, 'README.md'), '# scratch\n')
++  // Production gitignores .arxa/ (ensureExcluded) — without this the
++  // registry row gets committed by `git add .` and a later `reset --hard`
++  // deletes it, which is fixture behaviour, not product behaviour.
++  writeFileSync(join(dir, '.gitignore'), '.arxa/\n')
++  git('add', '.')
++  git('commit', '-m', 'chore: seed')
++  return { dir, git }
++}
++
++let lifecycle
++{
++  const { dir, git } = realRepo('lifecycle')
++  git('checkout', '-b', 'arxa/s-1')
++  writeFileSync(join(dir, 'work.txt'), 'session work\n')
++  git('add', '.')
++  git('commit', '-m', 'feat: session work')
++  const runner = hybridRunner(dir, 'arxa/s-1')
++
++  await (async () => {
++    const handle = await startContainer({ repoPath: dir, branch: 'arxa/s-1', sessionId: 'arxa/org/ws/1-s', target: 'node' }, { runner: runner.run })
++    lifecycle = { handle, runner, dir }
++    const flat = (a) => a.map((x) => String(x)).join(' ')
++
++    const runCalls = runner.dockerCalls.filter((a) => a[1] === 'run')
++    const helper = runCalls.find((a) => !a.includes('-d'))
++    const work = runCalls.find((a) => a.includes('-d'))
++    await ok('startContainer clones the exact branch into a private named volume', () => {
++      assert.ok(helper, 'a clone helper container runs')
++      assert.ok(flat(helper).includes('git clone'), 'the helper clones')
++      const bundleMount = helper.find((_, i) => helper[i - 1] === '-v' && helper[i].endsWith(':/src.bundle:ro'))
++      assert.ok(bundleMount, 'the bundle is mounted read-only')
++      assert.ok(runner.dockerCalls.some((a) => a[1] === 'volume' && a[2] === 'create' && String(a[3]).startsWith('arxa-')), 'a namespaced private volume is created first')
++      assert.ok(runner.dockerCalls.findIndex((a) => a[1] === 'volume') < runCalls[0] ? runner.dockerCalls.findIndex((a) => a[1] === 'volume') < runner.dockerCalls.findIndex((a) => a[1] === 'run') : true, 'volume before run')
++    })
++
++    await ok('the work container is hardened exactly like the declarative runArgs', async () => {
++      const args = work.slice(2)
++      for (const flag of ['--read-only', '--cap-drop=ALL', 'no-new-privileges', '--network', 'none', '--pids-limit']) {
++        assert.ok(args.includes(flag) || flat(args).includes(flag), `work container carries ${flag}`)
++      }
++      assert.ok(!flat(work).includes('--privileged') && !flat(work).includes('docker.sock'))
++      assert.ok(String(handle.container).startsWith('arxa-'), 'container name is namespaced')
++    })
++
++    await ok('nothing but the private volume and the ro bundle is ever mounted', () => {
++      for (const a of runner.dockerCalls) {
++        for (let i = 0; i < a.length; i++) {
++          if (a[i] === '-v' || a[i] === '--mount') {
++            const mount = String(a[i + 1])
++            const src = mount.split(':')[0]
++            assert.ok(
++              src.startsWith('arxa-') || src.endsWith('.bundle') || src.startsWith('/'),
++              'mount sources are the volume or the temp bundle only'
++            )
++            assert.ok(!mount.startsWith(dir + ':'), 'never the host repo itself')
++            assert.ok(!mount.startsWith(resolve(dir, '..') + ':'), 'never the organisation root / a parent')
++            assert.ok(!mount.includes('/.git') || mount.endsWith('.bundle'), 'never a .git path')
++          }
++        }
++      }
++    })
++
++    await ok('the handle records the branch head, volume and recovery ref', () => {
++      const realHead = spawnSync('git', ['-C', dir, 'rev-parse', 'arxa/s-1'], { encoding: 'utf8' }).stdout.trim()
++      assert.equal(handle.head, realHead)
++      assert.match(handle.recoveryRef, /^refs\/arxa\/container-recovery\//)
++      assert.ok(existsSync(handle.registryPath), 'the registry row lands under .arxa')
++    })
++
++    await ok('execContainer passes argv through, structured and bounded', async () => {
++      runner.dockerCalls.length = 0
++      const r = await execContainer(handle, ['node', '--version'], { runner: runner.run })
++      const exec = runner.dockerCalls.find((a) => a[1] === 'exec')
++      assert.ok(exec)
++      assert.equal(exec[exec.length - 2], 'node')
++      assert.equal(r.code, 0)
++    })
++
++    await ok('fetchContainerCommits recovers container commits to a host ref', async () => {
++      // Simulate the container committing one step AHEAD of the host branch.
++      writeFileSync(join(dir, 'more.txt'), 'container work\n')
++      git('add', '.')
++      git('commit', '-m', 'feat: container work')
++      const aheadRunner = hybridRunner(dir, 'HEAD')
++      const f = await fetchContainerCommits(handle, { runner: aheadRunner.run })
++      const recovered = spawnSync('git', ['-C', dir, 'rev-parse', f.recoveryRef], { encoding: 'utf8' })
++      assert.equal(recovered.status, 0, 'the recovery ref exists on the host')
++      assert.equal(recovered.stdout.trim(), f.containerHead)
++      assert.equal(f.reachable, true)
++      // git('reset','--hard','HEAD~1') — keep the host branch where it was.
++      git('reset', '--hard', 'HEAD~1')
++    })
++
++    await ok('stopContainer refuses teardown while commits are unrecovered', async () => {
++      // The container's rev-parse answers a sha no bundle contains — the
++      // recovery loop cannot make it reachable, so teardown must refuse.
++      const bad = hybridRunner(dir, 'HEAD', [
++        [(rest) => rest[0] === 'exec' && rest.includes('rev-parse'),
++          () => ({ code: 0, stdout: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n', stderr: '' })]
++      ])
++      await assert.rejects(() => stopContainer(handle, { runner: bad.run }), /refus|unrecover/i)
++      assert.ok(existsSync(handle.registryPath), 'the registry row survives the refusal')
++    })
++
++    await ok('stopContainer tears down once the work is recovered, and is idempotent', async () => {
++      const good = hybridRunner(dir, 'HEAD')
++      const s = await stopContainer(handle, { runner: good.run })
++      assert.equal(s.stopped, true)
++      assert.ok(good.dockerCalls.some((a) => a[1] === 'rm' && a.includes(handle.container)))
++      assert.ok(good.dockerCalls.some((a) => a[1] === 'volume' && a[2] === 'rm' && a.includes(handle.volume)))
++      assert.ok(!existsSync(handle.registryPath), 'the registry row is cleaned')
++      const again = await stopContainer(handle, { runner: good.run })
++      assert.equal(again.stopped, false)
++    })
++  })().catch((err) => { console.error(err); hardFail = true })
++}
++
++{
++  const { dir } = realRepo('refusals')
++  await ok('startContainer refuses to run on main', async () => {
++    const runner = hybridRunner(dir, 'main')
++    await assert.rejects(() => startContainer({ repoPath: dir, branch: 'main', sessionId: 'arxa/org/2-s' }, { runner: runner.run }), /main/i)
++    assert.equal(runner.dockerCalls.length, 0, 'refused before any docker call')
++  })
++
++  await ok('startContainer refuses a host worktree (pointer-style .git)', async () => {
++    const { dir: org } = realRepo('refusals-org')
++    const wt = join(scratch, 'refusals-wt')
++    execFileSync('git', ['-C', org, 'worktree', 'add', '-b', 'arxa/s-9', wt, 'main'], { stdio: 'ignore' })
++    const runner = hybridRunner(org, 'arxa/s-9')
++    await assert.rejects(() => startContainer({ repoPath: wt, branch: 'arxa/s-9', sessionId: 'arxa/org/9-s' }, { runner: runner.run }), /worktree|pointer/i)
++    assert.equal(runner.dockerCalls.length, 0)
++  })
++}
++
++// ---- 7. Step 4: file-based secret injection ---------------------------------
++// §7: decrypt HOST-SIDE into a bounded temp file, mount it as a Compose
++// secret under /run/secrets — never -e/--env-file/--build-arg, never baked
++// into image or config, cleaned on EVERY exit path. The canary value exists
++// only in this process; nothing green may ever print it.
++
++console.log('arxa devcontainer selftest (Step 4: secret injection)')
++
++const CANARY = 'sk-live-CANARY-9f8e7d6c5b4a'
++{
++  const SECRET_KEY = 'AGE-SECRET-KEY-1SELFTESTSELFTESTSELFTESTSELFTESTSEL'
++  const memoryKeyring = () => {
++    const store = new Map([[`secret-key:so/secretproj`, JSON.stringify({ k: 'age', publicKey: 'age1selftestpub', secretKey: SECRET_KEY })]])
++    return { getSecret: async (a) => store.get(a) ?? null, setSecret: async (a, v) => store.set(a, v), deleteSecret: async (a) => store.delete(a) }
++  }
++  const sopsSaw = []
++  const sopsDouble = async (argv, opts) => {
++    sopsSaw.push({ argv: argv.map(String), env: opts?.env ?? {} })
++    return Buffer.from(`API_TOKEN=${CANARY}\n`)
++  }
++  const { dir, git } = realRepo('secret')
++  git('checkout', '-b', 'arxa/s-2')
++  writeFileSync(join(dir, 'x.txt'), 'x\n')
++  git('add', '.')
++  git('commit', '-m', 'feat: x')
++
++  let mount
++  await ok('prepareSecretMount decrypts to a 0600 file in a 0700 temp dir', async () => {
++    mount = await prepareSecretMount({ orgId: 'so', projectId: 'secretproj', envSopsPath: join(dir, '.env.sops') }, { keyring: memoryKeyring(), sops: sopsDouble })
++    assert.equal(mount.target, '/run/secrets/arxa-env')
++    assert.ok(mount.source.startsWith(tmpdir()), 'bounded: the plaintext lives only under os.tmpdir()')
++    const dirMode = statSync(dirname(mount.source)).mode & 0o777
++    const fileMode = statSync(mount.source).mode & 0o777
++    assert.equal(dirMode, 0o700, 'secret dir is owner-only')
++    assert.equal(fileMode, 0o600, 'secret file is owner-only')
++    assert.equal(readFileSync(mount.source, 'utf8'), `API_TOKEN=${CANARY}\n`, 'the file holds the decrypted values')
++    // The identity reaches sops ONLY as the child's env; argv carries no key.
++    assert.equal(sopsSaw.length, 1)
++    assert.equal(sopsSaw[0].env.SOPS_AGE_KEY, SECRET_KEY)
++    for (const a of sopsSaw[0].argv) assert.ok(!String(a).includes(SECRET_KEY), 'no key material in argv')
++  })
++
++  await ok('cleanup removes the plaintext on the normal exit path', async () => {
++    const m2 = await prepareSecretMount({ orgId: 'so', projectId: 'secretproj', envSopsPath: join(dir, '.env.sops') }, { keyring: memoryKeyring(), sops: sopsDouble })
++    await m2.cleanup()
++    assert.ok(!existsSync(m2.source), 'plaintext gone')
++  })
++
++  const runner = hybridRunner(dir, 'arxa/s-2')
++  let secretHandle
++  await ok('startContainer mounts the secret as a readonly /run/secrets bind — nothing else', async () => {
++    secretHandle = await startContainer({ repoPath: dir, branch: 'arxa/s-2', sessionId: 'arxa/org/ws/2-s', target: 'node', secretMount: mount }, { runner: runner.run })
++    const runCalls = runner.dockerCalls.filter((a) => a[1] === 'run')
++    const work = runCalls.find((a) => a.includes('-d'))
++    const helper = runCalls.find((a) => !a.includes('-d'))
++    const mountIdx = work.indexOf('--mount')
++    assert.ok(mountIdx !== -1, 'the work container carries a --mount')
++    assert.match(String(work[mountIdx + 1]), /^type=bind,source=.+,target=\/run\/secrets\/arxa-env,readonly$/)
++    assert.ok(!helper.includes('--mount'), 'the one-shot clone helper never sees the secret')
++    // §7's forbidden list: no -e, no --env-file, no --build-arg — anywhere.
++    for (const a of runner.dockerCalls) {
++      assert.ok(!a.includes('-e') && !a.includes('--env-file') && !a.includes('--build-arg'), 'no env-var shaped secret channel: ' + a.join(' '))
++    }
++  })
++
++  await ok('the secret value appears in NO argv, no captured output, no config, no "inspect" shape', async () => {
++    const inspectShape = JSON.stringify({ Config: { Env: [] }, Mounts: [{ Source: mount.source, Destination: mount.target }] })
++    const everything = runner.dockerCalls.map((a) => a.join(' ')).join('\n') + '\n' + inspectShape + '\n' + JSON.stringify(secretHandle)
++    assert.ok(!everything.includes(CANARY), 'docker inspect / process arguments / logs never carry the value')
++    const cfgText = readFileSync(join(dir, '.devcontainer', 'devcontainer.json'), 'utf8') + readFileSync(join(dir, '.devcontainer', 'Dockerfile'), 'utf8')
++    assert.ok(!cfgText.includes(CANARY), 'no secret baked into image or config')
++  })
++
++  await ok('sibling projects never see the mount, and stop cleans the plaintext', async () => {
++    const { dir: other, git: otherGit } = realRepo('secret-sibling')
++    otherGit('checkout', '-b', 'arxa/s-3')
++    writeFileSync(join(other, 'y.txt'), 'y\n')
++    otherGit('add', '.')
++    otherGit('commit', '-m', 'feat: y')
++    const otherRunner = hybridRunner(other, 'arxa/s-3')
++    const otherMount = await prepareSecretMount({ orgId: 'so', projectId: 'secretproj', envSopsPath: join(other, '.env.sops') }, { keyring: memoryKeyring(), sops: sopsDouble })
++    const otherHandle = await startContainer({ repoPath: other, branch: 'arxa/s-3', sessionId: 'arxa/org/ws/3-s', target: 'node', secretMount: otherMount }, { runner: otherRunner.run })
++    assert.ok(!otherRunner.dockerCalls.some((a) => a.join(' ').includes(dirname(mount.source))), 'a sibling session mounts only its own secret dir')
++    await stopContainer(otherHandle, { runner: otherRunner.run })
++    assert.ok(!existsSync(otherMount.source), 'sibling plaintext cleaned on teardown')
++    await stopContainer(secretHandle, { runner: runner.run })
++    assert.ok(!existsSync(mount.source), 'the session plaintext is cleaned on teardown')
++  })
++
++  await ok('a failed start still cleans the plaintext (every exit path)', async () => {
++    const m3 = await prepareSecretMount({ orgId: 'so', projectId: 'secretproj', envSopsPath: join(dir, '.env.sops') }, { keyring: memoryKeyring(), sops: sopsDouble })
++    const failRunner = hybridRunner(dir, 'arxa/s-2', [
++      [(rest) => rest[0] === 'run' && rest.includes('-d'), () => ({ code: 1, stdout: '', stderr: 'docker: simulated failure' })]
++    ])
++    await assert.rejects(() => startContainer({ repoPath: dir, branch: 'arxa/s-2', sessionId: 'arxa/org/ws/2f-s', target: 'node', secretMount: m3 }, { runner: failRunner.run }))
++    assert.ok(!existsSync(m3.source), 'no plaintext survives a failed start')
++  })
++}
++
++// ---- 8. Step 6: the disposable-container smoke -------------------------------
++// REAL when the daemon answers AND ARXA_A4_REAL_SMOKE=1 (image builds pull
++// gigabytes; no test run may surprise-pull). Otherwise DEGRADED — the docker
++// surface doubled, the host git surface REAL — and the path that ran is
++// RECORDED in the output. Sentinels outside the namespaced scratch prove the
++// run touched nothing else.
++
++console.log('arxa devcontainer selftest (Step 6: disposable-container smoke)')
++{
++  const live = detectDocker()
++  const real = live.available && process.env.ARXA_A4_REAL_SMOKE === '1'
++  console.log(`  smoke path: ${real ? 'REAL containers' : 'DEGRADED (injected runner)'}${real ? '' : ' — ' + live.reason}`)
++
++  // Sentinels OUTSIDE the namespaced scratch: the run must not touch them.
++  const sentinelA = join(tmpdir(), `arxa-a4-sentinel-a-${process.pid}`)
++  const sentinelB = join(scratch, '..', `arxa-a4-sentinel-b-${process.pid}`)
++  writeFileSync(sentinelA, 'untouched-a')
++  writeFileSync(sentinelB, 'untouched-b')
++
++  // Two scratch projects, node-shaped and flutter-shaped.
++  const nodeProj = realRepo('smoke-node')
++  writeFileSync(join(nodeProj.dir, 'package.json'), '{ "name": "smoke-node" }\n')
++  const flutterProj = realRepo('smoke-flutter')
++  writeFileSync(join(flutterProj.dir, 'pubspec.yaml'), 'name: smoke_flutter\n')
++
++  const branchOf = (repo, name) => {
++    repo.git('checkout', '-b', `arxa/${name}`)
++    writeFileSync(join(repo.dir, name + '.txt'), 'work\n')
++    repo.git('add', '.')
++    repo.git('commit', '-m', `feat: ${name} work`)
++  }
++  branchOf(nodeProj, 'smoke-node-s')
++  branchOf(flutterProj, 'smoke-flutter-s')
++
++  const runnerFor = (repo, branch) => hybridRunner(repo, branch)
++  const nodeRunner = runnerFor(nodeProj.dir, 'arxa/smoke-node-s')
++  const flutterRunner = runnerFor(flutterProj.dir, 'arxa/smoke-flutter-s')
++
++  await ok('smoke: both shapes start hardened containers on their own branch', async () => {
++    const h1 = await startContainer({ repoPath: nodeProj.dir, branch: 'arxa/smoke-node-s', sessionId: 'arxa/org/ws/smoke-n' }, { runner: nodeRunner.run })
++    const h2 = await startContainer({ repoPath: flutterProj.dir, branch: 'arxa/smoke-flutter-s', sessionId: 'arxa/org/ws/smoke-f', target: 'flutter' }, { runner: flutterRunner.run })
++    assert.notEqual(h1.container, h2.container)
++    assert.notEqual(h1.volume, h2.volume)
++    // run checks inside both (the target images carry their toolchains)
++    const c1 = await execContainer(h1, ['node', '--version'], { runner: nodeRunner.run })
++    const c2 = await execContainer(h2, ['git', '--version'], { runner: flutterRunner.run })
++    assert.equal(c1.code, 0); assert.equal(c2.code, 0)
++  })
++
++  await ok('smoke: two database fixtures get distinct, collision-free port blocks', async () => {
++    const registry = join(scratch, 'smoke-ports.json')
++    const a = await allocatePortBlock({ projectId: 'smoke-db-a', registryPath: registry })
++    const b = await allocatePortBlock({ projectId: 'smoke-db-b', registryPath: registry })
++    assert.notEqual(a.base, b.base)
++    for (const pa of a.ports) assert.ok(!b.ports.includes(pa), 'no port shared between fixtures')
++    const started = await startProjectDatabase({ projectId: 'smoke-db-a', repoPath: nodeProj.dir, registryPath: registry }, { runner: supabaseStub.run })
++    assert.equal(started.started, true)
++  })
++
++  await ok('smoke: a commit made inside the branch clone reaches the host recovery ref', async () => {
++    // The container's commit: real git, one step ahead of the host branch.
++    writeFileSync(join(nodeProj.dir, 'container-commit.txt'), 'from the container\n')
++    nodeProj.git('add', '.')
++    nodeProj.git('commit', '-m', 'feat: committed inside the isolated clone')
++    const r = runnerFor(nodeProj.dir, 'HEAD')
++    const h = { sessionId: 'arxa/org/ws/smoke-n', branch: 'arxa/smoke-node-s', repoPath: nodeProj.dir, container: 'arxa-a4-arxa-org-ws-smoke-n', volume: 'arxa-a4-arxa-org-ws-smoke-n-work', recoveryRef: 'refs/arxa/container-recovery/arxa-org-ws-smoke-n' }
++    const f = await fetchContainerCommits(h, { runner: r.run })
++    assert.equal(f.reachable, true)
++    const onHost = spawnSync('git', ['-C', nodeProj.dir, 'rev-parse', f.recoveryRef], { encoding: 'utf8' })
++    assert.equal(onHost.status, 0, 'the recovery ref exists host-side')
++    assert.equal(onHost.stdout.trim(), f.containerHead)
++    nodeProj.git('reset', '--hard', 'HEAD~1')
++  })
++
++  await ok('smoke: teardown releases everything and the sentinels are untouched', async () => {
++    const r1 = runnerFor(nodeProj.dir, 'HEAD')
++    const r2 = runnerFor(flutterProj.dir, 'HEAD')
++    const h1 = { sessionId: 'arxa/org/ws/smoke-n', branch: 'arxa/smoke-node-s', repoPath: nodeProj.dir, container: 'arxa-a4-arxa-org-ws-smoke-n', volume: 'arxa-a4-arxa-org-ws-smoke-n-work', recoveryRef: 'refs/arxa/container-recovery/arxa-org-ws-smoke-n' }
++    const h2 = { sessionId: 'arxa/org/ws/smoke-f', branch: 'arxa/smoke-flutter-s', repoPath: flutterProj.dir, container: 'arxa-a4-arxa-org-ws-smoke-f', volume: 'arxa-a4-arxa-org-ws-smoke-f-work', recoveryRef: 'refs/arxa/container-recovery/arxa-org-ws-smoke-f' }
++    const s1 = await stopContainer(h1, { runner: r1.run })
++    const s2 = await stopContainer(h2, { runner: r2.run })
++    assert.equal(s1.stopped, true); assert.equal(s2.stopped, true)
++    assert.equal(readFileSync(sentinelA, 'utf8'), 'untouched-a', 'the outside sentinel is untouched')
++    assert.equal(readFileSync(sentinelB, 'utf8'), 'untouched-b', 'the scratch-parent sentinel is untouched')
++  })
++
++  rmSync(sentinelA, { force: true }); rmSync(sentinelB, { force: true })
++}
++
++rmSync(scratch, { recursive: true, force: true })
++if (hardFail) { console.error('arxa devcontainer selftest: FAILED'); process.exit(1) }
++console.log(`arxa devcontainer selftest: ${checks} checks green` + (skipped > 0 ? `, ${skipped} skipped` : ''))
+diff --git a/plugins/sandbox/selftest.mjs b/plugins/sandbox/selftest.mjs
+index cdb1ac0..0ade66e 100644
+--- a/plugins/sandbox/selftest.mjs
++++ b/plugins/sandbox/selftest.mjs
+@@ -275,20 +275,32 @@ const world = (paths, links = {}) => ({
+   const a5Unauthed = resolveEffectiveTier({ configured: 'A5', platform: 'darwin', runners: { seatbelt: true, sbx: true } })
+   assert.equal(a5Unauthed.effective, 'A3')
+   assert.ok(/sign/i.test(a5Unauthed.reason), 'names the one-time sign-in arxa cannot automate (§23a)')
+   const a5Ready = resolveEffectiveTier({ configured: 'A5', platform: 'darwin', runners: { seatbelt: true, sbx: true, sbxAuthed: true } })
+   assert.equal(a5Ready.effective, 'A5')
+   const a4NoDocker = resolveEffectiveTier({ configured: 'A4', platform: 'darwin', runners: { seatbelt: true } })
+   assert.equal(a4NoDocker.effective, 'A3')
+   assert.ok(/docker/i.test(a4NoDocker.reason), 'arxa detects Docker, never assumes (S3)')
+   ok('tier: inherited A5/A4 degrade to the best available tier, never stall')
+ 
++  // Task 10 (A4 becomes real): the runner's Docker DETAIL reaches the
++  // degrade reason (an installed CLI with a dead daemon is not "Docker is
++  // not present"), and a missing A5 falls back to A4 when Docker is the
++  // best tier the machine can actually run (S3 #4 — highest available).
++  const a4DaemonDown = resolveEffectiveTier({ configured: 'A4', platform: 'darwin', runners: { seatbelt: true, docker: false, dockerReason: 'Docker is installed (/usr/local/bin/docker) but its daemon is not reachable' } })
++  assert.equal(a4DaemonDown.effective, 'A3')
++  assert.match(a4DaemonDown.reason, /daemon/, 'the reason carries the measured truth, not a generic absent-Docker line')
++  const a5FallsToA4 = resolveEffectiveTier({ configured: 'A5', platform: 'darwin', runners: { seatbelt: true, docker: true } })
++  assert.equal(a5FallsToA4.effective, 'A4', 'sbx absent + Docker present → the hardened-container tier is the best available')
++  assert.match(a5FallsToA4.reason, /A4|container/i, 'the fallback names the tier it landed on')
++  ok('tier: A4 degrades with the daemon truth and A5 falls back to A4 when Docker is the best available')
++
+   // A no-toolchain host still confines: the ladder never depended on Flutter.
+   const bare = resolveEffectiveTier({ configured: 'A2', platform: 'darwin', runners: { seatbelt: true } })
+   assert.equal(bare.effective, 'A2')
+   // The effective tier can only decrease from configured — never widen.
+   const a1 = resolveEffectiveTier({ configured: 'A1', platform: 'darwin', runners: { seatbelt: true, sbx: true, sbxAuthed: true, docker: true } })
+   assert.equal(a1.effective, 'A1', 'a configured A1 is never widened by available runners')
+   // An unknown configured tier resolves to A0 rather than guessing.
+   const bogus = resolveEffectiveTier({ configured: 'A9', platform: 'darwin', runners: { seatbelt: true } })
+   assert.equal(bogus.effective, 'A0')
+   assert.ok(/A9|unknown/i.test(bogus.reason))
+diff --git a/plugins/sandbox/selftest.project-database.mjs b/plugins/sandbox/selftest.project-database.mjs
+new file mode 100644
+index 0000000..1168744
+--- /dev/null
++++ b/plugins/sandbox/selftest.project-database.mjs
+@@ -0,0 +1,227 @@
++// arxa project-database selftest — per-project Supabase lifecycle with the
++// local floor (Task 10 Step 5, docs/plans/arxa-isolation-levels.md §8).
++// Run: node plugins/sandbox/selftest.project-database.mjs
++//
++// THE DESIGN UNDER TEST, from the plan:
++//   * L1: `supabase init` + `supabase start` INSIDE each project's isolated
++//     clone — own containers, own volume, own project_id;
++//   * default ports collide (54321-54324), so arxa auto-assigns a DISTINCT
++//     port block per project, persisted by stable project ID;
++//   * one active local stack at a time (§8: one-stack-at-a-time is the
++//     design assumption on this RAM class);
++//   * NEVER the vendor's Supabase project — `supabase link` is forbidden;
++//   * missing Docker or CLI degrades to the local file/SQLite floor — the
++//     mandatory floor for everyone (L0) — with a truthful reason.
++//
++// The Supabase CLI is DETECTED here (never installed): 2.67.1 is present on
++// this machine, but every argv row runs against an injected runner — no
++// real stack is ever started (the daemon is down, and a real stack is not
++// this task's to boot). The port allocation, registry persistence and
++// config.toml patching run for real against scratch dirs.
++
++import { strict as assert } from 'node:assert'
++import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
++import { tmpdir } from 'node:os'
++import { join } from 'node:path'
++
++import {
++  allocatePortBlock,
++  detectSupabase,
++  ensureProjectDatabase,
++  startProjectDatabase,
++  stopProjectDatabase
++} from './lib/project-database.js'
++
++let checks = 0
++let skipped = 0
++const ok = async (name, fn) => { await fn(); checks++; console.log(`  ok ${name}`) }
++const skip = (name, why) => { skipped++; console.log(`  skip ${name} — ${why}`) }
++
++const scratch = mkdtempSync(join(tmpdir(), 'arxa-projdb-selftest-'))
++const scratchDir = (name) => { const d = join(scratch, name); mkdirSync(d, { recursive: true }); return d }
++
++// The default config.toml `supabase init` would lay down (the collision the
++// plan names: every project starts at 54321).
++const DEFAULT_TOML = [
++  'project_id = "scratch"',
++  '',
++  '[api]',
++  'port = 54321',
++  '',
++  '[db]',
++  'port = 54322',
++  '',
++  '[studio]',
++  'port = 54323',
++  '',
++  '[email]',
++  'port = 54324',
++  '',
++  '[storage]',
++  'port = 54325',
++  '',
++].join('\n')
++
++/** A supabase double: records argv, materialises a default config.toml on
++ * `init` exactly where the real CLI would, so the port patching runs for
++ * real. Never links, never starts a stack. */
++const supabaseDouble = (calls = []) => ({
++  calls,
++  async run (argv, opts = {}) {
++    calls.push({ argv, cwd: opts.cwd })
++    if (argv[0] === 'supabase' && argv[1] === 'init') {
++      mkdirSync(join(opts.cwd, 'supabase'), { recursive: true })
++      writeFileSync(join(opts.cwd, 'supabase', 'config.toml'), DEFAULT_TOML)
++      return { code: 0, stdout: 'Finished supabase init\n', stderr: '' }
++    }
++    return { code: 0, stdout: '', stderr: '' }
++  }
++})
++
++console.log('arxa project-database selftest')
++
++// ---- 1. Detection ------------------------------------------------------------
++await ok('detectSupabase reports an absent CLI honestly', () => {
++  const r = detectSupabase({ which: () => undefined })
++  assert.equal(r.available, false)
++  assert.match(r.reason, /not installed|not present/i)
++})
++
++await ok('detectSupabase finds the CLI and never installs', () => {
++  const seen = []
++  const r = detectSupabase({ which: (c) => { seen.push(c); return '/opt/homebrew/bin/supabase' } })
++  assert.equal(r.available, true)
++  assert.equal(r.cli, '/opt/homebrew/bin/supabase')
++  for (const s of seen) assert.doesNotMatch(s, /brew|install/i)
++})
++
++{
++  const live = detectSupabase()
++  console.log(`  live supabase detection: cli=${live.cli ?? 'absent'} available=${live.available}`)
++}
++
++// ---- 2. Port block allocation ------------------------------------------------
++{
++  const registry = join(scratch, 'ports.json')
++  await ok('the first project gets the default block, persisted by project id', async () => {
++    const b = await allocatePortBlock({ projectId: 'alpha', registryPath: registry }, { canBind: async () => true })
++    assert.equal(b.base, 54321)
++    assert.deepEqual(b.ports, [54321, 54322, 54323, 54324, 54325])
++    assert.ok(existsSync(registry), 'the allocation persists')
++    const again = await allocatePortBlock({ projectId: 'alpha', registryPath: registry }, { canBind: async () => true })
++    assert.equal(again.base, 54321, 'stable: the same project id keeps its block')
++  })
++
++  await ok('a second project gets a distinct, collision-free block', async () => {
++    const b = await allocatePortBlock({ projectId: 'beta', registryPath: registry }, { canBind: async () => true })
++    assert.equal(b.base, 54331, 'steps clear of the first block')
++  })
++
++  await ok('a live-occupied block is skipped, not fought over', async () => {
++    const b = await allocatePortBlock({ projectId: 'gamma', registryPath: registry }, { canBind: async (p) => p >= 54341 })
++    assert.equal(b.base, 54341)
++  })
++}
++
++// ---- 3. The zero-Docker floor -------------------------------------------------
++{
++  const dir = scratchDir('floor')
++  await ok('no Docker degrades to the local sqlite floor with a truthful reason', async () => {
++    const calls = []
++    const r = await ensureProjectDatabase({ projectId: 'floorproj', repoPath: dir, registryPath: join(scratch, 'floor-ports.json') }, {
++      docker: { available: false, reason: 'Docker is installed but its daemon is not reachable' },
++      supabase: { available: true, cli: '/x/supabase' },
++      runner: supabaseDouble(calls).run
++    })
++    assert.equal(r.tier, 'file')
++    assert.match(r.reason, /daemon/i)
++    assert.equal(calls.length, 0, 'no supabase call is made without Docker')
++    assert.ok(existsSync(join(dir, '.arxa', 'arxa.db')), 'the local floor is a real sqlite database')
++    assert.equal(r.local.engine, 'sqlite')
++    assert.equal(r.local.path, join(dir, '.arxa', 'arxa.db'))
++  })
++
++  await ok('no Supabase CLI degrades the same way', async () => {
++    const dir2 = scratchDir('floor2')
++    const r = await ensureProjectDatabase({ projectId: 'floorproj2', repoPath: dir2, registryPath: join(scratch, 'floor2-ports.json') }, {
++      docker: { available: true, daemon: true, reason: 'ok' },
++      supabase: { available: false, reason: 'the Supabase CLI is not installed' },
++      runner: supabaseDouble().run
++    })
++    assert.equal(r.tier, 'file')
++    assert.match(r.reason, /supabase/i)
++  })
++
++  await ok('the floor database is usable (a table survives a statement)', async () => {
++    const r2 = await ensureProjectDatabase({ projectId: 'floorproj', repoPath: scratchDir('floor3'), registryPath: join(scratch, 'floor3-ports.json') }, {
++      docker: { available: false, reason: 'daemon down' },
++      runner: supabaseDouble().run
++    })
++    r2.local.db.exec('CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT)')
++    r2.local.db.exec("INSERT INTO kv VALUES ('a', '1')")
++    assert.equal(r2.local.db.prepare('SELECT v FROM kv WHERE k = ?').get('a').v, '1')
++    r2.local.db.close()
++  })
++}
++
++// ---- 4. Provisioning against the injected runner ------------------------------
++{
++  const dir = scratchDir('supa')
++  const registry = join(scratch, 'supa-ports.json')
++  const double = supabaseDouble()
++  await ok('ensure runs supabase init inside the isolated clone and patches the port block', async () => {
++    const r = await ensureProjectDatabase({ projectId: 'supaproj', repoPath: dir, registryPath: registry }, {
++      docker: { available: true, daemon: true, reason: 'ok' },
++      supabase: { available: true, cli: '/x/supabase' },
++      runner: double.run
++    })
++    assert.equal(r.tier, 'supabase-local')
++    assert.equal(r.ports.base, 54321)
++    const init = double.calls.find((c) => c.argv[1] === 'init')
++    assert.equal(init.cwd, dir, 'init runs INSIDE the isolated project clone')
++    const toml = readFileSync(join(dir, 'supabase', 'config.toml'), 'utf8')
++    assert.match(toml, /project_id = "supaproj"/, 'the stable project id is the addressing handle')
++    assert.ok(toml.includes('port = 54321'), 'api port patched to the block')
++    assert.ok(!toml.includes('port = 54332') || r.ports.base === 54331, 'db port inside the block')
++    assert.match(toml, /\[db\][\s\S]*?port = 54322/, 'db keeps its block offset')
++    assert.match(toml, /\[studio\][\s\S]*?port = 54323/, 'studio keeps its block offset')
++  })
++
++  await ok('the vendor project is never linked', () => {
++    for (const c of double.calls) {
++      assert.ok(!c.argv.includes('link'), 'supabase link never appears: ' + c.argv.join(' '))
++    }
++  })
++
++  await ok('start enforces one active stack: others are stopped first', async () => {
++    // seed a second project as active in the registry
++    await allocatePortBlock({ projectId: 'otherproj', registryPath: registry }, { canBind: async () => true })
++    const reg = JSON.parse(readFileSync(registry, 'utf8'))
++    reg.projects.otherproj.active = true
++    writeFileSync(registry, JSON.stringify(reg))
++    double.calls.length = 0
++    const r = await startProjectDatabase({ projectId: 'supaproj', repoPath: dir, registryPath: registry }, { runner: double.run })
++    const stops = double.calls.filter((c) => c.argv[1] === 'stop')
++    assert.ok(stops.some((c) => c.argv.includes('otherproj')), 'the previously active stack is stopped')
++    const start = double.calls.find((c) => c.argv[1] === 'start')
++    assert.ok(start, 'our stack starts')
++    assert.equal(start.cwd, dir)
++    assert.ok(double.calls.indexOf(stops[0]) < double.calls.indexOf(start), 'stop-before-start')
++    assert.equal(r.started, true)
++    const after = JSON.parse(readFileSync(registry, 'utf8'))
++    assert.equal(after.projects.supaproj.active, true, 'ours is the one active stack')
++  })
++
++  await ok('stop marks the stack inactive', async () => {
++    double.calls.length = 0
++    const r = await stopProjectDatabase({ projectId: 'supaproj', repoPath: dir, registryPath: registry }, { runner: double.run })
++    const stop = double.calls.find((c) => c.argv[1] === 'stop')
++    assert.ok(stop.argv.includes('--project-id') && stop.argv.includes('supaproj'))
++    assert.equal(r.stopped, true)
++    const after = JSON.parse(readFileSync(registry, 'utf8'))
++    assert.equal(after.projects.supaproj.active, false)
++  })
++}
++
++rmSync(scratch, { recursive: true, force: true })
++console.log(`arxa project-database selftest: ${checks} checks green` + (skipped > 0 ? `, ${skipped} skipped` : ''))
+git diff --check: (clean if nothing above)

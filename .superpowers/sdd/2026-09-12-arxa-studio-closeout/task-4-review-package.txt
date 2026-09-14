@@ -1,0 +1,1178 @@
+7d9e866 feat: surface local checks and complete tree decorations
+ plugins/arxa-git-card/lib/client.js                |  77 +++++++++++++-
+ plugins/arxa-git-card/lib/git-card.snippet.txt     |  77 +++++++++++++-
+ plugins/arxa-git-card/lib/index.js                 |  59 +++++++++++
+ plugins/arxa-git-card/selftest.actions.mjs         | 112 +++++++++++++++++++++
+ plugins/arxa-git-card/selftest.mjs                 |  33 ++++++
+ plugins/arxa-sidebar/lib/client.js                 |  29 +++++-
+ .../arxa-sidebar/lib/workspace-region.snippet.txt  |  23 ++++-
+ plugins/arxa-sidebar/selftest.mjs                  |  19 ++++
+ scripts/card-local-smoke.mjs                       |  28 ++++++
+ scripts/gen-workspace.mjs                          |  40 ++++++++
+ 10 files changed, 492 insertions(+), 5 deletions(-)
+diff --git a/plugins/arxa-git-card/lib/client.js b/plugins/arxa-git-card/lib/client.js
+index 58818b2..a6908b4 100644
+--- a/plugins/arxa-git-card/lib/client.js
++++ b/plugins/arxa-git-card/lib/client.js
+@@ -112,20 +112,30 @@ window.__ModuleLoader__.load({
+       'git.wakeStarted': 'Waking the runner — checks resume when it reports in.',
+       'git.wakeManual': 'Start it by hand: run svc.sh start in ~/.arxa/runners/<owner>__<name>. {reason}',
+       'git.askDraft': 'Ask the session to draft the subject',
+       'git.draftFailed': 'Draft request failed: {reason}',
+       'git.insight.streak': 'Streak',
+       'git.insight.review': 'Review',
+       'git.insight.sessions': 'Sessions',
+       'git.mint': 'Mint a version',
+       'git.minted': 'Minted {chip}',
+       'git.mintFailed': 'Mint failed: {reason}',
++      // Decision 3 (local-only git parity): the local Checks row — the twin of
++      // the Actions section on linked seats, for the seat that has no remote.
++      'git.checks.none': 'checks not run yet',
++      'git.checks.running': 'running checks…',
++      'git.checks.green': 'green',
++      'git.checks.red': 'red',
++      'git.checks.light': 'light checks',
++      'git.checks.run': 'Run checks',
++      'git.checks.output': 'Checks output',
++      'git.checks.failed': 'Checks failed: {reason}',
+       // G4 (grilled 2026-09-06): the four moves that are hard to walk back ask
+       // first. Commit and Create PR already pause for text; Cancel CI is undone
+       // by re-running.
+       'git.confirm.integrate.title': 'Integrate main into this session?',
+       'git.confirm.integrate.body': 'Merges the current main into this session\u2019s worktree. A conflict stops the merge half-done — you finish it from the card before anything else can land.',
+       'git.confirm.integrate.ok': 'Integrate main',
+       'git.confirm.finish.title': 'Finish integrating?',
+       'git.confirm.finish.body': 'Commits the merge that is in progress. Resolve every conflict in the worktree first.',
+       'git.confirm.finish.ok': 'Finish integrating',
+       'git.confirm.merge.title': 'Merge this pull request into main?',
+@@ -210,20 +220,29 @@ window.__ModuleLoader__.load({
+       'git.wakeStarted': 'Budzenie runnera — kontrole wznowią się, gdy się zgłosi.',
+       'git.wakeManual': 'Uruchom ręcznie: svc.sh start w ~/.arxa/runners/<owner>__<name>. {reason}',
+       'git.askDraft': 'Poproś sesję o szkic tematu',
+       'git.draftFailed': 'Szkic nie powiódł się: {reason}',
+       'git.insight.streak': 'Seria',
+       'git.insight.review': 'Recenzja',
+       'git.insight.sessions': 'Sesje',
+       'git.mint': 'Wybij wersję',
+       'git.minted': 'Wybito {chip}',
+       'git.mintFailed': 'Wybicie nie powiodło się: {reason}',
++      // TODO native review (conformance decision 4): machine-drafted.
++      'git.checks.none': 'testy jeszcze nie uruchomiono',
++      'git.checks.running': 'uruchamianie testów…',
++      'git.checks.green': 'zielone',
++      'git.checks.red': 'czerwone',
++      'git.checks.light': 'testy lekkie',
++      'git.checks.run': 'Uruchom testy',
++      'git.checks.output': 'Wyniki testów',
++      'git.checks.failed': 'Testy nie powiodły się: {reason}',
+       'git.confirm.integrate.title': 'Scalić main do tej sesji?',
+       'git.confirm.integrate.body': 'Scala bieżący main do drzewa roboczego tej sesji. Konflikt zatrzyma scalanie w połowie — dokończysz je z karty, zanim cokolwiek innego wejdzie.',
+       'git.confirm.integrate.ok': 'Scal main',
+       'git.confirm.finish.title': 'Dokończyć scalanie?',
+       'git.confirm.finish.body': 'Zatwierdza trwające scalanie. Najpierw rozwiąż wszystkie konflikty w drzewie roboczym.',
+       'git.confirm.finish.ok': 'Dokończ scalanie',
+       'git.confirm.merge.title': 'Scalić ten pull request do main?',
+       'git.confirm.merge.body': 'Scala pull requesta jednym commitem. Main przesuwa się dla wszystkich, a karta tego nie cofnie.',
+       'git.confirm.merge.ok': 'Scal pull requesta',
+       'git.confirm.mint.title': 'Wybić wersję?',
+@@ -304,20 +323,29 @@ window.__ModuleLoader__.load({
+       'git.wakeStarted': 'Réveil du runner — les contrôles reprennent dès qu’il répond.',
+       'git.wakeManual': 'Lancez-le à la main : svc.sh start dans ~/.arxa/runners/<owner>__<name>. {reason}',
+       'git.askDraft': 'Demander à la session un sujet',
+       'git.draftFailed': 'Échec de la demande de brouillon : {reason}',
+       'git.insight.streak': 'Série',
+       'git.insight.review': 'Revue',
+       'git.insight.sessions': 'Sessions',
+       'git.mint': 'Frapper une version',
+       'git.minted': 'Version {chip} frappée',
+       'git.mintFailed': 'Échec de la frappe : {reason}',
++      // TODO native review (conformance decision 4): machine-drafted.
++      'git.checks.none': 'vérifications pas encore lancées',
++      'git.checks.running': 'lancement des vérifications…',
++      'git.checks.green': 'vertes',
++      'git.checks.red': 'rouges',
++      'git.checks.light': 'vérifications légères',
++      'git.checks.run': 'Lancer les vérifications',
++      'git.checks.output': 'Résultats des vérifications',
++      'git.checks.failed': 'Échec des vérifications : {reason}',
+       'git.confirm.integrate.title': 'Intégrer main dans cette session ?',
+       'git.confirm.integrate.body': 'Fusionne le main actuel dans l’arbre de travail de cette session. Un conflit arrête la fusion à mi-chemin — vous la terminez depuis la carte avant que quoi que ce soit d’autre puisse arriver.',
+       'git.confirm.integrate.ok': 'Intégrer main',
+       'git.confirm.finish.title': 'Terminer l’intégration ?',
+       'git.confirm.finish.body': 'Valide la fusion en cours. Résolvez d’abord tous les conflits dans l’arbre de travail.',
+       'git.confirm.finish.ok': 'Terminer l’intégration',
+       'git.confirm.merge.title': 'Fusionner cette pull request dans main ?',
+       'git.confirm.merge.body': 'Fusionne la pull request en un seul commit. Main avance pour tout le monde, et la carte ne l’annule pas.',
+       'git.confirm.merge.ok': 'Fusionner la pull request',
+       'git.confirm.mint.title': 'Frapper une version ?',
+@@ -361,20 +389,23 @@ window.__ModuleLoader__.load({
+ 
+     function GitDock({ sessionId, postAction: post, notify, t }) {
+       const [status, setStatus] = React.useState(null)
+       const [pr, setPr] = React.useState(void 0)
+       const [absent, setAbsent] = React.useState(false)
+       const [collapsed, setCollapsed] = React.useState(true)
+       const [editing, setEditing] = React.useState(null)
+       const [busy, setBusy] = React.useState(null)
+       const [seatSession, setSeatSession] = React.useState(sessionId || null)
+       const [mintChip, setMintChip] = React.useState(null)
++      // Decision 3: the local Checks row's disclosure — red output stays open
++      // until the reader closes it, but never leaks across a session switch.
++      const [checksOpen, setChecksOpen] = React.useState(false)
+       // G4: the move waiting on a yes — { key, title, body, ok, run } | null.
+       const [confirm, setConfirm] = React.useState(null)
+       // G6: the device-flow conversation — null | { starting } | { userCode, verificationUri }.
+       const [relink, setRelink] = React.useState(null)
+       const listId = React.useId()
+       const alive = React.useRef(true)
+       // The live device flow, or null: { poll }. A REF, not state — Cancel has to
+       // stop the poll synchronously, and a late tick has to be able to tell "my
+       // flow" from "the flow the user already dismissed".
+       const relinkRun = React.useRef(null)
+@@ -404,21 +435,21 @@ window.__ModuleLoader__.load({
+           notify('error', t('git.statusFailed', { reason: reasonOf(e) }))
+         }
+       }, [post, sessionId, notify, t])
+ 
+       const loadPr = React.useCallback(async () => {
+         if (!seatSession) { setPr(null); return }
+         try { const r = await post('card.pr.status', { sessionId: seatSession }); if (alive.current) setPr(r) }
+         catch (e) { if (alive.current) setPr({ ok: false, reason: reasonOf(e) }) }
+       }, [post, seatSession])
+ 
+-      React.useEffect(() => { setSeatSession(sessionId || null); setPr(void 0); setMintChip(null); load() }, [sessionId, load])
++      React.useEffect(() => { setSeatSession(sessionId || null); setPr(void 0); setMintChip(null); setChecksOpen(false); load() }, [sessionId, load])
+       React.useEffect(() => {
+         const on = () => { load(); if (!collapsed) loadPr() }
+         window.addEventListener('arxa-git-card-refresh', on)
+         return () => window.removeEventListener('arxa-git-card-refresh', on)
+       }, [load, loadPr, collapsed])
+       React.useEffect(() => {
+         if (!status || collapsed) return
+         if (status.seat && status.seat.kind === 'session' && status.linked && !status.localOnly && pr === void 0) loadPr()
+       }, [status, collapsed, pr, loadPr])
+ 
+@@ -617,20 +648,34 @@ window.__ModuleLoader__.load({
+       const finishSession = async () => {
+         await run('finish', async () => {
+           try {
+             await post('card.finish', seatArg())
+             if (!alive.current) return
+             notify('info', t('git.finish.done'))
+             load()
+           } catch (e) { notify('error', t('git.finishFailed', { reason: reasonOf(e) })) }
+         })
+       }
++      /** Decision 3: the local Checks row's verb — runGate WITHOUT committing,
++       * so the row answers "why would Commit park?" before anyone commits.
++       * No GitHub anywhere: this starts no Actions run, merges nothing, parks
++       * nothing. `run()` owns the busy key, so a second click while the script
++       * is live is a disabled button, not a second process. */
++      const runChecks = async () => {
++        await run('gate', async () => {
++          try {
++            await post('card.gate.run', seatArg())
++            if (!alive.current) return
++            load()
++          } catch (e) { notify('error', t('git.checks.failed', { reason: reasonOf(e) })) }
++        })
++      }
+       /** G6: the device flow, the sidebar's relink verbatim — card.github.link
+        * LONG-POLLS until GitHub confirms, while card.github.device is polled
+        * meanwhile for the one-time code to show. Both ride the card's own route:
+        * its host already holds the same getGithub the sidebar does, so the card
+        * keeps its one-wire property instead of reaching across. */
+       /** Cancel: stop the poll, drop the run token, close. Shipped 2026-09-06
+        * without this and the dialog could not be closed — the poll below was
+        * cleared only when card.github.link SETTLED, and that long-polls until
+        * GitHub confirms, so Cancel closed the modal for one tick and the next
+        * 700ms tick reopened it. The `if` guard in startRelink then swallowed
+@@ -794,20 +839,50 @@ window.__ModuleLoader__.load({
+                 latestRun ? action('ci-cancel', t('git.ci.cancel'), Icon('IconStopFill16', 'IconCloseOutline16', 14), { disabled: !runLive, onClick: cancelCi }) : null,
+                 latestRun && latestRun.url ? action('ci-open', t('git.ci.open'), Icon('IconRightUpOutline16', 'IconBrowseOutline16', 14), { onClick: openRun }) : null,
+                 // Merge is the one irreversible button: green checks AND an open PR.
+                 prOpen
+                   ? action('merge', t('git.pr.merge'), Icon('IconCheckOutline16', 'IconCheckOutline16', 14), { disabled: !(pr.checks && pr.checks.state === 'green' && pr.pr.state === 'open'), onClick: ask('merge', mergePr) })
+                   : prMerged
+                     ? action('mint', t('git.mint'), Icon('IconGoalOutline16', 'IconPlusOutline16', 14), { onClick: ask('mint', mint) })
+                     : action('pr-create', t('git.pr.create'), Icon('IconSendOutline16', 'IconPlusOutline16', 14), { disabled: pr === void 0, onClick: () => setEditing({ kind: 'pr', text: '' }) }),
+               ])))
+       }
++      // 4. Checks — the local-only twin of the Approve row (Decision 3). It
++      // shares the SLOT, not the shape: that row is a remote run with an id,
++      // history and cancellation; this one is a synchronous local script with
++      // a last result. `status.gate` is the cached card.gate.run outcome, and
++      // it is null whenever the worktree moved under it (stale ≠ green).
++      if (status.seat && status.seat.kind === 'session' && !(status.linked && !status.localOnly)) {
++        const gate = status.gate || null
++        const gateKind = !gate ? null : gate.kind === 'light' ? t('git.checks.light') : gate.kind
++        const gateState = !gate ? null : t(gate.state === 'green' ? 'git.checks.green' : 'git.checks.red')
++        const gateText = busy === 'gate' ? t('git.checks.running')
++          : !gate ? t('git.checks.none')
++            : [gateKind, gateState].filter(Boolean).join(' · ')
++        // Red output stays on the card in a disclosure — the toast this row
++        // replaces scrolled the reason away, which is why nobody knew why the
++        // branch parked.
++        const redOut = gate && gate.state === 'red' && gate.output ? gate.output : null
++        rows.push(h('li', { key: 'checks', className: S.row },
++          h('span', { className: S.preview }, gateText),
++          h('div', { className: S.actions }, [
++            redOut ? action('checks-output', t('git.checks.output'), Icon('IconChevronDownOutline14', 'IconChevronDownOutline14', 14), { onClick: () => setChecksOpen((v) => !v) }) : null,
++            action('checks-run', t('git.checks.run'), Icon('IconPlayOutline16', 'IconTriangleRightFill14', 14), { onClick: runChecks }),
++          ])))
++        if (checksOpen && redOut) {
++          rows.push(h('li', { key: 'checks-output', className: S.row },
++            h('pre', {
++              'aria-label': t('git.checks.output'),
++              style: { flex: 1, minWidth: 0, margin: 0, padding: '4px 8px', fontSize: 11, lineHeight: '16px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '30vh', overflow: 'auto', color: 'var(--dsw-alias-label-secondary)' },
++            }, redOut)))
++        }
++      }
+ 
+       const confirmModal = confirm === null ? null : h(P.Modal, {
+         open: true, onClose: () => setConfirm(null),
+         title: confirm.title, description: confirm.body, closeLabel: t('git.cancel'),
+         footer: h(React.Fragment, null,
+           h(P.Button, { variant: 'outline', autoFocus: true, onClick: () => setConfirm(null) }, t('git.cancel')),
+           h(P.Button, { variant: 'outline', onClick: confirmGo }, confirm.ok)),
+       })
+       const relinkModal = relink === null ? null : h(P.Modal, {
+         open: true, onClose: stopRelink,
+diff --git a/plugins/arxa-git-card/lib/git-card.snippet.txt b/plugins/arxa-git-card/lib/git-card.snippet.txt
+index def13c0..47e88be 100644
+--- a/plugins/arxa-git-card/lib/git-card.snippet.txt
++++ b/plugins/arxa-git-card/lib/git-card.snippet.txt
+@@ -64,20 +64,30 @@ const en = {
+   'git.wakeStarted': 'Waking the runner — checks resume when it reports in.',
+   'git.wakeManual': 'Start it by hand: run svc.sh start in ~/.arxa/runners/<owner>__<name>. {reason}',
+   'git.askDraft': 'Ask the session to draft the subject',
+   'git.draftFailed': 'Draft request failed: {reason}',
+   'git.insight.streak': 'Streak',
+   'git.insight.review': 'Review',
+   'git.insight.sessions': 'Sessions',
+   'git.mint': 'Mint a version',
+   'git.minted': 'Minted {chip}',
+   'git.mintFailed': 'Mint failed: {reason}',
++  // Decision 3 (local-only git parity): the local Checks row — the twin of
++  // the Actions section on linked seats, for the seat that has no remote.
++  'git.checks.none': 'checks not run yet',
++  'git.checks.running': 'running checks…',
++  'git.checks.green': 'green',
++  'git.checks.red': 'red',
++  'git.checks.light': 'light checks',
++  'git.checks.run': 'Run checks',
++  'git.checks.output': 'Checks output',
++  'git.checks.failed': 'Checks failed: {reason}',
+   // G4 (grilled 2026-09-06): the four moves that are hard to walk back ask
+   // first. Commit and Create PR already pause for text; Cancel CI is undone
+   // by re-running.
+   'git.confirm.integrate.title': 'Integrate main into this session?',
+   'git.confirm.integrate.body': 'Merges the current main into this session\u2019s worktree. A conflict stops the merge half-done — you finish it from the card before anything else can land.',
+   'git.confirm.integrate.ok': 'Integrate main',
+   'git.confirm.finish.title': 'Finish integrating?',
+   'git.confirm.finish.body': 'Commits the merge that is in progress. Resolve every conflict in the worktree first.',
+   'git.confirm.finish.ok': 'Finish integrating',
+   'git.confirm.merge.title': 'Merge this pull request into main?',
+@@ -162,20 +172,29 @@ const pl = {
+   'git.wakeStarted': 'Budzenie runnera — kontrole wznowią się, gdy się zgłosi.',
+   'git.wakeManual': 'Uruchom ręcznie: svc.sh start w ~/.arxa/runners/<owner>__<name>. {reason}',
+   'git.askDraft': 'Poproś sesję o szkic tematu',
+   'git.draftFailed': 'Szkic nie powiódł się: {reason}',
+   'git.insight.streak': 'Seria',
+   'git.insight.review': 'Recenzja',
+   'git.insight.sessions': 'Sesje',
+   'git.mint': 'Wybij wersję',
+   'git.minted': 'Wybito {chip}',
+   'git.mintFailed': 'Wybicie nie powiodło się: {reason}',
++  // TODO native review (conformance decision 4): machine-drafted.
++  'git.checks.none': 'testy jeszcze nie uruchomiono',
++  'git.checks.running': 'uruchamianie testów…',
++  'git.checks.green': 'zielone',
++  'git.checks.red': 'czerwone',
++  'git.checks.light': 'testy lekkie',
++  'git.checks.run': 'Uruchom testy',
++  'git.checks.output': 'Wyniki testów',
++  'git.checks.failed': 'Testy nie powiodły się: {reason}',
+   'git.confirm.integrate.title': 'Scalić main do tej sesji?',
+   'git.confirm.integrate.body': 'Scala bieżący main do drzewa roboczego tej sesji. Konflikt zatrzyma scalanie w połowie — dokończysz je z karty, zanim cokolwiek innego wejdzie.',
+   'git.confirm.integrate.ok': 'Scal main',
+   'git.confirm.finish.title': 'Dokończyć scalanie?',
+   'git.confirm.finish.body': 'Zatwierdza trwające scalanie. Najpierw rozwiąż wszystkie konflikty w drzewie roboczym.',
+   'git.confirm.finish.ok': 'Dokończ scalanie',
+   'git.confirm.merge.title': 'Scalić ten pull request do main?',
+   'git.confirm.merge.body': 'Scala pull requesta jednym commitem. Main przesuwa się dla wszystkich, a karta tego nie cofnie.',
+   'git.confirm.merge.ok': 'Scal pull requesta',
+   'git.confirm.mint.title': 'Wybić wersję?',
+@@ -256,20 +275,29 @@ const fr = {
+   'git.wakeStarted': 'Réveil du runner — les contrôles reprennent dès qu’il répond.',
+   'git.wakeManual': 'Lancez-le à la main : svc.sh start dans ~/.arxa/runners/<owner>__<name>. {reason}',
+   'git.askDraft': 'Demander à la session un sujet',
+   'git.draftFailed': 'Échec de la demande de brouillon : {reason}',
+   'git.insight.streak': 'Série',
+   'git.insight.review': 'Revue',
+   'git.insight.sessions': 'Sessions',
+   'git.mint': 'Frapper une version',
+   'git.minted': 'Version {chip} frappée',
+   'git.mintFailed': 'Échec de la frappe : {reason}',
++  // TODO native review (conformance decision 4): machine-drafted.
++  'git.checks.none': 'vérifications pas encore lancées',
++  'git.checks.running': 'lancement des vérifications…',
++  'git.checks.green': 'vertes',
++  'git.checks.red': 'rouges',
++  'git.checks.light': 'vérifications légères',
++  'git.checks.run': 'Lancer les vérifications',
++  'git.checks.output': 'Résultats des vérifications',
++  'git.checks.failed': 'Échec des vérifications : {reason}',
+   'git.confirm.integrate.title': 'Intégrer main dans cette session ?',
+   'git.confirm.integrate.body': 'Fusionne le main actuel dans l’arbre de travail de cette session. Un conflit arrête la fusion à mi-chemin — vous la terminez depuis la carte avant que quoi que ce soit d’autre puisse arriver.',
+   'git.confirm.integrate.ok': 'Intégrer main',
+   'git.confirm.finish.title': 'Terminer l’intégration ?',
+   'git.confirm.finish.body': 'Valide la fusion en cours. Résolvez d’abord tous les conflits dans l’arbre de travail.',
+   'git.confirm.finish.ok': 'Terminer l’intégration',
+   'git.confirm.merge.title': 'Fusionner cette pull request dans main ?',
+   'git.confirm.merge.body': 'Fusionne la pull request en un seul commit. Main avance pour tout le monde, et la carte ne l’annule pas.',
+   'git.confirm.merge.ok': 'Fusionner la pull request',
+   'git.confirm.mint.title': 'Frapper une version ?',
+@@ -313,20 +341,23 @@ const Icon = (name, fallback, size) => {
+ 
+ function GitDock({ sessionId, postAction: post, notify, t }) {
+   const [status, setStatus] = React.useState(null)
+   const [pr, setPr] = React.useState(void 0)
+   const [absent, setAbsent] = React.useState(false)
+   const [collapsed, setCollapsed] = React.useState(true)
+   const [editing, setEditing] = React.useState(null)
+   const [busy, setBusy] = React.useState(null)
+   const [seatSession, setSeatSession] = React.useState(sessionId || null)
+   const [mintChip, setMintChip] = React.useState(null)
++  // Decision 3: the local Checks row's disclosure — red output stays open
++  // until the reader closes it, but never leaks across a session switch.
++  const [checksOpen, setChecksOpen] = React.useState(false)
+   // G4: the move waiting on a yes — { key, title, body, ok, run } | null.
+   const [confirm, setConfirm] = React.useState(null)
+   // G6: the device-flow conversation — null | { starting } | { userCode, verificationUri }.
+   const [relink, setRelink] = React.useState(null)
+   const listId = React.useId()
+   const alive = React.useRef(true)
+   // The live device flow, or null: { poll }. A REF, not state — Cancel has to
+   // stop the poll synchronously, and a late tick has to be able to tell "my
+   // flow" from "the flow the user already dismissed".
+   const relinkRun = React.useRef(null)
+@@ -356,21 +387,21 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
+       notify('error', t('git.statusFailed', { reason: reasonOf(e) }))
+     }
+   }, [post, sessionId, notify, t])
+ 
+   const loadPr = React.useCallback(async () => {
+     if (!seatSession) { setPr(null); return }
+     try { const r = await post('card.pr.status', { sessionId: seatSession }); if (alive.current) setPr(r) }
+     catch (e) { if (alive.current) setPr({ ok: false, reason: reasonOf(e) }) }
+   }, [post, seatSession])
+ 
+-  React.useEffect(() => { setSeatSession(sessionId || null); setPr(void 0); setMintChip(null); load() }, [sessionId, load])
++  React.useEffect(() => { setSeatSession(sessionId || null); setPr(void 0); setMintChip(null); setChecksOpen(false); load() }, [sessionId, load])
+   React.useEffect(() => {
+     const on = () => { load(); if (!collapsed) loadPr() }
+     window.addEventListener('arxa-git-card-refresh', on)
+     return () => window.removeEventListener('arxa-git-card-refresh', on)
+   }, [load, loadPr, collapsed])
+   React.useEffect(() => {
+     if (!status || collapsed) return
+     if (status.seat && status.seat.kind === 'session' && status.linked && !status.localOnly && pr === void 0) loadPr()
+   }, [status, collapsed, pr, loadPr])
+ 
+@@ -569,20 +600,34 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
+   const finishSession = async () => {
+     await run('finish', async () => {
+       try {
+         await post('card.finish', seatArg())
+         if (!alive.current) return
+         notify('info', t('git.finish.done'))
+         load()
+       } catch (e) { notify('error', t('git.finishFailed', { reason: reasonOf(e) })) }
+     })
+   }
++  /** Decision 3: the local Checks row's verb — runGate WITHOUT committing,
++   * so the row answers "why would Commit park?" before anyone commits.
++   * No GitHub anywhere: this starts no Actions run, merges nothing, parks
++   * nothing. `run()` owns the busy key, so a second click while the script
++   * is live is a disabled button, not a second process. */
++  const runChecks = async () => {
++    await run('gate', async () => {
++      try {
++        await post('card.gate.run', seatArg())
++        if (!alive.current) return
++        load()
++      } catch (e) { notify('error', t('git.checks.failed', { reason: reasonOf(e) })) }
++    })
++  }
+   /** G6: the device flow, the sidebar's relink verbatim — card.github.link
+    * LONG-POLLS until GitHub confirms, while card.github.device is polled
+    * meanwhile for the one-time code to show. Both ride the card's own route:
+    * its host already holds the same getGithub the sidebar does, so the card
+    * keeps its one-wire property instead of reaching across. */
+   /** Cancel: stop the poll, drop the run token, close. Shipped 2026-09-06
+    * without this and the dialog could not be closed — the poll below was
+    * cleared only when card.github.link SETTLED, and that long-polls until
+    * GitHub confirms, so Cancel closed the modal for one tick and the next
+    * 700ms tick reopened it. The `if` guard in startRelink then swallowed
+@@ -746,20 +791,50 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
+             latestRun ? action('ci-cancel', t('git.ci.cancel'), Icon('IconStopFill16', 'IconCloseOutline16', 14), { disabled: !runLive, onClick: cancelCi }) : null,
+             latestRun && latestRun.url ? action('ci-open', t('git.ci.open'), Icon('IconRightUpOutline16', 'IconBrowseOutline16', 14), { onClick: openRun }) : null,
+             // Merge is the one irreversible button: green checks AND an open PR.
+             prOpen
+               ? action('merge', t('git.pr.merge'), Icon('IconCheckOutline16', 'IconCheckOutline16', 14), { disabled: !(pr.checks && pr.checks.state === 'green' && pr.pr.state === 'open'), onClick: ask('merge', mergePr) })
+               : prMerged
+                 ? action('mint', t('git.mint'), Icon('IconGoalOutline16', 'IconPlusOutline16', 14), { onClick: ask('mint', mint) })
+                 : action('pr-create', t('git.pr.create'), Icon('IconSendOutline16', 'IconPlusOutline16', 14), { disabled: pr === void 0, onClick: () => setEditing({ kind: 'pr', text: '' }) }),
+           ])))
+   }
++  // 4. Checks — the local-only twin of the Approve row (Decision 3). It
++  // shares the SLOT, not the shape: that row is a remote run with an id,
++  // history and cancellation; this one is a synchronous local script with
++  // a last result. `status.gate` is the cached card.gate.run outcome, and
++  // it is null whenever the worktree moved under it (stale ≠ green).
++  if (status.seat && status.seat.kind === 'session' && !(status.linked && !status.localOnly)) {
++    const gate = status.gate || null
++    const gateKind = !gate ? null : gate.kind === 'light' ? t('git.checks.light') : gate.kind
++    const gateState = !gate ? null : t(gate.state === 'green' ? 'git.checks.green' : 'git.checks.red')
++    const gateText = busy === 'gate' ? t('git.checks.running')
++      : !gate ? t('git.checks.none')
++        : [gateKind, gateState].filter(Boolean).join(' · ')
++    // Red output stays on the card in a disclosure — the toast this row
++    // replaces scrolled the reason away, which is why nobody knew why the
++    // branch parked.
++    const redOut = gate && gate.state === 'red' && gate.output ? gate.output : null
++    rows.push(h('li', { key: 'checks', className: S.row },
++      h('span', { className: S.preview }, gateText),
++      h('div', { className: S.actions }, [
++        redOut ? action('checks-output', t('git.checks.output'), Icon('IconChevronDownOutline14', 'IconChevronDownOutline14', 14), { onClick: () => setChecksOpen((v) => !v) }) : null,
++        action('checks-run', t('git.checks.run'), Icon('IconPlayOutline16', 'IconTriangleRightFill14', 14), { onClick: runChecks }),
++      ])))
++    if (checksOpen && redOut) {
++      rows.push(h('li', { key: 'checks-output', className: S.row },
++        h('pre', {
++          'aria-label': t('git.checks.output'),
++          style: { flex: 1, minWidth: 0, margin: 0, padding: '4px 8px', fontSize: 11, lineHeight: '16px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '30vh', overflow: 'auto', color: 'var(--dsw-alias-label-secondary)' },
++        }, redOut)))
++    }
++  }
+ 
+   const confirmModal = confirm === null ? null : h(P.Modal, {
+     open: true, onClose: () => setConfirm(null),
+     title: confirm.title, description: confirm.body, closeLabel: t('git.cancel'),
+     footer: h(React.Fragment, null,
+       h(P.Button, { variant: 'outline', autoFocus: true, onClick: () => setConfirm(null) }, t('git.cancel')),
+       h(P.Button, { variant: 'outline', onClick: confirmGo }, confirm.ok)),
+   })
+   const relinkModal = relink === null ? null : h(P.Modal, {
+     open: true, onClose: stopRelink,
+diff --git a/plugins/arxa-git-card/lib/index.js b/plugins/arxa-git-card/lib/index.js
+index bbc2ea2..d7827d1 100644
+--- a/plugins/arxa-git-card/lib/index.js
++++ b/plugins/arxa-git-card/lib/index.js
+@@ -199,20 +199,46 @@ async function reviewFor({ g, gw, owner, name, branch, sid, fresh }) {
+     issues: conversation.issues.map((i) => ({ ...i, comments: i.comments.map(clean) })),
+     commitNotes: conversation.commitNotes.map(clean),
+     ci,
+     needs: needsYou(conversation, ci, login),
+     degraded: conv.status === 'rejected' ? 'conversation' : runs.status === 'rejected' ? 'ci' : null,
+   }
+   reviewCache.set(key, { at: Date.now(), value })
+   return value
+ }
+ 
++/* ---------------------------------------------------------------------------
++ * The local Checks row (Decision 3, local-only git parity):
++ * `card.gate.run` runs check.sh WITHOUT committing — the same runGate the
++ * Commit boundary already uses (consume, don't duplicate). The last result
++ * is cached per worktree and served on card.status while the worktree
++ * fingerprint still matches: a poll never reruns the script, and any
++ * mutation (committed, staged, unstaged or untracked) leaves gate:null —
++ * "not run" — rather than a green/red claim about bytes that no longer
++ * exist.
++ * ------------------------------------------------------------------------- */
++const GATE_OUTPUT_MAX = 64 * 1024
++const gateCache = new Map() // worktree → last runGate result + fingerprint
++/** HEAD plus staged/unstaged/untracked state as one cheap string: any
++ * worktree mutation changes it, which is the whole staleness contract. */
++const gateFingerprint = (gw, worktree) =>
++  (gw.runGit(['rev-parse', 'HEAD'], { cwd: worktree, allowFail: true }) ?? 'no-head') + '\n'
++  + (gw.runGit(['status', '--porcelain'], { cwd: worktree, allowFail: true }) ?? 'unreadable')
++/** Cap the UI payload to the LAST 64 KiB — a failing gate says why at the
++ * end of its output, so the tail is the part worth carrying, behind an
++ * explicit prefix so the cut is never mistaken for the whole. */
++function capGateOutput(out) {
++  const s = String(out ?? '')
++  return s.length <= GATE_OUTPUT_MAX ? s
++    : '[output truncated — showing the last 64 KiB]\n' + s.slice(-GATE_OUTPUT_MAX)
++}
++
+ export function apply(ctx) {
+   /** The in-flight device flow, or null. Plugin scope on purpose: the action
+    * table below is rebuilt per REQUEST, so a per-table variable would dedupe
+    * nothing. A second concurrent flow is not merely untidy — GitHub answers
+    * competing polls on one client id with `slow_down` and caps verification
+    * submissions at 50/hour/app, and github-link keeps exactly ONE
+    * `lastDeviceCode` slot, so flow B would overwrite the code flow A is
+    * showing on screen. */
+   let linkInFlight = null
+ 
+@@ -709,22 +735,32 @@ export function apply(ctx) {
+               // is what the dark button says instead of going mute.
+               // D40: a parked session is never deleted, so Finish is not
+               // offered on one at all — not merely disabled.
+               let finish = null
+               if (sessionRow && sessionRow.state !== 'parked' && health === 'ok') {
+                 try {
+                   const dry = gw.finishSession(primaryRepoPath, sessionRow.id, { env: process.env, dryRun: true })
+                   finish = { can: dry.wouldFinish === true, reason: dry.reason ?? null }
+                 } catch (err) { finish = { can: false, reason: String(err?.message ?? err) } }
+               }
++              // Decision 3: the last local gate result, served from the
++              // card.gate.run cache only while the fingerprint still
++              // matches. Only measured when a run exists to serve — the
++              // fingerprint git calls never run for a seat that never asked.
++              let gate = null
++              if (sessionRow && health === 'ok' && gateCache.has(repoPath)) {
++                const hit = gateCache.get(repoPath)
++                if (gateFingerprint(gw, repoPath) === hit.fingerprint) gate = hit
++              }
+               return {
+                 finish,
++                gate,
+                 seat: { kind: sid ? 'session' : 'org', sessionId: sessionRow?.id ?? sid, branch },
+                 github: { relinkRequired: ghState?.relinkRequired === true },
+                 // `health` is what the card must read before any count. When it
+                 // is not 'ok' the counts were never measured, so they are null
+                 // rather than zero — zero is a claim, and it would be a lie.
+                 health,
+                 dirty: health === 'ok' ? { staged, unstaged, untracked } : null,
+                 aheadBehind,
+                 integrate,
+                 // wipRun throws outright on a missing worktree, which used to
+@@ -957,20 +993,43 @@ export function apply(ctx) {
+             /** Q8: run control from the card. Both take the run id the status
+               * call already surfaced, so the UI never has to guess one. */
+             'card.ci.rerun': async () => {
+               const { g, owner, name, runId } = await ciTarget()
+               return g.rerunRun({ owner, name, runId, failedOnly: arg?.failedOnly === true })
+             },
+             'card.ci.cancel': async () => {
+               const { g, owner, name, runId } = await ciTarget()
+               return g.cancelRun({ owner, name, runId })
+             },
++            /** Decision 3: the local Checks row's verb — run the gate
++             * WITHOUT committing, so the row can answer "why would Commit
++             * park?" before anyone commits. The same runGate the boundary
++             * uses; nothing is pushed, merged, parked, and no GitHub
++             * Actions run is started — local-only by construction. */
++            'card.gate.run': async () => {
++              const gw = await importGitWorkspace()
++              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
++              if (!sid) throw new Error('card.gate.run serves session seats')
++              const s = await sessionFor(gw, sid)
++              if (!s) throw new Error('session-not-found: ' + sid)
++              const gate = gw.runGate(s.worktree)
++              const output = capGateOutput(gate.output)
++              gateCache.set(s.worktree, {
++                state: gate.green ? 'green' : 'red',
++                kind: gate.kind,
++                configured: gate.configured,
++                output,
++                ranAt: Date.now(),
++                fingerprint: gateFingerprint(gw, s.worktree),
++              })
++              return { green: gate.green, kind: gate.kind, configured: gate.configured, output }
++            },
+             /** Bring main into the session's worktree (grilled 2026-09-03).
+               * The MANUAL half — nothing calls this on its own. A conflict is
+               * left open on purpose: the agent working in that worktree is what
+               * resolves it, and aborting would put the user back exactly where
+               * they started. */
+             'card.integrate': async () => {
+               const gw = await importGitWorkspace()
+               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+               if (!sid) throw new Error('card.integrate serves session seats')
+               const s = await sessionFor(gw, sid)
+diff --git a/plugins/arxa-git-card/selftest.actions.mjs b/plugins/arxa-git-card/selftest.actions.mjs
+index 0afbb77..b5cc45e 100644
+--- a/plugins/arxa-git-card/selftest.actions.mjs
++++ b/plugins/arxa-git-card/selftest.actions.mjs
+@@ -369,20 +369,132 @@ async function patchProjectManifest(projPath, patch) {
+ 
+   // The resolver sits at the action boundary, so handlers that hand the id
+   // down into git-workspace get a registry id too — version.mint is the
+   // cheapest such handler (card.commit would need a WIP run + gate).
+   r = await act('version.mint', { sessionId: dshId, name: 'Seatlets', state: 'Draft' })
+   check('version.mint: dsh conversation id reaches git-workspace as the registry id',
+     r.ok === true && r.result && typeof r.result === 'object' && !/unknown session/.test(JSON.stringify(r)),
+     JSON.stringify(r).slice(0, 300))
+ }
+ 
++// ============================================================
++// G. card.gate.run + card.status.gate — the local Checks row's engine
++//    (Decision 3, local-only git parity): runGate WITHOUT committing,
++//    cached per worktree, voided by any mutation (committed / staged /
++//    unstaged / untracked) without rerunning the script.
++// ============================================================
++{
++  const org = await makeOrg('Gate Co')
++  const sid = await makeSession(org)
++  const row = gw.parkedSessions(org.path).find((x) => x.id === sid)
++  const wt = row.worktree
++  const gateOf = async () => {
++    const r = await act('card.status', { sessionId: sid })
++    return r.ok ? (r.result.gate ?? null) : 'ERR:' + r.error
++  }
++
++  // Loud refusals first.
++  let r = await act('card.gate.run', {})
++  check('card.gate.run: refuses without a session seat',
++    r.ok === false && /serves session seats/.test(r.error), JSON.stringify(r))
++  r = await act('card.gate.run', { sessionId: 'nope-wt-260913-999' })
++  check('card.gate.run: unknown session is session-not-found',
++    r.ok === false && /^session-not-found/.test(r.error), JSON.stringify(r))
++
++  // No cached run yet: gate is null — "not run" is never "green".
++  r = await act('card.status', { sessionId: sid })
++  check('card.status: no gate run yet answers gate:null, not a claim',
++    r.ok === true && r.result.gate === null, JSON.stringify(r.result.gate))
++
++  // GREEN with captured output.
++  writeFileSync(path.join(wt, 'check.sh'), '#!/bin/sh\necho "gate green output"\n')
++  r = await act('card.gate.run', { sessionId: sid })
++  check('card.gate.run: green check.sh returns green/kind/configured + output',
++    r.ok === true && r.result.green === true && r.result.kind === 'check.sh' &&
++    r.result.configured === true && r.result.output.includes('gate green output'),
++    JSON.stringify(r))
++  r = await act('card.status', { sessionId: sid })
++  const g1 = r.result.gate
++  check('card.status: serves the cached run without rerunning (state/kind/output/ranAt/fingerprint)',
++    g1 && g1.state === 'green' && g1.kind === 'check.sh' && g1.configured === true &&
++    g1.output.includes('gate green output') && typeof g1.ranAt === 'number' &&
++    typeof g1.fingerprint === 'string' && g1.fingerprint.length > 0,
++    JSON.stringify(g1))
++
++  // Staleness: each mutation kind voids the cached result. A fresh green
++  // run precedes each so the cache is warm, then the mutation alone must
++  // void it — the whole point is that a historical green never outlives
++  // the bytes it was measured on.
++  await act('card.gate.run', { sessionId: sid })
++  writeFileSync(path.join(wt, 'untracked.txt'), 'x\n')
++  check('stale: an UNTRACKED file voids the cached result', (await gateOf()) === null,
++    JSON.stringify(await gateOf()))
++  await act('card.gate.run', { sessionId: sid })
++  check('rerun recaches while the tree is unchanged', (await gateOf())?.state === 'green')
++  gw.runGit(['add', 'untracked.txt'], { cwd: wt })
++  check('stale: a STAGED change voids the cached result', (await gateOf()) === null,
++    JSON.stringify(await gateOf()))
++  await act('card.gate.run', { sessionId: sid })
++  writeFileSync(path.join(wt, 'untracked.txt'), 'changed\n')
++  check('stale: an UNSTAGED change voids the cached result', (await gateOf()) === null,
++    JSON.stringify(await gateOf()))
++  await act('card.gate.run', { sessionId: sid })
++  gw.runGit(['commit', '-m', 'chore: gate fixture'], { cwd: wt })
++  check('stale: a COMMIT (HEAD move) voids the cached result', (await gateOf()) === null,
++    JSON.stringify(await gateOf()))
++
++  // RED with captured output — the parked-branch mystery this row exists for.
++  writeFileSync(path.join(wt, 'check.sh'), '#!/bin/sh\necho "boom-red-line" >&2\nexit 1\n')
++  r = await act('card.gate.run', { sessionId: sid })
++  check('card.gate.run: red check.sh captures the output, still kind check.sh',
++    r.ok === true && r.result.green === false && r.result.kind === 'check.sh' &&
++    r.result.output.includes('boom-red-line'),
++    JSON.stringify(r).slice(0, 300))
++  r = await act('card.status', { sessionId: sid })
++  check('card.status: the cached red gate carries state red + the same output',
++    r.result.gate?.state === 'red' && r.result.gate?.output.includes('boom-red-line'),
++    JSON.stringify(r.result.gate ?? null).slice(0, 300))
++
++  // The 64 KiB payload cap: a wall of output keeps only the last 64 KiB,
++  // with an explicit prefix saying so.
++  writeFileSync(path.join(wt, 'check.sh'),
++    '#!/bin/sh\ni=0\nwhile [ $i -lt 20000 ]; do echo "line $i filler text"; i=$((i+1)); done\necho "final-line-19999"\nexit 1\n')
++  r = await act('card.gate.run', { sessionId: sid })
++  check('cap: output is the LAST 64 KiB behind an explicit truncation prefix',
++    r.ok === true && /^.{0,80}truncat/i.test(r.result.output) &&
++    r.result.output.length <= 64 * 1024 + 120 &&
++    r.result.output.includes('final-line-19999') && !r.result.output.includes('line 0 filler'),
++    'len=' + r.result?.output?.length + ' head=' + String(r.result?.output).slice(0, 60))
++}
++
++// ============================================================
++// G2. card.gate.run on a worktree with NO check.sh — the light gate
++// ============================================================
++{
++  const org = await makeOrg('Light Gate Co')
++  const sid = await makeSession(org)
++  /* Org scaffolding SHIPS check.sh (the stack probe), so the light path
++   * needs it gone — and the tree clean again, or the light gate reports
++   * the dirt (which is its job) instead of the absent-script state. */
++  const wt2 = gw.parkedSessions(org.path).find((x) => x.id === sid).worktree
++  gw.runGit(['rm', '-q', 'check.sh'], { cwd: wt2 })
++  gw.runGit(['commit', '-m', 'chore: drop check.sh'], { cwd: wt2 })
++  const r = await act('card.gate.run', { sessionId: sid })
++  check('light: an absent check.sh is a configuration state, not an error',
++    r.ok === true && r.result.green === true && r.result.kind === 'light' &&
++    r.result.configured === false, JSON.stringify(r))
++  const s = await act('card.status', { sessionId: sid })
++  check('light: the cached gate reports kind light through card.status',
++    s.result.gate?.kind === 'light' && s.result.gate?.state === 'green',
++    JSON.stringify(s.result.gate ?? null))
++}
++
+ // ---- Q14: the PRODUCT posts the stage record, not a driver script ---------
+ // Everything above proves the actions work. This proves the ledger they leave
+ // behind reaches GitHub: the table lands in the PR BODY (replaced in place,
+ // never appended) and each stage adds ONE comment.
+ {
+   const posted = []       // comments
+   const bodies = []       // successive PR bodies
+   let prBody = 'Problem\n\nFix'
+   Object.assign(fakeGh, {
+     prListForHead: async () => [{ number: 9, state: 'open', html_url: 'u', body: prBody, head: { sha: 'deadbee' } }],
+diff --git a/plugins/arxa-git-card/selftest.mjs b/plugins/arxa-git-card/selftest.mjs
+index b58cd07..3ac9471 100644
+--- a/plugins/arxa-git-card/selftest.mjs
++++ b/plugins/arxa-git-card/selftest.mjs
+@@ -195,12 +195,45 @@ check('client: rerun waits for the run to finish and cancel waits for it to be l
+   clientSrc.includes('disabled: runLive, onClick: rerunCi') && clientSrc.includes('disabled: !runLive, onClick: cancelCi'))
+ check('client: run control passes the seat AND the run id, never guesses either',
+   clientSrc.includes('{ ...seatArg(), runId: latestRun.id }') && clientSrc.includes("if (!latestRun) return"))
+ check('client: a 409 on cancel reads as already-finished, not an error',
+   clientSrc.includes("r.outcome === 'already-finished'") && clientSrc.includes('git.ci.alreadyFinished'))
+ check('client: ci locale keys in all three dictionaries',
+   ['git.ci.rerun', 'git.ci.cancel', 'git.ci.open', 'git.ci.failed'].every((k) => (clientSrc.split("'" + k + "':").length - 1) === 3))
+ 
+ check('client: en/pl/fr dictionaries registered under NS', ['const en = {', 'const pl = {', 'const fr = {'].every((s) => clientSrc.includes(s)) && clientSrc.includes('ctx.locale.register(NS, { en, pl, fr })'))
+ 
++// ---- Decision 3 (local-only git parity): the local Checks row -------------
++// The remote Actions row occupies the slot on linked sessions; local-only
++// sessions get THIS row instead — a synchronous local script with a result,
++// not a remote run with an id. These pin the wiring at both ends.
++check('checks: host serves card.gate.run (the no-commit gate verb)',
++  hostSrc().includes("'card.gate.run': async () =>")
++  && hostSrc().includes('gw.runGate(s.worktree)'))
++check('checks: the run is cached per worktree and served only on a fingerprint match',
++  hostSrc().includes('const gateCache = new Map()')
++  && hostSrc().includes('gateFingerprint(gw, repoPath) === hit.fingerprint'))
++check('checks: output capped to the last 64 KiB behind an explicit prefix',
++  hostSrc().includes('const GATE_OUTPUT_MAX = 64 * 1024')
++  && hostSrc().includes('[output truncated — showing the last 64 KiB]'))
++check('checks: the row occupies the Actions slot for local-only sessions only',
++  clientSrc.includes('!(status.linked && !status.localOnly)'))
++check('checks: Run checks rides run() — the busy key de-dupes concurrent clicks',
++  clientSrc.includes("run('gate'") && clientSrc.includes("post('card.gate.run'"))
++check('checks: red output renders in a disclosure, not a toast that scrolls away',
++  clientSrc.includes("gate.state === 'red' && gate.output")
++  && clientSrc.includes('checksOpen && redOut'))
++{
++  // "Must not start GitHub Actions and must not merge or park the session"
++  // (Step 4): slice the handler body and pin what may and may not be in it.
++  const slice = hostSrc().split("'card.gate.run': async () => {")[1].split(/\n {12}'/)[0]
++  check('checks: the verb only runs the gate — no push, PR, merge, park or Actions',
++    slice.includes('gw.runGate(s.worktree)')
++    && !/pushSessionBranch|prMerge|parkSession|workflowRuns|rerunRun|cancelRun/.test(slice))
++}
++check('checks: every row string in all three dictionaries',
++  ['git.checks.run', 'git.checks.none', 'git.checks.green', 'git.checks.red', 'git.checks.light',
++    'git.checks.running', 'git.checks.output', 'git.checks.failed']
++    .every((k) => (clientSrc.split("'" + k + "':").length - 1) === 3))
++
+ console.log(failures === 0 ? '\narxa-git-card selftest: ALL GREEN' : `\narxa-git-card selftest: ${failures} FAILURE(S)`)
+ process.exit(failures === 0 ? 0 : 1)
+diff --git a/plugins/arxa-sidebar/lib/client.js b/plugins/arxa-sidebar/lib/client.js
+index 1ee3413..daa0992 100644
+--- a/plugins/arxa-sidebar/lib/client.js
++++ b/plugins/arxa-sidebar/lib/client.js
+@@ -1083,20 +1083,22 @@ window.__ModuleLoader__.load({
+ 		* @param props.drag - optional workspace-row drag wiring.
+ 		* @param props.home - host account home for POSIX hover-path abbreviation.
+ 		* @param props.t - the browser root's locale seat.
+ 		* @returns the row element.
+ 		*/
+ 		function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home, t }) {
+ 			const row = group;
+ 			const label = row.workspaceId === void 0 ? t("group.ungrouped") : row.label;
+ 			const active = group.expanded && group.containsCurrent;
+ 			const [menuOpen, setMenuOpen] = (0, react.useState)(false);
++			// AXS-003 closeout: subscribe to the deco map, like every decorated row.
++			ARXA_USE_DECO();
+ 			const workspaceMenuItems = [{
+ 				id: "rename",
+ 				label: t("rename"),
+ 				icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconEditOutline16, {})
+ 			}, {
+ 				id: "delete",
+ 				label: t("delete.workspace"),
+ 				icon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {}),
+ 				danger: true
+ 			}];
+@@ -1119,24 +1121,26 @@ window.__ModuleLoader__.load({
+ 						className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder, (active || ARXA_WS_SELECTED(row.workspaceId)) && Rows_module_css_default.folderActive),
+ 						children: ARXA_WS_DASH(row.workspaceId) ? (0, react_jsx_runtime.jsx)(DashGlyph, {}) : row.expanded ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {})
+ 					}),
+ 					(0, react_jsx_runtime.jsx)("span", {
+ 						className: clsx(Rows_module_css_default.slot, Rows_module_css_default.chevron),
+ 						children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTriangleRightFill14, { className: clsx(Rows_module_css_default.arrow, row.expanded && Rows_module_css_default.arrowOpen) })
+ 					}),
+ 					(0, react_jsx_runtime.jsx)("span", {
+ 						className: Rows_module_css_default.projectText,
+ 						children: (0, react_jsx_runtime.jsx)("span", {
+-							className: Rows_module_css_default.title,
++							// AXS-003 closeout: the folded dir mark on a leaf workspace row.
++							className: clsx(Rows_module_css_default.title, ARXA_WS_DECO_CLASS(row.workspaceId)),
+ 							children: label
+ 						})
+ 					}),
++					ARXA_DECO_BADGE(wsParts(row.workspaceId).ws, "dir"),
+ 					(0, react_jsx_runtime.jsxs)("span", {
+ 						className: Rows_module_css_default.rowActions,
+ 						children: [false && (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Menu, {
+ 							open: menuOpen,
+ 							onClose: () => {
+ 								setMenuOpen(false);
+ 							},
+ 							items: workspaceMenuItems,
+ 							onSelect: (id) => {
+ 								setMenuOpen(false);
+@@ -4485,20 +4489,29 @@ window.__ModuleLoader__.load({
+ 				const rest = p.ws.slice(prefix.length);
+ 				if (rest !== "" && rest.indexOf("/") < 0) out[rest] = 1;
+ 			}
+ 			return out;
+ 		};
+ 		/** Stock-tree render hooks (gen splices call these by name). */
+ 		// Leaf indent by depth, in px (a unitless paddingLeft is silently
+ 		// dropped by the CSSOM, which once left every leaf at the stock 8px).
+ 		const wsIndent = (ws) => 18 + 12 * (ws.split("/").length - 1);
+ 		const ARXA_WS_INDENT = (workspaceId) => wsIndent(wsParts(workspaceId).ws) + "px";
++		/** AXS-003 closeout: the folded dir mark for a stock LEAF workspace row
++		 * — a stage container ('projects/<slug>/01-discovery') or any other
++		 * leaf folder. Same map, same letters as the leaf/lister rows; null
++		 * when nothing under it changed. Returns the class pair so the
++		 * generated row can slot it straight into clsx(). */
++		const ARXA_WS_DECO_CLASS = (workspaceId) => {
++			const letter = ARXA_DECO_FOR(wsParts(workspaceId).ws, "dir");
++			return letter ? "aXa_decoText aXa_deco_" + letter : null;
++		};
+ 		const ARXA_WS_HIDDEN = (workspaceId) => leafHidden(workspaceId);
+ 		// Container rows render INSIDE their own pseudo group (v2 collapse
+ 		// fix: never inside a leaf group — a collapsed container hides its
+ 		// leaves' groups, and a row living there vanished with its anchor).
+ 		// The pseudo group carries the container's own indent, so the row
+ 		// compensates to land at its absolute depth:
+ 		// org 4 < dock 18 < project 32 < leaves 18/30/42.
+ 		const ARXA_CONTAINER_ROWS = (workspaceId) => {
+ 			const host = wsIndent(wsParts(workspaceId).ws);
+ 			return ((orgStore.get().emit ?? {})[workspaceId] ?? []).map((d) => (0, react_jsx_runtime.jsx)(OrgContainerRow, {
+@@ -4875,20 +4888,29 @@ window.__ModuleLoader__.load({
+ 			const selfRowId = isOrg ? "" : d.kind === "dock" ? d.slug : "projects/" + d.slug;
+ 			const isSelected = useOrg((st) => {
+ 				const sel = st.selectedRowId;
+ 				return !!sel && sel.orgId === d.orgId && (sel.rowId ?? "") === selfRowId;
+ 			});
+ 			const open = !!expandedMap[d.key];
+ 			const [menuOpen, setMenuOpen] = (0, react.useState)(false);
+ 			// D97: last sync outcome for THIS row — null (never synced this
+ 			// session) | { busy: true } | { key, detail, bad }.
+ 			const [syncState, setSyncState] = (0, react.useState)(null);
++			// AXS-003 closeout: subscribe to the deco map — without this the
++			// top-level mark waits for the next poll to paint.
++			ARXA_USE_DECO();
++			/* AXS-003 closeout: the Projects dock row and each project row are
++			 * the top of the tree — they fold the SAME map the leaf rows read
++			 * (foldDirs already rolls every ancestor up), so wiring them adds
++			 * zero git work. Org rows never decorate: the org is not a folder
++			 * in any session's diff. */
++			const decoTop = !isOrg && d.kind === "dock" && d.slug === "projects" ? "projects" : d.kind === "project" ? "projects/" + d.slug : null;
+ 			// D80: BOTH row kinds carry a menu; D80 scope fix: ONLY org + project
+ 			// rows — fixed docks (Meetings/Account/…) and containers are
+ 			// infrastructure, never renamable. D82: every row gets a proper
+ 			// design-system glyph (edit / folder / GitHub mark / trash).
+ 			// D87: "Close" is GONE from the menu — it closed whatever org was
+ 			// open server-side (unscoped, invisible, switch already tears down).
+ 			// "Move to Trash" (danger, local-only + restorable) stays — the Trash
+ 			// row LISTS entries but the verb that creates them must live on the org.
+ 			const showMenu = isOrg || d.kind === "project";
+ 			const ghMark16 = (0, react_jsx_runtime.jsx)("svg", { width: 16, height: 16, viewBox: "0 0 16 16", fill: "currentColor", "aria-hidden": "true", children: (0, react_jsx_runtime.jsx)("path", { d: GH_MARK }) });
+@@ -4981,22 +5003,25 @@ window.__ModuleLoader__.load({
+ 						// selected row draws is also the one that must not grey out.
+ 						className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder, isSelected && Rows_module_css_default.folderActive),
+ 						children: isOrg ? (0, react_jsx_runtime.jsx)(OrgGlyph, {}) : d.kind === "dock" ? (0, react_jsx_runtime.jsx)(DashGlyph, {}) : open ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {})
+ 					}),
+ 					(0, react_jsx_runtime.jsx)("span", {
+ 						className: clsx(Rows_module_css_default.slot, Rows_module_css_default.chevron),
+ 						children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTriangleRightFill14, { className: clsx(Rows_module_css_default.arrow, open && Rows_module_css_default.arrowOpen) })
+ 					}),
+ 					(0, react_jsx_runtime.jsx)("span", {
+ 						className: Rows_module_css_default.projectText,
+-						children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: d.label })
++						children: (0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.title, decoTop && ARXA_DECO_FOR(decoTop, "dir") && "aXa_decoText", decoTop && ARXA_DECO_FOR(decoTop, "dir") && ("aXa_deco_" + ARXA_DECO_FOR(decoTop, "dir"))), children: d.label })
+ 					}),
++					// AXS-003 closeout: the folded mark on the Projects /
++					// project rows — the same badge the leaf rows carry.
++					decoTop ? ARXA_DECO_BADGE(decoTop, "dir") : null,
+ 					// D91: connected marker — GitHub mark ONLY on rows with a repo
+ 					// behind them (org + project rows). Local-only rows carry NO mark.
+ 					(isOrg || d.kind === "project") && d.connected === true ? (0, react_jsx_runtime.jsx)("span", {
+ 						title: orgT("rows.ghSynced"),
+ 						style: { display: "inline-flex", alignItems: "center", marginLeft: 6, opacity: 0.55, flex: "none" },
+ 						children: ghMark16
+ 					}) : null,
+ 					// D97: the sync outcome sits beside the GitHub mark. A failure paints
+ 					// in the error alias and STAYS until the next sync — a manual sync door
+ 					// whose refusal is invisible is worse than no door. Raw per-repo status
+diff --git a/plugins/arxa-sidebar/lib/workspace-region.snippet.txt b/plugins/arxa-sidebar/lib/workspace-region.snippet.txt
+index e806811..801eb0d 100644
+--- a/plugins/arxa-sidebar/lib/workspace-region.snippet.txt
++++ b/plugins/arxa-sidebar/lib/workspace-region.snippet.txt
+@@ -1420,20 +1420,29 @@
+ 				const rest = p.ws.slice(prefix.length);
+ 				if (rest !== "" && rest.indexOf("/") < 0) out[rest] = 1;
+ 			}
+ 			return out;
+ 		};
+ 		/** Stock-tree render hooks (gen splices call these by name). */
+ 		// Leaf indent by depth, in px (a unitless paddingLeft is silently
+ 		// dropped by the CSSOM, which once left every leaf at the stock 8px).
+ 		const wsIndent = (ws) => 18 + 12 * (ws.split("/").length - 1);
+ 		const ARXA_WS_INDENT = (workspaceId) => wsIndent(wsParts(workspaceId).ws) + "px";
++		/** AXS-003 closeout: the folded dir mark for a stock LEAF workspace row
++		 * — a stage container ('projects/<slug>/01-discovery') or any other
++		 * leaf folder. Same map, same letters as the leaf/lister rows; null
++		 * when nothing under it changed. Returns the class pair so the
++		 * generated row can slot it straight into clsx(). */
++		const ARXA_WS_DECO_CLASS = (workspaceId) => {
++			const letter = ARXA_DECO_FOR(wsParts(workspaceId).ws, "dir");
++			return letter ? "aXa_decoText aXa_deco_" + letter : null;
++		};
+ 		const ARXA_WS_HIDDEN = (workspaceId) => leafHidden(workspaceId);
+ 		// Container rows render INSIDE their own pseudo group (v2 collapse
+ 		// fix: never inside a leaf group — a collapsed container hides its
+ 		// leaves' groups, and a row living there vanished with its anchor).
+ 		// The pseudo group carries the container's own indent, so the row
+ 		// compensates to land at its absolute depth:
+ 		// org 4 < dock 18 < project 32 < leaves 18/30/42.
+ 		const ARXA_CONTAINER_ROWS = (workspaceId) => {
+ 			const host = wsIndent(wsParts(workspaceId).ws);
+ 			return ((orgStore.get().emit ?? {})[workspaceId] ?? []).map((d) => (0, react_jsx_runtime.jsx)(OrgContainerRow, {
+@@ -1810,20 +1819,29 @@
+ 			const selfRowId = isOrg ? "" : d.kind === "dock" ? d.slug : "projects/" + d.slug;
+ 			const isSelected = useOrg((st) => {
+ 				const sel = st.selectedRowId;
+ 				return !!sel && sel.orgId === d.orgId && (sel.rowId ?? "") === selfRowId;
+ 			});
+ 			const open = !!expandedMap[d.key];
+ 			const [menuOpen, setMenuOpen] = (0, react.useState)(false);
+ 			// D97: last sync outcome for THIS row — null (never synced this
+ 			// session) | { busy: true } | { key, detail, bad }.
+ 			const [syncState, setSyncState] = (0, react.useState)(null);
++			// AXS-003 closeout: subscribe to the deco map — without this the
++			// top-level mark waits for the next poll to paint.
++			ARXA_USE_DECO();
++			/* AXS-003 closeout: the Projects dock row and each project row are
++			 * the top of the tree — they fold the SAME map the leaf rows read
++			 * (foldDirs already rolls every ancestor up), so wiring them adds
++			 * zero git work. Org rows never decorate: the org is not a folder
++			 * in any session's diff. */
++			const decoTop = !isOrg && d.kind === "dock" && d.slug === "projects" ? "projects" : d.kind === "project" ? "projects/" + d.slug : null;
+ 			// D80: BOTH row kinds carry a menu; D80 scope fix: ONLY org + project
+ 			// rows — fixed docks (Meetings/Account/…) and containers are
+ 			// infrastructure, never renamable. D82: every row gets a proper
+ 			// design-system glyph (edit / folder / GitHub mark / trash).
+ 			// D87: "Close" is GONE from the menu — it closed whatever org was
+ 			// open server-side (unscoped, invisible, switch already tears down).
+ 			// "Move to Trash" (danger, local-only + restorable) stays — the Trash
+ 			// row LISTS entries but the verb that creates them must live on the org.
+ 			const showMenu = isOrg || d.kind === "project";
+ 			const ghMark16 = (0, react_jsx_runtime.jsx)("svg", { width: 16, height: 16, viewBox: "0 0 16 16", fill: "currentColor", "aria-hidden": "true", children: (0, react_jsx_runtime.jsx)("path", { d: GH_MARK }) });
+@@ -1916,22 +1934,25 @@
+ 						// selected row draws is also the one that must not grey out.
+ 						className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder, isSelected && Rows_module_css_default.folderActive),
+ 						children: isOrg ? (0, react_jsx_runtime.jsx)(OrgGlyph, {}) : d.kind === "dock" ? (0, react_jsx_runtime.jsx)(DashGlyph, {}) : open ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderOpen16, {}) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconFolderClose16, {})
+ 					}),
+ 					(0, react_jsx_runtime.jsx)("span", {
+ 						className: clsx(Rows_module_css_default.slot, Rows_module_css_default.chevron),
+ 						children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTriangleRightFill14, { className: clsx(Rows_module_css_default.arrow, open && Rows_module_css_default.arrowOpen) })
+ 					}),
+ 					(0, react_jsx_runtime.jsx)("span", {
+ 						className: Rows_module_css_default.projectText,
+-						children: (0, react_jsx_runtime.jsx)("span", { className: Rows_module_css_default.title, children: d.label })
++						children: (0, react_jsx_runtime.jsx)("span", { className: clsx(Rows_module_css_default.title, decoTop && ARXA_DECO_FOR(decoTop, "dir") && "aXa_decoText", decoTop && ARXA_DECO_FOR(decoTop, "dir") && ("aXa_deco_" + ARXA_DECO_FOR(decoTop, "dir"))), children: d.label })
+ 					}),
++					// AXS-003 closeout: the folded mark on the Projects /
++					// project rows — the same badge the leaf rows carry.
++					decoTop ? ARXA_DECO_BADGE(decoTop, "dir") : null,
+ 					// D91: connected marker — GitHub mark ONLY on rows with a repo
+ 					// behind them (org + project rows). Local-only rows carry NO mark.
+ 					(isOrg || d.kind === "project") && d.connected === true ? (0, react_jsx_runtime.jsx)("span", {
+ 						title: orgT("rows.ghSynced"),
+ 						style: { display: "inline-flex", alignItems: "center", marginLeft: 6, opacity: 0.55, flex: "none" },
+ 						children: ghMark16
+ 					}) : null,
+ 					// D97: the sync outcome sits beside the GitHub mark. A failure paints
+ 					// in the error alias and STAYS until the next sync — a manual sync door
+ 					// whose refusal is invisible is worse than no door. Raw per-repo status
+diff --git a/plugins/arxa-sidebar/selftest.mjs b/plugins/arxa-sidebar/selftest.mjs
+index 9dc3057..25acc8e 100644
+--- a/plugins/arxa-sidebar/selftest.mjs
++++ b/plugins/arxa-sidebar/selftest.mjs
+@@ -1207,20 +1207,39 @@ check('S-orgparity: the host mirrors the org verbs — disconnect (keep/remove),
+   // fetched on mount and after mutations; a file changing UNDER the sidebar is
+   // neither, and a content edit changes no directory listing, so the tree
+   // refresh cannot stand in for it.
+   check('D117: a file changing under the sidebar repaints the Freestyle map',
+     gen.includes('decoTimer = window.setTimeout(() => { decoTimer = null; void freestyleStore.refresh({ signal: decoAbort.signal }); }, 500);')
+     && gen.includes('return () => { if (decoTimer) window.clearTimeout(decoTimer); decoAbort.abort(); events.close(); };'))
+   check('D117: a Freestyle badge never claims "in this session" — it has no session',
+     gen.includes('const ARXA_DECO_TITLE_LOCAL = ')
+     && (gen.match(/"rows\.deco\.local\.modified":/g) || []).length === 3
+     && (gen.match(/"rows\.deco\.local\.deleted":/g) || []).length === 3)
++
++  // ---- AXS-003 closeout: the three TOP-LEVEL rows fold the same map ----
++  // The leaf/lister rows shipped above; the Projects dock row, the project
++  // row and the stage rows were the open rollups. foldDirs already carries
++  // every ancestor, so wiring them adds ZERO git work — the same map, read
++  // at three more places.
++  check('deco closeout: Projects + project rows carry the folded mark (OrgContainerRow)',
++    gen.includes('d.slug === "projects" ? "projects"')
++    && gen.includes('ARXA_DECO_FOR(decoTop, "dir")')
++    && gen.includes('ARXA_DECO_BADGE(decoTop, "dir")'))
++  check('deco closeout: container rows subscribe to the map — or the mark paints a poll late',
++    /function OrgContainerRow[\s\S]{0,1400}?ARXA_USE_DECO\(\);/.test(gen))
++  check('deco closeout: stage rows (the stock leaf workspace rows) carry the folded mark',
++    gen.includes('ARXA_WS_DECO_CLASS(row.workspaceId)')
++    && gen.includes('ARXA_DECO_BADGE(wsParts(row.workspaceId).ws, "dir")'))
++  check('deco closeout: the stock leaf rows subscribe too, or a new map repaints nothing',
++    /function ProjectRowItem[\s\S]{0,600}?ARXA_USE_DECO\(\);/.test(gen))
++  check('deco closeout: no new git measurement — session.decorations stays the single fetch',
++    (gen.match(/ORG_POST\("session\.decorations"/g) || []).length === 1)
+ }
+ 
+ // ---- D112: a session with no conversation is NAMED, never silent ----
+ // The bug this gates (2026-09-08): selecting a row whose `dshSessionId` is null
+ // highlighted it, opened nothing, and said nothing — the pane kept a FOREIGN
+ // conversation and its (correct) org-seated git card was read as this row's.
+ // These assert the NEGATIVE. A test that only checks "the row is selectable"
+ // passed before the fix and would pass after it, so it gates nothing.
+ {
+   const gen = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
+diff --git a/scripts/card-local-smoke.mjs b/scripts/card-local-smoke.mjs
+index f00a151..778106e 100644
+--- a/scripts/card-local-smoke.mjs
++++ b/scripts/card-local-smoke.mjs
+@@ -259,20 +259,48 @@ writeFileSync(projManifestPath, JSON.stringify({
+ r = await act('card.status', { sessionId: sid2 })
+ check('a PUBLISHED project inside a local-only org reads as linked',
+   r.ok === true && r.result?.linked === true,
+   JSON.stringify({ linked: r.result?.linked, localOnly: r.result?.localOnly }))
+ check('...and is NOT local-only, so the card shows its PR and CI section',
+   r.result?.localOnly === false,
+   JSON.stringify({ linked: r.result?.linked, localOnly: r.result?.localOnly }))
+ 
+ writeFileSync(projManifestPath, JSON.stringify(projManifest, null, 2))
+ 
++// ============================================================
++section('6b. The local Checks row engine — red gate, output shown, worktree untouched')
++// ============================================================
++/* Decision 3 (local-only git parity): card.gate.run is the Checks row's
++ * engine — runGate WITHOUT committing. A red check.sh must surface its
++ * output (the parked-branch mystery is why the row exists) while changing
++ * nothing on disk: no commit, no park, no merge — the session stays
++ * exactly as it was. The leg is SCRATCH: check.sh is written into this
++ * sandbox session's worktree and removed before the shared table runs. */
++const gateWt = sess.worktree
++writeFileSync(path.join(gateWt, 'check.sh'), '#!/bin/sh\necho "smoke: red on purpose" >&2\nexit 1\n')
++const gateBeforePorcelain = git(['status', '--porcelain'], gateWt)
++const gateBeforeHead = git(['rev-parse', 'HEAD'], gateWt)
++r = await act('card.gate.run', { sessionId: sid })
++check('card.gate.run runs a red check.sh and captures the output',
++  r.ok === true && r.result?.green === false && r.result?.kind === 'check.sh' &&
++  r.result?.output?.includes('smoke: red on purpose'), JSON.stringify(r).slice(0, 300))
++r = await act('card.status', { sessionId: sid })
++check('card.status serves the cached red gate with its output',
++  r.ok === true && r.result?.gate?.state === 'red' &&
++  r.result?.gate?.output?.includes('smoke: red on purpose'),
++  JSON.stringify(r.result?.gate ?? null).slice(0, 300))
++check('the red run left the worktree unchanged (porcelain + HEAD identical)',
++  git(['status', '--porcelain'], gateWt) === gateBeforePorcelain &&
++  git(['rev-parse', 'HEAD'], gateWt) === gateBeforeHead,
++  JSON.stringify({ porcelain: git(['status', '--porcelain'], gateWt), head: git(['rev-parse', 'HEAD'], gateWt) }))
++rmSync(path.join(gateWt, 'check.sh'))
++
+ // ============================================================
+ /* Sections 7-8 are the SHARED table (Decision 5) — the same assertions the
+  * GitHub-linked smoke runs, imported rather than copied. Everything in it is
+  * plain local git through the card's own route, so it holds identically in
+  * both modes; the divergence it prevents is a flow that gets tested in one
+  * configuration and quietly not the other. Names come from ctx because the
+  * linked run uses arxa's real publish and real slugs. */
+ const flowCtx = {
+   act, check, section, git, gw,
+   orgId: org.id, orgPath: org.path,
+diff --git a/scripts/gen-workspace.mjs b/scripts/gen-workspace.mjs
+index a324c03..ef9aac7 100644
+--- a/scripts/gen-workspace.mjs
++++ b/scripts/gen-workspace.mjs
+@@ -206,20 +206,60 @@ out = out.replace(ROW_ICON, 'children: ARXA_WS_DASH(row.workspaceId) ? (0, react
+ 
+ // 6g-bis. the selected row's ICON is accent too (operator, 2026-09-11).
+ //     Stock `active` = group.expanded && containsCurrent — a dsh SESSION
+ //     notion, so selecting a dock row (no session open) left its glyph
+ //     tertiary while the row text went accent. OR our selection in; the
+ //     slot's own tertiary color beats inheritance, folderActive repaints it.
+ const ROW_ICON_ACTIVE = 'className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder, active && Rows_module_css_default.folderActive),'
+ if (!out.includes(ROW_ICON_ACTIVE) || out.indexOf(ROW_ICON_ACTIVE) !== out.lastIndexOf(ROW_ICON_ACTIVE)) throw new Error('row icon active anchor missing/dup — stock shape moved?')
+ out = out.replace(ROW_ICON_ACTIVE, 'className: clsx(Rows_module_css_default.slot, Rows_module_css_default.folder, (active || ARXA_WS_SELECTED(row.workspaceId)) && Rows_module_css_default.folderActive),')
+ 
++// 6i. (AXS-003 closeout, 2026-09-13) the stock leaf workspace row — a stage
++//     container ('projects/<slug>/01-discovery'), a track, or any leaf
++//     folder — carries the folded dir mark from the region's ONE deco map:
++//     the same letters the leaf/lister rows below it already read, wired at
++//     zero additional git cost. The title takes the text classes and the
++//     badge rides after the name, exactly like ArxaDirRows' dirRow.
++//     The hook first: without the subscription a new map repaints nothing.
++const ROW_ITEM_STATE = [
++  T(3) + 'const [menuOpen, setMenuOpen] = (0, react.useState)(false);',
++  T(3) + 'const workspaceMenuItems = [{',
++].join('\n')
++if (!out.includes(ROW_ITEM_STATE) || out.indexOf(ROW_ITEM_STATE) !== out.lastIndexOf(ROW_ITEM_STATE)) throw new Error('gen-workspace: ProjectRowItem state anchor missing or duplicated')
++out = out.replace(ROW_ITEM_STATE, [
++  T(3) + 'const [menuOpen, setMenuOpen] = (0, react.useState)(false);',
++  T(3) + '// AXS-003 closeout: subscribe to the deco map, like every decorated row.',
++  T(3) + 'ARXA_USE_DECO();',
++  T(3) + 'const workspaceMenuItems = [{',
++].join('\n'))
++const ROW_ITEM_TITLE = [
++  T(5) + '(0, react_jsx_runtime.jsx)("span", {',
++  T(6) + 'className: Rows_module_css_default.projectText,',
++  T(6) + 'children: (0, react_jsx_runtime.jsx)("span", {',
++  T(7) + 'className: Rows_module_css_default.title,',
++  T(7) + 'children: label',
++  T(6) + '})',
++  T(5) + '}),',
++].join('\n')
++if (!out.includes(ROW_ITEM_TITLE) || out.indexOf(ROW_ITEM_TITLE) !== out.lastIndexOf(ROW_ITEM_TITLE)) throw new Error('gen-workspace: ProjectRowItem title anchor missing or duplicated')
++out = out.replace(ROW_ITEM_TITLE, [
++  T(5) + '(0, react_jsx_runtime.jsx)("span", {',
++  T(6) + 'className: Rows_module_css_default.projectText,',
++  T(6) + 'children: (0, react_jsx_runtime.jsx)("span", {',
++  T(7) + '// AXS-003 closeout: the folded dir mark on a leaf workspace row.',
++  T(7) + 'className: clsx(Rows_module_css_default.title, ARXA_WS_DECO_CLASS(row.workspaceId)),',
++  T(7) + 'children: label',
++  T(6) + '})',
++  T(5) + '}),',
++  T(5) + 'ARXA_DECO_BADGE(wsParts(row.workspaceId).ws, "dir"),',
++].join('\n'))
++
+ // 6c-bis. the per-row + affordance obeys the track rule (98f2e93). The dock
+ //     CTA has been gated by projectRowRefused since tracks landed, but each
+ //     tree row carries its OWN + inside the stock bundle, and that one still
+ //     called onCreate() for a bare stage the server refuses with
+ //     workspace-needs-track. Measured through the lens 2026-09-08: pressing
+ //     it created nothing and said nothing. The region hook returns the reason
+ //     string (or null), so this scope needs no locale of its own.
+ //     One line, so it cannot drift on whitespace; `disabled` is what stops
+ //     the click, and the title carries the reason on hover.
+ const ROW_CREATE = '"aria-label": t("actions.newSession.aria", { name: label }),'

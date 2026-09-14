@@ -1,0 +1,9 @@
+⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
+[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
+**Status:** DONE
+- Commit: `8f10a08` fix: stop organisation sessions before trash (package-lock dirt left uncommitted as found)
+- Tests: 4 focused suites ALL GREEN · live `org-purge-smoke` OK (throwaway repo, self-cleaned) · `npm test` ALL GREEN
+- RED reconstructed on clean BASE per the tagged-stash pattern: flagship selftest 9 FAILURE(S) — on BASE the live writer recreates the org path and restore is refused with "already occupied" (Bug B reproduced); sweep suite fails on missing `quiesceSessionsUnder` export
+- Predecessor WIP kept after seam-by-seam verification against real dsh types (`AgentHandle{agent,dispose}`, bare-Agent `cancel`/`whenIdle`, `{kind:'disposed'}` cancel cause); only change: a missing blank line
+- Concerns: none blocking — `ARXA_SESSION_STOP_BUDGET_MS` is a test-only knob parsed inline; noted in report
+- Report: `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-2-report.md` (ledger appended)

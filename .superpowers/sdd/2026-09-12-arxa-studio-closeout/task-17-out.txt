@@ -1,0 +1,13 @@
+[33m⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors[39m
+[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
+✅ **Task 17 complete** — studio `02260f5`, arxa `0ac2dbbc`, both `docs: close the arxa studio implementation program` (no push/merge/tag).
+
+**Matrix** (in `docs/plans/open-work-inventory-2026-09-12.md`, chosen over a new doc): 68 rows — CLOSED 33 / EXTERNAL 14 / DEFERRED 17, zero ambiguous. Carry-ins: T16 legs verbatim, G12/G12c, installer-channel (AXS-054), `gate --all` debt (AXS-059), branch-protection (in AXS-053); Step-7-owned rows (AXS-062/063/064) recorded, NOT resolved by me.
+
+**Vocabulary:** lacks-claims resolved with dated notes; `supersededBy` = **not accepted, not added** (arxa grep at `3b6e08ea`: zero matches) → AXS-032.
+
+**Verification:** studio npm test **130 ALL GREEN** (engine-boot-smoke incl.; ran twice, 2nd only to count — disclosed); arxa analyze clean, contract 4/4, check.sh red ONLY at inherited `gates`, actionlint ×4 OK; full-suite acceptance precondition verified per-path (`3b6e08ea` touches only a doc).
+
+**Concerns:** ① AXS-066 — NO plugin version was D77-bumped on the branch (artifact-viewer still 0.3.5) — first-pack hazard; ② AXS-042/043 duplicate-ID collision found+fixed (renumbered AXS-052/053, 2 refs updated); ③ AXS-063/064 remain live external defects — closeout records limitations, not "no defects". Both new findings ledgered.
+
+**Report:** `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-17-report.md` · product doc: `docs/plans/arxa-studio-closeout-2026-09-12.md`.

@@ -1,0 +1,1073 @@
+bd14065 feat: show the latest delivery ledger on the git card
+ plugins/arxa-git-card/lib/client.js            | 98 +++++++++++++++++++++++++-
+ plugins/arxa-git-card/lib/git-card.snippet.txt | 98 +++++++++++++++++++++++++-
+ plugins/arxa-git-card/lib/index.js             | 34 ++++++++-
+ plugins/arxa-git-card/selftest.actions.mjs     | 64 +++++++++++++++++
+ plugins/arxa-git-card/selftest.mjs             | 19 +++++
+ plugins/git-workspace/lib/index.js             |  2 +-
+ plugins/git-workspace/lib/ledger.js            | 47 ++++++++++++
+ plugins/git-workspace/selftest.ledger.mjs      | 45 +++++++++++-
+ scripts/card-cicd-smoke.mjs                    |  7 ++
+ scripts/card-local-smoke.mjs                   | 18 +++++
+ 10 files changed, 423 insertions(+), 9 deletions(-)
+diff --git a/plugins/arxa-git-card/lib/client.js b/plugins/arxa-git-card/lib/client.js
+index a6908b4..8fa4323 100644
+--- a/plugins/arxa-git-card/lib/client.js
++++ b/plugins/arxa-git-card/lib/client.js
+@@ -122,20 +122,31 @@ window.__ModuleLoader__.load({
+       // Decision 3 (local-only git parity): the local Checks row — the twin of
+       // the Actions section on linked seats, for the seat that has no remote.
+       'git.checks.none': 'checks not run yet',
+       'git.checks.running': 'running checks…',
+       'git.checks.green': 'green',
+       'git.checks.red': 'red',
+       'git.checks.light': 'light checks',
+       'git.checks.run': 'Run checks',
+       'git.checks.output': 'Checks output',
+       'git.checks.failed': 'Checks failed: {reason}',
++      // AXS-005: the condensed delivery strip. The full ledger table stays on
++      // the PR; the card carries the latest stage only, read from the registry
++      // record — so a local-only session keeps the same facts with no remote.
++      'git.ledger.summary': 'delivery · {detail}',
++      'git.ledger.next': 'next: {next}',
++      'git.ledger.open': 'Open the pull request',
++      'git.ledger.view': 'Delivery record',
++      'git.ledger.stage': 'stage',
++      'git.ledger.result': 'result',
++      'git.ledger.nextOwner': 'next',
++      'git.ledger.target': 'target',
+       // G4 (grilled 2026-09-06): the four moves that are hard to walk back ask
+       // first. Commit and Create PR already pause for text; Cancel CI is undone
+       // by re-running.
+       'git.confirm.integrate.title': 'Integrate main into this session?',
+       'git.confirm.integrate.body': 'Merges the current main into this session\u2019s worktree. A conflict stops the merge half-done — you finish it from the card before anything else can land.',
+       'git.confirm.integrate.ok': 'Integrate main',
+       'git.confirm.finish.title': 'Finish integrating?',
+       'git.confirm.finish.body': 'Commits the merge that is in progress. Resolve every conflict in the worktree first.',
+       'git.confirm.finish.ok': 'Finish integrating',
+       'git.confirm.merge.title': 'Merge this pull request into main?',
+@@ -229,20 +240,31 @@ window.__ModuleLoader__.load({
+       'git.mintFailed': 'Wybicie nie powiodło się: {reason}',
+       // TODO native review (conformance decision 4): machine-drafted.
+       'git.checks.none': 'testy jeszcze nie uruchomiono',
+       'git.checks.running': 'uruchamianie testów…',
+       'git.checks.green': 'zielone',
+       'git.checks.red': 'czerwone',
+       'git.checks.light': 'testy lekkie',
+       'git.checks.run': 'Uruchom testy',
+       'git.checks.output': 'Wyniki testów',
+       'git.checks.failed': 'Testy nie powiodły się: {reason}',
++      // AXS-005: skrócony pasek dostawy. Pełna tabela pozostaje w PR; karta
++      // niesie tylko ostatni etap, odczytany z rejestru — sesja tylko lokalna
++      // zachowuje te same fakty bez zdalnego repozytorium.
++      'git.ledger.summary': 'dostawa · {detail}',
++      'git.ledger.next': 'następny: {next}',
++      'git.ledger.open': 'Otwórz pull request',
++      'git.ledger.view': 'Rejestr dostawy',
++      'git.ledger.stage': 'etap',
++      'git.ledger.result': 'wynik',
++      'git.ledger.nextOwner': 'następny',
++      'git.ledger.target': 'cel',
+       'git.confirm.integrate.title': 'Scalić main do tej sesji?',
+       'git.confirm.integrate.body': 'Scala bieżący main do drzewa roboczego tej sesji. Konflikt zatrzyma scalanie w połowie — dokończysz je z karty, zanim cokolwiek innego wejdzie.',
+       'git.confirm.integrate.ok': 'Scal main',
+       'git.confirm.finish.title': 'Dokończyć scalanie?',
+       'git.confirm.finish.body': 'Zatwierdza trwające scalanie. Najpierw rozwiąż wszystkie konflikty w drzewie roboczym.',
+       'git.confirm.finish.ok': 'Dokończ scalanie',
+       'git.confirm.merge.title': 'Scalić ten pull request do main?',
+       'git.confirm.merge.body': 'Scala pull requesta jednym commitem. Main przesuwa się dla wszystkich, a karta tego nie cofnie.',
+       'git.confirm.merge.ok': 'Scal pull requesta',
+       'git.confirm.mint.title': 'Wybić wersję?',
+@@ -332,20 +354,31 @@ window.__ModuleLoader__.load({
+       'git.mintFailed': 'Échec de la frappe : {reason}',
+       // TODO native review (conformance decision 4): machine-drafted.
+       'git.checks.none': 'vérifications pas encore lancées',
+       'git.checks.running': 'lancement des vérifications…',
+       'git.checks.green': 'vertes',
+       'git.checks.red': 'rouges',
+       'git.checks.light': 'vérifications légères',
+       'git.checks.run': 'Lancer les vérifications',
+       'git.checks.output': 'Résultats des vérifications',
+       'git.checks.failed': 'Échec des vérifications : {reason}',
++      // AXS-005 : bandeau de livraison condensé. Le tableau complet reste dans la
++      // PR ; la carte ne porte que la dernière étape, lue dans le registre — une
++      // session locale garde donc les mêmes faits sans dépôt distant.
++      'git.ledger.summary': 'livraison · {detail}',
++      'git.ledger.next': 'suite : {next}',
++      'git.ledger.open': 'Ouvrir la pull request',
++      'git.ledger.view': 'Relevé de livraison',
++      'git.ledger.stage': 'étape',
++      'git.ledger.result': 'résultat',
++      'git.ledger.nextOwner': 'suite',
++      'git.ledger.target': 'cible',
+       'git.confirm.integrate.title': 'Intégrer main dans cette session ?',
+       'git.confirm.integrate.body': 'Fusionne le main actuel dans l’arbre de travail de cette session. Un conflit arrête la fusion à mi-chemin — vous la terminez depuis la carte avant que quoi que ce soit d’autre puisse arriver.',
+       'git.confirm.integrate.ok': 'Intégrer main',
+       'git.confirm.finish.title': 'Terminer l’intégration ?',
+       'git.confirm.finish.body': 'Valide la fusion en cours. Résolvez d’abord tous les conflits dans l’arbre de travail.',
+       'git.confirm.finish.ok': 'Terminer l’intégration',
+       'git.confirm.merge.title': 'Fusionner cette pull request dans main ?',
+       'git.confirm.merge.body': 'Fusionne la pull request en un seul commit. Main avance pour tout le monde, et la carte ne l’annule pas.',
+       'git.confirm.merge.ok': 'Fusionner la pull request',
+       'git.confirm.mint.title': 'Frapper une version ?',
+@@ -392,20 +425,25 @@ window.__ModuleLoader__.load({
+       const [pr, setPr] = React.useState(void 0)
+       const [absent, setAbsent] = React.useState(false)
+       const [collapsed, setCollapsed] = React.useState(true)
+       const [editing, setEditing] = React.useState(null)
+       const [busy, setBusy] = React.useState(null)
+       const [seatSession, setSeatSession] = React.useState(sessionId || null)
+       const [mintChip, setMintChip] = React.useState(null)
+       // Decision 3: the local Checks row's disclosure — red output stays open
+       // until the reader closes it, but never leaks across a session switch.
+       const [checksOpen, setChecksOpen] = React.useState(false)
++      // AXS-005: the delivery strip's data and its bounded local view. Same rule
++      // as checksOpen: the disclosure never leaks across a session switch, and
++      // `void 0` (never loaded) is distinct from `null` (no record).
++      const [ledger, setLedger] = React.useState(void 0)
++      const [ledgerOpen, setLedgerOpen] = React.useState(false)
+       // G4: the move waiting on a yes — { key, title, body, ok, run } | null.
+       const [confirm, setConfirm] = React.useState(null)
+       // G6: the device-flow conversation — null | { starting } | { userCode, verificationUri }.
+       const [relink, setRelink] = React.useState(null)
+       const listId = React.useId()
+       const alive = React.useRef(true)
+       // The live device flow, or null: { poll }. A REF, not state — Cancel has to
+       // stop the poll synchronously, and a late tick has to be able to tell "my
+       // flow" from "the flow the user already dismissed".
+       const relinkRun = React.useRef(null)
+@@ -435,21 +473,31 @@ window.__ModuleLoader__.load({
+           notify('error', t('git.statusFailed', { reason: reasonOf(e) }))
+         }
+       }, [post, sessionId, notify, t])
+ 
+       const loadPr = React.useCallback(async () => {
+         if (!seatSession) { setPr(null); return }
+         try { const r = await post('card.pr.status', { sessionId: seatSession }); if (alive.current) setPr(r) }
+         catch (e) { if (alive.current) setPr({ ok: false, reason: reasonOf(e) }) }
+       }, [post, seatSession])
+ 
+-      React.useEffect(() => { setSeatSession(sessionId || null); setPr(void 0); setMintChip(null); setChecksOpen(false); load() }, [sessionId, load])
++      // AXS-005: the condensed delivery record — latest stage, its result, the
++      // next owner, the target, and the PR URL when one was recorded. A read of
++      // the registry row, so it needs no GitHub at all; a failure hides the strip
++      // rather than spamming a toast on a poll.
++      const loadLedger = React.useCallback(async () => {
++        if (!seatSession) { setLedger(null); return }
++        try { const r = await post('card.ledger.summary', { sessionId: seatSession }); if (alive.current) setLedger(r) }
++        catch { if (alive.current) setLedger(null) }
++      }, [post, seatSession])
++
++      React.useEffect(() => { setSeatSession(sessionId || null); setPr(void 0); setLedger(void 0); setLedgerOpen(false); setMintChip(null); setChecksOpen(false); load() }, [sessionId, load])
+       React.useEffect(() => {
+         const on = () => { load(); if (!collapsed) loadPr() }
+         window.addEventListener('arxa-git-card-refresh', on)
+         return () => window.removeEventListener('arxa-git-card-refresh', on)
+       }, [load, loadPr, collapsed])
+       React.useEffect(() => {
+         if (!status || collapsed) return
+         if (status.seat && status.seat.kind === 'session' && status.linked && !status.localOnly && pr === void 0) loadPr()
+       }, [status, collapsed, pr, loadPr])
+ 
+@@ -459,20 +507,30 @@ window.__ModuleLoader__.load({
+       const hasPr = Boolean(pr && pr.ok && pr.pr)
+       React.useEffect(() => {
+         const id = window.setInterval(() => { if (busy === null) load() }, 30000)
+         return () => window.clearInterval(id)
+       }, [load, busy])
+       React.useEffect(() => {
+         if (collapsed || !hasPr) return
+         const id = window.setInterval(() => { if (busy === null) loadPr() }, 30000)
+         return () => window.clearInterval(id)
+       }, [collapsed, hasPr, loadPr, busy])
++      // The strip refreshes like the PR read does: once on expand, then on a
++      // poll. Stages change exactly when the card's own actions run, so the 30s
++      // poll (plus the refresh button) is plenty — and it is a local registry
++      // read, not GitHub traffic.
++      React.useEffect(() => {
++        if (!seatSession || collapsed) return
++        if (ledger === void 0) loadLedger()
++        const id = window.setInterval(() => { if (busy === null) loadLedger() }, 30000)
++        return () => window.clearInterval(id)
++      }, [seatSession, collapsed, ledger, busy, loadLedger])
+ 
+       if (absent || status === null) return null
+ 
+       const interactionActive = editing !== null || busy !== null || confirm !== null || relink !== null
+       const expanded = !collapsed || interactionActive
+       const dirty = status.dirty
+       const changed = dirty ? dirty.staged + dirty.unstaged + dirty.untracked : null
+       const healthKey = status.health === 'ok' ? null : (status.health === 'missing' ? 'git.health.missing' : 'git.health.detached')
+       const summary = healthKey ? t(healthKey) : changed === 0 ? t('git.clean') : t('git.changed', { n: changed })
+       const branch = (status.seat && status.seat.branch) || 'main'
+@@ -748,21 +806,21 @@ window.__ModuleLoader__.load({
+         action('save', t('git.save'), Icon('IconCheckOutline16', 'IconCheckOutline16', 14), { disabled: editing.text.trim() === '', onClick: onSave }),
+         action('cancel', t('git.cancel'), Icon('IconCloseOutline16', 'IconCloseFill14', 14), { onClick: () => setEditing(null) }),
+       ]
+ 
+       const rows = []
+       // 1. Status
+       rows.push(h('li', { key: 'status', className: S.row },
+         h('span', { className: S.preview }, detail),
+         h('div', { className: S.actions },
+           [
+-            action('refresh', t('git.refresh'), Icon('IconRefreshOutline16', 'IconRefreshOutline16', 14), { onClick: () => { load(); if (pr !== void 0) loadPr() } }),
++            action('refresh', t('git.refresh'), Icon('IconRefreshOutline16', 'IconRefreshOutline16', 14), { onClick: () => { load(); if (pr !== void 0) loadPr(); loadLedger() } }),
+             // G6: the one door that works while the grant is dead. Waking the
+             // runner needs GitHub too, so it stays out of the way until then.
+             relinkRequired ? relinkAction() : null,
+             runnerAsleep && !relinkRequired ? wakeAction() : null,
+             sessionSeat ? action('insight-streak', t('git.insight.streak'), Icon('IconChecklistOutline14', 'IconInspectOutline12', 14), { onClick: () => openInsight('streak') }) : null,
+             sessionSeat ? action('insight-review', t('git.insight.review'), Icon('IconQueueOutline14', 'IconInspectOutline12', 14), { onClick: () => openInsight('review') }) : null,
+             sessionSeat ? action('insight-sessions', t('git.insight.sessions'), Icon('IconBrowseOutline16', 'IconInspectOutline12', 14), { onClick: () => openInsight('sessions') }) : null,
+             // Integrate sits with the "{n} behind" it answers. Mid-merge it becomes
+             // Finish, so the card offers exactly one next move rather than a button
+             // that would start a merge already in progress.
+@@ -869,20 +927,56 @@ window.__ModuleLoader__.load({
+             action('checks-run', t('git.checks.run'), Icon('IconPlayOutline16', 'IconTriangleRightFill14', 14), { onClick: runChecks }),
+           ])))
+         if (checksOpen && redOut) {
+           rows.push(h('li', { key: 'checks-output', className: S.row },
+             h('pre', {
+               'aria-label': t('git.checks.output'),
+               style: { flex: 1, minWidth: 0, margin: 0, padding: '4px 8px', fontSize: 11, lineHeight: '16px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '30vh', overflow: 'auto', color: 'var(--dsw-alias-label-secondary)' },
+             }, redOut)))
+         }
+       }
++      // 5. Delivery ledger (AXS-005) — the condensed strip under the card frame
++      // summary: latest stage, its result, who picks the work up next and where
++      // it is going. The FULL table stays on the PR. A trusted github.com URL
++      // recorded with a stage opens out; a session with no PR gets the same
++      // facts in the bounded local view below — the record is a registry fact
++      // and survives without the remote. React escapes every text child, so
++      // recorded strings (stage names, authors, URLs) render as text, never
++      // markup.
++      if (sessionSeat && ledger) {
++        const ledgerBits = [
++          String(ledger.lastStage ?? '—'),
++          ledger.result ? String(ledger.result) : null,
++          ledger.nextOwner ? t('git.ledger.next', { next: ledger.nextOwner }) : null,
++        ].filter(Boolean)
++        // Belt behind the host's own gate: the strip can only open a URL that is
++        // a github.com HTTPS link, whatever the registry row says.
++        const ledgerUrl = typeof ledger.url === 'string' && ledger.url.startsWith('https://github.com/') ? ledger.url : null
++        rows.push(h('li', { key: 'ledger', className: S.row },
++          h('span', { className: S.preview }, t('git.ledger.summary', { detail: ledgerBits.join(' · ') })),
++          h('div', { className: S.actions },
++            ledgerUrl
++              ? action('ledger-open', t('git.ledger.open'), Icon('IconRightUpOutline16', 'IconBrowseOutline16', 14), { onClick: () => window.open(ledgerUrl, '_blank', 'noopener') })
++              : action('ledger-view', t('git.ledger.view'), Icon('IconChevronDownOutline14', 'IconChevronDownOutline14', 14), { onClick: () => setLedgerOpen((v) => !v) }))))
++        if (ledgerOpen && ledger && !ledgerUrl) {
++          rows.push(h('li', { key: 'ledger-view', className: S.row },
++            h('pre', {
++              'aria-label': t('git.ledger.view'),
++              style: { flex: 1, minWidth: 0, margin: 0, padding: '4px 8px', fontSize: 11, lineHeight: '16px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '30vh', overflow: 'auto', color: 'var(--dsw-alias-label-secondary)' },
++            }, [
++              t('git.ledger.stage') + ': ' + String(ledger.lastStage ?? '—'),
++              t('git.ledger.result') + ': ' + String(ledger.result ?? '—'),
++              t('git.ledger.nextOwner') + ': ' + String(ledger.nextOwner ?? '—'),
++              ledger.target ? t('git.ledger.target') + ': ' + String(ledger.target) : null,
++            ].filter(Boolean).join('\n'))))
++        }
++      }
+ 
+       const confirmModal = confirm === null ? null : h(P.Modal, {
+         open: true, onClose: () => setConfirm(null),
+         title: confirm.title, description: confirm.body, closeLabel: t('git.cancel'),
+         footer: h(React.Fragment, null,
+           h(P.Button, { variant: 'outline', autoFocus: true, onClick: () => setConfirm(null) }, t('git.cancel')),
+           h(P.Button, { variant: 'outline', onClick: confirmGo }, confirm.ok)),
+       })
+       const relinkModal = relink === null ? null : h(P.Modal, {
+         open: true, onClose: stopRelink,
+diff --git a/plugins/arxa-git-card/lib/git-card.snippet.txt b/plugins/arxa-git-card/lib/git-card.snippet.txt
+index 47e88be..da1040f 100644
+--- a/plugins/arxa-git-card/lib/git-card.snippet.txt
++++ b/plugins/arxa-git-card/lib/git-card.snippet.txt
+@@ -74,20 +74,31 @@ const en = {
+   // Decision 3 (local-only git parity): the local Checks row — the twin of
+   // the Actions section on linked seats, for the seat that has no remote.
+   'git.checks.none': 'checks not run yet',
+   'git.checks.running': 'running checks…',
+   'git.checks.green': 'green',
+   'git.checks.red': 'red',
+   'git.checks.light': 'light checks',
+   'git.checks.run': 'Run checks',
+   'git.checks.output': 'Checks output',
+   'git.checks.failed': 'Checks failed: {reason}',
++  // AXS-005: the condensed delivery strip. The full ledger table stays on
++  // the PR; the card carries the latest stage only, read from the registry
++  // record — so a local-only session keeps the same facts with no remote.
++  'git.ledger.summary': 'delivery · {detail}',
++  'git.ledger.next': 'next: {next}',
++  'git.ledger.open': 'Open the pull request',
++  'git.ledger.view': 'Delivery record',
++  'git.ledger.stage': 'stage',
++  'git.ledger.result': 'result',
++  'git.ledger.nextOwner': 'next',
++  'git.ledger.target': 'target',
+   // G4 (grilled 2026-09-06): the four moves that are hard to walk back ask
+   // first. Commit and Create PR already pause for text; Cancel CI is undone
+   // by re-running.
+   'git.confirm.integrate.title': 'Integrate main into this session?',
+   'git.confirm.integrate.body': 'Merges the current main into this session\u2019s worktree. A conflict stops the merge half-done — you finish it from the card before anything else can land.',
+   'git.confirm.integrate.ok': 'Integrate main',
+   'git.confirm.finish.title': 'Finish integrating?',
+   'git.confirm.finish.body': 'Commits the merge that is in progress. Resolve every conflict in the worktree first.',
+   'git.confirm.finish.ok': 'Finish integrating',
+   'git.confirm.merge.title': 'Merge this pull request into main?',
+@@ -181,20 +192,31 @@ const pl = {
+   'git.mintFailed': 'Wybicie nie powiodło się: {reason}',
+   // TODO native review (conformance decision 4): machine-drafted.
+   'git.checks.none': 'testy jeszcze nie uruchomiono',
+   'git.checks.running': 'uruchamianie testów…',
+   'git.checks.green': 'zielone',
+   'git.checks.red': 'czerwone',
+   'git.checks.light': 'testy lekkie',
+   'git.checks.run': 'Uruchom testy',
+   'git.checks.output': 'Wyniki testów',
+   'git.checks.failed': 'Testy nie powiodły się: {reason}',
++  // AXS-005: skrócony pasek dostawy. Pełna tabela pozostaje w PR; karta
++  // niesie tylko ostatni etap, odczytany z rejestru — sesja tylko lokalna
++  // zachowuje te same fakty bez zdalnego repozytorium.
++  'git.ledger.summary': 'dostawa · {detail}',
++  'git.ledger.next': 'następny: {next}',
++  'git.ledger.open': 'Otwórz pull request',
++  'git.ledger.view': 'Rejestr dostawy',
++  'git.ledger.stage': 'etap',
++  'git.ledger.result': 'wynik',
++  'git.ledger.nextOwner': 'następny',
++  'git.ledger.target': 'cel',
+   'git.confirm.integrate.title': 'Scalić main do tej sesji?',
+   'git.confirm.integrate.body': 'Scala bieżący main do drzewa roboczego tej sesji. Konflikt zatrzyma scalanie w połowie — dokończysz je z karty, zanim cokolwiek innego wejdzie.',
+   'git.confirm.integrate.ok': 'Scal main',
+   'git.confirm.finish.title': 'Dokończyć scalanie?',
+   'git.confirm.finish.body': 'Zatwierdza trwające scalanie. Najpierw rozwiąż wszystkie konflikty w drzewie roboczym.',
+   'git.confirm.finish.ok': 'Dokończ scalanie',
+   'git.confirm.merge.title': 'Scalić ten pull request do main?',
+   'git.confirm.merge.body': 'Scala pull requesta jednym commitem. Main przesuwa się dla wszystkich, a karta tego nie cofnie.',
+   'git.confirm.merge.ok': 'Scal pull requesta',
+   'git.confirm.mint.title': 'Wybić wersję?',
+@@ -284,20 +306,31 @@ const fr = {
+   'git.mintFailed': 'Échec de la frappe : {reason}',
+   // TODO native review (conformance decision 4): machine-drafted.
+   'git.checks.none': 'vérifications pas encore lancées',
+   'git.checks.running': 'lancement des vérifications…',
+   'git.checks.green': 'vertes',
+   'git.checks.red': 'rouges',
+   'git.checks.light': 'vérifications légères',
+   'git.checks.run': 'Lancer les vérifications',
+   'git.checks.output': 'Résultats des vérifications',
+   'git.checks.failed': 'Échec des vérifications : {reason}',
++  // AXS-005 : bandeau de livraison condensé. Le tableau complet reste dans la
++  // PR ; la carte ne porte que la dernière étape, lue dans le registre — une
++  // session locale garde donc les mêmes faits sans dépôt distant.
++  'git.ledger.summary': 'livraison · {detail}',
++  'git.ledger.next': 'suite : {next}',
++  'git.ledger.open': 'Ouvrir la pull request',
++  'git.ledger.view': 'Relevé de livraison',
++  'git.ledger.stage': 'étape',
++  'git.ledger.result': 'résultat',
++  'git.ledger.nextOwner': 'suite',
++  'git.ledger.target': 'cible',
+   'git.confirm.integrate.title': 'Intégrer main dans cette session ?',
+   'git.confirm.integrate.body': 'Fusionne le main actuel dans l’arbre de travail de cette session. Un conflit arrête la fusion à mi-chemin — vous la terminez depuis la carte avant que quoi que ce soit d’autre puisse arriver.',
+   'git.confirm.integrate.ok': 'Intégrer main',
+   'git.confirm.finish.title': 'Terminer l’intégration ?',
+   'git.confirm.finish.body': 'Valide la fusion en cours. Résolvez d’abord tous les conflits dans l’arbre de travail.',
+   'git.confirm.finish.ok': 'Terminer l’intégration',
+   'git.confirm.merge.title': 'Fusionner cette pull request dans main ?',
+   'git.confirm.merge.body': 'Fusionne la pull request en un seul commit. Main avance pour tout le monde, et la carte ne l’annule pas.',
+   'git.confirm.merge.ok': 'Fusionner la pull request',
+   'git.confirm.mint.title': 'Frapper une version ?',
+@@ -344,20 +377,25 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
+   const [pr, setPr] = React.useState(void 0)
+   const [absent, setAbsent] = React.useState(false)
+   const [collapsed, setCollapsed] = React.useState(true)
+   const [editing, setEditing] = React.useState(null)
+   const [busy, setBusy] = React.useState(null)
+   const [seatSession, setSeatSession] = React.useState(sessionId || null)
+   const [mintChip, setMintChip] = React.useState(null)
+   // Decision 3: the local Checks row's disclosure — red output stays open
+   // until the reader closes it, but never leaks across a session switch.
+   const [checksOpen, setChecksOpen] = React.useState(false)
++  // AXS-005: the delivery strip's data and its bounded local view. Same rule
++  // as checksOpen: the disclosure never leaks across a session switch, and
++  // `void 0` (never loaded) is distinct from `null` (no record).
++  const [ledger, setLedger] = React.useState(void 0)
++  const [ledgerOpen, setLedgerOpen] = React.useState(false)
+   // G4: the move waiting on a yes — { key, title, body, ok, run } | null.
+   const [confirm, setConfirm] = React.useState(null)
+   // G6: the device-flow conversation — null | { starting } | { userCode, verificationUri }.
+   const [relink, setRelink] = React.useState(null)
+   const listId = React.useId()
+   const alive = React.useRef(true)
+   // The live device flow, or null: { poll }. A REF, not state — Cancel has to
+   // stop the poll synchronously, and a late tick has to be able to tell "my
+   // flow" from "the flow the user already dismissed".
+   const relinkRun = React.useRef(null)
+@@ -387,21 +425,31 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
+       notify('error', t('git.statusFailed', { reason: reasonOf(e) }))
+     }
+   }, [post, sessionId, notify, t])
+ 
+   const loadPr = React.useCallback(async () => {
+     if (!seatSession) { setPr(null); return }
+     try { const r = await post('card.pr.status', { sessionId: seatSession }); if (alive.current) setPr(r) }
+     catch (e) { if (alive.current) setPr({ ok: false, reason: reasonOf(e) }) }
+   }, [post, seatSession])
+ 
+-  React.useEffect(() => { setSeatSession(sessionId || null); setPr(void 0); setMintChip(null); setChecksOpen(false); load() }, [sessionId, load])
++  // AXS-005: the condensed delivery record — latest stage, its result, the
++  // next owner, the target, and the PR URL when one was recorded. A read of
++  // the registry row, so it needs no GitHub at all; a failure hides the strip
++  // rather than spamming a toast on a poll.
++  const loadLedger = React.useCallback(async () => {
++    if (!seatSession) { setLedger(null); return }
++    try { const r = await post('card.ledger.summary', { sessionId: seatSession }); if (alive.current) setLedger(r) }
++    catch { if (alive.current) setLedger(null) }
++  }, [post, seatSession])
++
++  React.useEffect(() => { setSeatSession(sessionId || null); setPr(void 0); setLedger(void 0); setLedgerOpen(false); setMintChip(null); setChecksOpen(false); load() }, [sessionId, load])
+   React.useEffect(() => {
+     const on = () => { load(); if (!collapsed) loadPr() }
+     window.addEventListener('arxa-git-card-refresh', on)
+     return () => window.removeEventListener('arxa-git-card-refresh', on)
+   }, [load, loadPr, collapsed])
+   React.useEffect(() => {
+     if (!status || collapsed) return
+     if (status.seat && status.seat.kind === 'session' && status.linked && !status.localOnly && pr === void 0) loadPr()
+   }, [status, collapsed, pr, loadPr])
+ 
+@@ -411,20 +459,30 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
+   const hasPr = Boolean(pr && pr.ok && pr.pr)
+   React.useEffect(() => {
+     const id = window.setInterval(() => { if (busy === null) load() }, 30000)
+     return () => window.clearInterval(id)
+   }, [load, busy])
+   React.useEffect(() => {
+     if (collapsed || !hasPr) return
+     const id = window.setInterval(() => { if (busy === null) loadPr() }, 30000)
+     return () => window.clearInterval(id)
+   }, [collapsed, hasPr, loadPr, busy])
++  // The strip refreshes like the PR read does: once on expand, then on a
++  // poll. Stages change exactly when the card's own actions run, so the 30s
++  // poll (plus the refresh button) is plenty — and it is a local registry
++  // read, not GitHub traffic.
++  React.useEffect(() => {
++    if (!seatSession || collapsed) return
++    if (ledger === void 0) loadLedger()
++    const id = window.setInterval(() => { if (busy === null) loadLedger() }, 30000)
++    return () => window.clearInterval(id)
++  }, [seatSession, collapsed, ledger, busy, loadLedger])
+ 
+   if (absent || status === null) return null
+ 
+   const interactionActive = editing !== null || busy !== null || confirm !== null || relink !== null
+   const expanded = !collapsed || interactionActive
+   const dirty = status.dirty
+   const changed = dirty ? dirty.staged + dirty.unstaged + dirty.untracked : null
+   const healthKey = status.health === 'ok' ? null : (status.health === 'missing' ? 'git.health.missing' : 'git.health.detached')
+   const summary = healthKey ? t(healthKey) : changed === 0 ? t('git.clean') : t('git.changed', { n: changed })
+   const branch = (status.seat && status.seat.branch) || 'main'
+@@ -700,21 +758,21 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
+     action('save', t('git.save'), Icon('IconCheckOutline16', 'IconCheckOutline16', 14), { disabled: editing.text.trim() === '', onClick: onSave }),
+     action('cancel', t('git.cancel'), Icon('IconCloseOutline16', 'IconCloseFill14', 14), { onClick: () => setEditing(null) }),
+   ]
+ 
+   const rows = []
+   // 1. Status
+   rows.push(h('li', { key: 'status', className: S.row },
+     h('span', { className: S.preview }, detail),
+     h('div', { className: S.actions },
+       [
+-        action('refresh', t('git.refresh'), Icon('IconRefreshOutline16', 'IconRefreshOutline16', 14), { onClick: () => { load(); if (pr !== void 0) loadPr() } }),
++        action('refresh', t('git.refresh'), Icon('IconRefreshOutline16', 'IconRefreshOutline16', 14), { onClick: () => { load(); if (pr !== void 0) loadPr(); loadLedger() } }),
+         // G6: the one door that works while the grant is dead. Waking the
+         // runner needs GitHub too, so it stays out of the way until then.
+         relinkRequired ? relinkAction() : null,
+         runnerAsleep && !relinkRequired ? wakeAction() : null,
+         sessionSeat ? action('insight-streak', t('git.insight.streak'), Icon('IconChecklistOutline14', 'IconInspectOutline12', 14), { onClick: () => openInsight('streak') }) : null,
+         sessionSeat ? action('insight-review', t('git.insight.review'), Icon('IconQueueOutline14', 'IconInspectOutline12', 14), { onClick: () => openInsight('review') }) : null,
+         sessionSeat ? action('insight-sessions', t('git.insight.sessions'), Icon('IconBrowseOutline16', 'IconInspectOutline12', 14), { onClick: () => openInsight('sessions') }) : null,
+         // Integrate sits with the "{n} behind" it answers. Mid-merge it becomes
+         // Finish, so the card offers exactly one next move rather than a button
+         // that would start a merge already in progress.
+@@ -821,20 +879,56 @@ function GitDock({ sessionId, postAction: post, notify, t }) {
+         action('checks-run', t('git.checks.run'), Icon('IconPlayOutline16', 'IconTriangleRightFill14', 14), { onClick: runChecks }),
+       ])))
+     if (checksOpen && redOut) {
+       rows.push(h('li', { key: 'checks-output', className: S.row },
+         h('pre', {
+           'aria-label': t('git.checks.output'),
+           style: { flex: 1, minWidth: 0, margin: 0, padding: '4px 8px', fontSize: 11, lineHeight: '16px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '30vh', overflow: 'auto', color: 'var(--dsw-alias-label-secondary)' },
+         }, redOut)))
+     }
+   }
++  // 5. Delivery ledger (AXS-005) — the condensed strip under the card frame
++  // summary: latest stage, its result, who picks the work up next and where
++  // it is going. The FULL table stays on the PR. A trusted github.com URL
++  // recorded with a stage opens out; a session with no PR gets the same
++  // facts in the bounded local view below — the record is a registry fact
++  // and survives without the remote. React escapes every text child, so
++  // recorded strings (stage names, authors, URLs) render as text, never
++  // markup.
++  if (sessionSeat && ledger) {
++    const ledgerBits = [
++      String(ledger.lastStage ?? '—'),
++      ledger.result ? String(ledger.result) : null,
++      ledger.nextOwner ? t('git.ledger.next', { next: ledger.nextOwner }) : null,
++    ].filter(Boolean)
++    // Belt behind the host's own gate: the strip can only open a URL that is
++    // a github.com HTTPS link, whatever the registry row says.
++    const ledgerUrl = typeof ledger.url === 'string' && ledger.url.startsWith('https://github.com/') ? ledger.url : null
++    rows.push(h('li', { key: 'ledger', className: S.row },
++      h('span', { className: S.preview }, t('git.ledger.summary', { detail: ledgerBits.join(' · ') })),
++      h('div', { className: S.actions },
++        ledgerUrl
++          ? action('ledger-open', t('git.ledger.open'), Icon('IconRightUpOutline16', 'IconBrowseOutline16', 14), { onClick: () => window.open(ledgerUrl, '_blank', 'noopener') })
++          : action('ledger-view', t('git.ledger.view'), Icon('IconChevronDownOutline14', 'IconChevronDownOutline14', 14), { onClick: () => setLedgerOpen((v) => !v) }))))
++    if (ledgerOpen && ledger && !ledgerUrl) {
++      rows.push(h('li', { key: 'ledger-view', className: S.row },
++        h('pre', {
++          'aria-label': t('git.ledger.view'),
++          style: { flex: 1, minWidth: 0, margin: 0, padding: '4px 8px', fontSize: 11, lineHeight: '16px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '30vh', overflow: 'auto', color: 'var(--dsw-alias-label-secondary)' },
++        }, [
++          t('git.ledger.stage') + ': ' + String(ledger.lastStage ?? '—'),
++          t('git.ledger.result') + ': ' + String(ledger.result ?? '—'),
++          t('git.ledger.nextOwner') + ': ' + String(ledger.nextOwner ?? '—'),
++          ledger.target ? t('git.ledger.target') + ': ' + String(ledger.target) : null,
++        ].filter(Boolean).join('\n'))))
++    }
++  }
+ 
+   const confirmModal = confirm === null ? null : h(P.Modal, {
+     open: true, onClose: () => setConfirm(null),
+     title: confirm.title, description: confirm.body, closeLabel: t('git.cancel'),
+     footer: h(React.Fragment, null,
+       h(P.Button, { variant: 'outline', autoFocus: true, onClick: () => setConfirm(null) }, t('git.cancel')),
+       h(P.Button, { variant: 'outline', onClick: confirmGo }, confirm.ok)),
+   })
+   const relinkModal = relink === null ? null : h(P.Modal, {
+     open: true, onClose: stopRelink,
+diff --git a/plugins/arxa-git-card/lib/index.js b/plugins/arxa-git-card/lib/index.js
+index d7827d1..8e8be95 100644
+--- a/plugins/arxa-git-card/lib/index.js
++++ b/plugins/arxa-git-card/lib/index.js
+@@ -468,21 +468,23 @@ export function apply(ctx) {
+             // stage can rewrite that block in place instead of appending.
+             const ledgerTable = gw.renderLedger(gw.readLedger(repoPath, sid), { sessionId: sid, container: s.workspace, next: 'review' })
+             const body = gw.withLedger(
+               [String(problem ?? ''), String(fix ?? ''), attribution].filter((x) => x !== '').join('\n\n'),
+               ledgerTable,
+             )
+             // file-pr rule 1: dedupe — update, never duplicate.
+             const existing = await g.prListForHead(manifest.repoOwner, manifest.repoName, s.branch).catch(() => [])
+             if (Array.isArray(existing) && existing.length > 0) return { ok: true, existing: true, pr: { number: existing[0].number, url: existing[0].html_url } }
+             const pr = await g.prCreate(manifest.repoOwner, manifest.repoName, { title, body, head: s.branch, base: 'main' })
+-            await noteStage(repoPath, sid, { stage: 'review', author: actor, collaborator, detail: 'PR #' + pr.number + ' opened' }, { next: 'a human reviewer' })
++            // AXS-005: the PR link is recorded WITH the stage — the strip links
++            // what GitHub itself handed back, and never refetches for it.
++            await noteStage(repoPath, sid, { stage: 'review', author: actor, collaborator, detail: 'PR #' + pr.number + ' opened', target: 'PR #' + pr.number, url: pr.html_url ?? null }, { next: 'a human reviewer' })
+             return { ok: true, pr: { number: pr.number, url: pr.html_url } }
+           }
+ 
+           /**
+            * D6 — the session's PR opens on its FIRST push, not on demand.
+            *
+            * Called from the tail of pushSessionBranch and ONLY after it reports
+            * ok:true, so the auth-retry path never reaches GitHub twice (that
+            * path has a measured six-minute freeze on a rejected token). The
+            * dedupe inside openPr makes it once-per-session: every later push
+@@ -556,25 +558,34 @@ export function apply(ctx) {
+           const authorLogin = async (repoPath) => {
+             const g = await getGithub().catch(() => null)
+             const st = g && typeof g.status === 'function' ? await g.status().catch(() => null) : null
+             if (st?.login) return st.login
+             const gw = await importGitWorkspace()
+             const cfg = gw.runGit(['config', 'user.name'], { cwd: repoPath, allowFail: true })
+             if (cfg) return cfg
+             try { return (await import('node:os')).userInfo().username } catch { return 'local' }
+           }
+ 
+-          const noteStage = async (repoPath, sid, entry, { next } = {}) => {
++          const noteStage = async (repoPath, sid, entry, { next, target, url } = {}) => {
+             const gw = await importGitWorkspace()
+             let ledger
+             try {
+-              ledger = gw.recordStage(repoPath, sid, entry)
++              // `next`/`target`/`url` ride the ENTRY so recordStage persists
++              // them with the row (AXS-005) — the strip reads the record, and
++              // a fact that is only rendered is not in the record. Merged one
++              // key at a time: a plain spread of the options would overwrite
++              // an entry-supplied `target` with a caller's `undefined`.
++              const row = { ...entry }
++              if (next !== undefined) row.next = next
++              if (target !== undefined) row.target = target
++              if (url !== undefined) row.url = url
++              ledger = gw.recordStage(repoPath, sid, row)
+             } catch {
+               return { recorded: false } // unknown session — never fail the caller's action
+             }
+             const published = await (async () => {
+               try {
+                 const g = await getGithub().catch(() => null)
+                 if (!g) return false
+                 const cur = oc ? handle() : null
+                 const s = await sessionFor(gw, sid)
+                 if (!s) return false
+@@ -975,20 +986,21 @@ export function apply(ctx) {
+               // Record a SETTLED result only, and only when it differs from the
+               // last one recorded. card.pr.status is polled — every 15s in the
+               // smoke — so recording each call would bury the ledger under
+               // forty identical "pending" rows and post forty comments.
+               if (checks?.state === 'green' || checks?.state === 'red') {
+                 const gwl = await importGitWorkspace()
+                 const seen = gwl.readLedger(repoPath, sid).filter((e) => e.stage === 'checks')
+                 if (seen[seen.length - 1]?.result !== checks.state) {
+                   await noteStage(repoPath, sid, {
+                     stage: 'checks', author: 'github-actions[bot]', result: checks.state, sha: pr.head?.sha ?? null,
++                    target: 'PR #' + pr.number, url: pr.html_url ?? null,
+                   }, { next: checks.state === 'green' ? 'merge when reviewed' : 'fix the failing check' })
+                 }
+               }
+               // GitHub's PR state is only open|closed — never 'merged' — so
+               // the merged signal has to be carried explicitly or the client's
+               // prMerged branch (and with it Mint) stays dead.
+               return { ok: true, merged: Boolean(pr.merged_at), pr: { number: pr.number, url: pr.html_url, state: pr.state }, checks, runs: await runsFor(), branch: s.branch }
+             },
+             /** Q8: run control from the card. Both take the run id the status
+               * call already surfaced, so the UI never has to guess one. */
+@@ -1016,20 +1028,36 @@ export function apply(ctx) {
+               gateCache.set(s.worktree, {
+                 state: gate.green ? 'green' : 'red',
+                 kind: gate.kind,
+                 configured: gate.configured,
+                 output,
+                 ranAt: Date.now(),
+                 fingerprint: gateFingerprint(gw, s.worktree),
+               })
+               return { green: gate.green, kind: gate.kind, configured: gate.configured, output }
+             },
++            /** AXS-005 (github-conversations carried ledger strip): the
++              * condensed delivery record for the strip under the card's frame
++              * summary. A PURE READ of the session's registry row through the
++              * resolved seat repo — the same resolution every other ledger
++              * reader uses, so a project session's record is found in the
++              * project repo. Never touches GitHub: the PR URL is only ever
++              * one a stage already recorded, and `ledgerSummary` refuses any
++              * URL that is not a github.com HTTPS link. */
++            'card.ledger.summary': async () => {
++              const gw = await importGitWorkspace()
++              const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
++              if (!sid) throw new Error('card.ledger.summary serves session seats')
++              const s = await sessionFor(gw, sid)
++              if (!s) throw new Error('session-not-found: ' + sid)
++              return gw.ledgerSummary(gw.readLedger(sessionRepoPath(s, sid), sid))
++            },
+             /** Bring main into the session's worktree (grilled 2026-09-03).
+               * The MANUAL half — nothing calls this on its own. A conflict is
+               * left open on purpose: the agent working in that worktree is what
+               * resolves it, and aborting would put the user back exactly where
+               * they started. */
+             'card.integrate': async () => {
+               const gw = await importGitWorkspace()
+               const sid = typeof arg?.sessionId === 'string' && arg.sessionId !== '' ? arg.sessionId : null
+               if (!sid) throw new Error('card.integrate serves session seats')
+               const s = await sessionFor(gw, sid)
+diff --git a/plugins/arxa-git-card/selftest.actions.mjs b/plugins/arxa-git-card/selftest.actions.mjs
+index b5cc45e..857396a 100644
+--- a/plugins/arxa-git-card/selftest.actions.mjs
++++ b/plugins/arxa-git-card/selftest.actions.mjs
+@@ -549,13 +549,77 @@ async function patchProjectManifest(projPath, patch) {
+   // recordStage would append to nothing and reset the ledger every call.
+   check('Q14: its ledger reads the same through the project path and the org path',
+     gw.readLedger(prow.repoPath, psid).length === 1 && gw.readLedger(repoPath, psid).length === 1,
+     JSON.stringify({ viaProject: gw.readLedger(prow.repoPath, psid).length, viaOrg: gw.readLedger(repoPath, psid).length }))
+   gw.recordStage(repoPath, psid, { stage: 'checks', actor: 'github actions', result: 'green' })
+   check('Q14: recording through the ORG path appends rather than resetting',
+     gw.readLedger(prow.repoPath, psid).map((e) => e.stage).join(',') === 'committed,checks',
+     JSON.stringify(gw.readLedger(prow.repoPath, psid).map((e) => e.stage)))
+ }
+ 
++// ============================================================
++// H. card.ledger.summary — the condensed delivery strip's engine (AXS-005).
++// A READ of the registry record only: no refetch, no GitHub call, and a URL
++// only when a trusted github.com link was already recorded with a stage.
++// ============================================================
++{
++  // No ledger yet: null, never an invented stage.
++  const org = await makeOrg('Ledger Sum Co')
++  const sid = await makeSession(org)
++  let r = await act('card.ledger.summary', {})
++  check('card.ledger.summary: refuses without a session seat',
++    r.ok === false && /serves session seats/.test(r.error), JSON.stringify(r))
++  r = await act('card.ledger.summary', { sessionId: sid })
++  check('card.ledger.summary: a session with no ledger answers null',
++    r.ok === true && r.result === null, JSON.stringify(r))
++
++  // LOCAL session, no URL anywhere: the strip's facts come from the recorded
++  // rows alone. The row below is the one the red-gate park writes
++  // (card.commit's prflow path): result red, next owner NAMED.
++  const repoPath = gw.parkedSessions(org.path).find((x) => x.id === sid).repoPath
++  gw.recordStage(repoPath, sid, {
++    stage: 'gate', author: 'unfazed-dev', result: 'red', sha: 'abc1234',
++    detail: 'parked — nothing is lost, the collapsed commit stays on the branch',
++    next: 'unfazed-dev — fix the gate and re-commit',
++  })
++  r = await act('card.ledger.summary', { sessionId: sid })
++  check('local session: the strip names the latest stage, its result and the next owner, with no URL',
++    r.ok === true && r.result.lastStage === 'gate' && r.result.result === 'red'
++      && r.result.nextOwner === 'unfazed-dev — fix the gate and re-commit' && r.result.url === null,
++    JSON.stringify(r.result))
++
++  // LINKED session: the PR URL is recorded WITH the review stage by openPr,
++  // and the summary links exactly that — never a refetch.
++  const org2 = await makeOrg('Ledger Link Co')
++  const sid2 = await makeSession(org2)
++  await patchManifest(org2.path, { repoOwner: 'acme', repoName: 'widgets', localOnly: false })
++  Object.assign(fakeGh, {
++    prListForHead: async () => [],
++    prCreate: async (o, n, a) => ({ number: 9, html_url: 'https://github.com/acme/widgets/pull/9', ...a }),
++    prUpdate: async () => ({ number: 9 }),
++    prComment: async () => ({ id: 1 }),
++    status: async () => ({ login: 'evan-dev' }),
++  })
++  r = await act('card.pr.create', { sessionId: sid2, title: 'feat(x): the thing', problem: 'P', fix: 'F' })
++  let s = await act('card.ledger.summary', { sessionId: sid2 })
++  check('linked session: the strip carries the PR URL recorded at review, with its target',
++    r.ok === true && s.ok === true && s.result.lastStage === 'review'
++      && s.result.nextOwner === 'a human reviewer' && s.result.target === 'PR #9'
++      && s.result.url === 'https://github.com/acme/widgets/pull/9',
++    JSON.stringify({ pr: r.result?.pr, summary: s.result }))
++
++  // MERGED: the latest stage/result/next come from the merged row; the URL
++  // still comes from the row that recorded it.
++  fakeGh.prListForHead = async () => [{ number: 9, state: 'open', html_url: 'https://github.com/acme/widgets/pull/9', head: { sha: 'deadbeef' }, title: 'feat(x): the thing' }]
++  fakeGh.prChecks = async () => ({ state: 'green', asleep: false, runs: [] })
++  fakeGh.prMerge = async () => ({ merged: true, sha: 'merged-sha-9' })
++  r = await act('card.pr.merge', { sessionId: sid2 })
++  s = await act('card.ledger.summary', { sessionId: sid2 })
++  check('merged: latest stage/result/next from the merged row, URL from the row that recorded it',
++    r.ok === true && r.result.ok === true && s.result.lastStage === 'merged' && s.result.result === 'ok'
++      && s.result.nextOwner === 'archive the session' && s.result.url === 'https://github.com/acme/widgets/pull/9',
++    JSON.stringify(s.result))
++}
++
+ console.log(failures === 0 ? '\narxa-git-card selftest.actions: ALL GREEN' : `\narxa-git-card selftest.actions: ${failures} FAILURE(S)`)
+ rmSync(sandbox, { recursive: true, force: true })
+ process.exit(failures === 0 ? 0 : 1)
+diff --git a/plugins/arxa-git-card/selftest.mjs b/plugins/arxa-git-card/selftest.mjs
+index 3ac9471..624a910 100644
+--- a/plugins/arxa-git-card/selftest.mjs
++++ b/plugins/arxa-git-card/selftest.mjs
+@@ -228,12 +228,31 @@ check('checks: red output renders in a disclosure, not a toast that scrolls away
+   const slice = hostSrc().split("'card.gate.run': async () => {")[1].split(/\n {12}'/)[0]
+   check('checks: the verb only runs the gate — no push, PR, merge, park or Actions',
+     slice.includes('gw.runGate(s.worktree)')
+     && !/pushSessionBranch|prMerge|parkSession|workflowRuns|rerunRun|cancelRun/.test(slice))
+ }
+ check('checks: every row string in all three dictionaries',
+   ['git.checks.run', 'git.checks.none', 'git.checks.green', 'git.checks.red', 'git.checks.light',
+     'git.checks.running', 'git.checks.output', 'git.checks.failed']
+     .every((k) => (clientSrc.split("'" + k + "':").length - 1) === 3))
+ 
++// ---- AXS-005: the condensed delivery ledger strip --------------------------
++// The full ledger table stays on the PR; the card renders only the latest
++// stage, its result, the next owner and the target, read from the registry
++// record through the strip's own action — never a refetch or a re-render of
++// the table.
++check('ledger: host serves card.ledger.summary as a pure read of the record',
++  hostSrc().includes("'card.ledger.summary': async () => {")
++  && hostSrc().includes('gw.ledgerSummary(gw.readLedger('))
++check('ledger: the strip loads through its own action and renders for session seats with a record',
++  clientSrc.includes("post('card.ledger.summary'")
++  && clientSrc.includes('sessionSeat && ledger'))
++check('ledger: only a trusted github.com URL opens out; everything else gets the bounded local view',
++  clientSrc.includes("startsWith('https://github.com/')")
++  && clientSrc.includes('ledgerOpen && ledger && !ledgerUrl'))
++check('ledger: strip strings in all three dictionaries',
++  ['git.ledger.summary', 'git.ledger.next', 'git.ledger.open', 'git.ledger.view',
++    'git.ledger.stage', 'git.ledger.result', 'git.ledger.nextOwner', 'git.ledger.target']
++    .every((k) => (clientSrc.split("'" + k + "':").length - 1) === 3))
++
+ console.log(failures === 0 ? '\narxa-git-card selftest: ALL GREEN' : `\narxa-git-card selftest: ${failures} FAILURE(S)`)
+ process.exit(failures === 0 ? 0 : 1)
+diff --git a/plugins/git-workspace/lib/index.js b/plugins/git-workspace/lib/index.js
+index e7e0fe7..23fa126 100644
+--- a/plugins/git-workspace/lib/index.js
++++ b/plugins/git-workspace/lib/index.js
+@@ -80,21 +80,21 @@ export {
+   archiveSession,
+   reviveSession,
+   dropSession,
+   removeSessionRow,
+   restoreSessionRow,
+   dropSessionRefs,
+   worktreeHealth,
+ } from './sessions.js'
+ export {
+   STAGES, sessionTrailers, agentCollaborator, EFFORT_UNSPECIFIED, readLedger, recordStage, renderLedger, withLedger, stageTime, readableTime,
+-  rowAuthor, stageComment,
++  rowAuthor, stageComment, ledgerSummary,
+ } from './ledger.js'
+ export {
+   listWorktreeDirs,
+   parseWorktreePorcelain,
+   reconcileWorktrees,
+   repairWorktrees,
+ } from './reconcile.js'
+ export {
+   transitionVersion,
+   recordTargetRelease,
+diff --git a/plugins/git-workspace/lib/ledger.js b/plugins/git-workspace/lib/ledger.js
+index 8d10cf7..423c7cd 100644
+--- a/plugins/git-workspace/lib/ledger.js
++++ b/plugins/git-workspace/lib/ledger.js
+@@ -134,20 +134,27 @@ export function recordStage(repoPath, id, entry, env = process.env) {
+   const row = {
+     stage,
+     // `author` is a GITHUB USERNAME, never a display name (grilled
+     // 2026-09-03) — `unfazed-dev`, not `Evan F Pierre Louis`. `actor` is
+     // accepted as an alias so a caller mid-migration still records someone.
+     author: entry?.author ? String(entry.author) : (entry?.actor ? String(entry.actor) : null),
+     collaborator: entry?.collaborator ? String(entry.collaborator) : null,
+     result: entry?.result ? String(entry.result) : 'ok',
+     sha: entry?.sha ? String(entry.sha).slice(0, 7) : null,
+     detail: entry?.detail ? String(entry.detail) : null,
++    // The condensed strip's fields (AXS-005): who picks the work up next,
++    // where it is going, and the PR link when one exists — recorded WITH the
++    // stage so the summary never has to guess from context. Rows written
++    // before these fields existed simply lack them, and read as null below.
++    next: entry?.next ? String(entry.next) : null,
++    target: entry?.target ? String(entry.target) : null,
++    url: entry?.url ? String(entry.url) : null,
+     at: entry?.at ?? t.at,
+     atUtc: t.atUtc,
+     atLocal: t.atLocal,
+     tz: t.tz,
+   }
+   const ledger = [...readLedger(repoPath, id, env), row]
+   annotateSession(repoPath, id, { ledger }, env)
+   return ledger
+ }
+ 
+@@ -229,20 +236,60 @@ export function renderLedger(ledger, { sessionId, container, next } = {}) {
+     out.push(
+       `| ${cell(r.stage)} | ${cell(rowAuthor(r))} | ${cell(r.collaborator)} | ${cell(r.result)} ` +
+       `| ${r.sha ? '`' + r.sha + '`' : '—'} | ${cell(r.at)} | ${cell(readableTime(r))} | ${cell(r.detail)} |`,
+     )
+   }
+   if (rows.length === 0) out.push('| _no stages recorded yet_ |  |  |  |  |  |  |  |')
+   out.push('', `**Next:** ${next ?? 'awaiting review'}`)
+   return out.join('\n')
+ }
+ 
++/** A URL the strip may link out to: only a github.com HTTPS link. The card
++ * never turns registry content into a clickable URL to somewhere else, and
++ * never refetches to find one — if GitHub did not hand this exact URL to
++ * arxa when a stage was recorded, there is no link. */
++const TRUSTED_URL_RE = /^https:\/\/github\.com\/\S+$/
++
++/**
++ * The condensed projection the git card's delivery strip renders (AXS-005):
++ * the LATEST stage, its result, who picks the work up next and where it is
++ * going — plus the PR URL when one was recorded, whichever stage recorded it
++ * (a merged session's last row is the merge, but the link out is still the
++ * PR). The full table stays wherever it is published; this never duplicates
++ * or refetches it.
++ *
++ * Pure: takes RECORDED rows, touches nothing. Rows written before `next`,
++ * `target` and `url` existed (everything before 2026-09-13) read as null for
++ * the missing fields rather than guessed — the same rule `rowAuthor` applies
++ * to the pre-rename `actor`.
++ *
++ * `null` for an empty ledger: "no stages recorded yet" is not a stage, and
++ * the strip hides rather than claim one.
++ */
++export function ledgerSummary(ledger) {
++  const rows = Array.isArray(ledger) ? ledger : []
++  const last = rows[rows.length - 1]
++  if (!last) return null
++  let url = null
++  for (let i = rows.length - 1; i >= 0 && url === null; i--) {
++    const u = rows[i]?.url
++    if (typeof u === 'string' && TRUSTED_URL_RE.test(u)) url = u
++  }
++  return {
++    lastStage: last.stage ?? null,
++    result: last.result ?? null,
++    nextOwner: last.next ?? null,
++    target: last.target ?? null,
++    url,
++  }
++}
++
+ const LEDGER_START = '<!-- arxa:ledger -->'
+ const LEDGER_END = '<!-- /arxa:ledger -->'
+ 
+ /**
+  * Put the ledger into a PR body, replacing any previous one.
+  *
+  * Fenced by HTML comments so a human can edit the prose above and below it
+  * freely and still have the next stage update the table in place. Without the
+  * fence the choice is append-forever (nine copies by merge) or overwrite the
+  * whole body (losing whatever a reviewer wrote).
+diff --git a/plugins/git-workspace/selftest.ledger.mjs b/plugins/git-workspace/selftest.ledger.mjs
+index a75881f..bc307da 100644
+--- a/plugins/git-workspace/selftest.ledger.mjs
++++ b/plugins/git-workspace/selftest.ledger.mjs
+@@ -3,21 +3,21 @@
+ // The ledger's whole promise is that the RECORD survives without GitHub, so
+ // everything here runs against a real registry and never touches the network.
+ import assert from 'node:assert/strict'
+ import { execFileSync } from 'node:child_process'
+ import fs from 'node:fs'
+ import os from 'node:os'
+ import path from 'node:path'
+ import {
+   initOrgRepo, openSession, wipCommit,
+   sessionTrailers, agentCollaborator, readLedger, recordStage, renderLedger, withLedger, STAGES,
+-  stageComment, rowAuthor,
++  stageComment, rowAuthor, ledgerSummary,
+   stageTime, readableTime,
+ } from './lib/index.js'
+ 
+ let passed = 0
+ const ok = (label, fn) => { fn(); passed++; console.log(`ok ${passed} - ${label}`) }
+ 
+ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'arxa-ledger-'))
+ process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
+ 
+ ok('trailers: identity and attribution, each optional but the session always present', () => {
+@@ -153,11 +153,54 @@ ok('ledger: the PR-body fence replaces in place and never duplicates', () => {
+   // A reviewer's edits on either side of the fence survive the next stage.
+   const edited = two.replace('Problem', 'Problem (edited by a reviewer)') + '\n\nTrailing note.'
+   const after = withLedger(edited, 'TABLE-3')
+   assert.ok(after.includes('edited by a reviewer') && after.includes('Trailing note.') && after.includes('TABLE-3'))
+ })
+ 
+ ok('ledger: STAGES names the whole life of a session, in order', () => {
+   assert.deepEqual([...STAGES], ['opened', 'integrated', 'committed', 'pushed', 'checks', 'gate', 'review', 'merged', 'archived', 'cleaned'])
+ })
+ 
++ok('summary: new rows persist next, target and url; none of it is guessed', () => {
++  const org = path.join(tmp, 'Summary')
++  fs.mkdirSync(path.join(org, 'notes'), { recursive: true })
++  fs.writeFileSync(path.join(org, 'org.json'), '{"name":"Summary"}\n')
++  initOrgRepo(org)
++  wipCommit(org, { message: 'seed' })
++  const id = 'Summary/notes/note-wt-260913-001'
++  openSession(org, { id, workspace: 'notes' })
++
++  assert.equal(ledgerSummary(readLedger(org, id)), null, 'no ledger is null — never an invented stage')
++  recordStage(org, id, { stage: 'review', author: 'unfazed-dev', next: 'a human reviewer', target: 'PR #12', url: 'https://github.com/acme/widgets/pull/12' })
++  recordStage(org, id, { stage: 'merged', author: 'unfazed-dev', result: 'ok', next: 'archive the session' })
++  const rows = readLedger(org, id)
++  assert.equal(rows[0].next, 'a human reviewer', 'next is persisted WITH the row, not rendered from context')
++  assert.equal(rows[0].target, 'PR #12')
++  assert.equal(rows[0].url, 'https://github.com/acme/widgets/pull/12')
++  const s = ledgerSummary(rows)
++  assert.deepEqual(s, {
++    lastStage: 'merged', result: 'ok', nextOwner: 'archive the session', target: null,
++    // The PR URL outlives the row that recorded it: a merged session's last
++    // row is the merge, but the link out is still the PR.
++    url: 'https://github.com/acme/widgets/pull/12',
++  })
++})
++
++ok('summary: old rows read without next/target/url, and only a trusted github.com URL links', () => {
++  // Every row recorded before 2026-09-13 lacks all three fields. They read
++  // as null — the strip shows what was recorded, never a guess for a field
++  // that did not exist (the same rule rowAuthor applies to `actor`).
++  assert.deepEqual(
++    ledgerSummary([{ stage: 'committed', actor: 'Evan', result: 'ok', at: '2026-09-03T10:00:00Z' }]),
++    { lastStage: 'committed', result: 'ok', nextOwner: null, target: null, url: null },
++  )
++  assert.equal(ledgerSummary([]), null, 'an empty ledger is still null')
++  assert.equal(ledgerSummary(null), null, 'and so is a missing one')
++  // The card must never turn registry content into a clickable URL to
++  // somewhere else, and never refetches to find one.
++  assert.equal(ledgerSummary([{ stage: 'review', url: 'http://github.com/a/b/pull/1' }]).url, null, 'not https')
++  assert.equal(ledgerSummary([{ stage: 'review', url: 'https://evil.example/pr' }]).url, null, 'not github.com')
++  assert.equal(ledgerSummary([{ stage: 'review', url: 'https://github.com/a/b/pull/1 x' }]).url, null, 'no embedded space')
++  assert.equal(ledgerSummary([{ stage: 'review', url: 42 }]).url, null, 'not even a string')
++})
++
+ console.log(`\nledger selftest: ${passed} checks passed`)
+diff --git a/scripts/card-cicd-smoke.mjs b/scripts/card-cicd-smoke.mjs
+index f9e9dab..1469084 100644
+--- a/scripts/card-cicd-smoke.mjs
++++ b/scripts/card-cicd-smoke.mjs
+@@ -431,20 +431,27 @@ try {
+     finalStatus?.pr?.number === prNumber, JSON.stringify(finalStatus?.pr ?? {}).slice(0, 200))
+   // The approve row is prOpen -> Merge, prMerged -> Mint, else -> Create PR.
+   // Without a merged flag the row fell through to "Create PR" and the Mint
+   // action was unreachable from the card at all.
+   check('and reports it MERGED, which is the only thing that makes Mint reachable',
+     finalStatus?.merged === true, JSON.stringify({ merged: finalStatus?.merged, state: finalStatus?.pr?.state }))
+   const minted = await act('version.mint', { sessionId: sid }); live('version.mint')
+   check('version.mint — the action that row leads to — answers rather than throwing',
+     minted !== undefined && minted.ok !== undefined, JSON.stringify(minted).slice(0, 240))
+ 
++  // ---- 13b. the delivery strip the card renders under its frame summary ----
++  const strip = val(await act('card.ledger.summary', { sessionId: sid })); live('card.ledger.summary')
++  check('card.ledger.summary carries the merged row and the PR link GitHub itself recorded',
++    strip?.lastStage === 'merged' && strip?.result === 'ok' && strip?.nextOwner === 'archive the session'
++      && typeof strip?.url === 'string' && strip.url.startsWith('https://github.com/'),
++    JSON.stringify(strip))
++
+   console.log('\n--- what to look at on GitHub ---')
+   if (projectMode) console.log('org repo : https://github.com/' + owner + '/' + ORG_NAME.replace(/ /g, '-') + '   (the org\'s own repo)')
+   console.log('repo     : ' + seatUrl + (projectMode ? '   (the PROJECT repo — its own, not the org\'s)' : ''))
+   console.log('the PR   : ' + seatUrl + '/pull/' + prNumber)
+   console.log('commits  : ' + seatUrl + '/commits/main')
+   console.log('actions  : ' + seatUrl + '/actions')
+   console.log('\nactions driven LIVE through the card route (' + covered.length + '):')
+   console.log('  ' + covered.join('\n  '))
+ } catch (err) {
+   check('the smoke ran to completion', false, String(err?.stack ?? err).slice(0, 900))
+diff --git a/scripts/card-local-smoke.mjs b/scripts/card-local-smoke.mjs
+index 778106e..00a6a44 100644
+--- a/scripts/card-local-smoke.mjs
++++ b/scripts/card-local-smoke.mjs
+@@ -287,20 +287,38 @@ r = await act('card.status', { sessionId: sid })
+ check('card.status serves the cached red gate with its output',
+   r.ok === true && r.result?.gate?.state === 'red' &&
+   r.result?.gate?.output?.includes('smoke: red on purpose'),
+   JSON.stringify(r.result?.gate ?? null).slice(0, 300))
+ check('the red run left the worktree unchanged (porcelain + HEAD identical)',
+   git(['status', '--porcelain'], gateWt) === gateBeforePorcelain &&
+   git(['rev-parse', 'HEAD'], gateWt) === gateBeforeHead,
+   JSON.stringify({ porcelain: git(['status', '--porcelain'], gateWt), head: git(['rev-parse', 'HEAD'], gateWt) }))
+ rmSync(path.join(gateWt, 'check.sh'))
+ 
++// ============================================================
++section('6c. The delivery strip — the record survives with no remote')
++// ============================================================
++/* AXS-005: card.ledger.summary feeds the condensed strip under the card
++ * frame summary. On this local-only org the integrate path has recorded a
++ * real row for session 2, so the strip surfaces the LATEST stage with no URL
++ * to link — exactly the bounded local view's case. Session 1 has no record
++ * at all (the local commit path records nothing), which must answer null
++ * rather than invent a stage. */
++r = await act('card.ledger.summary', { sessionId: sid2 })
++check('card.ledger.summary: a local-only session surfaces its latest stage, clean, with no URL',
++  r.ok === true && r.result?.lastStage === 'integrated' && r.result?.result === 'clean'
++    && r.result?.url === null,
++  JSON.stringify(r.result))
++r = await act('card.ledger.summary', { sessionId: sid })
++check('...and a session with no record answers null, never an invented stage',
++  r.ok === true && r.result === null, JSON.stringify(r))
++
+ // ============================================================
+ /* Sections 7-8 are the SHARED table (Decision 5) — the same assertions the
+  * GitHub-linked smoke runs, imported rather than copied. Everything in it is
+  * plain local git through the card's own route, so it holds identically in
+  * both modes; the divergence it prevents is a flow that gets tested in one
+  * configuration and quietly not the other. Names come from ctx because the
+  * linked run uses arxa's real publish and real slugs. */
+ const flowCtx = {
+   act, check, section, git, gw,
+   orgId: org.id, orgPath: org.path,
+git diff --check: (clean)

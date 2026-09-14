@@ -1,0 +1,7 @@
+⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
+[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
+- **Status:** DONE
+- Commit: `7d9e866` `feat: surface local checks and complete tree decorations` (10 files, +492/−5; package-lock.json untouched)
+- Tests: 3× RED verified (actions 11F, card static 4F, sidebar 4F) → all GREEN; focused suites + card-local-smoke (new red `check.sh` leg, worktree proven unchanged) + full `npm test` ALL GREEN, exit 0
+- Concerns: none blocking; ledgered a low-severity New finding — `card.runner.wake` ignores the seat and would wake the org repo's runner on a project seat (D98/D99 class, follow-up not in scope)
+- Report: `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-4-report.md`

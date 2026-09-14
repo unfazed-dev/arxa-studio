@@ -1,0 +1,9 @@
+[33m⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors[39m
+[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
+**Verdict: spec ❌ / quality Needs-fixes.**
+**Trio audit:** E1 sound (403 gate verbatim at BASE 4d1b924, only branch hunk on index.js is :484); E2 honors the RIDE condition (fresh probe reproduced, external row + counter-evidence); **E3 NOT sound** — workspace-provider is branch-born (absent at BASE), wired into the probe boot path, transport exculpated by same-boot `arxa-provider-status` RPC → "pre-existing at BASE" is impossible, fix loop was owed.
+**Matrix:** 20 rows = G1–G13 complete, 8/8/4 reproduced, every DONE artifact on disk, PREPARED/EXTERNAL verbatim+owned, no auth/physical DONE; SBX_PIN digests match the live public feed exactly.
+**Redaction sweep:** clean (logs `token=REDACTED`, PNGs strings-swept, only hit is the matrix's own grep-pattern prose).
+**Gates re-run:** npm test exit 0 ALL GREEN (130 reconciled statically), sbx-install 12/12, skill-packs 6 ok; G12b log verified on disk (not re-run).
+**Findings:** Critical 1 — E3 misadjudication (matrix :152-160, report :30-36; diagnose+TDD-fix or evidence-backed downgrade before Part B). Important 1 — "each measured pre-existing at BASE" true only for E1; don't propagate to T17. Minor — narrow-capture-log.json overwritten (§Escalated pointer stale); E-row artifact paths point at -2026-09-12/ but PNGs/pair-logs live in studio-closeout/; package-lock +2 committed under `test:` (residue-contract deviation).
+**Report:** `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-16-review.md`

@@ -1,0 +1,9 @@
+⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
+[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
+**Status:** DONE_WITH_CONCERNS
+- **Commit:** `62ee8d5` feat: add automatic Docker project isolation (18 files, package-lock dirt untouched)
+- **Tests:** focused suites all green (devcontainer 35+1 honest skip · project-database 12 · sandbox 34 · finish 15/15 · file-org-shell 234 · git-card ×5 · frame v7 pins); full `npm test` ALL GREEN
+- **Step 6 smoke:** DEGRADED, recorded — daemon unreachable (docker CLI present, `Cannot connect… docker.sock`); docker surface doubled, host git recovery loop ran REAL; supabase CLI 2.67.1 detected, DB tier degrades to sqlite floor here; devcontainer CLI absent (honest path)
+- **Concerns:** real-container path never executed end-to-end here (image pull / chown-1000 / read-only runtime unverified live — real leg exists behind daemon + `ARXA_A4_REAL_SMOKE=1`); container-per-session density on low-RAM machines untested; `--network none` default means in-container installs fail offline by design
+- **New finding (ledger):** freestyle repos' `.arxa` exclusion unverified — registry rows could be committed there before A4 ships on that path
+- **Report:** `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-10-report.md`

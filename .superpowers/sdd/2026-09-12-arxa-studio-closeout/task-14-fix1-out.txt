@@ -1,0 +1,14 @@
+⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
+[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
+**✅ Status:** done — both Important defects fixed, all suites green, no push.
+
+**Commit:** `ce5e82e` fix: correct prefer semantics and make the supabase smoke deterministic (3 files, +91/−26; lockfile dirt left out)
+
+**Tests:** selftest.supabase 17 checks green (+§17) · smoke offline leg green (honest OFFLINE BY DEFAULT banner) · `npm test` exit 0 — **129 suites ALL GREEN** (CLI installed, daemon down; daemon-up reasoned: dispatch never probes machine state → npm test unconditionally fake)
+
+**Findings:**
+- **Important 1** — addressed: blanket `return=minimal` removed; representation on all 5 consumed RPCs + mkOrg insert; minimal only where nothing read; fake now emulates PostgREST Prefer server-side (204 on minimal RPC, no row on unasked writes) + logs per-call headers + §17 regression row pins the map
+- **Important 2** — addressed: machine-state probe gone; real leg opt-in only (`--real` / `ARXA_SUPABASE_REAL_SMOKE=1`, mirroring A4/A5 convention); CI job already passes `--real`; ci.mjs comment now true, unchanged
+- Minors 3–5 — deferred per instruction
+
+**Report:** `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-14-report.md` (`## Fix round 1` appended)

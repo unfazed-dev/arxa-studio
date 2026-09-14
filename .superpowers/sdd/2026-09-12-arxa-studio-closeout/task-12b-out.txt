@@ -1,0 +1,15 @@
+⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
+[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
+✅ **Done** — report appended at `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-12-report.md` (`## Part B`)
+
+🗄️ **WIP**: reverted — spec has zero `lib/services` rows, Part A doesn't reference it, 0 committed importers, and it swept kit transport sources Ruling 10 fences off.
+
+🟢 **Gates**: analyze 0 issues · flutter test 108/108 (contract test 4/4) · transport 7 dart + 11 rust · check.sh green everywhere except `gates` area · actionlint 4/4 workflows clean · studio npm test exit 0, 130 suites ALL GREEN.
+
+🔴 **arxa gate --all** exit 1 — inherited: identical-or-worse on canonical main (intake 42, coverage 1, advertise digests stale since pre-branch H7 rename, deploy approvalTokens = human gate, review/lens env-N/A). No mobile parity rows → reported, not fixed.
+
+🔧 **Tool edits**: committed as canonical (`458f97e8`) — formatter reflow of the contract test + kit analyzer excludes; predicted 5-entry lock re-pin did not recur.
+
+📦 **Commits**: arxa `458f97e8` only. Studio: none needed. No push/tag/release.
+
+⚠️ **Concerns**: CI `gates` area will be red on first push until the repo-wide debt is separately resolved; studio worktree still carries Part A's `M package-lock.json` (+2). Steps 5/8, `deploy --self-test`, branch protection remain — outside this dispatch.

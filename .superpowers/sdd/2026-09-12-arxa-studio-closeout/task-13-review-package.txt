@@ -1,0 +1,3673 @@
+72a2a83 feat: add fixed workspace providers and local storage
+3597a40 feat: freeze the workspace provider wire contract
+ bin/arxa-studio-provider.mjs                      | 248 ++++++++++++
+ bin/arxa-studio.mjs                               |  18 +-
+ bin/selftest.provider-cli.mjs                     | 162 ++++++++
+ docs/plans/agency-backend-provider-abstraction.md |  41 +-
+ plugins/workspace-provider/lib/capabilities.js    |  24 ++
+ plugins/workspace-provider/lib/client.js          |  31 ++
+ plugins/workspace-provider/lib/conformance.js     | 269 +++++++++++++
+ plugins/workspace-provider/lib/contract.js        | 198 ++++++++++
+ plugins/workspace-provider/lib/errors.js          |  16 +
+ plugins/workspace-provider/lib/export-bundle.js   | 145 ++++++++
+ plugins/workspace-provider/lib/generic-rest.js    | 292 +++++++++++++++
+ plugins/workspace-provider/lib/index.js           |  64 ++++
+ plugins/workspace-provider/lib/local.js           | 312 ++++++++++++++++
+ plugins/workspace-provider/lib/polling.js         |  84 +++++
+ plugins/workspace-provider/lib/wire.js            | 102 +++++
+ plugins/workspace-provider/package.json           |  30 ++
+ plugins/workspace-provider/selftest.contract.mjs  | 392 +++++++++++++++++++
+ plugins/workspace-provider/selftest.export.mjs    | 155 ++++++++
+ plugins/workspace-provider/selftest.local.mjs     | 124 ++++++
+ plugins/workspace-provider/selftest.polling.mjs   | 111 ++++++
+ plugins/workspace-provider/selftest.rest.mjs      | 435 ++++++++++++++++++++++
+ profile/cordis.patch.yml                          |  15 +
+ scripts/ci.mjs                                    |   5 +
+ scripts/pack-manifest.mjs                         |   2 +-
+ 24 files changed, 3258 insertions(+), 17 deletions(-)
+diff --git a/bin/arxa-studio-provider.mjs b/bin/arxa-studio-provider.mjs
+new file mode 100644
+index 0000000..38316b8
+--- /dev/null
++++ b/bin/arxa-studio-provider.mjs
+@@ -0,0 +1,248 @@
++#!/usr/bin/env node
++// arxa-studio provider/workspace/diagnose CLI (task 13 steps 7–8).
++//
++// THE canonical spellings, dispatched from bin/arxa-studio.mjs BEFORE normal
++// studio boot (no dsh spawn, no pnpm, no profile writes):
++//   arxa-studio workspace export --org <id> --out <dir>
++//   arxa-studio workspace import <bundleDir> [--config <file>]
++//   arxa-studio provider verify [--config <file>]
++//   arxa-studio diagnose [--out <file>]
++//
++// `provider verify` prints EVERY conformance section and exits nonzero on any
++// required red row. `diagnose` emits the redacted, user-inspectable bundle
++// (versions, config shape, verify results, bounded error logs) with no
++// tokens, secrets, or client records. All user-facing strings exist in
++// en/pl/fr (T8 sweeps the whole surface; the three tables are here now).
++import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
++import { homedir } from 'node:os'
++import { dirname, join, resolve } from 'node:path'
++import { fileURLToPath } from 'node:url'
++
++const here = dirname(fileURLToPath(import.meta.url))
++const pluginDir = join(here, '..', 'plugins', 'workspace-provider')
++
++const { assertProviderConfig } = await import(join(pluginDir, 'lib', 'contract.js'))
++const { LocalWorkspaceProvider } = await import(join(pluginDir, 'lib', 'local.js'))
++const { GenericRestWorkspaceProvider } = await import(join(pluginDir, 'lib', 'generic-rest.js'))
++const { runConformance } = await import(join(pluginDir, 'lib', 'conformance.js'))
++const { exportBundle, importBundle } = await import(join(pluginDir, 'lib', 'export-bundle.js'))
++
++// ---- locale (en/pl/fr through the arxa-locale world; env-selected in a CLI) --
++const STRINGS = {
++  en: {
++    title: 'arxa studio workspace provider',
++    usage: 'usage: arxa-studio workspace export --org <id> --out <dir> | workspace import <dir> [--config <file>] | provider verify [--config <file>] | diagnose [--out <file>]',
++    verifyTitle: 'provider verify — every conformance section:',
++    rowGreen: 'green  {id} — {detail}',
++    rowRed: 'RED    {id} — {detail}',
++    rowNa: 'n/a    {id} — {detail}',
++    verifyOk: 'provider verify: all sections green',
++    verifyFailed: 'provider verify: FAILED — red rows above',
++    exportDone: 'exported org {org} to {out}',
++    importDone: 'imported bundle {dir} as org {org} (id map written into the bundle)',
++    diagnoseTitle: 'arxa-studio diagnose — user-inspectable bundle (redacted)',
++    configShape: 'workspace backend config (shape only, values redacted): {shape}',
++    errorLogs: 'bounded error log tail (last {n} lines, redacted):',
++    noErrorLogs: 'no error logs found',
++    unknownCommand: 'unknown command: {cmd}',
++    configRejected: 'workspace backend config rejected: {why}',
++    missingArg: 'missing required argument: {arg}',
++    notSignedIn: 'provider verify needs an authenticated session for this provider (no credentials are ever accepted in config files)',
++  },
++  pl: {
++    title: 'arxa studio — dostawca obszaru roboczego',
++    usage: 'użycie: arxa-studio workspace export --org <id> --out <katalog> | workspace import <katalog> [--config <plik>] | provider verify [--config <plik>] | diagnose [--out <plik>]',
++    verifyTitle: 'provider verify — wszystkie sekcje zgodności:',
++    rowGreen: 'zielona {id} — {detail}',
++    rowRed: 'CZERWONA {id} — {detail}',
++    rowNa: 'nd.    {id} — {detail}',
++    verifyOk: 'provider verify: wszystkie sekcje zielone',
++    verifyFailed: 'provider verify: NIEPOWODZENIE — czerwone wiersze powyżej',
++    exportDone: 'wyeksportowano organizację {org} do {out}',
++    importDone: 'zaimportowano pakiet {dir} jako organizację {org} (mapa id zapisana w pakiecie)',
++    diagnoseTitle: 'arxa-studio diagnose — pakiet do wglądu dla użytkownika (zanonimizowany)',
++    configShape: 'konfiguracja backendu obszaru (tylko kształt, wartości ukryte): {shape}',
++    errorLogs: 'ograniczony koniec logu błędów (ostatnie {n} linii, zanonimizowane):',
++    noErrorLogs: 'nie znaleziono logów błędów',
++    unknownCommand: 'nieznana komenda: {cmd}',
++    configRejected: 'konfiguracja backendu odrzucona: {why}',
++    missingArg: 'brak wymaganego argumentu: {arg}',
++    notSignedIn: 'provider verify wymaga uwierzytelnionej sesji tego dostawcy (pliki konfiguracyjne nigdy nie przyjmują poświadczeń)',
++  },
++  fr: {
++    title: 'arxa studio — fournisseur d’espace de travail',
++    usage: 'usage : arxa-studio workspace export --org <id> --out <dossier> | workspace import <dossier> [--config <fichier>] | provider verify [--config <fichier>] | diagnose [--out <fichier>]',
++    verifyTitle: 'provider verify — chaque section de conformité :',
++    rowGreen: 'vert   {id} — {detail}',
++    rowRed: 'ROUGE  {id} — {detail}',
++    rowNa: 's.o.   {id} — {detail}',
++    verifyOk: 'provider verify : toutes les sections au vert',
++    verifyFailed: 'provider verify : ÉCHEC — lignes rouges ci-dessus',
++    exportDone: 'organisation {org} exportée vers {out}',
++    importDone: 'paquet {dir} importé comme organisation {org} (carte d’ids écrite dans le paquet)',
++    diagnoseTitle: 'arxa-studio diagnose — paquet consultable (caviardé)',
++    configShape: 'configuration du backend (forme seule, valeurs caviardées) : {shape}',
++    errorLogs: 'fin bornée du journal d’erreurs ({n} dernières lignes, caviardées) :',
++    noErrorLogs: 'aucun journal d’erreurs trouvé',
++    unknownCommand: 'commande inconnue : {cmd}',
++    configRejected: 'configuration du backend rejetée : {why}',
++    missingArg: 'argument requis manquant : {arg}',
++    notSignedIn: 'provider verify exige une session authentifiée pour ce fournisseur (aucun identifiant n’est jamais accepté dans les fichiers de configuration)',
++  },
++}
++const locale = ['en', 'pl', 'fr'].includes(process.env.ARXA_LOCALE) ? process.env.ARXA_LOCALE : 'en'
++const t = (key, vars = {}) => (STRINGS[locale][key] ?? STRINGS.en[key])
++  .replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '')
++
++// ---- config + provider construction --------------------------------------
++const arxaHome = () => {
++  const h = process.env.ARXA_HOME?.trim()
++  return h ? resolve(h) : join(homedir(), '.arxa')
++}
++
++/** Precedence: env (provider name only, D32) > --config file > user config. */
++function loadBackend (args) {
++  const i = args.indexOf('--config')
++  const file = i >= 0 ? resolve(args[i + 1]) : join(arxaHome(), 'studio.json')
++  let backend = {}
++  if (existsSync(file)) {
++    try { backend = JSON.parse(readFileSync(file, 'utf8')).workspaceBackend ?? {} } catch { backend = {} }
++  }
++  const envProvider = process.env.ARXA_WORKSPACE_PROVIDER?.trim()
++  if (envProvider) backend = { ...backend, provider: envProvider }
++  try { assertProviderConfig(backend) } catch (e) {
++    console.error(t('configRejected', { why: e.message }))
++    process.exit(2)
++  }
++  return backend
++}
++
++const resolveTilde = (p) => p.startsWith('~/') ? join(homedir(), p.slice(2)) : p
++
++/** The CLI credential store: one opaque handle file under ARXA_HOME, 0600. */
++function credentialStore () {
++  const file = join(arxaHome(), 'workspace-credentials.json')
++  const read = () => { try { return JSON.parse(readFileSync(file, 'utf8')) } catch { return {} } }
++  return {
++    async get (k) { return read()[k] ?? null },
++    async set (k, v) {
++      const all = read(); all[k] = v
++      mkdirSync(dirname(file), { recursive: true })
++      writeFileSync(file, JSON.stringify(all), { mode: 0o600 })
++    },
++    async delete (k) { const all = read(); delete all[k]; writeFileSync(file, JSON.stringify(all), { mode: 0o600 }) },
++  }
++}
++
++function buildProvider (backend) {
++  if (backend.provider === 'generic-rest') {
++    return new GenericRestWorkspaceProvider({
++      baseUrl: backend['generic-rest']?.baseUrl,
++      credentialStore: credentialStore(),
++      fetch,
++    })
++  }
++  // local (the default) and supabase-not-yet (task 14) both fall back to the
++  // local store — local-first parity: nothing about the CLI needs a backend.
++  const root = backend.local?.root ? resolveTilde(backend.local.root) : undefined
++  return new LocalWorkspaceProvider(root ? { root } : {})
++}
++
++const flag = (args, name) => {
++  const i = args.indexOf(name)
++  return i >= 0 ? args[i + 1] : undefined
++}
++
++// ---- commands ---------------------------------------------------------------
++async function providerVerify (args) {
++  const backend = loadBackend(args)
++  const provider = buildProvider(backend)
++  const isLocal = !(provider instanceof GenericRestWorkspaceProvider)
++  console.log(t('verifyTitle'))
++  const report = await runConformance(provider, isLocal ? { localExempt: true } : {})
++  for (const s of report.sections) {
++    const template = s.status === 'green' ? 'rowGreen' : s.status === 'n/a' ? 'rowNa' : 'rowRed'
++    for (const d of s.details.length ? s.details : ['']) console.log(t(template, { id: s.id, detail: d }))
++  }
++  if (report.ok) { console.log(t('verifyOk')); return 0 }
++  console.log(t('verifyFailed'))
++  return 1
++}
++
++async function workspaceExport (args) {
++  const orgId = flag(args, '--org')
++  const out = flag(args, '--out')
++  if (!orgId) { console.error(t('missingArg', { arg: '--org <id>' })); return 2 }
++  if (!out) { console.error(t('missingArg', { arg: '--out <dir>' })); return 2 }
++  const provider = buildProvider(loadBackend(args))
++  await exportBundle(provider, orgId, resolve(out))
++  console.log(t('exportDone', { org: orgId, out: resolve(out) }))
++  return 0
++}
++
++async function workspaceImport (args) {
++  const dir = args.find((a) => !a.startsWith('--') && !args[args.indexOf(a) - 1]?.startsWith('--'))
++  if (!dir) { console.error(t('missingArg', { arg: '<bundleDir>' })); return 2 }
++  const provider = buildProvider(loadBackend(args))
++  const { orgId } = await importBundle(provider, resolve(dir))
++  console.log(t('importDone', { dir: resolve(dir), org: orgId }))
++  return 0
++}
++
++// Diagnose redaction: long opaque runs (tokens, JWTs, keys) never print.
++const OPAQUE_RUN = /[A-Za-z0-9+/_=-]{20,}/g
++const redactLine = (line) => line
++  .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
++  .replace(OPAQUE_RUN, (m) => (m.startsWith('line') ? m : '[redacted]'))
++
++async function diagnose (args) {
++  const backend = loadBackend(args)
++  const provider = buildProvider(backend)
++  const report = await runConformance(provider, backend.provider === 'local' || !backend.provider ? { localExempt: true } : {})
++  const lines = [t('diagnoseTitle')]
++  const pkg = JSON.parse(readFileSync(join(pluginDir, 'package.json'), 'utf8'))
++  const node = process.version
++  lines.push(`versions: node ${node}, arxa-workspace-provider ${pkg.version}, wire v${(await import(join(pluginDir, 'lib', 'contract.js'))).WIRE_VERSION}`)
++  // Config SHAPE only — provider name plus section keys; values never print.
++  const sections = Object.keys(backend).filter((k) => k !== 'provider')
++  const shape = `provider: ${backend.provider ?? 'local'}` + (sections.length ? `, sections: ${sections.join(', ')}` : '')
++  lines.push(t('configShape', { shape }))
++  lines.push(t('verifyTitle'))
++  for (const s of report.sections) {
++    const template = s.status === 'green' ? 'rowGreen' : s.status === 'n/a' ? 'rowNa' : 'rowRed'
++    for (const d of s.details.length ? s.details : ['']) lines.push(t(template, { id: s.id, detail: d }))
++  }
++  const logFile = join(arxaHome(), 'dsh', 'engine.log')
++  if (existsSync(logFile)) {
++    const tail = readFileSync(logFile, 'utf8').trim().split('\n').slice(-50)
++    lines.push(t('errorLogs', { n: tail.length }))
++    for (const l of tail) lines.push(redactLine(l))
++  } else {
++    lines.push(t('noErrorLogs'))
++  }
++  const text = lines.join('\n')
++  const out = flag(args, '--out')
++  if (out) { writeFileSync(resolve(out), text + '\n'); console.log(out) } else console.log(text)
++  return report.ok ? 0 : 1
++}
++
++// ---- entry ------------------------------------------------------------------
++export async function run (argv) {
++  const [a, b, ...rest] = argv
++  try {
++    if (a === 'provider' && b === 'verify') return await providerVerify(rest)
++    if (a === 'workspace' && b === 'export') return await workspaceExport(rest)
++    if (a === 'workspace' && b === 'import') return await workspaceImport(rest)
++    if (a === 'diagnose') return await diagnose(argv.slice(1)) // b is the first flag here, not a subcommand
++  } catch (e) {
++    console.error((e?.code ? e.code + ': ' : '') + (e?.message ?? e))
++    return 1
++  }
++  console.error(t('unknownCommand', { cmd: [a, b].filter(Boolean).join(' ') }))
++  console.error(t('usage'))
++  return 2
++}
++
++if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
++  process.exit(await run(process.argv.slice(2)))
++}
+diff --git a/bin/arxa-studio.mjs b/bin/arxa-studio.mjs
+index 66fcf54..c2cef3e 100644
+--- a/bin/arxa-studio.mjs
++++ b/bin/arxa-studio.mjs
+@@ -118,20 +118,31 @@ if (inOperatorDsh(arxaHome) || inOperatorDsh(dshHome)) {
+   console.error('  A parent dsh session exports DSH_HOME into its shells; arxa')
+   console.error('  must never share that home. Relaunch with a clean environment:')
+   console.error('    env -u DSH_HOME arxa')
+   process.exit(127)
+ }
+ 
+ const bundles = headless
+   ? ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-headless']
+   : ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app']
+ 
++// WORKSPACE PROVIDER CLI (task 13 steps 7–8): `provider verify`, `workspace
++// export|import`, `diagnose` dispatch BEFORE normal studio boot — no dsh
++// spawn, no pnpm, no profile writes. The four spellings are the ONLY ones;
++// anything else falls through to the studio boot below.
++if ((args[0] === 'provider' && args[1] === 'verify') ||
++    (args[0] === 'workspace' && (args[1] === 'export' || args[1] === 'import')) ||
++    args[0] === 'diagnose') {
++  const { run: runProviderCli } = await import(pathToFileURL(join(here, 'arxa-studio-provider.mjs')).href)
++  process.exit(await runProviderCli(args))
++}
++
+ // ---- dsh home ----------------------------------------------------------------
+ const designPanelDir = resolve(here, '..', 'plugins', 'design-panel')
+ const brandDir = resolve(here, '..', 'plugins', 'brand')
+ const genUiDir = resolve(here, '..', 'plugins', 'gen-ui')
+ // arxa-provider-status: provider/status session events → providerStatus
+ // projection → composer pill, shared by every model provider (docs/plans/
+ // claude-subscription-engine.md task 13). By-name because it ships a
+ // browser half via package.json dsh.client, like gen-ui above.
+ const providerStatusDir = resolve(here, '..', 'plugins', 'provider-status')
+ // Installed always, loaded only when the profile enables it (row 10 ships
+@@ -175,20 +186,24 @@ const artifactViewerDir = resolve(here, '..', 'plugins', 'artifact-viewer')
+ const arxaFrameDir = resolve(here, '..', 'plugins', 'arxa-frame')
+ // arxa's locale world (en/pl/fr — the stock locale row is disabled in the
+ // patch; Phase 0 of docs/plans/dsh-plugin-ui-conformance.md).
+ const localeDir = resolve(here, '..', 'plugins', 'locale')
+ // Prism background field (step 1): the animated split-triangle square on the
+ // conversation scrollport. Pure client-side CSS — see plugins/prism/lib/client.js.
+ const prismDir = resolve(here, '..', 'plugins', 'prism')
+ // Personalisation settings tab: the 4th settings section owning the
+ // look-and-feel rows (accent/editor-font/Background retarget there).
+ const personalisationDir = resolve(here, '..', 'plugins', 'personalisation')
++// Workspace provider (task 13): Wire v1 contract + local/generic-rest
++// providers + conformance kit. Host service row in the patch; browser half
++// via package.json dsh.client — same by-name shape as the rows above.
++const workspaceProviderDir = resolve(here, '..', 'plugins', 'workspace-provider')
+ mkdirSync(profileDir, { recursive: true })
+ /**
+  * The profile's plugin set — ONE list, two consumers.
+  *
+  * It feeds the profile package.json below (checkout mode, where pnpm installs
+  * the file: deps) AND the packed-mode directory copy further down. Those were
+  * two hand-maintained lists until 2026-09-03, when `arxa-personalisation` sat
+  * in the deps but not in the packed copy: the desktop sidecar extracted fine,
+  * printed its banner, then died on `Cannot find package 'arxa-personalisation'`
+  * before binding its port — silently, because packed mode sends engine stdio
+@@ -209,20 +224,21 @@ const PROFILE_PLUGINS = [
+   ['arxa-freestyle', freestyleDir],
+   ['arxa-jobs', jobsDir],
+   ['arxa-file-org-shell', fileOrgShellDir],
+   ['arxa-github-link', githubLinkDir],
+   ['arxa-artifact-viewer', artifactViewerDir],
+   ['arxa-frame', arxaFrameDir],
+   ['arxa-locale', localeDir],
+   ['arxa-prism', prismDir],
+   ['arxa-personalisation', personalisationDir],
+   ['arxa-provider-status', providerStatusDir],
++  ['arxa-workspace-provider', workspaceProviderDir],
+ ]
+ writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
+   name: 'dsh-profile-arxa',
+   private: true,
+   dependencies: Object.fromEntries(PROFILE_PLUGINS.map(([name, dir]) => [name, `file:${dir}`])),
+   dsh: { profile: { bundles } },
+ }, null, 2) + '\n')
+ // The sibling arxa repo: harness rows (the arxa gate) live there, and in a
+ // packed payload the same relative shape is preserved by pack-sidecar.
+ const arxaRepoDir = resolve(here, '..', '..', 'arxa')
+@@ -399,21 +415,21 @@ if (!existsSync(dshBin)) {
+   console.error('  arxa deliberately will NOT fall back to the operator install at')
+   console.error('  ~/.dsh — that would run an unpinned version. See')
+   console.error('  arxa/docs/plans/dsh-isolation-from-operator-install.md')
+   process.exit(127)
+ }
+ engineLog('dsh bin resolved: ' + dshBin)
+ 
+ // The design panel, brand and gen-ui plugins resolve by package name (their
+ // browser halves are discovered through package.json dsh.client, which a
+ // file-path entry never reaches).
+-const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa-mcp-apps', 'arxa-waiting-page', 'arxa-theme-accent', 'arxa-pairing', 'arxa-sidebar', 'arxa-git-card', 'arxa-dashboard', 'arxa-artifact-viewer', 'arxa-frame', 'arxa-locale', 'arxa-prism', 'arxa-provider-status', 'arxa-freestyle']
++const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa-mcp-apps', 'arxa-waiting-page', 'arxa-theme-accent', 'arxa-pairing', 'arxa-sidebar', 'arxa-git-card', 'arxa-dashboard', 'arxa-artifact-viewer', 'arxa-frame', 'arxa-locale', 'arxa-prism', 'arxa-provider-status', 'arxa-freestyle', 'arxa-workspace-provider']
+ // ALWAYS install, never skip on presence: these are file: dependencies, and
+ // pnpm copies them into .pnpm at add-time. A plain `pnpm install` sees the
+ // lockfile entry unchanged and keeps the OLD copy — measured 2026-08-25: the
+ // studio served an Aug-21 design panel (no selection handoff) three days
+ // after slice 7 landed in plugins/, and the two-tab compose proof could not
+ // pass until `pnpm install --force` refreshed the bytes. --force re-copies
+ // every file: plugin on boot (~160ms measured) — the only policy under which
+ // editing a plugin's source and relaunching arxa does what it visibly says.
+ // PACKED MODE (desktop sidecar): bin/packed.json is written only by
+ // scripts/pack-sidecar.mjs into the self-extracting sidecar payload — it never
+diff --git a/bin/selftest.provider-cli.mjs b/bin/selftest.provider-cli.mjs
+new file mode 100644
+index 0000000..534bceb
+--- /dev/null
++++ b/bin/selftest.provider-cli.mjs
+@@ -0,0 +1,162 @@
++/**
++ * Canonical CLI spellings (task 13 steps 7–8): `arxa-studio workspace
++ * export|import`, `arxa-studio provider verify`, `arxa-studio diagnose` are
++ * the ONLY spellings, dispatched from bin/arxa-studio.mjs BEFORE normal
++ * studio boot (no dsh spawn, no pnpm, no profile writes). provider verify
++ * prints every conformance section and exits nonzero on any required red
++ * row; diagnose emits a redacted, user-inspectable bundle with no tokens,
++ * secrets, or client records. All output strings exist en/pl/fr.
++ *
++ * Run: node bin/selftest.provider-cli.mjs
++ */
++import { strict as assert } from 'node:assert'
++import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
++import { spawnSync } from 'node:child_process'
++import { tmpdir } from 'node:os'
++import { dirname, join } from 'node:path'
++import { fileURLToPath } from 'node:url'
++
++import { LocalWorkspaceProvider } from '../plugins/workspace-provider/lib/local.js'
++
++const here = dirname(fileURLToPath(import.meta.url))
++let n = 0
++const ok = (s) => { n++; console.log('  ok ' + s) }
++const scratch = mkdtempSync(join(tmpdir(), 'arxa-ws-cli-'))
++const other = mkdtempSync(join(tmpdir(), 'arxa-ws-cli-target-'))
++
++const run = (bin, args, env = {}) => spawnSync(process.execPath, [join(here, bin), ...args], {
++  encoding: 'utf8',
++  env: { ...process.env, ARXA_HOME: env.ARXA_HOME ?? scratch, ARXA_LOCALE: env.ARXA_LOCALE, ...(env.extra ?? {}) },
++})
++
++try {
++  // A source org the export command will bundle.
++  const provider = new LocalWorkspaceProvider({ home: scratch })
++  const org = await provider.createOrg({ name: 'cli-org', kind: 'agency' })
++  await provider.putRecord(org.id, 'tickets', 'cli-1', { title: 'from the cli' })
++
++  // ---------------------------------------------- 1. provider verify through the launcher
++  {
++    const r = run('arxa-studio.mjs', ['provider', 'verify'])
++    assert.equal(r.status, 0, 'exit 0 on all-green\n' + r.stdout + r.stderr)
++    assert.ok(r.stdout.includes('cross-org-isolation'), 'EVERY section prints, including the n/a one')
++    assert.ok(r.stdout.includes('n/a (single-user local store)'), 'the local exemption in its exact words')
++    assert.ok(!r.stdout.split('\n').some((l) => /^RED/.test(l)), 'no red row')
++    ok('launcher dispatch: `arxa-studio provider verify` exits 0, prints every section, no studio boot')
++  }
++
++  // ---------------------------------------------- 2. no profile/dsh writes on the CLI path
++  {
++    assert.ok(!existsSync(join(scratch, 'dsh', 'profiles', 'arxa', 'package.json')),
++      'the CLI dispatch happens BEFORE profile materialization')
++    ok('dispatch precedes studio boot: no profile materialized')
++  }
++
++  // ---------------------------------------------- 3. workspace export / import (the only spellings)
++  {
++    const out = join(scratch, 'bundle-out')
++    const r = run('arxa-studio.mjs', ['workspace', 'export', '--org', org.id, '--out', out])
++    assert.equal(r.status, 0, r.stderr)
++    assert.ok(existsSync(join(out, 'manifest.json')), 'bundle written with manifest')
++
++    // The target is a second scratch home: default local provider, zero
++    // config (an absolute local.root would be rejected by the frozen D32
++    // guard — path-like values never enter workspaceBackend config).
++    const r2 = run('arxa-studio.mjs', ['workspace', 'import', out], { ARXA_HOME: other })
++    assert.equal(r2.status, 0, r2.stderr)
++    const moved = new LocalWorkspaceProvider({ home: other })
++    const orgs = await moved.listOrgs()
++    assert.ok(orgs.some((o) => o.name === 'cli-org (imported)'), 'org re-created on the target provider')
++    ok('`workspace export` / `workspace import`: bundle round-trip through the canonical spellings')
++  }
++
++  // ---------------------------------------------- 4. diagnose: redacted, bounded, useful
++  {
++    // Seed a bounded, SECRET-BEARING engine log — diagnose must tail it redacted.
++    const dshDir = join(scratch, 'dsh')
++    mkdirSync(dshDir, { recursive: true })
++    const secret = 'sk-live-SECRET0123456789abcdefXYZ'
++    const bearer = 'Bearer eyJhbGciOiJ9.VERYLONGOPAQUEVALUE.abcdef'
++    writeFileSync(join(dshDir, 'engine.log'),
++      Array.from({ length: 80 }, (_, i) => `line ${i} fine`).join('\n') + '\nplugin failed token=' + secret + ' auth ' + bearer + '\n')
++
++    const r = run('arxa-studio.mjs', ['diagnose'])
++    assert.equal(r.status, 0, r.stderr)
++    const out = r.stdout
++    for (const needle of ['cross-org-isolation', 'n/a (single-user local store)', 'wire', 'node', 'provider: local'])
++      assert.ok(out.includes(needle), 'diagnose carries ' + needle)
++    assert.ok(out.includes('line 79 fine') || out.includes('plugin failed'), 'bounded error-log tail included')
++    assert.ok(!out.includes(secret), 'no raw secret')
++    assert.ok(!out.includes(bearer), 'no raw bearer')
++    assert.ok(!out.includes('VERYLONGOPAQUEVALUE'), 'opaque material redacted')
++    const r2 = run('arxa-studio.mjs', ['diagnose', '--out', join(scratch, 'diag.txt')])
++    assert.equal(r2.status, 0, r2.stderr)
++    assert.ok(existsSync(join(scratch, 'diag.txt')), '--out writes the bundle to a file')
++    ok('diagnose: versions + config shape + verify results + bounded redacted logs; no tokens/secrets')
++  }
++
++  // ---------------------------------------------- 5. exit nonzero on any red row
++  {
++    // generic-rest pointing at a dead local port: every network section red.
++    const deadCfg = join(scratch, 'dead.json')
++    writeFileSync(deadCfg, JSON.stringify({ workspaceBackend: { provider: 'generic-rest', 'generic-rest': { baseUrl: 'http://127.0.0.1:9/x' } } }))
++    const r = run('arxa-studio.mjs', ['provider', 'verify', '--config', deadCfg])
++    assert.notEqual(r.status, 0, 'a red row means a nonzero exit')
++    assert.ok(r.stdout.split('\n').some((l) => /^RED/.test(l)), 'the red rows print')
++    ok('provider verify: nonzero exit on red, rows printed')
++  }
++
++  // ---------------------------------------------- 6. the config guard is enforced at the door
++  {
++    const badCfg = join(scratch, 'bad.json')
++    writeFileSync(badCfg, JSON.stringify({ workspaceBackend: { provider: 'custom', adapter: './x.mjs' } }))
++    const r = run('arxa-studio.mjs', ['provider', 'verify', '--config', badCfg])
++    assert.notEqual(r.status, 0)
++    assert.ok(r.stdout.includes('executable code') || r.stderr.includes('executable code'), 'the D32 reason surfaces')
++    ok('config guard: adapter/custom provider rejected by the CLI')
++  }
++
++  // ---------------------------------------------- 7. en/pl/fr
++  {
++    for (const loc of ['en', 'pl', 'fr']) {
++      const r = run('arxa-studio.mjs', ['provider', 'verify'], { ARXA_LOCALE: loc })
++      assert.equal(r.status, 0, loc + ': ' + r.stderr)
++      assert.ok(r.stdout.length > 0, loc + ' prints')
++    }
++    const en = run('arxa-studio.mjs', ['provider', 'verify'], { ARXA_LOCALE: 'en' }).stdout
++    const pl = run('arxa-studio.mjs', ['provider', 'verify'], { ARXA_LOCALE: 'pl' }).stdout
++    const fr = run('arxa-studio.mjs', ['provider', 'verify'], { ARXA_LOCALE: 'fr' }).stdout
++    assert.ok(en !== pl && en !== fr, 'the locales actually differ (three real tables, not copies)')
++    ok('locale: en/pl/fr string tables all render and differ')
++  }
++
++  // ---------------------------------------------- 8. only the four spellings dispatch
++  {
++    // `provider check` is NOT a CLI subcommand: it falls through to studio
++    // boot. --materialise-only makes that path exit fast WITHOUT spawning the
++    // engine (no port bind inside a test) while still proving the CLI did not
++    // swallow the unknown subcommand.
++    const r = run('arxa-studio.mjs', ['provider', 'check', '--materialise-only'])
++    assert.ok(!r.stdout.includes('conformance'), 'unknown subcommands are not swallowed by the CLI')
++    ok('unknown subcommands fall through to normal studio boot')
++
++    // The same run materialized the profile — the plugin must ride it:
++    // PROFILE_PLUGINS (profile package.json), the cordis row, and a browser
++    // half discoverable through package.json dsh.client.
++    const profileDir = join(scratch, 'dsh', 'profiles', 'arxa')
++    const deps = JSON.parse(readFileSync(join(profileDir, 'package.json'), 'utf8')).dependencies
++    assert.ok(deps['arxa-workspace-provider'], 'profile package.json depends on arxa-workspace-provider')
++    const patch = readFileSync(join(profileDir, 'cordis.patch.yml'), 'utf8')
++    assert.ok(patch.includes('arxa-workspace-provider'), 'the cordis patch carries the service row')
++    const pkg = JSON.parse(readFileSync(join(here, '..', 'plugins', 'workspace-provider', 'package.json'), 'utf8'))
++    assert.ok(pkg.dsh?.client, 'the plugin declares its browser half (dsh.client)')
++    assert.ok(existsSync(join(here, '..', 'plugins', 'workspace-provider', 'lib', 'client.js')), 'browser half exists')
++    assert.ok(existsSync(join(here, '..', 'plugins', 'workspace-provider', 'lib', 'index.js')), 'host half exists')
++    ok('runtime + package inclusion: profile dep, cordis row, host/client halves')
++  }
++} finally {
++  rmSync(scratch, { recursive: true, force: true })
++  rmSync(other, { recursive: true, force: true })
++}
++
++console.log(`workspace-provider CLI: ${n} checks green`)
+diff --git a/docs/plans/agency-backend-provider-abstraction.md b/docs/plans/agency-backend-provider-abstraction.md
+index a33d4eb..6eb4ef5 100644
+--- a/docs/plans/agency-backend-provider-abstraction.md
++++ b/docs/plans/agency-backend-provider-abstraction.md
+@@ -1,36 +1,44 @@
+ # Agency Backend Provider Abstraction (BYO Database)
+ 
+-Status: PLAN ONLY — no code or schema changes. Consult-mode advisor skipped (no API key configured); design grounded in primary sources below.
++Status: SUPERSEDED IN PART by grill decisions **D32–D35** (`docs/plans/arxa-studio-grill-decisions.md`, 2026-09-12) — those are the **later authority** wherever this plan and they disagree. The Wire v1 contract is frozen in `plugins/workspace-provider` (task 13); providers and the conformance kit land with it.
+ 
+ **Amended 2026-09-07 — two corrections, still no code.** (a) The plan offered
+ `supabase` and `custom` and nothing else, so a user with no database and no
+ adapter module got *nothing* — which the repo's own ownership boundary forbids
+ (`CLAUDE.md`: "every feature that can use a database must have a **local-only
+ fallback with equivalent capability and security** for users without one").
+ `local` is now the DEFAULT provider, specified in §0, §1 and §5. (b) The
+ Supabase table advertised `entitlementIssuer` and `billingWebhooks` as
+ workspace-provider capabilities while §0 says the license plane is not
+ pluggable; they are removed from the contract (§1) and kept only as a
+ description of the official project's own shape (§3). Everything marked `local`
+ here is a **design decision, not shipped code** — none of it exists yet.
+ 
++**Amended 2026-09-13 — D32–D35 recorded (wire-contract freeze).** The four
++rulings below are binding and later than every earlier paragraph:
++
++- **Providers (D32):** the fixed set is `local` (DEFAULT, zero-config), `supabase`, and `generic-rest` (the Wire v1 contract itself, over any conforming backend). There is **no `custom` provider**: a `custom.adapter` key in config and the `ARXA_WORKSPACE_ADAPTER` env override are **invalid** and rejected. A BYO backend integrates by implementing the fixed HTTP/JSONL wire protocol server-side and passing `arxa-studio provider verify`; no third-party JavaScript ever executes inside the app, and nothing is published to npm in this closeout.
++- **Support (D33):** bundle-only. Staff never hold credentials or tokens for customer-run infrastructure; no support-access capability exists in the wire contract. `arxa-studio diagnose` emits the redacted, user-inspectable bundle.
++- **Identity (D34):** token-opaque. The wire contract specifies only the session-token lifecycle — issue, refresh, revoke, introspect. How a user authenticates is entirely the provider's business; `GET /capabilities` declares `signIn.kind: email-form | browser | device-code | token` plus start metadata, and studio renders only the declared flow. Email/password is **not** part of the wire contract.
++- **Realtime fallback (D35):** adaptive polling, as contract constants — **3 s** focused-and-active, **30 s** focused-idle, **120 s** background, plus an **immediate poll after any local write**.
++
+ Sources read: `docs/plans/arxa-studio-grill-decisions.md` (D-series locked decisions), `docs/plans/entitlement-backend-runbook.md`, `arxa/deploy/supabase/schema.sql` + `seed.sql`.
+ 
+ ## 0. The one non-negotiable split
+ 
+ Two planes. They never merge:
+ 
+ | Plane | What it holds | Backend |
+ |---|---|---|
+ | **Product-license plane** | arxa entitlements, machines, subscriptions, Stripe billing, activate flow | **ALWAYS the official Totem backend.** Not pluggable, not configurable off. |
+-| **Workspace-data plane** | orgs, org_members, tickets, chat, feedback, audit_log, analytics, storage blobs | **Pluggable, three providers:** `local` (DEFAULT — no account, no network, no database), `supabase` (first-class, and the conformance reference), `custom` (a BYO adapter module). |
++| **Workspace-data plane** | orgs, org_members, tickets, chat, feedback, audit_log, analytics, storage blobs | **Pluggable, three providers (D32):** `local` (DEFAULT — no account, no network, no database), `supabase` (first-class, and the conformance reference), `generic-rest` (the Wire v1 contract over any conforming backend). There is no `custom` adapter module. |
+ 
+ A BYO provider replaces only the workspace-data plane. Paying for arxa (studio or agency tier) still means checkout → official `activate` Edge Function → Ed25519-signed token → offline verification in `arxa/lib/entitlement.dart`. A BYO backend cannot mint product tiers. This preserves every payment-gate decision in the grill doc unchanged.
+ 
+ ## 1. Provider interface surface (`WorkspaceProvider`)
+ 
+ Minimal contract the agency app codes against. All IDs are opaque strings; all methods async; all errors from a small typed set (`unauthenticated`, `forbidden`, `not_found`, `conflict`, `unavailable`).
+ 
+ ### REQUIRED capabilities
+ 
+ **`auth`** — session lifecycle
+@@ -49,21 +57,21 @@ Minimal contract the agency app codes against. All IDs are opaque strings; all m
+ 
+ **`audit`** — append-only
+ - `append(orgId, event)` only. No update/delete in the interface at all — immutability enforced by interface shape, verified by the conformance kit.
+ 
+ **Server-side authorization (cross-cutting, REQUIRED)** — every capability above must be enforced *by the provider's server*, not by the adapter. The adapter is untrusted client code. Concretely: user A of org X must be unable to read/write org Y's rows even with a hand-crafted request. Supabase does this with RLS; a BYO Postgres+PostgREST or custom API must do the equivalent. This is a conformance-kit gate, not a suggestion. It binds every provider that talks to a network; the `local` provider is exempt by construction (see §1 local table and §4 section 3), and the kit reports that exemption rather than a pass.
+ 
+ ### OPTIONAL capabilities (with mandated degradation)
+ 
+ | Capability | Surface | Degradation when absent |
+ |---|---|---|
+-| `realtime` | `subscribe(orgId, collection, cb)` | App polls `records.list` on a visible-tab interval; UI drops the "live" badge. No feature is removed. |
++| `realtime` | `subscribe(orgId, collection, cb)` | Adaptive polling (D35, contract constants): 3 s focused-and-active, 30 s focused-idle, 120 s background, immediate poll after any local write; UI drops the "live" badge. No feature is removed. |
+ | `storage` | `upload/download/delete/signedUrl(orgId, path)` | Attachments disabled in tickets/chat; text-only flows keep working. |
+ | `analytics` | `track(event)` (fire-and-forget) | No-op sink. Nothing user-visible. |
+ 
+ **Not capabilities, deliberately.** An earlier draft listed `billingWebhooks`
+ and `entitlementIssuer` here. Both contradict §0 — the license plane is "not
+ pluggable, not configurable off" — and listing them in the workspace contract
+ invites an adapter author to implement something no workspace provider may
+ serve. Product billing and product-tier issuance are the official backend's,
+ always. The *optional* BYO issuer for workspace-scoped claims is a separate
+ server endpoint spec (§2), not a `WorkspaceProvider` capability, and it can
+@@ -159,43 +167,46 @@ Ship as `arxa studio provider verify --config <file>` — a runnable suite again
+ Passing = printed report with per-section green, suitable for pasting into a support ticket. The Supabase reference adapter must pass the kit in CI — the kit is the contract's executable form.
+ 
+ ## 5. Config & UX
+ 
+ Precedence: env > project config > user config > default.
+ 
+ ```jsonc
+ // .arxa/studio.json (project) or ~/.arxa/studio.json (user)
+ {
+   "workspaceBackend": {
+-    "provider": "local",               // DEFAULT; or "supabase", or "custom"
+-    "local":    { "root": "~/.arxa/workspace" },   // optional; this is the default
+-    "supabase": { "url": "…", "anonKey": "…" },
+-    "custom":   { "adapter": "./adapters/my-backend.mjs" }  // module implementing WorkspaceProvider
++    "provider": "local",               // DEFAULT; or "supabase", or "generic-rest" — the only three (D32)
++    "local":       { "root": "~/.arxa/workspace" },   // optional; this is the default
++    "supabase":    { "url": "…", "anonKey": "…" },
++    "generic-rest": { "baseUrl": "https://backend.example.test" }  // any backend implementing Wire v1
+   },
+   "entitlements": {
+     "extraPublicKeys": [ { "kid": "acme-2026", "publicKeyPem": "…" } ]
+     // production key is compiled in and cannot be removed here
+   }
+ }
+ ```
+ 
+-Env overrides: `ARXA_WORKSPACE_PROVIDER`, `ARXA_SUPABASE_URL`, `ARXA_SUPABASE_ANON_KEY`, `ARXA_WORKSPACE_ADAPTER`, `ARXA_ENTITLEMENT_EXTRA_PUBKEYS` (path to JSON). These extend, and never replace, the production verification key — distinct from the existing debug-only `debugPublicKeyOverride`, which stays debug-gated.
++**Config cannot name executable code (D32).** A `custom` provider, an `adapter` key anywhere under `workspaceBackend`, or any module/file-path value is invalid and rejected at load — and the env override `ARXA_WORKSPACE_ADAPTER` is likewise invalid. `local` stays zero-config: no account, no network, no database, no environment variables.
++
++Env overrides: `ARXA_WORKSPACE_PROVIDER` (one of the three fixed names only), `ARXA_SUPABASE_URL`, `ARXA_SUPABASE_ANON_KEY`, `ARXA_ENTITLEMENT_EXTRA_PUBKEYS` (path to JSON). These extend, and never replace, the production verification key — distinct from the existing debug-only `debugPublicKeyOverride`, which stays debug-gated.
+ 
+ **UX**: Settings → "Workspace backend" panel shows provider, capability badges (live/degraded per §1), and a `provider verify` run button. A permanent, non-editable line reads: **"arxa license: Totem official backend"** — so BYO users never form the belief that self-hosting exempts them from the product paywall. Paywall flow on BYO is byte-identical to Supabase-default: gate → checkout → official activate → token cached → offline verify.
+ 
+ ## 6. Migration path (export / import)
+ 
+ - `arxa studio workspace export --org <id> --out bundle/` → portable bundle: `manifest.json` (contract version, capability set, collection counts, content hashes), one JSONL file per collection in **contract shape** (not provider row shape), `storage/` blob tree, `members.json` (emails + roles — identities themselves are not portable).
+ - `arxa studio workspace import --config <target> bundle/` → creates org on target, replays records preserving IDs where the target allows (else writes an ID-map file), re-uploads blobs, **re-invites members** (they re-auth on the new provider), imports `audit_log` as read-only historical records with an `imported_from` marker.
+ - Explicitly **not** migrated: entitlements, machines, subscriptions (license plane — nothing to migrate, it never moved), provider auth credentials, realtime subscriptions.
+ - Round-trip of the bundle is conformance-kit section 8, so every certified provider is also a certified migration source/target.
+ - `local` is a first-class source AND target: "try it offline, move to Supabase later" and "leave Supabase, keep working offline" are the same command with a different `--config`. Nothing about the bundle format is provider-specific.
+ 
+-## 7. Open questions (for the user)
++## 7. Open questions — all settled (D32–D35, 2026-09-13)
+ 
+-All five remain open and all five block the code phase; the 2026-09-07 amendment changed none of them.
++The five questions below were open when this plan was written; the grill
++decisions close all five, and the wire-contract freeze (task 13) encodes them.
+ 
+-1. **Adapter distribution**: are custom adapters local JS modules only (simple, but unsigned code loaded into the app), or do we require a reviewed registry / signature before loading?
+-2. **Contract packaging**: publish `WorkspaceProvider` types + conformance kit as a public npm package (invites third-party adapters) or keep in-repo for a first-party-only v1?
+-3. **Totem staff support access on BYO**: Supabase adapter has `is_totem_staff` read access for support; on BYO we have none. Accept "no in-band support access, bundle-export on request," or add an optional support-access capability?
+-4. **Minimum identity methods**: must every provider support email invite flows, or is "any auth + manual member add by user id" acceptable for v1?
+-5. **Realtime degradation interval**: fixed polling default (e.g. 30 s visible-tab) baked into the contract, or provider-hintable via `capabilities()` metadata?
++1. **Adapter distribution** → settled by **D32**: no arbitrary local JS adapters at all. Two first-party adapters ship (`supabase`, `generic-rest`); exotic backends integrate server-side against the wire contract. Signing/review pipelines are moot.
++2. **Contract packaging** → settled by **D32**: in-repo, first-party-only for v1; no public npm package in this closeout.
++3. **Totem staff support access on BYO** → settled by **D33**: accept "no in-band support access"; support is bundle-only via `arxa-studio diagnose`.
++4. **Minimum identity methods** → settled by **D34**: the contract is token-opaque (issue/refresh/revoke/introspect); any auth method is acceptable because providers declare `signIn.kind` and studio renders only the declared flow.
++5. **Realtime degradation interval** → settled by **D35**: adaptive polling baked into the contract as constants — 3 s active / 30 s idle / 120 s background + immediate poll after any local write. Not provider-hintable.
+diff --git a/plugins/workspace-provider/lib/capabilities.js b/plugins/workspace-provider/lib/capabilities.js
+new file mode 100644
+index 0000000..b406008
+--- /dev/null
++++ b/plugins/workspace-provider/lib/capabilities.js
+@@ -0,0 +1,24 @@
++/**
++ * Provider capability declarations (task 13, §1 of the source plan).
++ *
++ * `capabilities()` is the ONE call the app feature-flags from. The key set is
++ * the frozen CAPABILITY_KEYS; each provider answers the same keys, so the
++ * conformance kit and every first-party consumer read one shape.
++ */
++import { CAPABILITY_KEYS } from './contract.js'
++
++/**
++ * The local provider declares the FULL workspace surface: realtime is the
++ * in-process emitter (strictly better than the polling degradation — there is
++ * no network in between), storage is the filesystem. Only analytics degrades
++ * (no-op sink — nothing user-visible, so it is advertised off).
++ */
++export const LOCAL_CAPABILITIES = Object.freeze(Object.fromEntries(
++  CAPABILITY_KEYS.map((k) => [k, k !== 'analytics'])))
++
++/** Normalize any capability answer to the frozen key set (absent = false). */
++export function normalizeCapabilities (caps) {
++  const out = {}
++  for (const k of CAPABILITY_KEYS) out[k] = caps?.[k] === true
++  return out
++}
+diff --git a/plugins/workspace-provider/lib/client.js b/plugins/workspace-provider/lib/client.js
+new file mode 100644
+index 0000000..30e870a
+--- /dev/null
++++ b/plugins/workspace-provider/lib/client.js
+@@ -0,0 +1,31 @@
++/**
++ * arxa-workspace-provider — browser half.
++ *
++ * Hand-written in the __ModuleLoader__ factory shape every dsh client bundle
++ * uses (same as arxa-personalisation). No UI yet: this half exposes ONE
++ * accessor — window.__arxaWorkspaceProvider.info() — over Connection RPC to
++ * the host's read-only status channel, so a later settings panel (§5 "Workspace
++ * backend" panel) and T8's locale sweep have a stable seam to build on.
++ */
++window.__ModuleLoader__.load({
++  id: 'arxa-workspace-provider',
++  factory: (require) => {
++    var module = { exports: {} }; var exports = module.exports
++    Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' })
++
++    // Must equal lib/index.js RPC_CHANNEL. One segment only (dsh CHANNEL_PATTERN).
++    const RPC_CHANNEL = '/arxa-workspace-provider'
++
++    exports.inject = ['connection']
++
++    exports.apply = (ctx) => {
++      // Read-only status: provider name, redacted config shape, local caps.
++      // A remote provider's capabilities need a live backend call — the panel
++      // gets those from `arxa-studio provider verify` / diagnose, never here.
++      window.__arxaWorkspaceProvider = {
++        info: () => ctx.connection.rpc.call(RPC_CHANNEL, 'info', {}),
++      }
++    }
++    return module.exports
++  },
++})
+diff --git a/plugins/workspace-provider/lib/conformance.js b/plugins/workspace-provider/lib/conformance.js
+new file mode 100644
+index 0000000..d3d37eb
+--- /dev/null
++++ b/plugins/workspace-provider/lib/conformance.js
+@@ -0,0 +1,269 @@
++/**
++ * The reusable conformance kit (task 13 step 4, §4 of the source plan) — the
++ * contract's executable form. One kit, every provider: local passes the same
++ * sections a network backend must pass; only cross-org isolation differs,
++ * printing `n/a (single-user local store)` when the CALLER asserts the
++ * provider is local (opts.localExempt) — the exemption is claimed, never
++ * inferred, so a network provider can never silently "pass" section 3.
++ *
++ * Sections: auth, orgs-crud, members-roles, records-crud, pagination,
++ * optimistic-conflict, audit-immutability, storage-blobs, realtime-or-polling,
++ * idempotent-replay, migration-roundtrip, cross-org-isolation.
++ */
++import { mkdtempSync, rmSync } from 'node:fs'
++import { createHash } from 'node:crypto'
++import { tmpdir } from 'node:os'
++import { join } from 'node:path'
++
++import { COLLECTIONS } from './contract.js'
++import { WorkspaceError } from './errors.js'
++import { exportBundle, importBundle } from './export-bundle.js'
++
++const sha256 = (buf) => createHash('sha256').update(buf).digest('hex')
++const redDetail = (e) => (e instanceof WorkspaceError
++  ? e.code + ': ' + e.message
++  : 'error: ' + (e?.message ?? String(e)))
++
++const isCode = (e, ...codes) => e instanceof WorkspaceError && codes.includes(e.code)
++
++async function expectCode (codes, fn) {
++  try { await fn() } catch (e) {
++    if (isCode(e, ...codes)) return e
++    throw new Error('wrong error: expected ' + codes.join('|') + ', got ' + redDetail(e))
++  }
++  throw new Error('expected ' + codes.join('|') + ', nothing thrown')
++}
++
++/** Resolve once the predicate sees an event, or reject on timeout. */
++const waitFor = (subscribe, ms, pred = () => true) => {
++  const p = new Promise((resolve, reject) => {
++    const stop = subscribe((ev) => {
++      if (!pred(ev)) return
++      stop(); clearTimeout(t); resolve(ev)
++    })
++    const t = setTimeout(() => { stop(); reject(new Error('no event within ' + ms + 'ms')) }, ms)
++  })
++  // If the section dies before this wait resolves (e.g. its write threw), the
++  // timeout still fires later — swallow that orphan rejection instead of
++  // killing the process as an unhandled one.
++  p.catch(() => {})
++  return p
++}
++
++export async function runConformance (provider, opts = {}) {
++  const sections = []
++  const section = async (id, fn) => {
++    const details = []
++    try {
++      await fn((s) => details.push(s))
++      sections.push({ id, status: 'green', details })
++    } catch (e) {
++      sections.push({ id, status: 'red', details: [...details, redDetail(e)] })
++    }
++  }
++
++  // The shared scratch org most sections build on. A provider that cannot
++  // even create one gets an honest red report instead of a crash — `provider
++  // verify` must always be printable (dead backend, no session, whatever).
++  let org
++  try {
++    org = await provider.createOrg({ name: 'conformance', kind: 'studio' })
++  } catch (e) {
++    sections.push({
++      id: 'orgs-crud', status: 'red',
++      details: ['cannot create a scratch org: ' + redDetail(e)],
++    })
++    return { sections, ok: false }
++  }
++
++  await section('auth', async (note) => {
++    const s = await provider.currentSession()
++    if (!s || typeof s.userId !== 'string') throw new Error('currentSession() returned no userId')
++    note('currentSession → userId')
++    if (opts.signIn !== undefined) {
++      const events = []
++      const stop = provider.onAuthStateChange((ev) => events.push(ev))
++      try {
++        await provider.signIn(...opts.signIn)
++        await provider.signOut()
++        if (events.length < 2 || events[0]?.userId !== s.userId || events[events.length - 1] !== null)
++          throw new Error('onAuthStateChange did not fire session then null around sign-in/out')
++        note('signIn → signOut fired onAuthStateChange')
++      } finally { stop() }
++    }
++  })
++
++  await section('orgs-crud', async (note) => {
++    if (!org.id || org.name !== 'conformance') throw new Error('createOrg returned no org')
++    const got = await provider.getOrg(org.id)
++    if (got.name !== 'conformance') throw new Error('getOrg name mismatch')
++    const updated = await provider.updateOrg(org.id, { name: 'conformance-2' })
++    if (updated.name !== 'conformance-2') throw new Error('updateOrg did not apply')
++    const listed = await provider.listOrgs()
++    if (!listed.some((o) => o.id === org.id)) throw new Error('listOrgs missing the org')
++    // Archive a DEDICATED org: the shared org is still needed below.
++    const doomed = await provider.createOrg({ name: 'archived', kind: 'studio' })
++    await provider.archiveOrg(doomed.id)
++    await expectCode(['not_found'], () => provider.getOrg(doomed.id))
++    note('create → get → update → list → archive → get=not_found')
++  })
++
++  await section('members-roles', async (note) => {
++    // The org from orgs-crud was archived; make a fresh one.
++    const o = await provider.createOrg({ name: 'members', kind: 'studio' })
++    const billing = await provider.addMember(o.id, { email: 'b@example.test', role: 'billing' })
++    // idempotent replay: same email + same role adds ONE member
++    await provider.addMember(o.id, { email: 'b@example.test', role: 'billing' })
++    let members = await provider.listMembers(o.id)
++    if (members.filter((m) => m.email === 'b@example.test').length !== 1)
++      throw new Error('duplicate addMember created a second member')
++    await provider.setRole(o.id, billing.id, 'member')
++    if ((await provider.listMembers(o.id)).find((m) => m.id === billing.id)?.role !== 'member')
++      throw new Error('setRole did not apply')
++    // the role vocabulary is fixed: providers may not invent roles
++    await expectCode(['invalid_request'], () => provider.addMember(o.id, { email: 'x@example.test', role: 'superuser' }))
++    // last-owner removal is rejected
++    const sole = (await provider.listMembers(o.id)).find((m) => m.role === 'owner')
++    await expectCode(['forbidden'], () => provider.removeMember(o.id, sole.id))
++    note('add/dup-add/setRole/bad-role/last-owner rules hold')
++  })
++
++  await section('records-crud', async (note) => {
++    const doc = { title: 't', body: 'b', n: 1 }
++    const put = await provider.putRecord(org.id, 'tickets', 'rc-1', doc)
++    if (typeof put.etag !== 'string' || put.etag.length === 0) throw new Error('putRecord returned no etag')
++    const got = await provider.getRecord(org.id, 'tickets', 'rc-1')
++    if (JSON.stringify(got.doc) !== JSON.stringify(doc)) throw new Error('getRecord doc mismatch')
++    await expectCode(['invalid_request'], () => provider.putRecord(org.id, 'passwords', 'x', {}))
++    await provider.deleteRecord(org.id, 'tickets', 'rc-1')
++    await expectCode(['not_found'], () => provider.getRecord(org.id, 'tickets', 'rc-1'))
++    note('put/get/delete round-trip; unknown collection invalid_request; deleted → not_found')
++  })
++
++  await section('pagination', async (note) => {
++    for (let i = 0; i < 3; i++) await provider.putRecord(org.id, 'feedback', 'pg-' + i, { i })
++    const p1 = await provider.listRecords(org.id, 'feedback', { limit: 2 })
++    if (p1.records.length !== 2 || p1.nextCursor === null) throw new Error('page 1 not limited/cursored')
++    const p2 = await provider.listRecords(org.id, 'feedback', { cursor: p1.nextCursor })
++    const ids = [...p1.records, ...p2.records].map((r) => r.id).sort()
++    if (ids.join() !== 'pg-0,pg-1,pg-2') throw new Error('pages lost or duplicated records: ' + ids.join())
++    if (p2.nextCursor !== null) throw new Error('stream did not end with a null cursor')
++    note('limit → cursor → end; union exactly the written records')
++  })
++
++  await section('optimistic-conflict', async (note) => {
++    const r = await provider.putRecord(org.id, 'user_prefs', 'cf-1', { v: 1 })
++    await provider.putRecord(org.id, 'user_prefs', 'cf-1', { v: 2 })
++    const e = await expectCode(['conflict'], () => provider.putRecord(org.id, 'user_prefs', 'cf-1', { v: 3 }, { etag: r.etag }))
++    note('stale If-Match surfaces conflict' + (e.requestId ? '' : ''))
++  })
++
++  await section('audit-immutability', async (note) => {
++    await provider.appendAudit(org.id, { action: 'conformance-1' })
++    await provider.appendAudit(org.id, { action: 'conformance-2' })
++    const rows = await provider.readAudit(org.id)
++    if (!rows.some((x) => x.action === 'conformance-1') || !rows.some((x) => x.action === 'conformance-2'))
++      throw new Error('appended events missing from the audit read')
++    for (const m of ['updateAudit', 'patchAudit', 'deleteAudit'])
++      if (typeof provider[m] !== 'undefined') throw new Error('interface exposes ' + m + ' — audit must be append-only by shape')
++    note('append + read; no mutation method exists on the interface')
++  })
++
++  await section('storage-blobs', async (note) => {
++    const bytes = Buffer.from('conformance-blob-bytes')
++    const up = await provider.putBlob(org.id, ['conf', 'x.bin'], bytes)
++    if (up.sha256 !== sha256(bytes)) throw new Error('upload hash mismatch')
++    const down = await provider.getBlob(org.id, ['conf', 'x.bin'])
++    if (!down.equals(bytes)) throw new Error('blob bytes changed in transit')
++    const url = await provider.signedUrl(org.id, ['conf', 'x.bin'])
++    if (!url || typeof url.url !== 'string') throw new Error('no signed url')
++    await provider.deleteBlob(org.id, ['conf', 'x.bin'])
++    await expectCode(['not_found'], () => provider.getBlob(org.id, ['conf', 'x.bin']))
++    note('upload(hash) → download(bytes) → signedUrl → delete → not_found')
++  })
++
++  await section('realtime-or-polling', async (note) => {
++    const caps = await provider.capabilities()
++    // Subscribe FIRST, then write: the wait resolves for BOTH delivery modes —
++    // the in-process emitter (local) and the immediate-after-write poll (D35).
++    const waiting = waitFor((cb) => provider.subscribe(org.id, 'chat_conversations', cb), 5000, (e) => e.id === 'rt-1')
++    await provider.putRecord(org.id, 'chat_conversations', 'rt-1', { live: true })
++    await waiting
++    note(caps.realtime
++      ? 'realtime advertised: subscribe delivered the write'
++      : 'realtime absent: polling degradation delivered the write within the active window')
++  })
++
++  await section('idempotent-replay', async (note) => {
++    const doc = { replay: true }
++    const a = await provider.putRecord(org.id, 'requirements', 'idem-1', doc)
++    const b = await provider.putRecord(org.id, 'requirements', 'idem-1', doc)
++    if (a.etag !== b.etag) throw new Error('same document replaid to a different etag')
++    note('identical PUT replays to the identical etag')
++  })
++
++  await section('migration-roundtrip', async (note) => {
++    const o = await provider.createOrg({ name: 'migrating', kind: 'agency' })
++    await provider.putRecord(o.id, 'tickets', 'm-1', { title: 'one' })
++    await provider.putRecord(o.id, 'chat_messages', 'm-2', { text: 'two' })
++    await provider.addMember(o.id, { email: 'mate@example.test', role: 'member' })
++    await provider.appendAudit(o.id, { action: 'migrated' })
++    await provider.putBlob(o.id, ['m', 'b.bin'], Buffer.from('blob-bytes'))
++    const dir = opts.tmp ?? mkdtempSync(join(tmpdir(), 'arxa-ws-conf-'))
++    const owned = !opts.tmp
++    try {
++      await exportBundle(provider, o.id, join(dir, 'src'))
++      const target = opts.makeTarget ? await opts.makeTarget() : provider
++      const { orgId: newId } = await importBundle(target, join(dir, 'src'))
++      for (const [collection, id, doc] of [
++        ['tickets', 'm-1', { title: 'one' }],
++        ['chat_messages', 'm-2', { text: 'two' }],
++      ]) {
++        const got = await target.getRecord(newId, collection, id)
++        if (JSON.stringify(got.doc) !== JSON.stringify(doc)) throw new Error(collection + ' doc changed across migration')
++      }
++      const members = await target.listMembers(newId)
++      if (!members.some((m) => m.email === 'mate@example.test' && m.role === 'member'))
++        throw new Error('member was not re-invited with the same role')
++      const audit = await target.readAudit(newId)
++      if (!audit.some((x) => x.action === 'migrated' && x.imported === true))
++        throw new Error('audit history missing or not marked imported')
++      if (typeof target.getBlob === 'function' && typeof provider.listBlobs === 'function') {
++        // Blob migration rides provider blob ENUMERATION (the wire has no list
++        // route); providers without it export records/members/audit only.
++        const blob = await target.getBlob(newId, ['m', 'b.bin'])
++        if (!blob.equals(Buffer.from('blob-bytes'))) throw new Error('blob bytes changed across migration')
++      }
++      note('export → import → deep-diff records/members/audit' + (typeof provider.listBlobs === 'function' ? '/blobs' : ''))
++    } finally {
++      if (owned) rmSync(dir, { recursive: true, force: true })
++    }
++  })
++
++  if (opts.localExempt === true) {
++    // §4 section 3: the local exemption is STATED, never printed as a green.
++    sections.push({
++      id: 'cross-org-isolation',
++      status: 'n/a',
++      details: ['n/a (single-user local store)'],
++    })
++  } else {
++    await section('cross-org-isolation', async (note) => {
++      if (!opts.crossOrg) throw new Error('network providers must pass cross-org isolation — supply a second user context')
++      const { provider: other, orgId: orgB, recordId } = opts.crossOrg
++      // Raw replay of A's calls against B's org: every one must fail server-side.
++      await expectCode(['forbidden', 'not_found', 'unauthenticated'],
++        () => provider.getRecord(orgB, 'tickets', recordId))
++      await expectCode(['forbidden', 'not_found', 'unauthenticated'],
++        () => provider.putRecord(orgB, 'tickets', 'idor-probe', { x: 1 }))
++      await expectCode(['forbidden', 'not_found', 'unauthenticated'],
++        () => provider.listRecords(orgB, 'tickets'))
++      // List-endpoint leakage: A's own lists contain no B rows.
++      const mine = await provider.listRecords(org.id, 'tickets', { limit: 500 })
++      if (mine.records.some((r) => r.id === recordId)) throw new Error('org-A list leaked an org-B record id')
++      note('raw get/put/list against org B all refused; no B ids in A lists')
++    })
++  }
++
++  return { sections, ok: sections.every((s) => s.status !== 'red') }
++}
+diff --git a/plugins/workspace-provider/lib/contract.js b/plugins/workspace-provider/lib/contract.js
+new file mode 100644
+index 0000000..e0ae62e
+--- /dev/null
++++ b/plugins/workspace-provider/lib/contract.js
+@@ -0,0 +1,198 @@
++/**
++ * Wire v1 — the frozen workspace-provider protocol (task 13 step 3, D32–D35).
++ *
++ * This module is CONSTANTS plus a pure request builder. It performs no I/O.
++ * The golden suite selftest.contract.mjs pins every value here character for
++ * character: any change is a wire change and requires a new protocol version.
++ * The providers and the generic-REST adapter (part B) implement against this
++ * file; they may not invent routes, verbs, codes, or bounds.
++ */
++import { randomUUID } from 'node:crypto'
++import { invalidRequest } from './errors.js'
++import { decodeCursor } from './wire.js' // cycle is call-time only; both modules finish evaluating first
++
++export const WIRE_VERSION = 1
++export const BASE_PATH = '/arxa-workspace/v1'
++
++export const HEADER = Object.freeze({
++  VERSION: 'X-Arxa-Workspace-Version',
++  REQUEST_ID: 'X-Request-Id',
++  AUTHORIZATION: 'Authorization',
++  NEXT_CURSOR: 'X-Arxa-Cursor-Next', // JSONL list pages: body stays pure records, the resume cursor rides the header
++  ETAG: 'ETag',
++  IF_MATCH: 'If-Match',
++})
++
++export const MEDIA = Object.freeze({
++  JSON: 'application/json', // bounded singletons: orgs, members, records by id, auth envelopes, errors
++  NDJSON: 'application/x-ndjson', // streams: org/member/record/audit/event lists
++  BYTES: 'application/octet-stream', // storage blobs
++})
++
++// D32: the fixed provider set. `custom` does not exist; a BYO backend is a
++// server implementing Wire v1, reached through `generic-rest`.
++export const PROVIDERS = Object.freeze(['local', 'supabase', 'generic-rest'])
++
++export const ROLES = Object.freeze(['owner', 'admin', 'billing', 'member'])
++
++// The fixed §1 collection list (source plan §1 "records"). Providers may not
++// add collections; unknown names are rejected before any I/O.
++export const COLLECTIONS = Object.freeze([
++  'tickets', 'ticket_messages', 'chat_conversations', 'chat_messages',
++  'feedback', 'requirements', 'user_prefs',
++])
++
++// D34: token-opaque identity. The wire carries only the session-token
++// lifecycle; how a user authenticates is the provider's business, declared
++// here and rendered by exactly one studio flow.
++export const SIGN_IN_KINDS = Object.freeze(['email-form', 'browser', 'device-code', 'token'])
++
++export const CAPABILITY_KEYS = Object.freeze(
++  ['auth', 'orgs', 'records', 'audit', 'realtime', 'storage', 'analytics'])
++
++// The complete typed error set. `invalid_request` covers contract violations
++// (bad cursor, oversized body, unknown collection); `unsupported_version` is
++// what a conforming server returns for an unknown X-Arxa-Workspace-Version.
++export const ERROR_CODES = Object.freeze([
++  'unsupported_version', 'invalid_request', 'unauthenticated', 'forbidden',
++  'not_found', 'conflict', 'unavailable',
++])
++
++export const BOUNDS = Object.freeze({
++  DEFAULT_PAGE_LIMIT: 100,
++  MAX_PAGE_LIMIT: 500,
++  MAX_RECORD_BYTES: 1_048_576, // 1 MiB — one JSON document / bounded request body
++  MAX_JSONL_BYTES: 33_554_432, // 32 MiB — one decoded JSONL page or stream
++  MAX_BLOB_BYTES: 1_073_741_824, // 1 GiB — one storage blob
++  REQUEST_TIMEOUT_MS: 15_000,
++  MAX_ATTEMPTS: 3, // bounded retries on the retryable status set below
++  RETRYABLE_STATUSES: Object.freeze([408, 425, 429, 500, 502, 503, 504]),
++})
++
++// D35: adaptive polling when realtime is absent. Contract constants, not
++// provider hints.
++export const POLLING = Object.freeze({
++  ACTIVE_MS: 3000, // focused-and-active (thread/composer open)
++  IDLE_MS: 30000, // focused-idle
++  BACKGROUND_MS: 120000, // app in background
++  IMMEDIATE_AFTER_WRITE: true, // poll immediately after any local write
++})
++
++// req/res media: J = bounded JSON, L = JSONL stream, B = raw bytes.
++// `auth` = requires Authorization: Bearer. `query` = accepted query params.
++// `optional` = a capability a provider may not implement.
++const J = MEDIA.JSON, L = MEDIA.NDJSON, B = MEDIA.BYTES
++export const OPERATIONS = Object.freeze({
++  capabilities:   { method: 'GET',    path: '/capabilities', req: null, res: J, auth: false },
++  // Token lifecycle (D34). issue/refresh/introspect carry their material in
++  // the body; revoke revokes the bearer itself.
++  authIssue:      { method: 'POST',   path: '/auth/issue', req: J, res: J, auth: false },
++  authRefresh:    { method: 'POST',   path: '/auth/refresh', req: J, res: J, auth: false },
++  authRevoke:     { method: 'POST',   path: '/auth/revoke', req: J, res: J, auth: true },
++  authIntrospect: { method: 'POST',   path: '/auth/introspect', req: J, res: J, auth: false },
++  listOrgs:       { method: 'GET',    path: '/orgs', req: null, res: L, auth: true },
++  createOrg:      { method: 'POST',   path: '/orgs', req: J, res: J, auth: true },
++  getOrg:         { method: 'GET',    path: '/orgs/{orgId}', req: null, res: J, auth: true },
++  patchOrg:       { method: 'PATCH',  path: '/orgs/{orgId}', req: J, res: J, auth: true },
++  deleteOrg:      { method: 'DELETE', path: '/orgs/{orgId}', req: null, res: J, auth: true },
++  listMembers:    { method: 'GET',    path: '/orgs/{orgId}/members', req: null, res: L, auth: true },
++  addMember:      { method: 'POST',   path: '/orgs/{orgId}/members', req: J, res: J, auth: true },
++  patchMember:    { method: 'PATCH',  path: '/orgs/{orgId}/members/{memberId}', req: J, res: J, auth: true },
++  removeMember:   { method: 'DELETE', path: '/orgs/{orgId}/members/{memberId}', req: null, res: J, auth: true },
++  listRecords:    { method: 'GET',    path: '/orgs/{orgId}/records/{collection}', req: null, res: L, auth: true, query: Object.freeze(['cursor', 'limit']) },
++  getRecord:      { method: 'GET',    path: '/orgs/{orgId}/records/{collection}/{id}', req: null, res: J, auth: true },
++  putRecord:      { method: 'PUT',    path: '/orgs/{orgId}/records/{collection}/{id}', req: J, res: J, auth: true },
++  deleteRecord:   { method: 'DELETE', path: '/orgs/{orgId}/records/{collection}/{id}', req: null, res: J, auth: true },
++  // Audit: append + read only. There is deliberately no mutation route.
++  appendAudit:    { method: 'POST',   path: '/orgs/{orgId}/audit', req: J, res: J, auth: true },
++  readAudit:      { method: 'GET',    path: '/orgs/{orgId}/audit', req: null, res: L, auth: true },
++  putBlob:        { method: 'PUT',    path: '/orgs/{orgId}/storage/{path}', req: B, res: B, auth: true },
++  getBlob:        { method: 'GET',    path: '/orgs/{orgId}/storage/{path}', req: null, res: B, auth: true },
++  deleteBlob:     { method: 'DELETE', path: '/orgs/{orgId}/storage/{path}', req: null, res: J, auth: true },
++  signedUrl:      { method: 'POST',   path: '/orgs/{orgId}/storage/{path}/signed-url', req: J, res: J, auth: true },
++  events:         { method: 'GET',    path: '/orgs/{orgId}/events', req: null, res: L, auth: true, optional: true, query: Object.freeze(['cursor']) },
++})
++
++// Path segments that must be filled from params. `{path}` is multi-segment
++// (an array or a '/'-joined string) — everything else is a single segment.
++const PATH_PARAMS = /\{(\w+)\}/g
++
++/**
++ * Pure request builder — the only way a Wire v1 request spec exists. Throws
++ * WorkspaceError('invalid_request') for every contract violation (unknown
++ * collection, bad limit, undecodable cursor) BEFORE any request can be sent.
++ */
++export function buildRequest (name, params = {}, context = {}) {
++  const op = OPERATIONS[name]
++  if (!op) throw new Error('unknown operation: ' + name) // programming error, not a wire error
++
++  if (op.path.includes('{collection}')) {
++    if (!COLLECTIONS.includes(params.collection))
++      throw invalidRequest('collection is not part of the fixed Wire v1 collection list')
++  }
++
++  let path = op.path.replace(PATH_PARAMS, (_, key) => {
++    const v = params[key]
++    if (v === undefined) throw invalidRequest('missing path parameter: ' + key)
++    // {path} is multi-segment: an array of segments, or a '/'-joined string.
++    const segs = Array.isArray(v) ? v.map(String)
++      : key === 'path' ? String(v).split('/')
++        : [String(v)]
++    return segs.map((s) => encodeURIComponent(s)).join('/')
++  })
++
++  const query = []
++  if (op.query) {
++    for (const key of op.query) {
++      if (key === 'limit') {
++        const limit = params.limit ?? BOUNDS.DEFAULT_PAGE_LIMIT
++        if (!Number.isInteger(limit) || limit < 1 || limit > BOUNDS.MAX_PAGE_LIMIT)
++          throw invalidRequest('limit must be an integer between 1 and MAX_PAGE_LIMIT')
++        query.push('limit=' + limit)
++      } else if (params[key] !== undefined) {
++        if (key === 'cursor') decodeCursor(params[key]) // undecodable cursor dies HERE, before I/O
++        query.push(key + '=' + encodeURIComponent(params[key]))
++      }
++    }
++  }
++  if (query.length) path += '?' + query.join('&')
++
++  const headers = {
++    [HEADER.VERSION]: String(WIRE_VERSION),
++    [HEADER.REQUEST_ID]: context.requestId ?? randomUUID(),
++  }
++  if (op.auth && context.token !== undefined) headers[HEADER.AUTHORIZATION] = 'Bearer ' + context.token
++  if (params.etag !== undefined) headers[HEADER.IF_MATCH] = params.etag
++
++  return { method: op.method, url: BASE_PATH + path, headers, media: op.res, signal: context.signal }
++}
++
++const looksLikeCode = (v) =>
++  typeof v === 'string' &&
++  (/^\.{0,2}\//.test(v) || /\.(mjs|cjs|js|ts|json)\b/.test(v) ||
++    /\brequire\s*\(/.test(v) || /\bimport\s*\(/.test(v))
++
++/**
++ * D32 guard: config may select one of three fixed providers and set their
++ * endpoints — nothing else. It may never name executable code, so any
++ * adapter key or module/file-path value is rejected at load. An empty config
++ * is valid and means `local` (zero-config, local-first parity).
++ */
++export function assertProviderConfig (config = {}) {
++  const provider = config.provider ?? 'local'
++  if (!PROVIDERS.includes(provider))
++    throw invalidRequest('workspaceBackend.provider must be one of: ' + PROVIDERS.join(', ') + ' — config cannot name executable code')
++  for (const [key, value] of Object.entries(config)) {
++    if (key === 'adapter')
++      throw invalidRequest('workspaceBackend.adapter is invalid — config cannot name executable code (D32)')
++    if (looksLikeCode(value))
++      throw invalidRequest('workspaceBackend.' + key + ' names executable code — invalid under D32')
++    if (value && typeof value === 'object')
++      for (const [k2, v2] of Object.entries(value)) {
++        if (k2 === 'adapter')
++          throw invalidRequest('workspaceBackend adapter key is invalid — config cannot name executable code (D32)')
++        if (looksLikeCode(v2))
++          throw invalidRequest('workspaceBackend.' + key + '.' + k2 + ' names executable code — invalid under D32')
++      }
++  }
++}
+diff --git a/plugins/workspace-provider/lib/errors.js b/plugins/workspace-provider/lib/errors.js
+new file mode 100644
+index 0000000..5727afc
+--- /dev/null
++++ b/plugins/workspace-provider/lib/errors.js
+@@ -0,0 +1,16 @@
++// Workspace wire errors. The typed set is frozen in contract.js ERROR_CODES;
++// every failure crossing the provider boundary surfaces as one of these, so
++// callers branch on `code`, never on message text or HTTP status alone.
++export class WorkspaceError extends Error {
++  constructor (code, message, opts = {}) {
++    super(message, { cause: opts.cause })
++    this.name = 'WorkspaceError'
++    this.code = code
++    this.retryable = opts.retryable === true
++    this.requestId = opts.requestId // echoes the wire envelope's id when present
++    this.status = opts.status // HTTP status when the error came from a response
++    this.serverCode = opts.serverCode // preserved raw code when the server used one we don't know
++  }
++}
++
++export const invalidRequest = (message, opts) => new WorkspaceError('invalid_request', message, opts)
+diff --git a/plugins/workspace-provider/lib/export-bundle.js b/plugins/workspace-provider/lib/export-bundle.js
+new file mode 100644
+index 0000000..f813cfa
+--- /dev/null
++++ b/plugins/workspace-provider/lib/export-bundle.js
+@@ -0,0 +1,145 @@
++/**
++ * Portable export/import bundles (task 13 step 7, §6 of the source plan).
++ *
++ * A bundle is provider-independent: versioned manifest.json, one JSONL per
++ * collection in CONTRACT shape ({id, doc} lines — never provider rows),
++ * members.json (emails + roles; identities are not portable), audit.jsonl,
++ * and a storage/ blob tree. Hashes for every file live in the manifest and
++ * are verified BEFORE any mutation on import — a tampered bundle is refused
++ * whole, never half-applied. Nothing from the license plane (entitlements,
++ * machines, subscriptions) or any credential ever enters a bundle.
++ */
++import { createHash, randomUUID } from 'node:crypto'
++import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
++import { join } from 'node:path'
++
++import { COLLECTIONS, WIRE_VERSION } from './contract.js'
++import { decodeJsonl, encodeJsonl } from './wire.js'
++import { WorkspaceError, invalidRequest } from './errors.js'
++
++const sha256 = (buf) => createHash('sha256').update(buf).digest('hex')
++const jsonlText = (rows) => (rows.length ? encodeJsonl(rows) : '')
++
++/** Read every record of a collection through the provider's own pagination. */
++async function readAll (provider, orgId, collection) {
++  const records = []
++  let cursor
++  do {
++    const page = await provider.listRecords(orgId, collection, { cursor })
++    records.push(...page.records)
++    cursor = page.nextCursor
++  } while (cursor !== null && cursor !== undefined)
++  return records
++}
++
++/** List every file under dir as posix-ish relative paths. */
++function walkFiles (dir, rel = []) {
++  const out = []
++  if (!existsSync(dir)) return out
++  for (const e of readdirSync(dir, { withFileTypes: true })) {
++    if (e.isDirectory()) out.push(...walkFiles(join(dir, e.name), [...rel, e.name]))
++    else out.push({ path: [...rel, e.name].join('/'), file: join(dir, e.name) })
++  }
++  return out
++}
++
++export async function exportBundle (provider, orgId, outDir) {
++  mkdirSync(outDir, { recursive: true })
++  const org = await provider.getOrg(orgId)
++  const members = await provider.listMembers(orgId)
++  const manifest = {
++    bundle: 1,
++    wireVersion: WIRE_VERSION,
++    exportedAt: new Date().toISOString(),
++    org: { name: org.name, kind: org.kind },
++    collections: {},
++    blobs: {},
++    members: members.map((m) => ({ email: m.email, role: m.role })),
++    hashes: {},
++  }
++  for (const collection of COLLECTIONS) {
++    const records = await readAll(provider, orgId, collection)
++    manifest.collections[collection] = records.length
++    writeFileSync(join(outDir, collection + '.jsonl'), jsonlText(records))
++  }
++  const audit = await provider.readAudit(orgId)
++  writeFileSync(join(outDir, 'audit.jsonl'), jsonlText(audit))
++  writeFileSync(join(outDir, 'members.json'), JSON.stringify(manifest.members, null, 2) + '\n')
++  if (typeof provider.listBlobs === 'function') {
++    for (const path of await provider.listBlobs(orgId)) {
++      const bytes = await provider.getBlob(orgId, path)
++      manifest.blobs[path] = sha256(bytes)
++      const file = join(outDir, 'storage', ...path.split('/'))
++      mkdirSync(join(file, '..'), { recursive: true })
++      writeFileSync(file, bytes)
++    }
++  }
++  for (const f of walkFiles(outDir)) manifest.hashes[f.path] = sha256(readFileSync(f.file))
++  writeFileSync(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
++  return { manifest }
++}
++
++/**
++ * Verify every manifest hash BEFORE the first mutation: a mismatched or
++ * missing file refuses the whole import (the caller has changed nothing).
++ */
++export function verifyBundle (bundleDir) {
++  const manifestFile = join(bundleDir, 'manifest.json')
++  if (!existsSync(manifestFile)) throw invalidRequest('bundle has no manifest.json')
++  const manifest = JSON.parse(readFileSync(manifestFile, 'utf8'))
++  if (manifest.bundle !== 1) throw invalidRequest('unknown bundle version')
++  for (const [path, expected] of Object.entries(manifest.hashes ?? {})) {
++    const file = join(bundleDir, ...path.split('/'))
++    if (!existsSync(file)) throw invalidRequest('bundle file missing: ' + path)
++    if (sha256(readFileSync(file)) !== expected) throw invalidRequest('bundle hash mismatch: ' + path)
++  }
++  return manifest
++}
++
++export async function importBundle (provider, bundleDir) {
++  const manifest = verifyBundle(bundleDir) // refuses tampered bundles BEFORE any write
++  const org = await provider.createOrg({ name: manifest.org.name + ' (imported)', kind: manifest.org.kind })
++  const idMap = { org: org.id, records: {} }
++
++  for (const collection of COLLECTIONS) {
++    const file = join(bundleDir, collection + '.jsonl')
++    if (!existsSync(file)) continue
++    idMap.records[collection] = {}
++    for (const { id, doc } of decodeJsonl(readFileSync(file, 'utf8'))) {
++      try {
++        await provider.putRecord(org.id, collection, id, doc)
++      } catch (e) {
++        if (!(e instanceof WorkspaceError)) throw e
++        // IDs are preserved where the target accepts them; otherwise a fresh
++        // id is written and recorded in the map (§6).
++        const newId = id + '-' + randomUUID().slice(0, 8)
++        await provider.putRecord(org.id, collection, newId, doc)
++        idMap.records[collection][id] = newId
++      }
++    }
++  }
++
++  const storageDir = join(bundleDir, 'storage')
++  if (typeof provider.putBlob === 'function') {
++    for (const { path, file } of walkFiles(storageDir)) {
++      await provider.putBlob(org.id, path, readFileSync(file))
++    }
++  }
++
++  // Members are RE-INVITED through provider operations (they re-authenticate
++  // on the new provider); identities themselves never move.
++  for (const m of manifest.members ?? []) {
++    try { await provider.addMember(org.id, { email: m.email, role: m.role }) } catch { /* already a member */ }
++  }
++
++  // Audit imports as read-only history, marked with its origin.
++  const auditFile = join(bundleDir, 'audit.jsonl')
++  if (existsSync(auditFile)) {
++    for (const row of decodeJsonl(readFileSync(auditFile, 'utf8'))) {
++      await provider.appendAudit(org.id, { ...row, imported: true, importedFrom: manifest.exportedAt })
++    }
++  }
++
++  writeFileSync(join(bundleDir, 'id-map.json'), JSON.stringify(idMap, null, 2) + '\n')
++  return { orgId: org.id, idMap }
++}
+diff --git a/plugins/workspace-provider/lib/generic-rest.js b/plugins/workspace-provider/lib/generic-rest.js
+new file mode 100644
+index 0000000..8980b0b
+--- /dev/null
++++ b/plugins/workspace-provider/lib/generic-rest.js
+@@ -0,0 +1,292 @@
++/**
++ * GenericRestWorkspaceProvider — the Wire v1 adapter over any conforming
++ * backend (task 13 step 6). `fetch` is injected, the session token is an
++ * opaque handle kept in the injected credential store, only Wire v1 routes
++ * are ever rendered, and every response crosses one of the frozen codecs.
++ *
++ * This first block is the pure response-decode half, pinned golden by
++ * selftest.contract.mjs sections 13–14: the token/session envelope (D34) and
++ * the X-Arxa-Cursor-Next consume rule. The wire client (fetch, retries,
++ * timeouts) lives below and is exercised through the conformance kit.
++ */
++import { createHash, randomUUID } from 'node:crypto'
++import { BOUNDS, HEADER, MEDIA, OPERATIONS, buildRequest } from './contract.js'
++import { decodeCapabilities, decodeCursor, decodeErrorBody, decodeJsonBody, decodeJsonl, isRetryableStatus } from './wire.js'
++import { WorkspaceError, invalidRequest } from './errors.js'
++import { AdaptivePoller } from './polling.js'
++import { normalizeCapabilities } from './capabilities.js'
++
++/**
++ * POST /auth/issue and /auth/refresh answer with ONE envelope: an opaque
++ * token plus a session block. Exact decode — unknown keys are dropped. The
++ * token is stored and re-sent verbatim; nothing ever inspects inside it.
++ */
++export function decodeSessionEnvelope (text, opts = {}) {
++  const body = decodeJsonBody(text, opts)
++  if (!body || typeof body !== 'object') throw invalidRequest('session envelope is not an object')
++  const { token, session } = body
++  if (typeof token !== 'string' || token.length === 0) throw invalidRequest('session envelope has no token')
++  if (!session || typeof session !== 'object') throw invalidRequest('session envelope has no session block')
++  if (typeof session.id !== 'string' || session.id.length === 0) throw invalidRequest('session block has no id')
++  if (session.expiresAt !== undefined && typeof session.expiresAt !== 'number')
++    throw invalidRequest('session expiresAt is not a number')
++  return { token, session: { id: session.id, ...(session.expiresAt !== undefined ? { expiresAt: session.expiresAt } : {}) } }
++}
++
++/**
++ * POST /auth/introspect answers {active} with the session block only when
++ * active — an inactive introspection carries no session to leak.
++ */
++export function decodeIntrospection (text, opts = {}) {
++  const body = decodeJsonBody(text, opts)
++  if (!body || typeof body !== 'object') throw invalidRequest('introspection body is not an object')
++  if (typeof body.active !== 'boolean') throw invalidRequest('introspection has no active boolean')
++  if (!body.active) return { active: false }
++  if (!body.session || typeof body.session !== 'object' || typeof body.session.id !== 'string')
++    throw invalidRequest('active introspection has no session block')
++  return { active: true, session: { id: body.session.id } }
++}
++
++const headerOf = (headers, name) => {
++  if (!headers || typeof headers !== 'object') return undefined
++  if (typeof headers.get === 'function') return headers.get(name) // fetch Headers
++  const lower = String(name).toLowerCase()
++  for (const [k, v] of Object.entries(headers)) if (String(k).toLowerCase() === lower) return v
++  return undefined
++}
++
++/**
++ * JSONL list-page consume rule (pinned): the body is PURE records, the resume
++ * cursor rides X-Arxa-Cursor-Next, a present non-empty header value is the
++ * next request's cursor VERBATIM (it must decode as a Wire v1 cursor — the
++ * adapter validates but never inspects it), and an absent or empty header
++ * ends the stream. A cursor inside the body is not part of the contract.
++ */
++export function consumeListPage (headers, bodyText, opts = {}) {
++  const raw = headerOf(headers, HEADER.NEXT_CURSOR)
++  const nextCursor = typeof raw === 'string' && raw.length > 0 ? raw : null
++  if (nextCursor !== null) decodeCursor(nextCursor) // garbage dies HERE, before the next request
++  return { records: decodeJsonl(bodyText, opts), nextCursor }
++}
++
++/** The opaque credential handle name in the injected credential store. */
++export const CREDENTIAL_HANDLE = 'workspace-generic-rest'
++const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
++
++/**
++ * The Wire v1 adapter: fetch is INJECTED (never a global by contract), the
++ * session token lives only in the injected credential store as an opaque
++ * handle, every request is built by the frozen buildRequest, every response
++ * crosses a frozen codec. Timeouts and bounded retries use the contract
++ * bounds; no provider path or JavaScript module is ever accepted.
++ */
++export class GenericRestWorkspaceProvider {
++  constructor ({ baseUrl, credentialStore, fetch = globalThis.fetch, timeoutMs = BOUNDS.REQUEST_TIMEOUT_MS, attempts = BOUNDS.MAX_ATTEMPTS } = {}) {
++    if (!baseUrl || typeof baseUrl !== 'string') throw invalidRequest('generic-rest requires a baseUrl')
++    if (!credentialStore || typeof credentialStore.get !== 'function' || typeof credentialStore.set !== 'function')
++      throw invalidRequest('generic-rest requires an injected credential store')
++    this.baseUrl = baseUrl.replace(/\/+$/, '')
++    this.credentialStore = credentialStore
++    this.fetchImpl = fetch
++    this.timeoutMs = timeoutMs
++    this.attempts = attempts
++    this.session = null // {token, session} once signed in
++    this.authListeners = new Set()
++    this.capsCache = null
++    this.pollers = new Map() // `${orgId} ${collection}` -> Set<AdaptivePoller>
++  }
++
++  onAuthStateChange (cb) {
++    this.authListeners.add(cb)
++    return () => this.authListeners.delete(cb)
++  }
++  emitAuth (ev) { for (const cb of this.authListeners) cb(ev) }
++
++  async loadSession () {
++    if (!this.session) this.session = await this.credentialStore.get(CREDENTIAL_HANDLE) ?? null
++    return this.session
++  }
++
++  async token () {
++    const s = await this.loadSession()
++    if (!s) throw new WorkspaceError('unauthenticated', 'not signed in')
++    return s.token
++  }
++
++  // ---- the one transport: build (frozen) → fetch (injected) → decode (frozen)
++  async request (name, params = {}, { body, bytes } = {}) {
++    const op = OPERATIONS[name]
++    const token = op.auth ? (await this.loadSession())?.token : undefined
++    const spec = buildRequest(name, params, { requestId: randomUUID(), token })
++    const url = this.baseUrl + spec.url
++    const payload = bytes ?? (body !== undefined ? JSON.stringify(body) : undefined)
++    if (payload !== undefined && Buffer.byteLength(payload) > BOUNDS.MAX_RECORD_BYTES)
++      throw invalidRequest('body exceeds the Wire v1 byte bound')
++
++    let lastError = null
++    for (let attempt = 1; attempt <= this.attempts; attempt++) {
++      const signal = this.timeoutMs > 0 ? AbortSignal.timeout(this.timeoutMs) : undefined
++      let res
++      try {
++        res = await this.fetchImpl(url, {
++          method: spec.method,
++          headers: { ...spec.headers, ...(payload !== undefined ? { 'content-type': op.req === MEDIA.BYTES ? MEDIA.BYTES : MEDIA.JSON } : {}) },
++          body: payload,
++          signal,
++        })
++      } catch (e) {
++        lastError = new WorkspaceError('unavailable', 'request failed or timed out', { cause: e })
++        if (attempt < this.attempts) { await sleep(100 * attempt); continue }
++        throw lastError
++      }
++      if (res.status >= 200 && res.status < 300) return this.decodeSuccess(name, res)
++      const text = await res.text().catch(() => '')
++      if (isRetryableStatus(res.status) && attempt < this.attempts) { await sleep(100 * attempt); continue }
++      throw decodeErrorBody(text, { requestId: spec.headers[HEADER.REQUEST_ID], token })
++    }
++    throw lastError ?? new WorkspaceError('unavailable', 'request failed')
++  }
++
++  async decodeSuccess (name, res) {
++    const op = OPERATIONS[name]
++    if (op.res === MEDIA.JSON) {
++      const body = decodeJsonBody(await res.text())
++      // GET record: the doc rides the body, the etag rides the ETag header.
++      if (name === 'getRecord') return { doc: body, etag: headerOf(res.headers, HEADER.ETAG) }
++      return body
++    }
++    if (op.res === MEDIA.BYTES) return Buffer.from(await res.arrayBuffer())
++    return consumeListPage(res.headers, await res.text())
++  }
++
++  /** Raw escape hatch for conformance probes (cross-org replay, immutability). */
++  rawRequest (name, params, opts) { return this.request(name, params, opts) }
++
++  // ---- capabilities + sign-in dispatch (D34: render ONLY the declared kind)
++  async capabilities () {
++    if (!this.capsCache) this.capsCache = normalizeCapabilities(decodeCapabilities(await this.request('capabilities')))
++    return { ...this.capsCache }
++  }
++
++  async signInInfo () {
++    const caps = decodeCapabilities(await this.request('capabilities'))
++    return caps.signIn
++  }
++
++  async signIn (method, credentials = {}) {
++    const declared = await this.signInInfo()
++    if (method !== declared.kind)
++      throw invalidRequest('this backend declares a different sign-in flow: ' + declared.kind)
++    // The issue body is provider-defined JSON (D34); the adapter carries the
++    // caller's material through unchanged, adding only the method.
++    const body = await this.request('authIssue', {}, { body: { method, ...credentials } })
++    this.session = decodeSessionEnvelope(typeof body === 'string' ? body : JSON.stringify(body))
++    await this.credentialStore.set(CREDENTIAL_HANDLE, this.session)
++    this.emitAuth({ userId: this.session.session.id, expiresAt: this.session.session.expiresAt })
++    return this.currentSession()
++  }
++
++  async refresh () {
++    const token = await this.token()
++    const body = await this.request('authRefresh', {}, { body: { token } })
++    this.session = decodeSessionEnvelope(typeof body === 'string' ? body : JSON.stringify(body))
++    await this.credentialStore.set(CREDENTIAL_HANDLE, this.session)
++    return this.currentSession()
++  }
++
++  async signOut () {
++    try { await this.request('authRevoke') } catch { /* a dead token is still signed out */ }
++    this.session = null
++    await this.credentialStore.delete?.(CREDENTIAL_HANDLE)
++    this.emitAuth(null)
++  }
++
++  async currentSession () {
++    const s = await this.loadSession()
++    if (!s) return null
++    const body = await this.request('authIntrospect', {}, { body: { token: s.token } })
++    const intro = decodeIntrospection(typeof body === 'string' ? body : JSON.stringify(body))
++    if (!intro.active) { this.session = null; return null }
++    return { userId: intro.session.id }
++  }
++
++  // ---- orgs
++  async createOrg ({ name, kind }) { return this.request('createOrg', {}, { body: { name, kind } }) }
++  async getOrg (orgId) { return this.request('getOrg', { orgId }) }
++  async listOrgs () { return (await this.request('listOrgs')).records }
++  async updateOrg (orgId, patch) { return this.request('patchOrg', { orgId }, { body: patch }) }
++  async archiveOrg (orgId) { return this.request('deleteOrg', { orgId }) }
++
++  // ---- members
++  async addMember (orgId, { email, role }) { return this.request('addMember', { orgId }, { body: { email, role } }) }
++  async listMembers (orgId) { return (await this.request('listMembers', { orgId })).records }
++  async setRole (orgId, memberId, role) { return this.request('patchMember', { orgId, memberId }, { body: { role } }) }
++  async removeMember (orgId, memberId) { return this.request('removeMember', { orgId, memberId }) }
++
++  // ---- records (If-Match optimistic concurrency rides the frozen headers)
++  async putRecord (orgId, collection, id, doc, { etag } = {}) {
++    const out = await this.request('putRecord', { orgId, collection, id, etag }, { body: doc })
++    this.writeNotify(orgId, collection)
++    return out
++  }
++
++  async getRecord (orgId, collection, id) {
++    const { doc, etag } = await this.request('getRecord', { orgId, collection, id })
++    return { id, doc, etag }
++  }
++
++  async listRecords (orgId, collection, { cursor, limit } = {}) {
++    return this.request('listRecords', { orgId, collection, cursor, limit })
++  }
++
++  async deleteRecord (orgId, collection, id) {
++    const out = await this.request('deleteRecord', { orgId, collection, id })
++    this.writeNotify(orgId, collection)
++    return out
++  }
++
++  // ---- audit (append + read only; no mutation route exists to call)
++  async appendAudit (orgId, event) { return this.request('appendAudit', { orgId }, { body: event }) }
++  async readAudit (orgId) { return (await this.request('readAudit', { orgId })).records }
++
++  // ---- storage
++  async putBlob (orgId, path, bytes) {
++    const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes)
++    await this.request('putBlob', { orgId, path }, { bytes: buf }) // res is BYTES media; the hash is ours
++    return { sha256: createHash('sha256').update(buf).digest('hex'), bytes: buf.length }
++  }
++  async getBlob (orgId, path) { return this.request('getBlob', { orgId, path }) }
++  async deleteBlob (orgId, path) { return this.request('deleteBlob', { orgId, path }) }
++  async signedUrl (orgId, path) { return this.request('signedUrl', { orgId, path }, { body: {} }) }
++
++  // ---- realtime degradation: D35 adaptive polling over listRecords.
++  // Delivery starts from an EMPTY snapshot, so the first poll delivers the
++  // current page as `put` events (initial state) — no silent baseline pass to
++  // race a write against; the poller coalesces overlapping polls.
++  subscribe (orgId, collection, cb) {
++    const key = orgId + ' ' + collection
++    let prev = new Map()
++    const poller = new AdaptivePoller({
++      poll: async () => {
++        const { records } = await this.listRecords(orgId, collection, { limit: BOUNDS.MAX_PAGE_LIMIT })
++        const now = new Map(records.map((r) => [r.id, r]))
++        for (const [id, rec] of now) {
++          if (prev.get(id)?.etag !== rec.etag) cb({ type: 'put', id, doc: rec.doc })
++        }
++        for (const id of prev.keys()) if (!now.has(id)) cb({ type: 'delete', id })
++        prev = new Map(now)
++      },
++    })
++    poller.start()
++    if (!this.pollers.has(key)) this.pollers.set(key, new Set())
++    this.pollers.get(key).add(poller)
++    return () => { poller.stop(); this.pollers.get(key)?.delete(poller) }
++  }
++
++  /** D35: every local write polls immediately, not on the next tick. */
++  writeNotify (orgId, collection) {
++    for (const p of this.pollers.get(orgId + ' ' + collection) ?? []) void p.notifyWrite()
++  }
++
++  track () {} // analytics: no-op sink
++}
+diff --git a/plugins/workspace-provider/lib/index.js b/plugins/workspace-provider/lib/index.js
+new file mode 100644
+index 0000000..73c8d66
+--- /dev/null
++++ b/plugins/workspace-provider/lib/index.js
+@@ -0,0 +1,64 @@
++/**
++ * arxa-workspace-provider — host half (task 13 step 9 wiring).
++ *
++ * The library surface (contract, providers, conformance kit, bundles) is
++ * consumed by FIRST-PARTY modules only, via this package's exports — never by
++ * arbitrary adapters (D32: no third-party JavaScript executes inside the app).
++ * The dsh service row exposes a read-only status channel over Connection RPC
++ * (one segment, the CHANNEL_PATTERN law) so the browser half and future
++ * settings panels can show provider + capabilities without touching a
++ * provider instance themselves. Local-first parity: with no config at all
++ * the service answers for the local provider — no network, account,
++ * database, or environment variable involved.
++ */
++import { existsSync, readFileSync } from 'node:fs'
++import { homedir } from 'node:os'
++import { join, resolve } from 'node:path'
++
++import { assertProviderConfig } from './contract.js'
++import { normalizeCapabilities, LOCAL_CAPABILITIES } from './capabilities.js'
++
++// One path segment only (dsh-client-connection CHANNEL_PATTERN), same law as
++// '/arxa-provider-status'. Must equal the channel in lib/client.js.
++export const RPC_CHANNEL = '/arxa-workspace-provider'
++
++/** Redacted workspaceBackend shape — keys only; values never cross the wire. */
++export function configShape (backend = {}) {
++  return { provider: backend.provider ?? 'local', sections: Object.keys(backend).filter((k) => k !== 'provider') }
++}
++
++/** Read the §5 user config (~/.arxa/studio.json) — absent file means local. */
++export function readBackendConfig (env = process.env, home = homedir()) {
++  const arxaHome = env.ARXA_HOME?.trim() ? resolve(env.ARXA_HOME.trim()) : join(home, '.arxa')
++  let backend = {}
++  const file = join(arxaHome, 'studio.json')
++  if (existsSync(file)) {
++    try { backend = JSON.parse(readFileSync(file, 'utf8')).workspaceBackend ?? {} } catch { backend = {} }
++  }
++  const envProvider = env.ARXA_WORKSPACE_PROVIDER?.trim()
++  if (envProvider) backend = { ...backend, provider: envProvider }
++  assertProviderConfig(backend)
++  return backend
++}
++
++export default {
++  inject: [],
++  apply (ctx) {
++    // Child fiber: runs when `connection` is provided (web boot); on a
++    // headless boot it stays pending harmlessly — same shape as
++    // arxa-provider-status.
++    ctx.inject(['connection'], (c) => c.connection.rpc.handle(RPC_CHANNEL, async (endpoint) => {
++      if (endpoint !== 'info') throw new Error('unknown endpoint: ' + endpoint)
++      let backend
++      try { backend = readBackendConfig() } catch { backend = {} }
++      const caps = backend.provider === 'generic-rest'
++        ? null // remote caps need a live fetch; the panel asks the host CLI/diagnose for those
++        : LOCAL_CAPABILITIES
++      return {
++        provider: backend.provider ?? 'local',
++        config: configShape(backend),
++        ...(caps ? { capabilities: normalizeCapabilities(caps) } : {}),
++      }
++    }))
++  },
++}
+diff --git a/plugins/workspace-provider/lib/local.js b/plugins/workspace-provider/lib/local.js
+new file mode 100644
+index 0000000..05038d9
+--- /dev/null
++++ b/plugins/workspace-provider/lib/local.js
+@@ -0,0 +1,312 @@
++/**
++ * LocalWorkspaceProvider (task 13 step 5) — the DEFAULT provider and the
++ * local-first parity law made code: the same contract, the same conformance
++ * kit, the same UX, with ZERO network, account, database, or environment
++ * variable. What a free user with no backend runs.
++ *
++ * Storage (the account-mirror convention, §1 local table):
++ *   <home>/workspace/<orgId>/org.json        atomic JSON document
++ *   <home>/workspace/<orgId>/members.json    atomic JSON document
++ *   <home>/workspace/<orgId>/<collection>/<id>.json   atomic JSON documents
++ *   <home>/workspace/<orgId>/audit.jsonl     append-only JSONL
++ *   <home>/workspace/<orgId>/storage/<path>  blobs
++ * The workspace root and every org dir are mode 0700 — "equivalent security"
++ * for a single-user store is the OS's own file permissions plus the fact that
++ * nothing leaves the machine.
++ */
++import { createHash, randomUUID } from 'node:crypto'
++import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
++import { homedir } from 'node:os'
++import { dirname, join } from 'node:path'
++
++import { BOUNDS, COLLECTIONS, ROLES } from './contract.js'
++import { encodeCursor, decodeCursor } from './wire.js'
++import { WorkspaceError, invalidRequest } from './errors.js'
++import { LOCAL_CAPABILITIES } from './capabilities.js'
++
++const LOCAL_USER_ID = 'local-operator'
++const LOCAL_USER_EMAIL = 'operator@local.invalid'
++const WORKSPACE_MODE = 0o700
++
++let tmpCounter = 0
++
++/** Atomic write: temp file in the same dir, then rename over the target. */
++function writeAtomic (target, content) {
++  tmpCounter += 1
++  const tmp = join(dirname(target), `.ws-tmp-${process.pid}-${tmpCounter}`)
++  writeFileSync(tmp, content)
++  renameSync(tmp, target)
++}
++
++const sha256 = (s) => createHash('sha256').update(s).digest('hex')
++const etagOf = (doc) => '"' + sha256(JSON.stringify(doc)).slice(0, 16) + '"'
++
++const code = (c, message) => new WorkspaceError(c, message)
++const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'))
++
++export class LocalWorkspaceProvider {
++  constructor ({ home, root } = {}) {
++    // ARXA_HOME is the launcher's own relocation convention (sandbox
++    // verification), never a requirement: absent → ~/.arxa. `root` is the
++    // §5 config override for the workspace directory itself.
++    this.home = home ?? (process.env.ARXA_HOME?.trim() || join(homedir(), '.arxa'))
++    this.root = root ?? join(this.home, 'workspace')
++    this.userId = LOCAL_USER_ID
++    this.authListeners = new Set()
++    this.subscribers = new Map() // `${orgId} ${collection}` -> Set<cb>
++  }
++
++  capabilities () { return Promise.resolve({ ...LOCAL_CAPABILITIES }) }
++
++  // ------------------------------------------------------------- auth
++  // §1 local row: one user, the machine's operator. signIn/signOut are no-ops
++  // that still fire onAuthStateChange; currentSession always returns it.
++  async signIn () { this.emitAuth({ userId: this.userId, email: LOCAL_USER_EMAIL }) }
++  async signOut () { this.emitAuth(null) }
++  currentSession () { return Promise.resolve({ userId: this.userId, email: LOCAL_USER_EMAIL }) }
++  onAuthStateChange (cb) {
++    this.authListeners.add(cb)
++    return () => this.authListeners.delete(cb)
++  }
++  emitAuth (ev) { for (const cb of this.authListeners) cb(ev) }
++
++  // ------------------------------------------------------------- layout
++  orgDir (orgId) {
++    const dir = join(this.root, orgId)
++    if (!existsSync(dir)) throw code('not_found', 'org not found')
++    return dir
++  }
++  ensureOrgDir (orgId) {
++    const dir = join(this.root, orgId)
++    mkdirSync(dir, { recursive: true })
++    chmodSync(dir, WORKSPACE_MODE)
++    return dir
++  }
++
++  // ------------------------------------------------------------- orgs
++  async createOrg ({ name, kind }) {
++    mkdirSync(this.root, { recursive: true })
++    chmodSync(this.root, WORKSPACE_MODE)
++    const id = 'org-' + randomUUID().slice(0, 8)
++    this.ensureOrgDir(id)
++    const org = { id, name, kind: kind ?? 'studio', createdAt: new Date().toISOString() }
++    writeAtomic(join(this.root, id, 'org.json'), JSON.stringify(org, null, 2) + '\n')
++    writeAtomic(join(this.root, id, 'members.json'), JSON.stringify([{
++      id: 'mem-' + randomUUID().slice(0, 8), userId: this.userId, email: LOCAL_USER_EMAIL,
++      role: 'owner', status: 'active',
++    }], null, 2) + '\n')
++    return org
++  }
++
++  async getOrg (orgId) { return readJson(join(this.orgDir(orgId), 'org.json')) }
++
++  async listOrgs () {
++    if (!existsSync(this.root)) return []
++    return readdirSync(this.root, { withFileTypes: true })
++      .filter((e) => e.isDirectory() && existsSync(join(this.root, e.name, 'org.json')))
++      .map((e) => readJson(join(this.root, e.name, 'org.json')))
++  }
++
++  async updateOrg (orgId, patch) {
++    const file = join(this.orgDir(orgId), 'org.json')
++    const org = { ...readJson(file), ...patch, id: orgId } // id is not patchable
++    writeAtomic(file, JSON.stringify(org, null, 2) + '\n')
++    return org
++  }
++
++  async archiveOrg (orgId) {
++    this.orgDir(orgId)
++    rmSync(join(this.root, orgId), { recursive: true, force: true })
++    return { archived: true }
++  }
++
++  // ------------------------------------------------------------- members
++  memberFile (orgId) { return join(this.orgDir(orgId), 'members.json') }
++  readMembers (orgId) { return readJson(this.memberFile(orgId)) }
++
++  actorRole (orgId, userId = this.userId) {
++    return this.readMembers(orgId).find((m) => m.userId === userId)?.role
++  }
++
++  requireOwnerOrAdmin (orgId) {
++    if (!['owner', 'admin'].includes(this.actorRole(orgId) ?? ''))
++      throw code('forbidden', 'member management requires owner or admin')
++  }
++
++  async addMember (orgId, { email, role }) {
++    if (!ROLES.includes(role)) throw invalidRequest('role must be one of: ' + ROLES.join(', '))
++    this.requireOwnerOrAdmin(orgId)
++    const file = this.memberFile(orgId)
++    const members = this.readMembers(orgId)
++    // Idempotent: re-adding the same email with the same role is a no-op.
++    const existing = members.find((m) => m.email === email)
++    if (existing) {
++      if (existing.role !== role) throw code('conflict', 'member already exists with a different role')
++      return existing
++    }
++    const member = { id: 'mem-' + randomUUID().slice(0, 8), userId: 'user-' + randomUUID().slice(0, 8), email, role, status: 'invited' }
++    writeAtomic(file, JSON.stringify([...members, member], null, 2) + '\n')
++    return member
++  }
++
++  async listMembers (orgId) { return this.readMembers(orgId) }
++
++  async setRole (orgId, memberId, role) {
++    if (!ROLES.includes(role)) throw invalidRequest('role must be one of: ' + ROLES.join(', '))
++    this.requireOwnerOrAdmin(orgId)
++    const file = this.memberFile(orgId)
++    const members = this.readMembers(orgId)
++    const m = members.find((x) => x.id === memberId)
++    if (!m) throw code('not_found', 'member not found')
++    if (m.role === 'owner' && role !== 'owner' && members.filter((x) => x.role === 'owner').length === 1)
++      throw code('forbidden', 'the last owner cannot be demoted')
++    m.role = role
++    writeAtomic(file, JSON.stringify(members, null, 2) + '\n')
++    return m
++  }
++
++  async removeMember (orgId, memberId) {
++    this.requireOwnerOrAdmin(orgId)
++    const file = this.memberFile(orgId)
++    const members = this.readMembers(orgId)
++    const m = members.find((x) => x.id === memberId)
++    if (!m) throw code('not_found', 'member not found')
++    if (m.role === 'owner' && members.filter((x) => x.role === 'owner').length === 1)
++      throw code('forbidden', 'the last owner cannot be removed')
++    writeAtomic(file, JSON.stringify(members.filter((x) => x.id !== memberId), null, 2) + '\n')
++    return { removed: true }
++  }
++
++  // ------------------------------------------------------------- records
++  recordFile (orgId, collection, id) {
++    if (!COLLECTIONS.includes(collection)) throw invalidRequest('collection is not part of the fixed Wire v1 collection list')
++    return join(this.orgDir(orgId), collection, encodeURIComponent(id) + '.json')
++  }
++
++  async putRecord (orgId, collection, id, doc, { etag } = {}) {
++    const file = this.recordFile(orgId, collection, id)
++    let prev = null
++    if (existsSync(file)) prev = readJson(file)
++    if (etag !== undefined && (!prev || prev.etag !== etag))
++      throw code('conflict', 'etag mismatch — the record changed since it was read')
++    const next = { etag: etagOf(doc), doc, updatedAt: new Date().toISOString() }
++    mkdirSync(dirname(file), { recursive: true })
++    writeAtomic(file, JSON.stringify(next, null, 2) + '\n')
++    this.emit(orgId, collection, { type: 'put', id, doc })
++    return { id, etag: next.etag }
++  }
++
++  async getRecord (orgId, collection, id) {
++    const file = this.recordFile(orgId, collection, id)
++    if (!existsSync(file)) throw code('not_found', 'record not found')
++    const { etag, doc } = readJson(file)
++    return { id, etag, doc }
++  }
++
++  async listRecords (orgId, collection, { cursor, limit = BOUNDS.DEFAULT_PAGE_LIMIT } = {}) {
++    const dir = join(this.orgDir(orgId), collection)
++    if (!Number.isInteger(limit) || limit < 1 || limit > BOUNDS.MAX_PAGE_LIMIT)
++      throw invalidRequest('limit must be an integer between 1 and MAX_PAGE_LIMIT')
++    const offset = cursor ? decodeCursor(cursor).offset ?? 0 : 0
++    const ids = existsSync(dir)
++      ? readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => decodeURIComponent(f.slice(0, -5))).sort()
++      : []
++    const page = ids.slice(offset, offset + limit)
++    const records = page.map((id) => {
++      const { etag, doc } = readJson(join(dir, encodeURIComponent(id) + '.json'))
++      return { id, etag, doc }
++    })
++    const nextCursor = offset + limit < ids.length ? encodeCursor({ offset: offset + limit }) : null
++    return { records, nextCursor }
++  }
++
++  async deleteRecord (orgId, collection, id) {
++    const file = this.recordFile(orgId, collection, id)
++    if (!existsSync(file)) throw code('not_found', 'record not found')
++    rmSync(file, { force: true })
++    this.emit(orgId, collection, { type: 'delete', id })
++    return { deleted: true }
++  }
++
++  // ------------------------------------------------------------- audit
++  // Append-only by construction: the ONLY method, an append to a JSONL file.
++  // No update/delete exists at any layer — the wire has no mutation route and
++  // the interface has no mutation method.
++  async appendAudit (orgId, event) {
++    const dir = this.orgDir(orgId)
++    const line = JSON.stringify({ at: new Date().toISOString(), actor: this.userId, ...event })
++    appendFileSync(join(dir, 'audit.jsonl'), line + '\n')
++    return { appended: true }
++  }
++
++  async readAudit (orgId) {
++    const file = join(this.orgDir(orgId), 'audit.jsonl')
++    if (!existsSync(file)) return []
++    return readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
++  }
++
++  // ------------------------------------------------------------- storage
++  blobPath (orgId, path) {
++    const segs = Array.isArray(path) ? path : String(path).split('/')
++    if (segs.some((s) => s === '' || s === '.' || s === '..')) throw invalidRequest('blob path is not a plain path')
++    return join(this.orgDir(orgId), 'storage', ...segs)
++  }
++
++  async putBlob (orgId, path, bytes) {
++    const file = this.blobPath(orgId, path)
++    mkdirSync(dirname(file), { recursive: true })
++    writeAtomic(file, bytes)
++    return { sha256: sha256(bytes), bytes: bytes.length }
++  }
++
++  async getBlob (orgId, path) {
++    const file = this.blobPath(orgId, path)
++    if (!existsSync(file)) throw code('not_found', 'blob not found')
++    return readFileSync(file)
++  }
++
++  async deleteBlob (orgId, path) {
++    const file = this.blobPath(orgId, path)
++    if (!existsSync(file)) throw code('not_found', 'blob not found')
++    rmSync(file, { force: true })
++    return { deleted: true }
++  }
++
++  // §1: local signedUrl returns a file: URL.
++  signedUrl (orgId, path) {
++    this.blobPath(orgId, path) // validate org + path
++    return Promise.resolve({ url: 'file://' + this.blobPath(orgId, path), mode: 'local' })
++  }
++
++  /** Blob enumeration for export (local-only: the wire has no list route). */
++  listBlobs (orgId) {
++    const dir = join(this.orgDir(orgId), 'storage')
++    const out = []
++    const walk = (rel, d) => {
++      if (!existsSync(d)) return
++      for (const e of readdirSync(d, { withFileTypes: true })) {
++        if (e.isDirectory()) walk([...rel, e.name], join(d, e.name))
++        else out.push([...rel, e.name].join('/'))
++      }
++    }
++    walk([], dir)
++    return Promise.resolve(out)
++  }
++
++  // ------------------------------------------------------------- realtime
++  // In-process emitter — strictly better than the polling degradation.
++  subscribe (orgId, collection, cb) {
++    const key = orgId + ' ' + collection
++    let set = this.subscribers.get(key)
++    if (!set) { set = new Set(); this.subscribers.set(key, set) }
++    set.add(cb)
++    return () => set.delete(cb)
++  }
++  emit (orgId, collection, event) {
++    for (const cb of this.subscribers.get(orgId + ' ' + collection) ?? []) cb(event)
++  }
++
++  // ------------------------------------------------------------- analytics
++  // No-op sink: nothing user-visible, so nothing is advertised.
++  track () {}
++}
+diff --git a/plugins/workspace-provider/lib/polling.js b/plugins/workspace-provider/lib/polling.js
+new file mode 100644
+index 0000000..97f1b96
+--- /dev/null
++++ b/plugins/workspace-provider/lib/polling.js
+@@ -0,0 +1,84 @@
++/**
++ * AdaptivePoller (task 13, D35) — the realtime degradation as contract
++ * constants: 3 s focused-and-active, 30 s focused-idle, 120 s background,
++ * plus an immediate poll after any local write. NOT provider-hintable: the
++ * intervals come from contract.POLLING and nowhere else.
++ *
++ * The clock is injectable so the whole transition table is pinnable without
++ * waiting a real 120 s (selftest.polling.mjs).
++ */
++import { POLLING } from './contract.js'
++
++const DELAYS = { active: POLLING.ACTIVE_MS, idle: POLLING.IDLE_MS, background: POLLING.BACKGROUND_MS }
++
++export class AdaptivePoller {
++  constructor ({ poll, activity = 'active', clock = { setTimeout, clearTimeout } } = {}) {
++    if (typeof poll !== 'function') throw new Error('AdaptivePoller requires a poll function')
++    this.poll = poll
++    this.activity = activity
++    this.clock = clock
++    this.timer = null
++    this.running = false
++    this.inFlight = false
++    this.queued = false
++  }
++
++  /** The contract interval for the current activity — the only source. */
++  get delay () { return DELAYS[this.activity] }
++
++  schedule () {
++    this.clear()
++    // `return` so an injected clock can await the tick it fired.
++    this.timer = this.clock.setTimeout(() => { this.timer = null; return this.tick() }, this.delay)
++  }
++
++  clear () {
++    if (this.timer !== null) { this.clock.clearTimeout(this.timer); this.timer = null }
++  }
++
++  /**
++   * One poll pass, coalescing: a poll requested while one is in flight is
++   * queued and runs when the current pass ends (two overlapping list reads
++   * racing a write would diff against a stale snapshot and invent events).
++   */
++  async runOnce () {
++    if (this.inFlight) { this.queued = true; return }
++    this.inFlight = true
++    try {
++      do { this.queued = false; await this.poll() } while (this.queued && this.running)
++    } catch { /* a failed poll never kills the loop */ } finally {
++      this.inFlight = false
++    }
++  }
++
++  async tick () {
++    if (!this.running) return
++    await this.runOnce()
++    if (this.running) this.schedule()
++  }
++
++  start () {
++    if (this.running) return
++    this.running = true
++    this.schedule()
++  }
++
++  setActivity (activity) {
++    if (!(activity in DELAYS)) throw new Error('activity must be active, idle or background')
++    this.activity = activity
++    if (this.running) this.schedule()
++  }
++
++  /** D35 IMMEDIATE_AFTER_WRITE: poll now, then reschedule at the interval. */
++  async notifyWrite () {
++    if (!this.running) return
++    this.clear()
++    await this.runOnce()
++    if (this.running) this.schedule()
++  }
++
++  stop () {
++    this.running = false
++    this.clear()
++  }
++}
+diff --git a/plugins/workspace-provider/lib/wire.js b/plugins/workspace-provider/lib/wire.js
+new file mode 100644
+index 0000000..d3a5e50
+--- /dev/null
++++ b/plugins/workspace-provider/lib/wire.js
+@@ -0,0 +1,102 @@
++/**
++ * Wire v1 protocol codecs (task 13 step 3). Pure encode/decode over strings
++ * and buffers — no fetch, no sockets. Bounded JSON covers singleton
++ * operations; JSONL covers record/audit/event streams and export bundles.
++ * Every decode failure is a typed WorkspaceError('invalid_request'), never a
++ * raw parse crash, and never a message that echoes the payload.
++ */
++import { BOUNDS, CAPABILITY_KEYS, ERROR_CODES, SIGN_IN_KINDS, WIRE_VERSION } from './contract.js'
++import { WorkspaceError, invalidRequest } from './errors.js'
++
++const byteLen = (s) => Buffer.byteLength(s, 'utf8')
++const REDACTED = '[redacted]'
++
++// ------------------------------------------------------------- cursors
++// Opaque to callers, boring underneath: base64url JSON, version-tagged.
++export function encodeCursor (state) {
++  return Buffer.from(JSON.stringify({ v: WIRE_VERSION, ...state }), 'utf8')
++    .toString('base64url')
++}
++
++export function decodeCursor (cursor) {
++  let parsed
++  try {
++    parsed = JSON.parse(Buffer.from(String(cursor), 'base64url').toString('utf8'))
++  } catch { throw invalidRequest('cursor is not a decodable Wire v1 cursor') }
++  if (!parsed || typeof parsed !== 'object' || parsed.v !== WIRE_VERSION)
++    throw invalidRequest('cursor is not a Wire v1 cursor')
++  return parsed
++}
++
++// --------------------------------------------------------- bounded JSON
++export function encodeJsonBody (value, { maxBytes = BOUNDS.MAX_RECORD_BYTES } = {}) {
++  const text = JSON.stringify(value)
++  if (text === undefined) throw invalidRequest('value is not JSON-encodable')
++  if (byteLen(text) > maxBytes) throw invalidRequest('body exceeds the Wire v1 byte bound')
++  return text
++}
++
++export function decodeJsonBody (text, { maxBytes = BOUNDS.MAX_RECORD_BYTES } = {}) {
++  if (byteLen(text) > maxBytes) throw invalidRequest('body exceeds the Wire v1 byte bound')
++  try { return JSON.parse(text) } catch { throw invalidRequest('body is not valid JSON') }
++}
++
++// ------------------------------------------------------------- JSONL
++export function encodeJsonl (records) {
++  return records.map((r) => JSON.stringify(r)).join('\n') + '\n'
++}
++
++export function decodeJsonl (text, { maxBytes = BOUNDS.MAX_JSONL_BYTES } = {}) {
++  if (byteLen(text) > maxBytes) throw invalidRequest('stream exceeds the Wire v1 byte bound')
++  let lines = text.split('\n')
++  if (lines[lines.length - 1] === '') lines.pop() // trailing newline is legal
++  return lines.map((line) => {
++    if (line.trim() === '') throw invalidRequest('blank line in JSONL stream')
++    try { return JSON.parse(line) } catch { throw invalidRequest('line is not valid JSON') }
++  })
++}
++
++// ------------------------------------------------------------- errors
++// Server messages are surfaced (they carry no secrets by contract) minus any
++// occurrence of the caller's session token, which a hostile or buggy server
++// must never be able to bounce back into a log.
++const redact = (message, token) =>
++  typeof token === 'string' && token.length > 0 && message.includes(token)
++    ? message.split(token).join(REDACTED)
++    : message
++
++export function decodeErrorBody (text, { requestId, token } = {}) {
++  let body
++  try { body = JSON.parse(text) } catch { throw invalidRequest('error body is not valid JSON') }
++  const err = body && body.error
++  if (!err || typeof err !== 'object' || typeof err.code !== 'string')
++    throw invalidRequest('error body is not a Wire v1 envelope')
++
++  const known = ERROR_CODES.includes(err.code)
++  return new WorkspaceError(known ? err.code : 'unavailable', redact(String(err.message ?? 'workspace provider error'), token), {
++    retryable: err.retryable === true,
++    requestId: typeof err.requestId === 'string' ? err.requestId : requestId,
++    serverCode: known ? undefined : err.code,
++  })
++}
++
++// ------------------------------------------------------- capabilities
++// D34 sign-in dispatch: GET /capabilities declares one signIn kind plus its
++// start metadata; studio renders exactly that flow and nothing else.
++export function decodeCapabilities (body) {
++  const caps = body && typeof body === 'object' ? body : null
++  if (!caps) throw invalidRequest('capabilities body is not an object')
++  const { signIn } = caps
++  if (!signIn || typeof signIn !== 'object')
++    throw invalidRequest('capabilities must declare a signIn block')
++  if (!SIGN_IN_KINDS.includes(signIn.kind))
++    throw invalidRequest('signIn.kind is not a Wire v1 sign-in kind')
++  if (!signIn.start || typeof signIn.start !== 'object')
++    throw invalidRequest('signIn.start metadata is required')
++
++  const out = { signIn: { kind: signIn.kind, start: signIn.start } }
++  for (const key of CAPABILITY_KEYS) out[key] = caps[key] === true
++  return out
++}
++
++export const isRetryableStatus = (status) => BOUNDS.RETRYABLE_STATUSES.includes(status)
+diff --git a/plugins/workspace-provider/package.json b/plugins/workspace-provider/package.json
+new file mode 100644
+index 0000000..ce64320
+--- /dev/null
++++ b/plugins/workspace-provider/package.json
+@@ -0,0 +1,30 @@
++{
++  "name": "arxa-workspace-provider",
++  "version": "0.1.0",
++  "private": true,
++  "description": "WorkspaceProvider Wire v1 (task 13): frozen contract + codecs (part A); local provider, generic-REST adapter, adaptive polling, conformance kit, export/import bundles, and the CLI service row (part B). Local-first: the default provider needs no network, account, database, or environment variable.",
++  "type": "module",
++  "main": "lib/index.js",
++  "exports": {
++    ".": "./lib/index.js",
++    "./contract": "./lib/contract.js",
++    "./errors": "./lib/errors.js",
++    "./wire": "./lib/wire.js",
++    "./capabilities": "./lib/capabilities.js",
++    "./local": "./lib/local.js",
++    "./generic-rest": "./lib/generic-rest.js",
++    "./polling": "./lib/polling.js",
++    "./export-bundle": "./lib/export-bundle.js",
++    "./conformance": "./lib/conformance.js",
++    "./client": "./lib/client.js",
++    "./package.json": "./package.json"
++  },
++  "dsh": {
++    "client": {
++      "inject": [
++        "@deepseek-ai/dsh-client-runtime"
++      ],
++      "platform": "web"
++    }
++  }
++}
+diff --git a/plugins/workspace-provider/selftest.contract.mjs b/plugins/workspace-provider/selftest.contract.mjs
+new file mode 100644
+index 0000000..3574895
+--- /dev/null
++++ b/plugins/workspace-provider/selftest.contract.mjs
+@@ -0,0 +1,392 @@
++/**
++ * Wire v1 FREEZE (task 13 step 2, D32–D35). Golden tests pinning the
++ * workspace-provider protocol exactly: routes, verbs, headers, media types,
++ * envelopes, bounds, pagination, token lifecycle, capability-driven sign-in
++ * dispatch, error taxonomy, abort signals, request IDs, and the rule that
++ * config cannot name executable code.
++ *
++ * Any change to anything asserted here is a wire change and requires a NEW
++ * PROTOCOL VERSION. This file is the contract's executable form; part B
++ * (providers, REST adapter, conformance kit) implements against it.
++ */
++import { strict as assert } from 'node:assert'
++import * as contract from './lib/contract.js'
++import { WorkspaceError } from './lib/errors.js'
++import * as wire from './lib/wire.js'
++// Part B pins (checkpoint obligations): the token/session RESPONSE envelope and
++// the X-Arxa-Cursor-Next consume semantics. Part A pinned the REQUEST side
++// (routes, headers, codecs); these two sections pin the response decodes the
++// adapters build on. Same freeze rule: any change here is a wire change.
++import { consumeListPage, decodeIntrospection, decodeSessionEnvelope } from './lib/generic-rest.js'
++
++let n = 0; const ok = (s) => { n++; console.log('  ok ' + s) }
++const throwsCode = (code, fn) => {
++  try { fn() } catch (e) {
++    assert.ok(e instanceof WorkspaceError, 'typed WorkspaceError, got ' + e)
++    assert.equal(e.code, code, `code ${code}, got ${e.code}`)
++    return e
++  }
++  assert.fail('expected WorkspaceError ' + code + ', nothing thrown')
++}
++const TOKEN = 'opaque-secret-token-do-not-print-in-real-life'
++
++// ---------------------------------------------- 1. frozen scalar constants
++{
++  assert.equal(contract.WIRE_VERSION, 1)
++  assert.equal(contract.BASE_PATH, '/arxa-workspace/v1')
++  assert.equal(contract.HEADER.VERSION, 'X-Arxa-Workspace-Version')
++  assert.equal(contract.HEADER.REQUEST_ID, 'X-Request-Id')
++  assert.equal(contract.HEADER.AUTHORIZATION, 'Authorization')
++  assert.equal(contract.HEADER.ETAG, 'ETag')
++  assert.equal(contract.HEADER.IF_MATCH, 'If-Match')
++  assert.equal(contract.HEADER.NEXT_CURSOR, 'X-Arxa-Cursor-Next')
++  assert.equal(contract.MEDIA.JSON, 'application/json')
++  assert.equal(contract.MEDIA.NDJSON, 'application/x-ndjson')
++  assert.equal(contract.MEDIA.BYTES, 'application/octet-stream')
++  assert.deepEqual(contract.PROVIDERS, ['local', 'supabase', 'generic-rest'])
++  assert.deepEqual(contract.ROLES, ['owner', 'admin', 'billing', 'member'])
++  // The fixed §1 collection list — anything else is rejected before I/O.
++  assert.deepEqual(contract.COLLECTIONS, [
++    'tickets', 'ticket_messages', 'chat_conversations', 'chat_messages',
++    'feedback', 'requirements', 'user_prefs',
++  ])
++  assert.deepEqual(contract.SIGN_IN_KINDS, ['email-form', 'browser', 'device-code', 'token'])
++  // Token-opaque identity (D34): auth lifecycle is issue/refresh/revoke/introspect;
++  // email/password is NOT a sign-in kind, NOT a wire concept.
++  assert.ok(!contract.SIGN_IN_KINDS.includes('email+password'))
++  assert.deepEqual(contract.CAPABILITY_KEYS,
++    ['auth', 'orgs', 'records', 'audit', 'realtime', 'storage', 'analytics'])
++  ok('scalars: version, base path, headers, media types, providers, roles, collections, sign-in kinds, capabilities')
++}
++
++// ---------------------------------------------- 2. bounds + polling (D35, D9)
++{
++  assert.deepEqual(contract.BOUNDS, {
++    DEFAULT_PAGE_LIMIT: 100,
++    MAX_PAGE_LIMIT: 500,
++    MAX_RECORD_BYTES: 1_048_576,       // 1 MiB per JSON document / bounded body
++    MAX_JSONL_BYTES: 33_554_432,       // 32 MiB per decoded JSONL page/stream
++    MAX_BLOB_BYTES: 1_073_741_824,     // 1 GiB per storage blob
++    REQUEST_TIMEOUT_MS: 15_000,
++    MAX_ATTEMPTS: 3,
++    RETRYABLE_STATUSES: [408, 425, 429, 500, 502, 503, 504],
++  })
++  assert.deepEqual(contract.POLLING, {
++    ACTIVE_MS: 3000, IDLE_MS: 30000, BACKGROUND_MS: 120000,
++    IMMEDIATE_AFTER_WRITE: true,
++  })
++  ok('bounds: page limits, body/blob/stream caps, timeout, retries, retryable statuses; D35 polling 3s/30s/120s + immediate-after-write')
++}
++
++// ---------------------------------------------- 3. THE route table (verbatim)
++// Every route, verb, media type, auth requirement, query param. This object
++// literal IS the Wire v1 table from the task brief, character for character.
++{
++  const J = 'application/json', L = 'application/x-ndjson', B = 'application/octet-stream'
++  assert.deepEqual(contract.OPERATIONS, {
++    capabilities:  { method: 'GET',    path: '/capabilities', req: null, res: J, auth: false },
++    authIssue:     { method: 'POST',   path: '/auth/issue', req: J, res: J, auth: false },
++    authRefresh:   { method: 'POST',   path: '/auth/refresh', req: J, res: J, auth: false },
++    authRevoke:    { method: 'POST',   path: '/auth/revoke', req: J, res: J, auth: true },
++    authIntrospect:{ method: 'POST',   path: '/auth/introspect', req: J, res: J, auth: false },
++    listOrgs:      { method: 'GET',    path: '/orgs', req: null, res: L, auth: true },
++    createOrg:     { method: 'POST',   path: '/orgs', req: J, res: J, auth: true },
++    getOrg:        { method: 'GET',    path: '/orgs/{orgId}', req: null, res: J, auth: true },
++    patchOrg:      { method: 'PATCH',  path: '/orgs/{orgId}', req: J, res: J, auth: true },
++    deleteOrg:     { method: 'DELETE', path: '/orgs/{orgId}', req: null, res: J, auth: true },
++    listMembers:   { method: 'GET',    path: '/orgs/{orgId}/members', req: null, res: L, auth: true },
++    addMember:     { method: 'POST',   path: '/orgs/{orgId}/members', req: J, res: J, auth: true },
++    patchMember:   { method: 'PATCH',  path: '/orgs/{orgId}/members/{memberId}', req: J, res: J, auth: true },
++    removeMember:  { method: 'DELETE', path: '/orgs/{orgId}/members/{memberId}', req: null, res: J, auth: true },
++    listRecords:   { method: 'GET',    path: '/orgs/{orgId}/records/{collection}', req: null, res: L, auth: true, query: ['cursor', 'limit'] },
++    getRecord:     { method: 'GET',    path: '/orgs/{orgId}/records/{collection}/{id}', req: null, res: J, auth: true },
++    putRecord:     { method: 'PUT',    path: '/orgs/{orgId}/records/{collection}/{id}', req: J, res: J, auth: true },
++    deleteRecord:  { method: 'DELETE', path: '/orgs/{orgId}/records/{collection}/{id}', req: null, res: J, auth: true },
++    appendAudit:   { method: 'POST',   path: '/orgs/{orgId}/audit', req: J, res: J, auth: true },
++    readAudit:     { method: 'GET',    path: '/orgs/{orgId}/audit', req: null, res: L, auth: true },
++    putBlob:       { method: 'PUT',    path: '/orgs/{orgId}/storage/{path}', req: B, res: B, auth: true },
++    getBlob:       { method: 'GET',    path: '/orgs/{orgId}/storage/{path}', req: null, res: B, auth: true },
++    deleteBlob:    { method: 'DELETE', path: '/orgs/{orgId}/storage/{path}', req: null, res: J, auth: true },
++    signedUrl:     { method: 'POST',   path: '/orgs/{orgId}/storage/{path}/signed-url', req: J, res: J, auth: true },
++    events:        { method: 'GET',    path: '/orgs/{orgId}/events', req: null, res: L, auth: true, optional: true, query: ['cursor'] },
++  })
++  // Audit immutability at the route level: NO mutation route on audit exists.
++  const auditRoutes = Object.values(contract.OPERATIONS)
++    .filter((o) => o.path.includes('/audit') && ['PUT', 'PATCH', 'DELETE'].includes(o.method))
++  assert.equal(auditRoutes.length, 0, 'no audit mutation route may exist')
++  ok('OPERATIONS table: 25 routes verbatim; audit has append+read only')
++}
++
++// ---------------------------------------------- 4. request building: headers, ids, abort, token
++{
++  const signal = new AbortController().signal
++  const r = contract.buildRequest('listRecords',
++    { orgId: 'org-1', collection: 'tickets', limit: 25 },
++    { requestId: 'req-abc', token: TOKEN, signal })
++  assert.equal(r.method, 'GET')
++  assert.equal(r.url, '/arxa-workspace/v1/orgs/org-1/records/tickets?limit=25')
++  assert.equal(r.headers[contract.HEADER.VERSION], '1')
++  assert.equal(r.headers[contract.HEADER.REQUEST_ID], 'req-abc')
++  assert.equal(r.headers[contract.HEADER.AUTHORIZATION], 'Bearer ' + TOKEN)
++  assert.equal(r.signal, signal, 'abort signal forwarded untouched')
++  assert.equal(r.media, contract.MEDIA.NDJSON)
++  // Fresh request ID minted when the caller supplies none, and it is a UUID.
++  const a = contract.buildRequest('capabilities', {}, {})
++  const b = contract.buildRequest('capabilities', {}, {})
++  assert.notEqual(a.headers[contract.HEADER.REQUEST_ID], b.headers[contract.HEADER.REQUEST_ID])
++  assert.match(a.headers[contract.HEADER.REQUEST_ID], /^[0-9a-f-]{36}$/)
++  // capabilities carries no bearer token even if one is in context
++  const caps = contract.buildRequest('capabilities', {}, { token: TOKEN })
++  assert.equal(contract.HEADER.AUTHORIZATION in caps.headers, false)
++  // path segments are URI-encoded; blob paths keep their slashes
++  const blob = contract.buildRequest('putBlob', { orgId: 'org 1', path: ['a b', 'c.png'] }, {})
++  assert.equal(blob.url, '/arxa-workspace/v1/orgs/org%201/storage/a%20b/c.png')
++  // ETag optimistic concurrency: PUT carries If-Match when an etag is supplied
++  const put = contract.buildRequest('putRecord',
++    { orgId: 'o', collection: 'feedback', id: 'r1', etag: 'W/"1"' }, {})
++  assert.equal(put.headers[contract.HEADER.IF_MATCH], 'W/"1"')
++  assert.equal(put.media, contract.MEDIA.JSON)
++  ok('buildRequest: version+request-id headers, bearer on auth routes only, fresh UUID ids, abort passthrough, URI encoding, If-Match')
++}
++
++// ---------------------------------------------- 5. reject BEFORE I/O
++{
++  // Unknown collection: throws at build time — no request exists to send.
++  let built = null
++  try { built = contract.buildRequest('listRecords', { orgId: 'o', collection: 'passwords' }, {}) }
++  catch (e) { assert.ok(e instanceof WorkspaceError); assert.equal(e.code, 'invalid_request') }
++  assert.equal(built, null, 'no request spec may escape an unknown collection')
++  // Unknown operation name is a programming error, not a wire error
++  assert.throws(() => contract.buildRequest('dropTable', {}), /unknown operation/)
++  // Unknown version: the typed code exists and decodes (server side of the
++  // contract returns it; client side surfaces it).
++  const e = wire.decodeErrorBody(JSON.stringify({
++    error: { code: 'unsupported_version', message: 'wire version 2 not supported', retryable: false, requestId: 'rq-1' },
++  }), {})
++  assert.ok(e instanceof WorkspaceError)
++  assert.equal(e.code, 'unsupported_version')
++  assert.equal(e.retryable, false)
++  ok('pre-I/O guards: unknown collection rejected at build; unsupported_version is a typed code')
++}
++
++// ---------------------------------------------- 6. pagination
++{
++  // default limit applied when omitted
++  const d = contract.buildRequest('listRecords', { orgId: 'o', collection: 'tickets' }, {})
++  assert.equal(d.url, '/arxa-workspace/v1/orgs/o/records/tickets?limit=100')
++  // over-max, zero, negative, non-integer all rejected before I/O
++  for (const limit of [501, 0, -1, 2.5, 'many'])
++    throwsCode('invalid_request', () => contract.buildRequest('listRecords', { orgId: 'o', collection: 'tickets', limit }, {}))
++  // cursor must decode; a garbage cursor is rejected before I/O
++  throwsCode('invalid_request', () => contract.buildRequest('listRecords', { orgId: 'o', collection: 'tickets', cursor: '%%%not-base64%%%' }, {}))
++  const c = contract.buildRequest('listRecords',
++    { orgId: 'o', collection: 'tickets', cursor: wire.encodeCursor({ offset: 100 }) }, {})
++  assert.match(c.url, /cursor=[^&]+&limit=100$/)
++  ok('pagination: default 100, limit bounds validated pre-I/O, opaque cursor required valid')
++}
++
++// ---------------------------------------------- 7. cursor codec
++{
++  const cur = wire.encodeCursor({ v: 1, offset: 40, collection: 'tickets' })
++  assert.equal(typeof cur, 'string')
++  assert.ok(!cur.includes(' '), 'cursor is URL-safe')
++  assert.deepEqual(wire.decodeCursor(cur), { v: 1, offset: 40, collection: 'tickets' })
++  // malformed / wrong-version cursors are invalid_request, never a crash
++  throwsCode('invalid_request', () => wire.decodeCursor('nonsense'))
++  throwsCode('invalid_request', () => wire.decodeCursor(wire.encodeCursor({ v: 2 })))
++  ok('cursor: base64url JSON round-trip; malformed and v!=1 rejected')
++}
++
++// ---------------------------------------------- 8. JSON + JSONL codecs with bounds
++{
++  const body = wire.encodeJsonBody({ id: 'r1', title: 'x' })
++  assert.deepEqual(wire.decodeJsonBody(body), { id: 'r1', title: 'x' })
++  throwsCode('invalid_request', () => wire.encodeJsonBody({ big: 'x'.repeat(1_048_577) }))
++  throwsCode('invalid_request', () => wire.decodeJsonBody('{"broken"'))
++  // JSONL: one JSON object per line, trailing newline allowed, junk rejected
++  const text = wire.encodeJsonl([{ id: 'a' }, { id: 'b' }])
++  assert.deepEqual(wire.decodeJsonl(text), [{ id: 'a' }, { id: 'b' }])
++  // encodeJsonl's own trailing newline is legal (covered above); ONE blank
++  // line — a double newline mid-stream or at the end — is not a record.
++  assert.ok(text.endsWith('\n') && !text.endsWith('\n\n'), 'encoded stream ends with exactly one newline')
++  throwsCode('invalid_request', () => wire.decodeJsonl(text + '\n'), 'a second trailing newline is a blank line')
++  throwsCode('invalid_request', () => wire.decodeJsonl('{"id":"a"}\nnot-json'))
++  throwsCode('invalid_request', () => wire.decodeJsonl('{"id":"a"}\n\n{"id":"b"}'), 'blank line is not a record')
++  throwsCode('invalid_request', () => wire.decodeJsonl('x'.repeat(33_554_433)))
++  ok('codecs: bounded JSON singleton encode/decode; strict JSONL with byte cap')
++}
++
++// ---------------------------------------------- 9. error taxonomy
++{
++  assert.deepEqual(contract.ERROR_CODES, [
++    'unsupported_version', 'invalid_request', 'unauthenticated', 'forbidden',
++    'not_found', 'conflict', 'unavailable',
++  ])
++  // full envelope, request-id echo and fallback to the caller's id
++  const e1 = wire.decodeErrorBody(
++    JSON.stringify({ error: { code: 'conflict', message: 'etag mismatch', retryable: false, requestId: 'srv-9' } }),
++    { requestId: 'cli-1' })
++  assert.equal(e1.code, 'conflict'); assert.equal(e1.requestId, 'srv-9')
++  const e2 = wire.decodeErrorBody(
++    JSON.stringify({ error: { code: 'unavailable', message: 'overloaded', retryable: true } }),
++    { requestId: 'cli-1' })
++  assert.equal(e2.requestId, 'cli-1', 'envelope requestId absent -> caller request id')
++  assert.equal(e2.retryable, true)
++  // malformed envelope is itself invalid_request, never a raw parse crash
++  throwsCode('invalid_request', () => wire.decodeErrorBody('{"oops":true', {}))
++  throwsCode('invalid_request', () => wire.decodeErrorBody('{"no":"error key"}', {}))
++  // unknown server code maps to unavailable with the server's code preserved
++  const e3 = wire.decodeErrorBody(JSON.stringify({ error: { code: 'teapot', message: 'brewing', retryable: false, requestId: 'r' } }), {})
++  assert.equal(e3.code, 'unavailable'); assert.equal(e3.serverCode, 'teapot')
++  // retryable status set is the frozen set
++  for (const s of [408, 425, 429, 500, 502, 503, 504]) assert.equal(wire.isRetryableStatus(s), true)
++  for (const s of [400, 401, 403, 404, 409, 422]) assert.equal(wire.isRetryableStatus(s), false)
++  ok('errors: 7 typed codes, envelope shape, requestId echo/fallback, unknown->unavailable+serverCode, retryable set')
++}
++
++// ---------------------------------------------- 10. no secrets in messages
++{
++  // Every error our codecs/builders raise is a fixed literal; neither the
++  // bearer token nor hostile payload values may leak into .message.
++  let leaked = null
++  try { contract.buildRequest('listRecords', { orgId: 'o', collection: TOKEN }, {}) } catch (e) { leaked = e }
++  assert.ok(leaked && !leaked.message.includes(TOKEN), 'builder errors never echo values')
++  const hostile = wire.decodeErrorBody(JSON.stringify({
++    error: { code: 'unauthenticated', message: 'bad token ' + TOKEN, retryable: false, requestId: 'r' },
++  }), { token: TOKEN })
++  // The server's message is the SERVER's; our envelope fields stay clean, and
++  // any occurrence of the session token in a surfaced message is redacted.
++  assert.ok(!hostile.message.includes(TOKEN), 'the session token is redacted from surfaced messages')
++  assert.ok(hostile.message.length > 0)
++  ok('secrecy: token never appears in any client-produced or client-surfaced error message')
++}
++
++// ---------------------------------------------- 11. capabilities + sign-in dispatch (D34)
++{
++  const caps = wire.decodeCapabilities({
++    auth: true, orgs: true, records: true, audit: true,
++    realtime: false, storage: true, analytics: false,
++    signIn: { kind: 'browser', start: { url: 'https://backend.example.test/oauth/start' } },
++  })
++  assert.equal(caps.realtime, false); assert.equal(caps.storage, true)
++  assert.equal(caps.signIn.kind, 'browser')
++  assert.deepEqual(caps.signIn.start, { url: 'https://backend.example.test/oauth/start' })
++  // every declared kind is legal
++  for (const kind of contract.SIGN_IN_KINDS)
++    assert.equal(wire.decodeCapabilities({ auth: true, signIn: { kind, start: {} } }).signIn.kind, kind)
++  // an undeclared kind is a contract violation
++  throwsCode('invalid_request', () => wire.decodeCapabilities({ signIn: { kind: 'email+password', start: {} } }))
++  throwsCode('invalid_request', () => wire.decodeCapabilities({ signIn: { kind: 'email-form' } }), 'start metadata is required')
++  throwsCode('invalid_request', () => wire.decodeCapabilities({}), 'signIn block is required')
++  ok('capabilities: booleans + signIn{kind,start}; dispatch renders only the declared kind')
++}
++
++// ---------------------------------------------- 12. config cannot name executable code (D32)
++{
++  // the three fixed providers pass
++  for (const provider of ['local', 'supabase', 'generic-rest'])
++    assert.doesNotThrow(() => contract.assertProviderConfig({
++      provider,
++      local: { root: '~/.arxa/workspace' },
++      supabase: { url: 'https://x.test', anonKey: 'k' },
++      'generic-rest': { baseUrl: 'https://x.test' },
++    }))
++  assert.doesNotThrow(() => contract.assertProviderConfig({}), 'empty config defaults to local (zero-config)')
++  // custom provider, adapter key, module/file-path values, env-style adapter
++  assert.throws(() => contract.assertProviderConfig({ provider: 'custom' }))
++  assert.throws(() => contract.assertProviderConfig({ provider: 'local', custom: { adapter: './adapters/my-backend.mjs' } }))
++  assert.throws(() => contract.assertProviderConfig({ provider: 'local', adapter: './x.mjs' }))
++  assert.throws(() => contract.assertProviderConfig({ provider: 'local', 'generic-rest': { baseUrl: './adapters/local.mjs' } }))
++  assert.throws(() => contract.assertProviderConfig({ provider: 'require("child_process")' }))
++  // and the thrown reason names executable code as the problem
++  let why = ''; try { contract.assertProviderConfig({ provider: 'local', adapter: './x.mjs' }) } catch (e) { why = e.message }
++  assert.match(why, /executable code/i)
++  ok('config guard: 3 fixed providers only; adapter keys/paths/module strings rejected')
++}
++
++// ---------------------------------------------- 13. token/session RESPONSE envelope (D34)
++// POST /auth/issue and /auth/refresh answer with ONE shape: an opaque token
++// plus a session block. Pin it here — routes were pinned in part A; the
++// response decode was not. The token is an opaque string the adapter stores
++// and sends, never inspects; the session identifies the signer's user.
++{
++  const good = decodeSessionEnvelope(JSON.stringify({
++    token: 'opq_ab_3', session: { id: 'sess-1', expiresAt: 1893456000 },
++  }), {})
++  assert.deepEqual(good, { token: 'opq_ab_3', session: { id: 'sess-1', expiresAt: 1893456000 } })
++  // expiresAt is optional; unknown top-level keys are dropped (decode is exact,
++  // forward-compat means tolerating extras server-side, not leaking them on)
++  assert.deepEqual(
++    decodeSessionEnvelope(JSON.stringify({ token: 't', session: { id: 's' }, extra: 1 }), {}),
++    { token: 't', session: { id: 's' } })
++  // malformed bodies are typed invalid_request, never a parse crash
++  throwsCode('invalid_request', () => decodeSessionEnvelope('{"broken"', {}))
++  throwsCode('invalid_request', () => decodeSessionEnvelope('null', {}))
++  // token: required, non-empty string
++  throwsCode('invalid_request', () => decodeSessionEnvelope(JSON.stringify({ session: { id: 's' } }), {}))
++  throwsCode('invalid_request', () => decodeSessionEnvelope(JSON.stringify({ token: '', session: { id: 's' } }), {}))
++  throwsCode('invalid_request', () => decodeSessionEnvelope(JSON.stringify({ token: 7, session: { id: 's' } }), {}))
++  // session: required object with non-empty string id; expiresAt if present is a number
++  throwsCode('invalid_request', () => decodeSessionEnvelope(JSON.stringify({ token: 't' }), {}))
++  throwsCode('invalid_request', () => decodeSessionEnvelope(JSON.stringify({ token: 't', session: {} }), {}))
++  throwsCode('invalid_request', () => decodeSessionEnvelope(JSON.stringify({ token: 't', session: { id: '' } }), {}))
++  throwsCode('invalid_request', () => decodeSessionEnvelope(JSON.stringify({ token: 't', session: { id: 's', expiresAt: 'soon' } }), {}))
++  // secrecy: a rejected envelope never echoes the (hostile) body back
++  const hostile = 'opq-hostile-token-value'
++  let leaked = null
++  try { decodeSessionEnvelope(JSON.stringify({ token: hostile, session: 'x' }), {}) } catch (e) { leaked = e }
++  assert.ok(leaked && !leaked.message.includes(hostile), 'envelope decode errors never echo the body')
++  // introspection answers {active} + session only when active
++  assert.deepEqual(decodeIntrospection(JSON.stringify({ active: true, session: { id: 's' } }), {}),
++    { active: true, session: { id: 's' } })
++  assert.deepEqual(decodeIntrospection(JSON.stringify({ active: false, session: { id: 's' } }), {}),
++    { active: false })
++  throwsCode('invalid_request', () => decodeIntrospection(JSON.stringify({ active: 'yes' }), {}))
++  throwsCode('invalid_request', () => decodeIntrospection(JSON.stringify({ active: true }), {}))
++  ok('auth response envelope: {token, session:{id, expiresAt?}} exact decode; introspection {active[, session]}; malformed typed; no echo')
++}
++
++// ---------------------------------------------- 14. X-Arxa-Cursor-Next consume semantics
++// JSONL list pages keep the body PURE records; the resume cursor rides the
++// X-Arxa-Cursor-Next response header. Consume rule (pinned): a present,
++// non-empty header is the next request's `cursor` VERBATIM (opaque — the
++// adapter never inspects inside it); an absent OR EMPTY header ends the
++// stream; a garbage cursor value is invalid_request; a cursor in the body is
++// ignored (it is not part of the contract).
++{
++  const body = wire.encodeJsonl([{ id: 'a' }, { id: 'b' }])
++  // present header → returned verbatim, body stays pure records
++  const page = consumeListPage({ 'x-arxa-cursor-next': wire.encodeCursor({ offset: 2 }) }, body)
++  assert.deepEqual(page.records, [{ id: 'a' }, { id: 'b' }])
++  assert.equal(typeof page.nextCursor, 'string')
++  // absent header = end of stream
++  assert.equal(consumeListPage({}, body).nextCursor, null)
++  // empty-string header = end of stream too (a server may send an empty value)
++  assert.equal(consumeListPage({ 'X-Arxa-Cursor-Next': '' }, body).nextCursor, null)
++  // header lookup is case-insensitive (HTTP/1.1 title case, HTTP/2 lowercase)
++  assert.equal(consumeListPage({ 'X-ARXA-CURSOR-NEXT': wire.encodeCursor({ offset: 9 }) }, body)
++    .nextCursor, consumeListPage({ 'x-arxa-cursor-next': wire.encodeCursor({ offset: 9 }) }, body).nextCursor)
++  // the cursor must DECODE as a Wire v1 cursor — garbage is invalid_request
++  throwsCode('invalid_request', () => consumeListPage({ 'x-arxa-cursor-next': '%%garbage%%' }, body))
++  throwsCode('invalid_request', () => consumeListPage({ 'x-arxa-cursor-next': wire.encodeCursor({ v: 2 }) }, body))
++  // a cursor riding the BODY is ignored — never consumed
++  const sneaky = wire.encodeJsonl([{ id: 'a', cursor: wire.encodeCursor({ offset: 5 }) }])
++  assert.equal(consumeListPage({}, sneaky).nextCursor, null)
++  // and the loop: nextCursor feeds the next buildRequest cursor param verbatim,
++  // stopping at null — two pages then end
++  const pages = []
++  let cursor = undefined
++  for (let i = 0; i < 3; i++) {
++    const req = contract.buildRequest('listRecords', { orgId: 'o', collection: 'tickets', cursor }, {})
++    const hdr = pages.length < 2 ? { 'x-arxa-cursor-next': wire.encodeCursor({ offset: (pages.length + 1) * 2 }) } : {}
++    const p = consumeListPage(hdr, wire.encodeJsonl([{ id: 'r' + pages.length }]))
++    pages.push({ url: req.url, n: p.records.length })
++    if (p.nextCursor === null) break
++    cursor = p.nextCursor
++  }
++  assert.equal(pages.length, 3, 'the loop stops exactly at the header-less page')
++  assert.ok(!pages[0].url.includes('cursor=') && pages[1].url.includes('cursor=') && pages[2].url.includes('cursor='))
++  ok('cursor-next consume: header verbatim, absent/empty = end, garbage rejected, body cursor ignored, loop terminates')
++}
++
++console.log(`workspace-provider contract freeze: ${n} checks green`)
+diff --git a/plugins/workspace-provider/selftest.export.mjs b/plugins/workspace-provider/selftest.export.mjs
+new file mode 100644
+index 0000000..bbbf698
+--- /dev/null
++++ b/plugins/workspace-provider/selftest.export.mjs
+@@ -0,0 +1,155 @@
++/**
++ * Export/import bundle fidelity (task 13 step 7, §6) — the edge cases beyond
++ * the conformance kit's round-trip section: hash-verify BEFORE mutation, ID
++ * preservation vs ID map, member re-invites, read-only audit history with the
++ * imported_from marker, migration pressure across pagination, and the rule
++ * that no credential/entitlement material ever enters a bundle.
++ *
++ * Run: node plugins/workspace-provider/selftest.export.mjs
++ */
++import { strict as assert } from 'node:assert'
++import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
++import { tmpdir } from 'node:os'
++import { join } from 'node:path'
++
++import { LocalWorkspaceProvider } from './lib/local.js'
++import { exportBundle, importBundle, verifyBundle } from './lib/export-bundle.js'
++import { WorkspaceError } from './lib/errors.js'
++
++let n = 0
++const ok = (s) => { n++; console.log('  ok ' + s) }
++const home = mkdtempSync(join(tmpdir(), 'arxa-ws-export-'))
++
++try {
++  const src = new LocalWorkspaceProvider({ home })
++
++  // A source org with a little of everything.
++  const org = await src.createOrg({ name: 'src-org', kind: 'agency' })
++  await src.putRecord(org.id, 'tickets', 'keep-1', { title: 'one' })
++  await src.putRecord(org.id, 'tickets', 'locked-2', { title: 'two' })
++  await src.addMember(org.id, { email: 'invited@example.test', role: 'admin' })
++  await src.appendAudit(org.id, { action: 'historical-event', note: 'before the move' })
++  await src.putBlob(org.id, ['att', 'proof.bin'], Buffer.from('proof-bytes'))
++
++  const dir = join(home, 'bundle')
++  const { manifest } = await exportBundle(src, org.id, join(home, 'bundle'))
++
++  // ---------------------------------------------- 1. manifest + hash coverage
++  {
++    assert.equal(manifest.bundle, 1)
++    assert.equal(manifest.org.name, 'src-org')
++    assert.ok(!('id' in manifest.org), 'org IDs are not portable — the manifest carries none')
++    assert.equal(manifest.collections.tickets, 2)
++    // members.json carries every member verbatim (emails + roles, §6); the
++    // source owner row rides along and simply gets re-invited downstream.
++    assert.ok(manifest.members.some((m) => m.email === 'invited@example.test' && m.role === 'admin'))
++    for (const f of ['tickets.jsonl', 'audit.jsonl', 'members.json', 'storage/att/proof.bin'])
++      assert.ok(manifest.hashes[f], 'every bundle file is hashed: ' + f)
++    assert.doesNotThrow(() => verifyBundle(join(home, 'bundle')))
++    ok('manifest: versioned, org by name (no id), per-file hashes, verify passes clean')
++  }
++
++  // ---------------------------------------------- 2. no credentials or license material
++  {
++    const raw = readFileSync(join(home, 'bundle', 'manifest.json'), 'utf8')
++    for (const banned of ['token', 'credential', 'apikey', 'subscription', 'entitlement', 'machine'])
++      assert.ok(!raw.toLowerCase().includes(banned), 'manifest must not mention ' + banned)
++    ok('bundle hygiene: no token/credential/entitlement/subscription material')
++  }
++
++  // ---------------------------------------------- 3. tampered bundle: refuse BEFORE mutation
++  {
++    // Corrupt a record line AFTER export.
++    const file = join(home, 'bundle', 'tickets.jsonl')
++    writeFileSync(file, readFileSync(file, 'utf8').replace('one', 'TAMPERED'))
++    let err = null
++    const before = (await src.listOrgs()).length
++    try { await importBundle(src, join(home, 'bundle')) } catch (e) { err = e }
++    assert.ok(err instanceof WorkspaceError && err.code === 'invalid_request', 'tamper refused with a typed error')
++    assert.match(err.message, /hash mismatch/)
++    assert.equal((await src.listOrgs()).length, before, 'NOTHING was created — verification precedes every mutation')
++    ok('tamper: hash mismatch → invalid_request, zero mutations on the target')
++  }
++
++  // ---------------------------------------------- 4. missing file: refuse whole
++  {
++    rmSync(join(home, 'bundle', 'members.json'))
++    let err = null
++    try { await verifyBundle(join(home, 'bundle')) } catch (e) { err = e }
++    assert.ok(err instanceof WorkspaceError && err.message.includes('missing'))
++    ok('missing bundle file: refused')
++  }
++
++  // Re-export a clean bundle for the import legs.
++  rmSync(join(home, 'bundle'), { recursive: true, force: true })
++  const clean = await exportBundle(src, org.id, join(home, 'bundle'))
++
++  // ---------------------------------------------- 5. IDs preserved where accepted, mapped otherwise
++  {
++    // A target that refuses ONE caller-chosen id (models a backend that
++    // rejects ids it considers reserved/server-assigned).
++    const picky = {
++      target: new LocalWorkspaceProvider({ home }),
++      async putRecord (orgId, collection, id, doc, opts) {
++        if (id === 'locked-2') throw new WorkspaceError('invalid_request', 'ids are server-assigned here')
++        return this.target.putRecord(orgId, collection, id, doc, opts)
++      },
++    }
++    // Route the rest of the interface through the inner provider with the new org.
++    const innerPut = picky.putRecord.bind(picky)
++    const delegate = new Proxy(picky.target, {
++      get (t, prop) {
++        if (prop === 'putRecord') return innerPut
++        const v = t[prop]
++        return typeof v === 'function' ? v.bind(t) : v
++      },
++    })
++    const { orgId: newId, idMap } = await importBundle(delegate, join(home, 'bundle'))
++    assert.equal((await delegate.getRecord(newId, 'tickets', 'keep-1')).doc.title, 'one', 'accepted id preserved verbatim')
++    const mapped = idMap.records.tickets['locked-2']
++    assert.ok(mapped && mapped.startsWith('locked-2-'), 'rejected id remapped: ' + mapped)
++    assert.equal((await delegate.getRecord(newId, 'tickets', mapped)).doc.title, 'two', 'remapped record present under its new id')
++    assert.equal(existsSync(join(home, 'bundle', 'id-map.json')), true, 'the map is written into the bundle for inspection')
++    ok('IDs: preserved where accepted; remapped + id-map.json otherwise')
++  }
++
++  // ---------------------------------------------- 6. members re-invited, audit read-only history
++  {
++    const target = new LocalWorkspaceProvider({ home })
++    const { orgId: newId } = await importBundle(target, join(home, 'bundle'))
++    const members = await target.listMembers(newId)
++    assert.ok(members.some((m) => m.email === 'invited@example.test' && m.role === 'admin'),
++      'member re-invited through provider ops with the same role')
++    const audit = await target.readAudit(newId)
++    const row = audit.find((x) => x.action === 'historical-event')
++    assert.ok(row, 'original audit history present')
++    assert.equal(row.imported, true, 'marked imported')
++    assert.equal(row.importedFrom, clean.manifest.exportedAt, 'marker carries the bundle origin')
++    assert.equal(row.note, 'before the move', 'history fields survive verbatim')
++    ok('members re-invited; audit imported read-only with imported_from marker')
++  }
++
++  // ---------------------------------------------- 7. migration pressure: past pagination
++  {
++    const big = await src.createOrg({ name: 'big', kind: 'studio' })
++    const N = 300 // three default pages
++    for (let i = 0; i < N; i++) await src.putRecord(big.id, 'chat_messages', 'msg-' + String(i).padStart(4, '0'), { i })
++    const pdir = join(home, 'big-bundle')
++    await exportBundle(src, big.id, pdir)
++    assert.equal((await verifyBundle(pdir)).collections['chat_messages'], N, 'export paginated all records')
++    const target = new LocalWorkspaceProvider({ home })
++    const { orgId: newId } = await importBundle(target, pdir)
++    let cursor; let count = 0
++    do {
++      const page = await target.listRecords(newId, 'chat_messages', { cursor })
++      count += page.records.length
++      cursor = page.nextCursor
++    } while (cursor)
++    assert.equal(count, N, 'import replays every record across pages')
++    ok(`pressure: ${N} records export+import across pagination without loss`)
++  }
++} finally {
++  rmSync(home, { recursive: true, force: true })
++}
++
++console.log(`workspace-provider export bundle: ${n} checks green`)
+diff --git a/plugins/workspace-provider/selftest.local.mjs b/plugins/workspace-provider/selftest.local.mjs
+new file mode 100644
+index 0000000..18f7907
+--- /dev/null
++++ b/plugins/workspace-provider/selftest.local.mjs
+@@ -0,0 +1,124 @@
++/**
++ * LocalWorkspaceProvider + the conformance kit, local leg (task 13 steps 4–5).
++ *
++ * The kit runs against the local provider with NO network, NO account, NO
++ * database, NO environment variable — the CLAUDE.md local-first parity law:
++ * the section list and the green/red semantics are identical to the network
++ * run; only cross-org isolation prints `n/a (single-user local store)`.
++ *
++ * Run: node plugins/workspace-provider/selftest.local.mjs
++ */
++import { strict as assert } from 'node:assert'
++import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
++import { tmpdir } from 'node:os'
++import { join } from 'node:path'
++
++import { LocalWorkspaceProvider } from './lib/local.js'
++import { runConformance } from './lib/conformance.js'
++
++let n = 0
++const ok = (s) => { n++; console.log('  ok ' + s) }
++const tmp = mkdtempSync(join(tmpdir(), 'arxa-ws-local-'))
++
++try {
++  // ---------------------------------------------- 1. conformance, local leg
++  const provider = new LocalWorkspaceProvider({ home: tmp })
++  // localExempt is CLAIMED by the caller, never inferred by the kit.
++  const report = await runConformance(provider, { tmp: join(tmp, 'bundle'), localExempt: true, signIn: [] })
++  const byId = Object.fromEntries(report.sections.map((s) => [s.id, s]))
++  const NA = 'cross-org-isolation'
++  assert.equal(byId[NA].status, 'n/a', 'local is exempt from cross-org, and says so')
++  assert.equal(byId[NA].details[0], 'n/a (single-user local store)', 'the exact §4 wording')
++  for (const s of report.sections) {
++    if (s.id === NA) continue
++    assert.equal(s.status, 'green', s.id + ' → ' + s.details.join(' | '))
++  }
++  assert.equal(report.ok, true)
++  ok('conformance: all sections green; cross-org prints n/a (single-user local store)')
++
++  // ---------------------------------------------- 2. layout + permissions
++  const root = join(tmp, 'workspace')
++  assert.equal(statSync(root).mode & 0o777, 0o700, 'workspace root is 0700')
++  const orgDirs = readdir0700(root)
++  assert.ok(orgDirs.length >= 1, 'at least one org dir exists (the kit created orgs)')
++  for (const d of orgDirs) assert.equal(statSync(join(root, d)).mode & 0o777, 0o700, 'per-org dir 0700')
++  for (const d of orgDirs) {
++    assert.ok(existsSync(join(root, d, 'org.json')), 'org.json document per org')
++    assert.ok(existsSync(join(root, d, 'members.json')), 'members.json per org')
++    JSON.parse(readFileSync(join(root, d, 'org.json'), 'utf8')) // atomic docs are valid JSON
++  }
++  ok('layout: <ARXA_HOME>/workspace/<orgId>/ with 0700 root and per-org dirs; JSON documents')
++
++  // ---------------------------------------------- 3. audit is append-only JSONL
++  {
++    const p = new LocalWorkspaceProvider({ home: tmp })
++    const org = await p.createOrg({ name: 'audit-org', kind: 'studio' })
++    await p.appendAudit(org.id, { action: 'first' })
++    await p.appendAudit(org.id, { action: 'second' })
++    const lines = readFileSync(join(root, org.id, 'audit.jsonl'), 'utf8').trim().split('\n')
++    assert.equal(lines.length, 2, 'one JSONL line per append')
++    const [a, b] = lines.map((l) => JSON.parse(l))
++    assert.equal(a.action, 'first'); assert.equal(b.action, 'second')
++    assert.ok(typeof a.at === 'string' && a.at <= b.at, 'entries carry timestamps, ordered')
++    // immutability is the interface SHAPE: no mutation method exists at all
++    for (const m of ['updateAudit', 'patchAudit', 'deleteAudit']) assert.equal(typeof p[m], 'undefined')
++    const read = await p.readAudit(org.id)
++    assert.equal(read.length, 2)
++    ok('audit: append-only JSONL, one line per event, read-only by interface shape')
++  }
++
++  // ---------------------------------------------- 4. zero config of any kind
++  {
++    // A provider with NO options beyond home boots and serves a full CRUD loop.
++    const p = new LocalWorkspaceProvider({ home: tmp })
++    const caps = await p.capabilities()
++    assert.equal(caps.realtime, true, 'local realtime is the in-process emitter (better than polling)')
++    assert.equal(caps.analytics, false, 'analytics degrades to the no-op sink')
++    const org = await p.createOrg({ name: 'zero', kind: 'studio' })
++    const r = await p.putRecord(org.id, 'tickets', 't1', { title: 'works offline' })
++    assert.ok(typeof r.etag === 'string' && r.etag.length > 0)
++    assert.equal((await p.getRecord(org.id, 'tickets', 't1')).doc.title, 'works offline')
++    ok('zero-config: no network/account/database/env — CRUD works out of the box')
++  }
++
++  // ---------------------------------------------- 5. local realtime: in-process subscribe
++  {
++    const p = new LocalWorkspaceProvider({ home: tmp })
++    const org = await p.createOrg({ name: 'rt', kind: 'studio' })
++    const seen = []
++    const stop = p.subscribe(org.id, 'tickets', (ev) => seen.push(ev))
++    await p.putRecord(org.id, 'tickets', 'live', { title: 'push' })
++    await p.deleteRecord(org.id, 'tickets', 'live')
++    stop()
++    await p.putRecord(org.id, 'tickets', 'after-stop', { title: 'no cb' })
++    assert.equal(seen.length, 2, 'one event per write, none after unsubscribe')
++    assert.equal(seen[0].type, 'put'); assert.equal(seen[0].id, 'live')
++    assert.equal(seen[1].type, 'delete')
++    ok('realtime: in-process emitter fires per write; unsubscribe stops delivery')
++  }
++
++  // ---------------------------------------------- 6. session contract (§1 local row)
++  {
++    const p = new LocalWorkspaceProvider({ home: tmp })
++    const s = await p.currentSession()
++    assert.equal(typeof s.userId, 'string')
++    const events = []
++    const stop = p.onAuthStateChange((ev) => events.push(ev))
++    await p.signIn('token', {})
++    await p.signOut()
++    stop()
++    assert.equal(events.length, 2, 'the no-op sign-in/out still fire onAuthStateChange')
++    assert.equal(events[0].userId, s.userId)
++    assert.equal(events[1], null)
++    assert.equal((await p.currentSession()).userId, s.userId, 'local currentSession always returns the operator')
++    ok('auth: single local user; signIn/signOut no-ops that still fire onAuthStateChange')
++  }
++} finally {
++  rmSync(tmp, { recursive: true, force: true })
++}
++
++function readdir0700 (dir) {
++  return readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
++}
++
++console.log(`workspace-provider local conformance: ${n} checks green`)
+diff --git a/plugins/workspace-provider/selftest.polling.mjs b/plugins/workspace-provider/selftest.polling.mjs
+new file mode 100644
+index 0000000..e32cd2b
+--- /dev/null
++++ b/plugins/workspace-provider/selftest.polling.mjs
+@@ -0,0 +1,111 @@
++/**
++ * Adaptive polling (task 13, D35) — the realtime degradation, as CONTRACT
++ * constants, not provider hints. 3 s focused-and-active, 30 s focused-idle,
++ * 120 s background, plus an immediate poll after any local write.
++ *
++ * A manual clock drives the poller so the whole transition table is pinned
++ * without waiting a real 120 s.
++ *
++ * Run: node plugins/workspace-provider/selftest.polling.mjs
++ */
++import { strict as assert } from 'node:assert'
++import { POLLING } from './lib/contract.js'
++import { AdaptivePoller } from './lib/polling.js'
++
++let n = 0
++const ok = (s) => { n++; console.log('  ok ' + s) }
++
++/** Manual clock: setTimeout records {fn, ms} and hands back an id; fire()
++ *  runs one and the poller reschedules against the same clock. */
++function manualClock () {
++  const timers = new Map()
++  let nextId = 1
++  return {
++    setTimeout: (fn, ms) => { const id = nextId++; timers.set(id, { fn, ms }); return id },
++    clearTimeout: (id) => timers.delete(id),
++    pending: () => [...timers.entries()].map(([id, t]) => ({ id, ms: t.ms })),
++    // Returns the callback's result: a tick returns a promise whose finally
++    // does the reschedule, so callers await fire() before asserting.
++    fire: (id) => { const t = timers.get(id); if (!t) throw new Error('no timer ' + id); timers.delete(id); return t.fn() },
++    only: () => {
++      const p = [...timers.entries()]
++      assert.equal(p.length, 1, 'exactly one pending timer, got ' + JSON.stringify(p.map((x) => x[1].ms)))
++      return { id: p[0][0], ms: p[0][1].ms }
++    },
++  }
++}
++
++// ---------------------------------------------- 1. the D35 transition table
++{
++  const clock = manualClock()
++  const polls = []
++  const poller = new AdaptivePoller({ poll: async () => { polls.push(clock.pending().length) }, clock })
++  poller.start()
++  assert.equal(clock.only().ms, POLLING.ACTIVE_MS, 'active → 3 s')
++  poller.setActivity('idle')
++  assert.equal(clock.only().ms, POLLING.IDLE_MS, 'idle → 30 s (rescheduled, one timer)')
++  poller.setActivity('background')
++  assert.equal(clock.only().ms, POLLING.BACKGROUND_MS, 'background → 120 s')
++  poller.setActivity('active')
++  assert.equal(clock.only().ms, POLLING.ACTIVE_MS, 'back to active → 3 s')
++  poller.stop()
++  assert.equal(clock.pending().length, 0, 'stop clears the pending timer')
++  ok('transitions: active/idle/background reschedule to the contract constants; stop clears')
++}
++
++// ---------------------------------------------- 2. a fired poll reschedules at the CURRENT interval
++{
++  const clock = manualClock()
++  const poller = new AdaptivePoller({ poll: async () => {}, clock })
++  poller.start()
++  poller.setActivity('idle')
++  const t1 = clock.only()
++  await clock.fire(t1.id) // the 30 s tick elapses (await: the reschedule rides a microtask)
++  assert.equal(clock.only().ms, POLLING.IDLE_MS, 'after a tick the next one is still the current interval')
++  poller.stop()
++  ok('tick → reschedule at the current activity interval')
++}
++
++// ---------------------------------------------- 3. immediate poll after write (D35)
++{
++  const clock = manualClock()
++  const polls = []
++  const poller = new AdaptivePoller({ poll: async () => { polls.push(Date.now()) }, clock })
++  poller.start()
++  assert.equal(polls.length, 0, 'no poll before the first tick')
++  await poller.notifyWrite()
++  assert.equal(polls.length, 1, 'a write polls IMMEDIATELY, not on the 3 s tick')
++  assert.equal(clock.only().ms, POLLING.ACTIVE_MS, 'and the next tick reschedules at the current interval')
++  poller.stop()
++  ok('notifyWrite: immediate poll + reschedule (IMMEDIATE_AFTER_WRITE)')
++}
++
++// ---------------------------------------------- 4. a throwing poll never kills the loop
++{
++  const clock = manualClock()
++  let calls = 0
++  const poller = new AdaptivePoller({
++    poll: async () => { calls++; if (calls === 1) throw new Error('transient backend hiccup') },
++    clock,
++  })
++  poller.start()
++  await poller.notifyWrite() // first poll throws
++  await poller.notifyWrite() // second poll runs
++  assert.equal(calls, 2, 'the poller survived a rejected poll')
++  poller.stop()
++  ok('resilience: a rejected poll is swallowed; the loop keeps polling')
++}
++
++// ---------------------------------------------- 5. constants, not hints
++{
++  // The poller must not accept a provider-supplied interval — D35's whole
++  // point is that degradation timing is CONTRACT, not negotiable per backend.
++  const clock = manualClock()
++  const poller = new AdaptivePoller({ poll: async () => {}, clock, intervalMs: 10 })
++  poller.start()
++  assert.equal(clock.only().ms, POLLING.ACTIVE_MS, 'an injected interval is ignored; the contract constant wins')
++  poller.stop()
++  ok('provider hints ignored: intervals come from contract.POLLING only')
++}
++
++console.log(`workspace-provider polling: ${n} checks green`)
+diff --git a/plugins/workspace-provider/selftest.rest.mjs b/plugins/workspace-provider/selftest.rest.mjs
+new file mode 100644
+index 0000000..07e6399
+--- /dev/null
++++ b/plugins/workspace-provider/selftest.rest.mjs
+@@ -0,0 +1,435 @@
++/**
++ * GenericRestWorkspaceProvider + the HOSTILE fixture server (task 13 step 6).
++ *
++ * The fixture is an in-process, conforming Wire v1 backend on 127.0.0.1 with
++ * an EPHEMERAL port (localhost only, torn down in finally). It starts
++ * conforming — the adapter must pass the FULL conformance kit against it,
++ * cross-org isolation included — and then flips hostile:
++ *   idor  — ignores the token→org binding on record read/write
++ *   leak  — a list endpoint that leaks other orgs' rows
++ * and the kit MUST turn those runs red. A green kit that cannot go red is a
++ * rubber stamp, so the hostile legs are the point of this suite.
++ *
++ * Run: node plugins/workspace-provider/selftest.rest.mjs
++ */
++import { strict as assert } from 'node:assert'
++import { createServer } from 'node:http'
++import { createHash, randomUUID } from 'node:crypto'
++
++import { BOUNDS, BASE_PATH, COLLECTIONS, MEDIA, ROLES, WIRE_VERSION } from './lib/contract.js'
++import { encodeCursor } from './lib/wire.js'
++import { GenericRestWorkspaceProvider } from './lib/generic-rest.js'
++import { runConformance } from './lib/conformance.js'
++import { WorkspaceError } from './lib/errors.js'
++
++let n = 0
++const ok = (s) => { n++; console.log('  ok ' + s) }
++const sha256 = (b) => createHash('sha256').update(b).digest('hex')
++
++// ============================================================ fixture server
++class FixtureServer {
++  constructor () {
++    this.mode = 'conforming' // | 'idor' | 'leak' | 'flaky' | 'delay'
++    this.flakyLeft = {} // route -> remaining 503s
++    this.lastAuth = null
++    this.attempts = {} // route -> attempt count
++    this.orgs = new Map() // orgId -> {id, name, kind, members: [{userId, email, role}]}
++    this.records = new Map() // `${orgId}/${collection}/${id}` -> {etag, doc}
++    this.audit = new Map() // orgId -> rows[]
++    this.blobs = new Map() // `${orgId}/${path}` -> Buffer
++    this.revoked = new Set()
++    this.orgSeq = 0
++    this.server = createServer((req, res) => this.route(req, res))
++  }
++
++  listen () {
++    return new Promise((resolve) => {
++      this.server.listen(0, '127.0.0.1', () => resolve('http://127.0.0.1:' + this.server.address().port))
++    })
++  }
++  close () { return new Promise((r) => this.server.close(r)) }
++
++  // ---- wire helpers
++  json (res, status, obj) {
++    const body = JSON.stringify(obj)
++    res.writeHead(status, { 'content-type': MEDIA.JSON, 'content-length': Buffer.byteLength(body) })
++    res.end(body)
++  }
++  jsonl (res, rows, nextCursor) {
++    const body = rows.map((r) => JSON.stringify(r)).join('\n') + (rows.length ? '\n' : '')
++    const headers = { 'content-type': MEDIA.NDJSON, 'content-length': Buffer.byteLength(body) }
++    if (nextCursor) headers['X-Arxa-Cursor-Next'] = nextCursor
++    res.writeHead(200, headers)
++    res.end(body)
++  }
++  fail (res, status, code, message) {
++    this.json(res, status, { error: { code, message, retryable: false, requestId: 'fx-' + randomUUID().slice(0, 8) } })
++  }
++
++  userOf (req) {
++    const auth = req.headers.authorization
++    this.lastAuth = auth ?? null
++    const token = auth?.startsWith('Bearer ') ? auth.slice(7) : null
++    if (!token || this.revoked.has(token)) return null
++    return /^tok2?-/.test(token) ? token.replace(/^tok2?-/, '') : null
++  }
++  membership (org, user) { return org.members.find((m) => m.userId === user) }
++  requireMember (res, org, user) {
++    if (!this.membership(org, user)) { this.fail(res, 403, 'forbidden', 'not a member of this org'); return null }
++    return this.membership(org, user)
++  }
++
++  route (req, res) {
++    const url = new URL(req.url, 'http://x.test')
++    const path = url.pathname
++    if (!path.startsWith(BASE_PATH + '/')) return this.fail(res, 404, 'not_found', 'outside the workspace base path')
++    if (req.headers['x-arxa-workspace-version'] !== String(WIRE_VERSION))
++      return this.fail(res, 400, 'unsupported_version', 'only wire version 1 is served')
++    const sub = path.slice(BASE_PATH.length)
++    // hostile/stress modes
++    this.attempts[sub] = (this.attempts[sub] ?? 0) + 1
++    if (this.mode === 'flaky' && (this.flakyLeft[sub] ?? 0) > 0) {
++      this.flakyLeft[sub] -= 1
++      return this.fail(res, 503, 'unavailable', 'flaky fixture hiccup')
++    }
++    if (this.mode === 'delay' && sub === '/orgs') {
++      setTimeout(() => this.jsonl(res, []), BOUNDS.REQUEST_TIMEOUT_MS * 2) // outlive any client timeout
++      return
++    }
++    const chunks = []
++    req.on('data', (c) => chunks.push(c))
++    req.on('end', () => this.dispatch(req, res, sub, url, Buffer.concat(chunks)))
++  }
++
++  dispatch (req, res, sub, url, body) {
++    const user = this.userOf(req)
++    // ---- capabilities + auth lifecycle (token-opaque, D34)
++    if (req.method === 'GET' && sub === '/capabilities') {
++      return this.json(res, 200, {
++        auth: true, orgs: true, records: true, audit: true, realtime: false, storage: true, analytics: false,
++        signIn: { kind: 'token', start: { hint: 'present your provider token' } },
++      })
++    }
++    if (req.method === 'POST' && sub === '/auth/issue') {
++      const { credentials } = JSON.parse(body.toString() || '{}')
++      const u = credentials?.user
++      if (typeof u !== 'string' || !u) return this.fail(res, 401, 'unauthenticated', 'no such credentials')
++      return this.json(res, 200, { token: 'tok-' + u, session: { id: 'sess-' + u, expiresAt: 4102444800 } })
++    }
++    if (req.method === 'POST' && sub === '/auth/refresh') {
++      const { token } = JSON.parse(body.toString() || '{}')
++      if (typeof token !== 'string' || this.revoked.has(token)) return this.fail(res, 401, 'unauthenticated', 'token not refreshable')
++      const u = token.startsWith('tok-') ? token.slice(4) : null
++      if (!u) return this.fail(res, 401, 'unauthenticated', 'token not refreshable')
++      return this.json(res, 200, { token: 'tok2-' + u, session: { id: 'sess-' + u, expiresAt: 4102444800 } })
++    }
++    if (req.method === 'POST' && sub === '/auth/revoke') {
++      const token = req.headers.authorization?.slice(7)
++      if (!user) return this.fail(res, 401, 'unauthenticated', 'no bearer')
++      this.revoked.add(token)
++      return this.json(res, 200, { revoked: true })
++    }
++    if (req.method === 'POST' && sub === '/auth/introspect') {
++      const { token } = JSON.parse(body.toString() || '{}')
++      const u = typeof token === 'string' && !this.revoked.has(token) && token.startsWith('tok') ? token.replace(/^tok2?-/, '') : null
++      return this.json(res, 200, u ? { active: true, session: { id: 'sess-' + u } } : { active: false })
++    }
++
++    // ---- everything below requires a bearer
++    if (!user) return this.fail(res, 401, 'unauthenticated', 'bearer required')
++
++    const mOrg = sub.match(/^\/orgs\/([^/]+)$/)
++    const mMembers = sub.match(/^\/orgs\/([^/]+)\/members$/)
++    const mMember = sub.match(/^\/orgs\/([^/]+)\/members\/([^/]+)$/)
++    const mRecords = sub.match(/^\/orgs\/([^/]+)\/records\/([^/]+)$/)
++    const mRecord = sub.match(/^\/orgs\/([^/]+)\/records\/([^/]+)\/([^/]+)$/)
++    const mBlobUrl = sub.match(/^\/orgs\/([^/]+)\/storage\/(.+)\/signed-url$/)
++    const mBlob = sub.match(/^\/orgs\/([^/]+)\/storage\/(.+)$/)
++
++    if (req.method === 'GET' && sub === '/orgs') {
++      const rows = [...this.orgs.values()].filter((o) => this.membership(o, user))
++      return this.jsonl(res, rows)
++    }
++    if (req.method === 'POST' && sub === '/orgs') {
++      const { name, kind } = JSON.parse(body.toString())
++      this.orgSeq += 1
++      const org = { id: 'fx-org-' + this.orgSeq, name, kind, members: [{ userId: user, email: user + '@example.test', role: 'owner' }] }
++      this.orgs.set(org.id, org)
++      const { members, ...doc } = org
++      return this.json(res, 200, doc)
++    }
++    if (mOrg && ['GET', 'PATCH', 'DELETE'].includes(req.method)) {
++      const org = this.orgs.get(mOrg[1])
++      if (!org) return this.fail(res, 404, 'not_found', 'org not found')
++      if (!this.requireMember(res, org, user)) return
++      if (req.method === 'GET') { const { members, ...doc } = org; return this.json(res, 200, doc) }
++      if (req.method === 'PATCH') { Object.assign(org, JSON.parse(body.toString())); const { members, ...doc } = org; return this.json(res, 200, doc) }
++      this.orgs.delete(org.id)
++      return this.json(res, 200, { deleted: true })
++    }
++
++    if (mMembers && req.method === 'GET') {
++      const org = this.orgs.get(mMembers[1])
++      if (!org) return this.fail(res, 404, 'not_found', 'org not found')
++      if (!this.requireMember(res, org, user)) return
++      return this.jsonl(res, org.members.map((m, i) => ({ id: 'fx-mem-' + i, ...m })))
++    }
++    if (mMembers && req.method === 'POST') {
++      const org = this.orgs.get(mMembers[1])
++      if (!org) return this.fail(res, 404, 'not_found', 'org not found')
++      const actor = this.requireMember(res, org, user)
++      if (!actor) return
++      if (!['owner', 'admin'].includes(actor.role)) return this.fail(res, 403, 'forbidden', 'only owner or admin manages members')
++      const { email, role } = JSON.parse(body.toString())
++      if (!ROLES.includes(role)) return this.fail(res, 400, 'invalid_request', 'role outside the fixed vocabulary')
++      if (org.members.some((m) => m.email === email)) return this.json(res, 200, { id: 'fx-mem-existing', email, role, userId: 'fx-user-existing', status: 'invited' })
++      const id = 'fx-mem-' + org.members.length // matches the index-derived ids in GET/PATCH/DELETE
++      org.members.push({ userId: 'fx-user-' + randomUUID().slice(0, 6), email, role, status: 'invited' })
++      return this.json(res, 200, { id, email, role, userId: org.members.at(-1).userId, status: 'invited' })
++    }
++    if (mMember && ['PATCH', 'DELETE'].includes(req.method)) {
++      const org = this.orgs.get(mMember[1])
++      if (!org) return this.fail(res, 404, 'not_found', 'org not found')
++      const actor = this.requireMember(res, org, user)
++      if (!actor) return
++      if (!['owner', 'admin'].includes(actor.role)) return this.fail(res, 403, 'forbidden', 'only owner or admin manages members')
++      const idx = org.members.findIndex((m, i) => 'fx-mem-' + i === mMember[2])
++      if (idx === -1) return this.fail(res, 404, 'not_found', 'member not found')
++      const member = org.members[idx]
++      if (req.method === 'DELETE') {
++        if (member.role === 'owner' && org.members.filter((m) => m.role === 'owner').length === 1)
++          return this.fail(res, 403, 'forbidden', 'the last owner cannot be removed')
++        org.members.splice(idx, 1)
++        return this.json(res, 200, { removed: true })
++      }
++      const { role } = JSON.parse(body.toString())
++      if (!ROLES.includes(role)) return this.fail(res, 400, 'invalid_request', 'role outside the fixed vocabulary')
++      if (member.role === 'owner' && role !== 'owner' && org.members.filter((m) => m.role === 'owner').length === 1)
++        return this.fail(res, 403, 'forbidden', 'the last owner cannot be demoted')
++      member.role = role
++      return this.json(res, 200, { id: mMember[2], ...member })
++    }
++
++    if (mRecords && req.method === 'GET') {
++      const org = this.orgs.get(mRecords[1])
++      if (!org) return this.fail(res, 404, 'not_found', 'org not found')
++      if (!this.requireMember(res, org, user)) return
++      const collection = mRecords[2]
++      if (!COLLECTIONS.includes(collection)) return this.fail(res, 400, 'invalid_request', 'unknown collection')
++      const limit = Math.min(Number(url.searchParams.get('limit') ?? BOUNDS.DEFAULT_PAGE_LIMIT), BOUNDS.MAX_PAGE_LIMIT)
++      const cursor = url.searchParams.get('cursor')
++      const offset = cursor ? JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')).offset ?? 0 : 0
++      let prefix = mRecords[1] + '/' + collection + '/'
++      if (this.mode === 'leak') prefix = '' // hostile: leak EVERY org's rows
++      const ids = [...this.records.keys()].filter((k) => k.startsWith(prefix)).sort()
++      const page = ids.slice(offset, offset + limit)
++      const rows = page.map((k) => { const [/*o*/, /*c*/, id] = k.split('/'); return { id, etag: this.records.get(k).etag, doc: this.records.get(k).doc } })
++      const next = offset + limit < ids.length ? encodeCursor({ offset: offset + limit }) : null
++      return this.jsonl(res, rows, next ?? undefined)
++    }
++    if (mRecord && req.method === 'GET') {
++      const org = this.orgs.get(mRecord[1])
++      if (!org) return this.fail(res, 404, 'not_found', 'org not found')
++      if (this.mode !== 'idor' && !this.requireMember(res, org, user)) return // hostile idor skips the fence
++      const rec = this.records.get(mRecord[1] + '/' + mRecord[2] + '/' + mRecord[3])
++      if (!rec) return this.fail(res, 404, 'not_found', 'record not found')
++      res.writeHead(200, { 'content-type': MEDIA.JSON, etag: rec.etag })
++      return res.end(JSON.stringify(rec.doc))
++    }
++    if (mRecord && req.method === 'PUT') {
++      const org = this.orgs.get(mRecord[1])
++      if (!org) return this.fail(res, 404, 'not_found', 'org not found')
++      if (this.mode !== 'idor' && !this.requireMember(res, org, user)) return
++      if (!COLLECTIONS.includes(mRecord[2])) return this.fail(res, 400, 'invalid_request', 'unknown collection')
++      const key = mRecord[1] + '/' + mRecord[2] + '/' + mRecord[3]
++      const prev = this.records.get(key)
++      if (req.headers['if-match'] && (!prev || prev.etag !== req.headers['if-match']))
++        return this.fail(res, 409, 'conflict', 'etag mismatch')
++      const doc = JSON.parse(body.toString())
++      const etag = '"' + sha256(body).slice(0, 16) + '"'
++      this.records.set(key, { etag, doc })
++      return this.json(res, 200, { id: mRecord[3], etag })
++    }
++    if (mRecord && req.method === 'DELETE') {
++      const org = this.orgs.get(mRecord[1])
++      if (!org) return this.fail(res, 404, 'not_found', 'org not found')
++      if (!this.requireMember(res, org, user)) return
++      if (!this.records.delete(mRecord[1] + '/' + mRecord[2] + '/' + mRecord[3]))
++        return this.fail(res, 404, 'not_found', 'record not found')
++      return this.json(res, 200, { deleted: true })
++    }
++
++    if (sub.startsWith('/orgs/') && sub.endsWith('/audit')) {
++      const orgId = sub.split('/')[2]
++      const org = this.orgs.get(orgId)
++      if (!org) return this.fail(res, 404, 'not_found', 'org not found')
++      if (!this.requireMember(res, org, user)) return
++      if (req.method === 'POST') {
++        const row = JSON.parse(body.toString())
++        const rows = this.audit.get(orgId) ?? []
++        rows.push({ at: new Date().toISOString(), actor: user, ...row })
++        this.audit.set(orgId, rows)
++        return this.json(res, 200, { appended: true })
++      }
++      if (req.method === 'GET') return this.jsonl(res, this.audit.get(orgId) ?? [])
++      // NO mutation route exists on audit — the wire has none.
++      return this.fail(res, 404, 'not_found', 'audit is append-only; no mutation route exists')
++    }
++
++    if (mBlobUrl && req.method === 'POST') {
++      const org = this.orgs.get(mBlobUrl[1])
++      if (!org) return this.fail(res, 404, 'not_found', 'org not found')
++      if (!this.requireMember(res, org, user)) return
++      return this.json(res, 200, { url: this.server.address().port + BASE_PATH + sub.replace('/signed-url', '') + '?sig=fx', expiresAt: 4102444800 })
++    }
++    if (mBlob && req.method === 'PUT') {
++      const org = this.orgs.get(mBlob[1])
++      if (!org) return this.fail(res, 404, 'not_found', 'org not found')
++      if (!this.requireMember(res, org, user)) return
++      this.blobs.set(mBlob[1] + '/' + mBlob[2], body)
++      // The frozen wire answers putBlob with MEDIA.BYTES — echo the stored bytes.
++      res.writeHead(200, { 'content-type': MEDIA.BYTES })
++      return res.end(body)
++    }
++    if (mBlob && req.method === 'GET') {
++      const org = this.orgs.get(mBlob[1])
++      if (!org) return this.fail(res, 404, 'not_found', 'org not found')
++      if (!this.requireMember(res, org, user)) return
++      const bytes = this.blobs.get(mBlob[1] + '/' + mBlob[2])
++      if (!bytes) return this.fail(res, 404, 'not_found', 'blob not found')
++      res.writeHead(200, { 'content-type': MEDIA.BYTES })
++      return res.end(bytes)
++    }
++    if (mBlob && req.method === 'DELETE') {
++      const org = this.orgs.get(mBlob[1])
++      if (!org) return this.fail(res, 404, 'not_found', 'org not found')
++      if (!this.requireMember(res, org, user)) return
++      if (!this.blobs.delete(mBlob[1] + '/' + mBlob[2])) return this.fail(res, 404, 'not_found', 'blob not found')
++      return this.json(res, 200, { deleted: true })
++    }
++
++    return this.fail(res, 404, 'not_found', 'no such wire route')
++  }
++}
++
++// ============================================================ the suite
++const memoryStore = () => {
++  const map = new Map()
++  return { map, get: async (k) => map.get(k), set: async (k, v) => { map.set(k, v) }, delete: async (k) => { map.delete(k) } }
++}
++const fx = new FixtureServer()
++const baseUrl = await fx.listen()
++
++try {
++  const storeA = memoryStore()
++  const storeB = memoryStore()
++  const A = new GenericRestWorkspaceProvider({ baseUrl, credentialStore: storeA, fetch })
++  const B = new GenericRestWorkspaceProvider({ baseUrl, credentialStore: storeB, fetch })
++
++  // ---------------------------------------------- 1. no token, no access
++  {
++    const anon = new GenericRestWorkspaceProvider({ baseUrl, credentialStore: memoryStore(), fetch })
++    let code = null
++    try { await anon.listOrgs() } catch (e) { code = e.code }
++    assert.equal(code, 'unauthenticated', 'before sign-in every auth route is unauthenticated')
++    ok('unauthenticated before sign-in')
++  }
++
++  // ---------------------------------------------- 2. sign-in: declared flow, opaque handle
++  {
++    const info = await A.signInInfo()
++    assert.equal(info.kind, 'token', 'the fixture declares exactly one sign-in kind')
++    await A.signIn('token', { credentials: { user: 'a' } })
++    const s = await A.currentSession()
++    assert.equal(s.userId, 'sess-a', 'the wire session id is the opaque user handle')
++    const stored = storeA.map.get('workspace-generic-rest')
++    assert.ok(stored && typeof stored.token === 'string', 'the token is persisted through the credential store')
++    assert.ok(fx.lastAuth === null || fx.lastAuth.startsWith('Bearer '), 'bearer sent, never printed')
++    // refresh rotates the handle and keeps the session
++    await A.refresh()
++    assert.equal((await A.currentSession()).userId, 'sess-a')
++    ok('sign-in renders the declared flow; token held as opaque store handle; refresh rotates')
++  }
++
++  // ---------------------------------------------- 3. full conformance, conforming mode
++  {
++    await B.signIn('token', { credentials: { user: 'b' } })
++    const orgB = await B.createOrg({ name: 'org-b', kind: 'studio' })
++    await B.putRecord(orgB.id, 'tickets', 'b-1', { secret: 'belonging-to-b' })
++    const report = await runConformance(A, { crossOrg: { provider: B, orgId: orgB.id, recordId: 'b-1' } })
++    for (const s of report.sections)
++      assert.equal(s.status, 'green', s.id + ' → ' + s.details.join(' | '))
++    assert.equal(report.ok, true)
++    ok('conformance (network leg): every section green, cross-org isolation included')
++  }
++
++  // ---------------------------------------------- 4. bounded retries + timeout
++  {
++    fx.mode = 'flaky'
++    fx.flakyLeft['/orgs'] = 1 // one 503, then through
++    const orgs = await A.listOrgs()
++    assert.ok(Array.isArray(orgs) && orgs.length > 0, 'a single 503 is retried, not surfaced')
++    assert.equal(fx.attempts['/orgs'] >= 2, true, 'the retry actually re-issued the request')
++    fx.mode = 'delay'
++    let err = null
++    try { await new GenericRestWorkspaceProvider({ baseUrl, credentialStore: storeA, fetch, timeoutMs: 300 }).listOrgs() } catch (e) { err = e }
++    assert.ok(err instanceof WorkspaceError && err.code === 'unavailable', 'a hung server surfaces unavailable, not a hang')
++    fx.mode = 'conforming'
++    ok('bounded retries ride out a 503; a hung request times out to unavailable')
++  }
++
++  // ---------------------------------------------- 5. sign-out revokes the handle
++  {
++    const C = new GenericRestWorkspaceProvider({ baseUrl, credentialStore: memoryStore(), fetch })
++    await C.signIn('token', { credentials: { user: 'c' } })
++    await C.signOut()
++    let code = null
++    try { await C.listOrgs() } catch (e) { code = e.code }
++    assert.equal(code, 'unauthenticated', 'the revoked token no longer authenticates')
++    ok('sign-out revokes server-side and clears the handle')
++  }
++
++  // ---------------------------------------------- 6. HOSTILE: idor must go red
++  {
++    const orgB = await B.createOrg({ name: 'org-b2', kind: 'studio' })
++    await B.putRecord(orgB.id, 'tickets', 'b2-1', { secret: 'b2' })
++    fx.mode = 'idor'
++    const report = await runConformance(A, { crossOrg: { provider: B, orgId: orgB.id, recordId: 'b2-1' } })
++    const s = report.sections.find((x) => x.id === 'cross-org-isolation')
++    assert.equal(s.status, 'red', 'the idor backend must not pass: ' + s.details.join(' | '))
++    assert.equal(report.ok, false)
++    fx.mode = 'conforming'
++    ok('hostile idor: cross-org section RED, report not ok')
++  }
++
++  // ---------------------------------------------- 7. HOSTILE: list leak must go red
++  {
++    const orgB = await B.createOrg({ name: 'org-b3', kind: 'studio' })
++    await B.putRecord(orgB.id, 'tickets', 'b3-1', { secret: 'b3' })
++    fx.mode = 'leak'
++    const report = await runConformance(A, { crossOrg: { provider: B, orgId: orgB.id, recordId: 'b3-1' } })
++    const s = report.sections.find((x) => x.id === 'cross-org-isolation')
++    assert.equal(s.status, 'red', 'the leaking list must not pass: ' + s.details.join(' | '))
++    fx.mode = 'conforming'
++    ok('hostile leak: list-endpoint leakage RED')
++  }
++
++  // ---------------------------------------------- 8. audit immutability at the wire
++  {
++    const org = await A.createOrg({ name: 'audit-org', kind: 'studio' })
++    let code = null
++    try { await A.rawRequest('putRecord', { orgId: org.id, collection: 'tickets', id: 'x' }, { body: { x: 1 } }) } catch (e) { code = e.code }
++    // PUT /audit does not exist — but a raw PUT to an audit-shaped URL must be refused by the server
++    let rawCode = null
++    try {
++      await A.fetch(BASE_PATH + '/orgs/' + org.id + '/audit', { method: 'PUT', headers: { 'content-type': MEDIA.JSON }, body: '{}' })
++        .then((r) => { if (r.status >= 400) rawCode = 'refused-' + r.status })
++    } catch { rawCode = 'refused' }
++    assert.ok(rawCode?.startsWith('refused'), 'no audit mutation route exists server-side')
++    ok('audit immutability: raw wire mutation attempts are refused')
++  }
++} finally {
++  await fx.close()
++}
++
++console.log(`workspace-provider rest conformance: ${n} checks green`)
+diff --git a/profile/cordis.patch.yml b/profile/cordis.patch.yml
+index 4d2a5aa..724423c 100644
+--- a/profile/cordis.patch.yml
++++ b/profile/cordis.patch.yml
+@@ -461,20 +461,35 @@
+ # the desktop webview has no human. This host-only plugin publishes
+ # $DSH_HOME/desktop-session.json (token + authenticated URL) at every boot via
+ # the connection service's public authenticatedUrl seam; the shell reads the
+ # file and navigates tokenized once, minting the cookie on its own authority.
+ # By PATH — host-only plugin, no client half (same shape as the arxa-sandbox
+ # and github-link-signin rows).
+ - insert:
+   - id: arxa-desktop-session
+     name: __ARXA_STUDIO_PLUGINS__/desktop-session/lib/index.js
+ 
++# arxa-specific: the workspace-data-plane provider service (task 13, docs/
++# plans/agency-backend-provider-abstraction.md). Host half registers a
++# read-only status channel over Connection RPC (provider + redacted config
++# shape + local capabilities); the library surface (frozen Wire v1 contract,
++# local + generic-rest providers, conformance kit, export/import bundles) is
++# first-party-import only — D32: no third-party JavaScript ever executes
++# inside the app, config cannot name executable code. Local-first: with no
++# config the service answers for the local provider — no network, account,
++# database, or environment variable. By PACKAGE NAME — browser half
++# (window.__arxaWorkspaceProvider.info()) discovered through package.json
++# dsh.client, same as the rows above.
++- insert:
++  - id: arxa-workspace-provider
++    name: arxa-workspace-provider
++
+ # Session list at boot (2026-09-07 boot trace). dsh's list summarizes every
+ # cold session; for logs under coldBlankProbeMaxBytes (default 1024) it
+ # decompresses and replays the log to learn whether the session is blank.
+ # 33 of 56 saved sessions here are sub-1KB leftovers from worktree smoke
+ # runs, so every list cost ~500ms idle and 1.2s on the boot path — the
+ # critical path from splash to the first painted session. 0 skips the probe:
+ # a small session lists as visible instead of hidden, which the arxa
+ # sidebar never renders anyway (it opens dsh sessions by id). Config
+ # replaces wholesale; nativeOpen is optional in the schema (verified), so
+ # this row is complete as written.
+diff --git a/scripts/ci.mjs b/scripts/ci.mjs
+index 1f3b6c4..df4e56e 100644
+--- a/scripts/ci.mjs
++++ b/scripts/ci.mjs
+@@ -74,20 +74,25 @@ suites.push([root, 'scripts', 'pack-list-check.mjs'])
+ // arxa-engine-sync decides what reaches a user's desktop payload, and both of its
+ // previous skip rules failed silently — a version-keyed compare shipped nothing when
+ // the version was unchanged, and plugins without a package.json were passed over
+ // entirely. A build tool that reports success while shipping nothing needs a gate.
+ suites.push([root, 'bin', 'selftest.engine-sync.mjs'])
+ suites.push([root, 'bin', 'selftest.loopback-patch.mjs'])
+ // The launcher's permission-preset seeding (S1 step 3): new profiles get
+ // workspace-write; existing ones migrate only on marker proof. Pinned pure
+ // AND end-to-end through a real --materialise-only boot.
+ suites.push([root, 'bin', 'selftest.launcher-settings.mjs'])
++// The workspace-provider CLI (task 13 steps 7–8): canonical spellings,
++// dispatch-before-boot, redacted diagnose, nonzero exit on red rows. bin/ is
++// outside the plugins/*/selftest sweep, so it is wired by hand like the rows
++// above.
++suites.push([root, 'bin', 'selftest.provider-cli.mjs'])
+ 
+ console.log('arxa-studio CI — ' + suites.length + ' suites')
+ let failed = 0
+ const failedNames = []
+ for (const [base, plugin, script] of suites) {
+   const label = plugin + '/' + script
+   const r = spawnSync(process.execPath, [join(base, plugin, script)], {
+     cwd: root,
+     encoding: 'utf8',
+     timeout: 5 * 60 * 1000,
+diff --git a/scripts/pack-manifest.mjs b/scripts/pack-manifest.mjs
+index 4de9b4c..f5ad859 100644
+--- a/scripts/pack-manifest.mjs
++++ b/scripts/pack-manifest.mjs
+@@ -38,21 +38,21 @@ export function hostTriple (platform = process.platform, arch = process.arch) {
+   if (platform === 'darwin') return `${cpu}-apple-darwin`
+   if (platform === 'linux') return `${cpu}-unknown-linux-gnu`
+   throw new Error(`pack: unsupported platform ${platform}`)
+ }
+ 
+ /**
+  * Every bin/ module the launcher loads at runtime. Explicit (not a glob) on
+  * purpose: bin/ also holds dev-only scripts (arxa-explore, isolation-check,
+  * arxa-engine-sync) that must NOT ship in the sidecar.
+  */
+-export const BIN_FILES = ['arxa-studio.mjs', 'loopback-localhost-patch.mjs', 'materialise-preset.mjs', 'seed-settings.mjs']
++export const BIN_FILES = ['arxa-studio.mjs', 'arxa-studio-provider.mjs', 'loopback-localhost-patch.mjs', 'materialise-preset.mjs', 'seed-settings.mjs']
+ 
+ /** The launcher — the one entry the Mach-O payload execs. */
+ export const BIN_ENTRY = 'arxa-studio.mjs'
+ 
+ // Full-line comments and block comments are stripped before scanning so that a
+ // comment naming a dev-only script (they do: the pack list is discussed in
+ // bin/arxa-studio.mjs's own header) cannot fake a dependency.
+ const stripComments = (src) => src
+   .replace(/\/\*[\s\S]*?\*\//g, '')
+   .split('\n')
+git diff --check:
+(end)

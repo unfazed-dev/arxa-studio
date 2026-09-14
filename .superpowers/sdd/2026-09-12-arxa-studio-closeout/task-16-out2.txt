@@ -1,0 +1,13 @@
+[33m⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors[39m
+[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
+✅ **Task 16 Part A complete** — report: `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-16-report.md` (## Part A)
+
+- **L1/L2**: REPRODUCED at HEAD — no ts/css/json squiggles, no preview; dart `strip:false, editor:true`. Pre-existing (BASE-measured) → limitation + external row (artifact-viewer owner). No fix loop.
+- **Dock-dead**: REPRODUCED — session create/open/bind/composer all ✓, `[data-git-dock]` never mounts. Keep limitation rows + external row; RIDE respected.
+- **L3**: REPRODUCED — provider keys present, `info()` → `connection: invalid server-response result`; failure-state shots. Keep limitation + external row (workspace-provider owner).
+- **WIP verdict**: all attempt-1 work real and kept (matrix, SBX_PIN pins, both selftests, finish/backend legs, physical-gates fix); its wrapper survived the OOM and its langstrip pair died to my cleanup sweep — re-ran that leg fresh.
+- **Scratch legs run**: G3a (pins verified), G5a 6 ok, G7 4 pairs EVIDENCE OK, sbx-install 12/12, **G12b `arxa deploy --self-test` 12/12 exit 0**; G12/G12c PREPARED (OOM-class toolchains, exact commands in §G12-notes); npm test **130 suites ALL GREEN**.
+- **Matrix**: 20 rows — **8 DONE / 8 PREPARED / 4 EXTERNAL**.
+- **Commits**: studio `4e7f552` + arxa `3b6e08ea`, both `test: record authenticated and physical closeout evidence` (trailer set; no push).
+- **Authorization requests (Part B)**: G1 Actions minutes · G3 sbx OAuth + **mutates operator sbx state/policy** · G5 operator's signed-in claude · G6 one metered Z.ai call · G9 notarization + first live tag · G2/G4/G10 operator starts own daemon/VM · G11 operator push + branch protection · G8 devices + real APNs `.p8`/FCM.
+- **Concerns**: escalated trio unreproduced→fixed nowhere (owners named); arxa evidence logs `*.log`-ignored by convention (G12b verdict inline in matrix, artifact on disk); nohup redirect bypasses wrapper token-redaction (re-redacted; ledger row).

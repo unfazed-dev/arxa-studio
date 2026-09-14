@@ -1,0 +1,336 @@
+4cc0380 fix: bound blob payloads, refuse unimplemented providers, pack sandbox lib
+ bin/arxa-studio-provider.mjs                   | 44 +++++++++++++++++++-------
+ bin/arxa-studio.mjs                            |  9 ++++++
+ bin/selftest.provider-cli.mjs                  | 23 ++++++++++++++
+ plugins/workspace-provider/lib/generic-rest.js | 10 ++++--
+ plugins/workspace-provider/selftest.rest.mjs   | 17 ++++++++++
+ scripts/ci.mjs                                 |  7 ++++
+ 6 files changed, 97 insertions(+), 13 deletions(-)
+diff --git a/bin/arxa-studio-provider.mjs b/bin/arxa-studio-provider.mjs
+index 38316b8..a5f05c4 100644
+--- a/bin/arxa-studio-provider.mjs
++++ b/bin/arxa-studio-provider.mjs
+@@ -19,20 +19,21 @@ import { dirname, join, resolve } from 'node:path'
+ import { fileURLToPath } from 'node:url'
+ 
+ const here = dirname(fileURLToPath(import.meta.url))
+ const pluginDir = join(here, '..', 'plugins', 'workspace-provider')
+ 
+ const { assertProviderConfig } = await import(join(pluginDir, 'lib', 'contract.js'))
+ const { LocalWorkspaceProvider } = await import(join(pluginDir, 'lib', 'local.js'))
+ const { GenericRestWorkspaceProvider } = await import(join(pluginDir, 'lib', 'generic-rest.js'))
+ const { runConformance } = await import(join(pluginDir, 'lib', 'conformance.js'))
+ const { exportBundle, importBundle } = await import(join(pluginDir, 'lib', 'export-bundle.js'))
++const { invalidRequest } = await import(join(pluginDir, 'lib', 'errors.js'))
+ 
+ // ---- locale (en/pl/fr through the arxa-locale world; env-selected in a CLI) --
+ const STRINGS = {
+   en: {
+     title: 'arxa studio workspace provider',
+     usage: 'usage: arxa-studio workspace export --org <id> --out <dir> | workspace import <dir> [--config <file>] | provider verify [--config <file>] | diagnose [--out <file>]',
+     verifyTitle: 'provider verify — every conformance section:',
+     rowGreen: 'green  {id} — {detail}',
+     rowRed: 'RED    {id} — {detail}',
+     rowNa: 'n/a    {id} — {detail}',
+@@ -135,37 +136,49 @@ function credentialStore () {
+ }
+ 
+ function buildProvider (backend) {
+   if (backend.provider === 'generic-rest') {
+     return new GenericRestWorkspaceProvider({
+       baseUrl: backend['generic-rest']?.baseUrl,
+       credentialStore: credentialStore(),
+       fetch,
+     })
+   }
+-  // local (the default) and supabase-not-yet (task 14) both fall back to the
+-  // local store — local-first parity: nothing about the CLI needs a backend.
++  // A D32-sanctioned but unimplemented name (supabase, task 14) must never
++  // silently become the local store — a verify tool may not certify the
++  // wrong backend (task 13 review, Important 2).
++  if (backend.provider && backend.provider !== 'local')
++    throw invalidRequest(`the "${backend.provider}" adapter is not implemented in this build (implemented: local, generic-rest)`)
+   const root = backend.local?.root ? resolveTilde(backend.local.root) : undefined
+   return new LocalWorkspaceProvider(root ? { root } : {})
+ }
+ 
+ const flag = (args, name) => {
+   const i = args.indexOf(name)
+   return i >= 0 ? args[i + 1] : undefined
+ }
+ 
+ // ---- commands ---------------------------------------------------------------
+ async function providerVerify (args) {
+   const backend = loadBackend(args)
+-  const provider = buildProvider(backend)
+-  const isLocal = !(provider instanceof GenericRestWorkspaceProvider)
+   console.log(t('verifyTitle'))
++  let provider
++  try {
++    provider = buildProvider(backend)
++  } catch (e) {
++    // A configured-but-unimplemented backend gets a red row and a failing
++    // exit — verify never certifies the wrong backend green.
++    console.log(t('rowRed', { id: 'provider', detail: e.message }))
++    console.log(t('verifyFailed'))
++    return 1
++  }
++  const isLocal = !(provider instanceof GenericRestWorkspaceProvider)
+   const report = await runConformance(provider, isLocal ? { localExempt: true } : {})
+   for (const s of report.sections) {
+     const template = s.status === 'green' ? 'rowGreen' : s.status === 'n/a' ? 'rowNa' : 'rowRed'
+     for (const d of s.details.length ? s.details : ['']) console.log(t(template, { id: s.id, detail: d }))
+   }
+   if (report.ok) { console.log(t('verifyOk')); return 0 }
+   console.log(t('verifyFailed'))
+   return 1
+ }
+ 
+@@ -190,47 +203,56 @@ async function workspaceImport (args) {
+ }
+ 
+ // Diagnose redaction: long opaque runs (tokens, JWTs, keys) never print.
+ const OPAQUE_RUN = /[A-Za-z0-9+/_=-]{20,}/g
+ const redactLine = (line) => line
+   .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+   .replace(OPAQUE_RUN, (m) => (m.startsWith('line') ? m : '[redacted]'))
+ 
+ async function diagnose (args) {
+   const backend = loadBackend(args)
+-  const provider = buildProvider(backend)
+-  const report = await runConformance(provider, backend.provider === 'local' || !backend.provider ? { localExempt: true } : {})
++  let report = null
+   const lines = [t('diagnoseTitle')]
+   const pkg = JSON.parse(readFileSync(join(pluginDir, 'package.json'), 'utf8'))
+   const node = process.version
+   lines.push(`versions: node ${node}, arxa-workspace-provider ${pkg.version}, wire v${(await import(join(pluginDir, 'lib', 'contract.js'))).WIRE_VERSION}`)
+   // Config SHAPE only — provider name plus section keys; values never print.
+   const sections = Object.keys(backend).filter((k) => k !== 'provider')
+   const shape = `provider: ${backend.provider ?? 'local'}` + (sections.length ? `, sections: ${sections.join(', ')}` : '')
+   lines.push(t('configShape', { shape }))
+-  lines.push(t('verifyTitle'))
+-  for (const s of report.sections) {
+-    const template = s.status === 'green' ? 'rowGreen' : s.status === 'n/a' ? 'rowNa' : 'rowRed'
+-    for (const d of s.details.length ? s.details : ['']) lines.push(t(template, { id: s.id, detail: d }))
++  try {
++    const provider = buildProvider(backend)
++    report = await runConformance(provider, backend.provider === 'local' || !backend.provider ? { localExempt: true } : {})
++  } catch (e) {
++    // The named backend cannot be built; the diagnostic still runs (versions,
++    // config shape, log tail) but nothing gets certified green.
++    lines.push(t('rowRed', { id: 'provider', detail: e.message }))
++  }
++  if (report) {
++    lines.push(t('verifyTitle'))
++    for (const s of report.sections) {
++      const template = s.status === 'green' ? 'rowGreen' : s.status === 'n/a' ? 'rowNa' : 'rowRed'
++      for (const d of s.details.length ? s.details : ['']) lines.push(t(template, { id: s.id, detail: d }))
++    }
+   }
+   const logFile = join(arxaHome(), 'dsh', 'engine.log')
+   if (existsSync(logFile)) {
+     const tail = readFileSync(logFile, 'utf8').trim().split('\n').slice(-50)
+     lines.push(t('errorLogs', { n: tail.length }))
+     for (const l of tail) lines.push(redactLine(l))
+   } else {
+     lines.push(t('noErrorLogs'))
+   }
+   const text = lines.join('\n')
+   const out = flag(args, '--out')
+   if (out) { writeFileSync(resolve(out), text + '\n'); console.log(out) } else console.log(text)
+-  return report.ok ? 0 : 1
++  return report?.ok ? 0 : 1
+ }
+ 
+ // ---- entry ------------------------------------------------------------------
+ export async function run (argv) {
+   const [a, b, ...rest] = argv
+   try {
+     if (a === 'provider' && b === 'verify') return await providerVerify(rest)
+     if (a === 'workspace' && b === 'export') return await workspaceExport(rest)
+     if (a === 'workspace' && b === 'import') return await workspaceImport(rest)
+     if (a === 'diagnose') return await diagnose(argv.slice(1)) // b is the first flag here, not a subcommand
+diff --git a/bin/arxa-studio.mjs b/bin/arxa-studio.mjs
+index c2cef3e..7b593c2 100644
+--- a/bin/arxa-studio.mjs
++++ b/bin/arxa-studio.mjs
+@@ -448,20 +448,29 @@ const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa
+ // ../../<lib> unless they sit flat in the profile's node_modules.
+ // Measured live: a fresh checkout profile without them made
+ // importShell() fail and BOTH sidebar routes serve the stub (seam false,
+ // every action no-workspace) while the UI still rendered no-org — silent.
+ const fiveLibs = [
+   ['workspace', resolve(here, '..', 'plugins', 'workspace')],
+   ['workspace-index', resolve(here, '..', 'plugins', 'workspace-index')],
+   ['git-workspace', resolve(here, '..', 'plugins', 'git-workspace')],
+   ['account-mirror', resolve(here, '..', 'plugins', 'account-mirror')],
+   ['cairn-rail', resolve(here, '..', 'plugins', 'cairn-rail')],
++  // git-workspace/lib/sessions.js imports ../../sandbox/lib/{devcontainer,sbx}.js
++  // (task 10 A4), and sandbox/lib/devcontainer.js imports
++  // ../../github-link/lib/keyring.js — the same flat-resolution rule as the
++  // five above, by DIRECTORY name (the plugin's package name is
++  // arxa-github-link; only the dir name resolves relatively). Without these
++  // two rows every boot dies ERR_MODULE_NOT_FOUND (T11 regression, found in
++  // the task 13 review; gated by scripts/engine-boot-smoke.mjs in npm test).
++  ['sandbox', resolve(here, '..', 'plugins', 'sandbox')],
++  ['github-link', githubLinkDir],
+   // arxa-approvals probes 'arxa-push-doorbell' bare, then the relative
+   // ../../push-doorbell/lib/index.js — both shapes need these two flat.
+   ['arxa-approvals', approvalsDir],
+   ['push-doorbell', pushDoorbellDir],
+ ]
+ const nm = join(profileDir, 'node_modules')
+ if (packed) {
+   // PROFILE_PLUGINS (above) is the single source for the plugin set; only the
+   // relative-import libs are extra here. A plugin added to the profile is
+   // therefore shipped by the sidecar automatically — the drift that killed the
+diff --git a/bin/selftest.provider-cli.mjs b/bin/selftest.provider-cli.mjs
+index 534bceb..8b75b15 100644
+--- a/bin/selftest.provider-cli.mjs
++++ b/bin/selftest.provider-cli.mjs
+@@ -147,16 +147,39 @@ try {
+     const deps = JSON.parse(readFileSync(join(profileDir, 'package.json'), 'utf8')).dependencies
+     assert.ok(deps['arxa-workspace-provider'], 'profile package.json depends on arxa-workspace-provider')
+     const patch = readFileSync(join(profileDir, 'cordis.patch.yml'), 'utf8')
+     assert.ok(patch.includes('arxa-workspace-provider'), 'the cordis patch carries the service row')
+     const pkg = JSON.parse(readFileSync(join(here, '..', 'plugins', 'workspace-provider', 'package.json'), 'utf8'))
+     assert.ok(pkg.dsh?.client, 'the plugin declares its browser half (dsh.client)')
+     assert.ok(existsSync(join(here, '..', 'plugins', 'workspace-provider', 'lib', 'client.js')), 'browser half exists')
+     assert.ok(existsSync(join(here, '..', 'plugins', 'workspace-provider', 'lib', 'index.js')), 'host half exists')
+     ok('runtime + package inclusion: profile dep, cordis row, host/client halves')
+   }
++  // ---------------------------------------------- 9. an unimplemented provider name never certifies local (review Important 2)
++  {
++    // supabase is D32-sanctioned (PROVIDERS includes it) but unimplemented in
++    // this build — the CLI must refuse the silent local substitution.
++    const cfg = join(scratch, 'supabase.json')
++    writeFileSync(cfg, JSON.stringify({ workspaceBackend: { provider: 'supabase', supabase: { url: 'https://x.test', anonKey: 'k' } } }))
++
++    const v = run('arxa-studio.mjs', ['provider', 'verify', '--config', cfg])
++    assert.notEqual(v.status, 0, 'verify exits nonzero for an unimplemented provider')
++    assert.ok(v.stdout.split('\n').some((l) => /^RED/.test(l) && /supabase/.test(l)), 'a RED row names the unimplemented adapter')
++    assert.ok(!v.stdout.includes('all sections green'), 'the wrong backend is never certified green')
++
++    const e = run('arxa-studio.mjs', ['workspace', 'export', '--org', org.id, '--out', join(scratch, 'never-written'), '--config', cfg])
++    assert.notEqual(e.status, 0, 'export refuses to silently substitute local')
++    assert.ok((e.stderr + e.stdout).includes('not implemented'), 'the refusal names the adapter')
++
++    const d = run('arxa-studio.mjs', ['diagnose', '--config', cfg])
++    assert.notEqual(d.status, 0, 'diagnose exits nonzero')
++    for (const needle of ['provider: supabase', 'RED', 'not implemented'])
++      assert.ok(d.stdout.includes(needle), 'diagnose carries ' + needle)
++    ok('supabase config: verify RED + nonzero, export refuses, diagnose reports without certifying')
++  }
++
+ } finally {
+   rmSync(scratch, { recursive: true, force: true })
+   rmSync(other, { recursive: true, force: true })
+ }
+ 
+ console.log(`workspace-provider CLI: ${n} checks green`)
+diff --git a/plugins/workspace-provider/lib/generic-rest.js b/plugins/workspace-provider/lib/generic-rest.js
+index 8980b0b..9293efa 100644
+--- a/plugins/workspace-provider/lib/generic-rest.js
++++ b/plugins/workspace-provider/lib/generic-rest.js
+@@ -113,22 +113,28 @@ export class GenericRestWorkspaceProvider {
+     return s.token
+   }
+ 
+   // ---- the one transport: build (frozen) → fetch (injected) → decode (frozen)
+   async request (name, params = {}, { body, bytes } = {}) {
+     const op = OPERATIONS[name]
+     const token = op.auth ? (await this.loadSession())?.token : undefined
+     const spec = buildRequest(name, params, { requestId: randomUUID(), token })
+     const url = this.baseUrl + spec.url
+     const payload = bytes ?? (body !== undefined ? JSON.stringify(body) : undefined)
+-    if (payload !== undefined && Buffer.byteLength(payload) > BOUNDS.MAX_RECORD_BYTES)
+-      throw invalidRequest('body exceeds the Wire v1 byte bound')
++    // Bytes (blob) payloads ride MAX_BLOB_BYTES; JSON bodies ride
++    // MAX_RECORD_BYTES. One bound for both rejected every legal >1 MiB blob
++    // client-side (task 13 review, Important 1).
++    if (payload !== undefined) {
++      const isBytes = op.req === MEDIA.BYTES
++      if (Buffer.byteLength(payload) > (isBytes ? BOUNDS.MAX_BLOB_BYTES : BOUNDS.MAX_RECORD_BYTES))
++        throw invalidRequest(isBytes ? 'blob exceeds the Wire v1 blob byte bound' : 'body exceeds the Wire v1 byte bound')
++    }
+ 
+     let lastError = null
+     for (let attempt = 1; attempt <= this.attempts; attempt++) {
+       const signal = this.timeoutMs > 0 ? AbortSignal.timeout(this.timeoutMs) : undefined
+       let res
+       try {
+         res = await this.fetchImpl(url, {
+           method: spec.method,
+           headers: { ...spec.headers, ...(payload !== undefined ? { 'content-type': op.req === MEDIA.BYTES ? MEDIA.BYTES : MEDIA.JSON } : {}) },
+           body: payload,
+diff --git a/plugins/workspace-provider/selftest.rest.mjs b/plugins/workspace-provider/selftest.rest.mjs
+index 07e6399..610401f 100644
+--- a/plugins/workspace-provider/selftest.rest.mjs
++++ b/plugins/workspace-provider/selftest.rest.mjs
+@@ -421,15 +421,32 @@ try {
+     try { await A.rawRequest('putRecord', { orgId: org.id, collection: 'tickets', id: 'x' }, { body: { x: 1 } }) } catch (e) { code = e.code }
+     // PUT /audit does not exist — but a raw PUT to an audit-shaped URL must be refused by the server
+     let rawCode = null
+     try {
+       await A.fetch(BASE_PATH + '/orgs/' + org.id + '/audit', { method: 'PUT', headers: { 'content-type': MEDIA.JSON }, body: '{}' })
+         .then((r) => { if (r.status >= 400) rawCode = 'refused-' + r.status })
+     } catch { rawCode = 'refused' }
+     assert.ok(rawCode?.startsWith('refused'), 'no audit mutation route exists server-side')
+     ok('audit immutability: raw wire mutation attempts are refused')
+   }
++
++  // ---------------------------------------------- 9. blobs are bounded by MAX_BLOB_BYTES (review Important 1)
++  {
++    const org = await A.createOrg({ name: 'blob-bound-org', kind: 'studio' })
++    const big = Buffer.alloc(2 * 1024 * 1024, 7) // 2 MiB: contract-legal blob, oversize as a record
++    const put = await A.putBlob(org.id, 'big/blob.bin', big)
++    assert.equal(put.bytes, big.length, 'a 2 MiB blob must reach the wire, not die client-side on the 1 MiB record bound')
++    assert.equal(put.sha256, sha256(big), 'the client hash covers the whole blob')
++    const back = await A.getBlob(org.id, 'big/blob.bin')
++    assert.ok(back.equals(big), 'round-trip preserves every byte')
++    // The record bound itself still bites: a >1 MiB JSON body stays invalid_request.
++    let code = null
++    try { await A.putRecord(org.id, 'tickets', 'too-big', { pad: 'x'.repeat(BOUNDS.MAX_RECORD_BYTES) }) } catch (e) { code = e.code }
++    assert.equal(code, 'invalid_request', 'a >1 MiB JSON record is still rejected by MAX_RECORD_BYTES')
++    ok('blob byte bound is MAX_BLOB_BYTES (2 MiB accepted); the 1 MiB bound still guards JSON bodies')
++  }
++
+ } finally {
+   await fx.close()
+ }
+ 
+ console.log(`workspace-provider rest conformance: ${n} checks green`)
+diff --git a/scripts/ci.mjs b/scripts/ci.mjs
+index df4e56e..df78559 100644
+--- a/scripts/ci.mjs
++++ b/scripts/ci.mjs
+@@ -62,20 +62,27 @@ suites.push([root, 'scripts', 'session-event-vocabulary-check.mjs'])
+ // The platform-pin lockstep gate (update-strategy amendment 2026-09-05):
+ // one wave, one version — every @deepseek-ai/dsh* in the lockfile on the
+ // pinned release, the import surface still exporting what the plugins
+ // destructure, and pi-ai owned by upstream’s range again.
+ suites.push([root, 'scripts', 'dsh-contract-check.mjs'])
+ // The packed sidecar ships an EXPLICIT bin/ list. A checkout boots fine with a
+ // stale list (all of bin/ is there); the bundle dies on ERR_MODULE_NOT_FOUND
+ // before binding its port, two minutes of build and an install later. This
+ // scans what the launcher actually loads and compares (2026-09-02 regression).
+ suites.push([root, 'scripts', 'pack-list-check.mjs'])
++// The packed-boot gate. pack-list-check.mjs above scans bin/ vs BIN_FILES —
++// it cannot see a PLUGIN importing another plugin's lib (git-workspace →
++// sandbox, the T11 regression: web boot died ERR_MODULE_NOT_FOUND with every
++// scanner green). This smoke boots the real engine end-to-end against a
++// scratch home — live but fully local (loopback port, no credentials, no
++// model calls, ~15s), so ANY import the launcher loads must actually resolve.
++suites.push([root, 'scripts', 'engine-boot-smoke.mjs'])
+ 
+ // bin/ is outside the plugins/*/selftest.mjs sweep, so this is wired by hand.
+ // arxa-engine-sync decides what reaches a user's desktop payload, and both of its
+ // previous skip rules failed silently — a version-keyed compare shipped nothing when
+ // the version was unchanged, and plugins without a package.json were passed over
+ // entirely. A build tool that reports success while shipping nothing needs a gate.
+ suites.push([root, 'bin', 'selftest.engine-sync.mjs'])
+ suites.push([root, 'bin', 'selftest.loopback-patch.mjs'])
+ // The launcher's permission-preset seeding (S1 step 3): new profiles get
+ // workspace-write; existing ones migrate only on marker proof. Pinned pure
+git diff --check:
+(end)

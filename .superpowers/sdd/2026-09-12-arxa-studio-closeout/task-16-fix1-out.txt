@@ -1,0 +1,9 @@
+[33m⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors[39m
+[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
+✅ **Fix round 1 done**
+
+- **E3 outcome:** fixed-with-SHA `7351ddf` — host half returned a bare record; engine (`rpcFetchHandler→fullResponse`) passes handler returns verbatim as `result`, client law demands `{ok:true,value}`. RED wire bytes: `result:{"provider":"local",…}` vs lawful sibling control same-boot → GREEN `result:{"ok":true,"value":{…}}`. Browser half unwraps; suite re-pinned RED-first.
+- **Wire freeze:** held — contract/errors/wire byte-identical to `3597a40` (0-diff at HEAD).
+- **Suites:** 7/7 workspace-provider + smoke green; full `npm test` 130/130 ALL GREEN, 0 red.
+- **Commits:** `7351ddf` fix + `902551d` test: matrix corrections (E3 row→FIXED, §Escalated per-row bases + T17 no-propagate note, json pointer fixed, E-row paths aligned, lockfile restored from `8e3bc01`). No push/tag. Report appended. Operator's studio untouched; no chrome/engine residue.
+- **Remaining:** none on E1–E3; G12/G12c still PREPARED (RAM), Part B auths pending.

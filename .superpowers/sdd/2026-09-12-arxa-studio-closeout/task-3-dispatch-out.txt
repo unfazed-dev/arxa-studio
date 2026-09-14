@@ -1,0 +1,7 @@
+⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
+[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
+- **Status:** DONE_WITH_CONCERNS
+- **Commit:** `db6de5f` feat: prepare imported projects for sessions (9 files, +443/−6; package-lock untouched)
+- **Tests:** RED verified all three halves (lifecycle assertion, `unknown-action: project.repair-repo`, UI markers + drift); focused suites GREEN (file-org-shell selftest 228 checks, sidebar selftest + drift, selftest.actions, smoke 10 new checks incl. branch/worktree belong to project repo); `npm test` ALL GREEN
+- **Concern (minor):** shell-CTA refusal shows text notice only — clickable offer relies on proactive `hasRepo` arm, so an unborn project repo (init interrupted) refused via the shell door shows no offer; fix needs a gen-sidebar.mjs splice (outside brief's file list) → recorded as New finding in ledger
+- **Report:** `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-3-report.md`

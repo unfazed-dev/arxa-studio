@@ -1,0 +1,1787 @@
+18c52cc feat: add Docker Sandbox isolation with recoverable teardown
+ plugins/git-workspace/lib/finish.js       |  10 +
+ plugins/git-workspace/lib/sessions.js     |   7 +
+ plugins/git-workspace/selftest.finish.mjs |  47 +++
+ plugins/sandbox/lib/effective-tier.js     |   7 +-
+ plugins/sandbox/lib/sbx-install.js        | 201 +++++++++++
+ plugins/sandbox/lib/sbx.js                | 491 +++++++++++++++++++++++++
+ plugins/sandbox/package.json              |   4 +-
+ plugins/sandbox/selftest.sbx-install.mjs  | 261 ++++++++++++++
+ plugins/sandbox/selftest.sbx.mjs          | 574 ++++++++++++++++++++++++++++++
+ 9 files changed, 1599 insertions(+), 3 deletions(-)
+diff --git a/plugins/git-workspace/lib/finish.js b/plugins/git-workspace/lib/finish.js
+index 9367076..93f546a 100644
+--- a/plugins/git-workspace/lib/finish.js
++++ b/plugins/git-workspace/lib/finish.js
+@@ -14,20 +14,21 @@
+ // Finish reuses `archiveSession` (sessions.js) for the worktree-removal +
+ // final-snapshot half — it is not reimplemented here — and adds the two
+ // things archive deliberately never does (D40: archive never deletes):
+ // branch deletion and the per-session base-ref cleanup, both gated on the
+ // branch actually being merged into main.
+ 
+ import fs from 'node:fs'
+ import { runGit } from './run.js'
+ import { listSessions, archiveSession, annotateSession, sessionRepoFor, SESSION_BASE_PREFIX, SESSION_BRANCH_PREFIX } from './sessions.js'
+ import { unrecoveredContainerCommits } from '../../sandbox/lib/devcontainer.js'
++import { unrecoveredSandboxCommits } from '../../sandbox/lib/sbx.js'
+ 
+ /** Finish refused: the session branch is not (yet) merged into main. */
+ export class FinishRefusedError extends Error {
+   constructor(id, branch, reason) {
+     super(`session "${id}" (${branch}) cannot finish — ${reason}`)
+     this.name = 'FinishRefusedError'
+     this.sessionId = id
+     this.branch = branch
+     this.reason = reason
+   }
+@@ -100,20 +101,29 @@ export function finishSession(repoPath, id, { env = process.env, dryRun = false
+   // exist ONLY in the container volume. Deleting the branch here would
+   // orphan them permanently — refuse until every container commit is
+   // reachable from the host recovery ref (fetchContainerCommits lands it).
+   // Pure read; a refusal changes nothing.
+   const container = unrecoveredContainerCommits(repoPath, id)
+   if (container.unrecovered > 0) {
+     if (dryRun) return { finished: false, dryRun: true, id, branch, reason: 'container-work-unrecovered' }
+     throw new FinishRefusedError(id, branch, 'container-work-unrecovered')
+   }
+ 
++  // Task 11 (A5): same guard, same seam — a session that ran in a Docker
++  // Sandbox may hold commits only in the microVM clone. Refuse until every
++  // sandbox commit is reachable from refs/sandboxes/<name>/<branch>.
++  const sandbox = unrecoveredSandboxCommits(repoPath, id)
++  if (sandbox.unrecovered > 0) {
++    if (dryRun) return { finished: false, dryRun: true, id, branch, reason: 'sandbox-work-unrecovered' }
++    throw new FinishRefusedError(id, branch, 'sandbox-work-unrecovered')
++  }
++
+   if (session.state !== 'archived' && fs.existsSync(session.worktree) && !isWorktreeClean(session.worktree, env)) {
+     if (dryRun) return { finished: false, dryRun: true, id, branch, reason: 'worktree-dirty' }
+     throw new FinishRefusedError(id, branch, 'worktree-dirty')
+   }
+ 
+   if (dryRun) return { finished: false, dryRun: true, id, branch, wouldFinish: true }
+ 
+   let archivedNow = false
+   if (session.state !== 'archived') {
+     try {
+diff --git a/plugins/git-workspace/lib/sessions.js b/plugins/git-workspace/lib/sessions.js
+index 28f4931..5f412cb 100644
+--- a/plugins/git-workspace/lib/sessions.js
++++ b/plugins/git-workspace/lib/sessions.js
+@@ -55,20 +55,21 @@ import fs from 'node:fs'
+ import path from 'node:path'
+ import { ensureGit } from './probe.js'
+ import { runGit, runGitProbe, STAGE_IDENTITY } from './run.js'
+ import { wipCommit, stageBoundarySquash, STAGE_BASE_REF } from './commits.js'
+ import { getOrigin, excludeArxaDir } from './repos.js'
+ import { projectRepos } from './routing.js'
+ // Task 10 (A4): the container-work teardown guard. Cross-plugin like
+ // project-secrets' keyring reuse; no cycle — devcontainer.js reaches only
+ // frame.js on this side (never sessions.js).
+ import { unrecoveredContainerCommits } from '../../sandbox/lib/devcontainer.js'
++import { unrecoveredSandboxCommits } from '../../sandbox/lib/sbx.js'
+ 
+ /**
+  * Branch namespace. Grilled 2026-09-03 (Q2/Q3): a session's identity IS its
+  * relative disk path — `<org folder>/<workspace key>/<leaf>` — so the branch is
+  * that path under `arxa/`, the worktree directory is that path under the ORG's
+  * `.arxa/worktrees/`, and the dsh conversation key is that path with `/` → `-`.
+  * One string, three surfaces. SUPERSEDES `arxa/session/<opaque-id>`.
+  */
+ export const SESSION_BRANCH_PREFIX = 'arxa/'
+ export const SESSION_BASE_PREFIX = 'refs/arxa/session-base/'
+@@ -753,20 +754,26 @@ export function dropSession(repoPath, id, env = process.env) {
+   const registry = readRegistry(repoPath, env)
+   const session = registry.sessions.find((s) => s.id === id)
+   if (!session) return { id, dropped: false }
+   // Task 10 (A4): the forced drop deletes the branch — the only other
+   // handle on container-only commits besides the recovery ref. Same gate as
+   // finishSession: refuse while container work is unrecovered.
+   const container = unrecoveredContainerCommits(repoPath, id)
+   if (container.unrecovered > 0) {
+     throw new Error(`session "${id}" (${session.branch}) cannot be dropped — container-work-unrecovered: bring the container commits back to ${container.recoveryRef} first`)
+   }
++
++  // Task 11 (A5): the microVM twin of the guard above.
++  const sandbox = unrecoveredSandboxCommits(repoPath, id)
++  if (sandbox.unrecovered > 0) {
++    throw new Error(`session "${id}" (${session.branch}) cannot be dropped — sandbox-work-unrecovered: bring the sandbox commits back to ${sandbox.recoveryRef} first`)
++  }
+   if (session.worktree && fs.existsSync(session.worktree)) {
+     runGit(['worktree', 'remove', '--force', session.worktree], { cwd: repoPath, env, allowFail: true })
+   }
+   runGit(['worktree', 'prune'], { cwd: repoPath, env, allowFail: true })
+   if (session.branch) runGit(['branch', '-D', session.branch], { cwd: repoPath, env, allowFail: true })
+   runGit(['update-ref', '-d', `${SESSION_BASE_PREFIX}${id}`], { cwd: repoPath, env, allowFail: true })
+   registry.sessions = registry.sessions.filter((s) => s.id !== id)
+   writeRegistry(repoPath, registry, env)
+   return { id, dropped: true, worktree: session.worktree, branch: session.branch }
+ }
+diff --git a/plugins/git-workspace/selftest.finish.mjs b/plugins/git-workspace/selftest.finish.mjs
+index 1f40fdf..1a8ce0e 100644
+--- a/plugins/git-workspace/selftest.finish.mjs
++++ b/plugins/git-workspace/selftest.finish.mjs
+@@ -390,11 +390,58 @@ ok('pressure: 30 sessions, 15 merged, sweepMerged finishes exactly 15 in under 5
+     const id2 = 'plain1'
+     const s2 = openSession(proj, { id: id2, orgPath: proj, project: null, workspace: '' })
+     fs.writeFileSync(path.join(s2.worktree, 'p.txt'), 'plain\n')
+     runGit(['add', '.'], { cwd: s2.worktree })
+     runGit(['commit', '-m', 'feat: plain'], { cwd: s2.worktree })
+     sessionStageBoundary(proj, id2, { message: 'feat: plain' })
+     assert.ok(finishSession(proj, id2).finished)
+   })
+ }
+ 
++// ---- 8. Task 11 (A5): sandbox-work teardown guard -----------------------------
++// A session that ran in a Docker Sandbox may hold commits ONLY in the
++// microVM clone. Same guard, same seam as the A4 container row: teardown
++// must REFUSE until every sandbox commit is reachable from the host
++// recovery ref refs/sandboxes/<name>/<branch> — and change nothing when it
++// refuses.
++{
++  const id = 'sandbx1'
++  const s = openSession(proj, { id, orgPath: proj, project: null, workspace: '' })
++  fs.writeFileSync(path.join(s.worktree, 'microvm.txt'), 'sandbox work\n')
++  runGit(['add', '.'], { cwd: s.worktree })
++  runGit(['commit', '-m', 'feat: microvm work'], { cwd: s.worktree })
++  sessionStageBoundary(proj, id, { message: 'feat: microvm work' })
++  const tip = branchTip(proj, s.branch).sha
++
++  // A live sandbox registry row (what createSandbox wrote) whose head is
++  // not yet under the recovery ref.
++  const regDir = path.join(proj, '.arxa', 'sandboxes')
++  fs.mkdirSync(regDir, { recursive: true })
++  const row = {
++    sessionId: id, branch: s.branch, head: tip,
++    recoveryRef: `refs/sandboxes/arxa-sbx-${id}/${s.branch}`,
++    name: `arxa-sbx-${id}`, remote: `sandbox-arxa-sbx-${id}`, recovered: false,
++  }
++  fs.writeFileSync(path.join(regDir, `${id}.json`), JSON.stringify(row))
++
++  ok('finishSession refuses sandbox-work-unrecovered and changes nothing', () => {
++    assert.throws(
++      () => finishSession(proj, id),
++      (e) => e instanceof FinishRefusedError && e.reason === 'sandbox-work-unrecovered',
++    )
++    assert.ok(runGit(['branch', '--list', s.branch], { cwd: proj }) !== '', 'the branch survives the refusal')
++    assert.ok(listSessions(proj).some((x) => x.id === id), 'the registry row survives the refusal')
++  })
++
++  ok('dropSession refuses sandbox-work-unrecovered too', () => {
++    assert.throws(() => dropSession(proj, id), /sandbox-work-unrecovered/)
++    assert.ok(runGit(['branch', '--list', s.branch], { cwd: proj }) !== '')
++  })
++
++  ok('once the recovery ref holds the head, the sandbox session finishes', () => {
++    runGit(['update-ref', row.recoveryRef, tip], { cwd: proj })
++    const fin = finishSession(proj, id)
++    assert.ok(fin.finished)
++  })
++}
++
+ console.log(`# ${passed} passed`)
+diff --git a/plugins/sandbox/lib/effective-tier.js b/plugins/sandbox/lib/effective-tier.js
+index 0ba226c..7a67fe9 100644
+--- a/plugins/sandbox/lib/effective-tier.js
++++ b/plugins/sandbox/lib/effective-tier.js
+@@ -86,21 +86,24 @@ export function resolveEffectiveTier ({ configured, platform, runners = {} }) {
+   if (configured === 'A5') {
+     if (runners.sbx && runners.sbxAuthed) {
+       ceiling = Math.max(ceiling, 5)
+       reason = 'sbx is installed and signed in — the microVM tier is available on this machine'
+     } else if (runners.docker) {
+       // S3 #4: degrade to the highest tier ACTUALLY available — with the
+       // microVM out of reach but Docker running containers, that is A4.
+       ceiling = Math.max(ceiling, 4)
+       reason = (runners.sbx
+         ? 'sbx is installed but not signed in — the one-time browser sign-in is the only step arxa cannot automate (§23a)'
+-        : 'sbx (Docker Sandboxes) is not installed on this machine') + '; Docker is present, so degrading to A4 (the hardened-container tier), the best this machine can enforce'
++        // Task 11 (A5): the measured sbx detail (a stopped daemon is NOT
++        // "sbx is not installed") replaces the generic line, mirroring
++        // dockerReason — sbxStatus() feeds this.
++        : (runners.sbxReason ?? 'sbx (Docker Sandboxes) is not installed on this machine')) + '; Docker is present, so degrading to A4 (the hardened-container tier), the best this machine can enforce'
+     } else {
+       reason = runners.sbx
+         ? 'sbx is installed but not signed in — the one-time browser sign-in is the only step arxa cannot automate (§23a); degrading to the highest tier this machine can enforce'
+-        : 'sbx (Docker Sandboxes) is not installed on this machine; degrading to the highest tier this machine can enforce'
++        : (runners.sbxReason ?? 'sbx (Docker Sandboxes) is not installed on this machine') + '; degrading to the highest tier this machine can enforce'
+     }
+   }
+ 
+   const effectiveIdx = Math.min(configuredIdx, ceiling)
+   return { configured, effective: TIERS[effectiveIdx], reason }
+ }
+diff --git a/plugins/sandbox/lib/sbx-install.js b/plugins/sandbox/lib/sbx-install.js
+new file mode 100644
+index 0000000..9dde8a6
+--- /dev/null
++++ b/plugins/sandbox/lib/sbx-install.js
+@@ -0,0 +1,201 @@
++// arxa sbx-install — A5 sbx packaging/provisioning (Task 11 Step 2,
++// docs/plans/arxa-isolation-levels.md §23: "Install sbx — Yes … or
++// bundle/download the release artifact. Must not assume Homebrew.")
++//
++// THE DESIGN:
++//   * arxa provisions sbx itself: a checksum-pinned artifact from the
++//     official release feed, per shipped platform, installed into the
++//     arxa-managed state root (<arxaHome>/bin — ARXA_HOME relocatable, the
++//     same convention as bin/arxa-studio.mjs). NEVER /opt/homebrew, never
++//     /usr/local, never `brew anything`.
++//   * FAIL-CLOSED PINNING: an artifact without a measured sha256 pin is
++//     REFUSED — arxa does not download-and-run unverified binaries. The
++//     shipped SBX_PIN carries null checksums wherever unmeasured; the
++//     authorized external gate (Task 16) fills them from the official
++//     checksums before any real install.
++//   * Idempotent updater: a managed install at the pinned version
++//     re-downloads nothing; a stale one upgrades in place. An operator PATH
++//     install is DETECTED and used as-is — never modified, never shadowed
++//     (S3: detect rather than assume).
++//   * The daemon starts and diagnoses automatically (§23 checklist); a
++//     daemon that will not start is reported, never thrown.
++//
++// Every seam is injectable: downloader(url, dest), extract(archive, dir),
++// fs, which, runner. Unit tests never touch the operator install.
++
++import { spawnSync } from 'node:child_process'
++import { createHash } from 'node:crypto'
++import { homedir } from 'node:os'
++import { join, resolve } from 'node:path'
++
++import { whichOnPath } from './index.js'
++import { sbxStatus } from './sbx.js'
++
++/** The arxa-managed state root (same convention as bin/arxa-studio.mjs). */
++export function defaultStateRoot () {
++  return process.env.ARXA_HOME?.trim() ? resolve(process.env.ARXA_HOME) : join(homedir(), '.arxa')
++}
++
++/**
++ * The shipped pin. Version + artifact names follow the official feed
++ * (github.com/docker/sbx-releases); the sha256 values are UNSET until
++ * measured — planning against an unset pin refuses rather than trusting an
++ * unverified download. Task 16's authorized gate fills them from the
++ * release's official checksums.
++ * ponytail: single tar.gz-per-platform assumption; adjust file names/sha
++ * when the real asset shape is measured at the gate.
++ */
++export const SBX_PIN = {
++  version: '0.42.1',
++  base: 'https://github.com/docker/sbx-releases/releases/download',
++  artifacts: {
++    'darwin-arm64': { file: 'sbx_0.42.1_darwin_arm64.tar.gz', sha256: null },
++    'darwin-amd64': { file: 'sbx_0.42.1_darwin_amd64.tar.gz', sha256: null },
++    'linux-arm64': { file: 'sbx_0.42.1_linux_arm64.tar.gz', sha256: null },
++    'linux-amd64': { file: 'sbx_0.42.1_linux_amd64.tar.gz', sha256: null }
++  }
++}
++
++/**
++ * Resolve the pinned artifact for one platform+arch. Pure.
++ * @returns {{ supported: true, artifact: { url: string, file: string,
++ *   sha256: string } } | { supported: false, reason: string }}
++ */
++export function planSbxInstall ({ pin = SBX_PIN, platform = process.platform, arch = process.arch }) {
++  const archKey = arch === 'x64' ? 'amd64' : arch
++  const key = `${platform}-${archKey}`
++  const artifact = pin.artifacts[key]
++  if (artifact === undefined) {
++    return { supported: false, reason: `no pinned sbx artifact for ${key} — the A5 tier stays unavailable on this platform; degrading to the highest tier this machine can enforce` }
++  }
++  if (typeof artifact.sha256 !== 'string' || artifact.sha256 === '') {
++    return { supported: false, reason: `the sbx checksum pin for ${key} is unmeasured — arxa refuses to download and run an unverified binary (fail-closed); the authorized external gate fills the pin from the official release checksums` }
++  }
++  return { supported: true, artifact: { url: `${pin.base}/${artifact.file}`, file: artifact.file, sha256: artifact.sha256 }, version: pin.version }
++}
++
++/** The default downloader: node fetch → bytes → dest (no curl/wget). */
++async function defaultDownloader (url, dest) {
++  const { writeFileSync } = await import('node:fs')
++  const r = await fetch(url)
++  if (!r.ok) throw new Error(`sbx-install: download failed (${r.status} ${url})`)
++  writeFileSync(dest, Buffer.from(await r.arrayBuffer()))
++}
++
++/** The default extractor: a plain tar.gz. */
++function defaultExtract (archive, dir) {
++  const r = spawnSync('tar', ['-xzf', archive, '-C', dir], { encoding: 'utf8', timeout: 120000 })
++  if (r.status !== 0) throw new Error(`sbx-install: extraction failed: ${(r.stderr || '').slice(0, 200)}`)
++}
++
++/**
++ * Ensure sbx exists on this machine, arxa-managed when possible:
++ *   1. a managed install at the pinned version is the live answer
++ *      (idempotent — re-downloads nothing);
++ *   2. an operator PATH install is detected and used as-is, never touched;
++ *   3. otherwise download the pinned artifact, VERIFY ITS CHECKSUM, extract
++ *      into the state root and stamp the version (the updater path — a
++ *      stale stamp upgrades in place).
++ *
++ * @param {object} deps - injection seam (tests): `{ stateRoot, pin,
++ *   platform, arch, which, downloader, extract, fs }`.
++ * @returns {Promise<{ installed: boolean, cli?: string, managed?: string,
++ *   version?: string, already?: boolean, upgraded?: boolean, reason? }>}
++ * @throws only on an INTEGRITY violation (checksum mismatch) — an
++ *   unsupported platform or unavailable artifact is a reported degrade,
++ *   not an exception.
++ */
++export async function ensureSbxInstalled (deps = {}) {
++  const fs = deps.fs ?? (await import('node:fs'))
++  const which = deps.which ?? whichOnPath
++  const root = resolve(deps.stateRoot ?? defaultStateRoot())
++  const binDir = join(root, 'bin')
++  const cliPath = join(binDir, 'sbx')
++  const stampPath = join(binDir, 'sbx.version')
++  const pin = deps.pin ?? SBX_PIN
++
++  // 1. Idempotent: the stamp answers before any download.
++  if (fs.existsSync(cliPath) && fs.existsSync(stampPath) && fs.readFileSync(stampPath, 'utf8').trim() === pin.version) {
++    return { installed: true, managed: 'arxa', cli: cliPath, version: pin.version, already: true }
++  }
++
++  // 2. An operator PATH install is used as-is (S3) — never modified.
++  const onPath = which('sbx')
++  if (onPath !== undefined && !fs.existsSync(cliPath)) {
++    return { installed: true, managed: 'operator-path', cli: onPath }
++  }
++
++  // 3. Provision from the pinned artifact.
++  const plan = planSbxInstall({ pin, platform: deps.platform, arch: deps.arch })
++  if (!plan.supported) return { installed: false, reason: plan.reason }
++
++  const downloader = deps.downloader ?? defaultDownloader
++  const extract = deps.extract ?? defaultExtract
++  const upgraded = fs.existsSync(cliPath)
++  const archive = join(binDir, '.sbx-download.tmp')
++  const extractDir = join(binDir, '.sbx-extract')
++  fs.mkdirSync(binDir, { recursive: true })
++  try {
++    await downloader(plan.artifact.url, archive)
++    const digest = createHash('sha256').update(fs.readFileSync(archive)).digest('hex')
++    if (digest !== plan.artifact.sha256) {
++      throw new Error(`sbx-install: checksum verification FAILED for ${plan.artifact.file} — expected ${plan.artifact.sha256.slice(0, 12)}…, got ${digest.slice(0, 12)}…; refusing to install unverified bytes`)
++    }
++    fs.rmSync(extractDir, { recursive: true, force: true })
++    fs.mkdirSync(extractDir, { recursive: true })
++    await extract(archive, extractDir)
++    const extracted = join(extractDir, 'sbx')
++    if (!fs.existsSync(extracted)) throw new Error('sbx-install: the artifact did not contain an `sbx` binary — pin table does not match the release shape')
++    fs.rmSync(cliPath, { force: true })
++    fs.copyFileSync(extracted, cliPath)
++    fs.chmodSync(cliPath, 0o755)
++    fs.writeFileSync(stampPath, plan.version + '\n')
++    return { installed: true, managed: 'arxa', cli: cliPath, version: plan.version, ...(upgraded ? { upgraded: true } : {}) }
++  } finally {
++    fs.rmSync(archive, { force: true })
++    fs.rmSync(extractDir, { recursive: true, force: true })
++  }
++}
++
++/**
++ * Start the sandboxd daemon and verify it answered. `sbx daemon start` is
++ * idempotent; `sbx daemon status` prints the truth ("Status: stopped"
++ * exits 0 — the TEXT decides). `sbx diagnose` output is captured for the
++ * card. A daemon that will not start is REPORTED, never thrown.
++ * @returns {Promise<{ daemon: boolean, status?: string, diagnostics?: string,
++ *   reason?: string }>}
++ */
++export async function ensureSbxDaemon (cli = 'sbx', deps = {}) {
++  const runner = deps.runner ?? (async (argv, opts) => {
++    const r = spawnSync(argv[0], argv.slice(1), { ...opts, encoding: 'utf8', timeout: opts?.timeout ?? 60000, maxBuffer: 16 * 1024 * 1024 })
++    return { code: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
++  })
++  await runner([cli, 'daemon', 'start'], { timeout: 60000 })
++  const statusR = await runner([cli, 'daemon', 'status'], { timeout: 15000 })
++  const status = /Status:\s*(\w+)/.exec(statusR.stdout)?.[1]
++  const daemon = status === 'running'
++  const diagR = await runner([cli, 'diagnose'], { timeout: 30000 }).catch(() => ({ code: 1, stdout: '', stderr: '' }))
++  return {
++    daemon,
++    status,
++    diagnostics: daemon ? (diagR.stdout || '').trim().slice(0, 4000) : undefined,
++    ...(daemon ? {} : { reason: `the sandboxd daemon did not come up (status: ${status ?? 'unreachable'}) — the A5 tier cannot run here; degrading to the highest tier this machine can enforce` })
++  }
++}
++
++/**
++ * The full §23 provisioning leg short of the two operator-owned steps:
++ * install (arxa-managed, checksum-pinned), daemon (started + diagnosed),
++ * status (version/auth). NEVER signs in (§23a) and NEVER touches policy
++ * (§22a) — those belong to the operator and the authorized gate.
++ * @returns {Promise<object>} the composed truthful machine state.
++ */
++export async function ensureSbxRuntime (deps = {}) {
++  const inst = await ensureSbxInstalled(deps)
++  if (!inst.installed) {
++    return { installed: false, daemon: false, authed: false, install: inst, reason: inst.reason }
++  }
++  const daemon = await ensureSbxDaemon(inst.cli, deps)
++  const status = await sbxStatus({ which: () => inst.cli, runner: deps.statusRunner ?? deps.runner })
++  return { ...status, install: inst, daemon: daemon.daemon && status.daemon, daemonDetail: daemon, runners: { ...status.runners, sbx: daemon.daemon && status.runners.sbx } }
++}
+diff --git a/plugins/sandbox/lib/sbx.js b/plugins/sandbox/lib/sbx.js
+new file mode 100644
+index 0000000..d05d185
+--- /dev/null
++++ b/plugins/sandbox/lib/sbx.js
+@@ -0,0 +1,491 @@
++// arxa sbx — A5 Docker Sandbox (microVM) isolation (Task 11, docs/plans/
++// arxa-isolation-levels.md §§21–24/S3/S4).
++//
++// THE DESIGN, from the plan:
++//   * A5 is the ONLY tier allowed to require a Docker account (§23b). Every
++//     missing piece — CLI, daemon, sign-in — degrades with a truthful reason
++//     (to A4, then A0–A3) and NEVER blocks a session (S3 #4).
++//   * `sbx login` is an OAuth device-code flow with no headless path (§23a);
++//     arxa never touches credentials, so the argv is ALWAYS bare
++//     `['sbx','login']` — never --username, never --password-stdin. Failure
++//     (including Auth0's "Global rate limit exceeded") is an expected,
++//     retryable state, never a crash.
++//   * sbx ships with NO network policy (§22a): arxa plans exactly
++//     `sbx policy init deny-all` (reset first when a wider posture already
++//     exists — init is one-time), but applying it is GLOBAL one-time state
++//     and belongs to the authenticated external gate after explicit operator
++//     authorization (Task 16). ensurePolicy only ever READS.
++//   * The clone/start/fetch loop (§24): `sbx create --clone --name <n>
++//     <agent> <path>` mounts the host source read-only and the agent works
++//     in an in-container clone wired back via a git daemon. The daemon port
++//     is EPHEMERAL (observed 49152→49153→49154) — resolve it from `sbx ls`
++//     on EVERY start and never persist the URL; a stopped sandbox has no
++//     daemon, so wake it (`sbx exec <name> true` starts a stopped one)
++//     before any fetch; the advertised remote is NOT added by sbx — arxa
++//     adds and maintains it host-side.
++//   * SAFETY INVARIANT (binding): `sbx rm --force` runs ONLY after every
++//     sandbox commit is verified reachable from the host recovery ref, and
++//     refs/sandboxes/<name>/<branch> is RETAINED as recovery evidence —
++//     teardown never deletes it. Removing a sandbox does not reclaim the
++//     image cache (~2.4 GB retained by design, §24e); removeSandbox reports
++//     the retained cache separately from reclaimed workspace bytes.
++//
++// Registry rows live in `<repo>/.arxa/sandboxes/<slug>.json`, mirroring the
++// A4 container registry. Every runner call is argv-form through an
++// injectable runner; a non-zero exit is DATA, not an exception.
++
++import { execFile, spawnSync } from 'node:child_process'
++import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
++import { join, resolve } from 'node:path'
++import { promisify } from 'node:util'
++
++import { whichOnPath } from './index.js'
++
++const runFile = promisify(execFile)
++
++/** The default runner: real subprocesses, argv form only, bounded output
++ * and time. Structured `{ code, stdout, stderr }` — refusal paths report
++ * honestly instead of throwing. */
++async function defaultRunner (argv, opts = {}) {
++  try {
++    const r = await runFile(argv[0], argv.slice(1), {
++      cwd: opts.cwd,
++      encoding: 'utf8',
++      maxBuffer: 16 * 1024 * 1024,
++      timeout: opts.timeout ?? 15000
++    })
++    return { code: 0, stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
++  } catch (err) {
++    return { code: err.code === undefined ? 1 : (typeof err.code === 'number' ? err.code : 1), stdout: err.stdout ?? '', stderr: err.stderr ?? String(err?.message ?? err) }
++  }
++}
++
++/** A docker/sbx-safe slug for one session's names. */
++const slugFor = (sessionId) => String(sessionId).replace(/[^a-z0-9-]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase()
++
++/** Branch names reach refspecs — only the git-safe alphabet is accepted. */
++const BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/
++
++/** The registry row for one session's sandbox: `<repo>/.arxa/sandboxes/`. */
++const registryPathFor = (repo, sessionId) => join(repo, '.arxa', 'sandboxes', `${slugFor(sessionId)}.json`)
++
++function writeRegistry (repo, row) {
++  mkdirSync(join(repo, '.arxa', 'sandboxes'), { recursive: true })
++  writeFileSync(registryPathFor(repo, row.sessionId), JSON.stringify(row, null, 2) + '\n')
++}
++
++/** Read one session's registry row, or null when it never had a sandbox. */
++export function readSandboxRegistry (repo, sessionId) {
++  const p = registryPathFor(resolve(String(repo)), sessionId)
++  if (!existsSync(p)) return null
++  try { return JSON.parse(readFileSync(p, 'utf8')) } catch { return null }
++}
++
++const UNAUTH_RE = /401|unauthorized|no valid user session/i
++
++/**
++ * Measure the sbx machine state: CLI, version (through the update-banner
++ * noise), daemon health (`sbx daemon status` prints "Status: stopped" with
++ * exit 0 — the TEXT is the truth, not the code) and sign-in (`sbx ls`
++ * 401s until the one-time browser login). Pure probing; never installs,
++ * never signs in, never starts the daemon itself.
++ *
++ * @param {object} [deps] - injection seam (tests): `{ which, runner }`.
++ * @returns {Promise<{ installed: boolean, cli: string | undefined,
++ *   version?: string, updateAvailable?: string, daemon: boolean,
++ *   daemonStatus?: string, authed: boolean, reason: string,
++ *   runners: { sbx: boolean, sbxAuthed: boolean, sbxReason: string } }>} the
++ *   truthful machine state, ready to feed resolveEffectiveTier.
++ */
++export async function sbxStatus (deps = {}) {
++  const which = deps.which ?? whichOnPath
++  const runner = deps.runner ?? defaultRunner
++  const absent = 'sbx (Docker Sandboxes) is not installed on this machine'
++  const cli = which('sbx')
++  if (cli === undefined) {
++    return { installed: false, cli, daemon: false, authed: false, reason: absent + ' — degrading to the highest tier this machine can enforce', runners: { sbx: false, sbxAuthed: false, sbxReason: absent } }
++  }
++
++  const versionR = await runner([cli, 'version'])
++  const version = /sbx version:\s*v?(\d+\.\d+\.\d+)/.exec(versionR.stdout)?.[1]
++  const updateAvailable = /→\s*v?(\d+\.\d+\.\d+)/.exec(versionR.stdout)?.[1]
++
++  const daemonR = await runner([cli, 'daemon', 'status'])
++  const daemonStatus = /Status:\s*(\w+)/.exec(daemonR.stdout)?.[1]
++  const daemon = daemonStatus === 'running'
++
++  const lsR = await runner([cli, 'ls'])
++  const authed = lsR.code === 0 && !UNAUTH_RE.test(lsR.stderr + lsR.stdout)
++
++  let sbxReason
++  if (!daemon) {
++    sbxReason = `sbx is installed${version ? ` (v${version})` : ''} but the sandboxd daemon is ${daemonStatus ?? 'unreachable'} — start it with \`sbx daemon start\``
++  } else if (!authed) {
++    sbxReason = 'sbx is installed and the daemon is healthy but not signed in — the one-time browser sign-in is the only step arxa cannot automate (§23a)'
++  } else {
++    sbxReason = 'sbx is installed and signed in — the microVM tier is available on this machine'
++  }
++  return {
++    installed: true,
++    cli,
++    version,
++    updateAvailable,
++    daemon,
++    daemonStatus,
++    authed,
++    reason: sbxReason,
++    runners: { sbx: daemon, sbxAuthed: authed, sbxReason }
++  }
++}
++
++/**
++ * Launch the one unautomatable step: the OAuth device-code sign-in (§23a).
++ * arxa never handles credentials, so the argv is always bare
++ * `['sbx','login']` — the flow prints its own code + activation URL for a
++ * human to confirm in a browser. Every failure is DATA (retryable or not),
++ * never a crash, and never blocks the session — the caller degrades to the
++ * best available tier (S3 #4). The reason text is CLASSIFIED, never the raw
++ * stderr echo: login output carries the device code, an OAuth code arxa
++ * must not print.
++ *
++ * @param {object} [deps] - injection seam (tests): `{ cli, runner }`.
++ * @returns {Promise<{ signedIn: boolean, retryable: boolean, degrade: 'A4',
++ *   reason: string }>}
++ */
++export async function sbxLoginFlow (deps = {}) {
++  const which = deps.which ?? whichOnPath
++  const runner = deps.runner ?? defaultRunner
++  const cli = deps.cli ?? which('sbx')
++  if (cli === undefined) {
++    return { signedIn: false, retryable: false, degrade: 'A4', reason: 'sbx is not installed — nothing to sign in to' }
++  }
++  const r = await runner([cli, 'login'], { timeout: 600000 })
++  if (r.code === 0) return { signedIn: true, retryable: false, degrade: null, reason: 'signed in to Docker — the A5 microVM tier is now available' }
++  const err = r.stderr + r.stdout
++  if (/rate limit/i.test(err)) {
++    return { signedIn: false, retryable: true, degrade: 'A4', reason: 'upstream sign-in rate limit (Auth0 "Global rate limit exceeded") — nothing is wrong locally; retry later' }
++  }
++  if (/cancel|abort|EOF|stdin is not a terminal/i.test(err)) {
++    return { signedIn: false, retryable: true, degrade: 'A4', reason: 'sign-in was cancelled before the browser confirmation — retry when ready; the session runs at the best available tier meanwhile' }
++  }
++  return { signedIn: false, retryable: true, degrade: 'A4', reason: 'sign-in did not complete — run sbx login to see the device code and retry; the session runs at the best available tier meanwhile' }
++}
++
++/**
++ * Plan the global network policy WITHOUT touching global state (§22a, Step
++ * 4): read `sbx policy ls`, classify the posture, and surface the exact
++ * argv the AUTHORIZED EXTERNAL GATE (Task 16) must run. Applying it here
++ * would be a global, one-time mutation of operator state — out of bounds
++ * for in-product code. The only argv this function ever runs is the
++ * read-only `sbx policy ls`.
++ *
++ * @param {object} [deps] - injection seam (tests): `{ runner }`.
++ * @returns {Promise<{ current: string, compliant: boolean, changes:
++ *   string[][], perSandbox: { name: string, source: string, appliesTo:
++ *   string, summary: string }[], applied: false, note: string }>} the plan.
++ *   `changes` is empty when the posture is already deny-all (or unreadable —
++ *   an unauthenticated/failed read plans nothing; the gate signs in first).
++ */
++export async function ensurePolicy (deps = {}) {
++  const runner = deps.runner ?? defaultRunner
++  const r = await runner(['sbx', 'policy', 'ls'])
++  const text = (r.stdout ?? '') + (r.stderr ?? '')
++
++  if (UNAUTH_RE.test(text)) {
++    return { current: 'unauthenticated', compliant: false, changes: [], perSandbox: [], applied: false, note: 'sbx is not signed in — the external gate signs in (sbx login) before reviewing and applying any policy plan' }
++  }
++  if (/has not been initialized/i.test(text)) {
++    return { current: 'uninitialized', compliant: false, changes: [['sbx', 'policy', 'init', 'deny-all']], perSandbox: [], applied: false, note: 'sbx ships with NO policy (§22a) — the plan is the exact argv for the authorized external gate (Task 16); arxa never mutates global policy in-product' }
++  }
++
++  // The policy table: POLICY / SOURCE / APPLIES TO / SUMMARY, 2+ spaces
++  // between columns (measured §22a/§24e).
++  const perSandbox = []
++  let current = 'unknown'
++  for (const line of text.split('\n')) {
++    const m = /^(\S+)\s{2,}(\S+)\s{2,}(\S+(?:\s\S+)*?)\s{2,}(.+)$/.exec(line)
++    if (!m || m[1] === 'POLICY') continue
++    if (m[3] === 'all' && /deny-all/.test(m[1])) current = 'deny-all'
++    else if (m[3] === 'all' && /allow-all/.test(m[1])) current = 'allow-all'
++    else if (m[3] === 'all' && /balanced/.test(m[1] + m[4])) current = 'balanced'
++    if (m[3] !== 'all') perSandbox.push({ name: m[1], source: m[2], appliesTo: m[3], summary: m[4].trim() })
++  }
++
++  if (current === 'deny-all') {
++    return { current, compliant: true, changes: [], perSandbox, applied: false, note: 'the global posture is already deny-all — nothing to plan; per-sandbox rules are lifecycle-bound and disappear with their sandbox (§24e)' }
++  }
++  if (current === 'unknown') {
++    return { current, compliant: false, changes: [], perSandbox, applied: false, note: 'the policy read was unreadable — plan nothing blind; the external gate re-reads and decides' }
++  }
++  // init is one-time ("once initialized, use sbx policy reset to start
++  // over" — §22a), so a wider existing posture needs reset first.
++  return { current, compliant: false, changes: [['sbx', 'policy', 'reset'], ['sbx', 'policy', 'init', 'deny-all']], perSandbox, applied: false, note: `the global posture is ${current} — the plan resets to a clean slate then initializes deny-all; exact argv for the authorized external gate (Task 16), never applied in-product` }
++}
++
++// ---- the lifecycle (Steps 5–6) -----------------------------------------------
++
++/**
++ * Resolve and guard a project repo path before any mutation: refuse the
++ * reserved `.git`/`.arxa` segments (root confinement) and symlink escape.
++ * @param {string} projectRepo - the repo root as the caller spells it.
++ * @returns {string} the realpath'd repo root.
++ */
++function resolveRepoGuarded (projectRepo) {
++  const repo = resolve(String(projectRepo))
++  for (const seg of repo.split(/[/\\]/)) {
++    if (seg === '.git' || seg === '.arxa') {
++      throw new Error(`sbx: refusing to sandbox inside reserved path '${seg}' (${repo})`)
++    }
++  }
++  if (existsSync(repo)) return realpathSync(repo)
++  return repo
++}
++
++/**
++ * Create one session's clone-mode sandbox (§24): `sbx create --clone --name
++ * <n> <agent> <path>` mounts the host source READ-ONLY (verified by the
++ * tool's own refused write, §24a) and the agent works in an in-container
++ * clone wired back via a git daemon. Idempotent: an existing registry row
++ * IS the live handle.
++ *
++ * @param {{ repoPath: string, branch: string, sessionId: string,
++ *   agent?: string }} input - the owning repo, the session branch (never
++ *   main), the session id, the agent kit.
++ * @param {object} [deps] - injection seam (tests): `{ runner }`.
++ * @returns {Promise<object>} the sandbox handle (name, remote,
++ *   recoveryRef, registryPath). Never a port or URL — those are ephemeral
++ *   and resolved per start (§24d).
++ */
++export async function createSandbox ({ repoPath, branch, sessionId, agent }, deps = {}) {
++  const runner = deps.runner ?? defaultRunner
++  if (typeof branch !== 'string' || !BRANCH_RE.test(branch)) throw new Error(`sbx: refusing branch ${JSON.stringify(branch)} — not a branch name this lifecycle will clone`)
++  if (branch === 'main' || branch === 'master') throw new Error(`sbx: refusing to run the sandbox on '${branch}' — A5 sessions work on their own branch, never on project main`)
++  if (typeof sessionId !== 'string' || sessionId.trim() === '') throw new TypeError('sbx: sessionId is required')
++
++  const repo = resolveRepoGuarded(repoPath)
++  const existing = readSandboxRegistry(repo, sessionId)
++  if (existing !== null) return existing
++
++  const name = `arxa-sbx-${slugFor(sessionId)}`
++  const r = await runner(['sbx', 'create', '--clone', '--name', name, agent ?? 'claude', repo], { cwd: repo, timeout: 600000 })
++  if (r.code !== 0) {
++    throw new Error(`sbx: create of ${name} failed: ${(r.stderr || r.stdout).trim().slice(0, 400)}`)
++  }
++  const handle = {
++    sessionId, branch, repoPath: repo, name,
++    remote: `sandbox-${name}`,
++    recoveryRef: `refs/sandboxes/${name}/${branch}`,
++    registryPath: registryPathFor(repo, sessionId)
++  }
++  writeRegistry(repo, { ...handle, head: null, insideBranch: null, recovered: false, createdAt: Date.now() })
++  return handle
++}
++
++/**
++ * Resolve the sandbox's git-daemon endpoint FRESH from `sbx ls` — the port
++ * is ephemeral (observed 49152→49153→49154 across restarts, §24d), so the
++ * URL is never persisted anywhere. A stopped or removed sandbox has no
++ * port: that state REFUSES rather than guessing.
++ *
++ * @param {string} name - the sandbox name.
++ * @param {object} [deps] - injection seam (tests): `{ runner, json }`.
++ * @returns {Promise<{ name: string, endpoint: string, port: number }>}
++ */
++export async function resolveGitEndpoint (name, deps = {}) {
++  const runner = deps.runner ?? defaultRunner
++  const wantJson = deps.json !== false
++  const r = await runner(['sbx', 'ls', ...(wantJson ? ['--json'] : [])], { timeout: 15000 })
++  if (r.code !== 0) {
++    throw new Error(`sbx: cannot list sandboxes to resolve the git endpoint for ${name}: ${(r.stderr || r.stdout).trim().slice(0, 200)}`)
++  }
++  if (wantJson) {
++    try {
++      const entries = JSON.parse(r.stdout).sandboxes
++      const entry = Array.isArray(entries) ? entries.find((e) => e?.name === name) : undefined
++      if (entry !== undefined) {
++        // ponytail: the per-entry shape is read tolerantly (any git:// URL on
++        // the entry) — the real v0.39 field name is verified at Task 16's gate.
++        const endpoint = /git:\/\/[^\s"',]+/.exec(JSON.stringify(entry))?.[0]
++        if (endpoint !== undefined) {
++          return { name, endpoint, port: Number(/:(\d+)\//.exec(endpoint)?.[1] ?? 0) }
++        }
++      }
++    } catch { /* fall through to the text shape */ }
++  }
++  // Text shape: the line starting with the name carries the PORTS column.
++  for (const line of r.stdout.split('\n')) {
++    if (!line.trimStart().startsWith(name)) continue
++    const port = /\b(49\d{3}|[1-6]\d{4})\b/.exec(line)?.[1]
++    const workspace = /\s(\S+)\s*$/.exec(line.trimEnd())?.[1]
++    if (port !== undefined) {
++      const repoName = workspace ? workspace.split('/').filter(Boolean).pop() : 'repo'
++      const endpoint = `git://127.0.0.1:${port}/${repoName}`
++      return { name, endpoint, port: Number(port) }
++    }
++  }
++  throw new Error(`sbx: no reachable git endpoint for ${name} — the sandbox is stopped or gone; never a stale URL (§24d)`)
++}
++
++/**
++ * Wake the sandbox and resolve its CURRENT git endpoint. `sbx exec <name>
++ * true` starts a stopped sandbox first (measured, §24d #2) — the agent's
++ * work is only reachable while the sandbox runs, so the wake precedes every
++ * fetch.
++ * @returns {Promise<{ name: string, endpoint: string, port: number,
++ *   started: boolean }>}
++ */
++export async function startSandbox (handle, deps = {}) {
++  const runner = deps.runner ?? defaultRunner
++  const wake = await runner(['sbx', 'exec', handle.name, 'true'], { timeout: 120000 })
++  if (wake.code !== 0) {
++    throw new Error(`sbx: cannot wake ${handle.name}: ${(wake.stderr || wake.stdout).trim().slice(0, 200)}`)
++  }
++  const resolved = await resolveGitEndpoint(handle.name, deps)
++  return { ...resolved, started: true }
++}
++
++/**
++ * Bring the sandbox's commits back to the host: wake, resolve the endpoint
++ * fresh, add/maintain the host remote (sbx does NOT add it — §24d #3),
++ * fetch the in-sandbox branch into the RECOVERY REF
++ * `refs/sandboxes/<name>/<branch>`, then verify reachability by ancestry.
++ * Idempotent.
++ *
++ * @param {object} handle - the createSandbox handle.
++ * @param {object} [deps] - injection seam (tests): `{ runner }`.
++ * @returns {Promise<{ sandboxHead: string, recoveryRef: string,
++ *   reachable: boolean }>} `reachable` false is a reported state, not an
++ *   exception — teardown reads it as a refusal.
++ */
++export async function fetchSandboxCommits (handle, deps = {}) {
++  const runner = deps.runner ?? defaultRunner
++  const repo = resolveRepoGuarded(handle.repoPath)
++  const { endpoint } = await startSandbox(handle, deps)
++
++  const headR = await runner(['sbx', 'exec', handle.name, 'git', 'rev-parse', 'HEAD'], { timeout: 60000 })
++  if (headR.code !== 0) throw new Error(`sbx: cannot read the in-sandbox HEAD of ${handle.name}: ${(headR.stderr || headR.stdout).trim().slice(0, 200)}`)
++  const sandboxHead = headR.stdout.trim()
++
++  const branchR = await runner(['sbx', 'exec', handle.name, 'git', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeout: 60000 })
++  // ponytail: single-branch fetch of the in-sandbox HEAD branch; widen the
++  // refspec when a session ever needs cross-branch recovery.
++  const insideBranch = branchR.code === 0 && BRANCH_RE.test(branchR.stdout.trim()) ? branchR.stdout.trim() : handle.branch
++  const recoveryRef = `refs/sandboxes/${handle.name}/${insideBranch}`
++
++  // Remote maintenance: add when absent, follow the port when stale.
++  const getR = await runner(['git', '-C', repo, 'remote', 'get-url', handle.remote])
++  if (getR.code !== 0) {
++    const add = await runner(['git', '-C', repo, 'remote', 'add', handle.remote, endpoint])
++    if (add.code !== 0) throw new Error(`sbx: cannot add host remote ${handle.remote}: ${add.stderr.trim().slice(0, 200)}`)
++  } else if (getR.stdout.trim() !== endpoint) {
++    const set = await runner(['git', '-C', repo, 'remote', 'set-url', handle.remote, endpoint])
++    if (set.code !== 0) throw new Error(`sbx: cannot update host remote ${handle.remote}: ${set.stderr.trim().slice(0, 200)}`)
++  }
++
++  const fetch = await runner(['git', '-C', repo, 'fetch', endpoint, `+refs/heads/${insideBranch}:${recoveryRef}`], { timeout: 60000 })
++  if (fetch.code !== 0) throw new Error(`sbx: host git fetch into ${recoveryRef} failed: ${fetch.stderr.trim().slice(0, 200)}`)
++
++  const reach = await runner(['git', '-C', repo, 'merge-base', '--is-ancestor', sandboxHead, recoveryRef])
++  const reachable = reach.code === 0
++  const row = readSandboxRegistry(repo, handle.sessionId)
++  writeRegistry(repo, { ...row, ...handle, head: sandboxHead, insideBranch, recoveryRef, recovered: reachable, fetchedAt: Date.now() })
++  return { sandboxHead, recoveryRef, reachable }
++}
++
++/** Is the named sandbox verifiably absent from `sbx ls`? An unreadable list
++ * is UNVERIFIED, which counts as still-present (the conservative answer
++ * keeps the guard armed — mirrors A4's objectGone). */
++async function sandboxGone (runner, name) {
++  const r = await runner(['sbx', 'ls', '--json'], { timeout: 15000 })
++  if (r.code !== 0) return false
++  try {
++    const entries = JSON.parse(r.stdout).sandboxes
++    return !(Array.isArray(entries) && entries.some((e) => e?.name === name))
++  } catch {
++    return !r.stdout.split('\n').some((l) => l.trimStart().startsWith(name))
++  }
++}
++
++/** The retained image cache's home (darwin; undefined elsewhere). */
++const defaultStorePath = () => process.platform === 'darwin'
++  ? join(process.env.HOME ?? '', 'Library', 'Application Support', 'com.docker.sandboxes')
++  : undefined
++
++/** du -sk through the runner; 0 when there is nothing measurable. */
++async function storeBytes (runner, storePath) {
++  if (storePath === undefined || !existsSync(storePath)) return 0
++  const r = await runner(['du', '-sk', storePath], { timeout: 60000 })
++  const kb = Number(/^\s*(\d+)/.exec(r.stdout)?.[1] ?? 0)
++  return Number.isFinite(kb) ? kb * 1024 : 0
++}
++
++/**
++ * Remove one session's sandbox — SAFELY. The binding invariant: `sbx rm
++ * --force` runs ONLY after every sandbox commit is verified reachable from
++ * the host recovery ref, and `refs/sandboxes/<name>/<branch>` is RETAINED
++ * as recovery evidence (never deleted). A failed rm whose absence cannot be
++ * verified is a REFUSAL, not a shrug: the registry row stays so recovery
++ * stays armed. The retained image cache is reported SEPARATELY from
++ * reclaimed workspace bytes (§24e — removing a sandbox does not reclaim
++ * the cache; that is desirable, and the accounting must not lie).
++ *
++ * @param {object} handle - the createSandbox handle.
++ * @param {object} [deps] - injection seam (tests): `{ runner, storePath }`.
++ * @returns {Promise<{ removed: boolean, alreadyGone?: boolean,
++ *   retainedImageCache?: boolean, cacheBytes?: number,
++ *   reclaimedWorkspaceBytes?: number, note?: string }>}
++ */
++export async function removeSandbox (handle, deps = {}) {
++  const runner = deps.runner ?? defaultRunner
++  const repo = resolveRepoGuarded(handle.repoPath)
++  const row = readSandboxRegistry(repo, handle.sessionId)
++  if (row === null) return { removed: false, alreadyGone: true }
++
++  const storePath = deps.storePath ?? defaultStorePath()
++  const cacheBefore = await storeBytes(runner, storePath)
++
++  // Recover first; fall back to the last recorded head when the sandbox is
++  // already gone (exec cannot answer).
++  let sandboxHead = row.head
++  try {
++    const f = await fetchSandboxCommits({ ...handle, ...row }, deps)
++    sandboxHead = f.sandboxHead
++  } catch {
++    sandboxHead = row.head
++  }
++  const reach = await runner(['git', '-C', repo, 'merge-base', '--is-ancestor', String(sandboxHead), row.recoveryRef])
++  if (reach.code !== 0) {
++    throw new Error(`sbx: refusing teardown — sandbox commits (${String(sandboxHead).slice(0, 12)}) are not reachable from ${row.recoveryRef}; run fetchSandboxCommits first — the recovery ref stays as evidence`)
++  }
++  const rm = await runner(['sbx', 'rm', '--force', row.name], { timeout: 300000 })
++  if (rm.code !== 0 && !(await sandboxGone(runner, row.name))) {
++    throw new Error(`sbx: refusing teardown bookkeeping — sbx rm of ${row.name} failed (${(rm.stderr || rm.stdout).trim().slice(0, 200)}) and its absence cannot be verified; the registry row stays so recovery stays armed`)
++  }
++  const cacheAfter = await storeBytes(runner, storePath)
++  rmSync(registryPathFor(repo, handle.sessionId), { force: true })
++  return {
++    removed: true,
++    retainedImageCache: true,
++    cacheBytes: cacheAfter,
++    reclaimedWorkspaceBytes: Math.max(0, cacheBefore - cacheAfter),
++    note: 'the image cache is retained by design (~2.4 GB — the next create is fast); removing a sandbox does not reclaim it — sbx prune / image reclamation is separate (§24e)'
++  }
++}
++
++/**
++ * The SYNC teardown guard (consumed by git-workspace's finishSession /
++ * dropSession): every sandbox commit must be reachable from the host
++ * recovery ref before any branch-dropping teardown. Pure read — no sbx.
++ * @returns {{ unrecovered: number, head: string | null, recoveryRef: string |
++ *   null }} unrecovered > 0 refuses teardown.
++ */
++export function unrecoveredSandboxCommits (repoPath, sessionId) {
++  const repo = resolve(String(repoPath))
++  const row = readSandboxRegistry(repo, sessionId)
++  if (row === null) return { unrecovered: 0, head: null, recoveryRef: null }
++  const head = row.head ?? null
++  const recoveryRef = row.recoveryRef ?? null
++  if (head === null || recoveryRef === null) return { unrecovered: 1, head, recoveryRef }
++  const r = spawnSync('git', ['-C', repo, 'merge-base', '--is-ancestor', head, recoveryRef], { encoding: 'utf8', timeout: 10000 })
++  return { unrecovered: r.status === 0 ? 0 : 1, head, recoveryRef }
++}
+diff --git a/plugins/sandbox/package.json b/plugins/sandbox/package.json
+index 6260cfe..fd46c3a 100644
+--- a/plugins/sandbox/package.json
++++ b/plugins/sandbox/package.json
+@@ -1,13 +1,15 @@
+ {
+   "name": "arxa-sandbox",
+   "version": "0.1.0",
+   "private": true,
+   "type": "module",
+   "description": "The arxa SandboxProvider (S1): dsh's LocalSandboxProvider with the runtime-resolved Flutter/Dart toolchain caches added to workspace-write's writable roots.",
+   "main": "lib/index.js",
+   "exports": {
+     ".": "./lib/index.js",
+     "./devcontainer": "./lib/devcontainer.js",
+-    "./project-database": "./lib/project-database.js"
++    "./project-database": "./lib/project-database.js",
++    "./sbx": "./lib/sbx.js",
++    "./sbx-install": "./lib/sbx-install.js"
+   }
+ }
+diff --git a/plugins/sandbox/selftest.sbx-install.mjs b/plugins/sandbox/selftest.sbx-install.mjs
+new file mode 100644
+index 0000000..f01e4d6
+--- /dev/null
++++ b/plugins/sandbox/selftest.sbx-install.mjs
+@@ -0,0 +1,261 @@
++// arxa sbx-install selftest — A5 sbx packaging/provisioning (Task 11 Step 2,
++// docs/plans/arxa-isolation-levels.md §23: "Install sbx — Yes … or
++// bundle/download the release artifact. Must not assume Homebrew.")
++// Run: node plugins/sandbox/selftest.sbx-install.mjs
++//
++// THE DESIGN UNDER TEST:
++//   * arxa provisions sbx itself — a checksum-pinned artifact from the
++//     official release feed (github.com/docker/sbx-releases) per shipped
++//     platform, NO Homebrew assumption, installed into the arxa-managed
++//     state root (<arxaHome>/bin), never into /opt/homebrew or /usr.
++//   * CHECKSUM PINNED, fail-closed: an artifact without a pinned sha256 is
++//     REFUSED — arxa never downloads-and-runs an unverified binary. The
++//     shipped pin table ships UNSET where unmeasured; Task 16's authorized
++//     gate fills it from the official checksums.
++//   * Idempotent updater: an existing managed install at the pinned version
++//     re-downloads nothing; a stale one upgrades in place.
++//   * An operator PATH install is DETECTED and used as-is — never modified,
++//     never shadowed (S3: detect rather than assume).
++//   * The daemon starts and diagnoses automatically (§23 checklist).
++//
++// ALL rows run against injected downloader/extract/runner seams and a fake
++// state root under os.tmpdir(). The operator's real install
++// (/opt/homebrew/bin/sbx on this machine) is never touched: which() is
++// injected everywhere, and every write path is asserted to stay inside the
++// fake state root.
++
++import { strict as assert } from 'node:assert'
++import { createHash } from 'node:crypto'
++import * as realFs from 'node:fs'
++import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
++import { tmpdir } from 'node:os'
++import { join } from 'node:path'
++
++import {
++  SBX_PIN,
++  ensureSbxDaemon,
++  ensureSbxInstalled,
++  ensureSbxRuntime,
++  planSbxInstall
++} from './lib/sbx-install.js'
++
++let checks = 0
++const ok = async (name, fn) => { await fn(); checks++; console.log(`  ok ${name}`) }
++
++// ---- the double ecosystem ----------------------------------------------------
++
++const ARTIFACT_BYTES = Buffer.from('#!/bin/sh\necho fake-sbx\n')
++
++/** A fake-but-complete fs: the REAL node:fs, wrapped so every mutating call
++ * is recorded — the confinement assertions read the record. */
++const recordingFs = () => {
++  const writes = []
++  const real = realFs
++  const wrap = {}
++  for (const k of ['writeFileSync', 'mkdirSync', 'chmodSync', 'rmSync', 'renameSync', 'copyFileSync']) {
++    wrap[k] = (p, ...a) => { writes.push(String(p)); return real[k](p, ...a) }
++  }
++  for (const k of ['existsSync', 'readFileSync', 'readdirSync', 'statSync']) wrap[k] = real[k].bind(real)
++  return { fs: wrap, writes }
++}
++
++const sha256 = (buf) => createHash('sha256').update(buf).digest('hex')
++
++/** A test pin: versioned, with REAL checksums over the fake artifact bytes. */
++const testPin = (version = '9.9.9') => ({
++  version,
++  base: 'https://releases.test/sbx',
++  artifacts: {
++    'darwin-arm64': { file: `sbx_${version}_darwin_arm64.tar.gz`, sha256: sha256(ARTIFACT_BYTES) },
++    'darwin-amd64': { file: `sbx_${version}_darwin_amd64.tar.gz`, sha256: sha256(ARTIFACT_BYTES) },
++    'linux-arm64': { file: `sbx_${version}_linux_arm64.tar.gz`, sha256: sha256(ARTIFACT_BYTES) }
++  }
++})
++
++const fakeDownloader = (log, bytes = ARTIFACT_BYTES) => async (url, dest) => {
++  log.push({ url, dest })
++  realFs.writeFileSync(dest, bytes)
++}
++
++const fakeExtract = (log) => async (archive, dir) => {
++  log.push({ extract: archive })
++  realFs.writeFileSync(join(dir, 'sbx'), ARTIFACT_BYTES)
++  realFs.chmodSync(join(dir, 'sbx'), 0o755)
++}
++
++console.log('arxa sbx-install selftest (Step 2: packaging, updater, daemon)')
++
++// ---- 1. the pinned plan ------------------------------------------------------
++
++await ok('planSbxInstall resolves the exact pinned artifact per platform+arch', () => {
++  const p = planSbxInstall({ pin: testPin(), platform: 'darwin', arch: 'arm64' })
++  assert.equal(p.supported, true)
++  assert.equal(p.artifact.url, 'https://releases.test/sbx/sbx_9.9.9_darwin_arm64.tar.gz')
++  assert.equal(p.artifact.sha256, sha256(ARTIFACT_BYTES))
++})
++
++await ok('an unsupported platform is refused, not guessed', () => {
++  const p = planSbxInstall({ pin: testPin(), platform: 'win32', arch: 'x64' })
++  assert.equal(p.supported, false)
++  assert.match(p.reason, /win32|platform/i)
++})
++
++await ok('the SHIPPED pin table fails closed while checksums are unmeasured', () => {
++  // The real SBX_PIN ships sha256: null entries (unmeasured until Task 16's
++  // authorized gate) — planning must REFUSE rather than download unverified.
++  const p = planSbxInstall({ pin: SBX_PIN, platform: 'darwin', arch: 'arm64' })
++  assert.equal(p.supported, false)
++  assert.match(p.reason, /pin|checksum|verif/i)
++})
++
++// ---- 2. install into the arxa-managed state root ------------------------------
++
++await ok('a fresh install downloads, verifies, extracts and stamps into the state root', async () => {
++  const root = mkdtempSync(join(tmpdir(), 'arxa-sbxinstall-'))
++  const { fs, writes } = recordingFs()
++  const dl = []
++  const r = await ensureSbxInstalled({
++    stateRoot: root, pin: testPin(), platform: 'darwin', arch: 'arm64',
++    which: () => undefined, downloader: fakeDownloader(dl), extract: fakeExtract(dl), fs
++  })
++  assert.equal(r.installed, true)
++  assert.equal(r.managed, 'arxa')
++  assert.equal(r.cli, join(root, 'bin', 'sbx'))
++  assert.ok(existsSync(r.cli), 'the binary lands in the state root')
++  assert.equal(readFileSync(join(root, 'bin', 'sbx.version'), 'utf8').trim(), '9.9.9', 'the version stamp')
++  assert.equal(dl.filter((x) => x.url).length, 1, 'exactly one download')
++  assert.match(dl[0].url, /darwin_arm64\.tar\.gz$/)
++  assert.ok(dl.findIndex((x) => x.extract) > 0, 'extraction happens after the download')
++  // CONFIRMED: the sha256 was verified — see the tamper row below.
++  for (const w of writes) assert.ok(w.startsWith(root), `every write stays inside the state root, saw ${w}`)
++  rmSync(root, { recursive: true, force: true })
++})
++
++await ok('a tampered artifact is refused and nothing is installed', async () => {
++  const root = mkdtempSync(join(tmpdir(), 'arxa-sbxinstall-'))
++  const { fs } = recordingFs()
++  const tampered = async (url, dest) => {
++    realFs.writeFileSync(dest, Buffer.from('#!/bin/sh\necho pwned\n'))
++  }
++  await assert.rejects(
++    () => ensureSbxInstalled({
++      stateRoot: root, pin: testPin(), platform: 'darwin', arch: 'arm64',
++      which: () => undefined, downloader: tampered, extract: fakeExtract([]), fs
++    }),
++    /checksum|sha|verif/i
++  )
++  assert.ok(!existsSync(join(root, 'bin', 'sbx')), 'no unverified binary is ever installed')
++  rmSync(root, { recursive: true, force: true })
++})
++
++await ok('the updater is idempotent: a matching stamp re-downloads nothing', async () => {
++  const root = mkdtempSync(join(tmpdir(), 'arxa-sbxinstall-'))
++  const { fs } = recordingFs()
++  const dl = []
++  const first = await ensureSbxInstalled({
++    stateRoot: root, pin: testPin(), platform: 'darwin', arch: 'arm64',
++    which: () => undefined, downloader: fakeDownloader(dl), extract: fakeExtract(dl), fs
++  })
++  assert.equal(first.already, undefined)
++  const again = await ensureSbxInstalled({
++    stateRoot: root, pin: testPin(), platform: 'darwin', arch: 'arm64',
++    which: () => undefined, downloader: fakeDownloader(dl), extract: fakeExtract(dl), fs
++  })
++  assert.equal(again.installed, true)
++  assert.equal(again.already, true, 'the stamp answers before any download')
++  assert.equal(dl.filter((x) => x.url).length, 1, 'still exactly one download')
++  rmSync(root, { recursive: true, force: true })
++})
++
++await ok('a stale managed install upgrades in place', async () => {
++  const root = mkdtempSync(join(tmpdir(), 'arxa-sbxinstall-'))
++  const { fs } = recordingFs()
++  const dl = []
++  await ensureSbxInstalled({
++    stateRoot: root, pin: testPin('0.1.0'), platform: 'darwin', arch: 'arm64',
++    which: () => undefined, downloader: fakeDownloader(dl), extract: fakeExtract(dl), fs
++  })
++  const up = await ensureSbxInstalled({
++    stateRoot: root, pin: testPin('9.9.9'), platform: 'darwin', arch: 'arm64',
++    which: () => undefined, downloader: fakeDownloader(dl), extract: fakeExtract(dl), fs
++  })
++  assert.equal(up.installed, true)
++  assert.equal(up.upgraded, true)
++  assert.equal(readFileSync(join(root, 'bin', 'sbx.version'), 'utf8').trim(), '9.9.9', 'the stamp moves to the new pin')
++  rmSync(root, { recursive: true, force: true })
++})
++
++await ok('an operator PATH install is detected and NEVER modified', async () => {
++  const root = mkdtempSync(join(tmpdir(), 'arxa-sbxinstall-'))
++  const { fs, writes } = recordingFs()
++  const dl = []
++  const r = await ensureSbxInstalled({
++    stateRoot: root, pin: testPin(), platform: 'darwin', arch: 'arm64',
++    which: (c) => (c === 'sbx' ? '/opt/homebrew/bin/sbx' : undefined),
++    downloader: fakeDownloader(dl), extract: fakeExtract(dl), fs
++  })
++  assert.equal(r.installed, true)
++  assert.equal(r.managed, 'operator-path')
++  assert.equal(r.cli, '/opt/homebrew/bin/sbx')
++  assert.equal(dl.length, 0, 'nothing is downloaded over an operator install')
++  assert.equal(writes.length, 0, 'and nothing is written at all')
++  rmSync(root, { recursive: true, force: true })
++})
++
++// ---- 3. the daemon ------------------------------------------------------------
++
++const daemonRunner = (statusOut) => {
++  const calls = []
++  return {
++    calls,
++    async run (argv, opts) {
++      calls.push(argv)
++      if (argv[1] === 'daemon' && argv[2] === 'status') return { code: 0, stdout: statusOut, stderr: '' }
++      return { code: 0, stdout: '', stderr: '' }
++    }
++  }
++}
++
++await ok('ensureSbxDaemon starts (idempotently) and verifies via status', async () => {
++  const d = daemonRunner('Status: running\nSocket: /x/sandboxd.sock (connected)\n')
++  const r = await ensureSbxDaemon('/opt/homebrew/bin/sbx', { runner: d.run })
++  assert.equal(r.daemon, true)
++  assert.ok(d.calls.some((a) => a.slice(1, 3).join(' ') === 'daemon start'), 'start runs first')
++  assert.ok(d.calls.some((a) => a.slice(1, 3).join(' ') === 'daemon status'), 'status verifies')
++})
++
++await ok('a daemon that will not start is reported, never thrown', async () => {
++  const d = daemonRunner('Status: stopped\nSocket: /x/sandboxd.sock (not connected)\n')
++  const r = await ensureSbxDaemon('/opt/homebrew/bin/sbx', { runner: d.run })
++  assert.equal(r.daemon, false)
++  assert.match(r.reason, /stopped|not running|unreachable/i)
++})
++
++// ---- 4. the runtime orchestration ----------------------------------------------
++
++await ok('ensureSbxRuntime provisions install+daemon+status and NEVER signs in or mutates policy', async () => {
++  const root = mkdtempSync(join(tmpdir(), 'arxa-sbxruntime-'))
++  const { fs } = recordingFs()
++  const dl = []
++  const d = daemonRunner('Status: running\n')
++  const r = await ensureSbxRuntime({
++    stateRoot: root, pin: testPin(), platform: 'darwin', arch: 'arm64',
++    which: () => undefined, downloader: fakeDownloader(dl), extract: fakeExtract(dl), fs,
++    runner: d.run,
++    statusRunner: async (argv) => argv[1] === 'ls'
++      ? { code: 0, stdout: 'No sandboxes found.\n', stderr: '' }
++      : argv[1] === 'daemon'
++          ? { code: 0, stdout: 'Status: running\n', stderr: '' }
++          : { code: 0, stdout: 'sbx version: v9.9.9 abc\n', stderr: '' }
++  })
++  assert.equal(r.installed, true)
++  assert.equal(r.daemon, true)
++  assert.equal(r.authed, true)
++  for (const a of d.calls) {
++    assert.ok(!a.includes('login'), 'provisioning never signs in (§23a)')
++    assert.ok(!a.includes('policy'), 'provisioning never mutates policy (§22a)')
++  }
++  rmSync(root, { recursive: true, force: true })
++})
++
++console.log(`arxa sbx-install selftest: ${checks} checks green`)
+diff --git a/plugins/sandbox/selftest.sbx.mjs b/plugins/sandbox/selftest.sbx.mjs
+new file mode 100644
+index 0000000..f2cfb0b
+--- /dev/null
++++ b/plugins/sandbox/selftest.sbx.mjs
+@@ -0,0 +1,574 @@
++// arxa sbx selftest — A5 Docker Sandbox isolation (Task 11, docs/plans/
++// arxa-isolation-levels.md §§21–24/S3/S4).
++// Run: node plugins/sandbox/selftest.sbx.mjs
++//
++// THE DESIGN UNDER TEST, from the plan:
++//   * A5 is the ONLY tier allowed to require a Docker account (§23b); its
++//     absence degrades to A4 then A0–A3 with a truthful reason and NEVER
++//     blocks a session (S3 #4).
++//   * sbx has NO default network policy — arxa must plan `sbx policy init
++//     deny-all`, but the real init is GLOBAL one-time state, so it belongs
++//     to the authenticated external gate (Task 16) after explicit operator
++//     authorization. Everything here PLANS, never applies (§22a).
++//   * `sbx login` is an OAuth device-code flow with no headless path; arxa
++//     must never touch credentials (§23a) — no --username, no
++//     --password-stdin, ever. Sign-in failure (incl. Auth0's "Global rate
++//     limit exceeded") is an EXPECTED, retryable state, never a crash.
++//   * The git-daemon port is EPHEMERAL (observed 49152→49153→49154 across
++//     restarts, §24d): resolve from `sbx ls` on EVERY start, never persist
++//     the URL; wake the sandbox (`sbx exec <name> true` starts a stopped
++//     one) before any fetch; arxa adds/maintains the host remote itself.
++//   * SAFETY INVARIANT (binding): never `sbx rm --force` until every
++//     sandbox commit is reachable from a host ref and verified; retain
++//     refs/sandboxes/<name>/<branch> as recovery evidence. Removing a
++//     sandbox does NOT reclaim the image cache (~2.4 GB retained, §24e) —
++//     report it separately from reclaimed workspace bytes.
++//
++// ALL rows run against injected runners and fixtures measured from the real
++// CLI (v0.39.0, §§21–24 + re-measured 2026-09-13). No real sign-in, no
++// global policy change, no operator Docker Sandbox mutation — the real leg
++// is Task 16's external gate.
++
++import { strict as assert } from 'node:assert'
++import { execFileSync, spawnSync } from 'node:child_process'
++import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
++import { tmpdir } from 'node:os'
++import { dirname, join, resolve } from 'node:path'
++import { fileURLToPath } from 'node:url'
++
++import { resolveEffectiveTier } from './lib/effective-tier.js'
++import {
++  ensurePolicy,
++  fetchSandboxCommits,
++  createSandbox,
++  removeSandbox,
++  resolveGitEndpoint,
++  sbxLoginFlow,
++  sbxStatus,
++  startSandbox,
++  unrecoveredSandboxCommits
++} from './lib/sbx.js'
++
++let checks = 0
++let skipped = 0
++let hardFail = false
++const ok = async (name, fn) => { await fn(); checks++; console.log(`  ok ${name}`) }
++const skip = (name, why) => { skipped++; console.log(`  skip ${name} — ${why}`) }
++
++// ---- measured fixtures (real CLI, §§21/22/24 + 2026-09-13) ------------------
++
++const FIX = {
++  versionV39: 'sbx version: v0.39.0 def8cb0523a77e757bdd6ef52b459fe374f3783e\n',
++  versionBanner: [
++    '╭──────────────────────────────────────────────────────────────────────────────────╮',
++    '│ Docker Sandboxes Update Available                                                │',
++    '│ v0.39.0  →  v0.42.1                                                              │',
++    '╰──────────────────────────────────────────────────────────────────────────────────╯'
++  ].join('\n'),
++  daemonStopped: 'Status: stopped\nSocket: /Users/x/Library/Application Support/com.docker.sandboxes/sandboxes/sandboxd/sandboxd.sock (not connected)\n',
++  daemonRunning: 'Status: running\nSocket: /Users/x/Library/Application Support/com.docker.sandboxes/sandboxes/sandboxd/sandboxd.sock (/var/folders/.../sandboxd.sock)\n',
++  unauthenticated: 'ERROR: 401 Unauthorized: no valid user session found. Please run `sbx login` to authenticate.\n',
++  lsEmptyAuthed: 'No sandboxes found.\nLaunch one: sbx run claude\n',
++  lsEmptyJson: '{"sandboxes":[]}\n',
++  policyUninitialized: 'ERROR: global network policy has not been initialized\n  Initialize it with: sbx policy init <allow-all|balanced|deny-all>\n',
++  policyDenyAll: [
++    'POLICY             SOURCE   APPLIES TO   SUMMARY',
++    'default-deny-all   local    all          network: 1 deny',
++    'local-policy       local    all          filesystem read: 1 allow; filesystem write: 1 allow'
++  ].join('\n') + '\n',
++  policyAllowAll: [
++    'POLICY             SOURCE   APPLIES TO   SUMMARY',
++    'default-allow-all  local    all          network: 1 allow',
++    'local-policy       local    all          filesystem read: 1 allow; filesystem write: 1 allow'
++  ].join('\n') + '\n',
++  policyPerSandbox: [
++    'POLICY             SOURCE   APPLIES TO   SUMMARY',
++    'default-deny-all   local    all          network: 1 deny',
++    'kit-claude         kit      arxa-sbx-1   network: 6 allow',
++    'local-policy       local    all          filesystem read: 1 allow; filesystem write: 1 allow'
++  ].join('\n') + '\n',
++  rateLimit: 'ERROR: oauth2: "access_denied" "Global rate limit exceeded"\n',
++  rmRefusal: [
++    'Sandbox "arxa-sbx-1" has commits that exist nowhere else.',
++    'git branch <local-name> refs/sandboxes/arxa-sbx-1/main',
++    'Alternatively, ask the agent to push them to an upstream remote.',
++    'ERROR: stdin is not a terminal; use --force to skip confirmation'
++  ].join('\n') + '\n'
++}
++
++/** The hybrid runner: `git` and `du` are REAL (host-side recovery is
++ * production code); `sbx` is scripted from a per-argv script and recorded.
++ * The transport double is honest about WHAT it simulates: `sbx exec … git
++ * rev-parse` answers from the REAL repo (that is what the sandbox clone
++ * mirrors), and a `git fetch git://127.0.0.1:<port>/…` source is rewritten
++ * to the repo path — only the daemon transport is simulated, the fetch,
++ * refspec, remote bookkeeping and reachability check run real git. */
++const hybridRunner = (repo, script = []) => {
++  const sbxCalls = []
++  const reply = (rest) => {
++    for (const [when, make] of script) if (when(rest)) return make(rest)
++    return { code: 0, stdout: '', stderr: '' }
++  }
++  const realGit = (args, opts) => {
++    const r = spawnSync('git', ['-C', repo, ...args], { ...opts, encoding: 'utf8', timeout: 30000 })
++    return { code: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
++  }
++  return {
++    sbxCalls,
++    async run (argv, opts) {
++      const [cmd, ...rest] = argv
++      if (cmd === 'git') {
++        // rest: [-C, repo, ...] from production; tests may pass bare args.
++        const args = rest[0] === '-C' ? rest.slice(2) : rest
++        if (args[0] === 'fetch' && /^git:\/\/127\.0\.0\.1:\d+\//.test(args[1] ?? '')) {
++          return realGit(['fetch', repo, ...args.slice(2)], opts)
++        }
++        return realGit(args, opts)
++      }
++      if (cmd === 'du') {
++        const r = spawnSync('du', rest, { ...opts, encoding: 'utf8', timeout: 30000 })
++        return { code: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
++      }
++      sbxCalls.push(argv)
++      const rest2 = argv.slice(1)
++      // The script double wins over the default — a test may want a lying
++      // in-sandbox HEAD (the deadbeef rows).
++      for (const [when, make] of script) if (when(rest2)) return make(rest2)
++      if (rest2[0] === 'exec' && rest2.includes('rev-parse')) {
++        return realGit(['rev-parse', ...rest2.slice(rest2.lastIndexOf('rev-parse') + 1)], opts)
++      }
++      return reply(rest2)
++    }
++  }
++}
++
++/** A `sbx ls --json` reply advertising one sandbox's git daemon. */
++const lsJson = (name, endpoint) => ({
++  code: 0,
++  stdout: JSON.stringify({ sandboxes: [{ name, status: 'running', agent: 'claude', workspace: '/scratch/proj', gitDaemon: endpoint, ports: endpoint }] }) + '\n',
++  stderr: ''
++})
++
++/** A scripted sbx runner for the status probe sequence (version/daemon/ls). */
++const statusRunner = (over = {}) => async (argv) => argv[1] === 'daemon'
++  ? (over.daemon ?? { code: 0, stdout: FIX.daemonRunning, stderr: '' })
++  : argv[1] === 'ls'
++      ? (over.ls ?? { code: 0, stdout: FIX.lsEmptyAuthed, stderr: '' })
++      : (over.version ?? { code: 0, stdout: FIX.versionV39 + FIX.versionBanner + '\n', stderr: '' })
++
++console.log('arxa sbx selftest (Step 1/3/4: detection, sign-in surface, policy planning)')
++
++// ---- 1. sbxStatus: every measured state parses to a truthful row -------------
++
++await ok('sbxStatus reports an absent CLI without ever constructing an install command', async () => {
++  const seen = []
++  const r = await sbxStatus({
++    which: (c) => { seen.push(c); return undefined },
++    runner: async (argv) => { seen.push(argv.join(' ')); return { code: 1, stdout: '', stderr: '' } }
++  })
++  assert.equal(r.installed, false)
++  assert.equal(r.authed, false)
++  assert.equal(r.runners.sbx, false)
++  assert.match(r.reason, /sbx|Docker Sandboxes/i)
++  for (const s of seen) assert.doesNotMatch(s, /brew|apt|install/i, `detection must never install, saw: ${s}`)
++})
++
++await ok('sbxStatus parses the version line through the update-banner noise', async () => {
++  const r = await sbxStatus({ which: () => '/opt/homebrew/bin/sbx', runner: statusRunner() })
++  assert.equal(r.installed, true)
++  assert.equal(r.version, '0.39.0')
++  assert.equal(r.updateAvailable, '0.42.1', 'the banner is surfaced, not silently upgraded past')
++})
++
++await ok('sbxStatus distinguishes an installed CLI from a stopped daemon (rc 0!)', async () => {
++  const r = await sbxStatus({
++    which: () => '/opt/homebrew/bin/sbx',
++    runner: async (argv) => argv[1] === 'daemon'
++      ? { code: 0, stdout: FIX.daemonStopped, stderr: '' }
++      : argv[1] === 'ls' ? { code: 0, stdout: FIX.lsEmptyAuthed, stderr: '' } : { code: 0, stdout: FIX.versionV39, stderr: '' }
++  })
++  assert.equal(r.installed, true)
++  assert.equal(r.daemon, false, '"Status: stopped" exits 0 — the parser must read the text, not the code')
++  assert.equal(r.runners.sbx, false, 'a stopped daemon cannot run the microVM tier')
++  assert.match(r.runners.sbxReason, /daemon/i)
++})
++
++await ok('sbxStatus reads the 401 as "signed out", never as a crash', async () => {
++  const r = await sbxStatus({
++    which: () => '/opt/homebrew/bin/sbx',
++    runner: async (argv) => argv[1] === 'ls'
++      ? { code: 1, stdout: '', stderr: FIX.unauthenticated }
++      : argv[1] === 'daemon' ? { code: 0, stdout: FIX.daemonRunning, stderr: '' } : { code: 0, stdout: FIX.versionV39, stderr: '' }
++  })
++  assert.equal(r.authed, false)
++  assert.equal(r.runners.sbx, true)
++  assert.equal(r.runners.sbxAuthed, false)
++  assert.match(r.runners.sbxReason, /sign/i)
++})
++
++await ok('sbxStatus reports the authed, daemon-healthy machine as A5-ready', async () => {
++  const r = await sbxStatus({ which: () => '/opt/homebrew/bin/sbx', runner: async () => ({ code: 0, stdout: FIX.lsEmptyAuthed + FIX.daemonRunning + FIX.versionV39, stderr: '' }) })
++  assert.equal(r.authed, true)
++  assert.equal(r.runners.sbx && r.runners.sbxAuthed, true)
++})
++
++await ok('the status row feeds the effective tier, and the measured sbx detail reaches the degrade reason', () => {
++  const dead = resolveEffectiveTier({
++    configured: 'A5', platform: 'darwin',
++    runners: { seatbelt: true, sbx: false, sbxAuthed: false, sbxReason: 'sbx is installed (/opt/homebrew/bin/sbx, v0.39.0) but the sandboxd daemon is stopped — start it with `sbx daemon start`' }
++  })
++  assert.equal(dead.effective, 'A3')
++  assert.match(dead.reason, /daemon/, 'the measured truth, not a generic "not installed" line')
++  const authed = resolveEffectiveTier({
++    configured: 'A5', platform: 'darwin',
++    runners: { seatbelt: true, sbx: true, sbxAuthed: true }
++  })
++  assert.equal(authed.effective, 'A5')
++})
++
++// ---- 2. sbxLoginFlow: the one unautomatable step, honestly surfaced ----------
++
++await ok('sbxLoginFlow invokes the bare device-code flow — never a credential flag', async () => {
++  const runner = hybridRunner()
++  await sbxLoginFlow({ runner: runner.run })
++  const login = runner.sbxCalls.find((a) => a[1] === 'login')
++  assert.ok(login, 'sbx login runs')
++  assert.equal(login.length, 2, 'argv is exactly ["sbx","login"]')
++  for (const a of runner.sbxCalls) {
++    for (const flag of ['--username', '--password-stdin', '-e', '--env-file']) {
++      assert.ok(!a.includes(flag), `arxa must never handle Docker credentials (§23a), saw ${flag}`)
++    }
++  }
++})
++
++await ok('the Auth0 rate limit is an expected, retryable state — not a crash', async () => {
++  const r = await sbxLoginFlow({ runner: async () => ({ code: 1, stdout: '', stderr: FIX.rateLimit }) })
++  assert.equal(r.signedIn, false)
++  assert.equal(r.retryable, true)
++  assert.match(r.reason, /rate limit/i)
++})
++
++await ok('a cancelled sign-in degrades cleanly and never blocks the session', async () => {
++  const r = await sbxLoginFlow({ runner: async () => ({ code: 1, stdout: '', stderr: 'ERROR: login cancelled\n' }) })
++  assert.equal(r.signedIn, false)
++  assert.equal(r.degrade, 'A4', 'the flow names the tier to fall back to')
++  assert.equal(typeof r.reason, 'string')
++})
++
++await ok('a missing CLI answers without attempting login', async () => {
++  const runner = hybridRunner()
++  const r = await sbxLoginFlow({ which: () => undefined, runner: runner.run })
++  assert.equal(r.signedIn, false)
++  assert.equal(runner.sbxCalls.length, 0)
++})
++
++// ---- 3. ensurePolicy: plan the exact change, never touch global state --------
++
++await ok('an uninitialized global policy plans exactly `sbx policy init deny-all`', async () => {
++  const runner = hybridRunner(null, [[() => true, () => ({ code: 1, stdout: '', stderr: FIX.policyUninitialized })]])
++  const p = await ensurePolicy({ runner: runner.run })
++  assert.equal(p.current, 'uninitialized')
++  assert.equal(p.compliant, false)
++  assert.deepEqual(p.changes, [['sbx', 'policy', 'init', 'deny-all']], '§22a: arxa must own this decision explicitly')
++})
++
++await ok('an existing deny-all posture is compliant — no change planned', async () => {
++  const runner = hybridRunner(null, [[() => true, () => ({ code: 0, stdout: FIX.policyDenyAll, stderr: '' })]])
++  const p = await ensurePolicy({ runner: runner.run })
++  assert.equal(p.current, 'deny-all')
++  assert.equal(p.compliant, true)
++  assert.deepEqual(p.changes, [])
++})
++
++await ok('a wider posture plans reset-then-init, because init is one-time', async () => {
++  const runner = hybridRunner(null, [[() => true, () => ({ code: 0, stdout: FIX.policyAllowAll, stderr: '' })]])
++  const p = await ensurePolicy({ runner: runner.run })
++  assert.equal(p.current, 'allow-all')
++  assert.equal(p.compliant, false)
++  assert.deepEqual(p.changes, [['sbx', 'policy', 'reset'], ['sbx', 'policy', 'init', 'deny-all']])
++})
++
++await ok('per-sandbox kit rules are surfaced separately from the global posture', async () => {
++  const runner = hybridRunner(null, [[() => true, () => ({ code: 0, stdout: FIX.policyPerSandbox, stderr: '' })]])
++  const p = await ensurePolicy({ runner: runner.run })
++  assert.equal(p.compliant, true, 'the global posture is still deny-all')
++  assert.ok(p.perSandbox.some((row) => /arxa-sbx-1/.test(row.appliesTo)), 'lifecycle-bound per-sandbox rules are listed (§24e)')
++})
++
++await ok('ensurePolicy is read-only: the only argv it ever runs is `sbx policy ls`', async () => {
++  const runner = hybridRunner()
++  await ensurePolicy({ runner: runner.run })
++  for (const a of runner.sbxCalls) {
++    assert.deepEqual(a.slice(0, 2), ['sbx', 'policy'], 'no policy argv outside the ls read')
++    assert.equal(a[2], 'ls')
++  }
++})
++
++await ok('an unauthenticated policy read plans nothing and names the gate', async () => {
++  const runner = hybridRunner(null, [[() => true, () => ({ code: 1, stdout: '', stderr: FIX.unauthenticated })]])
++  const p = await ensurePolicy({ runner: runner.run })
++  assert.equal(p.current, 'unauthenticated')
++  assert.deepEqual(p.changes, [])
++  assert.match(p.note, /sign in|gate/i)
++})
++
++// ---- 4. Step 5: clone/start/Git retrieval (§24) ------------------------------
++
++const scratch = mkdtempSync(join(tmpdir(), 'arxa-sbx-selftest-'))
++const realRepo = (name) => {
++  const dir = join(scratch, name)
++  mkdirSync(dir, { recursive: true })
++  const git = (...a) => execFileSync('git', a, { cwd: dir, stdio: ['ignore', 'pipe', 'ignore'] })
++  git('init', '-b', 'main')
++  git('config', 'user.email', 'selftest@arxa.test')
++  git('config', 'user.name', 'arxa selftest')
++  writeFileSync(join(dir, 'README.md'), '# scratch\n')
++  writeFileSync(join(dir, '.gitignore'), '.arxa/\n')
++  git('add', '.')
++  git('commit', '-m', 'chore: seed')
++  return { dir, git }
++}
++
++console.log('arxa sbx selftest (Step 5: clone/start/Git retrieval)')
++
++{
++  const { dir, git } = realRepo('lifecycle')
++  git('checkout', '-b', 'arxa/s-1')
++  writeFileSync(join(dir, 'work.txt'), 'session work\n')
++  git('add', '.')
++  git('commit', '-m', 'feat: session work')
++  const NAME = 'arxa-sbx-arxa-org-ws-1-s'
++
++  let handle
++  await ok('createSandbox builds the measured §24 signature: --clone --name <n> <agent> <path>', async () => {
++    const runner = hybridRunner(dir)
++    handle = await createSandbox({ repoPath: dir, branch: 'arxa/s-1', sessionId: 'arxa/org/ws/1-s' }, { runner: runner.run })
++    const create = runner.sbxCalls.find((a) => a[1] === 'create')
++    assert.ok(create, 'sbx create runs')
++    assert.equal(create[2], '--clone')
++    assert.equal(create[3], '--name')
++    assert.equal(create[4], NAME)
++    assert.equal(create[5], 'claude')
++    assert.equal(create[6], realpathSync(dir), 'the project path is the last positional (read-only source mount)')
++  })
++
++  await ok('the registry row records name/remote/recoveryRef — and NEVER a port or URL', () => {
++    const row = JSON.parse(readFileSync(handle.registryPath, 'utf8'))
++    assert.equal(row.name, NAME)
++    assert.equal(row.remote, `sandbox-${NAME}`)
++    assert.equal(row.recoveryRef, `refs/sandboxes/${NAME}/arxa/s-1`)
++    const text = JSON.stringify(row)
++    assert.ok(!/port|git:\/\/|endpoint/i.test(text), 'the ephemeral port is resolved per start, never persisted (§24d)')
++  })
++
++  await ok('createSandbox is idempotent: the registry row IS the live handle', async () => {
++    const runner = hybridRunner(dir)
++    const again = await createSandbox({ repoPath: dir, branch: 'arxa/s-1', sessionId: 'arxa/org/ws/1-s' }, { runner: runner.run })
++    assert.equal(again.name, NAME)
++    assert.equal(runner.sbxCalls.length, 0, 'a re-create builds nothing')
++  })
++
++  await ok('createSandbox refuses main and unsafe branch names before any sbx call', async () => {
++    const runner = hybridRunner(dir)
++    await assert.rejects(() => createSandbox({ repoPath: dir, branch: 'main', sessionId: 'x/1' }, { runner: runner.run }), /main/i)
++    await assert.rejects(() => createSandbox({ repoPath: dir, branch: 'ev"al; rm -rf', sessionId: 'x/2' }, { runner: runner.run }), /branch/i)
++    assert.equal(runner.sbxCalls.length, 0, 'refused before any sbx invocation')
++  })
++
++  await ok('resolveGitEndpoint parses the JSON shape and the text shape, and follows the changing port', async () => {
++    const jsonRunner = hybridRunner(dir, [[(r) => r[0] === 'ls', () => lsJson(NAME, 'git://127.0.0.1:49154/lifecycle')]])
++    const e1 = await resolveGitEndpoint(NAME, { runner: jsonRunner.run })
++    // The empty JSON shape measured 2026-09-13: {"sandboxes":[]}
++    await assert.rejects(
++      () => resolveGitEndpoint(NAME, { runner: async () => ({ code: 0, stdout: FIX.lsEmptyJson, stderr: '' }) }),
++      /stopped or gone|never a stale URL/i,
++      'a stopped/removed sandbox has no port — never a stale URL'
++    )
++    const text = hybridRunner(dir, [[(r) => r[0] === 'ls', () => ({
++      code: 0,
++      stdout: `NAME            AGENT    STATUS    PORTS      WORKSPACE\n${NAME}   claude   running   49155      ${dir}\n`,
++      stderr: ''
++    })]])
++    const e2 = await resolveGitEndpoint(NAME, { runner: text.run, json: false })
++    assert.notEqual(e1.endpoint, e2.endpoint, 'the endpoint follows the freshly resolved port, never a cached one')
++  })
++
++  await ok('startSandbox wakes the sandbox BEFORE resolving the endpoint', async () => {
++    const runner = hybridRunner(dir, [[(r) => r[0] === 'ls', () => lsJson(NAME, `git://127.0.0.1:49160/lifecycle`)]])
++    const s = await startSandbox(handle, { runner: runner.run })
++    assert.match(s.endpoint, /^git:\/\/127\.0\.0\.1:\d+\//)
++    const wake = runner.sbxCalls.findIndex((a) => a[1] === 'exec')
++    const ls = runner.sbxCalls.findIndex((a) => a[1] === 'ls')
++    assert.ok(wake !== -1 && ls !== -1 && wake < ls, 'sbx exec <name> true starts a stopped sandbox (§24d) before the port is read')
++    assert.equal(runner.sbxCalls[wake][3], 'true')
++  })
++
++  let fetched
++  await ok('fetchSandboxCommits maintains the remote, lands the recovery ref, verifies reachability', async () => {
++    // The agent commits one step ahead of the host branch — inside the clone.
++    writeFileSync(join(dir, 'inside.txt'), 'committed inside the microVM\n')
++    git('add', '.')
++    git('commit', '-m', 'feat: inside the sandbox')
++    const runner = hybridRunner(dir, [[(r) => r[0] === 'ls', () => lsJson(NAME, `git://127.0.0.1:49161/lifecycle`)]])
++    fetched = await fetchSandboxCommits(handle, { runner: runner.run })
++    assert.equal(fetched.reachable, true)
++    assert.equal(fetched.recoveryRef, `refs/sandboxes/${NAME}/${'arxa/s-1'}`)
++    const onHost = spawnSync('git', ['-C', dir, 'rev-parse', fetched.recoveryRef], { encoding: 'utf8' })
++    assert.equal(onHost.status, 0, 'refs/sandboxes/<name>/<branch> exists host-side')
++    assert.equal(onHost.stdout.trim(), fetched.sandboxHead)
++    // The remote is arxa's to add and maintain (§24d #3).
++    const remoteUrl = spawnSync('git', ['-C', dir, 'remote', 'get-url', `sandbox-${NAME}`], { encoding: 'utf8' })
++    assert.equal(remoteUrl.status, 0, 'the host remote exists')
++    assert.equal(remoteUrl.stdout.trim(), 'git://127.0.0.1:49161/lifecycle')
++    git('reset', '--hard', 'HEAD~1')
++  })
++
++  await ok('a stale remote URL is corrected on the next fetch, not trusted', async () => {
++    const runner = hybridRunner(dir, [[(r) => r[0] === 'ls', () => lsJson(NAME, `git://127.0.0.1:49162/lifecycle`)]])
++    const f = await fetchSandboxCommits(handle, { runner: runner.run })
++    assert.equal(f.reachable, true)
++    const remoteUrl = spawnSync('git', ['-C', dir, 'remote', 'get-url', `sandbox-${NAME}`], { encoding: 'utf8' })
++    assert.equal(remoteUrl.stdout.trim(), 'git://127.0.0.1:49162/lifecycle', 'set-url follows the ephemeral port change')
++  })
++
++  await ok('a fetch whose head lands nowhere near the ref reports unreachable, never a silent pass', async () => {
++    const runner = hybridRunner(dir, [
++      [(r) => r[0] === 'ls', () => lsJson(NAME, 'git://127.0.0.1:49163/lifecycle')],
++      // The in-sandbox HEAD answers a sha the fetched history cannot contain
++      // (the branch probe still tells the truth).
++      [(r) => r[0] === 'exec' && r.includes('rev-parse') && !r.includes('--abbrev-ref'), () => ({ code: 0, stdout: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n', stderr: '' })]
++    ])
++    const f = await fetchSandboxCommits(handle, { runner: runner.run })
++    assert.equal(f.reachable, false, 'a head outside the recovery ref is an unreachable state, reported not thrown')
++  })
++
++  // ---- 5. Step 6: safe teardown ---------------------------------------------
++
++  console.log('arxa sbx selftest (Step 6: recoverable teardown)')
++
++  await ok('removeSandbox REFUSES while sandbox commits are unfetched — no rm ever runs', async () => {
++    const { dir: d2, git: g2 } = realRepo('refusal')
++    g2('checkout', '-b', 'arxa/s-9')
++    writeFileSync(join(d2, 'unfetched.txt'), 'only in the microVM\n')
++    g2('add', '.')
++    g2('commit', '-m', 'feat: unfetched')
++    const name2 = 'arxa-sbx-arxa-org-ws-9-s'
++    const runner = hybridRunner(d2)
++    const h = await createSandbox({ repoPath: d2, branch: 'arxa/s-9', sessionId: 'arxa/org/ws/9-s' }, { runner: runner.run })
++    // The fetch attempt finds a head the host history cannot reach.
++    const bad = hybridRunner(d2, [[(r) => r[0] === 'exec' && r.includes('rev-parse'), () => ({ code: 0, stdout: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n', stderr: '' })]])
++    await assert.rejects(() => removeSandbox(h, { runner: bad.run }), /refus|unrecover/i)
++    assert.ok(!bad.sbxCalls.some((a) => a[1] === 'rm'), 'SAFETY INVARIANT: no sbx rm (let alone --force) while work is unrecovered')
++    assert.ok(existsSync(h.registryPath), 'the registry row survives the refusal — recovery stays armed')
++  })
++
++  await ok('once reachable: rm --force runs exactly once, absence is verified, the recovery ref is RETAINED', async () => {
++    const good = hybridRunner(dir, [[(r) => r[0] === 'ls', () => lsJson(NAME, 'git://127.0.0.1:49164/lifecycle')]])
++    const store = join(scratch, 'store')
++    mkdirSync(store, { recursive: true })
++    writeFileSync(join(store, 'image-cache.bin'), 'x'.repeat(4096))
++    const r = await removeSandbox(handle, { runner: good.run, storePath: store })
++    assert.equal(r.removed, true)
++    const rm = good.sbxCalls.filter((a) => a[1] === 'rm')
++    assert.equal(rm.length, 1)
++    assert.ok(rm[0].includes('--force'), 'non-interactive teardown needs --force — arxa decides the safety question first')
++    assert.ok(rm[0].includes(NAME))
++    // The recovery evidence STAYS after teardown (binding invariant).
++    const ref = spawnSync('git', ['-C', dir, 'rev-parse', fetched.recoveryRef], { encoding: 'utf8' })
++    assert.equal(ref.status, 0, 'refs/sandboxes/<name>/<branch> is retained as recovery evidence')
++    assert.ok(!existsSync(handle.registryPath), 'the registry row is cleaned only after verified removal')
++    // Cache accounting: retained image cache reported SEPARATELY from
++    // reclaimed workspace bytes (§24e — teardown does not reclaim the cache).
++    assert.equal(r.retainedImageCache, true)
++    assert.equal(typeof r.cacheBytes, 'number')
++    assert.ok(r.cacheBytes > 0)
++    assert.equal(typeof r.reclaimedWorkspaceBytes, 'number')
++    assert.match(String(r.note), /cache|reclaim/i)
++  })
++
++  await ok('a failed rm with the sandbox still listed refuses bookkeeping — the row stays armed', async () => {
++    const { dir: d3, git: g3 } = realRepo('bookkeeping')
++    g3('checkout', '-b', 'arxa/s-10')
++    writeFileSync(join(d3, 'b.txt'), 'b\n')
++    g3('add', '.')
++    g3('commit', '-m', 'feat: b')
++    const name3 = 'arxa-sbx-arxa-org-ws-10-s'
++    const seeded = hybridRunner(d3)
++    const h = await createSandbox({ repoPath: d3, branch: 'arxa/s-10', sessionId: 'arxa/org/ws/10-s' }, { runner: seeded.run })
++    const down = hybridRunner(d3, [
++      [(r) => r[0] === 'ls', () => lsJson(name3, 'git://127.0.0.1:49165/bookkeeping')],
++      [(r) => r[0] === 'rm', () => ({ code: 1, stdout: '', stderr: 'ERROR: Cannot connect to the Docker daemon at unix:///var/run/docker.sock' })]
++    ])
++    await assert.rejects(() => removeSandbox(h, { runner: down.run }), /refus/i)
++    assert.ok(existsSync(h.registryPath), 'the row survives the failed teardown')
++    const down2 = hybridRunner(d3, [
++      [(r) => r[0] === 'ls', () => lsJson(name3, 'git://127.0.0.1:49166/bookkeeping')],
++      [(r) => r[0] === 'rm', () => ({ code: 1, stdout: '', stderr: 'ERROR: daemon down' })]
++    ])
++    const again = await removeSandbox(h, { runner: down2.run }).catch(() => null)
++    assert.equal(again, null, 'still refusing while the rm cannot be verified')
++  })
++
++  await ok('removeSandbox is idempotent: no row means already gone', async () => {
++    const r = await removeSandbox(handle, { runner: hybridRunner(dir).run })
++    assert.equal(r.removed, false)
++    assert.equal(r.alreadyGone, true)
++  })
++
++  await ok('unrecoveredSandboxCommits is the sync guard finish/drop consume', () => {
++    const { dir: d4, git: g4 } = realRepo('guard')
++    g4('checkout', '-b', 'arxa/s-11')
++    writeFileSync(join(d4, 'g.txt'), 'g\n')
++    g4('add', '.')
++    g4('commit', '-m', 'feat: g')
++    const name4 = 'arxa-sbx-arxa-org-ws-11-s'
++    const slug4 = 'arxa-org-ws-11-s'
++    const regDir = join(d4, '.arxa', 'sandboxes')
++    mkdirSync(regDir, { recursive: true })
++    const tip = spawnSync('git', ['-C', d4, 'rev-parse', 'arxa/s-11'], { encoding: 'utf8' }).stdout.trim()
++    const rowPath = join(regDir, `${slug4}.json`)
++    writeFileSync(rowPath, JSON.stringify({
++      sessionId: 'arxa/org/ws/11-s', branch: 'arxa/s-11', repoPath: d4, name: name4,
++      remote: `sandbox-${name4}`, head: tip, recoveryRef: `refs/sandboxes/${name4}/arxa/s-11`, recovered: false
++    }))
++    assert.equal(unrecoveredSandboxCommits(d4, 'arxa/org/ws/11-s').unrecovered, 1, 'a head outside the recovery ref is unrecovered')
++    spawnSync('git', ['-C', d4, 'update-ref', `refs/sandboxes/${name4}/arxa/s-11`, tip], { encoding: 'utf8' })
++    assert.equal(unrecoveredSandboxCommits(d4, 'arxa/org/ws/11-s').unrecovered, 0, 'reachable from the recovery ref → recovered')
++    assert.equal(unrecoveredSandboxCommits(d4, 'never-had-one').unrecovered, 0, 'no row → nothing to guard')
++  })
++}
++
++// ---- 6. live detection + the honest skip of the real gate --------------------
++// The live row is READ-ONLY measurement (version, daemon status, ls). The
++// real lifecycle leg — create/fetch/rm against the operator's signed-in sbx
++// — belongs to Task 16's authorized external gate and NEVER runs here;
++// ARXA_A5_REAL_SMOKE is the sentinel that would select it, and without
++// operator authorization it is skipped honestly.
++
++{
++  const live = await sbxStatus()
++  console.log(`  live sbx detection: cli=${live.cli ?? 'absent'} v=${live.version ?? '?'} daemon=${live.daemon} authed=${live.authed}`)
++  console.log(`    reason: ${live.reason}`)
++  if (live.updateAvailable) console.log(`    update available: v${live.updateAvailable} (surfaced, never auto-applied)`)
++
++  await ok('the A5 surface is exported from the plugin entry', () => {
++    const pkg = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'package.json'), 'utf8'))
++    assert.equal(pkg.exports['./sbx'], './lib/sbx.js')
++    assert.equal(pkg.exports['./sbx-install'], './lib/sbx-install.js')
++  })
++
++  if (process.env.ARXA_A5_REAL_SMOKE === '1') {
++    skip('the real sbx lifecycle leg', 'operator authorization required — Task 16 executes the prepared runbook (this suite stays injected/fake-state by design)')
++  } else {
++    await ok('the real gate stays shut without authorization', async () => {
++      // The suite itself is the proof: every lifecycle row above ran against
++      // the injected hybrid runner. This row pins the sentinel contract.
++      const r = await sbxStatus({ which: () => undefined })
++      assert.equal(r.runners.sbx, false)
++    })
++  }
++}
++
++rmSync(scratch, { recursive: true, force: true })
++if (hardFail) { console.error('arxa sbx selftest: FAILED'); process.exit(1) }
++console.log(`arxa sbx selftest: ${checks} checks green` + (skipped > 0 ? `, ${skipped} skipped` : ''))
+git diff --check: (clean if nothing above)

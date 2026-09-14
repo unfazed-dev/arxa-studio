@@ -1,0 +1,250 @@
+7334ddb docs: reconcile the arxa studio closeout inventory
+ docs/plans/artifact-viewer-implementation.md       |  7 ++
+ docs/plans/arxa-studio-vocabulary-collisions.md    |  8 ++
+ .../claude-subscription-engine-implementation.md   |  8 ++
+ docs/plans/mobile-flutter-migration-spec.md        |  7 ++
+ docs/plans/open-work-inventory-2026-09-07.md       |  6 ++
+ docs/plans/open-work-inventory-2026-09-12.md       | 90 ++++++++++++++++++++++
+ docs/plans/project-sessions-physical.md            |  7 ++
+ 7 files changed, 133 insertions(+)
+diff --git a/docs/plans/artifact-viewer-implementation.md b/docs/plans/artifact-viewer-implementation.md
+index 10a5e19..e977b92 100644
+--- a/docs/plans/artifact-viewer-implementation.md
++++ b/docs/plans/artifact-viewer-implementation.md
+@@ -1,12 +1,19 @@
+ # Artifact Viewer-Editor Implementation Plan
+ 
++> **Status 2026-09-12: acceptance tail owned by Task 7.** The five unchecked boxes below (gen-ui
++> Diff card, Lens visual gate, live runbook, version bump) and the vscode-monaco trust-boundary
++> work map to AXS-006 (Task 7) in
++> [`open-work-inventory-2026-09-12.md`](open-work-inventory-2026-09-12.md); phases 4–5 are the
++> deferred row AXS-023. The "`node scripts/ci.mjs` GREEN" box is discharged by the 2026-09-12
++> baseline run (110 suites, ALL GREEN).
++
+ > **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+ 
+ **Goal:** Build the D7 artifact multi-viewer with the D78–D87 editor extension: a per-org, origin-separated viewer for all artifact types whose text family edits like a minimal VS Code inside session worktrees.
+ 
+ **Architecture:** One new dsh plugin (`plugins/artifact-viewer/`), host half + client half, following the `design-panel`/`approvals` precedents. Host half owns: the per-org READ-ONLY file server (spawned on org open, killed on org switch, served under `org-<slug>.localhost` so rendered content never shares an origin — cookies are port-agnostic — with the studio), short-lived HMAC read/write tokens, the engine write API on the trusted studio origin, and an org watcher that pushes external-change events. Client half owns: type detection, the three D7 render lanes, the CodeMirror 6 editor with md source|preview split, diff via @codemirror/merge, version chip + session badge, and live color state.
+ 
+ **Tech Stack:** Vendored prebuilt bundles (ADR-0009 "categorized vendored libraries"): codemirror@6 + @codemirror/merge, markdown-it@15 + dompurify@3, pdfjs-dist@6 (worker + viewer). Host: node:http file server, node:crypto HMAC tokens, fs.watch, git plumbing via existing file-org-shell D18 machinery. No DB anywhere (CLAUDE.md boundary).
+ 
+ **Spec:** docs/plans/artifact-viewer-editor-brief.md · docs/plans/arxa-studio-grill-decisions.md (D7 :39-55, D78–D87 :819-872) · docs/research/artifact-viewer-media-research.md · docs/research/editor-viewer-to-editor.md
+ 
+diff --git a/docs/plans/arxa-studio-vocabulary-collisions.md b/docs/plans/arxa-studio-vocabulary-collisions.md
+index 34b7ac2..1f82bd1 100644
+--- a/docs/plans/arxa-studio-vocabulary-collisions.md
++++ b/docs/plans/arxa-studio-vocabulary-collisions.md
+@@ -1,12 +1,20 @@
+ # Vocabulary collisions — arxa ↔ arxa studio
+ 
++> **Status 2026-09-12: superseded in part.** V1–V4 landed: `Track` adopted, the gate-count drift
++> fixed, and studio's `versions.js` carries `changes-requested` (`VERSION_STATES`;
++> `selftest.versions: 14/14 passed` on 2026-09-12). V5 (the version-minting ledger shape and the
++> arxa-side `supersededBy`) remains a recommendation awaiting the sibling repo's confirmation —
++> deferred row AXS-032 in
++> [`open-work-inventory-2026-09-12.md`](open-work-inventory-2026-09-12.md); final vocabulary
++> reconciliation is Task 17. The "not yet decided" line below is historical.
++
+ Status: **inventory complete, resolutions proposed, not yet decided.**
+ Raised as blocking by the owner 2026-09-02, ahead of the version-management work.
+ 
+ ## Why this is blocking
+ 
+ Both products are about to share a client-facing surface (`/ship/deploy`, the version
+ chip, the deliverable timeline). Today the same words name different things in each.
+ Any code that maps one product's noun onto the other's **by name** will be silently
+ wrong, and the docs already disagree with each other in print.
+ 
+diff --git a/docs/plans/claude-subscription-engine-implementation.md b/docs/plans/claude-subscription-engine-implementation.md
+index d74dedb..945116a 100644
+--- a/docs/plans/claude-subscription-engine-implementation.md
++++ b/docs/plans/claude-subscription-engine-implementation.md
+@@ -1,12 +1,20 @@
+ # Claude Subscription Engine — Implementation Plan
+ 
++> **Status 2026-09-12: shipped and verified.** The unchecked boxes below are stale tracking, not
++> open work. `plugins/claude-code/` carries the full module set (models, probe, spawn, env, pending,
++> mirror-tools, mirror-gate, bridge, handoff, mcp-bridge, approval, adapter, account, auth-flow,
++> rate-limit, skill-packs, usage) with 21 selftests, all GREEN in the 110-suite `npm test` run of
++> 2026-09-12 (worktree `4d1b924`); the SDK ships in the payload (`scripts/pack-list-check.mjs`:
++> 10 ok). The remaining live gates are external — AXS-016 (Task 16) in
++> [`open-work-inventory-2026-09-12.md`](open-work-inventory-2026-09-12.md).
++
+ > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+ 
+ **Goal:** Claude models appear in arxa studio's stock model picker as provider `claude-code`, billed to the user's Claude subscription, running the real Claude Code binary inside arxa's own sandbox, approval flow and system prompt — with zero UI/UX change.
+ 
+ **Architecture:** A new dsh **LLM adapter** (`ctx.llm.registerAdapter(['claude-code'], adapter)`) whose `stream()` runs one Claude Code turn through `@anthropic-ai/claude-agent-sdk`'s `query()`. Claude's own tool calls are surfaced to the stock agent loop as ordinary `tool-call` stream blocks and satisfied by **mirror tools** (dsh tools named `Read`, `Bash`, … whose `execute` just waits for the result Claude already produced), so the dsh session log is byte-for-byte the shape every other model produces. arxa's own tools (`gen_ui`, gates, `delegate_pi`) reach Claude through an in-process MCP server whose handlers park until the **stock loop** has executed the real dsh tool. The child process is spawned through `ctx.sandbox.confine()` with one extra writable root, `~/.claude/projects`.
+ 
+ **Tech Stack:** Node ≥ 22 ESM, `@deepseek-ai/dsh-*` 0.1.1-rc.2 (cordis plugins), `@anthropic-ai/claude-agent-sdk` 0.3.259 (exact), `@modelcontextprotocol/sdk` ^1.29 (peer of the SDK), `node:assert` selftests auto-discovered by `scripts/ci.mjs`.
+ 
+ **Spec:** `docs/plans/claude-subscription-engine.md` (research + decisions D1–D10). Read its "Decisions locked in the grill" table first.
+ 
+diff --git a/docs/plans/mobile-flutter-migration-spec.md b/docs/plans/mobile-flutter-migration-spec.md
+index 5244dec..b700e36 100644
+--- a/docs/plans/mobile-flutter-migration-spec.md
++++ b/docs/plans/mobile-flutter-migration-spec.md
+@@ -1,12 +1,19 @@
+ # Mobile Flutter migration spec (Tauri v2 scaffold → Flutter)
+ 
++> **Status 2026-09-12: parity audit complete.** All twelve §a boxes were verified against current
++> `mobile_flutter` at arxa `5749402b`: `flutter analyze` — *No issues found*; `flutter test` —
++> *All tests passed!* (+104). The boxes stay unchecked below as historical narrative; the evidence
++> mapping and the genuine residuals (Android release signing, CI frame, release automation,
++> physical-device gates) are rows AXS-011/AXS-018/AXS-031 in
++> [`open-work-inventory-2026-09-12.md`](open-work-inventory-2026-09-12.md), owned by Tasks 12/16.
++
+ Sources: `arxa-studio/docs/plans/shell-language-decision.md`, `arxa/mobile/` (Tauri scaffold, arxa commit `ca2eff33`),
+ `arxa/docs/plans/mobile-pairing-transport.md`, `arxa-studio/docs/plans/mobile-grill-decisions.md`,
+ `arxa/docs/plans/arxa-kit-cairn.md` (ADR-0037). Date: 2026-08-29.
+ 
+ ## a) Feature parity checklist (Tauri scaffold → Flutter must reproduce)
+ 
+ The scaffold is a **single-screen pairing shell + webview handoff**. Everything below is verified in code.
+ 
+ - [ ] **Pairing screen** — states mirror `ConnectionStatus`: not-paired → scanning → pairing → connecting → connected (`mobile/src/index.html`, `mobile/src/main.js`).
+ - [ ] **QR scan** — `tauri-plugin-barcode-scanner 2.4`: `requestPermissions()` then `scan({ windowed: false, formats: ["QR_CODE"] })` (`mobile/src/main.js:71-76`). Flutter: camera QR scanner with same UX.
+diff --git a/docs/plans/open-work-inventory-2026-09-07.md b/docs/plans/open-work-inventory-2026-09-07.md
+index 0b8e17d..fb897f1 100644
+--- a/docs/plans/open-work-inventory-2026-09-07.md
++++ b/docs/plans/open-work-inventory-2026-09-07.md
+@@ -1,12 +1,18 @@
+ # Open work inventory — 2026-09-07
+ 
++> **Superseded 2026-09-12** by [`open-work-inventory-2026-09-12.md`](open-work-inventory-2026-09-12.md).
++> Every row below was re-verified against current source and tests; several that read as open here
++> closed since (Z.ai capability handoff, the cicd-card live GitHub smoke, the Claude sign-in surface),
++> and the rest were re-evidenced with their owning closeout task. This file is kept as the historical
++> read of 2026-09-07 — do not update it further.
++
+ Read of all 185 plan files (arxa-studio 65, arxa 120). Only items that still
+ read as open are listed; where a reader's claim was checkable in code it was
+ checked (noted as ✔ verified / ✘ still open).
+ 
+ ## arxa-studio
+ 
+ ### Blocked on a decision (yours)
+ - `arxa-studio-vocabulary-collisions.md` — "inventory complete, resolutions proposed, not yet decided".
+ - `zai-wire-params-capability-handoff.md` — `tool_stream` options A–D unresolved; temperature/top_p options open.
+ - `file-organisation-grill-agenda.md` — Q2 "Git repo boundaries in the tree (pending, asked)".
+diff --git a/docs/plans/open-work-inventory-2026-09-12.md b/docs/plans/open-work-inventory-2026-09-12.md
+new file mode 100644
+index 0000000..99e77d3
+--- /dev/null
++++ b/docs/plans/open-work-inventory-2026-09-12.md
+@@ -0,0 +1,90 @@
++# Open work inventory — 2026-09-12
++
++Successor to [`open-work-inventory-2026-09-07.md`](open-work-inventory-2026-09-07.md). Every row of that
++read was re-verified against current source, tests, and git history on 2026-09-12 in the studio worktree
++`4d1b9241` (branch `closeout-2026-09-12`, `npm test` → `arxa-studio CI — 110 suites` / `ALL GREEN`) and the
++isolated sibling worktree `arxa` `5749402b` (`mobile_flutter`: `flutter analyze` → *No issues found*,
++`flutter test` → *All tests passed!*, +104). Where the older inventory said "open" but code and tests prove
++otherwise, the row below is `CLOSED`; where it said open and the gap is still demonstrably present, the row
++is `OPEN` and names exactly one owning Task 2–16 of
++[`docs/superpowers/plans/2026-09-12-arxa-studio-closeout.md`](../superpowers/plans/2026-09-12-arxa-studio-closeout.md).
++
++**States.** `OPEN` — genuine work, mapped to exactly one Task 2–16. `EXTERNAL` — owned outside this program
++(operator credential/device, upstream dependency, or sibling-repo backlog); carries an owner and the prepared
++command or trigger. `DEFERRED` — deliberately not built; carries a dated trigger. `CLOSED` — proven by source
++plus tests cited in the row, checked 2026-09-12.
++
++**Scope.** arxa studio (this repo) plus the two sibling-repo surfaces the program owns (`mobile_flutter` →
++Task 12, `desktop/` → Task 15). The rest of the sibling `arxa` backlog is out of program scope and recorded
++as EXTERNAL rows at the end, not as open program work.
++
++## OPEN — the program map (Tasks 2–16)
++
++| ID | Owner repo | Source plan | Current evidence (2026-09-12) | Remaining deliverable | Dependency | Closure command | Task |
++|---|---|---|---|---|---|---|---|
++| AXS-001 | studio | `org-trash-unreachable.md` (Bug B lineage; reachability half superseded by `org-delete-trash-reachability.md`) | `plugins/arxa-sidebar/lib/session-sweep.js` has `sweepSessionsUnder`/`sweepDeadTmpSessions` but no quiesce seam; `makeDshFaces` exposes no stop face and `arxa-sidebar/lib/index.js:386-429` discards the `AgentHandle`; `trashOrg` stores no display name (no `displayName` in `lifecycle.js`) | Stop live sessions under the org before `org.trash` (bounded, fail-closed, reports stopped IDs); preserve `org.json.name` through trash/restore | none | `node plugins/file-org-shell/selftest.mjs && node plugins/arxa-sidebar/selftest.actions.mjs && node plugins/arxa-sidebar/selftest.session-sweep.mjs && node plugins/arxa-sidebar/selftest.trash-live-sessions.mjs && node scripts/org-purge-smoke.mjs && npm test` | 2 |
++| AXS-002 | studio | `git-card-sessions-worktree-rewire.md` D115 gap | No `prepareProjectRepo`/`project.repair-repo` anywhere in `plugins/`; a hand-created project with `project.json` but no `.git` cannot host a session | Explicit `Initialize Git repository` repair path (lifecycle method + action + notice UI + one retry) | Task 2 (same files) | `node plugins/file-org-shell/selftest.mjs && node plugins/arxa-sidebar/selftest.mjs && node plugins/arxa-sidebar/smoke.mjs && node scripts/gen-workspace.mjs --check && npm test` | 3 |
++| AXS-003 | studio | `local-only-git-parity-and-sidebar-decorations.md` D3/D6/D7 | No `card.gate.run` action or `gate` status field in `plugins/arxa-git-card`; leaf/session/lister decorations ship (`decorations.js`, `selftest.decorations` GREEN) but the folded mark is not applied to Projects/project/stage rows | Local Checks row for local-only sessions (cached, fingerprint-staled, 64 KiB cap) + top-level Projects/project/stage decoration rollups | Task 3 (snippet regen order) | `node plugins/arxa-git-card/selftest.actions.mjs && node plugins/arxa-git-card/selftest.mjs && node plugins/arxa-sidebar/selftest.mjs && node scripts/gen-git-card.mjs --check && node scripts/gen-workspace.mjs --check && node scripts/card-local-smoke.mjs && npm test` | 4 |
++| AXS-004 | studio | `local-only-git-parity-and-sidebar-decorations.md` S4/S5 | `scripts/cicd-stress.mjs` lacks both scenarios (no moving-`main` two-session race, no rapid-save/auto-commit storm) | S4 two-session integration race + S5 save storm, as real child processes/coordinator; fix only demonstrated defects | Tasks 2–4 (tree stable first) | `node scripts/cicd-stress.mjs && node scripts/cicd-stress.mjs && node scripts/cicd-stress.mjs && node scripts/cicd-stress.mjs && node scripts/cicd-stress.mjs && npm test` | 5 |
++| AXS-005 | studio | `github-conversations-in-the-insight-panel.md` (carried ledger strip) | `plugins/git-workspace/lib/ledger.js` exists; no `card.ledger.summary` action or strip in the git card | Condensed latest-stage delivery strip under the card summary (persisted `next`, local bounded view, trusted-URL link only) | Task 4 (card snippet regen order) | `node plugins/git-workspace/selftest.ledger.mjs && node plugins/arxa-git-card/selftest.actions.mjs && node scripts/card-local-smoke.mjs && node scripts/card-cicd-smoke.mjs && npm test` | 6 |
++| AXS-006 | studio | `artifact-viewer-implementation.md` (5 unchecked), `artifact-viewer-vscode-monaco.md`, `artifact-viewer-demo-runbook.md` | Threat model absent; extension allowlist untested; Monaco worker routing written but unexercised; gen-ui Diff card still positional; Dart-absent copy and autosave-ownership unprobed; Lens gate + live runbook unrun; version not bumped for this work | Trust-boundary verification (same-origin extension rule, ambient-capability sweep), runtime verification (LSP strip on screen, autosave one-owner probe, Dart discovery), gen-ui Diff reconciliation, clean-build gate (incl. `--webkit`), runbook execution, version bump | none | `cd plugins/artifact-viewer/lib/monaco-build && npm ci && npm run build && node check.mjs && node check.mjs --webkit && cd ../../../.. && npm test` + live runbook | 7 |
++| AXS-007 | studio | `dsh-plugin-ui-conformance.md`, `palette-personalisation.md`, local Git plan visual notes | `locale`/`personalisation`/`theme-accent` selftests GREEN but no EN/PL/FR key-set parity test for the Personalisation tab and Task 2–14-touched surfaces; no closeout viewport evidence set | Failing key-parity test first, translations, native-speaker review, 390/744/1280 evidence under `designs/evidence/studio-closeout/` | Tasks 2–14 (touches their surfaces) | `npm test` + `ls designs/evidence/studio-closeout/{390,744,1280}` | 8 |
++| AXS-008 | studio | `arxa-isolation-levels.md` S1–S4 (A0–A3, B1–B2) | `plugins/sandbox/lib/` has no `provision.js`/`effective-tier.js`/`filesystem.js`/`project-secrets.js`; profile still uses the stock FileSystem provider; no `.env.sops` flow | Effective-tier resolver, arxa read/write-confined FileSystem provider, workspace-write preset seeding with provenance migration, per-project age/SOPS secrets, integrity gates in frames | none | `node plugins/sandbox/selftest.mjs && node plugins/sandbox/selftest.filesystem.mjs && node plugins/sandbox/selftest.project-secrets.mjs && node scripts/s1-sandbox-verify.mjs && node scripts/mirror-drift-check.mjs && npm test` | 9 |
++| AXS-009 | studio | `arxa-isolation-levels.md` L1/A4 + worktree corrections | No `devcontainer.js`/`project-database.js` in `plugins/sandbox/lib/`; no `.devcontainer` generation through frame functions | Docker detection + declarative devcontainer/Dockerfile generation, volume-isolated session lifecycle with host recovery refs, Compose-secret injection, per-project Supabase lifecycle with local floor | Task 9 (tier resolver first) | `node plugins/sandbox/selftest.devcontainer.mjs && node plugins/sandbox/selftest.project-database.mjs && npm test` | 10 |
++| AXS-010 | studio | `arxa-isolation-levels.md` §§21–24/S3–S4 | No `sbx.js`/`sbx-install.js` in `plugins/sandbox/lib/`; sbx research + auth-boundary evidence recorded (see AXS-041) but no product integration | sbx packaging/provisioning, sign-in surface, policy planning without touching global state, clone/start/fetch/remove with `refs/sandboxes/<name>/<branch>` recovery, Finish/Sweep integration | Task 9 (A0–A3 fallback exists first) | `node plugins/sandbox/selftest.sbx.mjs && node plugins/sandbox/selftest.sbx-install.mjs && npm test` | 11 |
++| AXS-011 | arxa (isolated worktree) + studio (spec doc) | `mobile-flutter-migration-spec.md` §a (12 boxes) | All 12 parity boxes verified in code/tests 2026-09-12 (analyze clean, 104 tests pass; see the banner on the spec); `android/app/build.gradle.kts:32` wires only the debug signing config; no `scripts/check.sh`/ci.yml/release lanes; spec boxes left unchecked | Checked parity table in the spec, Android release signing from gitignored `key.properties`/CI secrets with fail-closed release builds, one-root CI frame via `arxa-cicd`, Fastlane/Shorebird release automation via `arxa-deployer`, simulator integration smoke, physical-gates doc | Task 1 (this audit) | `cd mobile_flutter && flutter analyze && flutter test && flutter test integration_test/approvals_e2e_test.dart` + `cd ../kit/studio_transport && dart test` | 12 |
++| AXS-012 | studio | `agency-backend-provider-abstraction.md` (PLAN ONLY) | `plugins/workspace-provider/` does not exist; no provider dispatch in `bin/arxa-studio.mjs` | Frozen Wire v1 golden tests, contract/types/errors + codecs, conformance kit, `LocalWorkspaceProvider` (zero-config default), generic REST adapter, export/import plus the `provider verify`, `workspace export`, `workspace import` and `diagnose` CLI, runtime/pack proof | none | `node plugins/workspace-provider/selftest.contract.mjs && node plugins/workspace-provider/selftest.local.mjs && node plugins/workspace-provider/selftest.rest.mjs && node plugins/workspace-provider/selftest.polling.mjs && node plugins/workspace-provider/selftest.export.mjs && npm test` | 13 |
++| AXS-013 | studio | `agency-backend-provider-abstraction.md` + Task 13 contract | No `supabase.js`, no migrations, no local-Supabase harness | Supabase adapter behind the frozen contract, RLS/IDOR-tested migrations, disposable local-Supabase CI job, settings surface with truthful capability badges | Task 13 (frozen contract) | `node plugins/workspace-provider/selftest.supabase.mjs && node scripts/workspace-provider-supabase-smoke.mjs && npm test` | 14 |
++| AXS-014 | arxa (isolated worktree) + studio | `desktop-shell-scaffold.md`, `linux-install-script.md`, `linux-omarchy-port.md`, `../arxa/desktop/README.md` | Distribution artifacts largely built (see Task 15 Step 1 evidence pass); `.desktop` plan line stale; stable-release workflow not fail-closed on signing; no macOS installer twin; Omarchy user path unproven | Close built rows by evidence, fail-closed `studio-v*` release job, `install-macos.sh` twin + tests, Omarchy VM retry, workflow logic without publishing, notarization preparation | Tasks 9–14 (final payload shape) | `actionlint .github/workflows/*.yml && sh desktop/scripts/install-macos.sh --check && npm test` (studio legs per Task 15 Step 5) | 15 |
++
++## EXTERNAL — owned outside the implementation tasks
++
++| ID | Owner | Source plan | Current evidence (2026-09-12) | Prepared command / trigger | Task |
++|---|---|---|---|---|---|
++| AXS-015 | operator (Docker account) | `arxa-isolation-levels.md` | sbx installed and verified to the auth boundary (commit `9119642`); login is the one unautomatable step (`fd6c137`); global `sbx policy init` is global state | After authorization: product-provisioned `sbx`, OAuth device flow, reviewed deny-all plan, disposable sandbox + scratch repo, policy-denial proof, commit fetch to host ref, removal (Task 11 prepares the runbook) | 16 |
++| AXS-016 | operator (Claude subscription) | `claude-subscription-engine.md` | Implementation shipped and CI-green (AXS-038); live quota smoke was recorded as "the operator's call"; Linux runs need `claude setup-token`; Windows ACL rung unmeasured; bundled skill-pack set is empty by ruling 5 with no asserting test yet | Authorized signed-in smoke; Linux resume + Bash escape; Windows ACL measurement; add the empty-default skill-pack policy test | 16 |
++| AXS-017 | operator (Z.ai credential) | `zai-wire-params-test-battery.md` | Battery T1–Tn PASS 2026-08-29; "live authenticated smoke remains the one open item" | `node scripts/zai-live-smoke.mjs` with the authorized credential path; require a real response with the intended model/wire params | 16 |
++| AXS-018 | operator (devices/credentials) | `mobile-grill-decisions.md` M5, Task 12 physical-gates doc | Simulator integration smoke exists (`integration_test/approvals_e2e_test.dart`); no physical-device evidence | `mobile_flutter/deploy/physical-gates.md` (written by Task 12): iPhone/APNs and Android/FCM/APK legs — pair, reconnect, notification tap, approval, unpair | 16 |
++| AXS-019 | operator (Apple credentials) | `desktop-shell-scaffold.md` / `mobile-grill-decisions.md` | `xcrun notarytool store-credentials arxa-notary` fails: no profile; updater endpoint hosting is a placeholder | After Task 15 prepares identities/entitlements/updater signatures: first signed `studio-v*` notarized release + `release-linux` tag, manifest verification from a clean machine | 16 |
++| AXS-020 | upstream dsh | `open-work-inventory-2026-09-07.md` (blocked upstream) | No resume verb until dsh has a contentless wake; no `job.*` RPC; dsh core boot ~1.1–1.2 s module I/O | Upstream dsh releases; studio adapts on the `arxa update` pin-bump path | — |
++| AXS-021 | sibling arxa repo / operator | `arxa-remaining-work.md`, `entitlement-backend-runbook.md`, `stub-remediation.md`, `monetization-and-entitlements.md` (via the 2026-09-07 inventory §arxa) | Entitlement dev-key swap, Stripe products/webhook, `arxa login` PKCE + OAuth, self-service deactivation, holdco/opco + store accounts — all sibling-repo commerce work, untouched by this program | Sibling repo's own program; not studio work | — |
++| AXS-022 | sibling arxa repo | 2026-09-07 inventory §arxa code-work rows | Design-tool backlog (kit/cairn porting, engine LLM fabric, harness dictionary, fidelity-mode, showcase passes, enterprise tier); `designs/arxa-studio-v2` already archived as abandoned | Sibling repo's own backlog; the studio-v2 items are superseded, not pending | — |
++
++## DEFERRED — recorded with triggers
++
++| ID | Source plan | What is deferred | Trigger (revisit when) |
++|---|---|---|---|
++| AXS-023 | `artifact-viewer-vscode-monaco.md` phases 4–5 | autoSave→VS Code setting ownership change, PDF extension experiment, Prettier→VS Code formatter swap | A replacement passes feature-parity tests (program rulings 3–4; pdf.js + Prettier + the tested 1.5 s debounce are retained) |
++| AXS-024 | `artifact-viewer-docked-column.md` T4 anchor | Files rows over the T3 tree route in the sidebar files section (held 2026-09-07) | The sidebar files-surface grill that owns that surface lands and rules the row grammar |
++| AXS-025 | `claude-signin-and-effort-selector.md` F15 | Probe swap to `claude auth status` for the liveness check (deliberate, recorded 2026-09-04: "F15 not done") | The SDK probe's cost is measured as a real problem |
++| AXS-026 | `sidebar-org-rethink.md` | The *direct* delete-org verb (trash/purge is the shipped path) | The operator asks for direct delete |
++| AXS-027 | `mobile-flutter-migration-spec.md` Q6 | Biometric approvals (no contract exists in any doc) | The operator sets v1 scope and a written contract exists |
++| AXS-028 | Freestyle follow-ups | Multi-select, clipboard, compact folders, file nesting, sort | Operator request after closeout |
++| AXS-029 | `artifact-viewer-implementation.md` | Viewer edit-with-agent (agent edits the open file → conflict prompt beyond the runbook leg) | An agent-edit contract with conflict UX budget is written |
++| AXS-030 | Dashboard follow-ups | Dashboard-inside-open-chat | Operator request after closeout |
++| AXS-031 | `mobile-flutter-migration-spec.md` Q7 | Archiving/removing the legacy Tauri scaffold (`arxa/mobile`) | First accepted iOS **and** Android releases (Task 12 retains it until then) |
++| AXS-032 | `arxa-studio-vocabulary-collisions.md` V5 | Version-minting ledger shape (project ledger + per-target rows) needs the sibling's confirmation; arxa-side `supersededBy` rides the same decision. Studio's half is already built (`versions.js`, AXS-035) | The sibling arxa repo confirms the shape in its governing design/version contract (Task 17 records the outcome) |
++
++## CLOSED — proven 2026-09-12 (source + tests; see the SDD ledger Task 1 evidence log)
++
++| ID | Item | Evidence |
++|---|---|---|
++| AXS-033 | Project-repo routing (the `project-sessions-physical.md` design) | `plugins/git-workspace/lib/routing.js` DOCK_ROUTES (D98/D99; silent org fallback is B2 and refuses loudly), `sessions.js` org+project aggregation with repo-discovery preamble; commits `0df8eb8`, `209e5f7`, `d92a418`; `selftest.routing: 19/19 passed` |
++| AXS-034 | Repo-less sessions / rows-face aggregation (D115 main body) | `d92a418` + `6ed5e27`; the D115 *repair-path* gap is the one live piece → AXS-002 |
++| AXS-035 | Version minting + `changes-requested` state | `plugins/git-workspace/lib/versions.js` (`mintVersion`, `VERSION_STATES` incl. `changes-requested`, `readTargetReleases`); `selftest.versions: 14/14 passed` |
++| AXS-036 | Project format stamp removal | Commit `a003287` "drop the project format stamp that was written, published and never read"; `plugins/workspace/lib/manifest.js:26` documents the stamp as derived-only |
++| AXS-037 | Leaf/session/lister Git decorations | `decorations.js` `decorate`/`foldDirs`; D117 `session.decorations` in `arxa-sidebar/lib/client.js`; `selftest.decorations: ALL GREEN`. Top-level rollups stay open → AXS-003 |
++| AXS-038 | Claude subscription engine implementation | `plugins/claude-code/` full module set (models, probe, spawn, env, pending, mirror-tools, mirror-gate, bridge, handoff, mcp-bridge, approval, adapter, account, auth-flow, rate-limit, skill-packs, usage) with 21 selftests GREEN in the 110-suite CI run; its plan's 88 unchecked boxes are stale tracking |
++| AXS-039 | Claude SDK packaging + skill-pack loading mechanism | `scripts/pack-list-check.mjs: 10 ok`; `@anthropic-ai/claude-agent-sdk 0.3.259` in the payload; `skill-packs.js` + 5-case selftest (closed 2026-09-07, still green). *Which packs ship* is settled by program ruling 5 (none by default) — enforcement test rides AXS-016 |
++| AXS-040 | GitHub authorization mounting | `plugins/github-link` device-flow mounting; `selftest.auth-flow: 7 ok` ("the authorization seam is mounted by a profile row and declared as a dependency") |
++| AXS-041 | sbx research + login-boundary evidence | `arxa-isolation-levels.md` research sections (tiers, policy tables, concurrency finding); commits `9119642`, `30a7863`, `fd6c137`. Product integration → AXS-010; the login run itself → AXS-015 |
++| AXS-042 | GitHub conversations live smoke (cicd card against a real repo) | `github-conversations-in-the-insight-panel.md`: "CLOSED 2026-09-03 — the authorised live smoke ran"; `2df41f0`, `ddffa17`, `19011e4` |
++| AXS-043 | Z.ai wire-params capability handoff | `zai-wire-params-capability-handoff.md` Status: IMPLEMENTED 2026-08-29 (§4B override; §5 closed); battery PASS. Live smoke → AXS-017 |
++| AXS-044 | Claude sign-in surface (Models page) | `claude-signin-surface-models-page.md`: live verification + closing note + follow-up grammar, all 2026-09-06; Sign out covered by `selftest.account` fake-spawner (live logout deliberately not run — it would kill the working CLI session); the stock Edit-form item is moot per the 2026-09-06 user direction ("no Edit") |
++| AXS-045 | Claude sign-in/effort findings F11–F14 | `claude-signin-and-effort-selector.md` Outcome 2026-09-04: F12/F13/F14 fixed and verified live; F11 closed by `plugins/claude-code/package.json` + engine-sync content hash. F15 → AXS-025 |
++| AXS-046 | Freestyle | `plugins/arxa-freestyle` shipped (org grammar parity, create/rename/publish/disconnect/sync/sweep/purge, decorations); 8 suites GREEN; commit series `a8e334d`→`5042258`, routing `64bf64a` |
++| AXS-047 | Dashboard restyle + installed-check | `10ea9df`, `82681e1`, `967b2cc`; 6 `arxa-dashboard` suites GREEN |
++| AXS-048 | Palette consolidation + personalisation rows | `967b2cc` (one active-row style, ink wash); `theme-accent` + `personalisation` selftests GREEN. Locale parity for new keys → AXS-007 |
++| AXS-049 | Client bundle diet | Measured not worth it (startup plan round 8) — declined by evidence; the remaining boot cost is upstream (AXS-020) |
++| AXS-050 | File-org grill Q2 (Git repo boundaries in the tree) | Answered in practice by the D98/D99 routing table (AXS-033): projects/* → project repo, notes/meetings/communications → org repo, account → refused |
++| AXS-051 | `org-trash-unreachable.md` reachability rescue | Superseded 2026-09-09 by `org-delete-trash-reachability.md` (gate steps aside; sidebar Trash reachable at zero orgs, commits `238a5d8`/`271bf87`). The live-session bug remains → AXS-001 |
+diff --git a/docs/plans/project-sessions-physical.md b/docs/plans/project-sessions-physical.md
+index ecd0612..3f5342f 100644
+--- a/docs/plans/project-sessions-physical.md
++++ b/docs/plans/project-sessions-physical.md
+@@ -1,12 +1,19 @@
+ # Project sessions — the physical design (deferred, decision Q3)
+ 
++> **Superseded 2026-09-12 — the physical step shipped.** Sessions attach to the project repo
++> (`plugins/git-workspace/lib/routing.js`, D98/D99; commits `0df8eb8`, `209e5f7`, `d92a418`) and
++> registries aggregate org + projects (`sessions.js`; `selftest.routing: 19/19 passed` on 2026-09-12).
++> Of the open questions below, only the trash interplay stays live — as AXS-001 (Task 2) in
++> [`open-work-inventory-2026-09-12.md`](open-work-inventory-2026-09-12.md). The "deferred" status
++> line below is historical narrative; the design as written was implemented.
++
+ Status: **deferred by decision** (grill Q3, file-org handoff session). What
+ shipped is annotation-only: sessions live on the org repo and carry a
+ `project` slug in the registry (CONTEXT.md: project session). This note
+ records the design for the PHYSICAL step so the deferral is actionable, not
+ just forgotten.
+ 
+ ## What changes
+ 
+ - `newSession(name, project)` on a selected project calls
+   `openSession(projectPath, …)` — branch + worktree attach to the **project

@@ -1,0 +1,13 @@
+⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
+[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
+**✅ Task 13 Part A — checkpoint stop**
+
+- **Status:** DONE_WITH_CONCERNS (concerns = ambiguity judgments awaiting review, not defects)
+- **Commit:** `3597a40` feat: freeze the workspace provider wire contract
+- **Tests:** focused suite 12/12 green · `npm test` 120 suites ALL GREEN (new suite auto-discovered, no ci.mjs edit)
+- **Ambiguities resolved** (10, full detail in report): signed-url route shape; member mutation routes; `invalid_request` added to code set; unknown server code → `unavailable`+`.serverCode`; next-cursor via `X-Arxa-Cursor-Next` header; bearer only on `/auth/revoke`; `GET /audit` has no query params; concrete bound values (100/500, 1 MiB/32 MiB/1 GiB, 15 s, 3 attempts, 408/425/429/5xx retry set); strict JSONL (blank line = error); DELETEs return bounded JSON
+- **Concerns:** reviewer should explicitly uphold/overturn each ambiguity (overturn = new protocol version per freeze rule); Part B's streaming reads must chunk (32 MiB cap is per decoded page)
+- **Report:** `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-13-report.md`
+- Ledger: no new findings. `package-lock.json` dirt untouched.
+
+Stopped before Step 4 as mandated.
