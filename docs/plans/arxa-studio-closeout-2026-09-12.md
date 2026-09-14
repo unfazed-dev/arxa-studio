@@ -13,7 +13,7 @@ lived there). Every row ends `CLOSED`, `DEFERRED` (concrete trigger), or `EXTERN
 prepared command/trigger). Zero ambiguous rows.
 
 Row counts: **CLOSED 33** (14 program outcomes AXS-001–014 + 19 pre-program AXS-033–051) ·
-**EXTERNAL 14** (AXS-015–022, 053, 055–059, 062–064, 067) · **DEFERRED 17** (AXS-023–032, 052,
+**EXTERNAL 18** (AXS-015–022, 053, 055–059, 062–064, 067) · **DEFERRED 17** (AXS-023–032, 052,
 054, 060, 061, 065, 066, 068). ID note: Task 15's inserted AXS-042/043 collided with pre-existing
 CLOSED IDs and are renumbered AXS-052/053 (references fixed in `closeout-evidence-2026-09-12.md`
 G10 and arxa `docs/linux-support.md`).
@@ -25,7 +25,7 @@ here. Task 16 Part B legs remain EXTERNAL/PREPARED pending per-leg operator auth
 
 ## Commits by repository
 
-Studio (`4d1b924..902551d`, 25 commits; BASE `4d1b924`, plan `1781083`):
+Studio (`4d1b924..902551d`, 27 commits; BASE `4d1b924`, plan `1781083`):
 
     902551d test: correct the closeout evidence matrix (fix round 1)
     7351ddf fix: return the dsh result envelope from the workspace info RPC
