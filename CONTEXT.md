@@ -184,3 +184,22 @@ vocabulary only.
   zero is a claim. Delivery is GitHub through the user's own
   `github-link` grant; Engine reads the arxa engine's on-disk file
   contract (D5) and says so when the engine never ran.
+
+## Added 2026-09-14 (closeout program)
+
+- **Workspace provider** — the pluggable org/workspace storage backend behind the frozen Wire v1
+  contract. `local` (filesystem, zero-config, offline) is the default; `supabase` (user-provided
+  project, RLS-enforced) and `generic-rest` are opt-in. Same conformance suite for all; export/
+  import moves portable data between them. Never required: local-only is a first-class citizen.
+- **Confinement tier** — the effective isolation level of a session home: A0 preset seeding
+  (workspace-write with provenance), A1/A2 read/write fences, A3 per-project secrets, A4 Docker
+  container isolation (host recovery refs), A5 sbx sandbox. The effective tier is resolved from
+  daemon truth, never assumed.
+- **Local Checks row** — the git-card gate row for local-only sessions: cached `check.sh` output,
+  fingerprint-staled, 64 KiB cap.
+- **Delivery ledger strip** — the condensed latest-stage delivery summary on the git card
+  (persisted `next`, bounded view, trusted-URL link only).
+- **Trash quiesce** — `org.trash` stops live sessions under the org first (bounded, fail-closed,
+  reports stopped IDs) before the org moves to trash; restore preserves `org.json.name`.
+- **Repair repo** — the explicit `Initialize Git repository` path for imported projects whose
+  `project.json` exists but `.git` does not; one retry, notice UI.

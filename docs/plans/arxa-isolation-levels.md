@@ -1,6 +1,13 @@
 # Project isolation levels — L0 / L1 / L2
 
 Status: **research + grill in progress.** Nothing here is settled law yet.
+
+> **Outcome 2026-09-14 (closeout):** S1–S4/L1 (A0–A3) shipped (Task 9, `fd6fd5f`), A4 Docker
+> isolation shipped (Task 10, `62ee8d5`/`f35389b`), S3–S4/A5 sbx shipped (Task 11,
+> `18c52cc`/`e800fe9`) — inventory rows AXS-008/009/010 CLOSED. The research sections below are
+> the historical record the implementation was built against; the vocabulary claims they carried
+> ("studio lacks `changes-requested`/version minting") are resolved — see
+> `arxa-studio-vocabulary-collisions.md` final outcome and AXS-035.
 Companion to `git-card-sessions-worktree-rewire.md` (the CI/CD plan this must not break).
 
 ## The ask
@@ -1679,6 +1686,12 @@ States are `Draft · In review · Approved · Superseded`. Superseded entries ar
 
 ### ⚠️ B12 — NEW, verified: the version system is built but nothing ever triggers it
 
+> **Outcome note 2026-09-14:** studio's version system (minting + the full state vocabulary incl.
+> `changes-requested`) is shipped and test-pinned (`versions.js`, `selftest.versions 14/14`;
+> AXS-035). The "never triggered" half was accurate at measurement and remains true by design:
+> the module is API-only and its first product trigger is the arxa-side publish event (AXS-032
+> records the cross-product decision).
+
 **`versions.json` exists nowhere on disk.** Across all three orgs and both projects,
 `find` returns nothing — **`mintVersion` has never run.**
 
@@ -2199,6 +2212,10 @@ a new path appends with a fresh `createdAt`.
 | Approved | `approved` | |
 | Superseded | **missing in arxa** | old versions are simply earlier array entries |
 | **missing in studio** | `changes-requested` | a rejection state the dial's kanban already models |
+
+> **Outcome 2026-09-14:** the studio half of this table is resolved — `changes-requested` and
+> minting ship in `versions.js` (AXS-035). The arxa half (`Superseded`/`supersededBy`) is not
+> accepted, not added (AXS-032).
 
 **Both gaps are real and both should close.** Studio needs `changes-requested` —
 §26k established that client objection opens new work (AIGA *cure*), and a rejection

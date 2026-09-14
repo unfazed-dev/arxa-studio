@@ -8,6 +8,28 @@ it (own release cadence; pins a compatible engine revision).
 The decisions record (SSOT) lives with the engine:
 `arxa/docs/plans/arxa-harness-and-distribution.md`.
 
+## Shipped 2026-09-14 (closeout program)
+
+- **Confinement A0–A5** — workspace-write preset seeding with provenance migration, read/write
+  fenced FileSystem provider, per-project age/SOPS secrets, automatic Docker project isolation
+  (devcontainer + host recovery refs), sbx (Docker Sandbox) isolation with fail-closed pinned
+  install and `refs/sandboxes/<name>/<branch>` recovery (`plugins/sandbox/`).
+- **Workspace providers** — frozen Wire v1 contract; `LocalWorkspaceProvider` (zero-config
+  default, offline) + Supabase adapter (RLS-tested migrations, reversible) + generic REST;
+  `arxa-studio provider verify|workspace export|workspace import|diagnose`
+  (`plugins/workspace-provider/`).
+- **Git card** — Local Checks row (cached, fingerprint-staled) and the latest delivery-ledger
+  strip; top-level Projects/project/stage decoration rollups.
+- **Trash quiesce** — org trash stops live sessions under the org first (bounded, fail-closed);
+  imported repo-less projects get an explicit `Initialize Git repository` repair path.
+- **Locales** — en/pl/fr key parity enforced by test on all touched surfaces; personalisation
+  captured light+dark across the 390/744/1280 ladder (`designs/evidence/studio-closeout/`).
+- **Evidence gates** — `scripts/evidence-gate.mjs` / `scripts/evidence-capture-narrow.mjs` drive
+  per-width capture with console-error gating.
+- **Sibling repo (arxa)** — mobile CI frame + fail-closed Android release signing; Linux
+  distribution prep (AppImage/deb/PKGBUILD, systemd unit, install scripts) + macOS installer;
+  external release legs documented in `docs/plans/arxa-studio-closeout-2026-09-12.md`.
+
 ## Layout
 
 arxa owns `~/.arxa` outright and never writes into the operator's `~/.dsh`

@@ -1,5 +1,10 @@
 # Organisation row dashboard — grill decisions and build plan
 
+> **Outcome 2026-09-14 (closeout):** shipped and green — restyle + installed-check, 6
+> `arxa-dashboard` suites GREEN (AXS-047; commits `10ea9df`, `82681e1`, `967b2cc`).
+> Dashboard-inside-open-chat is DEFERRED with a concrete trigger (AXS-030). Final matrix:
+> [`open-work-inventory-2026-09-12.md`](open-work-inventory-2026-09-12.md).
+
 **Status:** decisions grilled and confirmed by the operator 2026-09-09.
 Steps 1 (spike, §7), 2 (skeleton + selection bridge, §8), 3 (tier-1
 Activity + Repository cards, §12, 2026-09-09) and 4 (tier-2 figures + focus

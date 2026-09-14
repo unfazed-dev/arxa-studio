@@ -126,7 +126,13 @@ rejects), B19 (org gate failing on a Gradle cache), the frame-migration gap
 engine symlink. Seven defects that a document review could not have surfaced,
 because each one needed real code, a real app, or a real repo to appear.
 
-**Still open, accurately:**
+**Still open, accurately** *(snapshot 2026-09-03; current state = the final matrix in
+[`open-work-inventory-2026-09-12.md`](open-work-inventory-2026-09-12.md), Task 17 2026-09-14 —
+B2 → AXS-033 CLOSED, B12 vocabulary → AXS-035 CLOSED with the mint trigger deferred to the
+arxa publish event (AXS-032), V3 gaps → AXS-035 + AXS-032 (supersededBy not accepted), S1
+flip + the L0/L1/L2 tier programme → A0–A5 shipped (AXS-008/009/010), Flutter/mobile → AXS-011
+CLOSED, Phase 0b cleanup → EXTERNAL AXS-067 (operator authorization); B7/B8/D110/D111 were not
+carried as open rows by the 2026-09-12 inventory's re-verification):*
 - D110 write amplification, D111 red-main vs never-completed — decisions
 - B2 project-scoped session routing (this is D98/D99; nothing else moves first)
 - B7 worktree ↔ registry ↔ git reconciliation

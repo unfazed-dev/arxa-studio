@@ -7,6 +7,11 @@
 > 2026-09-12 (worktree `4d1b924`); the SDK ships in the payload (`scripts/pack-list-check.mjs`:
 > 10 ok). The remaining live gates are external — AXS-016 (Task 16) in
 > [`open-work-inventory-2026-09-12.md`](open-work-inventory-2026-09-12.md).
+>
+> **Closeout addendum 2026-09-14:** the empty-default skill-pack policy now also has an
+> asserting test — `plugins/claude-code/selftest.skill-packs.mjs` bundled-root-empty row, DONE
+> (T16 G5a). The signed-in smoke itself remains EXTERNAL pending operator authorization
+> (AXS-016).
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

@@ -6,6 +6,14 @@
 > [`open-work-inventory-2026-09-12.md`](open-work-inventory-2026-09-12.md); phases 4–5 are the
 > deferred row AXS-023. The "`node scripts/ci.mjs` GREEN" box is discharged by the 2026-09-12
 > baseline run (110 suites, ALL GREEN).
+>
+> **Outcome 2026-09-14 (Task 17):** AXS-006 CLOSED — trust boundaries + runtime verification +
+> clean-build gate landed in Task 7 (`78c1654`), the viewport ladder in Task 8
+> (`5c2f83a`…`d1771af`; evidence under `designs/evidence/studio-closeout/`). The five boxes end:
+> ci.mjs GREEN (discharged above); Lens visual gate → ladder captured with E1 limitations
+> (`closeout-evidence-2026-09-12.md` §G7-notes); live runbook → HTTP legs asserted by selftests,
+> person-driven legs PREPARED (AXS-068); gen-ui Diff card → DEFERRED AXS-065 (real-input
+> trigger); version bump → DEFERRED AXS-066 (D77 bump on first release/pack of this branch).
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

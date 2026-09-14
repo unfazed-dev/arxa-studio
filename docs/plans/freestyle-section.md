@@ -1,5 +1,11 @@
 # Freestyle Section Implementation Plan
 
+> **Outcome 2026-09-14 (closeout):** shipped and green — org grammar parity,
+> create/rename/publish/disconnect/sync/sweep/purge, decorations; 8 suites GREEN (AXS-046;
+> commits `a8e334d`→`5042258`, routing `64bf64a`). Follow-ups (multi-select, clipboard, compact
+> folders, file nesting, sort) are DEFERRED with concrete triggers (AXS-028). Final matrix:
+> [`open-work-inventory-2026-09-12.md`](open-work-inventory-2026-09-12.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** A second sidebar tab, **Freestyle**, beside **Organisations**: any folder, any file, any session, no org rules, VS Code-style explorer verbs, with the same automatic local git, GitHub link, arxa CI/CD gate and branch-per-session worktrees the orgs get.

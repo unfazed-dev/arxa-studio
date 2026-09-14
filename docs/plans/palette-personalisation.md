@@ -1,5 +1,10 @@
 # Palette Personalisation — Settings > Personalisation (2026-09-11, operator)
 
+> **Outcome 2026-09-14 (closeout):** shipped and green — one active-row style, ink wash,
+> `theme-accent` + `personalisation` selftests GREEN (AXS-048, `967b2cc`); EN/PL/FR parity for
+> the new keys closed by Task 8 (AXS-007, parity suite + native-speaker corrections `4347f07`).
+> Final matrix: [`open-work-inventory-2026-09-12.md`](open-work-inventory-2026-09-12.md).
+
 The Accent row (three fixed hexes) became the **Palette row**: three
 built-in coolors palettes — **Mystic Evening** (default, for everyone out
 of the box), **Earthy Green**, **Light Steel** — plus **one custom slot**

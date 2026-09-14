@@ -421,6 +421,11 @@ bundle.
 
 ## Known gaps — as of the session-2 run (2026-09-03)
 
+> **Snapshot note 2026-09-14 (closeout):** this list is the 2026-09-03 state. Current state =
+> the final matrix in [`open-work-inventory-2026-09-12.md`](open-work-inventory-2026-09-12.md)
+> (the dsh `job.*` gap rides the upstream row AXS-020; the CICD card itself closed with the
+> 2026-09-03 live smoke, AXS-042).
+
 Gaps 1, 4 and 5 from the first run are **closed**; what follows is what is
 still open, restated against the corrected capability map.
 

@@ -1,5 +1,13 @@
 # Artifact viewer docked column — D88–D93 acceptance runbook
 
+> **Outcome 2026-09-14 (Task 17):** the unchecked boxes below are closed or dispositioned —
+> HTTP-semantics legs (expired token, GET-only origin, conflict, SSE deny-default, tree-read
+> mint) are asserted green by the artifact-viewer selftest suites inside `npm test`; autosave /
+> diff / dart-present evidence (2026-09-13 §7) stands marked env-coupled (fresh-boot
+> reproduction blocked by the E1 LSP chain, AXS-063); the person-driven legs §§1–§5 are
+> PREPARED — an operator walkthrough, no authorization needed (AXS-068). Row-level detail:
+> `closeout-evidence-2026-09-12.md` §G7-notes.
+
 Supersedes the D87 overlay-panel runbook. The viewer is a docked,
 session-bound column (D88) with org-wide reach (D90), card routing (D91),
 and a narrow-viewport sheet (D92).

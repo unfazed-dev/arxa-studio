@@ -76,3 +76,5 @@ client of the Mac-hosted engine. Companion to
   `docs/plans/desktop-shell-scaffold.md` — updater endpoint hosting
   (placeholder `https://updates.arxa.invalid`) and notarization
   credentials (user step: `xcrun notarytool store-credentials arxa-notary`).
+  *(Closeout 2026-09-14: both remain operator-external — AXS-019 in the studio
+  final matrix; the first runner pass rides AXS-053.)*

@@ -7,6 +7,13 @@
 > deferred row AXS-032 in
 > [`open-work-inventory-2026-09-12.md`](open-work-inventory-2026-09-12.md); final vocabulary
 > reconciliation is Task 17. The "not yet decided" line below is historical.
+>
+> **Final outcome 2026-09-14 (Task 17):** Gap 2 is CLOSED — studio HAS `changes-requested` and
+> version minting (`versions.js`: `mintVersion`, `VERSION_STATES`; AXS-035), so every "studio has no
+> such state" line below is history, not current fact. Gap 1 (`supersededBy`) is **NOT ACCEPTED,
+> NOT ADDED**: no arxa-side design/version contract carries the field (grep of the arxa worktree at
+> `3b6e08ea`: zero matches) and no unconsumed field was added on either side. The decision rides
+> deferred row AXS-032 until the sibling contract explicitly adopts or rejects the ledger shape.
 
 Status: **inventory complete, resolutions proposed, not yet decided.**
 Raised as blocking by the owner 2026-09-02, ahead of the version-management work.
@@ -453,10 +460,14 @@ either product having to observe the other's builds.
 
 ### What must be agreed before any of this is written
 
+> **Outcome 2026-09-14 (Task 17):** item 3 is done (studio shipped `changes-requested`; AXS-035).
+> Items 1–2 remain open on the arxa side: not accepted, not added (AXS-032 records the trigger).
+
 1. Project ledger + per-target rows, versus a single number — **arxa's call to
    confirm, not studio's to assume.**
 2. `supersededBy` on arxa's side (arxa has no `superseded` state).
-3. `changes-requested` on studio's side (studio has no such state).
+3. `changes-requested` on studio's side ~~(studio has no such state)~~ — resolved:
+   shipped in `versions.js` (AXS-035).
 
 (2) and (3) are changes to *both* codebases and were already recorded in §V3 as
 accepted work. None of it should be built until arxa has said yes to (1).

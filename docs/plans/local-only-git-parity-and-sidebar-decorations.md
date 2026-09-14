@@ -1,5 +1,13 @@
 # Local-only git parity + VS Code-style sidebar decorations
 
+> **Outcome 2026-09-14 (closeout):** D3/D6/D7 shipped (Local Checks row + top-level rollups,
+> Task 4 `7d9e866`, AXS-003); S4/S5 stress shipped and both product defects found there fixed
+> (Task 5 `82296f8`, AXS-004); Bug B (sessions writing into a trashed org) closed by the trash
+> quiesce (Task 2 `8f10a08`, AXS-001). The "Sweep still open" line at §Decisions 2+4 is
+> superseded in-file below ("Sweep landed on the sidebar, not the card", 2026-09-08); the
+> unresolved DOM-read note in §5 is historical. Final matrix:
+> [`open-work-inventory-2026-09-12.md`](open-work-inventory-2026-09-12.md).
+
 Grilled 2026-09-08. Seven decisions, all confirmed by the operator. Nothing in
 here is implemented yet — this is the agreed shape plus the test matrix.
 
