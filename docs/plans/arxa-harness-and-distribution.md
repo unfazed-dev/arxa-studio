@@ -49,7 +49,9 @@ is not a default capability for distributed software.
 every launch (`materialisePreset`, `bin/materialise-preset.mjs`) — same
 treatment as the profile patch. `settings.yaml` seeds once; on a later launch,
 if `agent-presets.default` already names a shipped preset (`code`, `cordis`,
-`standard`, `minimal`), that key alone rewrites to `arxa`, notice printed,
+`ptc`, `standard`, `minimal` — gated against the installed wave by
+`scripts/preset-names-check.mjs`; `code` kept for homes seeded before upstream
+renamed it to `ptc`), that key alone rewrites to `arxa`, notice printed,
 everything else byte-untouched. `--materialise-only` runs the profile/preset
 copy and settings/credential seed, then exits — no pnpm install, no dsh exec.
 
@@ -58,3 +60,22 @@ copy and settings/credential seed, then exits — no pnpm install, no dsh exec.
 `~/.arxa/engine/<hash>/.../node_modules/@deepseek-ai/dsh/config/agent-presets/`
 belongs to the installed package; an engine upgrade overwrites it. Read it as
 reference only. To change what arxa ships, edit `profile/agent-presets/arxa/`.
+
+## Fork triggers (decided 2026-09-14)
+
+Depend-don't-fork stands (round 3 of the 0.1.5 grill,
+`docs/research/dsh-0.1.5-upgrade-analysis.md`): a fork trades an afternoon of
+seam-adaptation per wave for permanent merge debt against a 0.x upstream that
+breaks by design. Revisit — and only then fork — if any trigger fires:
+
+- upstream dies or locks outside contribution (the Gogs→Gitea case),
+- the license flips away from MIT (the Elasticsearch→OpenSearch case),
+- dsh reaches 1.0 AND arxa needs engine-core changes no plugin can express,
+- a routine wave regenerates more than half of the stock surfaces arxa
+  replaces (frame, sidebar, locale, workspace, git-card, conversation).
+
+Until then: exact pins, replacement plugins, drift gates
+(`dsh-contract-check`, `preset-names-check`, `session-format-check`), the
+bump-trigger rule in the upgrade analysis doc, and the registry radar
+`scripts/dsh-wave-latest-check.mjs` (hand-run or cron — network, never in ci).
+

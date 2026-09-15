@@ -22,10 +22,11 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import vm from 'node:vm'
+import { stockFile } from './stock-path.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
-const STOCK = join(ROOT, 'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js')
-const STOCK_PKG = join(ROOT, 'node_modules/@deepseek-ai/dsh-client-ui-conversation/package.json')
+const STOCK = stockFile('@deepseek-ai/dsh-client-ui-conversation')
+const STOCK_PKG = stockFile('@deepseek-ai/dsh-client-ui-conversation', 'package.json')
 const SNIPPET = join(ROOT, 'plugins/arxa-git-card/lib/git-card.snippet.txt')
 const OUT = join(ROOT, 'plugins/arxa-git-card/lib/client.js')
 
@@ -57,8 +58,11 @@ if (mapAt < 0) throw new Error('QueueDock class map not found')
 const mapEnd = src.indexOf('};', mapAt)
 const mapBody = src.slice(mapAt + mapHead.length, mapEnd)
 const classMap = vm.runInNewContext('({' + mapBody + '})')
-// dsh 0.1.2-rc.1: stock QueueDock grew attachment thumbnails → +thumb, +thumbs
-const expectKeys = ['action', 'actions', 'chevron', 'count', 'dock', 'editor', 'header', 'lead', 'list', 'panel', 'preview', 'row', 'thumb', 'thumbs']
+// dsh 0.1.5-rc.2: QueueDock grew the attachment/file rows (→ +attachments,
+// +file, +fileIcon, +fileName, +fileSize, +pendingRow, +status; thumbs merged
+// into the singular thumb). The git-card snippet rides only the surviving
+// grammar keys — asserted below by its own S.* usage.
+const expectKeys = ['action', 'actions', 'attachments', 'chevron', 'count', 'dock', 'editor', 'file', 'fileIcon', 'fileName', 'fileSize', 'header', 'lead', 'list', 'panel', 'pendingRow', 'preview', 'row', 'status', 'thumb']
 for (const k of expectKeys) if (!(k in classMap)) throw new Error('stock class map lost key ' + k)
 
 // ---- 3. identity rewrite ----------------------------------------------------

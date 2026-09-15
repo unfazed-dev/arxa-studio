@@ -342,3 +342,9 @@
 # (see the arxa-memory comment above for why no `insert:` wrapper).
 - id: arxa-gen-ui
   name: arxa-gen-ui
+# NOTE the web boot bundle composes client halves from HOST rows only, so an
+# agent-preset row's browser half never loads (2026-09-14, measured while
+# smoke-testing the old arxa-deliver card; arxa-gen-ui above predates the
+# finding and its live cards silently degrade to fallback on desktop).
+# arxa-deliver itself is retired at the 0.1.5 bump — stock delivered-file
+# cards + the grafted editor renderer cover it (2026-09-15).

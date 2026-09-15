@@ -58,23 +58,25 @@ assert.match(launcher, /BY_NAME_PLUGINS = \[[^\]]*'arxa-artifact-viewer'/,
 assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   'packed mode copies the plugin directory')
 
-// D88-D93: the generated arxa-frame module must match its generator (drift
-// gate) and the client must never register into shell.overlay again.
+// THE GRAFT (0.1.5 bump, 2026-09-15): the arxa-frame column is RETIRED — the
+// stock ui-layout row is back, and the editor renders INSIDE the stock right
+// sidebar under two seats. The old generated-frame drift gate went with the
+// column; the insight-css lift survives (now single-module: 0.1.5 merged
+// ToolDetails into ToolRow).
 {
-  const gen = execFileSync(process.execPath, [join(root, 'scripts', 'gen-frame.mjs'), '--check'], { cwd: root })
-  assert.match(String(gen), /--check OK/, 'arxa-frame drift gate: generated client matches gen-frame.mjs')
+  assert.ok(!fs.existsSync(join(root, 'plugins', 'arxa-frame')), 'arxa-frame is gone (stock ui-layout restored)')
+  assert.ok(!fs.existsSync(join(root, 'scripts', 'gen-frame.mjs')), 'the frame generator went with it')
   const genIns = execFileSync(process.execPath, [join(root, 'scripts', 'gen-insight-css.mjs'), '--check'], { cwd: root })
-  assert.match(String(genIns), /--check OK/, 'insight-css drift gate: the lifted ToolRow/ToolDetails copy matches the stock bundle')
+  assert.match(String(genIns), /--check OK/, 'insight-css drift gate: the lifted stock tool copy matches the bundle')
   const clientSrc = fs.readFileSync(join(here, 'lib', 'client.js'), 'utf8')
   assert.doesNotMatch(clientSrc, /inject\('shell\.overlay'/, 'viewer never floats over the frame again (D88)')
-  assert.match(clientSrc, /inject\('viewer'/, 'viewer registers into the docked viewer seat')
-  // The diff toggle must NAME the session, or the server's repo resolution has
-  // nothing to resolve and the base silently falls back to the org root.
-  assert.match(clientSrc, /worktreeId: wtRef\.current\.sessionId \}\s*\n\s*: \{ relPath: state\.relPath \}\)/,
-    'the diff toggle mints its base token against the worktree it is showing')
-  const frameSrc = fs.readFileSync(join(root, 'plugins', 'arxa-frame', 'lib', 'client.js'), 'utf8')
-  assert.match(frameSrc, /renderSlot\("viewer"/, 'frame renders the viewer seat')
-  assert.match(frameSrc, /session-maybe/, 'viewer seat is session-scoped (D88 presence)')
+  assert.match(clientSrc, /inject\('sidebar\.right\.tab\.document'/, 'editor registers into the stock document-preview seat')
+  assert.doesNotMatch(clientSrc, /inject\('sidebar\.right\.pane\.tab'/, "the 'arxa' tab seat is retired — session files ride the stock viewer (0.5.0)")
+  assert.match(clientSrc, /ctx\.documentPreviews\.register\(\{/, 'documentPreviews renderer declared')
+  assert.match(clientSrc, /priority: 'extension'/, 'renderer rides the extension band (beats the builtin code preview)')
+  assert.doesNotMatch(clientSrc, /ctx\.sidebarRightTabs\.register\(\{/, "no arxa page tab in the registry — the stock 'text' kind hosts files")
+  const noCommentSrc = clientSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+  assert.doesNotMatch(noCommentSrc, /openViewer|closeViewer/, 'no layout viewer-column face survives the retirement (comments may narrate)')
 }
 // D89/D90 lanes exist server-side
 {
@@ -86,11 +88,15 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   for (const p of ['/__arxa/artifacts/wt', '/__arxa/artifacts/tree', '/__arxa/artifacts/session-changes']) {
     assert.ok(idx.includes("'" + p + "'"), 'route registered: ' + p)
   }
-  // T5/D91 card routing: chips open the docked column, wt lane first, org fallback
+  // T5 routing at 0.6.0: every open lands in the arxa strip (the shell owns
+  // the rightbar column); stock produced-file cards stay native on the
+  // not-owning lane, and the chip capture returns ONLY while the strip owns
+  // the column — a stock openResource into the hidden surface is a dead
+  // click. The av-open lane keeps worktree-first resolution with the org
+  // fallback for tree/file rows.
   const t5client = fs.readFileSync(join(here, 'lib', 'client.js'), 'utf8')
-  assert.match(t5client, /\[data-produced-files-row\] button\[title\]/, 'interceptor targets stock produced-file chips only')
-  assert.match(t5client, /CustomEvent\('arxa-av-open', \{ detail: sessionId \? \{ sessionId, relPath: path \}/, 'chip click dispatches the arxa-av-open bridge')
-  assert.match(t5client, /path === '\.'\) return/, 'stock show-in-folder affordance stays stock')
+  assert.match(t5client, /data-produced-files-row\] button\[title\]/, 'the chip interceptor is back, scoped to ownership (0.6.0)')
+  assert.match(t5client, /if \(!col \|\| !col\.hasAttribute\('data-arxa-owns'\)\) return/, 'chip capture fires only while the strip owns the column')
   assert.match(t5client, /if \(ok\) return/, 'wt lane wins; org lane is the fallback on a miss')
   // Phase 1 conformance rebuild (docs/plans/dsh-plugin-ui-conformance.md):
   // store-based ingress replaces the D93 retry ladder + parked payload.
@@ -102,8 +108,8 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   assert.doesNotMatch(t5code, /__ARXA_AV_CHIP_INTERCEPT__|__ARXA_SESSIONS__|__ARXA_AV_DEBUG__/,
     'window debug globals are gone (ctx.effect disposal replaces the install-once flag)')
   assert.match(t5client, /function createAvStore\(\)/, 'ingress store exists')
-  assert.match(t5client, /store\.request\(\{ sessionId: detail\.sessionId \|\| null, rootId: detail\.rootId \|\| null, relPath: detail\.relPath, t0: Math\.round\(performance\.now\(\)\) \}\)/, 'apply() parks root-aware opens in the store, stamped with the click time')
-  assert.match(t5client, /store\.consume\(\)/, 'the mounted panel consumes the pending open')
+  assert.match(t5client, /store\.request\(\{ sessionId: sid, rootId: detail\.rootId \|\| null, relPath: detail\.relPath, t0: Math\.round\(performance\.now\(\)\) \}\)/, 'apply() parks root-aware opens in the store, stamped with the click time (0.6.0: sid resolved with the live-session fallback)')
+  assert.match(t5client, /store\.consume\(\)/, 'the ViewerShell consumes the pending open (panels receive their open as a request prop)')
   const saveStart = t5client.indexOf('const save = async (force = false) =>')
   const saveEnd = t5client.indexOf('/** Auto-save:', saveStart)
   const saveSrc = t5client.slice(saveStart, saveEnd)
@@ -123,13 +129,45 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
     'passive changes refresh never creates an org session when a root file opens')
   assert.match(changesSrc, /if \(!sessionId\) \{ setChanges\(\[\]\); return \}/,
     'changes refresh is empty when no current session already exists')
-  assert.match(t5client, /ctx\.layout\.openViewer\(\)/, 'the listener opens the column through the layout face')
+  // 0.6.0 "own the column": the openResource routing is GONE — every open
+  // lands in the shell's strip, session-less, no conversation jump.
+  assert.doesNotMatch(t5client, /openResource\(/, 'no openResource routing survives — the strip hosts every file open (0.6.0)')
+  assert.doesNotMatch(t5client, /openCreated/, 'the ingress never navigates into a conversation — no teleport, ever')
+  assert.doesNotMatch(t5client, /function sessionFileAddress|const dshSessionId =/, 'the dsh address builders died with the openResource lane (parseFileAddress stays for DocumentBody)')
+  assert.match(t5client, /function parseFileAddress\(addr\)/, 'DocumentBody still decodes the stock resource address')
+  assert.match(t5client, /const live = sessions && sessions\.list \? sessions\.list\.getSnapshot\(\)\.current : null/,
+    'a bare org-lane payload borrows the LIVE current session (wt-first resolution, 0.5.1 order)')
+  assert.match(t5client, /detail\.sessionId \|\| live \|\| store\.getSnapshot\(\)\.sessionId/,
+    'session resolution order: explicit payload, live current session, store fallback')
+  assert.match(t5client, /suppressAutoOpenUntil = Date\.now\(\) \+ 10000/,
+    'an explicit open suppresses the auto-open observer for 10s — the clicked file takes focus (0.5.1)')
+  assert.match(t5client, /if \(Date\.now\(\) < suppressAutoOpenUntil\) \{ armed = false; return \}/,
+    'the observer yields to a recent explicit open instead of popping the restored row')
+  assert.doesNotMatch(t5client, /openTab\('arxa'\)/, "the arxa tab is retired — no openTab('arxa') survives")
+  assert.match(t5client, /bare: true/, 'DocumentBody renders the panel chromeless inside the stock tab (stock chrome owns identity)')
+  // 0.6.0 column occupant pins.
+  assert.match(t5client, /function ViewerShell\(/, 'the ViewerShell owns the column chrome (tab strip + document header)')
+  assert.doesNotMatch(t5client, /aXa_av_sheet|stockChrome/, 'the 0.5.x overlay sheet and its chrome branch are deleted')
+  assert.match(t5client, /document\.querySelector\('\[data-rightbar-col\]'\)/, 'the shell locates the frame\'s rightbar track node')
+  assert.match(t5client, /ReactDOM\.createPortal\(\s*h\('div', \{ className: 'aXa_av_colHost'/, 'the shell portals into the column — in-flow, no overlap by construction')
+  assert.match(t5client, /\[data-rightbar-col\]\[data-arxa-owns\] > :not\(\.aXa_av_colHost\)\{display:none!important\}/, 'ownership CSS: the stock surface hides while the strip holds tabs')
+  assert.match(t5client, /colNode\.setAttribute\('data-arxa-owns', ''\)/, 'ownership attribute set on the column node')
+  assert.match(t5client, /L\.openRightbar\(true, false\)/, 'opens reveal the stock track (frame owns geometry + drag handle)')
+  assert.match(t5client, /L\.closeRightbar\(\)/, 'collapse/last-tab-close reports hidden to the frame')
+  assert.match(t5client, /'arxa-av-tabs:v1:'/, 'tabs persist per org in localStorage')
+  assert.match(t5client, /P\.MarkdownText/, "md renders through dsh's exact MarkdownText primitive")
+  assert.match(t5client, /data-arxa-renderer-menu/, 'the renderer dropdown anchors the stock P.Menu (openWith parity)')
+  assert.match(t5client, /IconWrapFill16/, 'the wrap toggle wears the stock wrap glyph')
+  assert.match(t5client, /aXa_av_edgeChip/, 'a session-less edge chip is the way back in while collapsed')
+  assert.match(t5client, /data-arxa-md/, 'the rendered-md lane is distinguishable in the DOM for probes')
+  assert.doesNotMatch(t5client, /aXa_av_head|aXa_av_chip|aXa_av_prettierMark|aXa_av_sheetBar/, 'the old aXa viewer chrome (header/actions/sheet bar) is gone')
   assert.match(t5client, /sessions\.list\.subscribe/, 'session tracking subscribes the dsh sessions snapshot store')
   assert.match(t5client, /MutationObserver/, 'first-produced-file-per-turn auto-open observer present')
   assert.match(t5client, /ctx\.locale\.register\(NS, \{ en, pl, fr \}\)/, 'locale NS registered with en/pl/fr dictionaries')
-  assert.match(t5client, /const inject = \['slots', 'connection', 'layout', 'sessions', 'locale'\]/, 'inject declares locale')
+  assert.match(t5client, /const inject = \['slots', 'connection', 'sessions', 'locale', 'documentPreviews', 'sidebarRight', 'layout'\]/,
+    'inject declares the faces the graft still uses (sidebarRightTabs went with the arxa tab; layout stays for openRightbar reveal)')
   assert.ok((t5client.match(/ctx\.effect\(/g) || []).length >= 5, 'every side effect sits inside ctx.effect (>=5)')
-  for (const prim of ['P.StateDot', 'P.Tooltip', 'P.Menu', 'P.Button', 'P.writeClipboard', 'P.IconCloseOutline16', 'P.IconCopyOutline16']) {
+  for (const prim of ['P.StateDot', 'P.Tooltip', 'P.Button', 'P.IconCloseOutline16', 'P.IconRefreshOutline16']) {
     assert.ok(t5client.includes(prim), 'primitives aboard: ' + prim)
   }
   // The generated insight-css region is a verbatim stock copy (its #0000 is a transparent scrollbar border) — the rule is about OUR css.
@@ -191,8 +229,8 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
     'the review refresh button arms the fresh flag before re-loading')
   assert.match(t5client, /wantFresh \? \{ sessionId, fresh: true \} : \{ sessionId \}/,
     'load() sends fresh:true to the host when the refresh button armed it')
-  assert.match(t5client, /if \(state\.phase === 'insight'\) \{ setState\(\(st\) => \(\{ \.\.\.st, sessionId: id \}\)\); return \}/,
-    'a session switch re-points an open insight panel instead of closing the column')
+  assert.match(t5client, /if \(open && state\.phase === 'insight'\) \{ setState\(\(st\) => \(\{ \.\.\.st, sessionId: id \}\)\) \}/,
+    'a session switch re-points an open insight tab (0.6.0: tabs persist across session switches — the close-on-switch directive died with the single-file column)')
   // `insight.title.ci` is deliberately absent: D4 retired the standalone CI
   // view and the review surface absorbed it. The `insight.ci.*` ROW strings
   // stay — the CI group inside the review view still renders those buttons.
@@ -221,19 +259,17 @@ assert.match(launcher, /\['arxa-artifact-viewer',\s*artifactViewerDir\]/,
   // and still refuses escapes (D91 re-base, escape checks intact)
   assert.match(wt, /path\.isAbsolute\(relPath\)/, 'absolute chip paths are re-based onto the worktree root')
   assert.match(wt, /'escape'\), \{ code: 'ESCAPE' \}\)\n/, 'escape check retained after the re-base')
-  // 2026-09-01 user report trio: session-scoped close, maximize glyph,
-  // toolbar tooltip placement.
-  assert.match(t5client, /IconFullscreenOutline16/, 'maximize uses the fullscreen glyph')
-  assert.doesNotMatch(t5client, /iconBtn\('max'[^]*?IconBrowseOutline16/, 'maximize no longer carries the browse glyph')
+  // 2026-09-01 user report trio: session-scoped close, toolbar tooltip
+  // placement (the maximize button died with the arxa tab, 0.5.0).
   {
     const calls = (t5client.match(/P\.Tooltip, \{/g) || []).length
     const bottom = (t5client.match(/side: 'bottom'/g) || []).length
     assert.ok(calls > 0 && calls === bottom, 'every viewer tooltip pins side bottom (' + bottom + '/' + calls + ') — toolbar tooltips must never cover sibling buttons')
   }
-  assert.match(t5client, /seenSessionRef\.current = id/, 'session tracker records every id incl. null (null->X must close a stale viewer)')
-  assert.match(t5client, /wtRef\.current\.sessionId === id\) return/, 'a shown file bound to the new current session survives the switch')
-  assert.match(t5client, /if \(frameProps\.close\) frameProps\.close\(\)\n\s*setOpen\(false\)/, 'the session-switch reset closes the LAYOUT column, not only panel state')
-  assert.match(t5client, /typeof l\.closeViewer === 'function'/, 'the session mirror enforces the close at the layout level — the seat remount outlives any in-panel close')
+  assert.match(t5client, /seenSessionRef\.current = id/, 'session tracker records every id incl. null (0.6.0: the switch no longer closes tabs — each wt tab carries its own session)')
+  assert.doesNotMatch(t5client, /if \(frameProps\.close\) frameProps\.close\(\)\n\s*setOpen\(false\)/, 'the close-on-session-switch reset is gone — tabs persist (0.6.0)')
+  // The 0.1.5 retirement: the session mirror no longer calls a layout face —
+  // the right sidebar's own per-session tab scoping does the closing now.
   assert.doesNotMatch(t5client, /if \(seenSessionRef\.current && id && seenSessionRef\.current !== id\)/, 'the over-guarded session->session-only reset is gone')
 }
 
@@ -595,10 +631,7 @@ assert.ok(!clientSrc.includes('ArxaCM') && !clientSrc.includes('unifiedMergeView
   const orphans = [...called].filter((n) => !declared.has(n) && n !== 'setTimeout')
   assert.deepStrictEqual(orphans, [], 'every state setter the client calls is declared: ' + orphans.join(', '))
 }
-assert.ok(clientSrc.includes('diffOriginal: showDiff ?'),
-  'and diff, like preview, is a PROP on the one CodeView — three tabs in one part, not three React subtrees')
 assert.match(clientSrc, /ensureVendor\('icons\.js', 'ArxaIcons'\)/, 'client loads the material icon subset')
-assert.match(clientSrc, /ensureVendor\('prettier\.js', 'ArxaPrettier'\)/, 'prettier stays lazy (loaded only on format)')
 // G7 phase 1b: the editable lane is Monaco/VS Code, not CodeMirror. Language
 // now comes from the uri (the VS Code grammar extensions resolve it), so the
 // old `CM.langForExt(ext)` pin is gone with the code it pinned. DiffView is
@@ -606,12 +639,9 @@ assert.match(clientSrc, /ensureVendor\('prettier\.js', 'ArxaPrettier'\)/, 'prett
 assert.ok(clientSrc.includes("import(VENDOR('arxa-monaco.js'))"), 'monaco bundle loaded by dynamic import (ESM + workers, not a script tag)')
 assert.ok(clientSrc.includes('M.openFile(ref.current,'), 'editable lane opens the file in monaco (keyed by the real path — see the G8 block)')
 assert.ok(clientSrc.includes('onChange: () => { if (onDirty) onDirty() }'), 'dirty state rides the monaco model')
-assert.ok(clientSrc.includes('M.setTheme(dark)'), 'palette flip reaches an already-open monaco editor')
+assert.ok(clientSrc.includes('M.setTheme(dark, studioColors())'), 'palette flip reaches an already-open monaco editor, with the canvas re-read')
 assert.ok(clientSrc.includes('if (dead) { handle.dispose(); handle = null; return }'), 'an editor created after unmount is disposed, not leaked into a detached node')
 assert.ok(clientSrc.includes('docRef.current.getText()'), 'save reads the live monaco document')
-assert.ok(clientSrc.includes('view.replaceRange('), 'format writes one minimal edit (cursor + undo survive)')
-assert.ok(clientSrc.includes('detectIndent('), 'indentation detected per file (VS Code detectIndentation)')
-assert.ok(clientSrc.includes('FORMAT_EXTS'), 'format-visible extension list present')
 // Shift-Alt-F is NOT rebound in the client any more. addCommand exists only on
 // a STANDALONE editor, and files now open in VS Code's editor part, whose
 // control is a plain ICodeEditor — the old binding would throw on every open.
@@ -773,7 +803,6 @@ assert.ok(spikeSrc.includes("out.lspMarkers > 0") && spikeSrc.includes("out.lspS
   'and proves same-language clients sync only their selected root model while diagnostics still reach Monaco')
 assert.ok(spikeSrc.includes('out.dialogs === 0') && spikeSrc.includes("out.afterConflict.startsWith('EDITED')"),
   'an external change under unsaved edits raises NO VS Code dialog and keeps the edits — the viewer\'s conflict banner stays the only prompt')
-assert.match(clientSrc, /IconEnhanceOutline16/, 'format action uses the enhance glyph')
 // The 2026 palette vars are gone with CodeMirror: they existed to make the CM
 // editor and the markdown preview match, and VS Code paints both from its own
 // theme. watchPalette stays — it is what tells VS Code which theme to use.
@@ -802,8 +831,15 @@ assert.ok(clientSrc.includes("await M.openDiff(uri, diffOriginal, {"),
   assert.ok(!wt.includes("/[/\\\\]/.test(worktreeId)"), 'resolveWorktreeFile no longer refuses the slash every registry id carries')
 }
 // First-click cost: the bundle and VS Code's boot are warmed after startup.
-assert.ok(clientSrc.includes("'arxa-av: warm editor'") && clientSrc.includes('M.start(document.createElement(\'div\'))'),
-  'the editor bundle is warmed before the first click')
+// The warm start passes the SHELL's palette + font: the workbench boots once
+// and its default is dark, so an args-less start painted dark body-level
+// chrome over a light shell (measured 2026-09-15).
+assert.ok(clientSrc.includes("'arxa-av: warm editor'") && clientSrc.includes("M.start(document.createElement('div'), { dark: isDarkMode(), fontFamily: studioEditorFont(), colors: studioColors() })"),
+  'the editor bundle is warmed before the first click, in the shell\'s palette')
+assert.ok(clientSrc.includes("'arxa-av: palette mirror'") && !clientSrc.includes('unwatch = watchPalette'),
+  'the palette mirror is armed once at apply, not per editor mount')
+assert.ok(clientSrc.includes('function cssColorToHex') && clientSrc.includes('4.0767416621'),
+  'studio colors convert oklab/oklch to hex by hand (canvas readback keeps the oklab string; VS Code refuses it)')
 // Click-to-paint trace (2026-09-07): one engine-log line per open, with the
 // phases the harness cannot see. Stays until the slow first load is explained.
 assert.ok(clientSrc.includes("const TRACE_ROUTE = '/__arxa/artifacts/trace'") && clientSrc.includes("trace.end('painted')"),
@@ -848,13 +884,6 @@ assert.ok(/await M\.openDiff\(uri, diffOriginal, \{[\s\S]{0,400}?\n\s+editable,\
   && !clientSrc.includes('sideBySide:'),
   'the client hands the diff the editable flag and leaves side-by-side to VS Code\'s own breakpoint')
 assert.ok(clientSrc.includes('data-arxa-vendor'), 'vendor script tags marked for cross-loader reuse')
-// Prettier viewer toggle: ON by default, persisted, gates every format path.
-assert.ok(clientSrc.includes("'arxa.av.prettier'"), 'prettier toggle persists its choice')
-assert.ok(clientSrc.includes("!== 'off'"), 'prettier defaults ON (unset key = on)')
-assert.ok(clientSrc.includes('FORMAT_EXTS.has(formatExt) && prettierOn'), 'prettier toggle gates the format BUTTON (Shift-Alt-F is VS Code\'s now)')
-assert.ok(clientSrc.includes("'aria-pressed'"), 'prettier toggle exposes pressed state')
-assert.ok(clientSrc.includes('aXa_av_prettierMark'), 'prettier brand chip rides the top bar')
-assert.ok(clientSrc.includes("'action.prettier.off'"), 'prettier toggle locales wired')
 
 // Q8 (2026-09-03): the CI insight panel mirrors the card's run control, but
 // per row — the card only ever reaches the newest run, this reaches every one.
@@ -1262,12 +1291,11 @@ assert.ok(!clientSrc.includes("|| 'Fira Code'") && !clientSrc.includes('var(--ar
   assert.equal(r1.headers['set-cookie'], undefined, 'the org origin sets no cookie')
   assert.equal(vget.headers['set-cookie'], undefined, 'the vendor route sets no cookie')
 
-  // S7: pdf.js and Prettier REMAIN (program ruling 3). No PDF extension
-  // experiment, no allowlist widening, no prettier->LSP swap in this closeout.
+  // S7: pdf.js stays vendored (program ruling 3). The client prettier FORMAT
+  // path retired with the aXa header (0.5.0) — the bundle/route lanes above
+  // keep guarding the host side; no extension allowlist widening either way.
   assert.ok(clientSrc.includes("ext === '.pdf'") && clientSrc.includes('function PdfView'),
     'the pdf lane stays on the vendored pdf.js (no extension experiment)')
-  assert.ok(clientSrc.includes("'md', 'yaml', 'yml'"),
-    'prettier keeps the lanes no language server covers (markdown/yaml/yml)')
   assert.ok(!PINNED_EXTENSIONS.some((n) => /pdf|prettier/.test(n)),
     'neither pdf nor prettier rides the extension allowlist — they are vendor bundles, not VS Code extensions')
 

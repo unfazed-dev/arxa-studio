@@ -38,11 +38,12 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { stockFile, WAVE } from './stock-path.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = dirname(here)
-const DSH_VERSION = '0.1.2-rc.1'
-const stockPath = join(root, 'node_modules', '@deepseek-ai', 'dsh-client-locale', 'lib', 'client.js')
+const DSH_VERSION = WAVE
+const stockPath = stockFile('@deepseek-ai/dsh-client-locale')
 const outPath = join(root, 'plugins', 'locale', 'lib', 'client.js')
 const T = (n) => '\t'.repeat(n)
 

@@ -1,5 +1,5 @@
 // Browser half of arxa-locale. GENERATED from
-// @deepseek-ai/dsh-client-locale lib/client.js (dsh 0.1.2-rc.1) +
+// @deepseek-ai/dsh-client-locale lib/client.js (dsh 0.1.5-rc.2) +
 // scripts/gen-locale.mjs deltas — do not hand-edit: regenerate and let the
 // selftest drift gate compare bytes. The stock LocaleRuntime, lookup chain,
 // Language row, and service face are kept whole; the shipped languages are

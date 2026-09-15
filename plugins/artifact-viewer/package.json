@@ -1,8 +1,8 @@
 {
   "name": "arxa-artifact-viewer",
-  "version": "0.3.5",
+  "version": "0.6.0",
   "private": true,
-  "description": "arxa artifact viewer-editor (D7 + D78-D87): per-org origin-separated viewer for all artifact types; the text family edits CodeMirror-style inside session worktrees.",
+  "description": "arxa editor owning the stock right column: a tabbed viewer portal-mounted into the frame's rightbar track ([data-rightbar-col]) — every file open (dashboard or conversation) lands in one strip, session-less, with the stock drag handle, renderer dropdown (dsh's MarkdownText included), wrap toggle and persistence. The stock document tab keeps the editor renderer for the not-owning lane. The host half owns the token/write/worktree/LSP routes.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -13,8 +13,7 @@
   "dsh": {
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-ui-layout"
+        "@deepseek-ai/dsh-client-runtime"
       ],
       "platform": "web"
     }

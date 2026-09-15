@@ -73,12 +73,13 @@ check('client: package exports ./client and declares dsh.client (runtime + ui-co
   pkg.exports['./client'] === './lib/client.js' && Array.isArray(pkg.dsh?.client?.inject) && ['@deepseek-ai/dsh-client-runtime', '@deepseek-ai/dsh-client-ui-conversation', '@deepseek-ai/dsh-client-locale'].every((d) => pkg.dsh.client.inject.includes(d)))
 check('client: stock QueueDock CSS carried under its own identity (tag + prefix), stock prefix absent',
   clientSrc.includes("CSS_TAG = 'arxa-git-card/GitDock.module.css'") && clientSrc.includes('.aXa_gc_dock{') && !clientSrc.includes('_7yHdaG_'))
-// stock shape, refreshed for dsh 0.1.2-rc.1: upstream QueueDock grew
-// attachment thumbnails, so the stock class map now ships 14 keys (+thumb,
-// +thumbs). This describes the STOCK, not arxa behavior — the card itself
-// still uses only the original 12 grammar slots.
-check('client: full stock class map present (14 keys, dsh 0.1.2-rc.1)',
-  ['action', 'actions', 'chevron', 'count', 'dock', 'editor', 'header', 'lead', 'list', 'panel', 'preview', 'row', 'thumb', 'thumbs'].every((k) => clientSrc.includes('"' + k + '": "aXa_gc_' + k + '"')))
+// stock shape, refreshed for dsh 0.1.5-rc.2: QueueDock grew the attachment/
+// file rows (+attachments, +file, +fileIcon, +fileName, +fileSize,
+// +pendingRow, +status; thumbs merged into the singular thumb). This
+// describes the STOCK, not arxa behavior — the card still uses only the
+// grammar slots its tree mirrors below.
+check('client: full stock class map present (20 keys, dsh 0.1.5-rc.2)',
+  ['action', 'actions', 'attachments', 'chevron', 'count', 'dock', 'editor', 'file', 'fileIcon', 'fileName', 'fileSize', 'header', 'lead', 'list', 'panel', 'pendingRow', 'preview', 'row', 'status', 'thumb'].every((k) => clientSrc.includes('"' + k + '": "aXa_gc_' + k + '"')))
 check('client: registers conversation.input.dock id=git order=15 between goal(10) and queue(20), locale-scoped',
   clientSrc.includes("ctx.slots.inject('conversation.input.dock'") && clientSrc.includes("id: 'git'") && clientSrc.includes('order: 15') && clientSrc.includes('locale: NS'))
 check('client: tree mirrors QueueDock — dock > panel > header[lead,count,chevron] + list > row[preview|editor, actions > action]',

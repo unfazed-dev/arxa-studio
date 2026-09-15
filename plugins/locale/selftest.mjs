@@ -18,6 +18,7 @@ import vm from 'node:vm'
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { dirname, join, relative, resolve } from 'node:path'
+import { stockFile } from '../../scripts/stock-path.mjs'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -105,7 +106,9 @@ check('face: inject set unchanged (stock set: slots/remote/settingsScope)',
 
 // ---- 5. original dsh package byte-identical -------------------------------------
 const hashPkg = (specifier, expected) => {
-  const pkgDir = dirname(createRequire(import.meta.url).resolve(specifier + '/package.json'))
+  // Graph-pinned (scripts/stock-path.mjs): root node_modules once carried
+  // stale pre-pnpm copies this hash silently vouched for.
+  const pkgDir = dirname(stockFile(specifier, 'package.json'))
   const files = []
   const walk = (d) => {
     // Plain code-unit order, NOT localeCompare: this hash is a cross-platform
@@ -127,8 +130,8 @@ const hashPkg = (specifier, expected) => {
   const got = hash.digest('hex')
   return { ok: got === expected, got }
 }
-// [re-pinned 2026-09-07 when the walk order became byte-stable; dsh 0.1.2-rc.1]
-const PINNED_LOCALE_SHA = '89a696152ec6ab9679757f490ad63a46e484e75821e9f5f632870dcfa8172bff'
+// [re-pinned 2026-09-15 at the 0.1.5-rc.2 bump, fresh install; walk order byte-stable since 2026-09-07]
+const PINNED_LOCALE_SHA = 'eaed9625c9a26d2524823c001b0601f18d02d654d71f20a32f796d6b109a75e8'
 {
   // package-tree sha256, code-unit filename order
   const s = hashPkg('@deepseek-ai/dsh-client-locale', PINNED_LOCALE_SHA)

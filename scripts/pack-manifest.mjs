@@ -176,6 +176,23 @@ const pkgOf = (spec) => (spec.startsWith('@') ? spec.split('/').slice(0, 2).join
  */
 export function devOnlyImports (studioRoot, dropped) {
   const names = new Set([...dropped].map((p) => p.split(sep).slice(1).join('/')))
+  // Engine-graph members ride the dsh WAVE's own dependency closure: host
+  // plugins import them bare and dsh's cordis runner resolves them from the
+  // materialized node_modules at boot, never from a repo-root link — so a
+  // dev-only ROOT LINK is not a payload drop of the package itself. Their
+  // devDependencies exist only so tests resolve the PINNED wave (2026-09-15,
+  // when the stale pre-pnpm root leftovers that used to satisfy them went).
+  // ponytail: store-layout aware (.pnpm names); if arxa ever leaves pnpm,
+  // re-derive from the wave's package graph instead.
+  let wave = new Set()
+  try {
+    const store = join(studioRoot, 'node_modules', '.pnpm')
+    for (const d of readdirSync(store)) {
+      if (!d.startsWith('@deepseek-ai+')) continue
+      const rest = d.slice('@deepseek-ai+'.length)
+      wave.add('@deepseek-ai/' + rest.slice(0, rest.indexOf('@')))
+    }
+  } catch { /* no store — every hit reports, fail-closed */ }
   const hits = []
   const walk = (dir) => {
     let entries
@@ -192,7 +209,7 @@ export function devOnlyImports (studioRoot, dropped) {
         : [...src.matchAll(SPEC_RE)].map((m) => pkgOf(m[1]))
       for (const name of found) {
         if (name.startsWith('node:')) continue
-        if (names.has(name)) hits.push({ pkg: name, file: relative(studioRoot, file) })
+        if (names.has(name) && !wave.has(name)) hits.push({ pkg: name, file: relative(studioRoot, file) })
       }
     }
   }

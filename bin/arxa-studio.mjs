@@ -140,6 +140,11 @@ if ((args[0] === 'provider' && args[1] === 'verify') ||
 const designPanelDir = resolve(here, '..', 'plugins', 'design-panel')
 const brandDir = resolve(here, '..', 'plugins', 'brand')
 const genUiDir = resolve(here, '..', 'plugins', 'gen-ui')
+// arxa-deliver + arxa-frame are RETIRED at the 0.1.5 bump (2026-09-15,
+// docs/research/dsh-0.1.5-right-sidebar-vs-arxa-artifact-viewer.md §Decision):
+// the stock right sidebar ships previews + delivered-file cards upstream, the
+// arxa editor grafts in as a documentPreviews renderer, and the docked viewer
+// column (arxa-frame's only reason to exist) is gone with them.
 // arxa-provider-status: provider/status session events → providerStatus
 // projection → composer pill, shared by every model provider (docs/plans/
 // claude-subscription-engine.md task 13). By-name because it ships a
@@ -180,10 +185,11 @@ const fileOrgShellDir = resolve(here, '..', 'plugins', 'file-org-shell')
 // name so arxa-sidebar's bare import resolves in every profile boot.
 const githubLinkDir = resolve(here, '..', 'plugins', 'github-link')
 // Artifact viewer-editor (D7 + D78-D87): by-package-name plugin with a
-// browser half — dir const feeds the profile package.json, BY_NAME_PLUGINS,
+// browser half — at 0.1.5 it is the documentPreviews EDITOR renderer inside
+// the stock right sidebar; the host half (write/worktree/LSP routes) is
+// unchanged. dir const feeds the profile package.json, BY_NAME_PLUGINS,
 // and the packed-mode copy list below.
 const artifactViewerDir = resolve(here, '..', 'plugins', 'artifact-viewer')
-const arxaFrameDir = resolve(here, '..', 'plugins', 'arxa-frame')
 // arxa's locale world (en/pl/fr — the stock locale row is disabled in the
 // patch; Phase 0 of docs/plans/dsh-plugin-ui-conformance.md).
 const localeDir = resolve(here, '..', 'plugins', 'locale')
@@ -226,7 +232,6 @@ const PROFILE_PLUGINS = [
   ['arxa-file-org-shell', fileOrgShellDir],
   ['arxa-github-link', githubLinkDir],
   ['arxa-artifact-viewer', artifactViewerDir],
-  ['arxa-frame', arxaFrameDir],
   ['arxa-locale', localeDir],
   ['arxa-prism', prismDir],
   ['arxa-personalisation', personalisationDir],
@@ -316,7 +321,10 @@ ${seededPermissionBlock(provisionLocalConfinement().preset.value)}`)
   // other byte of an existing settings.yaml — comments included — survives.
   const raw = readFileSync(settingsFile, 'utf8')
   const lines = raw.split('\n')
-  const shipped = new Set(['code', 'cordis', 'standard', 'minimal'])
+  // Gated against the installed @deepseek-ai/dsh-agent-presets tree by
+  // scripts/preset-names-check.mjs ('code' stays for homes seeded before
+  // upstream renamed it to 'ptc').
+  const shipped = new Set(['code', 'cordis', 'ptc', 'standard', 'minimal'])
   const topIdx = lines.findIndex((l) => l === 'agent-presets:')
   if (topIdx !== -1) {
     for (let i = topIdx + 1; i < lines.length && (lines[i] === '' || /^\s/.test(lines[i])); i++) {
@@ -422,7 +430,7 @@ engineLog('dsh bin resolved: ' + dshBin)
 // The design panel, brand and gen-ui plugins resolve by package name (their
 // browser halves are discovered through package.json dsh.client, which a
 // file-path entry never reaches).
-const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa-mcp-apps', 'arxa-waiting-page', 'arxa-theme-accent', 'arxa-pairing', 'arxa-sidebar', 'arxa-git-card', 'arxa-dashboard', 'arxa-artifact-viewer', 'arxa-frame', 'arxa-locale', 'arxa-prism', 'arxa-provider-status', 'arxa-freestyle', 'arxa-workspace-provider']
+const BY_NAME_PLUGINS = ['arxa-design-panel', 'arxa-brand', 'arxa-gen-ui', 'arxa-mcp-apps', 'arxa-waiting-page', 'arxa-theme-accent', 'arxa-pairing', 'arxa-sidebar', 'arxa-git-card', 'arxa-dashboard', 'arxa-artifact-viewer', 'arxa-locale', 'arxa-prism', 'arxa-provider-status', 'arxa-freestyle', 'arxa-workspace-provider']
 // ALWAYS install, never skip on presence: these are file: dependencies, and
 // pnpm copies them into .pnpm at add-time. A plain `pnpm install` sees the
 // lockfile entry unchanged and keeps the OLD copy — measured 2026-08-25: the
@@ -664,7 +672,11 @@ const child = spawn(process.execPath, [...loaderArgs, dshBin, '--profile', 'arxa
   // runtime is 26.x). Measured 2026-09-07: dsh core alone is 1744 modules,
   // 9.5MB of bytecode; spawn -> first plugin apply was 1.2-1.35s without it.
   // Keyed by engine payload dir so a new payload never reads stale cache.
-  env: { ...childEnv, DSH_HOME: dshHome, PI_CODING_AGENT_DIR: piHome, NODE_COMPILE_CACHE: join(here, '..', '.compile-cache') },
+  env: { ...childEnv, DSH_HOME: dshHome, PI_CODING_AGENT_DIR: piHome, NODE_COMPILE_CACHE: join(here, '..', '.compile-cache'),
+    // TEMP diagnostic (2026-09-15): the launchd-spawned engine stalls mid-boot
+    // where the identical binary+env from a shell boots clean — remove once the
+    // stall is root-caused.
+    ...(process.env.ARXA_ENGINE_INSPECT ? { NODE_OPTIONS: '--inspect=127.0.0.1:9231' } : {}) },
 })
 if (packed) {
   const relay = (stream) => {

@@ -13,3 +13,4 @@ scratchpad/
 # bin/arxa-studio.mjs) — 10 MB of bytecode, rebuilt on demand, never source.
 .compile-cache/
 .worktrees/
+.kimi-code/

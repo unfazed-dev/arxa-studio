@@ -64,6 +64,16 @@ suites.push([root, 'scripts', 'session-event-vocabulary-check.mjs'])
 // pinned release, the import surface still exporting what the plugins
 // destructure, and pi-ai owned by upstream’s range again.
 suites.push([root, 'scripts', 'dsh-contract-check.mjs'])
+// The shipped-preset drift gate (grill round 3, 2026-09-14): upstream renamed
+// 'code' → 'ptc' without notice and the launcher's rewrite set went stale in
+// the SAME wave — a new preset name upstream must land in bin/arxa-studio.mjs
+// as a red gate, not as homes quietly keeping shipped defaults.
+suites.push([root, 'scripts', 'preset-names-check.mjs'])
+// The V3 alarm (grill round 3, 2026-09-14): dsh-session's
+// SESSION_FORMAT_VERSION is the one seam under the session-reading plugins;
+// a moved constant means a ONE-WAY ~/.arxa/dsh migration, so it must be red
+// here BEFORE any pnpm install, not after a user's logs are converted.
+suites.push([root, 'scripts', 'session-format-check.mjs'])
 // The packed sidecar ships an EXPLICIT bin/ list. A checkout boots fine with a
 // stale list (all of bin/ is there); the bundle dies on ERR_MODULE_NOT_FOUND
 // before binding its port, two minutes of build and an install later. This

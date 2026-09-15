@@ -11,10 +11,12 @@
 //      stock ui-sidebar AND ui-workspace disabled — one sidebar world active)
 //   7. host half: rows state/action surface + lifecycle rows faces present
 import { createHash } from 'node:crypto'
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import vm from 'node:vm'
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
+import { stockFile } from '../../scripts/stock-path.mjs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -434,7 +436,9 @@ check('empty state (2026-08-30 polish): guidance centered and spaced, arxa glyph
 // Parent-walk resolution: works from the main checkout AND from a git
 // worktree nested under it (no node_modules of its own).
 const hashPkg = (specifier, expected) => {
-  const pkgDir = dirname(createRequire(import.meta.url).resolve(specifier + '/package.json'))
+  // Graph-pinned (scripts/stock-path.mjs): the repo root once carried stale
+  // pre-pnpm copies that made this hash vouch for a DEAD wave.
+  const pkgDir = dirname(stockFile(specifier, 'package.json'))
   const files = []
   const walk = (d) => {
     for (const e of readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -455,11 +459,11 @@ const hashPkg = (specifier, expected) => {
 }
 {
   const s = hashPkg('@deepseek-ai/dsh-client-ui-sidebar',
-    '7130676e45b80e6361b85a33d390a8f73c833c941b402fe40915d70843134419')
-  check('reference: dsh sidebar package byte-identical', s.ok, 'expected 7130676e…')
+    'b0da4635e03fd68ad9995bf83ab09ef57c01886b9d12599d1d1d0df9c2cd60cd')
+  check('reference: dsh sidebar package byte-identical', s.ok, 'expected ba930b50… (re-pinned 2026-09-15 at 0.1.5-rc.2)')
   const w = hashPkg('@deepseek-ai/dsh-client-ui-workspace',
-    'd518e3a6765db4d59f63461bd83960ca6b7bb096754876230130522e4ae10996')
-  check('reference: dsh workspace package byte-identical', w.ok, 'expected d518e3a6…')
+    'ba77e0ed0251a88757a66196e17100a4ab0a1ad5a3195390b6bcaf268ad1eb79')
+  check('reference: dsh workspace package byte-identical', w.ok, 'expected 47fcd70e… (re-pinned 2026-09-15 at 0.1.5-rc.2)')
 }
 
 // ---- 6. registration wired ---------------------------------------------------
@@ -552,7 +556,7 @@ check('wiring: status switch covers the closed union',
 check('wiring: runtime producer present (UiSession pendingInteractions)',
   (() => {
     try {
-      const rt = readFileSync(join(repo, 'node_modules', '@deepseek-ai', 'dsh-client-ui-session', 'lib', 'client.js'), 'utf8')
+      const rt = readFileSync(stockFile('@deepseek-ai/dsh-client-ui-session'), 'utf8')
       return rt.includes('sessionPendingInteraction: service.pendingInteractions')
     } catch { return false }
   })())
@@ -682,7 +686,9 @@ check('files: the INDENT is what is bounded, not the tree — the step stops at 
 check('files: lazy tree route + one fresh-token 403 retry + arxa-av-open carries the session',
   client.includes('"/__arxa/artifacts/tree?dir="') && client.includes('scope: "tree-read"')
   && client.includes('window.dispatchEvent(new CustomEvent("arxa-av-open", { detail }))')
-  && client.includes('const detail = sessionId ? { relPath: inWorktree, sessionId } : { relPath };')
+  && client.includes('if (sessionId) {')
+  && client.includes('const detail = { relPath };')
+  && !client.includes('sessionId: host.id')
   && client.includes('relPath.startsWith(arxaDeco.prefix)'))
 check('files: Freestyle tree opens files against the owning root',
   client.includes('if (rootId) {') && client.includes('const detail = { relPath, rootId };'))
@@ -999,7 +1005,6 @@ check('client: agent verb + reason strings localized in en/pl/fr',
 {
   const gen = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
   const host = readFileSync(new URL('./lib/index.js', import.meta.url), 'utf8')
-  const frame = readFileSync(new URL('../arxa-frame/lib/client.js', import.meta.url), 'utf8')
   check('S-rescue: the zero-org snapshot still carries the org trash',
     host.includes('...emptySnap(SEAM_LIFECYCLE_STUBBED), orgTrash: await orgTrashRows()'))
   check('S-rescue: orgtrash.restore is answered with NO lifecycle',
@@ -1012,10 +1017,11 @@ check('client: agent verb + reason strings localized in en/pl/fr',
     && !gen.includes('arxa-welcome-gate'))
   check('S-rescue: no welcome-gate strings survive in any locale',
     !/"welcome\.[a-zA-Z]+":/.test(gen))
-  // The gate was the only consumer of the frame's published sidebar width;
-  // it went with it rather than lingering as a mechanism nothing reads.
-  check('S-rescue: the frame publishes no sidebar-width var for a gate that is gone',
-    !frame.includes('--aXa-fr-sidebar'))
+  // The frame itself is retired at the 0.1.5 bump (2026-09-15) — the stock
+  // ui-layout owns the frame again, so the sidebar-width gate check went
+  // with it. Nothing arxa-side may resurrect a frame takeover instead.
+  check('S-rescue: no frame takeover plugin survives the 0.1.5 convergence',
+    !existsSync(new URL('../arxa-frame', import.meta.url)))
   // What replaces it: the app's own empty state, which needs no org to exist.
   check('S-rescue: the hero guide is what an empty app shows',
     gen.includes('"hero.guide"') && gen.includes('data-arxa-hero-guide'))
@@ -1337,7 +1343,7 @@ check('S-orgparity: the host mirrors the org verbs — disconnect (keep/remove),
 // never existed shipped; the sidebar never did, and D113 added a new name to it.
 {
   const gen = readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
-  const assets = new URL('../../node_modules/@deepseek-ai/dsh-web-frontend/dist/assets/', import.meta.url)
+  const assets = pathToFileURL(stockFile('@deepseek-ai/dsh-web-frontend', 'dist/assets/'))
   let bundle
   try { bundle = readdirSync(assets).find((f) => /^index-.*\.js$/.test(f)) } catch { bundle = undefined }
   check('icons: the shipped primitives bundle is findable (the haystack)', bundle !== undefined)

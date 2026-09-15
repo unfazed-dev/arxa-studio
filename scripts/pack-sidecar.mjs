@@ -26,7 +26,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rm
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { basename, dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
 import { BIN_FILES, checkPackList, devOnlyDirs, devOnlyImports, hostTriple } from './pack-manifest.mjs'
 
@@ -38,7 +38,11 @@ const arxaGateRel = join('arxa', 'harness', 'pi', 'arxa-gate.ts')
 // The profile's arxa-gate row (__ARXA_REPO__/harness/…) resolves inside the
 // payload, so these ship with it — without them a packed app on any machine but
 // the build host dies on ERR_MODULE_NOT_FOUND before serving anything.
-const arxaHarnessRels = [join('arxa', 'harness', 'dsh-external-gate'), join('arxa', 'harness', 'verdict.sh')]
+// arxa/hooks ships too: verdict.sh execs $REPO/hooks/arxa-guard.js, and the
+// 2026-09-14 desktop smoke hit exactly this gap — a packed payload whose gate
+// failed EVERY mutating tool call with MODULE_NOT_FOUND until hooks/ was
+// hand-copied into ~/.arxa/engine/<sha>.
+const arxaHarnessRels = [join('arxa', 'harness', 'dsh-external-gate'), join('arxa', 'harness', 'verdict.sh'), join('arxa', 'hooks')]
 
 const triple = hostTriple()
 const outIdx = process.argv.indexOf('--out')
@@ -137,6 +141,49 @@ try {
   cpSync(nodeBin, join(stage, 'node', 'bin', 'node'))
   chmodSync(join(stage, 'node', 'bin', 'node'), 0o755)
 
+  // STAGED PROD TREE (2026-09-15, the pnpm era): the repo's node_modules is a
+  // pnpm root — declared deps as symlinks into a .pnpm store that ALSO holds
+  // every dev-only tree (wdio, browser drivers…). Tarring it directly would
+  // ship dev junk and record the dsh entry as a symlink with no lib/bin.js
+  // member at all. Instead: install the PROD closure into the stage with the
+  // same lockfile, and tar that. The engine-graph packages host plugins
+  // import bare ride the wave's own closure inside .pnpm, so nothing the
+  // engine resolves goes missing — that is exactly what the member asserts
+  // below prove.
+  const stagePkg = join(stage, studioName)
+  mkdirSync(stagePkg, { recursive: true })
+  for (const f of ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml']) {
+    cpSync(join(studioRoot, f), join(stagePkg, f))
+  }
+  // HOISTED for the payload alone: host plugins load from arxa-studio/plugins/
+  // and resolve their bare @deepseek-ai/* imports through the PARENT chain
+  // (…/arxa-studio/node_modules). The 0.1.2 payload satisfied that by
+  // accident — its node_modules was an npm layout with every wave package as
+  // a real top-level dir. A pnpm symlink tree has top-level links for
+  // DECLARED deps only, so the staged tree hoists the whole prod closure
+  // (measured 2026-09-15: the first pnpm-shaped payload died on "failed to
+  // import loader entry arxa-sandbox … Cannot find package
+  // @deepseek-ai/dsh-sandbox"). The repo tree keeps its isolated layout.
+  writeFileSync(join(stagePkg, 'pnpm-workspace.yaml'),
+    readFileSync(join(stagePkg, 'pnpm-workspace.yaml'), 'utf8').trimEnd() + '\nnodeLinker: hoisted\n')
+  console.log('pack-sidecar: staging the prod node_modules (pnpm install --prod, hoisted, frozen)…')
+  const staged = spawnSync('pnpm', ['install', '--prod', '--frozen-lockfile', '--dir', stagePkg], { stdio: 'inherit' })
+  if (staged.status !== 0) throw new Error('pnpm --prod staging failed — no payload without a prod tree')
+  // GRAPH GATE (2026-09-15): importing the engine's entry with the PAYLOAD'S
+  // OWN node resolves the whole static module graph. The dev-trimmed payloads
+  // shipped fine for a day and then died in production with
+  // ERR_MODULE_NOT_FOUND on host-provided peers (js-yaml, cordis, pi-ai —
+  // each discovered one boot crash at a time). One import, whole graph, at
+  // pack time, with the node that will run it.
+  {
+    const entry = pathToFileURL(join(stagePkg, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')).href
+    const graph = spawnSync(join(stage, 'node', 'bin', 'node'), ['--input-type=module', '-e', `await import(${JSON.stringify(entry)})`], { encoding: 'utf8' })
+    if (graph.status !== 0) {
+      const lines = (graph.stderr || '').split('\n').filter(Boolean)
+      throw new Error('staged engine graph failed to load under the payload node — missing host-provided package? ' + lines.slice(-4).join(' | ').slice(0, 600))
+    }
+  }
+
   // One pattern per dropped dir, plus its children: bsdtar (macOS) and GNU tar
   // (the Arch container) agree on both forms, and neither is trusted — the
   // tarball is listed and asserted below. An EMPTY list means no flag at all:
@@ -162,9 +209,10 @@ try {
     '--exclude', '*/lib/monaco-build/node_modules',
     ...excludeArgs,
     '-czf', tarball,
+    // node_modules comes from the STAGED prod tree (stage dir, first -C);
+    // everything else is tarred straight from the repos.
     '-C', stage, '.',
     '-C', parentDir,
-    join(studioName, 'node_modules'),
     join(studioName, 'plugins'),
     join(studioName, 'profile'),
     join(studioName, 'pi'),
@@ -178,7 +226,9 @@ try {
   // (a payload missing a prod tree) are both silent.
   const listed = spawnSync(tarBin, ['-tzf', tarball], { encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 })
   if (listed.status !== 0) throw new Error('tar -tzf failed on the payload we just wrote')
-  const members = listed.stdout.split('\n').filter(Boolean)
+  // Normalize the leading "./" bsdtar emits for the first -C group, so the
+  // member asserts below compare like-for-like paths.
+  const members = listed.stdout.split('\n').filter(Boolean).map((m) => m.replace(/^\.\//, ''))
   const dropped = new Set(devDirs.map((d) => `${studioName}/${d}`))
   const leaked = members.filter((m) => {
     for (let i = m.indexOf('/'); i > 0; i = m.indexOf('/', i + 1)) if (dropped.has(m.slice(0, i))) return true
@@ -186,7 +236,12 @@ try {
   })
   if (leaked.length > 0) throw new Error(`payload still contains ${leaked.length} dev-only members (e.g. ${leaked[0]}) — the tar exclude did not apply`)
   const anchor = `${studioName}/node_modules/@deepseek-ai/dsh/lib/bin.js`
-  if (!members.includes(anchor)) throw new Error(`payload is missing ${anchor} — the exclude list was too broad`)
+  // pnpm layout: the root entry is a symlink member; the REAL file lives in
+  // the .pnpm store dir the link targets. Either shape proves the engine
+  // entry exists — a symlink without its store member would not.
+  const engineEntry = members.includes(anchor)
+    || (members.some((m) => m.endsWith('/@deepseek-ai/dsh')) && members.some((m) => m.endsWith('/@deepseek-ai/dsh/lib/bin.js')))
+  if (!engineEntry) throw new Error(`payload is missing ${anchor} (or its .pnpm store member) — the exclude list was too broad`)
   console.log(`pack-sidecar: payload verified — ${members.length} members, ${devDirs.length} dev-only trees excluded, engine entry present`)
 
   const sha = createHash('sha256').update(readFileSync(tarball)).digest('hex').slice(0, 12)

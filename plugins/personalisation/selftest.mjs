@@ -8,6 +8,8 @@
 // bundle (the mirror — dsh-client-ui-primitives only resolves in-browser).
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { pathToFileURL } from 'node:url'
+import { stockFile } from '../../scripts/stock-path.mjs'
 
 const src = fs.readFileSync(new URL('./lib/client.js', import.meta.url), 'utf8')
 
@@ -50,7 +52,7 @@ assert.ok(src.includes('border-bottom:.5px solid var(--dsw-alias-border-l2);'), 
 // The icons: names drift-gated against ui-theme's own bundle (the mirror —
 // primitives resolves only inside the browser __ModuleLoader__).
 const mirror = fs.readFileSync(
-  new URL('../../node_modules/@deepseek-ai/dsh-client-ui-theme/lib/client.js', import.meta.url), 'utf8')
+  new URL(pathToFileURL(stockFile('@deepseek-ai/dsh-client-ui-theme')).href), 'utf8')
 for (const icon of ['IconLightOutline16', 'IconDarkOutline16', 'IconFollowsystemOutline16', 'IconChevronUpOutline14', 'IconChevronDownOutline14']) {
   assert.ok(src.includes('P.' + icon), 'uses ' + icon)
   assert.ok(mirror.includes(icon), 'ui-theme still ships ' + icon + ' (mirror drift gate)')

@@ -26,7 +26,7 @@
 //
 //   node scripts/dsh-contract-check.mjs
 import { createRequire } from 'node:module'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -82,9 +82,19 @@ ok(`every @deepseek-ai/dsh* package in the lockfile is on the ${wave} wave`, str
     try {
       installed = JSON.parse(readFileSync(join(root, 'node_modules', name, 'package.json'), 'utf8')).version
     } catch {
-      stale.push(`${key} (not installed)`)
-      continue
+      // pnpm keeps undeclared packages only in the store (root links exist
+      // for declared deps alone — dsh-subprocess-local is one, riding the
+      // wave's closure). A store instance at the exact pin counts as
+      // installed: the engine resolves it there, and that is the copy a
+      // packed payload ships.
+      try {
+        const base = name.replace('/', '+')
+        const store = join(root, 'node_modules', '.pnpm')
+        installed = readdirSync(store).some((d) => d === `${base}@${pinned}` || d.startsWith(`${base}@${pinned}_`))
+          ? pinned : undefined
+      } catch { /* fall through to the stale report */ }
     }
+    if (installed === undefined) { stale.push(`${key} (not installed)`); continue }
     if (installed !== pinned) stale.push(`${key} → installed ${installed}`)
   }
   ok('every allowScripts key names the installed version', stale.length === 0,

@@ -37,9 +37,14 @@ export function armHeaderIndex(persistence, { file, log = () => {} } = {}) {
   let listCache = null
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8'))
-    if (parsed && parsed.v === 1) {
+    if (parsed && (parsed.v === 1 || parsed.v === 2)) {
       if (parsed.entries && typeof parsed.entries === 'object') entries = parsed.entries
-      if (parsed.list && typeof parsed.list.fp === 'string' && Array.isArray(parsed.list.headers)) listCache = parsed.list
+      // v1 list caches hold the 0.1.2 wave's BARE headers; 0.1.5's
+      // session-query maps snapshot.header over the list answer, so serving
+      // one threw "reading 'id'" on EVERY listSessions — the client catalog
+      // stayed empty and no session could become current (2026-09-15). List
+      // answers are v2-only; header-line entries are shape-free and stay.
+      if (parsed.v === 2 && parsed.list && typeof parsed.list.fp === 'string' && Array.isArray(parsed.list.headers)) listCache = parsed.list
     }
   } catch { entries = {}; listCache = null }
 
@@ -55,7 +60,7 @@ export function armHeaderIndex(persistence, { file, log = () => {} } = {}) {
     dirty = false
     try {
       mkdirSync(dirname(path), { recursive: true })
-      writeFileSync(path + '.tmp', JSON.stringify({ v: 1, entries, ...(listCache ? { list: listCache } : {}) }))
+      writeFileSync(path + '.tmp', JSON.stringify({ v: 2, entries, ...(listCache ? { list: listCache } : {}) }))
       renameSync(path + '.tmp', path)
     } catch (e) { log('header index flush failed: ' + (e?.message ?? e)) }
   }
@@ -98,10 +103,17 @@ export function armHeaderIndex(persistence, { file, log = () => {} } = {}) {
       return present.filter(Boolean).sort().join('\n')
     }
     const origList = persistence.list.bind(persistence)
-    persistence.list = async (signal) => {
-      const fp = await fingerprint(signal)
-      if (listCache && listCache.fp === fp) { listHits++; return structuredClone(listCache.headers) }
-      const headers = await origList(signal)
+    persistence.list = async (options) => {
+      // 0.1.5 hands list() an OPTIONS envelope ({ signal }) while the dir
+      // walkers below still take a BARE signal — forward the extracted one
+      // to the scan or ({ signal }).throwIfAborted() throws on every
+      // gateway-driven list (found live 2026-09-15; the engine's own
+      // no-signal diagnostic skipped the crash and masked it).
+      const fp = await fingerprint(options?.signal)
+      // ponytail: shape guard, not a schema — a future wave that changes the
+      // snapshot shape pays one real list instead of poisoning stock code.
+      if (listCache && listCache.fp === fp && listCache.headers.every((x) => x && x.header !== undefined)) { listHits++; return structuredClone(listCache.headers) }
+      const headers = await origList(options)
       listCache = { fp, headers: structuredClone(headers) }
       listMisses++
       scheduleFlush()

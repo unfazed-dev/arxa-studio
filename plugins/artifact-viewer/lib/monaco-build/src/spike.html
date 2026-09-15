@@ -107,7 +107,15 @@
   await settle(1200)
   out.bgLight = bgOf()
   out.themeFlipped = out.bgLight !== '' && out.bgLight !== out.bg
-  m.setTheme(true)
+  // 6b. the studio canvas must repaint the workbench's backgrounds live —
+  // the contrast complaint (2026-09-15): stock Light Modern's #ffffff chrome
+  // against the studio's grey canvas read as a foreign surface.
+  m.setTheme(false, { canvas: '#004488' })
+  await settle(1200)
+  // A CSS var keeps its AUTHORED form, so accept both spellings.
+  const cbg = bgOf().replace(/\s+/g, '')
+  out.canvasApplied = cbg === 'rgb(0,68,136)' || cbg === '#004488'
+  m.setTheme(true, null)
   await settle(800)
 
   out.step = 'resize'
@@ -666,6 +674,7 @@
       "out.workerLabels.includes('editorWorkerService')",
       "out.workerLabels.includes('TextMateWorker')",
       'out.themeFlipped === true',     // live dark/light flip
+      'out.canvasApplied === true',    // studio canvas overrides backgrounds
       'out.styled === true',           // the bundle loaded its OWN css
       'out.contained === true',        // and the editor stayed in its box
       'out.resizeShrank === true',     // follows the container when it shrinks

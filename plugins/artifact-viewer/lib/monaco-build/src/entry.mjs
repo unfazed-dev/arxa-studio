@@ -123,8 +123,26 @@ function ensureStyles () {
 
 let started = null
 let themeDark = true
-export function start (container, { fontFamily = 'Fira Code', dark = true } = {}) {
-  themeDark = dark
+// The studio's canvas, handed in by the client as hex (VS Code's color
+// parser refuses the oklab()/oklch() strings modern WebKit reports). Rides
+// every palette write so the workbench's chrome paints the studio's
+// surface, not VS Code's stock white/dark.
+let themeColors = null
+export function start (container, { fontFamily = 'Fira Code', dark = null, colors = null } = {}) {
+  // dark:null means "boot only, leave the palette alone" — every internal
+  // caller (registerFile, updateFile, connectLanguageServer, the harness
+  // probes) starts bare and must not stomp the shell's palette with the
+  // default (measured 2026-09-15: a session auto-open ran updateFile, whose
+  // bare start() re-applied Default Dark Modern over a light studio).
+  //
+  // A caller that arrives AFTER the boot with a different palette must not
+  // ride the booted theme either: the init below reads themeDark only once,
+  // so without a re-apply the FIRST palette wins forever (measured
+  // 2026-09-15: the prewarm booted dark, the first open asked light, the
+  // workbench body stayed vs-dark under a light editor).
+  const flip = dark != null && started != null && dark !== themeDark
+  if (dark != null) themeDark = dark
+  if (colors) themeColors = colors
   started ??= (async () => {
     await ensureStyles()
     // getWorker is asked for SEVERAL labels, not just the editor's. Handing
@@ -222,6 +240,7 @@ export function start (container, { fontFamily = 'Fira Code', dark = true } = {}
     })
     applyTheme(fontFamily)
   })()
+  if (flip) applyTheme(fontFamily)
   return started.then(() => container)
 }
 
@@ -253,13 +272,33 @@ function applyTheme (fontFamily = 'Fira Code') {
   writeConfig({
     'editor.fontFamily': fontFamily + ', monospace',
     'workbench.colorTheme': themeDark ? 'Default Dark Modern' : 'Default Light Modern',
+    // Background overrides toward the studio canvas — the whole contrast
+    // complaint (2026-09-15): stock Light Modern paints #ffffff chrome
+    // against the studio's grey canvas and the pane reads as a foreign
+    // surface. Foregrounds/syntax stay from the flipped base theme, so
+    // contrast is preserved in both palettes. JSON.stringify drops the
+    // undefined — no customizations until the client hands colors in.
+    'workbench.colorCustomizations': themeColors ? {
+      'editor.background': themeColors.canvas,
+      'editorGutter.background': themeColors.canvas,
+      'editorGroupHeader.tabsBackground': themeColors.canvas,
+      'editorGroupHeader.noTabsBackground': themeColors.canvas,
+      'tab.activeBackground': themeColors.canvas,
+      'breadcrumbs.background': themeColors.canvas,
+      'editorWidget.background': themeColors.canvas,
+      'editorHoverWidget.background': themeColors.canvas,
+      'editorSuggestWidget.background': themeColors.canvas,
+    } : undefined,
   })
 }
 
 /** Live dark/light flip. The viewer's palette can change under an open editor
- *  (the studio theme toggle), and start() only runs once. */
-export function setTheme (dark) {
-  if (dark === themeDark) return
+ *  (the studio theme toggle), and start() only runs once. colors re-reads the
+ *  canvas on every call — the studio's own tokens move with its palette. */
+export function setTheme (dark, colors = null) {
+  const flip = dark !== themeDark
+  if (colors) themeColors = colors
+  if (!flip && !colors) return
   themeDark = dark
   if (started) applyTheme()
 }
@@ -339,8 +378,8 @@ function layoutFor (width) {
  *  call sites read, and leaking monaco's shape there would make phase 4-6 a
  *  rewrite of all of them. */
 export async function openFile (container, uriPath, text, opts = {}) {
-  const { editable = true, onChange = null, fontFamily = 'Fira Code', dark = true } = opts
-  await start(container, { fontFamily, dark })
+  const { editable = true, onChange = null, fontFamily = 'Fira Code', dark = true, colors = null } = opts
+  await start(container, { fontFamily, dark, colors })
   applyTheme(fontFamily)
   await attachEditorPart(container)
   // Sync only a NEW load. A re-open (the client remounts its CodeView when a

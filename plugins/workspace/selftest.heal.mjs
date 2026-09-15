@@ -17,14 +17,15 @@
  */
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { stockFile } from '../../scripts/stock-path.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(here, '..', '..')
 const { healWorkspaceStore } = await import(path.join(here, 'lib', 'store-heal.js'))
 
-const dshValidator = path.join(
-  repoRoot, 'node_modules', '@deepseek-ai', 'dsh-workspace', 'lib', 'types', 'index.js',
-)
+// Graph-pinned (scripts/stock-path.mjs): root node_modules once carried
+// stale pre-pnpm copies of the dsh wave.
+const dshValidator = stockFile('@deepseek-ai/dsh-workspace', 'lib/types/index.js')
 const { WorkspaceRegistry } = await import(dshValidator)
 const validateLikeDsh = (store) =>
   WorkspaceRegistry.prototype.validateStoredState.call(

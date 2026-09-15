@@ -109,10 +109,15 @@ const gatewayOf = (frames = []) => ({
 })
 const fakeRes = () => {
   const res = { status: null, body: null, raw: null, headers: null, writes: [] }
+  // The route's end-callback is async and detaches from the handler call;
+  // tests that assert on a POST's response await `settled` so the send
+  // chain (now resume + prompt) finishes first.
+  res.settled = new Promise((r) => { res._settle = r })
   res.writeHead = (s, h) => { res.status = s; res.headers = h }
   res.end = (b) => {
     res.raw = b
     try { res.body = JSON.parse(b) } catch { res.body = undefined }
+    res._settle()
   }
   res.write = (c) => { res.writes.push(c) }
   return res
@@ -180,10 +185,15 @@ const fakeReqCloseCbs = []
       prompt: async (request) => { seen = request; return { accepted: true } },
       page: async () => ({ records: [], hasMore: false }),
     },
+    // The send path resumes the agent before admitting the prompt (parked
+    // sessions after an engine restart 502'd — 2026-09-14); give the fake a
+    // live-agent resume.
+    agents: { get: () => undefined, resume: async () => ({ agent: { session: {} } }) },
   })
   const handler = routes.get('prefix:/__arxa/conversations')
   const res = fakeRes()
   await handler(fakeReq('POST', '/__arxa/conversations/s-1/messages', JSON.stringify({ text: '  do the thing  ' })), res)
+  await res.settled
   assert.equal(res.status, 200)
   assert.deepEqual({ ok: res.body.ok, accepted: res.body.accepted }, { ok: true, accepted: true })
   assert.equal(typeof seen.requestId, 'string')
@@ -197,10 +207,12 @@ const fakeReqCloseCbs = []
   // (steer passes through below in the error harness; here just verify no crash)
   const resEmpty = fakeRes()
   await handler(fakeReq('POST', '/__arxa/conversations/s-1/messages', JSON.stringify({ text: '   ' })), resEmpty)
+  await resEmpty.settled
   assert.equal(resEmpty.status, 400)
   assert.equal(resEmpty.body.error, 'empty-text')
   const resBad = fakeRes()
   await handler(fakeReq('POST', '/__arxa/conversations/s-1/messages', '{not json'), resBad)
+  await resBad.settled
   assert.equal(resBad.status, 400)
   assert.equal(resBad.body.error, 'malformed-json')
   ok('POST send: happy path + empty-text + malformed-json')
@@ -208,23 +220,29 @@ const fakeReqCloseCbs = []
 
 // ---- 7. POST send error mapping
 {
-  const mk = (promptImpl) => makeCtx({ sessionController: { prompt: promptImpl, page: async () => ({ records: [], hasMore: false }) } })
+  // Same live-agent resume as section 6 — the mapping under test is the
+  // PROMPT's rejection, so hydration must succeed here.
+  const liveAgents = { get: () => undefined, resume: async () => ({ agent: { session: {} } }) }
+  const mk = (promptImpl) => makeCtx({ sessionController: { prompt: promptImpl, page: async () => ({ records: [], hasMore: false }) }, agents: liveAgents })
   const notFound = mk(async () => { throw remoteError('session/not-found', 'gone') })
   const r1 = fakeRes()
   await notFound.get('prefix:/__arxa/conversations')(
     fakeReq('POST', '/__arxa/conversations/s-x/messages', JSON.stringify({ text: 'hi' })), r1)
+  await r1.settled
   assert.equal(r1.status, 404); assert.equal(r1.body.error, 'no-such-session')
 
   const busy = mk(async () => { throw remoteError('session/agent-busy', 'busy') })
   const r2 = fakeRes()
   await busy.get('prefix:/__arxa/conversations')(
     fakeReq('POST', '/__arxa/conversations/s-x/messages', JSON.stringify({ text: 'hi' })), r2)
+  await r2.settled
   assert.equal(r2.status, 409); assert.equal(r2.body.error, 'no-live-agent')
 
   const threw = mk(async () => { throw new Error('socket blew') })
   const r3 = fakeRes()
   await threw.get('prefix:/__arxa/conversations')(
     fakeReq('POST', '/__arxa/conversations/s-x/messages', JSON.stringify({ text: 'hi' })), r3)
+  await r3.settled
   assert.equal(r3.status, 502); assert.equal(r3.body.error, 'prompt-failed')
   ok('POST send: 404 / 409 no-live-agent / 502 prompt-failed')
 }
@@ -349,6 +367,7 @@ const fakeReqCloseCbs = []
   let promptSeen
   const imgRoutes = makeCtx({
     sessionController: { prompt: async (request) => { promptSeen = request; return { accepted: true } } },
+    agents: { get: () => undefined, resume: async () => ({ agent: { session: {} } }) },
   })
   const imgHandler = imgRoutes.get('prefix:/__arxa/conversations')
   const resImg = fakeRes()
@@ -356,6 +375,7 @@ const fakeReqCloseCbs = []
     text: 'shot from the site',
     images: [{ mediaType: 'image/jpeg', data: 'aGVsbG8=' }],
   })), resImg)
+  await resImg.settled
   assert.equal(resImg.status, 200)
   assert.deepEqual(promptSeen.content, [
     { type: 'text', text: 'shot from the site' },

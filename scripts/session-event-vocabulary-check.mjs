@@ -18,12 +18,15 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { stockFile } from './stock-path.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 
-/** The installed dsh's own vocabulary — the same Set the persistence read path consults. */
-export function knownEventTypes (repo = root) {
-  const src = readFileSync(join(repo, 'node_modules', '@deepseek-ai', 'dsh-session', 'lib', 'index.js'), 'utf8')
+/** The installed dsh's own vocabulary — the same Set the persistence read path consults.
+ *  Graph-pinned (stock-path.mjs): never the repo root, whose pre-pnpm leftovers
+ *  once made this read a DEAD wave's vocabulary. */
+export function knownEventTypes (_repo = root) {
+  const src = readFileSync(stockFile('@deepseek-ai/dsh-session', 'lib/index.js'), 'utf8')
   const at = src.indexOf('const KNOWN_SESSION_EVENT_TYPES = new Set([')
   if (at < 0) throw new Error('could not locate KNOWN_SESSION_EVENT_TYPES in the installed dsh-session')
   const body = src.slice(at, src.indexOf(']', at) + 1)

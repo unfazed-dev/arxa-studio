@@ -2390,7 +2390,15 @@ ARXA_DECO_BADGE(relPath, kind === "dir" ? "dir" : "file", rootId),
 				const inWorktree = sessionId && arxaDeco.prefix && relPath.startsWith(arxaDeco.prefix)
 					? relPath.slice(arxaDeco.prefix.length)
 					: relPath;
-				const detail = sessionId ? { relPath: inWorktree, sessionId } : { relPath };
+				if (sessionId) {
+					const detail = { relPath: inWorktree, sessionId };
+					try { window.dispatchEvent(new CustomEvent("arxa-av-open", { detail })); } catch { /* no bridge — ignore */ }
+					return;
+				}
+				// Undecorated row: bare relPath — the viewer opens it where the
+				// operator stands (the stock tab inside a conversation, the
+				// sheet over the dashboard; 0.5.2: no teleport into a session).
+				const detail = { relPath };
 				try { window.dispatchEvent(new CustomEvent("arxa-av-open", { detail })); } catch { /* no bridge — ignore */ }
 			};
 			const statusRow = (d, text) => (0, react_jsx_runtime.jsx)("div", { style: { ...childStyle(d), fontSize: 12, opacity: 0.6, padding: "2px 8px" }, children: text });

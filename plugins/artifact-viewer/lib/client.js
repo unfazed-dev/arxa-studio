@@ -4,23 +4,39 @@
 // dsh-cordis-client-runner), fully on the contract: primitives, --dsw-*
 // tokens, locale NS (en/pl/fr), every side effect inside ctx.effect.
 //
+// 0.6.0 (grilled 2026-09-15, "own the column"): the tabbed viewer OCCUPIES
+// the frame's rightbar grid track — a React portal into [data-rightbar-col].
+// The stock frame (dsh-client-ui-layout) owns the column geometry and its
+// drag handle; we own the content: a tab strip (multi-file, persisted per
+// org in localStorage), the stock document header replica (path, renderer
+// dropdown over dsh primitives Menu — MarkdownText is dsh's exact markdown
+// renderer imported from dsh-client-ui-primitives — wrap toggle, reload),
+// fullscreen/collapse strip-end controls, and a session-less edge chip as
+// the way back in while collapsed. EVERY file open (dashboard or
+// conversation) lands in the strip — no openResource routing, no jumps, no
+// sheet overlay (the 0.5.x sheet is deleted). While the strip holds tabs
+// the column carries data-arxa-owns and the stock sidebar-right surface is
+// CSS-hidden (rule A of the grill: the right column IS this viewer); close
+// the last tab and the stock surface returns. The documentPreviews EDITOR
+// renderer stays registered so the stock document tab still renders files
+// editable in the not-owning lane.
+//
 // Claude-window model (support.claude.com article 9487310):
-//   * auto-open: user gestures (produced-file chips, sidebar file rows,
-//     gen-ui cards) + the FIRST produced file of a turn; the open artifact
-//     live-reloads on re-writes ("updates in place").
-//   * automatic edit: markdown is rendered-primary with a corner source
-//     toggle; code/text open directly editable; the session ensure runs at
-//     OPEN time (D80 transparent ensure); guards (no org, >cap, binary)
-//     make a lane view-only with the reason shown.
+//   * auto-open: the FIRST produced file of a turn opens a tab by itself.
+//   * automatic edit: markdown is rendered-primary (MarkdownText) with the
+//     renderer dropdown as the source toggle; code/text open directly
+//     editable; the session ensure runs at OPEN time (D80); guards (no org,
+//     >cap, binary) make a lane view-only with the reason shown.
 //   * auto-save: debounced ~1.5 s through POST /__arxa/artifacts/write; no
 //     edit/save buttons; one StateDot carries clean/dirty/saving/conflict;
 //     the 409/D86 external-change flow offers reload-theirs / overwrite.
 //
 // Runtime: store-based ingress — apply() owns ONE ctx.effect listener for
 // the public 'arxa-av-open' window event, parks the payload in a store the
-// mounted panel consumes (the 0px-column race dies by design: no retry
-// ladder, no __ARXA_AV_PENDING__, no 4 s session poll — session tracking
-// subscribes the dsh sessions service snapshot store).
+// ViewerShell consumes (no retry ladder, no __ARXA_AV_PENDING__, no 4 s
+// session poll — session tracking subscribes the dsh sessions service
+// snapshot store).cribes the dsh sessions service
+// snapshot store).
 window.__ModuleLoader__.load({
   id: 'arxa-artifact-viewer',
   factory: (require) => {
@@ -30,6 +46,11 @@ window.__ModuleLoader__.load({
     const React = require('react')
     const h = React.createElement
     const P = require('@deepseek-ai/dsh-client-ui-primitives')
+    // Sheet fallback host comment retired with the sheet (0.6.0): the shell
+    // mounts a second React root (portaled into the rightbar column) and
+    // still needs the client API.
+    const ReactDOM = require('react-dom')
+    const ReactDOMClient = require('react-dom/client')
 
     const TOKEN_ROUTE = '/__arxa/artifacts/token'
     const WRITE_ROUTE = '/__arxa/artifacts/write'
@@ -121,23 +142,46 @@ window.__ModuleLoader__.load({
     // ---- styles (aXa_av_* — every value from the --dsw-* token vocabulary) --
     const css = ''
       + '.aXa_av_root{display:flex;flex-direction:column;height:100%;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family);font-size:14px}'
-      + '.aXa_av_head{flex:none;display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--dsw-alias-border-l2);min-width:0}'
-      + '.aXa_av_titleWrap{flex:1;min-width:0;display:flex;align-items:center;gap:8px;overflow:hidden}'
-      + '.aXa_av_filename{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-primary)}'
-      + '.aXa_av_rootName{flex:none;font-size:12px;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40%}'
-      + '.aXa_av_lane{flex:none;font-size:11px;line-height:16px;padding:1px 8px;border-radius:9px;border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary)}'
-      + '.aXa_av_chip{flex:none;font-size:11px;line-height:16px;padding:1px 8px;border-radius:9px;border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;font:inherit}'
-      + '.aXa_av_chip:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}'
-      + '.aXa_av_chip:disabled{cursor:default;opacity:.6}'
-      + '.aXa_av_chip:disabled:hover{background:transparent;color:var(--dsw-alias-label-secondary)}'
-      + '.aXa_av_actions{flex:none;display:flex;align-items:center;gap:2px}'
+      // Column occupant (0.6.0): the rightbar column node (position:relative
+      // in the stock frame) hosts our shell; the shell fills it exactly. The
+      // ownership rule hides the stock sidebar-right surface while we hold
+      // tabs (grill rule A: the right column IS this viewer).
+      + '.aXa_av_colHost{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base)}'
+      + '[data-rightbar-col][data-arxa-owns] > :not(.aXa_av_colHost){display:none!important}'
+      // Tab strip: the strip replaces the 0.5.x capsule row; chips carry the
+      // same stock vocabulary the capsule used (border l2, radius 8).
+      + '.aXa_av_strip{flex:none;height:35px;display:flex;align-items:center;gap:4px;padding:0 8px;border-bottom:1px solid var(--dsw-alias-border-l2);overflow-x:auto;scrollbar-width:none}'
+      + '.aXa_av_strip::-webkit-scrollbar{display:none}'
+      + '.aXa_av_tab{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 4px 0 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;max-width:220px;background:transparent;cursor:pointer;font:inherit;color:var(--dsw-alias-label-secondary)}'
+      + '.aXa_av_tab:hover{background:var(--dsw-alias-interactive-bg-hover)}'
+      + '.aXa_av_tab[data-active]{border-color:var(--dsw-alias-border-l3);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary)}'
+      + '.aXa_av_tabTitle{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+      + '.aXa_av_tabClose{flex:none;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;border:none;border-radius:5px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;padding:0}'
+      + '.aXa_av_tabClose:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}'
+      + '.aXa_av_stripEnd{margin-left:auto;display:inline-flex;align-items:center;gap:2px;flex:none}'
+      + '.aXa_av_docHead{flex:none;height:30px;display:flex;align-items:center;gap:8px;padding:0 10px;border-bottom:1px solid var(--dsw-alias-border-l2)}'
+      + '.aXa_av_docPath{flex:1;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left}'
+      + '.aXa_av_docDir{color:var(--dsw-alias-label-tertiary)}'
+      + '.aXa_av_docName{color:var(--dsw-alias-label-primary);direction:ltr;unicode-bidi:embed}'
+      + '.aXa_av_rendererName{flex:none;font-size:11px;color:var(--dsw-alias-label-secondary)}'
+      // Renderer dropdown anchor: the stock viewerTool face — a bordered
+      // pill whose label IS the active renderer, opening P.Menu.
+      + '.aXa_av_tool{flex:none;display:inline-flex;align-items:center;height:24px;padding:0 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:7px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;font:inherit;font-size:12px}'
+      + '.aXa_av_tool:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}'
       + '.aXa_av_iconBtn{width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;border:none;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;padding:0}'
       + '.aXa_av_iconBtn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}'
       + '.aXa_av_iconBtn:disabled{cursor:default;opacity:.5}'
       + '.aXa_av_iconBtn:disabled:hover{background:transparent;color:var(--dsw-alias-label-secondary)}'
-      + '.aXa_av_iconBtn[data-on=true]{color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-interactive-bg-active)}'
-      + '.aXa_av_prettierMark{width:14px;height:14px;border-radius:4px;display:block;pointer-events:none}'
-      + '.aXa_av_prettierMark[data-off=true]{filter:grayscale(1);opacity:.45}'
+      // Changed-on-disk banner (stock textpreview face): note + reload-now.
+      + '.aXa_av_changed{color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-2);border-bottom:.5px solid var(--dsw-alias-border-l1);flex:none;align-items:center;gap:10px;margin:0;padding:6px 10px;font-size:12px;display:flex}'
+      + '.aXa_av_changedAction{cursor:pointer;padding:0;border:none;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;text-decoration:underline}'
+      // MarkdownText document host: the stock MarkdownBody padding.
+      + '.aXa_av_mdDoc{flex:1;min-height:0;overflow:auto;padding:16px}'
+      // Session-less way back in while the frame collapses the column: a
+      // slim chip pinned to the frame's right edge (stock ExpandButton slot
+      // lives in the conversation header — session-bound, not ours to host).
+      + '.aXa_av_edgeChip{position:fixed;right:0;top:50%;transform:translateY(-50%);z-index:30;width:22px;height:64px;display:flex;align-items:center;justify-content:center;border:1px solid var(--dsw-alias-border-l2);border-right:none;border-radius:8px 0 0 8px;background:var(--dsw-specific-sidebar-fill);color:var(--dsw-alias-label-secondary);cursor:pointer;padding:0}'
+      + '.aXa_av_edgeChip:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}'
       + '.aXa_av_body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}'
       + '.aXa_av_scroll{flex:1;min-height:0;overflow:auto;padding:10px 12px}'
       + '.aXa_av_idle{flex:1;min-height:0;overflow:auto;padding:16px 12px;display:flex;flex-direction:column;gap:12px}'
@@ -182,9 +226,9 @@ window.__ModuleLoader__.load({
       + '.aXa_av_insightInput{flex:none;width:130px;padding:2px 6px;border-radius:6px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);color:inherit;font:inherit}'
 
     // >>> insight-css — GENERATED by scripts/gen-insight-css.mjs from @deepseek-ai/dsh-client-ui-tool
-    // ToolRow.module.css + ToolDetails.module.css (dsh 0.1.2-rc.1), 2 stock hashed prefixes rewritten → aXa_ins_ (the raw prefixes are deliberately not named here — selftest asserts none leak).
+    // ToolRow.module.css (absorbed ToolDetails at 0.1.5; dsh 0.1.5-rc.2), 1 stock hashed prefixes rewritten → aXa_ins_ (the raw prefixes are deliberately not named here — selftest asserts none leak).
     // Do not hand-edit — `--check` is the selftest drift gate.
-    const INSIGHT_CSS = ".aXa_ins_root{flex-direction:column;display:flex}.aXa_ins_row{position:relative;overflow:hidden}.aXa_ins_root[data-state=running] .aXa_ins_row:after{content:\"\";background:linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--dsw-alias-bg-base) 60%, transparent) 55%, transparent 100%);pointer-events:none;width:300px;animation:2.6s ease-out infinite aXa_ins_dsh-tool-row-sweep;position:absolute;top:0;bottom:0;left:0}@keyframes aXa_ins_dsh-tool-row-sweep{0%{left:-300px}90%,to{left:100%}}.aXa_ins_leading{flex-shrink:0}.aXa_ins_root[data-tool^=cordis_] .aXa_ins_leading,.aXa_ins_root[data-tool^=cordis_] .aXa_ins_title{color:var(--dsw-alias-state-business-primary)}.aXa_ins_root[data-tool^=cordis_] .aXa_ins_title{font-weight:500}.aXa_ins_root[data-tool^=cordis_] .aXa_ins_sep{background:var(--dsw-alias-state-business-primary)}.aXa_ins_chevron{color:var(--dsw-alias-label-secondary)}.aXa_ins_title{font-weight:400}.aXa_ins_sep{background:var(--dsw-alias-label-caption);border-radius:1px;flex:none;width:2px;height:2px;margin:0 8px}.aXa_ins_summary{text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(24px + var(--dsh-content-font-delta,0px));color:var(--dsw-alias-label-tertiary);flex:auto;overflow:hidden}.aXa_ins_summarySuffix{white-space:nowrap;font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(24px + var(--dsh-content-font-delta,0px));color:var(--dsw-alias-label-tertiary);flex:none;margin-left:4px}.aXa_ins_diffStat{font-family:var(--ds-font-family-code);font-size:calc(var(--dsh-content-font-size-secondary,13px) - 2px);color:var(--dsw-alias-label-caption);margin-left:10px;transform:translateY(.5px)}.aXa_ins_fileLink{text-overflow:ellipsis;white-space:nowrap;min-width:0;font:inherit;text-align:left;font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(24px + var(--dsh-content-font-delta,0px));color:var(--dsw-alias-label-secondary);text-decoration:underline dotted;text-decoration-color:var(--dsw-alias-label-tertiary);text-underline-offset:3px;cursor:pointer;background:0 0;border:none;flex:0 auto;margin:0;padding:0;text-decoration-thickness:1px;overflow:hidden}.aXa_ins_fileLink:hover{color:var(--dsw-alias-label-primary);text-decoration-color:currentColor}.aXa_ins_errorSummary{color:var(--dsw-alias-state-error-primary)}.aXa_ins_bodyWrap{flex-direction:column;display:flex}.aXa_ins_inspectButton{border:.5px solid var(--dsw-alias-border-l3);corner-shape:round;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-secondary);cursor:pointer;opacity:0;border-radius:999px;align-self:flex-start;align-items:center;gap:4px;margin:4px 0 2px 4px;padding:2px 8px;font-size:11px;line-height:16px;transition:opacity .1s;display:inline-flex}.aXa_ins_root:hover .aXa_ins_inspectButton,.aXa_ins_inspectButton:focus-visible{opacity:1}.aXa_ins_inspectButton:hover{background:var(--dsw-alias-interactive-bg-hover-solid);color:var(--dsw-alias-label-primary)}.aXa_ins_bodyScroll{max-height:260px;overflow-y:auto}.aXa_ins_ioCard{border:.5px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-markdown-code-block);font:var(--dsw-font-markdown-code-block-small);border-radius:12px;flex-direction:column;margin:4px 0 4px 4px;display:flex}.aXa_ins_ioSection{grid-template-columns:max-content 1fr;align-items:baseline;column-gap:14px;max-height:150px;padding:12px 16px;display:grid;overflow-y:auto}.aXa_ins_ioSection::-webkit-scrollbar-thumb{background-clip:padding-box;border:2px solid #0000;border-radius:6px}.aXa_ins_ioSection::-webkit-scrollbar-track{margin:6px 0}.aXa_ins_ioLabel{color:var(--dsw-alias-label-caption);align-self:start;position:sticky;top:0}.aXa_ins_ioDivider{background:var(--dsw-alias-border-l2);flex:none;height:.5px}.aXa_ins_ioText{white-space:pre-wrap;word-break:break-word;min-width:0;color:var(--dsw-alias-label-secondary)}.aXa_ins_ioText[data-error]{color:var(--dsw-alias-state-error-primary)}.aXa_ins_codeBody,.aXa_ins_terminalBody,.aXa_ins_diffBody,.aXa_ins_readBody,.aXa_ins_searchBody,.aXa_ins_webBody{margin:4px 0 4px 4px}.aXa_ins_searchRecovery{white-space:pre-wrap;overflow-wrap:anywhere;font:var(--dsw-font-xs-13);color:var(--dsw-alias-label-tertiary);margin:4px 0 4px 4px}.aXa_ins_codeBody{--dsl-code-block-content-font:var(--dsw-font-markdown-code-block-small)}.aXa_ins_terminalBody{--dsl-terminal-font:var(--dsw-font-markdown-code-block-small);--dsl-terminal-line-height:18px;--dsl-terminal-output-max-height:224px;border:.5px solid var(--dsw-alias-border-l1)}.aXa_ins_visuallyHidden{clip:rect(0 0 0 0);white-space:nowrap;width:1px;height:1px;position:absolute;overflow:hidden}.aXa_ins_description{color:var(--dsw-alias-label-secondary);font:var(--dsw-font-xs-13);margin:0 0 6px}.aXa_ins_cardBody{margin:0}.aXa_ins_recovery{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--dsw-alias-label-tertiary);font:var(--dsw-font-xs-13);margin:6px 0 0}.aXa_ins_code{background:var(--dsw-alias-markdown-code-block);font-family:var(--ds-font-family-code);color:var(--dsw-alias-label-primary);white-space:pre-wrap;word-break:break-word;border-radius:12px;margin:0;padding:16px;font-size:13px;line-height:22px}.aXa_ins_code[data-error]{color:var(--dsw-alias-state-error-primary)}.aXa_ins_read,.aXa_ins_web{margin:0}.aXa_ins_empty{color:var(--dsw-alias-label-tertiary);padding:8px 0;font-size:13px;line-height:20px}"
+    const INSIGHT_CSS = ".aXa_ins_root{flex-direction:column;display:flex}.aXa_ins_row{position:relative;overflow:hidden}.aXa_ins_root[data-state=running] .aXa_ins_row:after{content:\"\";background:linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--dsw-alias-bg-base) 60%, transparent) 55%, transparent 100%);pointer-events:none;width:300px;animation:2.6s ease-out infinite aXa_ins_dsh-tool-row-sweep;position:absolute;top:0;bottom:0;left:0}@keyframes aXa_ins_dsh-tool-row-sweep{0%{left:-300px}90%,to{left:100%}}.aXa_ins_leading{flex-shrink:0}.aXa_ins_root[data-tool^=cordis_] .aXa_ins_leading,.aXa_ins_root[data-tool^=cordis_] .aXa_ins_title{color:var(--dsw-alias-state-business-primary)}.aXa_ins_root[data-tool^=cordis_] .aXa_ins_title{font-weight:500}.aXa_ins_root[data-tool^=cordis_] .aXa_ins_sep{background:var(--dsw-alias-state-business-primary)}.aXa_ins_chevron{color:var(--dsw-alias-label-secondary)}.aXa_ins_title{font-weight:400}.aXa_ins_sep{background:var(--dsw-alias-label-caption);border-radius:1px;flex:none;width:2px;height:2px;margin:0 8px}.aXa_ins_summary{text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(24px + var(--dsh-content-font-delta,0px));color:var(--dsw-alias-label-tertiary);flex:auto;overflow:hidden}.aXa_ins_summarySuffix{white-space:nowrap;font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(24px + var(--dsh-content-font-delta,0px));color:var(--dsw-alias-label-tertiary);flex:none;margin-left:4px}.aXa_ins_diffStat{font-family:var(--ds-font-family-code);font-size:calc(var(--dsh-content-font-size-secondary,13px) - 2px);color:var(--dsw-alias-label-caption);margin-left:10px;transform:translateY(.5px)}.aXa_ins_fileLink{text-overflow:ellipsis;white-space:nowrap;min-width:0;font:inherit;text-align:left;font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(24px + var(--dsh-content-font-delta,0px));color:var(--dsw-alias-label-secondary);text-decoration:underline dotted;text-decoration-color:var(--dsw-alias-label-tertiary);text-underline-offset:3px;cursor:pointer;background:0 0;border:none;flex:0 auto;margin:0;padding:0;text-decoration-thickness:1px;overflow:hidden}.aXa_ins_fileLink:hover{color:var(--dsw-alias-label-primary);text-decoration-color:currentColor}.aXa_ins_errorSummary{color:var(--dsw-alias-state-error-primary)}.aXa_ins_bodyWrap{flex-direction:column;display:flex}.aXa_ins_inspectButton{border:.5px solid var(--dsw-alias-border-l3);corner-shape:round;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-secondary);cursor:pointer;opacity:0;border-radius:999px;align-self:flex-start;align-items:center;gap:4px;margin:4px 0 2px 4px;padding:2px 8px;font-size:11px;line-height:16px;transition:opacity .1s;display:inline-flex}.aXa_ins_root:hover .aXa_ins_inspectButton,.aXa_ins_inspectButton:focus-visible{opacity:1}.aXa_ins_inspectButton:hover{background:var(--dsw-alias-interactive-bg-hover-solid);color:var(--dsw-alias-label-primary)}.aXa_ins_bodyScroll{max-height:260px;overflow-y:auto}.aXa_ins_ioCard{border:.5px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-markdown-code-block);font:var(--dsw-font-markdown-code-block-small);border-radius:12px;flex-direction:column;margin:4px 0 4px 4px;display:flex}.aXa_ins_ioSection{grid-template-columns:max-content 1fr;align-items:baseline;column-gap:14px;max-height:150px;padding:12px 16px;display:grid;overflow-y:auto}.aXa_ins_ioSection::-webkit-scrollbar-thumb{background-clip:padding-box;border:2px solid #0000;border-radius:6px}.aXa_ins_ioSection::-webkit-scrollbar-track{margin:6px 0}.aXa_ins_ioLabel{color:var(--dsw-alias-label-caption);align-self:start;position:sticky;top:0}.aXa_ins_ioDivider{background:var(--dsw-alias-border-l2);flex:none;height:.5px}.aXa_ins_ioText{white-space:pre-wrap;word-break:break-word;min-width:0;color:var(--dsw-alias-label-secondary)}.aXa_ins_ioText[data-error]{color:var(--dsw-alias-state-error-primary)}.aXa_ins_codeBody,.aXa_ins_terminalBody,.aXa_ins_diffBody,.aXa_ins_readBody,.aXa_ins_imageBody,.aXa_ins_searchBody,.aXa_ins_webBody{margin:4px 0 4px 4px}.aXa_ins_searchRecovery{white-space:pre-wrap;overflow-wrap:anywhere;font:var(--dsw-font-xs-13);color:var(--dsw-alias-label-tertiary);margin:4px 0 4px 4px}.aXa_ins_imageLabel{overflow-wrap:anywhere;font:var(--dsw-font-sm-13);color:var(--dsw-alias-label-secondary);margin-bottom:4px}.aXa_ins_imageMeta{white-space:pre-wrap;overflow-wrap:anywhere;font:var(--dsw-font-xs-13);color:var(--dsw-alias-label-tertiary)}.aXa_ins_codeBody{--dsl-code-block-content-font:var(--dsw-font-markdown-code-block-small)}.aXa_ins_terminalBody{--dsl-terminal-font:var(--dsw-font-markdown-code-block-small);--dsl-terminal-line-height:18px;--dsl-terminal-output-max-height:224px;border:.5px solid var(--dsw-alias-border-l1)}.aXa_ins_visuallyHidden{clip:rect(0 0 0 0);white-space:nowrap;width:1px;height:1px;position:absolute;overflow:hidden}"
     const I = {
       "bodyScroll": "aXa_ins_bodyScroll",
       "bodyWrap": "aXa_ins_bodyWrap",
@@ -195,6 +239,9 @@ window.__ModuleLoader__.load({
       "dsh-tool-row-sweep": "aXa_ins_dsh-tool-row-sweep",
       "errorSummary": "aXa_ins_errorSummary",
       "fileLink": "aXa_ins_fileLink",
+      "imageBody": "aXa_ins_imageBody",
+      "imageLabel": "aXa_ins_imageLabel",
+      "imageMeta": "aXa_ins_imageMeta",
       "inspectButton": "aXa_ins_inspectButton",
       "ioCard": "aXa_ins_ioCard",
       "ioDivider": "aXa_ins_ioDivider",
@@ -213,14 +260,7 @@ window.__ModuleLoader__.load({
       "terminalBody": "aXa_ins_terminalBody",
       "title": "aXa_ins_title",
       "visuallyHidden": "aXa_ins_visuallyHidden",
-      "webBody": "aXa_ins_webBody",
-      "cardBody": "aXa_ins_cardBody",
-      "code": "aXa_ins_code",
-      "description": "aXa_ins_description",
-      "empty": "aXa_ins_empty",
-      "read": "aXa_ins_read",
-      "recovery": "aXa_ins_recovery",
-      "web": "aXa_ins_web"
+      "webBody": "aXa_ins_webBody"
     }
     // <<< insight-css
 
@@ -251,7 +291,21 @@ window.__ModuleLoader__.load({
       'guard.tooLarge': 'File is {size} MB — over the {cap} MB edit cap; read-only',
       'guard.binary': 'Binary file — view only',
       'guard.noOrg': 'Open an organisation to edit this file',
-      'action.diff': 'Diff vs main',
+      'action.reload': 'Reload',
+      'renderer.editor': 'arxa editor',
+      'renderer.markdown': 'Markdown',
+      'action.openWith': 'Open with',
+      'wrap.on': 'Wrap lines',
+      'wrap.off': 'Wrap lines',
+      'action.fullscreen': 'Fullscreen',
+      'action.restore': 'Restore panel',
+      'action.collapse': 'Collapse panel',
+      'action.expand': 'Expand panel',
+      'changed.note': 'Changed on disk',
+      'changed.reload': 'Reload now',
+      'md.copy': 'Copy',
+      'md.copied': 'Copied',
+      'md.footnotes': 'Footnotes',
       'action.format': 'Format document (Shift+Alt+F)',
       'action.prettier.on': 'Prettier: on',
       'action.prettier.off': 'Prettier: off',
@@ -351,7 +405,21 @@ window.__ModuleLoader__.load({
       'guard.tooLarge': 'Plik ma {size} MB — powyżej limitu edycji {cap} MB; tylko do odczytu',
       'guard.binary': 'Plik binarny — tylko podgląd',
       'guard.noOrg': 'Otwórz organizację, aby edytować ten plik',
-      'action.diff': 'Diff względem main',
+      'action.reload': 'Odśwież',
+      'renderer.editor': 'arxa editor',
+      'renderer.markdown': 'Markdown',
+      'action.openWith': 'Otwórz za pomocą',
+      'wrap.on': 'Zawijaj wiersze',
+      'wrap.off': 'Zawijaj wiersze',
+      'action.fullscreen': 'Pełny ekran',
+      'action.restore': 'Przywróć panel',
+      'action.collapse': 'Zwiń panel',
+      'action.expand': 'Rozwiń panel',
+      'changed.note': 'Zmieniono na dysku',
+      'changed.reload': 'Wczytaj ponownie',
+      'md.copy': 'Kopiuj',
+      'md.copied': 'Skopiowano',
+      'md.footnotes': 'Przypisy',
       'action.format': 'Formatuj dokument (Shift+Alt+F)',
       'action.prettier.on': 'Prettier: włączony',
       'action.prettier.off': 'Prettier: wyłączony',
@@ -452,7 +520,21 @@ window.__ModuleLoader__.load({
       'guard.tooLarge': 'Le fichier fait {size} Mo — au-delà de la limite d’édition de {cap} Mo ; lecture seule',
       'guard.binary': 'Fichier binaire — aperçu seul',
       'guard.noOrg': 'Ouvrez une organisation pour modifier ce fichier',
-      'action.diff': 'Diff vs main',
+      'action.reload': 'Recharger',
+      'renderer.editor': 'arxa editor',
+      'renderer.markdown': 'Markdown',
+      'action.openWith': 'Ouvrir avec',
+      'wrap.on': 'Retour à la ligne',
+      'wrap.off': 'Retour à la ligne',
+      'action.fullscreen': 'Plein écran',
+      'action.restore': 'Restaurer le panneau',
+      'action.collapse': 'Réduire le panneau',
+      'action.expand': 'Déployer le panneau',
+      'changed.note': 'Modifié sur le disque',
+      'changed.reload': 'Recharger',
+      'md.copy': 'Copier',
+      'md.copied': 'Copié',
+      'md.footnotes': 'Notes de bas de page',
       'action.format': 'Formatter le document (Maj+Alt+F)',
       'action.prettier.on': 'Prettier : activé',
       'action.prettier.off': 'Prettier : désactivé',
@@ -600,27 +682,7 @@ window.__ModuleLoader__.load({
     // ---- VS Code 2026 palette + formatting plumbing (grilled 2026-09-03) -----
     // The editor surfaces adopt the vendored 2026 Dark/Light port (themes.js)
     // following the dsh shell's dark flag (body[data-ds-dark-theme]); every
-    // other surface keeps the --dsw-* vocabulary. Prettier is a lazy 2MB
-    // bundle: only its EXTENTIONS are known up front, the parser map itself
-    // lives inside the bundle (single source of truth).
-    const FORMAT_EXTS = new Set(['js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'json', 'jsonc', 'css', 'scss', 'md', 'yaml', 'yml'])
-
-    function detectIndent(text) {
-      // VS Code editor.detectIndentation: majority vote over leading
-      // whitespace of the first ~400 lines; fallback 2 spaces.
-      let two = 0, four = 0, tab = 0
-      for (const line of String(text || '').split('\n').slice(0, 400)) {
-        const ws = (line.match(/^[\t ]+/) || [''])[0]
-        if (!ws) continue
-        if (ws[0] === '\t') tab++
-        else if (ws.length >= 4 && ws.length % 4 === 0) four++
-        else if (ws.length >= 2) two++
-      }
-      if (tab > two && tab > four) return { unit: '\t', size: 4 }
-      if (four > two) return { unit: '    ', size: 4 }
-      return { unit: '  ', size: 2 }
-    }
-
+    // other surface keeps the --dsw-* vocabulary.
     function isDarkMode() {
       return !!(typeof document !== 'undefined' && document.body && document.body.hasAttribute('data-ds-dark-theme'))
     }
@@ -636,6 +698,66 @@ window.__ModuleLoader__.load({
       return () => paletteSubs.delete(fn)
     }
 
+    // Monaco measures glyph width from the font it is TOLD, so the shell's
+    // choice has to be read and passed rather than left to CSS. The fallback
+    // is the same explicit Fira-free stack the CodeMirror rule carried
+    // (2026-09-03): the dsh code token lists Fira Code third and resolves to
+    // it in WKWebView, which made the Default pill render Fira and the font
+    // toggle a visual no-op.
+    function studioEditorFont() {
+      return getComputedStyle(document.documentElement)
+        .getPropertyValue('--arxa-editor-font').trim()
+        || '"SF Mono", ui-monospace, "JetBrains Mono", Consolas, "Liberation Mono", Menlo, monospace'
+    }
+
+    // The studio's canvas as hex VS Code can eat. Computed colors come back
+    // oklab()/oklch() in modern WebKit, which VS Code's color parser
+    // refuses — and the canvas readback trick does not help either: Chrome
+    // serializes an oklab source right back as the oklab() string (measured
+    // 2026-09-15). So: canvas normalises rgb()/named/hex, and oklab/oklch
+    // convert by hand (Björn Ottosson's matrices; unitless floats only — a
+    // % form falls back to null, no override rather than a wrong one).
+    // Read fresh every call — the canvas moves with the studio's palette.
+    let normCtx = null
+    function cssColorToHex(c) {
+      if (typeof c !== 'string' || !c || c === 'transparent') return null
+      normCtx ??= document.createElement('canvas').getContext('2d')
+      normCtx.fillStyle = 'black'
+      normCtx.fillStyle = c
+      const rb = normCtx.fillStyle
+      if (typeof rb === 'string' && rb[0] === '#') return rb
+      const m = /^okl(ch|ab)\(([^)]+)\)/.exec(c)
+      if (!m) return null
+      const n = m[2].trim().split(/[\s/]+/).map(Number)
+      if (n.length < 3 || n.slice(0, 3).some(Number.isNaN)) return null
+      let L = n[0], a = n[1], b = n[2]
+      if (m[1] === 'ch') { const rad = n[2] * Math.PI / 180; a = n[1] * Math.cos(rad); b = n[1] * Math.sin(rad) }
+      const l_ = L + 0.3963377774 * a + 0.2158037573 * b
+      const m_ = L - 0.1055613458 * a - 0.0638541728 * b
+      const s_ = L - 0.0894841775 * a - 1.291485548 * b
+      const l = l_ * l_ * l_, mm = m_ * m_ * m_, s = s_ * s_ * s_
+      const lin = [
+        4.0767416621 * l - 3.3077115913 * mm + 0.2309699292 * s,
+        -1.2684380046 * l + 2.6097574011 * mm - 0.3413193965 * s,
+        -0.0041960863 * l - 0.7034186147 * mm + 1.707614701 * s,
+      ]
+      const enc = (v) => {
+        const x = Math.min(1, Math.max(0, v))
+        const g = x <= 0.0031308 ? 12.92 * x : 1.055 * x ** (1 / 2.4) - 0.055
+        return Math.round(g * 255).toString(16).padStart(2, '0')
+      }
+      return '#' + enc(lin[0]) + enc(lin[1]) + enc(lin[2])
+    }
+
+    function studioCanvas() {
+      return cssColorToHex(getComputedStyle(document.body).backgroundColor)
+    }
+
+    function studioColors() {
+      const canvas = studioCanvas()
+      return canvas ? { canvas } : null
+    }
+
     function FileIcon({ name }) {
       const [svg, setSvg] = React.useState(null)
       React.useEffect(() => {
@@ -648,6 +770,22 @@ window.__ModuleLoader__.load({
       if (!svg) return null
       return h('span', { className: 'aXa_av_fileIcon', dangerouslySetInnerHTML: { __html: svg } })
     }
+
+    // Wrap glyphs lifted verbatim from the stock documentpreview bundle
+    // (IconNowrapFill16 / IconWrapFill16, dsh 0.1.5-rc.2) — dsh keeps them
+    // bundle-local, so the paths are copied rather than imported.
+    const IconNowrapFill16 = ({ size = 16, className }) => h('svg', {
+      width: size, height: size, className, viewBox: '0 0 24 24', fill: 'none', xmlns: 'http://www.w3.org/2000/svg',
+    }, h('path', {
+      d: 'M1.5 2.5H3.5V21.5H1.5V2.5ZM20.5 2.5H22.5V21.5H20.5V2.5ZM14 9L19 12L14 15V13H5V11H14V9Z',
+      fill: 'currentColor',
+    }))
+    const IconWrapFill16 = ({ size = 16, className }) => h('svg', {
+      width: size, height: size, className, viewBox: '0 0 24 24', fill: 'none', xmlns: 'http://www.w3.org/2000/svg',
+    }, h('path', {
+      d: 'M1.5 2.5H3.5V21.5H1.5V2.5ZM20.5 2.5H22.5V21.5H20.5V2.5ZM6.75 5H11.5A6 6 0 0 1 12 16.98V19L7 16L12 13V14.97A4 4 0 0 0 11.5 7H6.75V5Z',
+      fill: 'currentColor',
+    }))
 
     async function fetchTokenRaw(payload) {
       const res = await fetch(TOKEN_ROUTE, {
@@ -720,7 +858,7 @@ window.__ModuleLoader__.load({
      *  `docRef.current` holds the bundle's handle, not a monaco object. Five
      *  call sites in Panel read the live document through it, and keeping the
      *  seam narrow is what stops phases 4-6 from rewriting all of them. */
-    function CodeView({ relPath, absPath, session, rootId, text, editable, docRef, onDirty, diffOriginal, t }) {
+    function CodeView({ relPath, absPath, session, rootId, text, editable, docRef, onDirty, diffOriginal, wrap = false, t }) {
       const ref = React.useRef(null)
       // The uri the part currently holds, and a counter that ticks when it
       // lands. The mode effect below needs both: what to open, and a signal that
@@ -772,7 +910,6 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         let dead = false
         let handle = null
-        let unwatch = null
         ;(async () => {
           trace.mark('codeview')
           const M = await ensureMonaco()
@@ -788,16 +925,10 @@ window.__ModuleLoader__.load({
           handle = await M.openFile(ref.current, absPath || ('/' + relPath), textRef.current, {
             editable: !!editable,
             dark: isDarkMode(),
-            // The viewer's font choice reached CodeMirror through a css var on
-            // .cm-content. Monaco has to be TOLD its font (it measures glyph
-            // width from it), so the var is read and passed instead.
-            fontFamily: getComputedStyle(document.documentElement)
-              // The fallback is the same explicit Fira-free stack the
-              // CodeMirror rule carried (2026-09-03): the dsh code token lists
-              // Fira Code third and resolves to it in WKWebView, which made the
-              // Default pill render Fira and the font toggle a visual no-op.
-              .getPropertyValue('--arxa-editor-font').trim()
-              || '"SF Mono", ui-monospace, "JetBrains Mono", Consolas, "Liberation Mono", Menlo, monospace',
+            // Monaco has to be TOLD its font (it measures glyph width from
+            // it); studioEditorFont is the one read of the shell token.
+            fontFamily: studioEditorFont(),
+            colors: studioColors(),
             onChange: () => { if (onDirty) onDirty() },
           })
           trace.mark('open')
@@ -814,7 +945,6 @@ window.__ModuleLoader__.load({
           // editor.action.formatDocument, which formats through the language
           // server. The toolbar Format button still runs prettier — that is the
           // lane that covers markdown and yaml, which no server does.
-          unwatch = watchPalette((dark) => { M.setTheme(dark) })
           openedRef.current = absPath || ('/' + relPath)
           setOpened((n) => n + 1)
           // Language service, best effort and always last: the editor is fully
@@ -844,7 +974,6 @@ window.__ModuleLoader__.load({
         })().catch((e) => { trace.end('editor-error'); if (ref.current) ref.current.textContent = String(e && e.message || e) })
         return () => {
           dead = true
-          if (unwatch) unwatch()
           if (handle) handle.dispose()
           if (docRef) docRef.current = null
         }
@@ -891,6 +1020,16 @@ window.__ModuleLoader__.load({
           }
         })().catch(() => { /* a mode switch is not worth an error surface */ })
       }, [opened, diffOriginal, editable])
+
+      // Wrap toggle (stock wrap-tool parity, 0.6.0): a per-VIEW monaco
+      // override — instance updateOptions wins over the width-derived config
+      // the bundle's ResizeObserver keeps writing on resize.
+      React.useEffect(() => {
+        const handle = docRef.current
+        if (handle && handle.editor && typeof handle.editor.updateOptions === 'function') {
+          handle.editor.updateOptions({ wordWrap: wrap ? 'on' : 'off' })
+        }
+      }, [wrap, opened])
 
       // The strip keeps its slot whether or not it is showing: React
       // reconciles these children by position, and letting the host div move
@@ -978,10 +1117,10 @@ window.__ModuleLoader__.load({
     }
 
     // ---- insight panel (Phase 4 A3) -----------------------------------------
-    // The docked column is not only a file surface: the git card's three
+    // The column is not only a file surface: the git card's three
     // "Insights" links open it on a REPORT instead — commit streak, CI runs,
-    // sessions across the org. Same ingress event, same column, same sheet
-    // behaviour below 744px; only the payload differs (`kind: 'insight'`).
+    // sessions across the org. Same ingress event, same column; only the
+    // payload differs (`kind: 'insight'`).
     // Every read goes through the git-card action route the card already uses,
     // so there is one server surface, not two.
     // `agent.*` lives on the SIDEBAR host, not the card host — a session's
@@ -1299,30 +1438,22 @@ window.__ModuleLoader__.load({
       const t = frameProps.t || ((k) => k)
       const store = frameProps.avStore
       const snap = React.useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
-
       const [open, setOpen] = React.useState(false)
       const [state, setState] = React.useState({ phase: 'idle' })
       const [session, setSession] = React.useState(null)
       const [dirty, setDirty] = React.useState(false)
       const [savePhase, setSavePhase] = React.useState('idle') // idle|saving|saved|error|conflict
       const [saveNote, setSaveNote] = React.useState('')
-      const [showDiff, setShowDiff] = React.useState(false)
-      const [mainText, setMainText] = React.useState('')
-      const [chip, setChip] = React.useState(null)
-      const [timeline, setTimeline] = React.useState([])
-      const [versionOpen, setVersionOpen] = React.useState(false)
-      const [copied, setCopied] = React.useState(false)
-      // Prettier is a viewer-level toggle: ON by default, persisted per
-      // browser (same storage class as the editor font choice).
-      const [prettierOn, setPrettierOn] = React.useState(() => {
-        try { return localStorage.getItem('arxa.av.prettier') !== 'off' } catch { return true }
-      })
-      const togglePrettier = () => setPrettierOn((v) => {
-        const next = !v
-        try { localStorage.setItem('arxa.av.prettier', next ? 'on' : 'off') } catch { /* storage optional */ }
-        return next
-      })
       const [changes, setChanges] = React.useState([])
+      // Stock textpreview parity (0.6.0): the changed-on-disk banner. A clean
+      // buffer auto-reloads (better than stock's ask-first), and the banner
+      // still appears for 5 s so the swap on screen is explained.
+      const [changedFlash, setChangedFlash] = React.useState(0)
+      React.useEffect(() => {
+        if (!changedFlash) return
+        const id = setTimeout(() => setChangedFlash(0), 5000)
+        return () => clearTimeout(id)
+      }, [changedFlash])
       const docRef = React.useRef(null)
       const mtimeRef = React.useRef(null)
       const dirtyRef = React.useRef(false)
@@ -1335,14 +1466,6 @@ window.__ModuleLoader__.load({
       const openWorktreeRef = React.useRef(null)
       const openRequestRef = React.useRef(0)
       React.useEffect(() => { dirtyRef.current = dirty }, [dirty])
-
-      /** The live document, or the loaded bytes when no editor is mounted yet.
-       *  One of its callers runs during RENDER (the diff surface), so it has
-       *  to answer before the editor bundle has finished
-       *  loading — never throw here. */
-      const docText = () => {
-        try { return docRef.current ? docRef.current.getText() : state.text } catch { return state.text }
-      }
 
       const lane = state.kind ? state.kind.lane : null
       const editableLane = EDITABLE_LANES.has(lane)
@@ -1362,14 +1485,16 @@ window.__ModuleLoader__.load({
         return () => { live = false }
       }, [])
 
-      // Store ingress: a pending open arrives from apply()'s listener (chips,
-      // file rows, gen-ui, the produced-file observer). Consumed HERE, when
-      // the panel demonstrably exists — the cold-open race is structural now.
-      // The first open after a mount: the click happened while the panel was
-      // NOT mounted (the column was closed), so its payload was waiting.
+      // Open requests arrive as a PROP (0.6.0): the ViewerShell (or the stock
+      // DocumentBody) owns the payload; a fresh object identity is a new open,
+      // and the shell's reload is the same payload re-issued with a new tick.
+      // The panel itself no longer consumes the shared store — only the shell
+      // does — so a stock-tab panel and a strip tab can never race a payload.
+      // The panel's mount time — the trace mark above needs it even though the
+      // payload now arrives as a prop.
       const mountedAtRef = React.useRef(Math.round(performance.now()))
       React.useEffect(() => {
-        const p = store.consume()
+        const p = frameProps.request
         if (!p) return
         if (p.relPath && p.t0 != null) {
           trace.begin(p.relPath, p.t0)
@@ -1400,7 +1525,7 @@ window.__ModuleLoader__.load({
         } else if (p.relPath) {
           void (openArtifactRef.current && openArtifactRef.current(p.relPath))
         }
-      }, [snap.tick, store])
+      }, [frameProps.request])
 
       // D93 session switch: the dsh sessions service is the event source
       // (the 4 s ensureSession poll is gone). A current-session change resets
@@ -1420,32 +1545,15 @@ window.__ModuleLoader__.load({
         if (prev === id) return
         seenSessionRef.current = id
         void refreshChanges(id)
-        // 2026-09-01 user directive: opening a session must not leave a stale
-        // artifact on screen. The old guard (prev && id && prev !== id) only
-        // fired on session->session transitions and skipped the most common
-        // case — browse an org file with no session current, THEN open a
-        // session (null->X) — so the viewer kept the orphaned file. The shown
-        // file survives only when it IS the new current session's worktree
-        // file; the org lane (bound to no session) closes too.
-        if (!open) return
-        // An insight report is not a stale artifact: re-point it at the new
-        // current session so it re-fetches, rather than closing the column the
-        // user just opened. The sessions view is org-keyed and ignores this.
-        if (state.phase === 'insight') { setState((st) => ({ ...st, sessionId: id })); return }
-        if (state.rootId) return
-        if (id && wtRef.current && wtRef.current.sessionId === id) return
-        // Close the LAYOUT column (the frame face), not just the panel state:
-        // the old reset only flipped internal state while the frame kept the
-        // column on screen with the stale filename in its header.
-        if (frameProps.close) frameProps.close()
-        setOpen(false); setState({ phase: 'idle' }); setSession(null)
-        setDirty(false); setSavePhase('idle'); setSaveNote('')
-        setShowDiff(false); setChip(null); setTimeline([])
-        wtRef.current = null
-        // state.phase is a dep on purpose: the insight guard above reads it,
-        // and without it a panel that BECAME an insight after the last session
-        // change would be judged by a stale closure and closed.
-      }, [snap.sessionId, open, refreshChanges, state.phase, state.rootId])
+        // 0.6.0: the persistent strip supersedes the 2026-09-01 close-on-
+        // switch directive — tabs SURVIVE a session change (each worktree tab
+        // holds its own session; org/root tabs are session-free), the way VS
+        // Code tabs survive navigating between folders. Only the insight
+        // report re-points at the new current session so it re-fetches; the
+        // sessions view is org-keyed and ignores this.
+        if (open && state.phase === 'insight') { setState((st) => ({ ...st, sessionId: id })) }
+        // state.phase is a dep on purpose: the insight re-point reads it.
+      }, [snap.sessionId, open, refreshChanges, state.phase])
       // D86 external-change push. Org lane: the org watcher. Worktree lane:
       // the same route with ?session= (host watches the worktree for this
       // connection). Clean buffer auto-reloads; dirty buffer conflicts.
@@ -1525,6 +1633,7 @@ window.__ModuleLoader__.load({
                     }
                     mtimeRef.current = readMtime
                     setState((s) => ({ ...s, text }))
+                    setChangedFlash(Date.now())
                   } catch { /* transient */ }
                 })()
               }
@@ -1543,8 +1652,6 @@ window.__ModuleLoader__.load({
 
       const resetForOpen = () => {
         setDirty(false); setSavePhase('idle'); setSaveNote(''); mtimeRef.current = null
-        setShowDiff(false); setMainText(''); setChip(null); setTimeline([]); setVersionOpen(false)
-        setCopied(false)
         if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null }
       }
 
@@ -1591,14 +1698,6 @@ window.__ModuleLoader__.load({
             ? WT_ROUTE + '?root=' + encodeURIComponent(rootId) + '&path=' + encodeURIComponent(relPath) + '&avt=' + encodeURIComponent(token)
             : origin + '/' + encodeURI(relPath) + '?avt=' + encodeURIComponent(token)
           const kind = kindFor(relPath)
-          if (!rootId) void (async () => {
-            try {
-              const tk = await fetchToken(relPath)
-              const r = await fetch('/__arxa/artifacts/version?relPath=' + encodeURIComponent(relPath) + '&avt=' + encodeURIComponent(tk.token))
-              const body = await r.json().catch(() => ({}))
-              if (r.ok && request === openRequestRef.current) { setChip(body.chip || null); setTimeline(body.timeline || []) }
-            } catch { /* chip stays hidden — never blocks the artifact */ }
-          })()
           if (EDITABLE_LANES.has(kind.lane)) {
             const r = await fetch(url)
             if (!r.ok) throw new Error('fetch ' + r.status)
@@ -1736,59 +1835,10 @@ window.__ModuleLoader__.load({
         else await openArtifact(rel, state.rootId ?? null)
       }
 
-      const toggleDiff = () => {
-        if (state.rootId) return
-        if (showDiff) { setShowDiff(false); return }
-        void (async () => {
-          try {
-            // Name the session: this row's relPath is worktree-relative, and
-            // the org root holds a file of the same name that is NOT this one.
-            const { token } = await fetchTokenRaw(wtRef.current
-              ? { relPath: state.relPath, worktreeId: wtRef.current.sessionId }
-              : { relPath: state.relPath })
-            const r = await fetch('/__arxa/artifacts/main-version?relPath=' + encodeURIComponent(state.relPath) + '&avt=' + encodeURIComponent(token))
-            const body = await r.json().catch(() => ({}))
-            if (!r.ok) throw new Error(body.error || ('main-version ' + r.status))
-            setMainText(body.content || '')
-            setShowDiff(true)
-          } catch (e) { setSavePhase('error'); setSaveNote(String(e && e.message || e)) }
-        })()
-      }
-
       // The 2026 palette effect is gone with CodeMirror. It read ArxaTheme out of
       // the CM bundle to theme the editor, the markdown preview and the pane
       // background; VS Code paints all three itself now, from its own theme.
       const filename = state.relPath ? state.relPath.split('/').pop() : null
-      const formatExt = filename && editableLane ? filename.split('.').pop().toLowerCase() : null
-      const canFormat = !!(state.phase === 'ready' && canEdit && formatExt && FORMAT_EXTS.has(formatExt) && prettierOn)
-
-      const doFormat = async () => {
-        const view = docRef.current
-        if (!view || !formatExt) return
-        try {
-          const PT = await ensureVendor('prettier.js', 'ArxaPrettier')
-          const before = view.getText()
-          const indent = detectIndent(before)
-          const out = await PT.format(before, formatExt, { tabWidth: indent.size, useTabs: indent.unit === '\t' })
-          if (out === before) return
-          // Minimal single-change diff (common prefix/suffix) so the cursor
-          // and undo history survive the reformat.
-          const minLen = Math.min(before.length, out.length)
-          let p = 0
-          while (p < minLen && before[p] === out[p]) p++
-          let s = 0
-          while (s < minLen - p && before[before.length - 1 - s] === out[out.length - 1 - s]) s++
-          view.replaceRange(p, before.length - s, out.slice(p, out.length - s))
-        } catch (e) {
-          setSaveNote(t('format.failed') + ' ' + String((e && e.message) || e))
-          setSavePhase('error')
-        }
-      }
-      const doCopy = () => {
-        const text = docText()
-        if (text == null) return
-        void P.writeClipboard(text).then((ok) => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1600) } })
-      }
 
       const dotState = dotStateOf(savePhase, dirty)
       const dotVisible = editableLane && state.phase === 'ready' && (dirty || savePhase !== 'idle' || canEdit)
@@ -1798,53 +1848,23 @@ window.__ModuleLoader__.load({
         : savePhase === 'saved' ? (saveNote || t('state.saved'))
         : session ? t('session.badge', { name: session.name }) : (state.rootName || t('state.saved'))
 
-      // ---- header --------------------------------------------------------------
-      const iconBtn = (key, label, onClick, Icon, opts = {}) =>
-        h(P.Tooltip, { key, label, delayMs: 500, side: 'bottom' },
-          h('button', {
-            className: 'aXa_av_iconBtn', onClick, 'aria-label': label,
-            disabled: !!opts.disabled, 'data-on': opts.on ? 'true' : undefined,
-          }, h(Icon, { size: 14 })))
-
-      const header = h('div', { className: 'aXa_av_head' },
-        h('div', { className: 'aXa_av_titleWrap' },
-          filename && h(FileIcon, { name: filename }),
-          state.rootName && h('span', { className: 'aXa_av_rootName', title: state.rootName }, state.rootName),
-          h('span', { className: 'aXa_av_filename' },
-            state.phase === 'insight' ? t('insight.title.' + state.view) : (filename || t('title'))),
-          state.phase === 'ready' && lane && h('span', { className: 'aXa_av_lane' }, t('lane.' + lane) !== 'lane.' + lane ? t('lane.' + lane) : lane),
-          dotVisible && h(P.Tooltip, { label: dotLabel, delayMs: 500, side: 'bottom' },
-            h('span', { style: { display: 'inline-flex', alignItems: 'center' } },
-              h(P.StateDot, { state: dotState }))),
-          chip && h(P.Menu, {
-            open: versionOpen,
-            onClose: () => setVersionOpen(false),
-            items: (timeline.length === 0 ? [{ id: '_none', label: t('version.none') }] : timeline.map((v) => ({ id: v.version, label: v.version + ' · ' + v.state }))),
-            selectedId: chip.version,
-            onSelect: () => setVersionOpen(false),
-            align: 'start',
-            portal: true,
-            anchor: h('button', {
-              className: 'aXa_av_chip', title: chip.name || chip.label,
-              onClick: () => setVersionOpen((v) => !v),
-              'aria-haspopup': 'menu', 'aria-expanded': versionOpen,
-            }, chip.label),
-          })),
-        h('div', { className: 'aXa_av_actions' },
-          state.phase === 'ready' && editableLane && iconBtn('copy', copied ? t('copied') : t('copy'), doCopy, copied ? P.IconCheckOutline16 : P.IconCopyOutline16),
-          state.phase === 'ready' && state.url && h(P.Tooltip, { label: t('action.download'), delayMs: 500, side: 'bottom' },
-            h('a', { className: 'aXa_av_iconBtn', href: state.url, download: filename || true, target: '_blank', rel: 'noreferrer', 'aria-label': t('action.download') },
-              h(P.IconDownloadOutline16, { size: 14 }))),
-          state.phase === 'ready' && editableLane && h(P.Tooltip, { key: 'prettier', label: prettierOn ? t('action.prettier.on') : t('action.prettier.off'), delayMs: 500, side: 'bottom' },
-            h('button', {
-              className: 'aXa_av_iconBtn', onClick: togglePrettier,
-              'aria-label': prettierOn ? t('action.prettier.on') : t('action.prettier.off'),
-              'aria-pressed': prettierOn ? 'true' : 'false', 'data-on': prettierOn ? 'true' : undefined,
-            }, h('img', { className: 'aXa_av_prettierMark', 'data-off': prettierOn ? undefined : 'true', src: VENDOR('prettier.png'), alt: '', draggable: false }))),
-          canFormat && iconBtn('format', t('action.format'), () => void doFormat(), P.IconEnhanceOutline16),
-          state.phase === 'ready' && editableLane && !state.rootId && iconBtn('diff', t('action.diff'), toggleDiff, P.IconInspectOutline12, { on: showDiff }),
-          frameProps.maximize && iconBtn('max', t('action.maximize'), () => frameProps.maximize(), P.IconFullscreenOutline16),
-          frameProps.close && !frameProps.sheet && iconBtn('close', t('close'), () => frameProps.close(), P.IconCloseOutline16)))
+      // ---- chrome handoff (0.6.0) ----------------------------------------------
+      // The panel renders BARE, always: the ViewerShell owns the tab strip
+      // and the document header (path, renderer dropdown, wrap, reload) for
+      // strip tabs; the stock document tab owns the same chrome for its own
+      // lane. What the panel still owns is the META those headers need —
+      // reported up through onMeta whenever a value moves.
+      const isInsight = state.phase === 'insight'
+      const pathText = isInsight ? String(state.orgId || state.sessionId || '') : String(state.absPath || state.relPath || '')
+      const onMetaRef = React.useRef(frameProps.onMeta)
+      React.useEffect(() => { onMetaRef.current = frameProps.onMeta })
+      React.useEffect(() => {
+        if (!onMetaRef.current) return
+        onMetaRef.current({
+          filename, pathText, isInsight, view: state.view || null, phase: state.phase,
+          lane, editableLane, canEdit: !!canEdit, dirty, savePhase, dotState, dotLabel, dotVisible,
+        })
+      }, [filename, pathText, isInsight, state.view, state.phase, lane, editableLane, canEdit, dirty, savePhase, dotState, dotLabel, dotVisible])
 
       // ---- body ----------------------------------------------------------------
       let body = null
@@ -1872,6 +1892,11 @@ window.__ModuleLoader__.load({
       } else if (state.phase === 'ready') {
         const notes = []
         if (state.guardNote) notes.push(h('div', { key: 'guard', className: 'aXa_av_note' }, state.guardNote))
+        if (changedFlash) {
+          notes.push(h('div', { key: 'changed', className: 'aXa_av_changed' },
+            h('span', null, t('changed.note')),
+            h('button', { type: 'button', className: 'aXa_av_changedAction', onClick: () => { void reloadTheirs() } }, t('changed.reload'))))
+        }
         if (savePhase === 'conflict') {
           notes.push(h('div', { key: 'conflict', className: 'aXa_av_conflict' },
             h('span', { className: 'aXa_av_conflictText' }, t('conflict.note')),
@@ -1882,15 +1907,21 @@ window.__ModuleLoader__.load({
         }
 
         let surface = null
-        if (editableLane) {
-          // Markdown is not a separate surface: it is source in Monaco like
-          // any other file, and the diff is an editor input on the same file
-          // inside VS Code's editor part — a prop, not another React subtree.
+        // Markdown has TWO renderers (0.6.0, stock openWith parity): dsh's
+        // exact MarkdownText (rendered-primary, read-only) and the arxa
+        // editor (monaco source, editable). The shell's dropdown picks.
+        const renderedMd = lane === 'markdown' && frameProps.renderer !== 'editor'
+        if (renderedMd) {
+          surface = h('div', { key: 'surface', className: 'aXa_av_mdDoc', 'data-arxa-md': state.relPath },
+            h(P.MarkdownText, {
+              text: state.text, streaming: false,
+              labels: { code: { copyLabel: t('md.copy'), copiedLabel: t('md.copied') }, footnotes: t('md.footnotes') },
+            }))
+        } else if (editableLane) {
           // Keyed: the notes above it come and go (the "saved" note lands
           // 1.5s after the first keystroke), and an unkeyed sibling shifting
           // index is a remount of the live editor.
-          surface = h(CodeView, { key: 'surface', relPath: state.relPath, absPath: state.absPath, session: state.wt ?? null, rootId: state.rootId ?? null, text: state.text, editable: canEdit, docRef, onDirty,
-            diffOriginal: showDiff ? (mainText ?? '') : null, t })
+          surface = h(CodeView, { key: 'surface', relPath: state.relPath, absPath: state.absPath, session: state.wt ?? null, rootId: state.rootId ?? null, text: state.text, editable: canEdit, docRef, onDirty, wrap: !!frameProps.wrap, t })
         } else if (lane === 'image') {
           surface = h('div', { className: 'aXa_av_scroll' }, h('div', { className: 'aXa_av_media' }, h('img', { src: state.url, alt: state.relPath })))
         } else if (lane === 'audio') {
@@ -1907,7 +1938,283 @@ window.__ModuleLoader__.load({
         body = h(React.Fragment, null, ...notes, surface)
       }
 
-      return h('div', { className: 'aXa_av_root' }, header, h('div', { className: 'aXa_av_body' }, body))
+      return h('div', { className: 'aXa_av_root' }, h('div', { className: 'aXa_av_body' }, body))
+    }
+
+    /** Decode a dsh resource address for a session workspace file — the same
+     *  grammar dsh-client-ui-sidebar-files builds (`dsh-resource://file/
+     *  session/<id>/<workspace-relative-path>`, segments encodeURIComponent'd
+     *  with ':' restored). The document-preview slot hands the panel its file
+     *  as this address; the av-open lane hands it the same parts directly. */
+    function parseFileAddress(addr) {
+      const m = /^dsh-resource:\/\/file\/session\/([^/]+)\/(.+)$/.exec(String(addr || ''))
+      if (!m) return null
+      const dec = (s) => { try { return decodeURIComponent(s) } catch { return s } }
+      return { sessionId: dec(m[1]), relPath: m[2].split('/').map(dec).join('/') }
+    }
+
+    /** Document-preview seat body: one rightbar document tab mounting the
+     *  EDITOR (the not-owning lane — the strip above owns the column while
+     *  it holds tabs). The slot hands us resourceAddress (the dsh-resource://
+     *  file address); decode it into the panel's `request` prop exactly like
+     *  an av-open payload, so worktree-first resolution, guards and the save
+     *  flow apply to stock-opened files identically. BARE: the stock tab
+     *  already drew the capsule and document header. */
+    function DocumentBody(props) {
+      const addr = props.resourceAddress
+      const request = React.useMemo(() => {
+        const f = parseFileAddress(addr)
+        return f ? { sessionId: f.sessionId, relPath: f.relPath, t0: Math.round(performance.now()) } : null
+      }, [addr])
+      return h(ArtifactPanel, { ...props, request, bare: true })
+    }
+
+    // ---- the column occupant (0.6.0) ----------------------------------------
+    /** The tabbed viewer that OWNS the rightbar track: portal-mounted into
+     *  the frame's [data-rightbar-col] node (position:relative in the stock
+     *  layout), so the stock grid gives the column its width, the stock drag
+     *  handle resizes it, and nothing floats over the centre — "no sheet
+     *  overlap" is by construction. Tabs: one per open identity (file+lane /
+     *  insight), all panels stay mounted (editors, dirty buffers and save
+     *  timers survive switches — VS Code tab semantics), inactive ones
+     *  display:none. Persisted per org in localStorage. While the strip holds
+     *  tabs the column carries data-arxa-owns and CSS hides the stock
+     *  sidebar-right surface (grill rule A: the right column IS this viewer);
+     *  closing the last tab releases it back.
+     *  kimitail: no drag-reorder of chips, no per-tab dirty dot in the chip
+     *  beyond the StateDot — add when asked. */
+    function ViewerShell({ avStore, hostCtx, t }) {
+      const store = avStore
+      const snap = React.useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
+      const [tabs, setTabs] = React.useState([])
+      const [activeId, setActiveId] = React.useState(null)
+      const [metas, setMetas] = React.useState({})
+      const [frameState, setFrameState] = React.useState({ collapsed: false, fullscreen: false })
+      const [colNode, setColNode] = React.useState(null)
+
+      const layoutCall = (fn) => {
+        try { const L = hostCtx && hostCtx.layout; if (L) fn(L) } catch { /* face not wired yet */ }
+      }
+
+      const defaultRendererFor = (p) => (p.kind !== 'insight' && kindFor(p.relPath || '').lane === 'markdown' ? 'markdown' : 'editor')
+      const tabIdOf = (p) => p.kind === 'insight'
+        ? 'insight:' + p.view + ':' + (p.orgId || p.sessionId || '')
+        : p.rootId ? 'root:' + p.rootId + ':' + p.relPath
+        : p.sessionId ? 'wt:' + p.sessionId + ':' + p.relPath
+        : 'org:' + p.relPath
+      const makeTab = (p) => ({ id: tabIdOf(p), payload: p, wrap: false, renderer: defaultRendererFor(p) })
+
+      const openTabRef = React.useRef(null)
+      const openTab = (p) => {
+        const id = tabIdOf(p)
+        setTabs((cur) => cur.some((x) => x.id === id)
+          ? cur.map((x) => (x.id === id ? { ...x, payload: p } : x))
+          : cur.concat(makeTab(p)))
+        setActiveId(id)
+        layoutCall((L) => L.openRightbar(true, false))
+      }
+      openTabRef.current = openTab
+
+      // Ingress: ONE consumer for the parking lot — apply()'s listener parks,
+      // the shell opens the tab.
+      React.useEffect(() => {
+        const p = store.consume()
+        if (p) openTabRef.current(p)
+      }, [snap.tick, store])
+
+      // Locate the column node, then watch the FRAME's presentation attrs
+      // (the layout package sets data-rightbar-collapsed / -fullscreen on the
+      // frame root, not the column). col.parentElement is the frame — the
+      // layout JSX lays them as siblings; if a future dsh wraps the column,
+      // the observer never fires and only the edge chip degrades.
+      React.useEffect(() => {
+        if (typeof document === 'undefined' || !document.body) return () => {}
+        let dead = false
+        let obs = null
+        let wait = null
+        const readFrame = (frame) => setFrameState({
+          collapsed: frame.hasAttribute('data-rightbar-collapsed'),
+          fullscreen: frame.hasAttribute('data-rightbar-fullscreen'),
+        })
+        const attach = (col) => {
+          if (dead) return
+          setColNode(col)
+          const frame = col.parentElement
+          if (!frame) return
+          readFrame(frame)
+          obs = new MutationObserver(() => readFrame(frame))
+          obs.observe(frame, { attributes: true, attributeFilter: ['data-rightbar-collapsed', 'data-rightbar-fullscreen'] })
+        }
+        const col = document.querySelector('[data-rightbar-col]')
+        if (col) { attach(col); return () => { dead = true; if (obs) obs.disconnect() } }
+        // The frame has not rendered its track yet — wait for it the same way
+        // the auto-open observer waits for rows (no timers).
+        wait = new MutationObserver(() => {
+          const c = document.querySelector('[data-rightbar-col]')
+          if (c) { wait.disconnect(); attach(c) }
+        })
+        wait.observe(document.body, { childList: true, subtree: true })
+        return () => { dead = true; wait.disconnect(); if (obs) obs.disconnect() }
+      }, [])
+
+      // Ownership: hold the column while any tab lives; release on empty.
+      React.useEffect(() => {
+        if (!colNode) return
+        if (tabs.length > 0) colNode.setAttribute('data-arxa-owns', '')
+        else colNode.removeAttribute('data-arxa-owns')
+      }, [colNode, tabs.length])
+
+      // Persistence (per open org). Restored AFTER the key resolves so the
+      // boot-time empty strip cannot clobber the saved one; saved on every
+      // change once the restore attempt has run.
+      const persistKeyRef = React.useRef(null)
+      const restoredRef = React.useRef(false)
+      React.useEffect(() => {
+        let dead = false
+        fetch(STATE_ROUTE).then((r) => r.json().catch(() => ({}))).then((st) => {
+          if (dead) return
+          const orgs = (st && st.orgs) || []
+          const org = orgs.find((o) => o.open) || orgs[0]
+          persistKeyRef.current = 'arxa-av-tabs:v1:' + ((org && org.id) || 'default')
+          try {
+            const saved = JSON.parse(localStorage.getItem(persistKeyRef.current) || 'null')
+            if (saved && Array.isArray(saved.tabs) && saved.tabs.length > 0) {
+              // t0 is a previous page-life's performance.now — strip it.
+              const restored = saved.tabs.map((p) => makeTab({ ...p, t0: null }))
+              setTabs(restored)
+              setActiveId(restored.some((x) => x.id === saved.activeId) ? saved.activeId : restored[0].id)
+            }
+          } catch { /* fresh strip */ }
+        }).catch(() => {}).finally(() => { if (!dead) restoredRef.current = true })
+        return () => { dead = true }
+      }, [])
+      React.useEffect(() => {
+        if (!restoredRef.current || !persistKeyRef.current) return
+        try {
+          localStorage.setItem(persistKeyRef.current, JSON.stringify({ tabs: tabs.map((x) => x.payload), activeId }))
+        } catch { /* quota or private mode */ }
+      }, [tabs, activeId])
+
+      const closeTab = (id) => {
+        const idx = tabs.findIndex((x) => x.id === id)
+        if (idx === -1) return
+        const next = tabs.filter((x) => x.id !== id)
+        setTabs(next)
+        if (activeId === id) setActiveId(next.length ? next[Math.min(idx, next.length - 1)].id : null)
+        setMetas((m) => { const n = { ...m }; delete n[id]; return n })
+        if (next.length === 0) {
+          // Last tab: release the column. On the dashboard nothing would fill
+          // the open track (the empty-column look), so close it; inside a
+          // conversation the stock surface returns and keeps the track.
+          if (!(typeof document !== 'undefined' && document.querySelector('[data-conversation-scroll]'))) {
+            layoutCall((L) => L.closeRightbar())
+          }
+        }
+      }
+      const reloadActive = () => {
+        setTabs((cur) => cur.map((x) => (x.id === activeId
+          ? { ...x, payload: { ...x.payload, t0: Math.round(performance.now()), tick: (x.payload.tick || 0) + 1 } }
+          : x)))
+      }
+      const patchTab = (id, patch) => setTabs((cur) => cur.map((x) => (x.id === id ? { ...x, ...patch } : x)))
+
+      const active = tabs.find((x) => x.id === activeId) || null
+      const meta = (active && metas[active.id]) || null
+      const chipTitle = (tab) => {
+        const m = metas[tab.id]
+        if (m) return m.isInsight ? t('insight.title.' + m.view) : (m.filename || t('title'))
+        const p = tab.payload
+        return p.kind === 'insight' ? t('insight.title.' + p.view) : String(p.relPath || '').split('/').pop() || t('title')
+      }
+      // Renderer candidates (stock openWith semantics): markdown files offer
+      // MarkdownText (rendered, dsh's exact renderer) and the arxa editor;
+      // media lanes label their single native lane; everything else is the
+      // arxa editor.
+      const candidates = !meta || meta.isInsight ? []
+        : meta.lane === 'markdown'
+          ? [{ id: 'markdown', label: t('renderer.markdown') }, { id: 'editor', label: t('renderer.editor') }]
+          : (meta.phase === 'ready' && !meta.editableLane && meta.lane)
+            ? [{ id: 'editor', label: t('lane.' + meta.lane) }]
+            : [{ id: 'editor', label: t('renderer.editor') }]
+      const anchorLabel = candidates.length > 0 && candidates.some((c) => c.id === active?.renderer)
+        ? candidates.find((c) => c.id === active.renderer).label
+        : (candidates[0] ? candidates[0].label : t('renderer.editor'))
+      const [menuOpen, setMenuOpen] = React.useState(false)
+      const showWrap = !!(meta && meta.editableLane && meta.phase === 'ready' && active && active.renderer === 'editor')
+
+      if (!colNode || tabs.length === 0) return null
+
+      const strip = h('div', { className: 'aXa_av_strip' },
+        tabs.map((tab) => h('div', {
+          key: tab.id, className: 'aXa_av_tab', 'data-active': tab.id === activeId ? '' : undefined,
+          role: 'tab', 'aria-selected': tab.id === activeId, onClick: () => setActiveId(tab.id),
+        },
+          h(FileIcon, { name: chipTitle(tab) }),
+          h('span', { className: 'aXa_av_tabTitle' }, chipTitle(tab)),
+          metas[tab.id] && metas[tab.id].dotVisible && h(P.Tooltip, { label: metas[tab.id].dotLabel, delayMs: 500, side: 'bottom' },
+            h('span', { style: { display: 'inline-flex', alignItems: 'center' } }, h(P.StateDot, { state: metas[tab.id].dotState }))),
+          h('button', { className: 'aXa_av_tabClose', 'aria-label': t('close'), onClick: (e) => { e.stopPropagation(); closeTab(tab.id) } },
+            h(P.IconCloseOutline16, { size: 12 })))),
+        h('div', { className: 'aXa_av_stripEnd' },
+          h(P.Tooltip, { label: frameState.fullscreen ? t('action.restore') : t('action.fullscreen'), delayMs: 500, side: 'bottom' },
+            h('button', { className: 'aXa_av_iconBtn', 'aria-label': frameState.fullscreen ? t('action.restore') : t('action.fullscreen'),
+              onClick: () => layoutCall((L) => L.openRightbar(true, !frameState.fullscreen)) },
+              h(P.IconFullscreenOutline16, { size: 14 }))),
+          h(P.Tooltip, { label: t('action.collapse'), delayMs: 500, side: 'bottom' },
+            h('button', { className: 'aXa_av_iconBtn', 'aria-label': t('action.collapse'),
+              onClick: () => layoutCall((L) => L.closeRightbar()) },
+              h(P.IconChevronRightOutline14, { size: 14 })))))
+
+      const docHead = h('div', { className: 'aXa_av_docHead' },
+        h('span', { className: 'aXa_av_docPath', title: meta ? meta.pathText : '' },
+          meta && (() => { const s = meta.pathText.lastIndexOf('/'); return h(React.Fragment, null,
+            s > 0 ? h('span', { className: 'aXa_av_docDir' }, meta.pathText.slice(0, s + 1)) : null,
+            h('span', { className: 'aXa_av_docName' }, s > 0 ? meta.pathText.slice(s + 1) : meta.pathText)) })()),
+        candidates.length > 1
+          ? h(P.Menu, {
+              open: menuOpen,
+              anchor: h('button', { type: 'button', className: 'aXa_av_tool', 'aria-label': t('action.openWith'),
+                'data-arxa-renderer-menu': true, onClick: () => setMenuOpen((v) => !v) }, anchorLabel),
+              items: candidates,
+              selectedId: active ? active.renderer : undefined,
+              onSelect: (id) => { if (active) patchTab(active.id, { renderer: id }); setMenuOpen(false) },
+              onClose: () => setMenuOpen(false),
+              align: 'end', portal: true, dense: true,
+            })
+          : h('span', { className: 'aXa_av_rendererName' }, anchorLabel),
+        showWrap && h(P.Tooltip, { label: t(active && active.wrap ? 'wrap.off' : 'wrap.on'), delayMs: 500, side: 'bottom' },
+          h('button', { type: 'button', className: 'aXa_av_iconBtn', 'aria-pressed': !!(active && active.wrap),
+            'aria-label': t('wrap.on'), 'data-arxa-tool': 'wrap',
+            onClick: () => { if (active) patchTab(active.id, { wrap: !active.wrap }) } },
+            active && active.wrap ? h(IconNowrapFill16, {}) : h(IconWrapFill16, {}))),
+        h(P.Tooltip, { label: t('action.reload'), delayMs: 500, side: 'bottom' },
+          h('button', { className: 'aXa_av_iconBtn', 'aria-label': t('action.reload'), onClick: reloadActive },
+            h(P.IconRefreshOutline16, { size: 14 }))))
+
+      const body = h('div', { style: { flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' } },
+        tabs.length === 0 ? null : tabs.map((tab) => h('div', {
+          key: tab.id,
+          style: { flex: '1 1 auto', minHeight: 0, display: tab.id === activeId ? 'flex' : 'none', flexDirection: 'column' },
+        },
+          h(ArtifactPanel, {
+            avStore: store, hostCtx, request: tab.payload, wrap: tab.wrap, renderer: tab.renderer, t,
+            onMeta: (m) => setMetas((prev) => ({ ...prev, [tab.id]: m })),
+          }))))
+
+      // The way back in while collapsed: stock hosts its expand button in the
+      // conversation header (session-bound); ours is a session-less edge chip.
+      const edgeChip = frameState.collapsed && tabs.length > 0
+        ? ReactDOM.createPortal(
+          h('button', { type: 'button', className: 'aXa_av_edgeChip', 'aria-label': t('action.expand'), 'data-arxa-edge-chip': true,
+            onClick: () => layoutCall((L) => L.openRightbar(true, false)) },
+            h(P.IconPanelLeftOutline16, { size: 14 })),
+          document.body)
+        : null
+
+      return ReactDOM.createPortal(
+        h('div', { className: 'aXa_av_colHost', 'data-arxa-viewer': '' }, strip, docHead, body),
+        colNode,
+        edgeChip)
     }
 
     // ---- apply: registration + every side effect inside ctx.effect -----------
@@ -1919,27 +2226,16 @@ window.__ModuleLoader__.load({
       ctx.effect(() => ctx.locale.register(NS, { en, pl, fr }), 'arxa-av: dictionaries')
 
       // Mirror the current dsh session into the store (panel rebind rides it).
+      // The 2026-09-01 "opening a session closes the viewer" directive now
+      // rides the right sidebar's OWN session scoping: 0.1.5 tabs are
+      // per-session, so a session switch swaps the tab tree natively. The
+      // old layout-level closeViewer hack died with the retired column.
       ctx.effect(() => {
         if (!sessions || !sessions.list || typeof sessions.list.subscribe !== 'function') return () => {}
-        let last = null
-        try { last = (sessions.list.getSnapshot() || {}).current ?? null } catch {}
         return sessions.list.subscribe(() => {
           let cur = null
           try { cur = (sessions.list.getSnapshot() || {}).current ?? null } catch { return }
           store.setSession(cur)
-          if (cur === last) return
-          last = cur
-          // 2026-09-01 user directive: opening a session must CLOSE the viewer
-          // column — any artifact on screen belongs to another session or to
-          // none (org lane). Enforced at the LAYOUT level from here (outside
-          // React): the seat's session gate remounts the panel on every
-          // transition, so a close called from inside the dying panel raced
-          // the remount and lost (measured live). Deferred one tick so the
-          // remount settles first; a file genuinely opened for the new
-          // session re-opens the column after this with fresh content.
-          setTimeout(() => {
-            try { const l = ctx.layout; if (l && typeof l.closeViewer === 'function') l.closeViewer() } catch { /* face not wired */ }
-          }, 0)
         })
       }, 'arxa-av: session mirror')
 
@@ -1949,66 +2245,106 @@ window.__ModuleLoader__.load({
       // the shell's own startup; a click before it lands just waits on the same
       // promise. The container is a throwaway — the workbench mounts on
       // document.body and the editor part attaches to the real host at open.
+      // The palette and font are read HERE, not defaulted inside start(): the
+      // workbench boots once and paints body-level chrome (context menus,
+      // toasts, scrollbars), so a dark default booted over a light shell as
+      // mixed UI — the theme only ever caught up after a file open, and only
+      // sometimes (measured 2026-09-15: body stuck vs-dark, editor vs).
       ctx.effect(() => {
         const id = setTimeout(() => {
-          ensureMonaco().then((M) => M.start(document.createElement('div'))).catch(() => { /* the open path reports */ })
+          ensureMonaco().then((M) => M.start(document.createElement('div'), { dark: isDarkMode(), fontFamily: studioEditorFont(), colors: studioColors() })).catch(() => { /* the open path reports */ })
         }, 1500)
         return () => clearTimeout(id)
       }, 'arxa-av: warm editor')
 
+      // Palette mirror for the workbench's LIFETIME, not an editor mount's:
+      // the per-mount watcher was unwatched by every CodeView remount, so a
+      // palette flip between mounts never reached Monaco at all (measured
+      // 2026-09-15: body[data-ds-dark-theme] toggled, the theme did not move).
+      // One sub, armed at apply; it only flips a workbench that loaded.
+      ctx.effect(() => watchPalette((dark) => {
+        if (monacoMod) monacoMod.then((M) => { M.setTheme(dark, studioColors()) }).catch(() => { /* the open path reports */ })
+      }), 'arxa-av: palette mirror')
+
+      // Column shell (0.6.0): the ViewerShell root outlives every panel — it
+      // mounts once per page, portals into [data-rightbar-col] when the frame
+      // renders it, and consumes the ingress store (the sheet host it
+      // replaces died here).
+      ctx.effect(() => {
+        if (typeof document === 'undefined' || !document.body) return () => {}
+        const host = document.createElement('div')
+        document.body.appendChild(host)
+        const root = ReactDOMClient.createRoot(host)
+        root.render(h(ViewerShell, { avStore: store, hostCtx: ctx, t: ctx.locale.bind(NS) }))
+        return () => { try { root.unmount() } catch { /* already gone */ } host.remove() }
+      }, 'arxa-av: column shell')
+
       // Public ingress: ONE listener for 'arxa-av-open' (sidebar file rows,
-      // gen-ui cards, the chip interceptor and the produced-file observer all
-      // dispatch it). Parks the payload in the store and opens the column —
-      // the mounted panel consumes; no retry ladder, no parked window global.
+      // gen-ui cards and the produced-file observer all dispatch it).
+      // Routing (0.6.0): EVERY open lands in the strip — the shell occupies
+      // the rightbar track session-less (the frame owns the track and its
+      // drag handle; dsh's session-surface rule stopped mattering when we
+      // stopped routing through openResource). No jumps: the operator never
+      // leaves the dashboard to view a file.
+      //
+      // An explicit open suppresses the auto-open observer below for 10s
+      // (2026-09-15): entering the conversation mounts the restored
+      // produced-files row, and the observer would otherwise pop THAT file
+      // over the one the operator clicked. A turn genuinely producing its
+      // first file inside the window stays click-to-open (kimitail ceiling).
+      let suppressAutoOpenUntil = 0
       ctx.effect(() => {
         const onOpen = (ev) => {
           const detail = (ev && ev.detail) || {}
-          // Two payload shapes ride ONE event: a file open (relPath) and an
-          // insight report (kind:'insight' + view). The column, the sheet
-          // behaviour below 744px and the store are shared; only the panel
-          // body differs, so there is no second ingress to keep in step.
           if (detail.kind === 'insight') {
             if (!detail.view) return
             store.request({ kind: 'insight', view: detail.view, sessionId: detail.sessionId || null, orgId: detail.orgId || null })
-          } else {
-            if (!detail.relPath) return
-            store.request({ sessionId: detail.sessionId || null, rootId: detail.rootId || null, relPath: detail.relPath, t0: Math.round(performance.now()) })
+            return
           }
-          try { if (ctx.layout && typeof ctx.layout.openViewer === 'function') ctx.layout.openViewer() } catch { /* face not wired yet */ }
+          if (!detail.relPath) return
+          suppressAutoOpenUntil = Date.now() + 10000
+          const live = sessions && sessions.list ? sessions.list.getSnapshot().current : null
+          const sid = detail.rootId ? null : (detail.sessionId || live || store.getSnapshot().sessionId || null)
+          store.request({ sessionId: sid, rootId: detail.rootId || null, relPath: detail.relPath, t0: Math.round(performance.now()) })
         }
         window.addEventListener('arxa-av-open', onOpen)
         return () => window.removeEventListener('arxa-av-open', onOpen)
       }, 'arxa-av-open ingress')
 
-      // D91 card routing, capture phase: produced-file chips open the docked
-      // viewer column. The stock deliverables chips stay untouched; the chip's
-      // title carries the full path; "show in folder" (".") stays stock.
+      // Produced-chip routing, SCOPED to ownership (0.6.0): a stock card chip
+      // click calls openResource into the stock surface — while the strip
+      // OWNS the column that surface is hidden, so the click would land
+      // nowhere. Capture the chip and route it through our own ingress; when
+      // we do not own, the stock preview stays native (the D91 retirement
+      // holds on that lane).
       ctx.effect(() => {
-        const onChip = (e) => {
+        if (typeof document === 'undefined') return () => {}
+        const onChip = (ev) => {
           try {
-            const target = e.target
-            const btn = target && target.closest ? target.closest('[data-produced-files-row] button[title]') : null
+            const col = document.querySelector('[data-rightbar-col]')
+            if (!col || !col.hasAttribute('data-arxa-owns')) return
+            const btn = ev.target && ev.target.closest ? ev.target.closest('[data-produced-files-row] button[title]') : null
             if (!btn) return
             const path = btn.getAttribute('title')
             if (!path || path === '.') return
-            e.preventDefault()
-            e.stopPropagation()
+            ev.stopPropagation(); ev.preventDefault()
             const snapNow = sessions && sessions.list ? sessions.list.getSnapshot() : null
             const sessionId = snapNow ? snapNow.current : null
             window.dispatchEvent(new CustomEvent('arxa-av-open', { detail: sessionId ? { sessionId, relPath: path } : { relPath: path } }))
-          } catch { /* interception is best-effort — stock opener still applies */ }
+          } catch { /* best effort */ }
         }
         document.addEventListener('click', onChip, true)
         return () => document.removeEventListener('click', onChip, true)
-      }, 'arxa-av chip interception')
+      }, 'arxa-av: produced-chip routing while owning')
 
       // Claude-model auto-open: the FIRST produced file of a turn opens the
-      // column by itself. Armed while no produced-files row exists; fires once
-      // per row appearance (a new turn's row re-arms it). Everything else
-      // stays click-to-open.
+      // column by itself. Armed only when no produced-files row exists; fires
+      // once per row appearance (a new turn's row re-arms it). Everything else
+      // stays click-to-open. An explicit open suppresses it for 10s (see the
+      // ingress): the clicked file, never the restored row, takes focus.
       ctx.effect(() => {
         if (typeof MutationObserver === 'undefined' || typeof document === 'undefined' || !document.body) return () => {}
-        let armed = true
+        let armed = false
         const obs = new MutationObserver((mutations) => {
           try {
             // Streaming token text never re-scans: only ELEMENT insertions can
@@ -2022,6 +2358,7 @@ window.__ModuleLoader__.load({
             const rows = document.querySelectorAll('[data-produced-files-row]')
             if (rows.length === 0) { armed = true; return }
             if (!armed) return
+            if (Date.now() < suppressAutoOpenUntil) { armed = false; return }
             const first = rows[0].querySelector('button[title]')
             const path = first && first.getAttribute('title')
             if (!path || path === '.') return
@@ -2035,11 +2372,31 @@ window.__ModuleLoader__.load({
         return () => obs.disconnect()
       }, 'arxa-av first-produced-file auto-open')
 
-      ctx.slots.inject('viewer', () =>
-        ctx.slots.register({ name: 'viewer', id: 'arxa-artifact-viewer', locale: NS },
-          (props) => h(ArtifactPanel, { ...props, avStore: store, hostCtx: ctx })))
+      // THE GRAFT stays for the NOT-OWNING lane (0.6.0): while the strip owns
+      // the column, stock opens never show; close the last tab and the stock
+      // rightbar returns — text-family files there still open EDITABLE in the
+      // stock document tab through this renderer (extension band beats the
+      // builtin read-only code preview). The slot hands the body the file as
+      // a resource address; DocumentBody decodes it into the panel's request
+      // prop, so worktree-first resolution, guards and the save flow all
+      // apply unchanged.
+      ctx.effect(() => ctx.documentPreviews.register({
+        id: 'arxa-artifact-viewer',
+        // The code family the editor owns. NOT .md/.html/.pdf/images: the
+        // stock builtin previews those (rendered markdown included), and
+        // beating them would delete the preview the user asked for.
+        extensions: ['.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.css', '.scss',
+          '.py', '.rb', '.go', '.rs', '.sh', '.bash', '.zsh', '.sql', '.toml', '.ini', '.env',
+          '.json', '.jsonc', '.yaml', '.yml', '.dart', '.txt', '.log', '.xml'],
+        priority: 'extension',
+        title: () => 'arxa editor',
+        loading: 'text-pages',
+      }), 'arxa-av: document preview renderer')
+      ctx.slots.inject('sidebar.right.tab.document', () =>
+        ctx.slots.register({ name: 'sidebar.right.tab.document', key: 'arxa-artifact-viewer', locale: NS },
+          (props) => h(DocumentBody, { ...props, avStore: store, hostCtx: ctx })))
     }
-    const inject = ['slots', 'connection', 'layout', 'sessions', 'locale']
+    const inject = ['slots', 'connection', 'sessions', 'locale', 'documentPreviews', 'sidebarRight', 'layout']
     exports.apply = apply
     exports.inject = inject
     return module.exports

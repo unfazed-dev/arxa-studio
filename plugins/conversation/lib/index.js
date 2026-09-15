@@ -810,6 +810,21 @@ export function apply(ctx, deps = {}) {
           const requestId = randomUUID()
           let value
           try {
+            // The stock prompt admits one turn for an ALREADY-LIVE agent
+            // (dsh-api-session-controller: "after explicit Agent resume");
+            // prompting a parked one — every desktop engine restart parks
+            // all sessions — died inside resolveAgent with "Cannot read
+            // properties of undefined (reading 'throwIfAborted')" (502,
+            // measured 2026-09-14). Resume first, the same hydrate the
+            // commands path below uses; the phone's live sessions resume
+            // as a no-op.
+            const up = await hydrate(sessionId)
+            if (!up.ok) {
+              if (up.code === 'no-such-session') {
+                return json(res, 404, { ok: false, error: 'no-such-session', sessionId })
+              }
+              return json(res, 409, { ok: false, error: 'no-live-agent', code: up.code, detail: up.detail })
+            }
             value = await sessionApi.prompt({ requestId, sessionId, mode, content })
           } catch (e) {
             if (errCode(e) === 'session/not-found') {

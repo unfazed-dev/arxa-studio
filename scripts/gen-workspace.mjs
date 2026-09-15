@@ -25,12 +25,13 @@ import { readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { stockFile, WAVE } from './stock-path.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = dirname(here)
-const DSH_VERSION = '0.1.2-rc.1'
+const DSH_VERSION = WAVE
 const T = (n) => '\t'.repeat(n)
-const stockPath = join(root, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
+const stockPath = stockFile('@deepseek-ai/dsh-client-ui-workspace')
 const regionPath = join(root, 'plugins', 'arxa-sidebar', 'lib', 'workspace-region.snippet.txt')
 const freestyleRegionPath = join(root, 'plugins', 'arxa-sidebar', 'lib', 'freestyle-region.snippet.txt')
 
