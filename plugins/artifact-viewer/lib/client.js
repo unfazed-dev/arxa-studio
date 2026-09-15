@@ -146,7 +146,9 @@ window.__ModuleLoader__.load({
       // in the stock frame) hosts our shell; the shell fills it exactly. The
       // ownership rule hides the stock sidebar-right surface while we hold
       // tabs (grill rule A: the right column IS this viewer).
-      + '.aXa_av_colHost{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base)}'
+      + '.aXa_av_colHost{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base);border-left:.5px solid var(--dsw-alias-border-l4)}'
+      // Fullscreen drops the divider — stock P3OORG_panel[data-sidebar-right-panel=fullscreen] parity.
+      + '[data-rightbar-fullscreen] .aXa_av_colHost{border-left:none}'
       + '[data-rightbar-col][data-arxa-owns] > :not(.aXa_av_colHost){display:none!important}'
       // Tab strip: the strip replaces the 0.5.x capsule row; chips carry the
       // same stock vocabulary the capsule used (border l2, radius 8).
@@ -2103,12 +2105,11 @@ window.__ModuleLoader__.load({
         if (activeId === id) setActiveId(next.length ? next[Math.min(idx, next.length - 1)].id : null)
         setMetas((m) => { const n = { ...m }; delete n[id]; return n })
         if (next.length === 0) {
-          // Last tab: release the column. On the dashboard nothing would fill
-          // the open track (the empty-column look), so close it; inside a
-          // conversation the stock surface returns and keeps the track.
-          if (!(typeof document !== 'undefined' && document.querySelector('[data-conversation-scroll]'))) {
-            layoutCall((L) => L.closeRightbar())
-          }
+          // Last tab: release the column AND collapse the track (2026-09-16
+          // directive) — the stock surface does not auto-fill the released
+          // track, so keeping it open showed an empty column. The way back:
+          // stock's own header button for its surface, any file open for ours.
+          layoutCall((L) => L.closeRightbar())
         }
       }
       const reloadActive = () => {
@@ -2211,9 +2212,13 @@ window.__ModuleLoader__.load({
           document.body)
         : null
 
-      return ReactDOM.createPortal(
-        h('div', { className: 'aXa_av_colHost', 'data-arxa-viewer': '' }, strip, docHead, body),
-        colNode,
+      // Two portals, one fragment: the shell into the column, the chip into
+      // body. (createPortal's third arg is the KEY slot — passing the chip
+      // there mounted nothing and collapse had no way back in, 2026-09-15.)
+      return h(React.Fragment, null,
+        ReactDOM.createPortal(
+          h('div', { className: 'aXa_av_colHost', 'data-arxa-viewer': '' }, strip, docHead, body),
+          colNode),
         edgeChip)
     }
 
