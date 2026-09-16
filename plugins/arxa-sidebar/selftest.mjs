@@ -267,6 +267,11 @@ check('welcome (D12, 2026-09-09): boot lands on the last-selected org dashboard,
 check('D12: selectRow persists container rows only (org / dock / project) — leaf workspace picks never become a landing',
   client.includes('window.localStorage.setItem(LAST_ROW_KEY, JSON.stringify({ orgId: sel.orgId, rowId: sel.rowId || "", kind: sel.kind, label: sel.label || "" }))')
   && client.includes('if (sel && (sel.kind === "org" || sel.kind === "dock" || sel.kind === "project")) {'))
+check('org-vanish guard (2026-09-16, ghost TERRA dashboard): a refresh whose org list lost the selected/bound org drops the selection, the persisted landing AND the dsh binding — no org-not-found hero, no mkdir\'d skeleton (session-sweep.js:218)',
+  client.includes('if (state.selectedRowId && !state.orgs.some((o) => o && o.id === state.selectedRowId.orgId)) {')
+  && client.includes('window.localStorage.removeItem(LAST_ROW_KEY)')
+  && client.includes('if (state.currentSessionId && !state.orgs.some((o) => (o.sessions || []).some((x) => x && (x.id === state.currentSessionId || x.dshSessionId === state.currentSessionId)))) {')
+  && client.includes('if (arxaClientSessions && typeof arxaClientSessions.clear === "function") arxaClientSessions.clear();'))
 check('D12: the landing reveals the row (org + container prefixes written true) and opens the org like the row click, best-effort',
   client.includes('x[sel.orgId + "|" + prefix] = true;') && client.includes('ORG_POST("org.open", { orgId: sel.orgId }).then(() => refresh()).catch(() => {});'))
 check('content area (2026-08-30): arxa is the sole driver — row open + resume focus the conversation via the client sessions service (dsh own open call)',

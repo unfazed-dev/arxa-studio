@@ -1,7 +1,0 @@
-⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
-[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
-- **Status:** DONE_WITH_CONCERNS
-- **Commit:** `fd6fd5f` feat: provision local confinement and project integrity (17 files, +1766/−44; `package-lock.json` dirt untouched)
-- **Tests:** focused suites green (sandbox 33, filesystem 15, project-secrets 4+1 honest sops-skip, launcher-settings 10, git-workspace 78/78, frame suites, preset/pack-list/mirror-drift); s1-sandbox-verify ALL PASS on real Seatbelt (sibling secret unreadable, sentinel unchanged, org `.git` plumbing readable, egress honestly reported); full `npm test` ALL GREEN (43 suites)
-- **Concerns:** `bin/.arxa-cell-launcher.mjs` still seeds danger-full-access (out of brief scope, ledgered); agent-driven `git add/commit` in a worktree is denied under workspace-write (host auto-commit unaffected, pinned); read isolation keys on the arxa worktree layout — freestyle roots unfenced (symmetric with Seatbelt, pinned); sops absent here so `.env.sops` live rows skip (double-covered)
-- **Report:** `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-9-report.md` (ledger appended)

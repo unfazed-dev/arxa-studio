@@ -1,7 +1,0 @@
-⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
-[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
-**Status:** DONE
-**Commit:** `e800fe9` fix: gate the live sbx probe behind the real-smoke flag (2 files, +17/−10; package-lock untouched)
-**Tests:** selftest 32 green, 1 skipped (skip line visible); `npm test` exit 0, ALL GREEN, 119 suites
-**Finding:** addressed — live probe now behind `ARXA_A5_REAL_SMOKE`, default path zero real sbx commands, honest skip reason; injected §1 parse-shape rows keep coverage; `sbx.js:91` comment names the measured `sbx ls` auto-start
-**Report:** `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-11-report.md` (Fix round 1 appended)

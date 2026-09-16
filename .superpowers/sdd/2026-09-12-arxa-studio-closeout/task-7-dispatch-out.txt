@@ -1,9 +1,0 @@
-⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
-[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
-**Status:** DONE_WITH_CONCERNS
-
-- **Commit:** `78c1654` fix: close artifact viewer runtime and trust boundaries (26 files, +717/−87)
-- **Tests:** monaco clean-build + `check.mjs` + `--webkit` GREEN (×2, final tree) · 7 artifact-viewer selftests GREEN · sidebar suites incl. drift gate GREEN · root `npm test` ALL GREEN · live runbook §7 executed (evidence in `designs/evidence/studio-closeout/`)
-- **Extra work in scope:** fixed WIP-introduced sidebar SSE break (snippet + regen) and a deterministic LSP wedge (server kept past its last socket never diagnosed again — now last-socket-scoped; TDD RED→GREEN, `selftest.lsp: 55 ok`)
-- **Concerns:** (1) 390/744 ladder evidence blocked — sheet won't mount on emulated resize + no headless file entry at narrow widths (ledger: medium); (2) brief's ".html squiggle" unsatisfiable by design (preview lane + html server validates nothing by default) — documented, not force-changed; (3) zero-console-error gate scoped with a named, ledger-recorded filter list
-- **Report:** `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-7-report.md`

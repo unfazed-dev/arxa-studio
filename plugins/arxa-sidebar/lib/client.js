@@ -3415,6 +3415,24 @@ window.__ModuleLoader__.load({
 						// server data — a bare spread would leave selectedRowId
 						// undefined where the contract says null).
 						state = { ...next, loading: false, __sig: sig, trashOpen: state.trashOpen, selectedRowId: state.selectedRowId ?? null, expanded: state.expanded ?? {}, currentSessionId: currentSessionId ?? state.currentSessionId ?? null };
+						// Org-vanish guard (2026-09-16, the ghost TERRA dashboard): an
+						// org that left the registry mid-session (trash / purge / a dead
+						// recents pointer — listOrgs skips those silently) keeps no
+						// client state. A stale row selection renders a dashboard the
+						// host can only answer org-not-found for; a bound session whose
+						// cwd died with the org is the page that keeps mkdir -p'ing the
+						// purged skeleton back (session-sweep.js:218). maybeResume and
+						// clearIfNothingToResume cover boot; this is the in-session
+						// half, same doctrine.
+						if (state.selectedRowId && !state.orgs.some((o) => o && o.id === state.selectedRowId.orgId)) {
+							try { window.localStorage.removeItem(LAST_ROW_KEY); } catch { /* storage optional */ }
+							state = { ...state, selectedRowId: null };
+						}
+						if (state.currentSessionId && !state.orgs.some((o) => (o.sessions || []).some((x) => x && (x.id === state.currentSessionId || x.dshSessionId === state.currentSessionId)))) {
+							currentSessionId = null;
+							state = { ...state, currentSessionId: null };
+							try { if (arxaClientSessions && typeof arxaClientSessions.clear === "function") arxaClientSessions.clear(); } catch { /* best-effort */ }
+						}
 						state.trashView = { rows: state.trash ?? [], open: state.trashOpen ?? true };
 						// Derived faces computed ONCE per state replacement: stock hosts
 						// serve stable array identities, and per-render rebuilds would

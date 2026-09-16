@@ -1,9 +1,0 @@
-⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
-[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
-✅ done
-
-- **Status:** DONE_WITH_CONCERNS
-- **Commits (7d9e866..HEAD):** `bd14065` feat: show the latest delivery ledger on the git card (predecessor's; verified complete — I committed nothing, per instructions)
-- **Tests:** 3 focused suites + drift `--check` + `card-local-smoke` + `npm test` ALL GREEN; RED reconstructed on BASE (ledger: missing-export SyntaxError; actions: 4× `unknown-action`; static: 4 failures)
-- ⚠️ `card-cicd-smoke`: 6 failures — root-caused to **account's private-repo Actions minutes exhausted** (identical workflow green when repo made public; no runner/steps/logs on private, 3/3 deterministic). `bd14065` not implicated; its failing check faithfully reports the un-merged world. Operator must restore minutes, then rerun.
-- 📄 report: `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-6-report.md` (+ progress.md ledgered w/ New finding)

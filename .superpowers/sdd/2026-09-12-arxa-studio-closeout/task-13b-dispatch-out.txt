@@ -1,8 +1,0 @@
-⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
-[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
-- **Status:** DONE_WITH_CONCERNS
-- **Commit:** `72a2a83` `feat: add fixed workspace providers and local storage` (20 files, +2602; frozen contract/wire/errors byte-identical to 3597a40; `package-lock.json` dirt left out)
-- **Tests:** 5 plugin suites (14+6+8+5+7) + CLI 9 all green; pack-list-check 10 ok; full `npm test` — **125 suites ALL GREEN**; full pack 239.9 MB, packed binary ran `provider verify` all-green exit 0, payload carries all 11 modules
-- **Checkpoint obligations:** pinned — golden §13 (token/session response envelope) + §14 (X-Arxa-Cursor-Next consume semantics) in `selftest.contract.mjs`; hostile fixture turns idor/leak runs red
-- **Concerns:** engine web boot (checkout + packed) fails since Task 11 — `git-workspace/lib/sessions.js` imports `sandbox/` which is missing from `fiveLibs`; verified identical at BASE via stash round-trip, recorded as high-severity New finding (blocked the literal packed-web-boot proof; CLI-path packed proof stands). Minor: pre-existing loopback pack-list scanner blind spot (low, recorded)
-- **Report:** `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-13-report.md` (## Part B); ledger findings appended to `progress.md`

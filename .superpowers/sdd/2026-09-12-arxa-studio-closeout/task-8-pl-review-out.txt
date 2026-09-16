@@ -1,9 +1,0 @@
-⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
-[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
-📋 Keys reviewed: ~174 (personalisation 9 · theme-accent 20 · git-card 107 · sidebar 20 · workspace-provider 14 · sandbox 0 (no dict — confinement copy is git-card's, parity-covered) · artifact-viewer 4 literals)
-🔴 Must-fix: 2 — artifact-viewer install strip ships hardcoded English (no pl keys exist, `client.js:888-897`); git-card `git.wakeStarted` says „kontrole" where the other 14 checks keys say „testy"
-🟡 Nice-to-fix: 12 (dostawa↔Dostarczanie consistency, plural agreement `{n} zmienionych`, „na żywo" badge, „Dotknij"→„Kliknij", declension/grammar nits)
-✅ Verdict: **NEEDS-CORRECTIONS**
-📄 Report: `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-8-pl-review.md`
-
-Note: context-mode MCP was unpermissioned this session — review ran on native Read/Grep/Glob (no repo edits, report file only).

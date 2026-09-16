@@ -1,7 +1,0 @@
-⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
-[claude-code:unrecognized_model] {"model":"glm-5.3[1m]","query_source":"sdk"}
-- **Status:** DONE_WITH_CONCERNS
-- **Commits:** `75d090f` feat: add the first-party Supabase workspace provider (single commit; `package-lock.json` dirt untouched)
-- **Tests:** RED→GREEN per step (module-not-found / missing-export / flipped §9 assertion); focused suites green (supabase 16, settings 4, CLI 10, contract 14, rest 9, local 6, export 7, polling 5); smoke took the **fake leg** (docker daemon down — honest DAEMON-GATED banner; real leg = new CI job `supabase-conformance`); full `npm test` **129 suites ALL GREEN** (one unrelated cicd-stress S5 flake on first run, green isolated + on immediate re-run)
-- **Concerns:** real-stack SQL/harness correct by construction/inspection only until CI/Task 16 daemon leg (incl. unverified `status -o env` key names — one-line fix if off); CI job warns+skips when runner Docker is down (repo convention); live `provider verify` without a 2nd user prints cross-org RED by design (smoke/CI carries the full-green proof)
-- **Report:** `.superpowers/sdd/2026-09-12-arxa-studio-closeout/task-14-report.md` (+ raw evidence in `task-14-red-evidence.md`, 3 New finding entries appended to the ledger)
